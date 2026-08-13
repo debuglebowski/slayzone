@@ -63,7 +63,7 @@ export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
    * agent-turns domain to detect turn boundaries (user-message + result). */
   onChatEvent?: (tabId: string, event: AgentEvent) => void
-  /** Injectable data seam (hub/runner split). Defaults to the local-DB impl
+  /** Injectable data seam (hub/computer split). Defaults to the local-DB impl
    * (`createDbChatDataOps`) which runs the same SQL the handlers always ran. */
   dataOps?: ChatDataOps
 }
@@ -114,7 +114,7 @@ async function resolveSafeChatMode(stored: string): Promise<string> {
 }
 
 // ProviderConfigEntry + the provider-config read/write helpers moved to
-// ./chat-data-ops (hub/runner data seam). chat-handlers routes all data
+// ./chat-data-ops (hub/computer data seam). chat-handlers routes all data
 // access through the injected `ChatDataOps` — see `ChatHandlerOpts.dataOps`.
 
 // (writeChatConversationId removed — replaced by recordConversation w/
@@ -324,17 +324,17 @@ async function buildHydrateOpts(
   const initialNextSeq = fresh ? 0 : await data.getNextSeqForTab(opts.tabId)
 
   // Which machine will run this agent. Resolved BEFORE the env is built: a
-  // runner-routed spawn needs a remote-shaped env (no hub loopback hook URL).
-  const runnerId = await data.resolveRunnerId(opts.taskId)
+  // computer-routed spawn needs a remote-shaped env (no hub loopback hook URL).
+  const computerId = await data.resolveComputerId(opts.taskId)
 
   // PATH enrichment is HUB-local by construction — `getEnrichedPath()` probes
   // THIS machine's login shell, so injecting it into a routed spawn would send
-  // hub paths to a runner whose toolchains live elsewhere (and could mask the
-  // runner's own PATH entirely). The runner supplies its own sanitized base env
-  // (see runner handlers/proc.ts buildEnv), so remote spawns omit it.
-  const enrichedPath = runnerId == null ? getEnrichedPath() : null
+  // hub paths to a computer whose toolchains live elsewhere (and could mask the
+  // computer's own PATH entirely). The computer supplies its own sanitized base env
+  // (see computer handlers/proc.ts buildEnv), so remote spawns omit it.
+  const enrichedPath = computerId == null ? getEnrichedPath() : null
   const subprocessEnv: Record<string, string> = {
-    ...(await data.buildMcpEnv(opts.taskId, opts.mode, runnerId)),
+    ...(await data.buildMcpEnv(opts.taskId, opts.mode, computerId)),
     ...(enrichedPath ? { PATH: enrichedPath } : {})
   }
 
@@ -343,13 +343,13 @@ async function buildHydrateOpts(
     taskId: opts.taskId,
     mode: opts.mode,
     cwd: opts.cwd,
-    // Lets the runner resolve its own cwd, exactly as a terminal agent does.
+    // Lets the computer resolve its own cwd, exactly as a terminal agent does.
     // Without it a chat agent depended on the hub-computed path — the one thing
     // the hub cannot know about another machine.
     projectId: await data.getTaskProjectId(opts.taskId),
     conversationId: fresh ? null : (providerCfg.chatConversationId ?? null),
     providerFlags,
-    runnerId,
+    computerId,
     env: subprocessEnv,
     initialBuffer,
     initialNextSeq,
@@ -387,7 +387,7 @@ async function buildHydrateOpts(
  */
 export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
   // Data seam: all tasks/chat_events/autocomplete access goes through this.
-  // Default is the local-DB impl (same SQL as before the hub/runner split).
+  // Default is the local-DB impl (same SQL as before the hub/computer split).
   const data = opts.dataOps ?? createDbChatDataOps(db)
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.

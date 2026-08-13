@@ -1,10 +1,10 @@
 /**
- * Minimal async subprocess helpers for the runner's git handlers. A pared-down
+ * Minimal async subprocess helpers for the computer's git handlers. A pared-down
  * mirror of the worktrees domain's `exec-async.ts` (`execAsync`/`execGit`) with
- * the electron/diagnostics coupling removed, so the runner stays a lightweight
+ * the electron/diagnostics coupling removed, so the computer stays a lightweight
  * standalone bundle.
  *
- * @module runner/handlers/exec
+ * @module computer/handlers/exec
  */
 
 import { spawn } from 'node:child_process'

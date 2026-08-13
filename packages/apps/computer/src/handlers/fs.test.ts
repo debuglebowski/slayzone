@@ -2,22 +2,22 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HubToRunnerMethods, RunnerNotificationMethods } from '@slayzone/computer-transport/shared'
-import type { RunnerConfig } from '../config'
+import { HubToComputerMethods, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
+import type { ComputerConfig } from '../config'
 import { createFsHandlers } from './fs'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
 // Method names come from the SHARED frame contract, never a local copy. This
 // module used to declare its own `FsMethods` + zod schemas that only "MIRRORED"
 // the contract — the same divergence class that silently broke git.* and proc.*
 // (four separate wire mismatches). Importing the canonical names here means a
 // rename on either side fails the build instead of a routed call at runtime.
-const M = HubToRunnerMethods
+const M = HubToComputerMethods
 
-const dialer: RunnerDialer = { notify: () => true }
+const dialer: ComputerDialer = { notify: () => true }
 
-function ctxWithRoots(roots: string[], notify?: RunnerDialer['notify']) {
-  const config: RunnerConfig = {
+function ctxWithRoots(roots: string[], notify?: ComputerDialer['notify']) {
+  const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
@@ -30,7 +30,7 @@ let dir: string
 let roots: string[]
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'runner-fs-'))
+  dir = mkdtempSync(join(tmpdir(), 'computer-fs-'))
   // Canonicalize so containment holds on macOS (/var → /private/var).
   roots = [realpathSync(tmpdir())]
 })
@@ -95,7 +95,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
   })
 
   it('rejects removeDir outside every allowed root — no deletion happens', async () => {
-    // Root the runner at a child dir so a sibling is provably out of bounds.
+    // Root the computer at a child dir so a sibling is provably out of bounds.
     const child = join(dir, 'child')
     const sibling = join(dir, 'sibling')
     mkdirSync(child, { recursive: true })
@@ -108,7 +108,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
     expect(existsSync(join(sibling, 'keep.txt'))).toBe(true)
   })
 
-  // A runner with no configured roots is the standalone default. It must refuse
+  // A computer with no configured roots is the standalone default. It must refuse
   // everything rather than fall open — including the browse ops the picker calls
   // first, which is exactly where an accidental fail-open would be least visible.
   it('refuses every op when allowedRoots is empty', async () => {
@@ -126,7 +126,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
 })
 
 describe('createFsHandlers — fs.listRoots', () => {
-  it('returns the realpath-resolved jail plus the runner platform idiom', () => {
+  it('returns the realpath-resolved jail plus the computer platform idiom', () => {
     const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = handlers[M.fsListRoots]({}) as {
       roots: string[]
@@ -322,7 +322,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 5000 })
 
     const [method, params] = notify.mock.calls[0] as unknown as [string, { watchId: string }]
-    expect(method).toBe(RunnerNotificationMethods.fsChange)
+    expect(method).toBe(ComputerNotificationMethods.fsChange)
     expect(params.watchId).toBe('w1')
 
     expect(handlers[M.fsWatchStop]({ watchId: 'w1' })).toEqual({ ok: true })

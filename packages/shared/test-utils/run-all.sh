@@ -109,15 +109,15 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # Artifact export routes after the inversion: served by the HUB against ctx.db,
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
-run_test_electron_strict_loader packages/apps/hub/src/runner-auth.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
 # Routing the filesystem to runners put the local runner's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
-run_test_electron_strict_loader packages/apps/hub/src/local-runner-roots.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/local-computer-roots.test.ts
 # `projects.path` is being deleted; this is the one-time hand-off of its values to
 # the local runner. It must never overwrite a mapping the user re-pointed, and
 # must never record a path that is not on that machine.
-run_test_electron_strict_loader packages/apps/hub/src/seed-runner-project-paths.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/seed-computer-project-paths.test.ts
 # The hub's MIRROR of runner-reported paths, on the v149 table that modelled this
 # and was never wired. Pins that a report replaces a runner's rows wholesale (a
 # stale row would be trusted by reverse lookup) and that `resolve-by-path` still
@@ -196,7 +196,7 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.tes
 # `mode:"enroll"` line and its credential file are the evidence). Forces the
 # unsupervised branch (SLZ_FORCE_NO_SERVICE=1), so no launchd/systemd unit is ever
 # installed. Electron ABI (hub better-sqlite3 + runner node-pty) → strict loader.
-run_test_electron_strict_loader packages/apps/cli/src/commands/runner-lifecycle.test.ts
+run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycle.test.ts
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_test packages/apps/cli/src/commands/update.test.ts
@@ -206,11 +206,11 @@ run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 # Wave-3.5 runner TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
-run_test packages/apps/hub/src/runner-tls-listener.test.ts
+run_test packages/apps/hub/src/computer-tls-listener.test.ts
 # Per-role hub.config.json/hub.state.json + runner.config.json (env>file>default,
 # auto-gen secret, race-safe, legacy shared config.json fallback).
 run_test packages/shared/platform/src/hub-config-file.test.ts
-run_test packages/shared/platform/src/runner-config-file.test.ts
+run_test packages/shared/platform/src/computer-config-file.test.ts
 run_test packages/apps/hub/src/standalone-config.test.ts
 # getSupervisedRoot: channel-to-bucket folding (beta/unknown → stable, never a
 # third bucket), SLAYZONE_ROOT composition.
@@ -272,7 +272,7 @@ run_test packages/shared/platform/src/hub-addr.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 runner restart-survival — stable port + local-runner dedup (count stays 1 across reboots).
-run_test_electron_strict_loader packages/apps/hub/src/runner-restart-survival.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/computer-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
 # Loopback operator account routes (`slay hub users`). no_loader: the routes never
@@ -393,7 +393,7 @@ run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.te
 
 # Local-runner supervisor exit reporting — the runner owns every agent pty, so
 # its exits must stay observable (they killed whole fleets silently before).
-run_test_electron_strict packages/apps/app/src/main/local-runner-supervisor.test.ts
+run_test_electron_strict packages/apps/app/src/main/local-computer-supervisor.test.ts
 
 # e2e stale-process reaper: must never match the dev app's live runner (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).
@@ -515,7 +515,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
-  packages/domains/task/src/client/RunnerCard.test.tsx \
+  packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \

@@ -1,8 +1,8 @@
 /**
- * Runner-side git exec handlers. Reimplements the pure, path-parametrized git
- * worktree operations the hub delegates to a runner. The equivalent logic lives
+ * Computer-side git exec handlers. Reimplements the pure, path-parametrized git
+ * worktree operations the hub delegates to a computer. The equivalent logic lives
  * in `@slayzone/worktrees/server` (git-worktree.ts), but that package drags in
- * the full electron/React/diagnostics tree, so the runner reimplements the
+ * the full electron/React/diagnostics tree, so the computer reimplements the
  * handful of operations it needs via child_process git to stay a lightweight
  * standalone bundle.
  *
@@ -14,7 +14,7 @@
  * EVERY path argument passes the {@link assertPathAllowed} realpath containment
  * guard before any filesystem/git access.
  *
- * @module runner/handlers/git
+ * @module computer/handlers/git
  */
 
 import { spawn } from 'node:child_process'
@@ -28,7 +28,7 @@ import {
   gitIsGitRepoParamsSchema,
   gitRemoveWorktreeParamsSchema,
   gitRunWorktreeSetupScriptParamsSchema,
-  RunnerNotificationMethods
+  ComputerNotificationMethods
 } from '@slayzone/computer-transport/shared'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { z } from 'zod'
@@ -68,7 +68,7 @@ const SETUP_SCRIPT_TIMEOUT_MS = 5 * 60_000
 
 export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   // Read the jail through `ctx` on every call, never captured:
-  // `runner.setAllowedRoots` edits it live, and a captured array would keep
+  // `computer.setAllowedRoots` edits it live, and a captured array would keep
   // enforcing the boot-time set long after the user widened it.
   const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
 
@@ -177,7 +177,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       }
     }
 
-    // Sanitize the inherited runner env: the setup script gets the user env
+    // Sanitize the inherited computer env: the setup script gets the user env
     // (PATH/HOME) but none of SlayZone's own infra/secret/identity vars (fail
     // closed on anything unmanifested). The worktree-scoped vars below are the
     // authoritative overlay the script actually needs.
@@ -196,8 +196,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       const onData = (data: Buffer): void => {
         const text = data.toString()
         chunks.push(text)
-        // Stream progress to the hub over the generic runner event channel.
-        ctx.dialer.notify(RunnerNotificationMethods.event, {
+        // Stream progress to the hub over the generic computer event channel.
+        ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: 'git.worktreeSetupData',
           payload: { worktreePath, chunk: text }
         })

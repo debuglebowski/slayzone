@@ -1,21 +1,21 @@
 /**
- * Hand the hub's legacy `projects.path` values to a runner, once.
+ * Hand the hub's legacy `projects.path` values to a computer, once.
  *
  * `projects.path` is being deleted: one column cannot describe two machines, and
  * the hub cannot see any of them. But every existing install has real paths in
  * it, and dropping the column cold would blank every project the user has. So on
- * the first connect after upgrade, offer those paths to the runner to adopt.
+ * the first connect after upgrade, offer those paths to the computer to adopt.
  *
- * Scoped to the **supervised local runner**, and only for paths that actually
- * exist there. A remote runner's disk is a different machine: handing it the
+ * Scoped to the **supervised local computer**, and only for paths that actually
+ * exist there. A remote computer's disk is a different machine: handing it the
  * hub's paths would record mappings that are wrong by construction — exactly the
- * assumption this whole change exists to remove. Remote runners adopt through the
+ * assumption this whole change exists to remove. Remote computers adopt through the
  * picker, or provision from a repo URL.
  *
- * Idempotent by construction: a project the runner already has a mapping for is
+ * Idempotent by construction: a project the computer already has a mapping for is
  * skipped, so a reconnect never overwrites a path the user has since re-pointed.
  *
- * @module hub/seed-runner-project-paths
+ * @module hub/seed-computer-project-paths
  */
 
 export interface SeedableProject {
@@ -25,23 +25,23 @@ export interface SeedableProject {
 }
 
 export interface SeedTarget {
-  /** Existing mapping on the runner, or null. */
+  /** Existing mapping on the computer, or null. */
   resolve: (projectId: string) => Promise<{ path: string | null }>
-  /** Does this path exist on the runner? */
+  /** Does this path exist on the computer? */
   exists: (path: string) => Promise<boolean>
   adopt: (projectId: string, path: string) => Promise<unknown>
 }
 
 export interface SeedOutcome {
   adopted: string[]
-  /** Already mapped on the runner — left exactly as the user had it. */
+  /** Already mapped on the computer — left exactly as the user had it. */
   skippedExisting: string[]
   /** The legacy path is not on this machine. Not an error; just not ours. */
   skippedMissing: string[]
 }
 
 /**
- * Adopt every legacy path the runner does not already have a mapping for and
+ * Adopt every legacy path the computer does not already have a mapping for and
  * that is really present on its disk.
  *
  * Failures for one project never abort the rest — a seed is best-effort by

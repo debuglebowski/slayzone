@@ -3,19 +3,19 @@ export { createAuthExpressApp, type FetchHandlerAuth } from './app'
 export {
   API_KEY_HEADER,
   getHubAuthContext,
-  getRunnerPrincipal,
+  getComputerPrincipal,
   requireApiKey,
   requireSession,
-  verifyRunnerApiKey,
+  verifyComputerApiKey,
   verifySession
 } from './verify'
 export {
-  mintRunnerApiKey,
-  revokeRunnerApiKey,
+  mintComputerApiKey,
+  revokeComputerApiKey,
   RUNNER_SERVICE_USER_EMAIL,
-  type MintedRunnerApiKey,
-  type MintRunnerApiKeyInput
-} from './runner-keys'
+  type MintedComputerApiKey,
+  type MintComputerApiKeyInput
+} from './computer-keys'
 export {
   createHubUser,
   listHubUsers,

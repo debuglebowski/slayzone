@@ -1,8 +1,8 @@
 /**
  * Hand a long-lived SlayZone process to the OS supervisor so it stays up.
  *
- * Two KINDS use this: the `hub` (`slay hub create`) and the `runner`
- * (`slay runner create`). Neither merely backgrounds the process — a detached spawn
+ * Two KINDS use this: the `hub` (`slay hub create`) and the `computer`
+ * (`slay computer create`). Neither merely backgrounds the process — a detached spawn
  * dies for good on the first crash and never returns after a logout. Both
  * mainstream OSes already ship a supervisor that solves exactly this from a small
  * declarative file: launchd (macOS) and systemd --user (Linux). This module renders
@@ -32,7 +32,7 @@
  * rather than `npx @slayzone/hub`: the supervisor re-executes this command on every
  * crash and at every login, and an `npx` there would mean a registry round-trip (and
  * a silent version drift) per restart. `slay hub restart --upgrade` /
- * `slay runner restart --upgrade` re-resolve deliberately.
+ * `slay computer restart --upgrade` re-resolve deliberately.
  *
  * Lean leaf (node builtins only) so the CLI bundle can import
  * `@slayzone/platform/service-unit` without the platform barrel.
@@ -49,9 +49,9 @@ import { join } from 'node:path'
 export type ServiceBackend = 'launchd' | 'systemd' | 'none'
 
 /** Which SlayZone process a unit supervises. Drives identity + pinned env. */
-export type ServiceKind = 'hub' | 'runner'
+export type ServiceKind = 'hub' | 'computer'
 
-/** Everything a unit file needs to run one hub or runner. */
+/** Everything a unit file needs to run one hub or computer. */
 export interface ServiceUnitSpec {
   /** Which process this supervises — selects the identity + env shape. */
   kind: ServiceKind
@@ -67,7 +67,7 @@ export interface ServiceUnitSpec {
    *  uses journald). */
   logDir: string
   /**
-   * Explicit bind AUTHORITY (`host[:port]`) — HUB ONLY, ignored for a runner.
+   * Explicit bind AUTHORITY (`host[:port]`) — HUB ONLY, ignored for a computer.
    *
    * Supersedes {@link port}, which can only ever mean loopback. A REMOTE hub has to
    * bind wider than `127.0.0.1` to be reachable at all, and that is not
@@ -76,8 +76,8 @@ export interface ServiceUnitSpec {
    */
   address?: string
   /**
-   * Explicit bind port. HUB ONLY — a runner binds nothing (it dials out), so this
-   * is ignored for `kind: 'runner'`. Omitted on a hub ⇒ the hub picks a free port
+   * Explicit bind port. HUB ONLY — a computer binds nothing (it dials out), so this
+   * is ignored for `kind: 'computer'`. Omitted on a hub ⇒ the hub picks a free port
    * from the hub block itself, which is the normal case.
    *
    * @deprecated Prefer {@link address}. Kept because it renders the historical
@@ -86,7 +86,7 @@ export interface ServiceUnitSpec {
    */
   port?: number
   /** Extra environment for the unit, on top of the SlayZone vars below. Needed when
-   *  the interpreter itself requires configuring — e.g. a dev-tree hub or runner
+   *  the interpreter itself requires configuring — e.g. a dev-tree hub or computer
    *  whose native addons are Electron-ABI must run under
    *  `ELECTRON_RUN_AS_NODE=1 electron`. Keys here win over the defaults. */
   env?: Record<string, string>
@@ -95,7 +95,7 @@ export interface ServiceUnitSpec {
 /**
  * Per-kind identity. The prefixes reach a FILENAME and a launchd Label, so they are
  * also what keeps the two kinds' units from ever being mistaken for one another —
- * `listRegisteredUnits('runner')` will not see a hub, and vice versa.
+ * `listRegisteredUnits('computer')` will not see a hub, and vice versa.
  */
 const KINDS = {
   hub: {
@@ -110,14 +110,14 @@ const KINDS = {
     /** How an operator picks a different name — quoted in the invalid-name error. */
     renameHint: 'Rename with `--name` or the config.json `hubName` key.'
   },
-  runner: {
-    labelPrefix: 'com.slayzone.runner.',
+  computer: {
+    labelPrefix: 'com.slayzone.computer.',
     systemdPrefix: 'slayzone-computer-',
-    description: 'SlayZone runner',
-    outLog: 'runner.out.log',
-    errLog: 'runner.err.log',
-    logsCommand: 'slay runner logs',
-    renameHint: 'Pick a different name for `slay runner create`.'
+    description: 'SlayZone computer',
+    outLog: 'computer.out.log',
+    errLog: 'computer.err.log',
+    logsCommand: 'slay computer logs',
+    renameHint: 'Pick a different name for `slay computer create`.'
   }
 } as const satisfies Record<ServiceKind, unknown>
 
@@ -127,7 +127,7 @@ const KINDS = {
  * Deliberately strict: the name reaches a FILE PATH and the INTERIOR of a unit file,
  * so `..`/`/` would let `create` write outside the unit dir, and a newline would
  * inject arbitrary directives (`Restart=always`) into a systemd unit. Letters,
- * digits, dot, dash and underscore cover every name a hub or runner actually gets
+ * digits, dot, dash and underscore cover every name a hub or computer actually gets
  * (hub default: a directory basename), and a leading dot is refused so a name can
  * never be `.` or `..`.
  */
@@ -340,9 +340,9 @@ function xmlEscape(value: string): string {
  *
  * The two kinds pin different sets, and the RUNNER's is deliberately minimal: its
  * display name, filesystem path-jail, join token and cert pin have NO env channel at
- * all (see `runner/src/config.ts`) — they come from `<ROOT>/config.json`, which is
+ * all (see `computer/src/config.ts`) — they come from `<ROOT>/config.json`, which is
  * 0600. A unit file is 0644 and world-readable, so a join token must never be
- * written into one. Pinning ROOT is what points the runner at that config.
+ * written into one. Pinning ROOT is what points the computer at that config.
  */
 function unitEnv(spec: ServiceUnitSpec): Array<[string, string]> {
   const merged: Record<string, string> = { SLAYZONE_ROOT: spec.root }
@@ -368,7 +368,7 @@ function unitEnv(spec: ServiceUnitSpec): Array<[string, string]> {
  *
  * `KeepAlive.SuccessfulExit = false` is the crux: relaunch after a CRASH, stay
  * down after a clean exit. A bare `KeepAlive: true` would resurrect the process
- * immediately after `slay hub stop` / `slay runner stop`, making the stop command
+ * immediately after `slay hub stop` / `slay computer stop`, making the stop command
  * look broken.
  */
 export function renderLaunchdPlist(spec: ServiceUnitSpec): string {
@@ -417,7 +417,7 @@ ${envEntries}
 /**
  * Render the systemd user unit.
  *
- * One unit per hub/runner rather than a `@`-template instance: the template form
+ * One unit per hub/computer rather than a `@`-template instance: the template form
  * would have to derive SLAYZONE_ROOT from the instance name, which cannot express an
  * arbitrary path. `Restart=on-failure` mirrors the launchd choice — a clean `stop`
  * must stay stopped. `[Install]` is required or `systemctl enable` has nothing to
@@ -483,7 +483,7 @@ export function removeUnit(
 }
 
 /**
- * Every hub (or runner) registered with this backend, by unit filename.
+ * Every hub (or computer) registered with this backend, by unit filename.
  *
  * A missing unit dir is an empty list, not an error — a machine that has never run
  * `create` simply has none. Foreign units in the directory (a real LaunchAgents dir
@@ -510,11 +510,11 @@ export function listRegisteredUnits(
 }
 
 /**
- * The `SLAYZONE_ROOT` a registered hub/runner was created with, read back out of its
+ * The `SLAYZONE_ROOT` a registered hub/computer was created with, read back out of its
  * unit file — or null when there is no unit (or it is unreadable).
  *
  * `start`/`rm` act on a process that may be STOPPED, so its root cannot come from
- * `/health` the way a running hub's does — and a runner never has a `/health` at all
+ * `/health` the way a running hub's does — and a computer never has a `/health` at all
  * (it dials out), so its unit is the ONLY machine-side record of where it lives. The
  * unit is the record of what `create` decided, which is exactly what those commands
  * must reuse (log paths, restart with the same anchor).

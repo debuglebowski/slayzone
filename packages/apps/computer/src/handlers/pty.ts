@@ -1,18 +1,18 @@
 /**
- * Runner-side pty exec handlers. Spawns node-pty processes on the runner
+ * Computer-side pty exec handlers. Spawns node-pty processes on the computer
  * machine and streams their output back to the hub as `pty.data` notifications,
  * each carrying a MONOTONIC per-session sequence number (assigned by a
  * per-session {@link RingBuffer}). The hub detects gaps and replays them via
- * `pty.getBufferSince`; on process exit the runner emits `pty.exit`.
+ * `pty.getBufferSince`; on process exit the computer emits `pty.exit`.
  *
  * This mirrors the terminal domain's pty-manager seq/buffer semantics, scoped
- * down to the exec surface the runner protocol exposes.
+ * down to the exec surface the computer protocol exposes.
  *
- * @module runner/handlers/pty
+ * @module computer/handlers/pty
  */
 
 import {
-  HubToRunnerMethods,
+  HubToComputerMethods,
   ptyGetBufferSinceParamsSchema,
   ptyKillParamsSchema,
   type PtyListResult,
@@ -23,8 +23,8 @@ import {
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
   RpcError,
-  RunnerNotificationMethods,
-  RunnerTransportErrorCodes
+  ComputerNotificationMethods,
+  ComputerTransportErrorCodes
 } from '@slayzone/computer-transport/shared'
 import * as pty from 'node-pty'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
@@ -52,7 +52,7 @@ interface PtySession {
 
 export interface PtyHandlers {
   handlers: HubMethodTable
-  /** Kill every live pty (called on runner shutdown). */
+  /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
 }
 
@@ -63,7 +63,7 @@ export interface PtyHandlers {
 /**
  * `getProjectPaths` lets a cwd-less spawn resolve its own directory. The hub no
  * longer knows where a project lives on this machine — it held one path column
- * covering every runner — so `pty.spawn` may arrive carrying `projectId` instead
+ * covering every computer — so `pty.spawn` may arrive carrying `projectId` instead
  * of `cwd`, and this side does the lookup.
  */
 export function createPtyHandlers(
@@ -73,11 +73,11 @@ export function createPtyHandlers(
   const sessions = new Map<string, PtySession>()
 
   /**
-   * An explicit `cwd` wins: it is either a worktree this runner created or a
+   * An explicit `cwd` wins: it is either a worktree this computer created or a
    * `task.base_dir` the user set, never a hub guess about someone else's disk.
    * Otherwise resolve the project's own checkout here.
    *
-   * A project with no mapping fails LOUDLY. Falling back to the runner's launch
+   * A project with no mapping fails LOUDLY. Falling back to the computer's launch
    * directory would start the agent in the wrong tree and look like it worked,
    * which is the exact failure this whole seam removes.
    */
@@ -87,24 +87,24 @@ export function createPtyHandlers(
     const entry = getProjectPaths?.()?.get(opts.projectId)
     if (!entry) {
       throw new Error(
-        `project ${opts.projectId} is not checked out on this runner — adopt a folder or enable remote git for it`
+        `project ${opts.projectId} is not checked out on this computer — adopt a folder or enable remote git for it`
       )
     }
     return entry.path
   }
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    // Base channel: the runner inherits its parent (supervisor) process.env, so
+    // Base channel: the computer inherits its parent (supervisor) process.env, so
     // sanitize it through the shared manifest — keep the user env (PATH/HOME/
     // toolchains) but strip every SlayZone infra/secret/identity var (and any
-    // unmanifested SLAYZONE_*, fail closed) so nothing the runner was configured
+    // unmanifested SLAYZONE_*, fail closed) so nothing the computer was configured
     // with leaks into a spawned agent, which would reinterpret it. The hub's
     // per-spawn `overrides` (the identity overlay) apply AFTER and are the
     // authoritative source for anything an agent legitimately needs.
     const merged: Record<string, string> = overrides
       ? { ...sanitizeSpawnEnv(process.env), ...overrides }
       : sanitizeSpawnEnv(process.env)
-    // Override channel: force the agent's lifecycle hook to the runner's OWN
+    // Override channel: force the agent's lifecycle hook to the computer's OWN
     // loopback relay (which forwards to the hub over the authed ws channel), and
     // strip any hub bearer the hub baked into `overrides` — no per-agent token in
     // subprocess env, and the agent env is byte-identical to a local spawn's hook
@@ -180,7 +180,7 @@ export function createPtyHandlers(
       // (`attachPtyHandlers` wraps remote handles too), which answers what it
       // answers via `interceptSyncQueries` and strips cursor-status queries via
       // `filterBufferData` before anything is buffered or rendered. Stripping on
-      // the runner would only risk starving a remote program of an answer the hub
+      // the computer would only risk starving a remote program of an answer the hub
       // would otherwise have given it.
       const seq = buffer.append(data)
       // A WARM session buffers but does not stream: the hub has no session to
@@ -188,7 +188,7 @@ export function createPtyHandlers(
       // adopt. Emitting under a `warmId` the hub never registered would be
       // dropped anyway — and would burn a seq the adopt handover then replays.
       if (session.warm) return
-      ctx.dialer.notify(RunnerNotificationMethods.ptyData, {
+      ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
         seq,
         data
@@ -201,13 +201,13 @@ export function createPtyHandlers(
       // would tear down the replacement and confuse the hub.
       if (sessions.get(session.id) !== session) return
       sessions.delete(session.id)
-      // A warm session dying before adoption is the runner's business: the hub
+      // A warm session dying before adoption is the computer's business: the hub
       // holds no session for it. It re-warms on its own reconcile.
       if (session.warm) {
         ctx.log('warm pty exited before adoption', { warmId: session.id })
         return
       }
-      ctx.dialer.notify(RunnerNotificationMethods.ptyExit, {
+      ctx.dialer.notify(ComputerNotificationMethods.ptyExit, {
         sessionId: session.id,
         exitCode: typeof exitCode === 'number' ? exitCode : null,
         signal: signal != null ? String(signal) : null
@@ -247,7 +247,7 @@ export function createPtyHandlers(
     const session = sessions.get(params.warmId)
     if (!session || !session.warm) {
       throw new RpcError(
-        RunnerTransportErrorCodes.unknownRunner,
+        ComputerTransportErrorCodes.unknownComputer,
         `no warm session ${params.warmId} to adopt`
       )
     }
@@ -339,8 +339,8 @@ export function createPtyHandlers(
   }
 
   /**
-   * Every live session this runner still holds, for hub reattach after a
-   * dropped connection. The runner is the authority here — the hub's registry
+   * Every live session this computer still holds, for hub reattach after a
+   * dropped connection. The computer is the authority here — the hub's registry
    * is only a belief about this list, and a disconnect lets the two diverge in
    * both directions (sessions the hub gave up on that are still running;
    * sessions it still tracks that have since exited).
@@ -388,16 +388,16 @@ export function createPtyHandlers(
   }
 
   const handlers: HubMethodTable = {
-    [HubToRunnerMethods.ptySpawn]: spawn,
-    [HubToRunnerMethods.ptyKill]: kill,
-    [HubToRunnerMethods.ptyResize]: resize,
-    [HubToRunnerMethods.ptyWrite]: write,
-    [HubToRunnerMethods.ptyGetBufferSince]: getBufferSince,
-    [HubToRunnerMethods.ptyList]: list,
-    [HubToRunnerMethods.ptyWarmSpawn]: warmSpawn,
-    [HubToRunnerMethods.ptyWarmAdopt]: warmAdopt,
-    [HubToRunnerMethods.ptyWarmKill]: warmKill,
-    [HubToRunnerMethods.ptyWarmList]: warmList
+    [HubToComputerMethods.ptySpawn]: spawn,
+    [HubToComputerMethods.ptyKill]: kill,
+    [HubToComputerMethods.ptyResize]: resize,
+    [HubToComputerMethods.ptyWrite]: write,
+    [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
+    [HubToComputerMethods.ptyList]: list,
+    [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
+    [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
+    [HubToComputerMethods.ptyWarmKill]: warmKill,
+    [HubToComputerMethods.ptyWarmList]: warmList
   }
 
   return { handlers, disposeAll }

@@ -825,73 +825,73 @@ export function getProcessesDeps(): ProcessesDeps {
   return processesDeps
 }
 
-// Runners / runner deps — the hub/runner-split surface the `computersRouter` needs
-// that transport cannot own itself: the live runner gateway (runner-WS connection
-// status) plus the two values `mintJoinToken` bakes into a join token (the runner
-// WS URL a runner dials + the hub TLS cert fingerprint it pins). All three are
+// Computers / computer deps — the hub/computer-split surface the `computersRouter` needs
+// that transport cannot own itself: the live computer gateway (computer-WS connection
+// status) plus the two values `mintJoinToken` bakes into a join token (the computer
+// WS URL a computer dials + the hub TLS cert fingerprint it pins). All three are
 // exposed as GETTERS, not snapshots: the gateway is built asynchronously (auth
 // migrations) and the URL/fingerprint are only known after the server binds its
 // port + loads its identity, so the registry must read the live refs each call.
 //
 // Populated once composeServer + the server host wire it (always, barring init failure); when
-// the runner init failed it is not set and `getRunnersDeps()` throws — the router's
-// runner-dependent procedures fail cleanly and nothing calls them (the UI is
-// wave 3). The pure runner-binding mutations (setTaskRunner / … / revokeRunner)
+// the computer init failed it is not set and `getComputersDeps()` throws — the router's
+// computer-dependent procedures fail cleanly and nothing calls them (the UI is
+// wave 3). The pure computer-binding mutations (setTaskComputer / … / revokeComputer)
 // go straight through `ctx.db` and never touch this registry, so they work
-// regardless. `getRunnersDepsOrNull()` lets `list` degrade gracefully (store rows
+// regardless. `getComputersDepsOrNull()` lets `list` degrade gracefully (store rows
 // with no live status) instead of throwing when the gateway isn't wired.
 
-/** Structural slice of the runner gateway the runners router reads — connection
- *  status only. Kept structural (not the full `HubRunnerGateway`) so transport
+/** Structural slice of the computer gateway the computers router reads — connection
+ *  status only. Kept structural (not the full `HubComputerGateway`) so transport
  *  stays decoupled from `@slayzone/computer-transport`.
  *
  *  NOTE: structural mirrors of a real interface drift silently (that class of bug
- *  cost four wire-contract fixes in the runner handlers). Keep this a strict
- *  SUBSET of `HubRunnerGateway`'s member names/shapes so the real gateway is
+ *  cost four wire-contract fixes in the computer handlers). Keep this a strict
+ *  SUBSET of `HubComputerGateway`'s member names/shapes so the real gateway is
  *  always assignable to it. */
-export type RunnerGateway = {
-  /** Socket-open runners. Says nothing about liveness. */
-  listRunners: () => ReadonlyArray<{
-    runnerId: string
+export type ComputerGateway = {
+  /** Socket-open computers. Says nothing about liveness. */
+  listComputers: () => ReadonlyArray<{
+    computerId: string
     connectedAt: number
     lastSeenAt: number
   }>
-  /** Runners that can actually take work now (open + inside the heartbeat window).
-   *  This is what a dispatch decision should read; `listRunners` is for display. */
-  listUsableRunners: () => ReadonlyArray<{
-    runnerId: string
+  /** Computers that can actually take work now (open + inside the heartbeat window).
+   *  This is what a dispatch decision should read; `listComputers` is for display. */
+  listUsableComputers: () => ReadonlyArray<{
+    computerId: string
     connectedAt: number
     lastSeenAt: number
   }>
 }
 
-export type RunnersDeps = {
-  /** Live runner gateway, or null until the async runner init resolves. */
-  getGateway: () => RunnerGateway | null
-  /** ws(s)://host:port/computers URL a join token embeds for the runner to dial.
-   *  Null until the runner listener's port is bound. */
+export type ComputersDeps = {
+  /** Live computer gateway, or null until the async computer init resolves. */
+  getGateway: () => ComputerGateway | null
+  /** ws(s)://host:port/computers URL a join token embeds for the computer to dial.
+   *  Null until the computer listener's port is bound. */
   getHubUrl: () => string | null
   /** Hub TLS leaf-cert sha256 (lowercase hex) a join token pins. Null until the
    *  hub identity has been loaded. */
   getCertFingerprint: () => string | null
 }
 
-let runnersDeps: RunnersDeps | null = null
+let computersDeps: ComputersDeps | null = null
 
-export function setRunnersDeps(deps: RunnersDeps): void {
-  runnersDeps = deps
+export function setComputersDeps(deps: ComputersDeps): void {
+  computersDeps = deps
 }
 
-export function getRunnersDeps(): RunnersDeps {
-  if (!runnersDeps)
-    throw new Error('runnersDeps not initialized — composeServer/server host have not wired it yet')
-  return runnersDeps
+export function getComputersDeps(): ComputersDeps {
+  if (!computersDeps)
+    throw new Error('computersDeps not initialized — composeServer/server host have not wired it yet')
+  return computersDeps
 }
 
 /** Non-throwing read for the `list` procedure, which must still return store
  *  rows (with no live connection status) when the gateway isn't wired. */
-export function getRunnersDepsOrNull(): RunnersDeps | null {
-  return runnersDeps
+export function getComputersDepsOrNull(): ComputersDeps | null {
+  return computersDeps
 }
 
 /**
@@ -900,8 +900,8 @@ export function getRunnersDepsOrNull(): RunnersDeps | null {
  * (no identity loaded / no auth) so the `hub.describe` query works with
  * multi-hub OFF — the co-located local sidecar has no cert + no auth. Wired by
  * the server composition only when a hub identity is loaded (multi_hub/computers) or
- * auth is enforced (Phase 6). Deliberately separate from `RunnersDeps` (the
- * runner-facing `/computers` axis) — this is the client-facing `/trpc` axis.
+ * auth is enforced (Phase 6). Deliberately separate from `ComputersDeps` (the
+ * computer-facing `/computers` axis) — this is the client-facing `/trpc` axis.
  */
 export type HubDescribeDeps = {
   /** The hub's own TLS leaf-cert sha256 (lowercase hex), or null when no hub
@@ -945,46 +945,46 @@ export function getAuthGate(): boolean {
  * The workspace filesystem seam.
  *
  * Every fs op the UI runs against a workspace must execute on the machine that
- * owns it — a runner, which may be another host. Serving these from the hub is
+ * owns it — a computer, which may be another host. Serving these from the hub is
  * what made a remote task report "No repository path configured" for a path that
  * existed: the hub was answering about its own disk.
  *
- * `resolveRunner` deliberately mirrors the pty backend's resolution rather than
+ * `resolveComputer` deliberately mirrors the pty backend's resolution rather than
  * reading `tasks.computer_id` directly, so the directory picker browses exactly the
- * filesystem the agent will get. Precedence: an explicit `runnerId` the user
+ * filesystem the agent will get. Precedence: an explicit `computerId` the user
  * chose → the task's binding → the project default → the connected default.
  *
  * Default: in-process adapters and a null resolver — correct for hosts with no
- * runner gateway (the standalone/fork sidecar, tests), where the hub's disk is
+ * computer gateway (the standalone/fork sidecar, tests), where the hub's disk is
  * the only disk there is. The hub composition replaces both when it wires the
- * runner gateway.
+ * computer gateway.
  */
-export type WorkspaceRunnerTarget = {
-  /** A runner the caller already chose. Wins over every other field. */
-  runnerId?: string | null
+export type WorkspaceComputerTarget = {
+  /** A computer the caller already chose. Wins over every other field. */
+  computerId?: string | null
   taskId?: string
   projectId?: string
 }
 
 export type WorkspaceDeps = {
   fs: WorkspaceFsAdapters
-  resolveRunner: (target: WorkspaceRunnerTarget) => Promise<string | null>
+  resolveComputer: (target: WorkspaceComputerTarget) => Promise<string | null>
   /**
-   * Is this runner the desktop's own co-resident child?
+   * Is this computer the desktop's own co-resident child?
    *
    * Only the desktop-local case can meaningfully "reveal in Finder" or hand a
-   * path to a local editor — there is no file manager on a headless runner, and
+   * path to a local editor — there is no file manager on a headless computer, and
    * revealing a folder on a machine the user is not sitting at is not the action
-   * they asked for. Defaults to true: a host with no runner gateway is by
+   * they asked for. Defaults to true: a host with no computer gateway is by
    * definition working on its own disk.
    */
-  isLocalRunner: (runnerId: string | null) => boolean
+  isLocalComputer: (computerId: string | null) => boolean
 }
 
 let workspaceDeps: WorkspaceDeps = {
   fs: createLocalWorkspaceFsAdapters(),
-  resolveRunner: async () => null,
-  isLocalRunner: () => true
+  resolveComputer: async () => null,
+  isLocalComputer: () => true
 }
 
 export function setWorkspaceDeps(deps: WorkspaceDeps): void {

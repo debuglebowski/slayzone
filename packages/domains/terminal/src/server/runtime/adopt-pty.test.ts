@@ -4,9 +4,9 @@
  * fresh spawn, that the task-scoped env is exported and the agent exec'd via the
  * post-spawn write, and that the warm scrollback reaches the RingBuffer.
  *
- * Adoption is a REKEY on the runner (`pty.warmAdopt`), reached through
+ * Adoption is a REKEY on the computer (`pty.warmAdopt`), reached through
  * `PtyBackend.adopt`, so the fake backend below stands in for the routing one and
- * replays the warm scrollback the way a real runner does: as the first chunk on the
+ * replays the warm scrollback the way a real computer does: as the first chunk on the
  * adopted session's ordinary data path. Fake pty + fake window + stub db — nothing
  * spawns anywhere.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
@@ -86,20 +86,20 @@ const stubDb = {
 setDatabase(stubDb)
 
 /**
- * Stands in for the routing backend. `adopt` hands back the fake pty (the runner's
+ * Stands in for the routing backend. `adopt` hands back the fake pty (the computer's
  * process, rekeyed) and replays `warmScrollback` through its onData, which is how a
- * real runner delivers everything the agent emitted while warm.
+ * real computer delivers everything the agent emitted while warm.
  */
 let warmScrollback = ''
-const adoptCalls: Array<{ runnerId: string; warmId: string; sessionId: string }> = []
+const adoptCalls: Array<{ computerId: string; warmId: string; sessionId: string }> = []
 function installFakeBackend(fake: FakePty): void {
   setPtyBackend({
     spawn() {
       fake.spawnedFresh = true
       throw new Error('adoption must not cold-spawn')
     },
-    async adopt(runnerId: string, warmId: string, sessionId: string) {
-      adoptCalls.push({ runnerId, warmId, sessionId })
+    async adopt(computerId: string, warmId: string, sessionId: string) {
+      adoptCalls.push({ computerId, warmId, sessionId })
       const dataCbs: Array<(d: string) => void> = []
       const handle = {
         ...fake,
@@ -132,7 +132,7 @@ await test('adopt: registers the provided pty without a fresh spawn', async () =
     conversationId: 'conv-1',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   expect(res.success === true, `createPty failed: ${res.error}`)
   expect(hasPty(sessionId), 'session not registered under real id')
@@ -152,7 +152,7 @@ await test('adopt: exports task identity then execs the agent', async () => {
     conversationId: 'conv-2',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
   expect(cmd.includes('export SLAYZONE_TASK_ID='), `no task-id export in: ${cmd}`)
@@ -186,7 +186,7 @@ await test('adopt: warm scrollback reaches the RingBuffer via the data path', as
     conversationId: 'conv-3',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   // onData is registered during createPty; the replay is queued as a microtask.
   await new Promise((r) => setTimeout(r, 10))
@@ -214,7 +214,7 @@ await test("adopt: resizes the warm pty to the tab's real dimensions", async () 
     defaultFlags: '--allow-dangerously-skip-permissions',
     cols: 217,
     rows: 53,
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   expect(
     fake.resized.some(([c, r]) => c === 217 && r === 53),
@@ -236,7 +236,7 @@ await test('adopt: resizes to the 80x24 default when the tab requests no explici
     conversationId: 'conv-6',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--allow-dangerously-skip-permissions',
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   expect(
     fake.resized.some(([c, r]) => c === 80 && r === 24),

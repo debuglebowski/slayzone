@@ -1,22 +1,22 @@
 /**
- * proc.* end-to-end contract: hub routing backend ⇄ REAL runner handler.
+ * proc.* end-to-end contract: hub routing backend ⇄ REAL computer handler.
  *
- * Every other proc test exercises ONE side — `runner/handlers/proc.test.ts` calls
+ * Every other proc test exercises ONE side — `computer/handlers/proc.test.ts` calls
  * the handler directly, `exec-proxies.test.ts` drives a fake gateway. Neither
- * catches a hub/runner DISAGREEMENT, which is exactly the class of bug that
+ * catches a hub/computer DISAGREEMENT, which is exactly the class of bug that
  * shipped: the hub sent `{sessionId}` while the handler parsed `{id}`, and the
- * runner emitted `{id}` while the hub validated `{sessionId}` — so every routed
+ * computer emitted `{id}` while the hub validated `{sessionId}` — so every routed
  * `proc.spawn` threw and every `proc.data` was dropped. Invisible in production
- * only because `ProcSpawnSpec.runnerId` was hardcoded null (→ always local).
+ * only because `ProcSpawnSpec.computerId` was hardcoded null (→ always local).
  *
  * This test wires the two real implementations to each other through the shared
  * frame schemas, so a param-name or notification-shape divergence fails here.
  *
- * The runner handler lives in `@slayzone/computer` (an app, not a dep of this
+ * The computer handler lives in `@slayzone/computer` (an app, not a dep of this
  * package), so it is loaded dynamically and skipped if unresolvable — the suite
- * must not go red merely because the runner bundle is absent.
+ * must not go red merely because the computer bundle is absent.
  *
- * @module runner/server/proc-roundtrip.test
+ * @module computer/server/proc-roundtrip.test
  */
 
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
@@ -24,34 +24,34 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { RunnerNotificationMethods } from '../shared/frames'
+import { ComputerNotificationMethods } from '../shared/frames'
 import { createRoutingProcessBackend, type RoutingGateway } from './exec-proxies'
-import type { RunnerGatewayEvents } from './hub-gateway'
+import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'runner-1'
+const RUNNER_ID = 'computer-1'
 
 type ProcHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
 /**
- * Bridge the hub's `RoutingGateway` surface onto a real runner handler table:
+ * Bridge the hub's `RoutingGateway` surface onto a real computer handler table:
  * `request` dispatches into the handler, and the handler's `dialer.notify`
- * re-enters the gateway event bus tagged with `runnerId` — the same demux the
- * production `HubRunnerGateway` performs.
+ * re-enters the gateway event bus tagged with `computerId` — the same demux the
+ * production `HubComputerGateway` performs.
  */
 function bridge(
   handlers: ProcHandlerTable,
-  events: TypedEventEmitter<RunnerGatewayEvents>
+  events: TypedEventEmitter<ComputerGatewayEvents>
 ): RoutingGateway {
   return {
-    request: async (_runnerId: string, method: string, params?: unknown) => {
+    request: async (_computerId: string, method: string, params?: unknown) => {
       const handler = handlers[method]
-      if (!handler) throw new Error(`runner has no handler for ${method}`)
+      if (!handler) throw new Error(`computer has no handler for ${method}`)
       return await handler(params)
     },
     events,
     // These round-trips never disconnect, so the detach controller's epoch
     // baseline is never consulted — an empty roster is the honest answer.
-    listRunners: () => []
+    listComputers: () => []
   }
 }
 
@@ -67,32 +67,32 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-interface LoadedRunner {
+interface LoadedComputer {
   handlers: ProcHandlerTable
   disposeAll: () => void
-  events: TypedEventEmitter<RunnerGatewayEvents>
+  events: TypedEventEmitter<ComputerGatewayEvents>
 }
 
-async function loadRunnerProcHandlers(): Promise<LoadedRunner | null> {
-  // Resolved by path, not package name: the runner is an app, not a dependency
+async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
+  // Resolved by path, not package name: the computer is an app, not a dependency
   // of this package, so there is no bare specifier to import.
   let mod: {
     createProcHandlers: (ctx: unknown) => { handlers: ProcHandlerTable; disposeAll: () => void }
   }
   try {
-    mod = await import('../../../../apps/runner/src/handlers/proc')
+    mod = await import('../../../../apps/computer/src/handlers/proc')
   } catch {
     return null
   }
-  const events = new TypedEventEmitter<RunnerGatewayEvents>()
+  const events = new TypedEventEmitter<ComputerGatewayEvents>()
   const created = mod.createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         const p = (params ?? {}) as Record<string, unknown>
-        if (method === RunnerNotificationMethods.procData) {
-          events.emit('proc.data', { runnerId: RUNNER_ID, ...p })
-        } else if (method === RunnerNotificationMethods.procExit) {
-          events.emit('proc.exit', { runnerId: RUNNER_ID, ...p })
+        if (method === ComputerNotificationMethods.procData) {
+          events.emit('proc.data', { computerId: RUNNER_ID, ...p })
+        } else if (method === ComputerNotificationMethods.procExit) {
+          events.emit('proc.exit', { computerId: RUNNER_ID, ...p })
         }
         return true
       }
@@ -108,27 +108,27 @@ async function loadRunnerProcHandlers(): Promise<LoadedRunner | null> {
   return { handlers: created.handlers, disposeAll: created.disposeAll, events }
 }
 
-describe('proc.* hub⇄runner round trip', () => {
+describe('proc.* hub⇄computer round trip', () => {
   it('routes a spawn, streams sequenced stdout back, and reports exit', async () => {
-    const runner = await loadRunnerProcHandlers()
-    if (!runner) return // runner app unavailable in this context
-    cleanup.push(() => runner.disposeAll())
+    const computer = await loadComputerProcHandlers()
+    if (!computer) return // computer app unavailable in this context
+    cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingProcessBackend({
-      gateway: bridge(runner.handlers, runner.events),
+      gateway: bridge(computer.handlers, computer.events),
       local: {
         spawn: () => {
-          throw new Error('must not fall back to local: a runnerId was resolved')
+          throw new Error('must not fall back to local: a computerId was resolved')
         }
       },
-      resolveRunnerId: () => RUNNER_ID
+      resolveComputerId: () => RUNNER_ID
     })
 
     const handle = backend.spawn({
       id: 'rt-1',
       taskId: 'task-1',
       projectId: null,
-      runnerId: RUNNER_ID,
+      computerId: RUNNER_ID,
       command: 'printf "alpha\\nbeta\\n"',
       cwd: dir
     } as never)
@@ -151,18 +151,18 @@ describe('proc.* hub⇄runner round trip', () => {
   })
 
   it('writes to stdin over the wire (duplex — required for a chat protocol)', async () => {
-    const runner = await loadRunnerProcHandlers()
-    if (!runner) return
-    cleanup.push(() => runner.disposeAll())
+    const computer = await loadComputerProcHandlers()
+    if (!computer) return
+    cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingProcessBackend({
-      gateway: bridge(runner.handlers, runner.events),
+      gateway: bridge(computer.handlers, computer.events),
       local: {
         spawn: () => {
           throw new Error('must not fall back to local')
         }
       },
-      resolveRunnerId: () => RUNNER_ID
+      resolveComputerId: () => RUNNER_ID
     })
 
     // `cat` echoes stdin to stdout — proves the write reached the child.
@@ -170,7 +170,7 @@ describe('proc.* hub⇄runner round trip', () => {
       id: 'rt-2',
       taskId: 'task-1',
       projectId: null,
-      runnerId: RUNNER_ID,
+      computerId: RUNNER_ID,
       command: 'cat',
       cwd: dir
     } as never)
@@ -193,36 +193,36 @@ describe('proc.* hub⇄runner round trip', () => {
   })
 
   it('recovers a dropped stdout frame via proc.getBufferSince, preserving order', async () => {
-    const runner = await loadRunnerProcHandlers()
-    if (!runner) return
-    cleanup.push(() => runner.disposeAll())
+    const computer = await loadComputerProcHandlers()
+    if (!computer) return
+    cleanup.push(() => computer.disposeAll())
 
     // Swallow ONE mid-stream stdout notification to simulate a lost frame. The
-    // runner still buffered it, so the hub's gap detection must backfill it and
+    // computer still buffered it, so the hub's gap detection must backfill it and
     // deliver the stream contiguously — never skipping ahead.
     let dropped = 0
-    const lossy = new TypedEventEmitter<RunnerGatewayEvents>()
-    runner.events.on('proc.data', (p) => {
+    const lossy = new TypedEventEmitter<ComputerGatewayEvents>()
+    computer.events.on('proc.data', (p) => {
       if (p.stream !== 'stderr' && typeof p.seq === 'number' && p.seq === 1 && dropped === 0) {
         dropped++
         return
       }
       lossy.emit('proc.data', p)
     })
-    runner.events.on('proc.exit', (p) => lossy.emit('proc.exit', p))
+    computer.events.on('proc.exit', (p) => lossy.emit('proc.exit', p))
 
     const backend = createRoutingProcessBackend({
       gateway: {
-        request: bridge(runner.handlers, runner.events).request,
+        request: bridge(computer.handlers, computer.events).request,
         events: lossy,
-        listRunners: () => []
+        listComputers: () => []
       },
       local: {
         spawn: () => {
           throw new Error('must not fall back to local')
         }
       },
-      resolveRunnerId: () => RUNNER_ID
+      resolveComputerId: () => RUNNER_ID
     })
 
     // Three separate writes with gaps → three distinct seqs, so seq 1 is a real
@@ -231,7 +231,7 @@ describe('proc.* hub⇄runner round trip', () => {
       id: 'rt-3',
       taskId: 'task-1',
       projectId: null,
-      runnerId: RUNNER_ID,
+      computerId: RUNNER_ID,
       command: 'printf one; sleep 0.2; printf two; sleep 0.2; printf three',
       shell: true,
       cwd: dir

@@ -6,24 +6,24 @@ import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../sh
 export const AGENT_HOOK_PATH = '/api/agent-hook'
 
 /**
- * A resolved REMOTE hub target for a task whose PTY runs on a runner
- * (hub/runner split, Model A). Built by the caller (pty-manager, via an injected
+ * A resolved REMOTE hub target for a task whose PTY runs on a computer
+ * (hub/computer split, Model A). Built by the caller (pty-manager, via an injected
  * provider) and passed IN so `buildMcpEnv` stays a pure function of its inputs.
  *
  * `null`/absent (today's only path, and every local spawn) => the loopback env
  * below is byte-identical to before this seam existed.
  */
 export interface RemoteMcpEnv {
-  /** Non-empty runner id this session's OS process spawns on. */
-  runnerId: string
+  /** Non-empty computer id this session's OS process spawns on. */
+  computerId: string
   /**
    * The hub's externally-reachable HTTP base URL (e.g. `https://hub:8443`), no
    * trailing slash. The `slay` CLI inside the remote pty dials THIS to reach the
-   * hub's REST surface (loopback resolves on the runner machine, where no hub
+   * hub's REST surface (loopback resolves on the computer machine, where no hub
    * runs). The provider MUST return `null` rather than an empty/invalid base.
    *
    * NOTE: the AGENT HOOK no longer uses this. The hook posts to the RUNNER's own
-   * loopback `/api/agent-hook`, and the runner relays to the hub over its
+   * loopback `/api/agent-hook`, and the computer relays to the hub over its
    * authenticated ws channel (so the agent env is byte-identical local vs
    * remote and carries no per-agent hub bearer). This field remains only for the
    * `slay` CLI's hub REST access.
@@ -33,7 +33,7 @@ export interface RemoteMcpEnv {
 
 /**
  * Resolves the remote hub target (base URL) for a session that spawns on a
- * runner. Injected by the composition root; UNSET by default (so
+ * computer. Injected by the composition root; UNSET by default (so
  * `resolveRemoteMcpEnv` short-circuits to `null` and every spawn keeps today's
  * loopback env). Kept a plain function so `buildMcpEnv` itself stays a pure
  * function of its inputs — the impurity (read the hub URL) lives behind this
@@ -41,31 +41,31 @@ export interface RemoteMcpEnv {
  */
 export type RemoteMcpEnvProvider = (args: {
   taskId: string | undefined
-  runnerId: string
+  computerId: string
   mode?: TerminalMode
 }) => Promise<RemoteMcpEnv | null> | RemoteMcpEnv | null
 
 /**
  * Resolve the remote target for a spawn: `null` for a hub-local session
- * (`runnerId == null` — today's only path) or when no provider is wired. Only a
- * `runnerId != null` session with a provider mints/reads a target. Never throws
+ * (`computerId == null` — today's only path) or when no provider is wired. Only a
+ * `computerId != null` session with a provider mints/reads a target. Never throws
  * — a provider error degrades to `null` (spawn continues; the remote backend's
- * own routing surfaces a hard failure if the runner is truly unreachable).
+ * own routing surfaces a hard failure if the computer is truly unreachable).
  */
 export async function resolveRemoteMcpEnv(
   provider: RemoteMcpEnvProvider | null | undefined,
-  args: { taskId: string | undefined; runnerId: string | null; mode?: TerminalMode }
+  args: { taskId: string | undefined; computerId: string | null; mode?: TerminalMode }
 ): Promise<RemoteMcpEnv | null> {
-  if (args.runnerId == null || !provider) return null
+  if (args.computerId == null || !provider) return null
   try {
     const resolved = await provider({
       taskId: args.taskId,
-      runnerId: args.runnerId,
+      computerId: args.computerId,
       mode: args.mode
     })
     if (!resolved) return null
     // Enforce the provider contract defensively: a blank base URL would yield an
-    // empty hub target + a relative hook URL (both broken on the runner), so
+    // empty hub target + a relative hook URL (both broken on the computer), so
     // treat it as "no valid remote target" rather than emit a poisoned env.
     if (resolved.hubBaseUrl.trim() === '') return null
     return resolved
@@ -82,9 +82,9 @@ export async function resolveRemoteMcpEnv(
  * When `mode` is supplied AND the agent supports hook lifecycle events
  * (claude-code initially; see HOOK_SUPPORTED_AGENT_IDS), also injects:
  *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook. LOCAL only: the
- *                              loopback URL. On a REMOTE runner it is NOT set
- *                              here — the runner overlays its OWN loopback URL at
- *                              spawn (see runner handlers/pty.ts) and relays to
+ *                              loopback URL. On a REMOTE computer it is NOT set
+ *                              here — the computer overlays its OWN loopback URL at
+ *                              spawn (see computer handlers/pty.ts) and relays to
  *                              the hub over its ws channel, so the agent env is
  *                              byte-identical local vs remote.
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in the hook envelope)
@@ -109,9 +109,9 @@ export async function resolveRemoteMcpEnv(
  *                              older release channel's app can feed a newer
  *                              shared script — see notify.sh v4.)
  *
- * `remote` (a task's pty routed to a runner) only suppresses the loopback hook
- * URL (the runner supplies it). It injects NO hub URL and NO bearer: the hook
- * posts to runner loopback, and the `slay` CLI reaches the hub via its own
+ * `remote` (a task's pty routed to a computer) only suppresses the loopback hook
+ * URL (the computer supplies it). It injects NO hub URL and NO bearer: the hook
+ * posts to computer loopback, and the `slay` CLI reaches the hub via its own
  * `cli-hub-target.json` (see apps/cli/hub-config.ts). With no `remote` (the default)
  * nothing about the local env changes.
  *
@@ -143,7 +143,7 @@ export async function buildMcpEnv(
    *  over the task-derived lookup so `SLAYZONE_PROJECT_ID` is always present,
    *  regardless of whether a task is bound yet. */
   projectId?: string,
-  /** Resolved remote hub target when this session runs on a runner.
+  /** Resolved remote hub target when this session runs on a computer.
    *  Absent/`null` => local loopback env (byte-identical to before the seam). */
   remote?: RemoteMcpEnv | null
 ): Promise<Record<string, string>> {
@@ -171,12 +171,12 @@ export async function buildMcpEnv(
   // state lives, and a child can no longer derive it: with the desktop app's
   // supervised roles channel-scoped (`~/.slayzone/<dev|stable>/hub`), the old
   // "everyone falls through to ~/.slayzone" assumption is dead. Worse, a pty
-  // routed through the co-located LOCAL RUNNER inherits that runner's own
+  // routed through the co-located LOCAL RUNNER inherits that computer's own
   // (different, role-scoped) SLAYZONE_ROOT through the base env — the manifest
   // tags the var `global`, so sanitizeSpawnEnv keeps it. Setting it here means
   // the hub's value always overrides that inherited one at the spawn boundary
-  // (the runner applies these overrides last), so a plain shell resolves the same
-  // DB an agent does instead of pointing at the runner's credential dir.
+  // (the computer applies these overrides last), so a plain shell resolves the same
+  // DB an agent does instead of pointing at the computer's credential dir.
   env.SLAYZONE_ROOT = getSlayzoneHomeDir()
 
   // The opaque identity blob the benign notify.sh forwards verbatim. Built ONLY
@@ -200,8 +200,8 @@ export async function buildMcpEnv(
   }
 
   if (remote) {
-    // Remote runner: the agent posts to the RUNNER's own loopback /api/agent-hook
-    // (the runner overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
+    // Remote computer: the agent posts to the RUNNER's own loopback /api/agent-hook
+    // (the computer overlays SLAYZONE_AGENT_HOOK_URL at spawn and relays to the hub
     // over its ws channel). So we set NO hub URL, NO bearer, and NO hook URL here
     // — the identity env is byte-identical to a local spawn. `remote.hubBaseUrl`
     // is used only by the `slay` CLI's own cli-hub-target.json path, not the hook.

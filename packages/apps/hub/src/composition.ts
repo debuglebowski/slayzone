@@ -25,7 +25,7 @@ import {
   setPtyDeps,
   setChatDeps,
   setAuthEvents,
-  setRunnersDeps,
+  setComputersDeps,
   setWorkspaceDeps,
   requestGithubSignInStart,
   type AppDeps,
@@ -121,23 +121,23 @@ import {
 } from '@slayzone/processes/server'
 import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
 import { runGhLocally, setGhExecutor } from '@slayzone/worktrees/server'
-import { missingRootsForProjects } from './local-runner-roots'
-import { seedProjectPaths } from './seed-runner-project-paths'
-import { recordRunnerProjectPaths } from '@slayzone/computers/server'
-// Runner transport: runner gateway + hub-auth + runner resolution, wired
-// unconditionally at boot (a hub always accepts runners).
+import { missingRootsForProjects } from './local-computer-roots'
+import { seedProjectPaths } from './seed-computer-project-paths'
+import { recordComputerProjectPaths } from '@slayzone/computers/server'
+// Computer transport: computer gateway + hub-auth + computer resolution, wired
+// unconditionally at boot (a hub always accepts computers).
 import {
   ghExecResultSchema,
-  HubToRunnerMethods,
+  HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
 import {
-  createHubRunnerGateway,
+  createHubComputerGateway,
   createRoutingChatBackend,
   createRoutingPtyBackend,
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
-  type HubRunnerGateway
+  type HubComputerGateway
 } from '@slayzone/computer-transport/server'
 import {
   createHubAuth,
@@ -148,8 +148,8 @@ import {
 } from '@slayzone/hub-auth/server'
 import { verifyRestBearer } from './rest-auth.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskRunnerId } from '@slayzone/computers/server'
-import { createRunnerAuthAdapters } from './runner-auth.js'
+import { DEFAULT_LOCAL_RUNNER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
+import { createComputerAuthAdapters } from './computer-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireHostKillStamp } from './host-kill.js'
@@ -209,23 +209,23 @@ export type ServerComposition = {
   restDeps: RestApiDeps
   /** Late-bound by the server once listen() resolves the actual port. */
   setBoundPort: (port: number) => void
-  /** Hub runner gateway (runner-WS multiplexer), or `null` until its async init
-   *  resolves (see `runnersReady`). A later unit mounts it onto the server's WS
+  /** Hub computer gateway (computer-WS multiplexer), or `null` until its async init
+   *  resolves (see `computersReady`). A later unit mounts it onto the server's WS
    *  upgrade path. */
-  readonly runnerGateway: HubRunnerGateway | null
-  /** Hub-auth (better-auth) instance backing runner enroll/verify, or `null`
-   *  until the async init resolves (same as `runnerGateway`). */
+  readonly computerGateway: HubComputerGateway | null
+  /** Hub-auth (better-auth) instance backing computer enroll/verify, or `null`
+   *  until the async init resolves (same as `computerGateway`). */
   readonly hubAuth: HubAuth | null
-  /** Resolves once the async runner init (createHubAuth + gateway) has finished.
+  /** Resolves once the async computer init (createHubAuth + gateway) has finished.
    *  A later unit awaits this before reading the two fields above / mounting the
    *  gateway. */
-  runnersReady: Promise<void>
-  /** Feed the runner listener's bound WS URL + the hub identity's TLS cert
-   *  fingerprint back into the runners registry (`mintJoinToken` embeds both in
-   *  a join token). The server host resolves these only after it binds the runner
+  computersReady: Promise<void>
+  /** Feed the computer listener's bound WS URL + the hub identity's TLS cert
+   *  fingerprint back into the computers registry (`mintJoinToken` embeds both in
+   *  a join token). The server host resolves these only after it binds the computer
    *  port + loads `loadOrCreateHubIdentity`, which happens AFTER composeServer
    *  returns — so it's a late-bound setter, not a constructor arg. */
-  setRunnerListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
+  setComputerListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
 }
 
 export function composeServer(opts: {
@@ -242,22 +242,22 @@ export function composeServer(opts: {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
 
-  // --- Runner transport (always on) -------------------------------------------
-  // A hub always accepts runners: the gateway + hub-auth are built and the runner
-  // listener binds at startup unconditionally, so a runner can connect (and join
+  // --- Computer transport (always on) -------------------------------------------
+  // A hub always accepts computers: the gateway + hub-auth are built and the computer
+  // listener binds at startup unconditionally, so a computer can connect (and join
   // tokens can mint) with no mode to flip. Co-located exec still runs IN-PROCESS —
-  // a task only routes over the transport when it is explicitly bound to a runner
-  // (`resolveTaskRunnerId` → null ⇒ local.spawn), so always-on costs the common
+  // a task only routes over the transport when it is explicitly bound to a computer
+  // (`resolveTaskComputerId` → null ⇒ local.spawn), so always-on costs the common
   // laptop case nothing at runtime.
   //
   // Single HMAC secret backing hub-auth signing: better-auth's session/cookie
-  // signer + the runner enroll/api-key credentials (createHubAuth). (The former
-  // per-task agent-hook bearer is gone — a runner-routed hook posts to the
-  // runner's own loopback relay, so no per-task token is minted or verified.)
+  // signer + the computer enroll/api-key credentials (createHubAuth). (The former
+  // per-task agent-hook bearer is gone — a computer-routed hook posts to the
+  // computer's own loopback relay, so no per-task token is minted or verified.)
   //
   // SECURITY SEAM (hub-auth-secret hardening): a STANDALONE boot resolves this in
   // bin.ts (applyStandaloneHubConfig → env SLAYZONE_HUB_AUTH_SECRET > config.json
-  // runnerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
+  // computerTransportSecret > generated+persisted 256-bit secret) and sets the env BEFORE
   // composeServer runs. So in standalone the env is ALWAYS present and NEVER the
   // shared dev constant — a per-install unique secret means minted per-task
   // tokens can't be forged across installs (the npm-published bug). We assert
@@ -265,7 +265,7 @@ export function composeServer(opts: {
   // (Electron host) keeps the historical env-or-dev-constant default untouched:
   // the host controls the env, config.json is never consulted, and a dev/test
   // boot without the env still works exactly as before.
-  const DEV_HUB_AUTH_SECRET = 'slayzone-dev-runner-secret'
+  const DEV_HUB_AUTH_SECRET = 'slayzone-dev-computer-secret'
   if (opts.standalone && !process.env.SLAYZONE_HUB_AUTH_SECRET) {
     // bin.ts must have seeded this; a standalone boot that reached composeServer
     // without it means the resolve step was skipped — fail loud instead of
@@ -276,17 +276,17 @@ export function composeServer(opts: {
     )
   }
   const hubAuthSecret = process.env.SLAYZONE_HUB_AUTH_SECRET ?? DEV_HUB_AUTH_SECRET
-  // Populated by the async runner init (createHubAuth is async — migrations); a
-  // later unit reads these after `runnersReady` to mount the gateway in server.ts.
-  let runnerGatewayRef: HubRunnerGateway | null = null
+  // Populated by the async computer init (createHubAuth is async — migrations); a
+  // later unit reads these after `computersReady` to mount the gateway in server.ts.
+  let computerGatewayRef: HubComputerGateway | null = null
   let hubAuthRef: HubAuth | null = null
-  let runnersReady: Promise<void> = Promise.resolve()
-  // Runner listener info the runners router bakes into a join token — bound late
-  // by the server host (setRunnerListenerInfo) once it knows its own runner URL +
+  let computersReady: Promise<void> = Promise.resolve()
+  // Computer listener info the computers router bakes into a join token — bound late
+  // by the server host (setComputerListenerInfo) once it knows its own computer URL +
   // cert fingerprint. Null until then, so `mintJoinToken` fails cleanly if
   // called before the listener is up.
-  let runnerHubUrl: string | null = null
-  let runnerCertFingerprint: string | null = null
+  let computerHubUrl: string | null = null
+  let computerCertFingerprint: string | null = null
 
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
@@ -378,7 +378,7 @@ export function composeServer(opts: {
   // standalone mode only, when the engine is started (slice 7).
   const taskBus = new EventEmitter()
   // Base task runtime adapters (no worktrees override → the task server's local
-  // git/fs default stays bound). Extracted so the runner-routing path can re-supply a
+  // git/fs default stays bound). Extracted so the computer-routing path can re-supply a
   // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
@@ -526,48 +526,48 @@ export function composeServer(opts: {
     isDarkTheme: () => true,
     bus: { on: () => undefined }
   })
-  // Runner resolution for exec routing: a task's explicit binding, else the
-  // connected default runner (sole connected, else the one named
+  // Computer resolution for exec routing: a task's explicit binding, else the
+  // connected default computer (sole connected, else the one named
   // DEFAULT_LOCAL_RUNNER_NAME; several unnamed → refuse to guess). `null` means
   // "run in-process", which every routing backend below handles as a local spawn.
   //
-  // Deliberately simple: the reconnect grace + last-known-runner cache that used to
+  // Deliberately simple: the reconnect grace + last-known-computer cache that used to
   // live here existed only to keep the no-fallback invariant from failing spawns
-  // during a runner reconnect. With the fallback restored they are dead weight, and
-  // a cache that can name a dead runner is worse than none. When enforcement lands
-  // (plan phases A→D) this is replaced by a single `listUsableRunners()` authority
+  // during a computer reconnect. With the fallback restored they are dead weight, and
+  // a cache that can name a dead computer is worse than none. When enforcement lands
+  // (plan phases A→D) this is replaced by a single `listUsableComputers()` authority
   // on the gateway, not by re-adding these.
-  let execGateway: HubRunnerGateway | null = null
-  const resolveExecRunner = (specRunnerId: string | null | undefined): string | null => {
-    if (specRunnerId != null) return specRunnerId
-    // `listUsableRunners`, NOT `listRunners`: usable = authenticated + heard from
+  let execGateway: HubComputerGateway | null = null
+  const resolveExecComputer = (specComputerId: string | null | undefined): string | null => {
+    if (specComputerId != null) return specComputerId
+    // `listUsableComputers`, NOT `listComputers`: usable = authenticated + heard from
     // inside the heartbeat window. An open-but-silent socket would otherwise be
     // picked and every dispatch to it would hang until the watchdog reaped it.
-    const usable = execGateway?.listUsableRunners() ?? []
+    const usable = execGateway?.listUsableComputers() ?? []
     if (usable.length === 0) return null
-    if (usable.length === 1) return usable[0].runnerId
+    if (usable.length === 1) return usable[0].computerId
     const local = usable.find((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
-    return local ? local.runnerId : null
+    return local ? local.computerId : null
   }
-  /** Effective runner for a task: explicit binding, else connected default. */
-  const resolveRunnerForTask = async (taskId: string): Promise<string | null> =>
-    resolveExecRunner(await resolveTaskRunnerId(db, taskId))
+  /** Effective computer for a task: explicit binding, else connected default. */
+  const resolveComputerForTask = async (taskId: string): Promise<string | null> =>
+    resolveExecComputer(await resolveTaskComputerId(db, taskId))
   /** Same, for a project — its default binding, else the connected default. */
-  const resolveRunnerForProject = async (projectId: string): Promise<string | null> => {
+  const resolveComputerForProject = async (projectId: string): Promise<string | null> => {
     const row = await db.get<{ default_computer_id?: string | null }>(
       'SELECT default_computer_id FROM projects WHERE id = ?',
       [projectId]
     )
-    return resolveExecRunner(row?.default_computer_id ?? null)
+    return resolveExecComputer(row?.default_computer_id ?? null)
   }
 
-  // Inject runner-aware spawn lookups BEFORE createPtyOps (which captures the
-  // lookups at construction). Only `resolveRunnerId` is overridden; the mode-row /
+  // Inject computer-aware spawn lookups BEFORE createPtyOps (which captures the
+  // lookups at construction). Only `resolveComputerId` is overridden; the mode-row /
   // project-id reads keep their db defaults.
   const dbLookups = createDbPtySpawnLookups(db)
   setPtySpawnLookups({
     ...dbLookups,
-    resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
+    resolveComputerId: (taskId) => resolveComputerForTask(taskId)
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
 
@@ -658,21 +658,21 @@ export function composeServer(opts: {
       ])
       return row?.path ?? null
     },
-    // Warm on the runner this project's tasks will actually resolve to. Reads the
+    // Warm on the computer this project's tasks will actually resolve to. Reads the
     // project's default binding through the SAME resolver a spawn uses, so a warm
     // agent is never booted on a machine no task will land on.
-    resolveRunnerId: (projectId) => resolveRunnerForProject(projectId)
+    resolveComputerId: (projectId) => resolveComputerForProject(projectId)
   })
   setChatDeps({
-    // Override ONLY the runner resolution over the db defaults, so a chat spawn
-    // resolves the same runner the exec backend will route it to. If chat resolved
+    // Override ONLY the computer resolution over the db defaults, so a chat spawn
+    // resolves the same computer the exec backend will route it to. If chat resolved
     // just the explicit binding while the backend applied the connected default,
     // an unbound task would build a hub-shaped agent env (loopback agent-hook URL)
-    // and then run that agent on the runner, where the URL points nowhere.
+    // and then run that agent on the computer, where the URL points nowhere.
     ops: createChatOps(db, {
       dataOps: {
         ...createDbChatDataOps(db),
-        resolveRunnerId: (taskId) => resolveRunnerForTask(taskId)
+        resolveComputerId: (taskId) => resolveComputerForTask(taskId)
       }
     }),
     queueOps: createChatQueueOps(db),
@@ -1050,8 +1050,8 @@ export function composeServer(opts: {
   }
 
   // PTY state-machine bridge — shared by the agent-hook HTTP route (restDeps
-  // below) AND the runner-relay `event` consumer (wired in the async gateway
-  // block), so a local loopback hook and a runner-relayed hook drive the exact
+  // below) AND the computer-relay `event` consumer (wired in the async gateway
+  // block), so a local loopback hook and a computer-relayed hook drive the exact
   // same state machine through the exact same authority (processAgentHook).
   const terminalStateBridge = {
     findSession: findSessionByTaskIdAndMode,
@@ -1069,7 +1069,7 @@ export function composeServer(opts: {
     agentLifecycle: agentLifecycleEvents,
     menu: menuEvents,
     taskBus,
-    // NOTE: no per-task hub-bearer verifier. A runner-routed pty's hook posts to
+    // NOTE: no per-task hub-bearer verifier. A computer-routed pty's hook posts to
     // the RUNNER's own loopback relay (which forwards to the hub over the authed
     // ws channel via the gateway `event` consumer wired below) — the hook never
     // carries a bearer, so there is nothing to verify on the agent-hook route.
@@ -1077,41 +1077,41 @@ export function composeServer(opts: {
     // SECURITY DECISION (intentional — do NOT re-add per-task scoping): the old
     // path minted a per-task bearer and rejected a hook whose token taskId != the
     // payload taskId. That guarded a threat this trust model does not have. The
-    // standing trust boundary is TWO layers: (1) the runner→hub ws channel is
-    // AUTHENTICATED at enroll (hub-auth api-key), so only an enrolled runner can
+    // standing trust boundary is TWO layers: (1) the computer→hub ws channel is
+    // AUTHENTICATED at enroll (hub-auth api-key), so only an enrolled computer can
     // relay hooks at all; (2) `processAgentHook` only mutates a session that
     // `bridge.findSession(taskId, mode)` actually resolves, so a hook cannot
-    // fabricate state for a non-existent session. An enrolled runner already
+    // fabricate state for a non-existent session. An enrolled computer already
     // executes the agents and spawns the PTYs for its tasks — a per-hook bearer
     // guarded a side door on a house whose front door it already holds. Re-adding
     // it would also force per-agent bearers back into subprocess env, undoing the
     // byte-identical-local-vs-remote agent env the benign-forwarder redesign won.
-    // FUTURE TRIGGER: if runners ever become UNTRUSTED / multi-tenant, restore
-    // scoping as a CHANNEL-level claim (runner X may only drive tasks assigned to
+    // FUTURE TRIGGER: if computers ever become UNTRUSTED / multi-tenant, restore
+    // scoping as a CHANNEL-level claim (computer X may only drive tasks assigned to
     // X), NOT a per-agent bearer.
-    // Runner listener info for the loopback `POST /api/computers/join-token` route —
+    // Computer listener info for the loopback `POST /api/computers/join-token` route —
     // the MAIN process's boot-time auto-enroll mints through it (no tRPC client in
-    // main). Closed over the SAME late-bound refs the runners registry reads
-    // (setRunnerListenerInfo feeds them once the /computers listener binds).
-    runners: {
-      getHubUrl: () => runnerHubUrl,
-      getCertFingerprint: () => runnerCertFingerprint,
-      // Same late-bound ref the tRPC `runners.list` reads, so the REST twin
-      // (`GET /api/computers`, what `slay runner ls` calls) can never report a
-      // different connection status than the app's Runners tab.
-      getGateway: () => runnerGatewayRef
+    // main). Closed over the SAME late-bound refs the computers registry reads
+    // (setComputerListenerInfo feeds them once the /computers listener binds).
+    computers: {
+      getHubUrl: () => computerHubUrl,
+      getCertFingerprint: () => computerCertFingerprint,
+      // Same late-bound ref the tRPC `computers.list` reads, so the REST twin
+      // (`GET /api/computers`, what `slay computer ls` calls) can never report a
+      // different connection status than the app's Computers tab.
+      getGateway: () => computerGatewayRef
     },
     // Operator account management for the loopback-only `/api/hub/users` routes
     // (`slay hub users add|ls|rm`) — the ONLY way to create an account now that
     // public signup is closed (hub-auth auth.ts `disableSignUp`).
     //
     // Closed over the SAME late-bound `hubAuthRef` that `get hubAuth()` below reads,
-    // for the same reason the `runners` slot above is getter-shaped: hub-auth is
-    // built inside the async `runnersReady` IIFE, long after this literal is
+    // for the same reason the `computers` slot above is getter-shaped: hub-auth is
+    // built inside the async `computersReady` IIFE, long after this literal is
     // constructed. `ready` is therefore a function, never a captured value — and it
     // stays false permanently if `createHubAuth` threw (that failure is swallowed
     // into a diagnostic), which the route surfaces as a 503 naming
-    // `runner.init_failed`.
+    // `computer.init_failed`.
     hubUsers: {
       ready: () => hubAuthRef !== null,
       create: async (input) => {
@@ -1127,14 +1127,14 @@ export function composeServer(opts: {
       remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
     },
     // Bearer authority for routes that admit an authenticated OFF-BOX caller —
-    // today only `POST /api/computers/join-token`, so `slay runner mint` can target a
+    // today only `POST /api/computers/join-token`, so `slay computer mint` can target a
     // hub on another machine (see that route's WHO MAY CALL IT note).
     //
     // Deliberately the SAME two pieces the outer gate uses — `isRemoteMode() &&
     // hubAuthRef != null` and `verifyRestBearer` — so a route-level decision can
     // never disagree with the gate about whether this hub authenticates at all, or
     // about which sessions count. Getter-shaped for the usual reason: hub-auth is
-    // built inside the async `runnersReady` IIFE, long after this literal exists.
+    // built inside the async `computersReady` IIFE, long after this literal exists.
     //
     // False on every local / supervised / e2e hub, which keeps the consuming route
     // loopback-only exactly as before.
@@ -1218,37 +1218,37 @@ export function composeServer(opts: {
   // the local emitters (set via setAppDeps above) exist before frames arrive.
   bridge?.connect()
 
-  // --- Runner gateway + hub-auth (async; dark until a runner enrolls) ----------
+  // --- Computer gateway + hub-auth (async; dark until a computer enrolls) ----------
   // Built off the main path because `createHubAuth` runs better-auth migrations
   // (async). Ordering is safe: the ledger DB stays local (Model A — never
   // proxied); `setPtySpawnLookups` already ran synchronously above; and the
   // routing backends are read per-spawn via getPtyBackend()/getProcessBackend(),
   // so injecting them once the gateway resolves takes effect for later spawns
-  // without a mid-session straddle. With no runner registered every spawn's
-  // resolved runnerId is null → the routing backends fall through to local, so
-  // behavior matches runner-OFF until a runner actually enrolls.
-  // Populate the runners registry synchronously (the router may be called before
+  // without a mid-session straddle. With no computer registered every spawn's
+  // resolved computerId is null → the routing backends fall through to local, so
+  // behavior matches computer-OFF until a computer actually enrolls.
+  // Populate the computers registry synchronously (the router may be called before
   // the async gateway init below resolves). The getters read the late-bound refs,
   // so `list` sees the gateway once it exists and `mintJoinToken` sees the
-  // URL/fingerprint once the server host feeds them via setRunnerListenerInfo.
-  setRunnersDeps({
-    getGateway: () => runnerGatewayRef,
-    getHubUrl: () => runnerHubUrl,
-    getCertFingerprint: () => runnerCertFingerprint
+  // URL/fingerprint once the server host feeds them via setComputerListenerInfo.
+  setComputersDeps({
+    getGateway: () => computerGatewayRef,
+    getHubUrl: () => computerHubUrl,
+    getCertFingerprint: () => computerCertFingerprint
   })
 
   // Remote-MCP-env provider. Wired synchronously here — it depends only on
   // boundPort (read LAZILY inside the closure), which does not need the async
-  // gateway — so a runner-routed pty spawned before `runnersReady` resolves still
+  // gateway — so a computer-routed pty spawned before `computersReady` resolves still
   // gets a valid hub base URL (used by the `slay` CLI's hub REST access). A task
-  // not bound to a runner keeps today's loopback env (the provider short-circuits
-  // on a null runnerId). See `createRemoteMcpEnvProvider` for hubBaseUrl derivation.
+  // not bound to a computer keeps today's loopback env (the provider short-circuits
+  // on a null computerId). See `createRemoteMcpEnvProvider` for hubBaseUrl derivation.
   setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
-  runnersReady = (async () => {
+  computersReady = (async () => {
     const hubAuth = await createHubAuth({
       dbPath: join(dataRoot, 'hub-auth.sqlite'),
-      // better-auth baseURL: a fixed loopback constant. Runners authenticate via
+      // better-auth baseURL: a fixed loopback constant. Computers authenticate via
       // api-key/bearer (not cookies/redirects), so this is internal plumbing and
       // never needs an operator override — the SLAYZONE_RUNNER_TRANSPORT_BASE_URL
       // env knob was inlined.
@@ -1256,80 +1256,80 @@ export function composeServer(opts: {
       secret: hubAuthSecret
     })
     hubAuthRef = hubAuth
-    // Identity-based local-runner dedup (Wave3.5-D5): tell the auth adapters
-    // which enroll name is the co-located auto-spawned runner so it collapses to
+    // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
+    // which enroll name is the co-located auto-spawned computer so it collapses to
     // ONE deterministic-id row instead of orphaning one per boot. MUST match the
-    // name the supervised runner enrolls under — both derive the SHARED
-    // DEFAULT_LOCAL_RUNNER_NAME const (the supervised runner defaults to it when
-    // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote runners (any
+    // name the supervised computer enrolls under — both derive the SHARED
+    // DEFAULT_LOCAL_RUNNER_NAME const (the supervised computer defaults to it when
+    // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote computers (any
     // other name) keep the fresh-uuid path.
-    const localRunnerName = DEFAULT_LOCAL_RUNNER_NAME
+    const localComputerName = DEFAULT_LOCAL_RUNNER_NAME
     // Assigned further down, once the workspace-fs adapters exist. The
-    // `runner-connected` listener below only calls it on a later event, so the
+    // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
-    let widenLocalRunnerRoots: (runnerId: string, runnerName: string) => Promise<void> = async () =>
+    let widenLocalComputerRoots: (computerId: string, computerName: string) => Promise<void> = async () =>
       undefined
-    let seedLocalProjectPaths: (runnerId: string, runnerName: string) => Promise<void> = async () =>
+    let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> = async () =>
       undefined
-    let mirrorRunnerProjectPaths: (runnerId: string) => Promise<void> = async () => undefined
-    const runnerGateway = createHubRunnerGateway(
-      createRunnerAuthAdapters({ db, auth: hubAuth, localRunnerName })
+    let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
+    const computerGateway = createHubComputerGateway(
+      createComputerAuthAdapters({ db, auth: hubAuth, localComputerName })
     )
-    runnerGatewayRef = runnerGateway
+    computerGatewayRef = computerGateway
 
-    // Agent-hook relay consumer (hub/runner split): a runner-routed pty posts its
-    // lifecycle hook to the runner's OWN loopback relay, which forwards the raw
+    // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its
+    // lifecycle hook to the computer's OWN loopback relay, which forwards the raw
     // envelope here over the authed ws channel as a generic `event`
     // (name: 'agent-hook'). Feed it through the SAME `processAgentHook` authority
     // the local loopback HTTP route uses. Extracted + unit-tested in
     // agent-hook-relay-consumer.ts.
-    attachAgentHookRelayConsumer(runnerGateway, restDeps, terminalStateBridge)
+    attachAgentHookRelayConsumer(computerGateway, restDeps, terminalStateBridge)
 
-    // Route ALL OS-level exec (pty / chat agents / processes) to a runner. There
-    // is no in-process fallback: an unresolved runner raises
-    // NoRunnerAvailableError so "which machine ran this?" is never an invisible
+    // Route ALL OS-level exec (pty / chat agents / processes) to a computer. There
+    // is no in-process fallback: an unresolved computer raises
+    // NoComputerAvailableError so "which machine ran this?" is never an invisible
     // property of DB state.
     //
-    // Bind the gateway into the shared `resolveExecRunner` declared above, so the
+    // Bind the gateway into the shared `resolveExecComputer` declared above, so the
     // spawn-time lookups and these exec backends resolve IDENTICALLY. Any spec
-    // arriving with a null runnerId still gets the connected default here.
-    execGateway = runnerGateway
+    // arriving with a null computerId still gets the connected default here.
+    execGateway = computerGateway
     setPtyBackend(
       createRoutingPtyBackend({
-        gateway: runnerGateway,
-        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
+        gateway: computerGateway,
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
       })
     )
     // Warm agents are the RUNNER's processes, so they outlive a hub or sidecar
     // restart — unlike the old hub-local pool, whose children died with it. An
     // unclaimed pre-booted agent is a billable LLM process with no owner, so
-    // reconcile against the runner's own list on every (re)connect and reap
+    // reconcile against the computer's own list on every (re)connect and reap
     // whatever this hub is no longer tracking.
-    runnerGateway.events.on('runner-connected', ({ runner }) => {
-      void reapOrphanWarms(runner.runnerId)
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      void reapOrphanWarms(computer.computerId)
       // A nameless descriptor (`hello` reconnect before the roster fills) can
-      // never match the local runner's name, so it is correctly skipped.
-      void widenLocalRunnerRoots(runner.runnerId, runner.name ?? '')
-      void seedLocalProjectPaths(runner.runnerId, runner.name ?? '')
-      void mirrorRunnerProjectPaths(runner.runnerId)
+      // never match the local computer's name, so it is correctly skipped.
+      void widenLocalComputerRoots(computer.computerId, computer.name ?? '')
+      void seedLocalProjectPaths(computer.computerId, computer.name ?? '')
+      void mirrorComputerProjectPaths(computer.computerId)
     })
     // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
     // servers, not agents. `doSpawn` is synchronous and also driven by restart
-    // timers, so it cannot resolve a runner — its spec always carries
-    // `runnerId: null`. Routing them therefore is NOT wired: enforcement would
+    // timers, so it cannot resolve a computer — its spec always carries
+    // `computerId: null`. Routing them therefore is NOT wired: enforcement would
     // block every `pnpm dev`, and running them on the hub is the intended
     // behavior, not a fallback.
     //
     // The routing backend stays available for when they become async and routable
     // (a separate change); until then the in-process default stands.
-    // Chat agents route the same way terminal agents do (the runnerId is baked
-    // into the spec by chat-handlers' resolveRunnerId). Before this, chat was the
+    // Chat agents route the same way terminal agents do (the computerId is baked
+    // into the spec by chat-handlers' resolveComputerId). Before this, chat was the
     // one agent kind the hub always ran in its OWN process, so a chat session
     // could never reach a remote workspace.
     configureTransport({
       backend: createRoutingChatBackend({
-        gateway: runnerGateway,
-        resolveRunnerId: (spec) => resolveExecRunner(spec.runnerId)
+        gateway: computerGateway,
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
       })
     })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
@@ -1337,14 +1337,14 @@ export function composeServer(opts: {
     configureTaskRuntimeAdapters({
       ...baseTaskAdapters,
       worktrees: createRemoteWorktreeAdapters({
-        gateway: runnerGateway,
-        // Route each task's worktree/git/fs work to the SAME runner its agents
+        gateway: computerGateway,
+        // Route each task's worktree/git/fs work to the SAME computer its agents
         // spawn on — the seam now carries the taskId, so this is the same
         // resolution the pty/chat backends use (explicit binding, else the
-        // connected default runner). Without it a task whose agent runs on a
-        // runner had its worktree created on the hub, leaving the agent with a cwd
+        // connected default computer). Without it a task whose agent runs on a
+        // computer had its worktree created on the hub, leaving the agent with a cwd
         // that does not exist on its own machine.
-        resolveRunnerId: (taskId) => resolveRunnerForTask(taskId),
+        resolveComputerId: (taskId) => resolveComputerForTask(taskId),
         local: defaultWorktreeExecAdapters
       })
     })
@@ -1354,11 +1354,11 @@ export function composeServer(opts: {
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.
     setGhExecutor(async (args, opts) => {
-      const runnerId = resolveExecRunner(null)
-      // No runner = this hub's own disk is the only one, so its own `gh` is the
+      const computerId = resolveExecComputer(null)
+      // No computer = this hub's own disk is the only one, so its own `gh` is the
       // only meaningful identity. Falls through to the local executor.
-      if (runnerId == null || !opts.cwd) return runGhLocally(args, opts)
-      const res = await runnerGateway.request(runnerId, HubToRunnerMethods.ghExec, {
+      if (computerId == null || !opts.cwd) return runGhLocally(args, opts)
+      const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
         args,
         cwd: opts.cwd,
         ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
@@ -1371,21 +1371,21 @@ export function composeServer(opts: {
     // (later) the editor panel. Same resolution as the exec backends above, which
     // is the entire point: the picker must browse the filesystem the agent will
     // actually get. Serving these from the hub is what made a task on a remote
-    // runner report "No repository path configured" for a path that existed.
+    // computer report "No repository path configured" for a path that existed.
     const workspaceFs = createRemoteFsAdapters({
-      gateway: runnerGateway,
+      gateway: computerGateway,
       local: createLocalWorkspaceFs()
     })
-    // The supervised local runner defaults its jail to `[homedir()]`, but the
+    // The supervised local computer defaults its jail to `[homedir()]`, but the
     // desktop app that used to do this work had no jail at all — so routing the
     // filesystem would have silently broken every project outside $HOME. Widen
-    // to cover what already works. See ./local-runner-roots.ts for why the unit
+    // to cover what already works. See ./local-computer-roots.ts for why the unit
     // is the project's PARENT (the default worktree layout is a sibling dir) and
-    // why only the LOCAL runner is touched.
-    widenLocalRunnerRoots = async (runnerId: string, runnerName: string): Promise<void> => {
-      if (runnerName !== localRunnerName) return
+    // why only the LOCAL computer is touched.
+    widenLocalComputerRoots = async (computerId: string, computerName: string): Promise<void> => {
+      if (computerName !== localComputerName) return
       try {
-        const { roots } = await workspaceFs.listRoots(runnerId)
+        const { roots } = await workspaceFs.listRoots(computerId)
         const rows = await db.all<{ path: string | null }>(
           'SELECT DISTINCT path FROM projects WHERE path IS NOT NULL'
         )
@@ -1394,115 +1394,115 @@ export function composeServer(opts: {
           roots
         )
         if (additions.length === 0) return
-        const applied = await workspaceFs.setAllowedRoots(runnerId, [...roots, ...additions])
+        const applied = await workspaceFs.setAllowedRoots(computerId, [...roots, ...additions])
         recordDiagnosticEvent({
           level: 'info',
           source: 'server',
-          event: 'runner.roots_widened',
-          message: `local runner jail widened for ${additions.length} project location(s)`,
-          payload: { runnerId, additions, applied: applied.roots, rejected: applied.rejected }
+          event: 'computer.roots_widened',
+          message: `local computer jail widened for ${additions.length} project location(s)`,
+          payload: { computerId, additions, applied: applied.roots, rejected: applied.rejected }
         })
       } catch (err) {
-        // Best-effort: a runner that refuses this is still usable for everything
+        // Best-effort: a computer that refuses this is still usable for everything
         // inside its existing jail, and the user can widen it by hand.
         recordDiagnosticEvent({
           level: 'warn',
           source: 'server',
-          event: 'runner.roots_widen_failed',
+          event: 'computer.roots_widen_failed',
           message: err instanceof Error ? err.message : String(err),
-          payload: { runnerId }
+          payload: { computerId }
         })
       }
     }
-    // Hand the legacy hub-side `projects.path` values to the local runner once,
+    // Hand the legacy hub-side `projects.path` values to the local computer once,
     // so deleting that column does not blank every project an existing install
-    // has. Local runner only: a remote runner's disk is a different machine, and
+    // has. Local computer only: a remote computer's disk is a different machine, and
     // seeding it with the hub's paths would record mappings wrong by
     // construction — the exact assumption this change removes.
-    seedLocalProjectPaths = async (runnerId: string, runnerName: string): Promise<void> => {
-      if (runnerName !== localRunnerName) return
+    seedLocalProjectPaths = async (computerId: string, computerName: string): Promise<void> => {
+      if (computerName !== localComputerName) return
       try {
         const rows = await db.all<{ id: string; path: string | null }>(
           'SELECT id, path FROM projects WHERE path IS NOT NULL'
         )
         if (rows.length === 0) return
         const outcome = await seedProjectPaths(rows, {
-          resolve: (projectId) => workspaceFs.resolveProjectPath(runnerId, projectId),
-          exists: (path) => workspaceFs.pathExists(runnerId, path),
-          adopt: (projectId, path) => workspaceFs.setProjectPath(runnerId, projectId, path)
+          resolve: (projectId) => workspaceFs.resolveProjectPath(computerId, projectId),
+          exists: (path) => workspaceFs.pathExists(computerId, path),
+          adopt: (projectId, path) => workspaceFs.setProjectPath(computerId, projectId, path)
         })
         if (outcome.adopted.length === 0) return
         recordDiagnosticEvent({
           level: 'info',
           source: 'server',
-          event: 'runner.project_paths_seeded',
-          message: `local runner adopted ${outcome.adopted.length} project path(s)`,
-          payload: { runnerId, ...outcome }
+          event: 'computer.project_paths_seeded',
+          message: `local computer adopted ${outcome.adopted.length} project path(s)`,
+          payload: { computerId, ...outcome }
         })
       } catch (err) {
         recordDiagnosticEvent({
           level: 'warn',
           source: 'server',
-          event: 'runner.project_paths_seed_failed',
+          event: 'computer.project_paths_seed_failed',
           message: err instanceof Error ? err.message : String(err),
-          payload: { runnerId }
+          payload: { computerId }
         })
       }
     }
-    // Pull the runner's own project→path map into the hub's mirror. The runner
-    // authors it; this only records. The mirror serves the one direction a runner
+    // Pull the computer's own project→path map into the hub's mirror. The computer
+    // authors it; this only records. The mirror serves the one direction a computer
     // cannot answer alone — `resolve-by-path`, i.e. `slay` asking which project
     // its working directory belongs to.
     //
     // Runs AFTER the seed above, on every connect, so a re-pointed checkout or a
-    // project the runner has since dropped is reflected rather than remembered.
-    mirrorRunnerProjectPaths = async (runnerId: string): Promise<void> => {
+    // project the computer has since dropped is reflected rather than remembered.
+    mirrorComputerProjectPaths = async (computerId: string): Promise<void> => {
       try {
-        const listed = await runnerGateway.request(runnerId, HubToRunnerMethods.projectList, {})
+        const listed = await computerGateway.request(computerId, HubToComputerMethods.projectList, {})
         const parsed = projectListResultSchema.safeParse(listed)
         if (!parsed.success) return
-        await recordRunnerProjectPaths(
+        await recordComputerProjectPaths(
           db,
-          runnerId,
+          computerId,
           parsed.data.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
         )
       } catch (err) {
-        // A runner too old to answer `project.list`, or one that dropped
+        // A computer too old to answer `project.list`, or one that dropped
         // mid-request. The mirror simply keeps whatever it last knew, and
         // `resolve-by-path` still has the legacy column to fall back on.
         recordDiagnosticEvent({
           level: 'warn',
           source: 'server',
-          event: 'runner.project_mirror_failed',
+          event: 'computer.project_mirror_failed',
           message: err instanceof Error ? err.message : String(err),
-          payload: { runnerId }
+          payload: { computerId }
         })
       }
     }
     setWorkspaceDeps({
       fs: workspaceFs,
-      resolveRunner: async ({ runnerId, taskId, projectId }) => {
+      resolveComputer: async ({ computerId, taskId, projectId }) => {
         // An id the user explicitly chose wins — the create-project flow picks a
-        // runner before any task or project row exists to resolve from.
-        if (runnerId != null) return resolveExecRunner(runnerId)
-        if (taskId != null) return resolveRunnerForTask(taskId)
-        if (projectId != null) return resolveRunnerForProject(projectId)
-        return resolveExecRunner(null)
+        // computer before any task or project row exists to resolve from.
+        if (computerId != null) return resolveExecComputer(computerId)
+        if (taskId != null) return resolveComputerForTask(taskId)
+        if (projectId != null) return resolveComputerForProject(projectId)
+        return resolveExecComputer(null)
       },
-      // No runner at all = this hub's own disk, which for a supervised hub IS the
-      // desktop's. Otherwise only the co-spawned local runner shares a machine
+      // No computer at all = this hub's own disk, which for a supervised hub IS the
+      // desktop's. Otherwise only the co-spawned local computer shares a machine
       // with the user; every remote one is somewhere they cannot see.
-      isLocalRunner: (runnerId) => {
-        if (runnerId == null) return true
-        const runner = runnerGateway.listRunners().find((r) => r.runnerId === runnerId)
-        return runner?.name === localRunnerName
+      isLocalComputer: (computerId) => {
+        if (computerId == null) return true
+        const computer = computerGateway.listComputers().find((r) => r.computerId === computerId)
+        return computer?.name === localComputerName
       }
     })
   })().catch((err) => {
     recordDiagnosticEvent({
       level: 'error',
       source: 'task',
-      event: 'runner.init_failed',
+      event: 'computer.init_failed',
       message: err instanceof Error ? err.message : String(err)
     })
   })
@@ -1514,16 +1514,16 @@ export function composeServer(opts: {
     setBoundPort: (port: number) => {
       boundPort = port
     },
-    get runnerGateway(): HubRunnerGateway | null {
-      return runnerGatewayRef
+    get computerGateway(): HubComputerGateway | null {
+      return computerGatewayRef
     },
     get hubAuth(): HubAuth | null {
       return hubAuthRef
     },
-    runnersReady,
-    setRunnerListenerInfo: (info) => {
-      runnerHubUrl = info.hubUrl
-      runnerCertFingerprint = info.certFingerprint
+    computersReady,
+    setComputerListenerInfo: (info) => {
+      computerHubUrl = info.hubUrl
+      computerCertFingerprint = info.certFingerprint
     }
   }
 }

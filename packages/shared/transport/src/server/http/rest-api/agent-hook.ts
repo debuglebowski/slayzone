@@ -519,8 +519,8 @@ async function persistConversationId(
 
 /**
  * Process ONE agent-hook envelope — the SINGLE authority shared by the Express
- * route (local loopback hooks) AND the hub's runner-relay consumer (a remote
- * runner relays the envelope over its ws channel — see the hub composition
+ * route (local loopback hooks) AND the hub's computer-relay consumer (a remote
+ * computer relays the envelope over its ws channel — see the hub composition
  * root). Pure of Express so both callers reuse the exact same field-resolution,
  * state-machine, prompt-capture, and conversation-id logic — no duplication, no
  * drift.
@@ -713,7 +713,7 @@ export async function processAgentHook(
  * Receives agent lifecycle pings from the bundled `notify.sh` hook script.
  *
  * Auth: NONE. The hook ALWAYS posts to loopback — either the local sidecar's
- * 127.0.0.1 port, or (for a runner-routed pty) the RUNNER's OWN loopback, which
+ * 127.0.0.1 port, or (for a computer-routed pty) the RUNNER's OWN loopback, which
  * relays to the hub over its already-authenticated ws channel. So the agent env
  * carries no per-agent bearer and the route trusts loopback, exactly as the
  * local path always has. Blast radius is renderer-side status updates + a chime.

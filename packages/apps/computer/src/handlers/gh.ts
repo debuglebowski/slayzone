@@ -1,5 +1,5 @@
 /**
- * Run `gh` on the runner.
+ * Run `gh` on the computer.
  *
  * `gh` authenticates as whoever owns the machine it runs on. Running it on the
  * hub meant the PR panel spoke as the HUB while the agent pushed as the RUNNER —
@@ -14,13 +14,13 @@
  * argv, never a shell string. A PR title or comment body is arbitrary user text,
  * and routing it through a shell would make quoting a security boundary.
  *
- * @module runner/handlers/gh
+ * @module computer/handlers/gh
  */
 
 import { execFile } from 'node:child_process'
 import {
   ghExecParamsSchema,
-  HubToRunnerMethods,
+  HubToComputerMethods,
   type GhExecResult
 } from '@slayzone/computer-transport/shared'
 import { assertPathAllowed } from '../config'
@@ -73,5 +73,5 @@ export function createGhHandlers(ctx: HandlerContext): HubMethodTable {
     })
   }
 
-  return { [HubToRunnerMethods.ghExec]: ghExec }
+  return { [HubToComputerMethods.ghExec]: ghExec }
 }

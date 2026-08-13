@@ -11,7 +11,7 @@ let warnedHost: string | null = null
  * file-pointing override to thread across processes — each process derives the
  * same path from ROOT.
  *
- * Flat by design: a root belongs to exactly one role (hub or runner, standalone
+ * Flat by design: a root belongs to exactly one role (hub or computer, standalone
  * or channel-scoped), so a `storage/` layer separating "this role's data" from
  * "everything else in the root" has nothing left to separate from — everything
  * under `<ROOT>` already is this role's own storage. Kept the function name

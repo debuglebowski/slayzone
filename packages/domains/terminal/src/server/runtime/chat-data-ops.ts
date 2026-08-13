@@ -51,7 +51,7 @@ export type RecordConversationInput = Parameters<typeof recordConversation>[1]
  * `chat_events` / `chat_queue` / `autocomplete_usage` directly — they go
  * through this interface. The default implementation
  * (`createDbChatDataOps`) runs the exact SQL the handlers previously ran
- * inline; a future hub/runner split swaps in a remote implementation with
+ * inline; a future hub/computer split swaps in a remote implementation with
  * zero handler changes.
  */
 export interface ChatDataOps {
@@ -83,18 +83,18 @@ export interface ChatDataOps {
   /** Drop all queued messages for a tab. Returns the number removed. */
   clearChatQueue(tabId: string): Promise<number>
   /** MCP env vars for the chat subprocess (task/project ids, hook URL, …).
-   *  Runner-aware: when the task resolves to a runner, the env is built for a
-   *  REMOTE spawn (no loopback agent-hook URL — the runner overlays its own and
-   *  relays over its authed ws), exactly as the pty ledger does. `runnerId` null
+   *  Computer-aware: when the task resolves to a computer, the env is built for a
+   *  REMOTE spawn (no loopback agent-hook URL — the computer overlays its own and
+   *  relays over its authed ws), exactly as the pty ledger does. `computerId` null
    *  keeps today's loopback env. */
   buildMcpEnv(
     taskId: string,
     mode: string,
-    runnerId?: string | null
+    computerId?: string | null
   ): Promise<Record<string, string>>
-  /** Effective runner for this task, or null for the hub. Mirrors the pty spawn
-   *  lookups' `resolveRunnerId`; the default impl reads the tasks/projects rows. */
-  resolveRunnerId(taskId: string): Promise<string | null>
+  /** Effective computer for this task, or null for the hub. Mirrors the pty spawn
+   *  lookups' `resolveComputerId`; the default impl reads the tasks/projects rows. */
+  resolveComputerId(taskId: string): Promise<string | null>
   /** Project this task belongs to, so the RUNNER can resolve its own cwd.
    *  Mirrors the pty spawn lookups' `getTaskProjectId`. */
   getTaskProjectId(taskId: string): Promise<string | null>
@@ -272,23 +272,23 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
 
     clearChatQueue: (tabId) => clearChatQueue(db, tabId),
 
-    buildMcpEnv: async (taskId, mode, runnerId) => {
-      // Mirrors the pty spawn path: a runner-routed session resolves a remote
-      // target so the agent env omits the hub-loopback hook URL (the runner
-      // overlays its own and relays over its authed ws). `runnerId` null →
+    buildMcpEnv: async (taskId, mode, computerId) => {
+      // Mirrors the pty spawn path: a computer-routed session resolves a remote
+      // target so the agent env omits the hub-loopback hook URL (the computer
+      // overlays its own and relays over its authed ws). `computerId` null →
       // `resolveRemoteMcpEnv` short-circuits to null → today's loopback env.
       const remote = await resolveRemoteMcpEnv(getRemoteMcpEnvProvider(), {
         taskId,
-        runnerId: runnerId ?? null,
+        computerId: computerId ?? null,
         mode: mode as TerminalMode
       })
       return buildMcpEnv(db, taskId, mode as TerminalMode, undefined, undefined, remote)
     },
 
-    resolveRunnerId: async (taskId) => {
-      // Task pin over project default — IDENTICAL to `resolveTaskRunnerId` in
-      // the runners store. Divergence here would route a chat agent and a
-      // terminal agent for the SAME task to different runners.
+    resolveComputerId: async (taskId) => {
+      // Task pin over project default — IDENTICAL to `resolveTaskComputerId` in
+      // the computers store. Divergence here would route a chat agent and a
+      // terminal agent for the SAME task to different computers.
       const row = await db.get<{ computer_id: string | null }>(
         `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
            FROM tasks t

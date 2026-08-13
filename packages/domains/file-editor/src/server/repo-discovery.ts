@@ -4,7 +4,7 @@
  * Moved here from `@slayzone/worktrees/server` because it has to run on the
  * machine that OWNS the directory. It drives `resolveRepoPath` → the terminal
  * cwd, the editor root, and the git panel, so running it on the hub while the
- * checkout lives on a runner resolves every one of those to the wrong place —
+ * checkout lives on a computer resolves every one of those to the wrong place —
  * the same defect as the project-path probe, one layer further in.
  *
  * The walk is one call, not one per directory. A depth-3 recursive walk routed
@@ -12,7 +12,7 @@
  * stays next to the disk and only the result crosses the wire.
  *
  * Pure `node:fs` + `git` exec, like the rest of this package's server half, so
- * the runner bundles it and hub-local and runner-routed execution run identical
+ * the computer bundles it and hub-local and computer-routed execution run identical
  * code. `isTaskBound` is deliberately NOT computed here — it is viewer state
  * belonging to whoever asked, not a property of the disk.
  *

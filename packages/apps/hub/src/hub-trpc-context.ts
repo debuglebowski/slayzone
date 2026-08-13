@@ -2,7 +2,7 @@
  * tRPC connection-context decisions for the hub's `/trpc` listener, factored out
  * of `startServer` so the two security-relevant choices are unit-testable
  * without the full boot (composeServer → better-auth migrations → listeners).
- * Mirrors the `runner-listener.ts` split: the bind/degradation decision lives in
+ * Mirrors the `computer-listener.ts` split: the bind/degradation decision lives in
  * its own module for the same reason.
  *
  * Two decisions live here:
@@ -44,7 +44,7 @@ export function parseWindowIdFromUrl(rawUrl: string | undefined): number | null 
 export interface ResolvePrincipalOptions {
   /** Whether THIS hub enforces auth (derived: `SLAYZONE_MODE=remote` + hubAuth present). */
   hubAuthRequired: boolean
-  /** The hub's better-auth instance, or null when runner/auth mode is off. */
+  /** The hub's better-auth instance, or null when computer/auth mode is off. */
   hubAuth: HubAuth | null
   /** The bearer token from tRPC `connectionParams`, if the client sent one. */
   token: string | null | undefined

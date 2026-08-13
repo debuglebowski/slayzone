@@ -1,11 +1,11 @@
 /**
- * Interactive first-run setup for the STANDALONE hub + runner bins.
+ * Interactive first-run setup for the STANDALONE hub + computer bins.
  *
  * When a standalone `slayzone-hub` / `slayzone-computer` boots on an interactive
- * terminal and a required (runner) or recommended (hub) value is missing, the
+ * terminal and a required (computer) or recommended (hub) value is missing, the
  * bin prompts for it, prints a summary, and — after a `[Y/n]` confirmation —
  * persists it to whichever config file the caller names (`hub.config.json` or
- * `runner.config.json`) via {@link updateJsonFile}. Values collected this run
+ * `computer.config.json`) via {@link updateJsonFile}. Values collected this run
  * are also seeded into `process.env` so the bin's EXISTING config-resolution
  * path (which reads env) picks them up unchanged — the prompt is just an
  * interactive env producer sitting at the very top of the pipeline.
@@ -17,7 +17,7 @@
  * boot stays byte-identical to today (auto-gen / fail-fast).
  *
  * Lives in @slayzone/platform and is exposed on the lean `./config-prompt`
- * SUBPATH so the runner bundle can import it WITHOUT pulling the platform barrel
+ * SUBPATH so the computer bundle can import it WITHOUT pulling the platform barrel
  * (which references better-sqlite3). It depends only on `./slayzone-config` +
  * node builtins.
  *
@@ -114,7 +114,7 @@ export interface RunInteractiveConfigOptions {
   fields: PromptField[]
   /** IO override (tests). Defaults to real stdin/stdout; owned + closed here. */
   io?: PromptIO
-  /** Target config file path — `hub.config.json` or `runner.config.json` depending on the caller. Required: there's no single-file default anymore. */
+  /** Target config file path — `hub.config.json` or `computer.config.json` depending on the caller. Required: there's no single-file default anymore. */
   configPath: string
   /** Heading printed above the write summary. */
   title?: string

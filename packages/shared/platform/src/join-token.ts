@@ -6,17 +6,17 @@
  *
  * TWO CONSUMERS, ONE DECODER:
  *   - the RUNNER reads the embedded `hubUrl` + `certFingerprint` to dial + pin the
- *     hub before sending any runner frame;
- *   - `slay runner create` validates a `--token` locally (fail fast on a typo rather
+ *     hub before sending any computer frame;
+ *   - `slay computer create` validates a `--token` locally (fail fast on a typo rather
  *     than installing a unit that crash-loops against an undialable hub) and reads
- *     the `hubUrl` out of it for `slay runner ls`.
+ *     the `hubUrl` out of it for `slay computer ls`.
  *
  * This is a dependency-free re-implementation of the hub-side `decodeJoinToken`.
  * Importing the hub decoder from `@slayzone/computers/server` would drag its `./store`
- * module (and thus better-sqlite3) into both the runner and the CLI bundle. The token
+ * module (and thus better-sqlite3) into both the computer and the CLI bundle. The token
  * grammar is trivial and stable (`szjt1.` prefix), so decoding it here is the
  * smallest sustainable option — kept byte-compatible with the minter, which
- * `runner/src/join-token.test.ts` pins by round-tripping a REAL minted token.
+ * `computer/src/join-token.test.ts` pins by round-tripping a REAL minted token.
  *
  * Lives on the lean `@slayzone/platform/join-token` subpath (node builtins only, no
  * local imports) so neither consumer pulls the platform barrel.
@@ -27,11 +27,11 @@
 /** Prefix of a v1 join token — must match `@slayzone/computers/server`. */
 export const JOIN_TOKEN_PREFIX = 'szjt1'
 
-/** Decoded contents of a join token — what an enrolling runner needs. */
+/** Decoded contents of a join token — what an enrolling computer needs. */
 export interface JoinTokenPayload {
   hubUrl: string
   certFingerprint: string
-  /** 256-bit random secret (base64url). Unused by the runner (the enroll frame
+  /** 256-bit random secret (base64url). Unused by the computer (the enroll frame
    *  carries the whole token), but decoded for completeness. */
   secret: string
 }

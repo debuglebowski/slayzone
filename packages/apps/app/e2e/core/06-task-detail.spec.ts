@@ -46,19 +46,19 @@ test.describe('Task detail page', () => {
     await expect(titleInput).toHaveValue(taskTitle)
   })
 
-  test('metadata sidebar renders + RunnerCard shows the runner selector', async ({
+  test('metadata sidebar renders + ComputerCard shows the computer selector', async ({
     mainWindow
   }) => {
     // The TaskMetadataSidebar lives in the settings panel's pinned Details region
-    // in normal mode. e2e now boots runner-ON, so a local runner IS enrolled and the
-    // RunnerCard renders its live selector. (It used to assert a "runs locally"
-    // empty state — that copy is gone: agents only run on runners, so zero runners
+    // in normal mode. e2e now boots computer-ON, so a local computer IS enrolled and the
+    // ComputerCard renders its live selector. (It used to assert a "runs locally"
+    // empty state — that copy is gone: agents only run on computers, so zero computers
     // is an actionable empty state, not a benign default.)
     const details = mainWindow.getByTestId('settings-details-pinned').last()
     await expect(details).toBeVisible({ timeout: 5_000 })
     // Sidebar still renders its existing sections.
-    await expect(details.getByText('Runner', { exact: true })).toBeVisible({ timeout: 5_000 })
-    await expect(details.getByText('No runners — runs locally')).toHaveCount(0)
+    await expect(details.getByText('Computer', { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(details.getByText('No computers — runs locally')).toHaveCount(0)
   })
 
   test('go back to kanban', async ({ mainWindow }) => {

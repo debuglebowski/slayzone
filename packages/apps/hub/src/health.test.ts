@@ -52,7 +52,7 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
   mode: 'local',
   supervised: false,
   authRequired: false,
-  runnersConnected: () => 2
+  computersConnected: () => 2
 }
 
 /**
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
       assertEq(body.pid, 4321, 'pid')
       assertEq(body.mode, 'local', 'mode')
       assertEq(body.supervised, false, 'supervised')
-      assertEq(body.runnersConnected, 2, 'runnersConnected resolved from the getter')
+      assertEq(body.computersConnected, 2, 'computersConnected resolved from the getter')
       assertEq(body.dbPath, BASE_STATE.dbPath, 'dbPath')
       assertEq(body.port, 51110, 'port')
       assert(typeof body.uptimeMs === 'number' && body.uptimeMs >= 5_000, 'uptimeMs')
@@ -145,13 +145,13 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('runnersConnected reflects the live gateway, not a boot snapshot', async () => {
+  await test('computersConnected reflects the live gateway, not a boot snapshot', async () => {
     let count = 0
-    const srv = await startHealthServer({ runnersConnected: () => count })
+    const srv = await startHealthServer({ computersConnected: () => count })
     try {
-      assertEq((await getHealth(srv.port)).body.runnersConnected, 0, 'starts at 0')
+      assertEq((await getHealth(srv.port)).body.computersConnected, 0, 'starts at 0')
       count = 3
-      assertEq((await getHealth(srv.port)).body.runnersConnected, 3, 'follows the getter')
+      assertEq((await getHealth(srv.port)).body.computersConnected, 3, 'follows the getter')
     } finally {
       await srv.close()
     }
@@ -186,7 +186,7 @@ async function main(): Promise<void> {
       assertEq(body.root, undefined, 'root withheld')
       assertEq(body.pid, undefined, 'pid withheld')
       assertEq(body.name, undefined, 'name withheld')
-      assertEq(body.runnersConnected, undefined, 'runnersConnected withheld')
+      assertEq(body.computersConnected, undefined, 'computersConnected withheld')
     } finally {
       await srv.close()
     }

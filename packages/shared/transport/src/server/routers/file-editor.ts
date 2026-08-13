@@ -2,19 +2,19 @@
  * File editor router — every call routed to the machine that owns the workspace.
  *
  * These used to call `@slayzone/file-editor/server` directly, i.e. against the
- * HUB's disk. For a task whose checkout lives on a runner that is the wrong
+ * HUB's disk. For a task whose checkout lives on a computer that is the wrong
  * filesystem entirely: the tree showed the hub's files, a save wrote them there,
  * and the agent working in the real checkout saw none of it. Same defect as the
  * project-path probe, one panel over.
  *
- * Every procedure now carries an optional target (`runnerId` | `taskId` |
- * `projectId`) resolved by `WorkspaceDeps.resolveRunner` — the same resolution a
+ * Every procedure now carries an optional target (`computerId` | `taskId` |
+ * `projectId`) resolved by `WorkspaceDeps.resolveComputer` — the same resolution a
  * pty spawn uses, so the editor and the agent always see one filesystem. Omitting
- * it resolves to the connected default runner, which is correct for the callers
+ * it resolves to the connected default computer, which is correct for the callers
  * that genuinely have no task context.
  *
  * `rootPath` still bounds every relative path (file-editor's own
- * `assertWithinRoot`), and on a runner the path-jail bounds `rootPath` in turn.
+ * `assertWithinRoot`), and on a computer the path-jail bounds `rootPath` in turn.
  */
 
 import { z } from 'zod'
@@ -28,14 +28,14 @@ const searchOptions = z.unknown() as unknown as z.ZodType<SearchFilesOptions>
 
 /** Which machine the call is for. See the module note on resolution order. */
 const target = {
-  runnerId: z.string().nullable().optional(),
+  computerId: z.string().nullable().optional(),
   taskId: z.string().optional(),
   projectId: z.string().optional()
 }
 
-type Target = { runnerId?: string | null; taskId?: string; projectId?: string }
+type Target = { computerId?: string | null; taskId?: string; projectId?: string }
 
-const resolve = (input: Target): Promise<string | null> => getWorkspaceDeps().resolveRunner(input)
+const resolve = (input: Target): Promise<string | null> => getWorkspaceDeps().resolveComputer(input)
 
 const fs = () => getWorkspaceDeps().fs
 
@@ -135,7 +135,7 @@ export const fileEditorRouter = router({
   /**
    * Reveal in the OS file manager.
    *
-   * Deliberately NOT routed. There is no Finder on a headless runner, and even if
+   * Deliberately NOT routed. There is no Finder on a headless computer, and even if
    * there were, revealing a folder on a machine the user is not sitting at is not
    * the action they asked for. The path resolves against the DESKTOP, so the UI
    * should only offer this when the workspace is co-resident — the caller decides.
@@ -153,8 +153,8 @@ export const fileEditorRouter = router({
   /**
    * Subscribe to changes under rootPath.
    *
-   * The source is the runner's watcher, streamed back as `fs.change` frames and
-   * demuxed by a hub-minted watchId. A lost runner COMPLETES the stream rather
+   * The source is the computer's watcher, streamed back as `fs.change` frames and
+   * demuxed by a hub-minted watchId. A lost computer COMPLETES the stream rather
    * than going quiet, because a watcher that simply stops emitting is
    * indistinguishable from a directory that stopped changing — and the client
    * would keep showing a stale tree believing it was live.
@@ -165,9 +165,9 @@ export const fileEditorRouter = router({
       observable<FileWatchEvent>((emit) => {
         let dispose: (() => void) | null = null
         let cancelled = false
-        void resolve(input).then((runnerId) => {
+        void resolve(input).then((computerId) => {
           if (cancelled) return
-          dispose = fs().watch(runnerId, input.rootPath, (e) => emit.next(e))
+          dispose = fs().watch(computerId, input.rootPath, (e) => emit.next(e))
         })
         return () => {
           cancelled = true

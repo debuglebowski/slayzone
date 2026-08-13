@@ -1,15 +1,15 @@
 /**
  * REST: POST /api/computers/join-token contract tests (Wave3.5-D3).
- * Run with the electron+loader runner (better-sqlite3 native ABI via the harness DB).
+ * Run with the electron+loader computer (better-sqlite3 native ABI via the harness DB).
  *
  * The route is the mint channel the Electron MAIN process hits at boot to
- * auto-enroll its local runner (main has no tRPC client to the sidecar), AND the
- * channel `slay runner mint` uses. It wraps the same store `mintJoinToken` as the
- * runners tRPC proc, gated on the `deps.runners` slot (wired once the runner init
+ * auto-enroll its local computer (main has no tRPC client to the sidecar), AND the
+ * channel `slay computer mint` uses. It wraps the same store `mintJoinToken` as the
+ * computers tRPC proc, gated on the `deps.computers` slot (wired once the computer init
  * resolves):
- *   - runner ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
- *   - runner ON + not-yet-bound   → 503 (main retries)
- *   - runner OFF (slot absent)    → 503 (never mints; default boot byte-identical)
+ *   - computer ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
+ *   - computer ON + not-yet-bound   → 503 (main retries)
+ *   - computer OFF (slot absent)    → 503 (never mints; default boot byte-identical)
  *
  * WHO MAY CALL IT is a separate axis, decided by the pure `joinTokenAuthDecision`
  * and asserted at the bottom: loopback always, off-box only on an auth-enforcing
@@ -30,38 +30,38 @@ import { decodeJoinToken } from '@slayzone/computers/server'
 import {
   isLoopbackAddress,
   joinTokenAuthDecision,
-  registerRunnersJoinTokenRoute
+  registerComputersJoinTokenRoute
 } from './join-token.js'
 import type { RestApiDeps } from '../types.js'
 
 const h = await createTestHarness()
 
-/** A bound runner listener (runner ON, url + fingerprint present). */
-const boundRunners = {
+/** A bound computer listener (computer ON, url + fingerprint present). */
+const boundComputers = {
   getHubUrl: () => 'wss://127.0.0.1:54321/computers',
   getCertFingerprint: () => 'abcdef0123456789'
 }
 
-function mount(runners: RestApiDeps['runners'], restAuth?: RestApiDeps['restAuth']) {
+function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['restAuth']) {
   const app = express()
   app.use(express.json())
-  registerRunnersJoinTokenRoute(app, {
+  registerComputersJoinTokenRoute(app, {
     db: h.slayDb,
     notifyRenderer: () => {},
-    runners,
+    computers,
     ...(restAuth ? { restAuth } : {})
   })
   return mountRestApp(app)
 }
 
 await describe('POST /api/computers/join-token', () => {
-  test('runner ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
-    const rest = await mount(boundRunners)
+  test('computer ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
+    const rest = await mount(boundComputers)
     try {
       const res = await rest.request<{ token: string; hubUrl: string }>(
         'POST',
         '/api/computers/join-token',
-        { label: 'local-runner' }
+        { label: 'local-computer' }
       )
       expect(res.status).toBe(200)
       expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/computers')
@@ -74,7 +74,7 @@ await describe('POST /api/computers/join-token', () => {
     }
   })
 
-  test('runner ON but listener not yet bound (null url): 503', async () => {
+  test('computer ON but listener not yet bound (null url): 503', async () => {
     const rest = await mount({ getHubUrl: () => null, getCertFingerprint: () => null })
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
@@ -84,7 +84,7 @@ await describe('POST /api/computers/join-token', () => {
     }
   })
 
-  test('runner OFF (runners slot absent): 503, never mints', async () => {
+  test('computer OFF (computers slot absent): 503, never mints', async () => {
     const rest = await mount(undefined)
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
@@ -95,7 +95,7 @@ await describe('POST /api/computers/join-token', () => {
   })
 
   test('defaults the label when omitted', async () => {
-    const rest = await mount(boundRunners)
+    const rest = await mount(boundComputers)
     try {
       const res = await rest.request<{ token: string; hubUrl: string }>(
         'POST',
@@ -113,7 +113,7 @@ await describe('POST /api/computers/join-token', () => {
   // this is the Electron host's boot auto-enroll path and the on-box `slay` path.
   test('loopback caller mints even on an auth-enforcing hub, without a bearer', async () => {
     let verifyCalls = 0
-    const rest = await mount(boundRunners, {
+    const rest = await mount(boundComputers, {
       required: () => true,
       verifyBearer: async () => {
         verifyCalls += 1
@@ -137,7 +137,7 @@ await describe('POST /api/computers/join-token', () => {
  *
  * The 403 exists because a join token is a bearer-equivalent secret. But on an
  * auth-enforcing hub a valid session ALREADY grants the identical operation over
- * `/trpc` (`runners.mintJoinToken` is not loopback-gated), so refusing the same
+ * `/trpc` (`computers.mintJoinToken` is not loopback-gated), so refusing the same
  * caller here was a capability gap between two transports, not a boundary.
  */
 await describe('joinTokenAuthDecision', () => {

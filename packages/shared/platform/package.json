@@ -12,7 +12,7 @@
     "./events": "./src/typed-emitter.ts",
     "./slayzone-config": "./src/slayzone-config.ts",
     "./client-settings": "./src/client-settings.ts",
-    "./runner-identity": "./src/runner-identity.ts",
+    "./computer-identity": "./src/computer-identity.ts",
     "./config-prompt": "./src/config-prompt.ts",
     "./env-manifest": "./src/env-manifest.ts",
     "./device-status-queries": "./src/device-status-queries.ts",

@@ -22,9 +22,9 @@ export type HealthState = {
   /** Whether this hub gates its client API (`/trpc` + REST) on a bearer token.
    *  Derived from SLAYZONE_MODE — see `hubAuthRequired` in server.ts. */
   authRequired: boolean
-  /** Live count of connected runners. A GETTER, not a number — the value must
+  /** Live count of connected computers. A GETTER, not a number — the value must
    *  reflect the gateway at request time, not a boot-time snapshot. */
-  runnersConnected: () => number
+  computersConnected: () => number
 }
 
 /**
@@ -58,7 +58,7 @@ function isLoopbackRequest(req: IncomingMessage): boolean {
  *     same bit to any /trpc caller, and an unauthenticated request learns it
  *     anyway from the 401.
  *   - LOOPBACK ONLY: everything that describes the host — the hub name, its
- *     SLAYZONE_ROOT, the db path, the pid, and the runner count. These exist for
+ *     SLAYZONE_ROOT, the db path, the pid, and the computer count. These exist for
  *     local discovery (`slay hub ls` probes 127.0.0.1), so restricting them to
  *     loopback costs discovery nothing while keeping absolute filesystem paths
  *     and a signalable pid off the public surface. `dbPath` was previously served
@@ -98,9 +98,9 @@ export function handleHealth(
     // must not take /health down — liveness is the one thing this endpoint owes
     // its callers.
     try {
-      payload.runnersConnected = state.runnersConnected()
+      payload.computersConnected = state.computersConnected()
     } catch {
-      payload.runnersConnected = null
+      payload.computersConnected = null
     }
   }
   res.writeHead(200, { 'Content-Type': 'application/json' })

@@ -4,7 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { ProjectStatusCard } from './ProjectStatusCard'
-import { RunnerCard } from './RunnerCard'
+import { ComputerCard } from './ComputerCard'
 import { PriorityDueDateCard } from './PriorityDueDateCard'
 import { SnoozeProgressCard } from './SnoozeProgressCard'
 import { TagsCard } from './TagsCard'
@@ -55,21 +55,21 @@ export function TaskMetadataSidebar({
   const selectedProject = projects.find((project) => project.id === task.project_id)
   const columnsConfig = selectedProject?.columns_config
 
-  // Runner runner bindings (hub/runner split). `computer_id` / `default_computer_id`
+  // Computer computer bindings (hub/computer split). `computer_id` / `default_computer_id`
   // are v149 columns present at runtime (parseTask/parseProject spread the row)
   // but not yet on the shared Task/Project types — read via a narrow local cast.
-  const taskRunnerId = (task as { computer_id?: string | null }).computer_id ?? null
-  const projectDefaultRunnerId =
+  const taskComputerId = (task as { computer_id?: string | null }).computer_id ?? null
+  const projectDefaultComputerId =
     (selectedProject as { default_computer_id?: string | null } | undefined)?.default_computer_id ??
     null
 
   return (
     <div className="space-y-2">
       <ProjectStatusCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />
-      <RunnerCard
+      <ComputerCard
         taskId={task.id}
-        taskRunnerId={taskRunnerId}
-        projectDefaultRunnerId={projectDefaultRunnerId}
+        taskComputerId={taskComputerId}
+        projectDefaultComputerId={projectDefaultComputerId}
       />
       <PriorityDueDateCard task={task} onUpdate={onUpdate} />
       <SnoozeProgressCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />

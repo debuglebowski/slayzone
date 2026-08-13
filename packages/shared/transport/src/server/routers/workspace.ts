@@ -3,16 +3,16 @@
  *
  * The desktop cannot answer "what directories exist where this agent will run".
  * A native file dialog browses the DESKTOP's disk, so the path it yields need not
- * exist on the runner; and the hub's own disk is equally wrong once the runner is
- * a separate host. So the hub relays: the runner enumerates, the desktop renders.
+ * exist on the computer; and the hub's own disk is equally wrong once the computer is
+ * a separate host. So the hub relays: the computer enumerates, the desktop renders.
  *
- * Every procedure takes a {@link WorkspaceRunnerTarget} — an explicit `runnerId`
+ * Every procedure takes a {@link WorkspaceComputerTarget} — an explicit `computerId`
  * when the user has picked one, else a task or project to resolve from. The
- * resolution is the pty backend's, injected via `WorkspaceDeps.resolveRunner`, so
+ * resolution is the pty backend's, injected via `WorkspaceDeps.resolveComputer`, so
  * the picker and the agent can never disagree about which machine is meant.
  *
- * `runnerId: null` in a result means "answered in-process": no runner exists to
- * ask (standalone/fork sidecar, or before the local runner enrolls). It is echoed
+ * `computerId: null` in a result means "answered in-process": no computer exists to
+ * ask (standalone/fork sidecar, or before the local computer enrolls). It is echoed
  * back on every response so the UI can name the machine it is showing instead of
  * implying a remote one.
  *
@@ -25,7 +25,7 @@ import { getWorkspaceDeps } from '../app-deps'
 
 /** Resolvable address of the machine a call targets. */
 const targetInput = z.object({
-  runnerId: z.string().nullable().optional(),
+  computerId: z.string().nullable().optional(),
   taskId: z.string().optional(),
   projectId: z.string().optional()
 })
@@ -35,16 +35,16 @@ export const workspaceRouter = router({
    * Where browsing may start on the target machine, in that machine's idiom
    * (platform + separator), so the client never assumes POSIX or the desktop's OS.
    *
-   * An empty `roots` array is a real, actionable state — a runner whose
+   * An empty `roots` array is a real, actionable state — a computer whose
    * `allowedRoots` is unconfigured refuses all filesystem access — and must be
    * surfaced as such rather than rendered as an empty directory.
    */
   listRoots: publicProcedure.input(targetInput).query(async ({ input }) => {
-    const { fs, resolveRunner, isLocalRunner } = getWorkspaceDeps()
-    const runnerId = await resolveRunner(input)
+    const { fs, resolveComputer, isLocalComputer } = getWorkspaceDeps()
+    const computerId = await resolveComputer(input)
     // `isLocal` is what lets the UI decide whether desktop-only affordances
     // ("Reveal in Finder", "Open in editor") make sense for this workspace.
-    return { runnerId, isLocal: isLocalRunner(runnerId), ...(await fs.listRoots(runnerId)) }
+    return { computerId, isLocal: isLocalComputer(computerId), ...(await fs.listRoots(computerId)) }
   }),
 
   listDir: publicProcedure
@@ -57,28 +57,28 @@ export const workspaceRouter = router({
       })
     )
     .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      const res = await fs.listDir(runnerId, input.path, {
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      const res = await fs.listDir(computerId, input.path, {
         dirsOnly: input.dirsOnly,
         includeHidden: input.includeHidden
       })
-      return { runnerId, ...res }
+      return { computerId, ...res }
     }),
 
   mkdir: publicProcedure
     .input(targetInput.extend({ path: z.string().min(1) }))
     .mutation(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      const res = await fs.mkdir(runnerId, input.path)
-      return { runnerId, ...res }
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      const res = await fs.mkdir(computerId, input.path)
+      return { computerId, ...res }
     }),
 
   /**
-   * Replace a runner's path-jail (Settings → Runners).
+   * Replace a computer's path-jail (Settings → Computers).
    *
-   * Routing the filesystem through runners gave the co-resident local runner's
+   * Routing the filesystem through computers gave the co-resident local computer's
    * `[homedir()]` default authority over ops the desktop previously ran unjailed
    * — so a project on `/Volumes` or `/opt` would have stopped working. This is
    * the escape hatch that keeps that from being a cap.
@@ -90,9 +90,9 @@ export const workspaceRouter = router({
   setAllowedRoots: publicProcedure
     .input(targetInput.extend({ roots: z.array(z.string().min(1)) }))
     .mutation(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      return { runnerId, ...(await fs.setAllowedRoots(runnerId, input.roots)) }
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      return { computerId, ...(await fs.setAllowedRoots(computerId, input.roots)) }
     }),
 
   /**
@@ -100,25 +100,25 @@ export const workspaceRouter = router({
    *
    * `path: null` means that machine has no checkout — the honest answer the
    * hub's single `projects.path` column could never give, since it always had
-   * *a* path even for a runner that had never seen the project. `exists: false`
+   * *a* path even for a computer that had never seen the project. `exists: false`
    * is different again: recorded, but the folder is gone.
    */
   resolveProjectPath: publicProcedure
     .input(targetInput.extend({ projectId: z.string().min(1) }))
     .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
       try {
         return {
-          runnerId,
+          computerId,
           reachable: true,
-          ...(await fs.resolveProjectPath(runnerId, input.projectId))
+          ...(await fs.resolveProjectPath(computerId, input.projectId))
         }
       } catch (err) {
         // Could not ask ≠ not checked out. Reporting `path: null` for an offline
-        // runner would send the user to re-adopt a checkout that is fine.
+        // computer would send the user to re-adopt a checkout that is fine.
         return {
-          runnerId,
+          computerId,
           reachable: false,
           path: null,
           error: err instanceof Error ? err.message : String(err)
@@ -135,11 +135,11 @@ export const workspaceRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
       return {
-        runnerId,
-        ...(await fs.setProjectPath(runnerId, input.projectId, input.path))
+        computerId,
+        ...(await fs.setProjectPath(computerId, input.projectId, input.path))
       }
     }),
 
@@ -147,30 +147,30 @@ export const workspaceRouter = router({
   forgetProjectPath: publicProcedure
     .input(targetInput.extend({ projectId: z.string().min(1) }))
     .mutation(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      await fs.forgetProjectPath(runnerId, input.projectId)
-      return { runnerId, ok: true as const }
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      await fs.forgetProjectPath(computerId, input.projectId)
+      return { computerId, ok: true as const }
     }),
 
   /**
    * Does a path exist on the target machine?
    *
    * This is the honest replacement for `app.files.pathExists`, which always
-   * probed the hub. `reachable: false` distinguishes "the runner said no" from
+   * probed the hub. `reachable: false` distinguishes "the computer said no" from
    * "we could not ask" — collapsing those is what produced a permanent
    * "No repository path configured" for a path that was fine.
    */
   pathExists: publicProcedure
     .input(targetInput.extend({ path: z.string().min(1) }))
     .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
       try {
-        return { runnerId, exists: await fs.pathExists(runnerId, input.path), reachable: true }
+        return { computerId, exists: await fs.pathExists(computerId, input.path), reachable: true }
       } catch (err) {
         return {
-          runnerId,
+          computerId,
           exists: false,
           reachable: false,
           error: err instanceof Error ? err.message : String(err)

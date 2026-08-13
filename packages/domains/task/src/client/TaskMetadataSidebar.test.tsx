@@ -219,10 +219,10 @@ const queryData: Record<string, () => unknown> = {
   'task.getAll': () => allTasksList,
   'task.getBlockers': () => blockersList,
   'projects.list': () => projects,
-  // No runners enrolled in the sidebar tests → RunnerCard shows its minimal
+  // No computers enrolled in the sidebar tests → ComputerCard shows its minimal
   // "runs locally" state (no Select), keeping the other assertions untouched.
   'computers.list': () => [],
-  'computers.resolveTaskRunner': () => ({ runnerId: null })
+  'computers.resolveTaskComputer': () => ({ computerId: null })
 }
 
 // Mutations live in the real child cards (BlockedBySection / ProjectStatusCard /
@@ -233,7 +233,7 @@ const mutationMocks: Record<string, ReturnType<typeof vi.fn>> = {
   'task.addBlocker': vi.fn(),
   'task.removeBlocker': vi.fn(),
   'tags.setForTask': vi.fn(),
-  'computers.setTaskRunner': vi.fn()
+  'computers.setTaskComputer': vi.fn()
 }
 
 vi.mock('@slayzone/transport/client', () => ({
@@ -261,13 +261,13 @@ vi.mock('@slayzone/transport/client', () => ({
       list: {
         queryOptions: () => ({ queryKey: ['computers.list'], queryFn: queryData['computers.list'] })
       },
-      resolveTaskRunner: {
+      resolveTaskComputer: {
         queryOptions: (input: { taskId: string }) => ({
-          queryKey: ['computers.resolveTaskRunner', input],
-          queryFn: queryData['computers.resolveTaskRunner']
+          queryKey: ['computers.resolveTaskComputer', input],
+          queryFn: queryData['computers.resolveTaskComputer']
         })
       },
-      setTaskRunner: { mutationOptions: () => ({ __mutationKey: 'computers.setTaskRunner' }) }
+      setTaskComputer: { mutationOptions: () => ({ __mutationKey: 'computers.setTaskComputer' }) }
     },
     tags: {
       setForTask: { mutationOptions: () => ({ __mutationKey: 'tags.setForTask' }) }

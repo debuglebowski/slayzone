@@ -26,7 +26,7 @@ import {
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
 import { composeServer } from './composition.js'
-import { deriveRunnerHubUrl } from './runner-listener.js'
+import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
 import { getServerBuildInfo } from './build-info.js'
@@ -49,7 +49,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // boot an exposed-but-unhardened hub (mode=local + non-loopback bind).
   if (!supervised) {
     assertModeHostConsistency(getSlayzoneMode(), host)
-    // Remote runners reach this hub's MCP/hook callbacks via
+    // Remote computers reach this hub's MCP/hook callbacks via
     // SLAYZONE_HUB_PUBLIC_ADDRESS; it can't be auto-derived (the hub can't know its
     // own external address, which in a proxy/NAT deployment differs from the address
     // it binds). In remote mode a missing/blank value would silently degrade every
@@ -57,7 +57,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (isRemoteMode() && !process.env.SLAYZONE_HUB_PUBLIC_ADDRESS?.trim()) {
       throw new Error(
         '[slayzone] SLAYZONE_MODE=remote requires SLAYZONE_HUB_PUBLIC_ADDRESS ' +
-          '(the externally-reachable hub address, host[:port], for remote runners) — ' +
+          '(the externally-reachable hub address, host[:port], for remote computers) — ' +
           'set it or use SLAYZONE_MODE=local.'
       )
     }
@@ -83,14 +83,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
-  // --- Runner transport ---
-  // `composition.runnersReady` resolves the async runner init (createHubAuth runs
+  // --- Computer transport ---
+  // `composition.computersReady` resolves the async computer init (createHubAuth runs
   // better-auth migrations, then the gateway builds). A hub always accepts
-  // runners, so this always runs; the null-guards below are init-FAILURE
+  // computers, so this always runs; the null-guards below are init-FAILURE
   // degradation (createHubAuth threw) — not a mode — so a broken auth DB can't
-  // crash the whole hub, it just leaves runner enroll unavailable.
-  await composition.runnersReady
-  const runnerGateway = composition.runnerGateway
+  // crash the whole hub, it just leaves computer enroll unavailable.
+  await composition.computersReady
+  const computerGateway = composition.computerGateway
   const hubAuth = composition.hubAuth
   // better-auth express app for `/api/auth/*`. Mounted via a direct dispatch in
   // the HTTP request handler BELOW (not inside the mcpRest express app) so the
@@ -98,19 +98,19 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
   // Hub TLS identity (creates <dataRoot>/identity/ on first run). Its
-  // `fingerprintSha256Hex` is fed to the runners registry so `mintJoinToken` can
+  // `fingerprintSha256Hex` is fed to the computers registry so `mintJoinToken` can
   // pin it in a join token, AND its key/cert terminate TLS on the SEPARATE https
   // `/computers` listener stood up below. Cert-pinning is enforced end-to-end: the
-  // hub presents this leaf, the runner pins its fingerprint (from the join token)
-  // before sending any runner frame (see hub-dialer verifyPinnedCert). Loaded
+  // hub presents this leaf, the computer pins its fingerprint (from the join token)
+  // before sending any computer frame (see hub-dialer verifyPinnedCert). Loaded
   // whenever the gateway came up (i.e. always, barring an init failure).
   //
   // The /computers listener is its OWN https server on its OWN port — the shared HTTP
   // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
-  // renderer / CLI / e2e loopback assumptions are unchanged; isolating the runner
+  // renderer / CLI / e2e loopback assumptions are unchanged; isolating the computer
   // link onto a second listener keeps the shared server plain.
-  const hubIdentity = runnerGateway ? await loadOrCreateHubIdentity(dataRoot) : null
-  if (runnerGateway) log('runner transport ready (gateway + hub-auth + identity loaded)')
+  const hubIdentity = computerGateway ? await loadOrCreateHubIdentity(dataRoot) : null
+  if (computerGateway) log('computer transport ready (gateway + hub-auth + identity loaded)')
 
   // Multi-hub: wire the client-facing `hub.describe` identity deps so a
   // connecting client learns this hub's cert fingerprint + whether it enforces
@@ -145,7 +145,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // /health doubles as the multi-hub discovery channel: `slay hub ls` probes the
   // hub port block and builds its table from these fields, so a hub is only
   // findable/addressable if it reports them. Identity fields are served to
-  // loopback callers only (see handleHealth). `runnersConnected` is a getter so it
+  // loopback callers only (see handleHealth). `computersConnected` is a getter so it
   // tracks the live gateway rather than freezing at boot.
   const state: HealthState = {
     ready: false,
@@ -160,34 +160,34 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
     // client can learn "this hub needs a sign-in" without opening a socket.
     authRequired: hubAuthRequired,
-    // `listUsableRunners`, NOT `listRunners` — its own docstring names itself the
-    // single authority for "can this runner do work right now?" and warns that the
-    // raw map means only "socket is open", including a runner that has stopped
-    // responding but not yet been reaped. `/health.runnersConnected` is read as a
+    // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
+    // single authority for "can this computer do work right now?" and warns that the
+    // raw map means only "socket is open", including a computer that has stopped
+    // responding but not yet been reaped. `/health.computersConnected` is read as a
     // READINESS gate (an e2e worker waits on it before dispatching), so the raw
-    // count reports `connected: true` for a runner that cannot take work — the
+    // count reports `connected: true` for a computer that cannot take work — the
     // symptom recorded in e2e/global-setup.ts: a fresh worker's gate satisfied in
-    // ~14ms by a runner that process never spawned, which then dies mid-test.
-    runnersConnected: () => runnerGateway?.listUsableRunners().length ?? 0
+    // ~14ms by a computer that process never spawned, which then dies mid-test.
+    computersConnected: () => computerGateway?.listUsableComputers().length ?? 0
   }
 
   // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
   // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
   // serves https/wss terminated with the hub identity leaf. There is no separate
-  // TLS port and no separate runner port — `/trpc` (clients) and `/computers`
-  // (runners) ride the ONE listener below, demuxed by path. Protocol is never a
+  // TLS port and no separate computer port — `/trpc` (clients) and `/computers`
+  // (computers) ride the ONE listener below, demuxed by path. Protocol is never a
   // knob; it is implied by mode. Both axes present the same identity leaf in
-  // remote, so a runner's pinned fingerprint is unchanged from the old split.
+  // remote, so a computer's pinned fingerprint is unchanged from the old split.
   const remote = isRemoteMode()
   // Remote REQUIRES the hub identity leaf to terminate TLS. Fail loud rather than
   // serve an unhardened (plaintext, unauthenticated) internet-facing hub. The
-  // identity is loaded whenever the runner gateway came up (i.e. always, barring
+  // identity is loaded whenever the computer gateway came up (i.e. always, barring
   // an init failure); a remote hub whose gateway failed to init has no leaf and
   // must not boot.
   if (remote && !hubIdentity) {
     throw new Error(
       '[slayzone] SLAYZONE_MODE=remote but the hub identity could not be loaded ' +
-        '(runner gateway init failed) — refusing to boot an unhardened remote hub.'
+        '(computer gateway init failed) — refusing to boot an unhardened remote hub.'
     )
   }
 
@@ -206,7 +206,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // E2E-only raw SQL. Off unless PLAYWRIGHT=1, in which case it sits ABOVE the
     // auth gate deliberately: the e2e harness drives it on loopback with no bearer.
     if (handleDevSql(db, req, res)) return
-    // Runner transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
+    // Computer transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
     // body. Present whenever hub-auth built (always, barring init failure).
     if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
@@ -267,13 +267,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   //   /trpc    — clients (renderer / federated hubs), origin-guarded. In remote
   //              mode the leaf terminates TLS so clients dial `wss://…/trpc` and
   //              pin the cert (renderer pins in main via setCertificateVerifyProc).
-  //   /computers — runners (non-browser), NO origin allowlist (authenticated by the
-  //              runner protocol: enroll/hello frames + join token). In remote mode
-  //              the SAME leaf terminates TLS, so the runner's pinned fingerprint
+  //   /computers — computers (non-browser), NO origin allowlist (authenticated by the
+  //              computer protocol: enroll/hello frames + join token). In remote mode
+  //              the SAME leaf terminates TLS, so the computer's pinned fingerprint
   //              (carried in its join token) is enforced end-to-end, unchanged from
   //              the old separate-listener design.
   const wss = new WebSocketServer({ noServer: true })
-  const runnerWss = runnerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
+  const computerWss = computerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
   httpServer.on('upgrade', (req, socket, head) => {
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
@@ -286,8 +286,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         return
       }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
-    } else if (pathname === '/computers' && runnerWss && runnerGateway) {
-      runnerWss.handleUpgrade(req, socket, head, (ws) => runnerGateway.handleConnection(ws))
+    } else if (pathname === '/computers' && computerWss && computerGateway) {
+      computerWss.handleUpgrade(req, socket, head, (ws) => computerGateway.handleConnection(ws))
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
       socket.destroy()
@@ -360,33 +360,33 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   state.ready = true
   composition.setBoundPort(actualPort)
 
-  // Runner `/computers` rides the SAME listener as `/trpc` (bound above) — no
-  // separate port to claim, no separate bind to fail. Feed the runners registry
+  // Computer `/computers` rides the SAME listener as `/trpc` (bound above) — no
+  // separate port to claim, no separate bind to fail. Feed the computers registry
   // the `ws(s)://…/computers` URL + cert fingerprint so `mintJoinToken`
   // embeds them. Scheme follows mode: local → `ws://` loopback (dev/supervised);
   // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_ADDRESS (the hub's
   // external address, needed alongside its bind address whenever the two differ —
   // reverse proxy / NAT). The fingerprint is the real hub
-  // leaf — in remote the one listener terminates TLS with it, so the runner's
+  // leaf — in remote the one listener terminates TLS with it, so the computer's
   // join-token pin is enforced end-to-end, exactly as under the old split listener.
   //
-  // The runner URL's port is the hub port (stable via claimServerPort /
-  // SIDECAR_FIXED_PORT), so the runner credential key (hubHostFromUrl → host_port)
-  // stays stable across reboots WITHOUT a dedicated runner-port persistence layer —
+  // The computer URL's port is the hub port (stable via claimServerPort /
+  // SIDECAR_FIXED_PORT), so the computer credential key (hubHostFromUrl → host_port)
+  // stays stable across reboots WITHOUT a dedicated computer-port persistence layer —
   // that layer existed ONLY to pin a separate OS-assigned port, now gone.
-  if (runnerGateway && hubIdentity) {
-    const runnerHubUrl = deriveRunnerHubUrl({
+  if (computerGateway && hubIdentity) {
+    const computerHubUrl = deriveComputerHubUrl({
       remote,
       host,
       port: actualPort,
       publicAddress: process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     })
-    if (runnerHubUrl) {
-      composition.setRunnerListenerInfo({
-        hubUrl: runnerHubUrl,
+    if (computerHubUrl) {
+      composition.setComputerListenerInfo({
+        hubUrl: computerHubUrl,
         certFingerprint: hubIdentity.fingerprintSha256Hex
       })
-      log(`runner transport ready on ${runnerHubUrl}`)
+      log(`computer transport ready on ${computerHubUrl}`)
     } else {
       // Only reachable if SLAYZONE_HUB_PUBLIC_ADDRESS is malformed in remote mode
       // (an unset value already fails loud at boot). `mintJoinToken` then throws a
@@ -394,10 +394,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       recordDiagnosticEvent({
         level: 'error',
         source: 'server',
-        event: 'runner.hub_url_underivable',
-        message: 'runner transport URL could not be derived (check SLAYZONE_HUB_PUBLIC_ADDRESS)'
+        event: 'computer.hub_url_underivable',
+        message: 'computer transport URL could not be derived (check SLAYZONE_HUB_PUBLIC_ADDRESS)'
       })
-      log('runner transport URL could not be derived — runner enroll unavailable')
+      log('computer transport URL could not be derived — computer enroll unavailable')
     }
   }
   // Agents spawned BY this process discover their hook endpoint via this global.
@@ -448,7 +448,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       if (stopped) return
       stopped = true
       // FIRST, before anything that can fire a pty/chat exit handler. Closing the
-      // runner gateway below disposes every session on that runner, and each exit
+      // computer gateway below disposes every session on that computer, and each exit
       // would otherwise clear `terminal_tabs.was_spawned` — the exact flag the
       // next boot reads to bring your agents back (`listAutoRestoreTasks`).
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
@@ -473,21 +473,21 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       } catch {
         /* ignore */
       }
-      // Terminate every runner connection + reject in-flight requests,
-      // then close the runner WSS + its https listener. No-op if the runner init failed
+      // Terminate every computer connection + reject in-flight requests,
+      // then close the computer WSS + its https listener. No-op if the computer init failed
       // (all null).
-      if (runnerGateway) {
+      if (computerGateway) {
         try {
-          runnerGateway.close()
+          computerGateway.close()
         } catch {
           /* ignore */
         }
       }
       // `/computers` shares the one httpServer as a noServer WSS — close it to drop
-      // the gateway sockets; there is no separate runner/TLS listener to close.
-      if (runnerWss) {
+      // the gateway sockets; there is no separate computer/TLS listener to close.
+      if (computerWss) {
         try {
-          runnerWss.close()
+          computerWss.close()
         } catch {
           /* ignore */
         }

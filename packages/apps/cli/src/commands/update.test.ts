@@ -187,7 +187,7 @@ async function main(): Promise<void> {
   // Deterministic + never touches this machine's real launchd/systemd units —
   // the restart-hint path (`printRestartHints`) is exercised for its "backend
   // none => no hints" short-circuit only; listRegisteredUnits itself is already
-  // covered by hub-lifecycle.test.ts / runner-lifecycle.test.ts.
+  // covered by hub-lifecycle.test.ts / computer-lifecycle.test.ts.
   process.env.SLZ_FORCE_NO_SERVICE = '1'
   process.env.BUN_INSTALL = bunInstallDir
   process.env.FAKE_NPM_GLOBAL_ROOT = npmRoot
@@ -387,7 +387,7 @@ async function main(): Promise<void> {
         stdout.join('\n')
       )
       check(
-        'bun-only: --trust is set for runner (native deps)',
+        'bun-only: --trust is set for computer (native deps)',
         log.some((l) => l.includes('--trust')),
         log.join('|')
       )
@@ -400,7 +400,7 @@ async function main(): Promise<void> {
 
     // --- bun-only, cli (no native deps): no --trust flag --------------------------
     resetNpm()
-    enableBun() // fresh bun root — the previous case's runner must not leak in here
+    enableBun() // fresh bun root — the previous case's computer must not leak in here
     clearInstallLogs()
     seed(bunGlobalNodeModules, '@slayzone/cli', '0.9.0')
     setDistTags({ latest: '1.0.0' })

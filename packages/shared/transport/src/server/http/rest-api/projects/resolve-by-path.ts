@@ -8,9 +8,9 @@ import { queryString } from '../resolve'
  * directory? Deepest match wins. Backs `slay`'s project inference from $PWD.
  *
  * This is the ONE direction the hub genuinely needs paths for, and why the
- * runner-reported mirror (`project_placements`) exists: asking every
- * connected runner in turn would be slow and ambiguous. Forward resolution —
- * "where does this project live for that agent" — is the runner's job and no
+ * computer-reported mirror (`project_placements`) exists: asking every
+ * connected computer in turn would be slow and ambiguous. Forward resolution —
+ * "where does this project live for that agent" — is the computer's job and no
  * longer happens here at all.
  */
 export function registerProjectsResolveByPathRoute(app: Express, deps: RestApiDeps): void {

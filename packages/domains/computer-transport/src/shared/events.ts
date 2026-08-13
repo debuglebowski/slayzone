@@ -1,8 +1,8 @@
 /**
- * Minimal typed event emitter used by the runner gateway and dialer. Kept
+ * Minimal typed event emitter used by the computer gateway and dialer. Kept
  * dependency-free on purpose — @slayzone/computer-transport only depends on ws + zod.
  *
- * @module runner/shared/events
+ * @module computer/shared/events
  */
 
 export type EventMap = Record<string, unknown>

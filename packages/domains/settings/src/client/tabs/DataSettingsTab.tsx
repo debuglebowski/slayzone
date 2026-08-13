@@ -26,7 +26,7 @@ export function DataSettingsTab() {
     Array<{ id: string; name: string; path: string }>
   >([])
   // One picker for the whole list — which row it is filling. An imported project
-  // has no runner binding yet, so it browses the connected default runner, which
+  // has no computer binding yet, so it browses the connected default computer, which
   // is also where its tasks will run until someone binds it elsewhere.
   const [browsingIndex, setBrowsingIndex] = useState<number | null>(null)
 

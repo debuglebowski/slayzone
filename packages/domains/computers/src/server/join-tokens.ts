@@ -3,10 +3,10 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { JoinToken } from '../shared/types'
 
 /**
- * Single-use runner enrollment tokens.
+ * Single-use computer enrollment tokens.
  *
  * Token format: `szjt1.<base64url(JSON payload)>` where the payload embeds the
- * hub URL, the hub's TLS cert fingerprint (so the runner can pin it before
+ * hub URL, the hub's TLS cert fingerprint (so the computer can pin it before
  * trusting the hub) and a 256-bit random secret. The DB stores ONLY
  * `sha256(token)` — the plaintext token is returned once from `mintJoinToken`
  * and can never be recovered from the hub afterwards.
@@ -14,7 +14,7 @@ import type { JoinToken } from '../shared/types'
 
 export const JOIN_TOKEN_PREFIX = 'szjt1'
 
-/** Decoded contents of a join token — what an enrolling runner needs. */
+/** Decoded contents of a join token — what an enrolling computer needs. */
 export interface JoinTokenPayload {
   hubUrl: string
   certFingerprint: string
@@ -32,8 +32,8 @@ export interface MintJoinTokenInput {
    *
    * A token is the only thing that crosses from "a user clicked mint" to "a
    * machine enrolled", so it is the only place ownership can be carried without
-   * asking the runner to assert an identity it cannot prove. Null on an
-   * unauthenticated loopback hub — the normal local case — and an unowned runner
+   * asking the computer to assert an identity it cannot prove. Null on an
+   * unauthenticated loopback hub — the normal local case — and an unowned computer
    * then stays honestly unowned.
    */
   mintedByUserId?: string | null
@@ -57,7 +57,7 @@ export type VerifyJoinTokenResult =
       tokenId: string
       label: string
       payload: JoinTokenPayload
-      /** Carried to `runners.owner_user_id` at enroll. Null = unowned. */
+      /** Carried to `computers.owner_user_id` at enroll. Null = unowned. */
       mintedByUserId: string | null
     }
   | { ok: false; reason: 'malformed' | 'unknown' | 'used' | 'expired' }
@@ -68,7 +68,7 @@ export function hashJoinToken(token: string): string {
 }
 
 /**
- * Stateless decode of a token's embedded payload (no DB) — the runner side
+ * Stateless decode of a token's embedded payload (no DB) — the computer side
  * uses this to learn the hub URL + pinned cert before dialing. Returns `null`
  * for anything that isn't a well-formed `szjt1.` token.
  */

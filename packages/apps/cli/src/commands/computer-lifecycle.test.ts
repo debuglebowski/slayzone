@@ -1,14 +1,14 @@
 /**
- * `slay runner` end-to-end against a REAL hub.
+ * `slay computer` end-to-end against a REAL hub.
  *
  * Drives the BUILT `slay` bundle: boots a real hub in a throwaway root, mints a join
- * token, then runs `slay runner create` and asserts the runner actually ENROLLS —
- * token decode → runner.config.json write → spawn → pinned dial → `mode:"enroll"`. The
+ * token, then runs `slay computer create` and asserts the computer actually ENROLLS —
+ * token decode → computer.config.json write → spawn → pinned dial → `mode:"enroll"`. The
  * library pieces are unit-tested elsewhere (platform/src/service-unit.test.ts for
- * unit CONTENT, runner/src/join-token.test.ts for the token codec); what only an
+ * unit CONTENT, computer/src/join-token.test.ts for the token codec); what only an
  * end-to-end run can catch is the wiring.
  *
- * The happy path's token is minted by `slay runner mint` rather than by this file's
+ * The happy path's token is minted by `slay computer mint` rather than by this file's
  * raw `fetch` — the two channels must agree about what a token contains, and making
  * the enroll depend on the CLI one is what proves it. `mintToken()` (raw fetch)
  * stays, as the independent reference the mint cases compare against and to absorb
@@ -23,7 +23,7 @@
  * is clean. The register-and-start path is a documented manual check per OS, same as
  * the hub's.
  *
- * WHY THE ASSERTIONS LOOK DIFFERENT FROM hub-lifecycle.test.ts: a runner binds no port
+ * WHY THE ASSERTIONS LOOK DIFFERENT FROM hub-lifecycle.test.ts: a computer binds no port
  * and serves no `/health`. There is nothing to probe. Its success signal is its own
  * stdout (`"mode":"enroll"`), its identity is its unit file, and its liveness comes
  * from the supervisor — so the checks here read logs and unit files where the hub suite
@@ -32,17 +32,17 @@
  * ISOLATION — must never touch the real dev/prod stores:
  *   - every `SLAYZONE_*` / `ELECTRON_*` var is scrubbed from child envs (a supervised
  *     parent leaks SLAYZONE_ROOT → the real dev store);
- *   - the hub and every runner get `SLAYZONE_ROOT` under one throwaway mkdtemp dir;
+ *   - the hub and every computer get `SLAYZONE_ROOT` under one throwaway mkdtemp dir;
  *   - the hub binds `127.0.0.1:0` (OS-assigned) so it cannot collide with — or be
  *     mistaken for — a developer's real hub, and nothing here discovers hubs by name;
  *   - names carry a pid-unique prefix, which every unit-dir assertion filters on.
  *
- * Native ABI: the hub bundle needs better-sqlite3 and the runner needs node-pty, both
+ * Native ABI: the hub bundle needs better-sqlite3 and the computer needs node-pty, both
  * built for Electron's ABI, so both run under `ELECTRON_RUN_AS_NODE=1 electron`
  * (run_test_electron_strict_loader in run-all.sh). The CLI bundle is plain node.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   packages/apps/cli/src/commands/runner-lifecycle.test.ts
+ *   packages/apps/cli/src/commands/computer-lifecycle.test.ts
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
@@ -95,7 +95,7 @@ const ELECTRON_BIN = resolve(
 /** A real `node` for running the CLI — see the note on `slay()`. */
 const NODE_BIN = process.env.SLZ_TEST_NODE ?? 'node'
 
-/** Pid-unique so a developer's real runners can never be listed or removed by us. */
+/** Pid-unique so a developer's real computers can never be listed or removed by us. */
 const NAME_PREFIX = `slztest-${process.pid}-`
 
 let passed = 0
@@ -144,9 +144,9 @@ function ensureBuilt(pkgDir: string, bin: string, label: string): void {
  * Inherited env minus every SLAYZONE_/ELECTRON_ key, plus a sandbox for every
  * MACHINE-WIDE install target.
  *
- * The sandbox is not hygiene, it is required: a standalone runner installs agent
+ * The sandbox is not hygiene, it is required: a standalone computer installs agent
  * hooks at boot, and those targets are deliberately anchored on $HOME rather than
- * on the runner's root (one `~/.claude/settings.json` per machine can hold only
+ * on the computer's root (one `~/.claude/settings.json` per machine can hold only
  * one notify.sh path). Scrubbing SLAYZONE_* alone therefore does NOT isolate them
  * — it just puts them back on their real defaults, so this suite would rewrite
  * the developer's actual ~/.slayzone and ~/.claude/settings.json.
@@ -212,8 +212,8 @@ async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: st
 let TMP = ''
 let hubProc: ChildProcess | null = null
 const hubLogs: string[] = []
-/** Runner pids the CLI detached; killed in the teardown so none survives the suite. */
-const spawnedRunnerPids: number[] = []
+/** Computer pids the CLI detached; killed in the teardown so none survives the suite. */
+const spawnedComputerPids: number[] = []
 
 /** Boot a real hub on an OS-assigned loopback port in its own throwaway root. */
 async function startHub(): Promise<{ port: number }> {
@@ -283,7 +283,7 @@ async function mintToken(port: number, label: string): Promise<string> {
       return (await r.json()) as { token: string }
     },
     25_000,
-    'join-token mint (runner listener bound)'
+    'join-token mint (computer listener bound)'
   )
   assert(tok.token.startsWith('szjt1.'), `szjt1 token, got ${tok.token.slice(0, 12)}…`)
   return tok.token
@@ -300,7 +300,7 @@ function leakedUnits(backend: ServiceBackend): string[] {
 }
 
 async function main(): Promise<void> {
-  console.log('\nslay runner — end-to-end against a real hub\n')
+  console.log('\nslay computer — end-to-end against a real hub\n')
 
   if (!existsSync(CLI_DIR) || !existsSync(HUB_DIR) || !existsSync(RUNNER_DIR)) {
     throw new Error(
@@ -308,9 +308,9 @@ async function main(): Promise<void> {
     )
   }
   ensureBuilt(HUB_DIR, HUB_BIN, 'hub')
-  ensureBuilt(RUNNER_DIR, RUNNER_BIN, 'runner')
+  ensureBuilt(RUNNER_DIR, RUNNER_BIN, 'computer')
   ensureBuilt(CLI_DIR, CLI_BIN, 'cli')
-  TMP = mkdtempSync(join(tmpdir(), 'slz-runnerctl-'))
+  TMP = mkdtempSync(join(tmpdir(), 'slz-computerctl-'))
   const backend = detectBackend()
 
   try {
@@ -320,8 +320,8 @@ async function main(): Promise<void> {
     const rejectRoot = join(TMP, 'reject')
     mkdirSync(rejectRoot, { recursive: true })
 
-    await test('create requires --token (a runner cannot reach any hub without one)', async () => {
-      const res = slayNoService(['runner', 'create', `${NAME_PREFIX}notoken`], rejectRoot)
+    await test('create requires --token (a computer cannot reach any hub without one)', async () => {
+      const res = slayNoService(['computer', 'create', `${NAME_PREFIX}notoken`], rejectRoot)
       assert(res.status !== 0, 'exited non-zero')
       assert(
         /required option.*--token/i.test(res.stderr),
@@ -332,7 +332,7 @@ async function main(): Promise<void> {
     await test('create rejects a malformed token BEFORE writing anything', async () => {
       const res = slayNoService(
         [
-          'runner',
+          'computer',
           'create',
           `${NAME_PREFIX}badtok`,
           '--token',
@@ -344,27 +344,27 @@ async function main(): Promise<void> {
       )
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
       assert(/not a valid SlayZone join token/.test(res.stderr), `explains why: ${res.stderr}`)
-      // The whole point of failing fast: no runner.config.json, no unit, nothing to clean up.
-      assert(!existsSync(join(rejectRoot, 'runner.config.json')), 'no runner.config.json written')
+      // The whole point of failing fast: no computer.config.json, no unit, nothing to clean up.
+      assert(!existsSync(join(rejectRoot, 'computer.config.json')), 'no computer.config.json written')
       assertEq(leakedUnits(backend).length, 0, 'no unit written')
     })
 
-    await test('create refuses the reserved local-runner name', async () => {
-      // The hub collapses every enroll named `local-runner` onto one deterministic id
-      // (the desktop app's co-located runner), so a second one would hijack that row.
+    await test('create refuses the reserved local-computer name', async () => {
+      // The hub collapses every enroll named `local-computer` onto one deterministic id
+      // (the desktop app's co-located computer), so a second one would hijack that row.
       const fake = `szjt1.${Buffer.from(
         JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
       ).toString('base64url')}`
       const res = slayNoService(
-        ['runner', 'create', 'local-runner', '--token', fake, '--root', rejectRoot],
+        ['computer', 'create', 'local-computer', '--token', fake, '--root', rejectRoot],
         rejectRoot
       )
       assert(res.status !== 0, 'exited non-zero')
       assert(
-        /reserved for the runner inside the SlayZone/.test(res.stderr),
+        /reserved for the computer inside the SlayZone/.test(res.stderr),
         `explains: ${res.stderr}`
       )
-      assert(!existsSync(join(rejectRoot, 'runner.config.json')), 'no runner.config.json written')
+      assert(!existsSync(join(rejectRoot, 'computer.config.json')), 'no computer.config.json written')
     })
 
     await test('create refuses a duplicate name, pointing at start/rm', async () => {
@@ -378,7 +378,7 @@ async function main(): Promise<void> {
       const name = `${NAME_PREFIX}dup`
       writeUnit(
         {
-          kind: 'runner',
+          kind: 'computer',
           name,
           root: rejectRoot,
           command: NODE_BIN,
@@ -391,35 +391,35 @@ async function main(): Promise<void> {
         const fake = `szjt1.${Buffer.from(
           JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
         ).toString('base64url')}`
-        const res = slay(['runner', 'create', name, '--token', fake, '--root', rejectRoot], {
+        const res = slay(['computer', 'create', name, '--token', fake, '--root', rejectRoot], {
           root: rejectRoot
         })
         assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
-        assert(new RegExp(`runner named "${name}" already exists`).test(res.stderr), res.stderr)
-        assert(/slay runner start/.test(res.stderr), 'points at start')
-        assert(/slay runner rm/.test(res.stderr), 'points at rm')
+        assert(new RegExp(`computer named "${name}" already exists`).test(res.stderr), res.stderr)
+        assert(/slay computer start/.test(res.stderr), 'points at start')
+        assert(/slay computer rm/.test(res.stderr), 'points at rm')
       } finally {
-        removeUnit('runner', name, backend)
+        removeUnit('computer', name, backend)
       }
     })
 
     for (const verb of ['start', 'stop', 'rm', 'restart', 'logs']) {
-      await test(`${verb} on an unknown runner fails with a create hint`, async () => {
+      await test(`${verb} on an unknown computer fails with a create hint`, async () => {
         if (backend === 'none') {
           console.log('    (skipped — no user service manager on this platform)')
           return
         }
-        const res = slay(['runner', verb, `${NAME_PREFIX}ghost`], { root: rejectRoot })
+        const res = slay(['computer', verb, `${NAME_PREFIX}ghost`], { root: rejectRoot })
         assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
         assert(
-          new RegExp(`No runner named "${NAME_PREFIX}ghost"`).test(res.stderr),
+          new RegExp(`No computer named "${NAME_PREFIX}ghost"`).test(res.stderr),
           `names it: ${res.stderr}`
         )
       })
     }
 
-    await test('ls on a machine with no test runners lists none of ours', async () => {
-      const res = slay(['runner', 'ls', '--json'], { root: rejectRoot })
+    await test('ls on a machine with no test computers lists none of ours', async () => {
+      const res = slay(['computer', 'ls', '--json'], { root: rejectRoot })
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
       // `none` backend prints a plain sentence rather than JSON — accept either, since
       // what matters is that nothing of OURS is listed.
@@ -428,18 +428,18 @@ async function main(): Promise<void> {
             r.name.startsWith(NAME_PREFIX)
           )
         : []
-      assertEq(mine.length, 0, `no test runners listed, got ${JSON.stringify(mine)}`)
+      assertEq(mine.length, 0, `no test computers listed, got ${JSON.stringify(mine)}`)
     })
 
     // ---------------------------------------------------------------- happy path
     // `SLZ_FORCE_NO_SERVICE=1` takes the unsupervised detached-spawn branch, so this
-    // exercises the ENTIRE chain — token decode → runner.config.json → spawn → pinned dial →
+    // exercises the ENTIRE chain — token decode → computer.config.json → spawn → pinned dial →
     // enroll — while installing no service unit.
 
     const hub = await startHub()
 
     // ------------------------------------------------------------------- mint
-    // `runner mint` is the ONLY place a runner's hub is chosen — the token embeds
+    // `computer mint` is the ONLY place a computer's hub is chosen — the token embeds
     // that hub's dial url + cert fingerprint, and `create` merely decodes it. These
     // cases run before the happy path on purpose: the token `create` then uses is
     // the one MINT produced, so a divergence between the CLI channel and the raw
@@ -449,7 +449,7 @@ async function main(): Promise<void> {
     await mintToken(hub.port, `${NAME_PREFIX}warmup`)
 
     await test('mint --json prints a decodable token for the addressed hub', async () => {
-      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--json'], {
+      const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {
         root: rejectRoot
       })
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
@@ -457,14 +457,14 @@ async function main(): Promise<void> {
       assert(out.token.startsWith('szjt1.'), `szjt1 token, got ${out.token.slice(0, 12)}…`)
       assertEq(out.hubUrl, `ws://127.0.0.1:${hub.port}/computers`, 'names the hub it minted on')
       // The decoded payload must agree with the reported hubUrl — that equality is
-      // what makes `runner ls`'s HUB column and `create`'s decode trustworthy.
+      // what makes `computer ls`'s HUB column and `create`'s decode trustworthy.
       const decoded = decodeJoinToken(out.token)
       assert(decoded !== null, 'token decodes')
       assertEq(decoded!.hubUrl, out.hubUrl, 'embedded url matches the reported one')
     })
 
     await test('mint warns that a loopback hub token is same-machine only', async () => {
-      const res = slay(['--hub', String(hub.port), 'runner', 'mint', `${NAME_PREFIX}warn`], {
+      const res = slay(['--hub', String(hub.port), 'computer', 'mint', `${NAME_PREFIX}warn`], {
         root: rejectRoot
       })
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
@@ -477,7 +477,7 @@ async function main(): Promise<void> {
     })
 
     await test('mint rejects a non-positive --ttl before calling the hub', async () => {
-      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--ttl', '0'], {
+      const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--ttl', '0'], {
         root: rejectRoot
       })
       assert(res.status !== 0, 'exited non-zero')
@@ -485,47 +485,47 @@ async function main(): Promise<void> {
     })
 
     // The token the happy path uses comes from the CLI, closing the loop: if
-    // `runner mint` and the raw REST mint ever disagree, the enroll below fails.
+    // `computer mint` and the raw REST mint ever disagree, the enroll below fails.
     const token = await (async () => {
-      const res = slay(['--hub', String(hub.port), 'runner', 'mint', '--json'], {
+      const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {
         root: rejectRoot
       })
       assertEq(res.status, 0, `mint for the happy path exited 0 (stderr: ${res.stderr})`)
       return (JSON.parse(res.stdout) as { token: string }).token
     })()
-    const runnerRoot = join(TMP, 'runner-root')
+    const computerRoot = join(TMP, 'computer-root')
     const workDir = join(TMP, 'work')
-    mkdirSync(runnerRoot, { recursive: true })
+    mkdirSync(computerRoot, { recursive: true })
     mkdirSync(workDir, { recursive: true })
-    const runnerName = `${NAME_PREFIX}e2e`
+    const computerName = `${NAME_PREFIX}e2e`
 
-    await test('create enrolls a runner into the hub and records its config', async () => {
+    await test('create enrolls a computer into the hub and records its config', async () => {
       const res = slayNoService(
         [
-          'runner',
+          'computer',
           'create',
-          runnerName,
+          computerName,
           '--token',
           token,
           '--root',
-          runnerRoot,
+          computerRoot,
           '--allow',
           workDir
         ],
-        runnerRoot
+        computerRoot
       )
       const pid = /pid (\d+)/.exec(res.stdout)?.[1]
-      if (pid) spawnedRunnerPids.push(Number(pid))
+      if (pid) spawnedComputerPids.push(Number(pid))
       assertEq(res.status, 0, `exited 0 (stdout: ${res.stdout}\nstderr: ${res.stderr})`)
       assert(/reached its hub/.test(res.stdout), `reports the hub link: ${res.stdout}`)
 
-      // The token, hub url, name and path-jail all travel via runner.config.json — none has
+      // The token, hub url, name and path-jail all travel via computer.config.json — none has
       // an env channel, and a unit file must never carry a credential.
       const cfg = JSON.parse(
-        readFileSync(join(runnerRoot, 'runner.config.json'), 'utf8')
+        readFileSync(join(computerRoot, 'computer.config.json'), 'utf8')
       ) as Record<string, unknown>
       assertEq(cfg.joinToken, token, 'token persisted')
-      assertEq(cfg.runnerName, runnerName, 'name persisted')
+      assertEq(cfg.computerName, computerName, 'name persisted')
       assertEq(cfg.hubUrl, `ws://127.0.0.1:${hub.port}/computers`, 'hub url decoded from the token')
       assert(
         Array.isArray(cfg.allowedRoots) && (cfg.allowedRoots as string[])[0] === workDir,
@@ -533,26 +533,26 @@ async function main(): Promise<void> {
       )
     })
 
-    await test('runner.config.json is 0600 — it holds the join token', async () => {
+    await test('computer.config.json is 0600 — it holds the join token', async () => {
       if (process.platform === 'win32') {
         console.log('    (skipped — POSIX mode bits are not enforced on Windows)')
         return
       }
-      const mode = statSync(join(runnerRoot, 'runner.config.json')).mode & 0o777
+      const mode = statSync(join(computerRoot, 'computer.config.json')).mode & 0o777
       assertEq(mode.toString(8), '600', 'owner-only')
     })
 
-    await test('the runner actually enrolled (credentials on disk, mode:enroll logged)', async () => {
-      // A FRESH runner must ENROLL, not hello-reconnect: `enroll` is what proves the
+    await test('the computer actually enrolled (credentials on disk, mode:enroll logged)', async () => {
+      // A FRESH computer must ENROLL, not hello-reconnect: `enroll` is what proves the
       // join token was accepted and credentials were minted over the link.
-      const logs = readdirSync(join(runnerRoot, 'logs'))
-        .map((f) => readFileSync(join(runnerRoot, 'logs', f), 'utf8'))
+      const logs = readdirSync(join(computerRoot, 'logs'))
+        .map((f) => readFileSync(join(computerRoot, 'logs', f), 'utf8'))
         .join('\n')
       assert(/"mode":"enroll"/.test(logs), `enroll logged:\n${logs.slice(-1500)}`)
-      // The durable record: the dialer persists {runnerId, apiKey} per hub host into
-      // one shared map file, which is what `runner ls` reads for its ENROLLED column.
+      // The durable record: the dialer persists {computerId, apiKey} per hub host into
+      // one shared map file, which is what `computer ls` reads for its ENROLLED column.
       const creds = JSON.parse(
-        readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')
+        readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')
       ) as Record<string, unknown>
       assert(
         Object.keys(creds).length > 0,
@@ -560,61 +560,61 @@ async function main(): Promise<void> {
       )
     })
 
-    await test('the hub reports the runner as connected', async () => {
+    await test('the hub reports the computer as connected', async () => {
       // The other side of the same fact — proves the enroll reached the hub's store,
-      // not just that the runner believed it did.
+      // not just that the computer believed it did.
       const health = await poll(
         async () => {
           const r = await fetch(`http://127.0.0.1:${hub.port}/health`)
           if (!r.ok) return null
-          const body = (await r.json()) as { runnersConnected?: number }
-          return (body.runnersConnected ?? 0) > 0 ? body : null
+          const body = (await r.json()) as { computersConnected?: number }
+          return (body.computersConnected ?? 0) > 0 ? body : null
         },
         20_000,
-        'hub reports a connected runner'
+        'hub reports a connected computer'
       )
-      assert((health.runnersConnected ?? 0) >= 1, `runnersConnected: ${health.runnersConnected}`)
+      assert((health.computersConnected ?? 0) >= 1, `computersConnected: ${health.computersConnected}`)
     })
 
-    await test('create refuses a second runner under a name it already spawned', async () => {
+    await test('create refuses a second computer under a name it already spawned', async () => {
       // Even on the unsupervised path a duplicate must be refused — otherwise a second
-      // detached runner would race the first for the same root and credentials. With no
-      // unit file to consult, the runner.config.json already naming this runner is the record.
+      // detached computer would race the first for the same root and credentials. With no
+      // unit file to consult, the computer.config.json already naming this computer is the record.
       const res = slayNoService(
-        ['runner', 'create', runnerName, '--token', token, '--root', runnerRoot],
-        runnerRoot
+        ['computer', 'create', computerName, '--token', token, '--root', computerRoot],
+        computerRoot
       )
       const pid = /pid (\d+)/.exec(res.stdout)?.[1]
-      if (pid) spawnedRunnerPids.push(Number(pid))
+      if (pid) spawnedComputerPids.push(Number(pid))
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
-      // On this path the refusal comes from runner.config.json's `runnerName`, not a unit
+      // On this path the refusal comes from computer.config.json's `computerName`, not a unit
       // file — that is the whole point: with no service manager there is no unit to
-      // consult, and an unguarded second create silently spawned a rival runner.
+      // consult, and an unguarded second create silently spawned a rival computer.
       assert(
-        new RegExp(`already installed in .* — "${runnerName}"`).test(res.stderr),
+        new RegExp(`already installed in .* — "${computerName}"`).test(res.stderr),
         `refused by root occupancy: ${res.stderr}`
       )
-      assert(/slay runner start/.test(res.stderr), `points at start: ${res.stderr}`)
+      assert(/slay computer start/.test(res.stderr), `points at start: ${res.stderr}`)
     })
 
     await test('create refuses a DIFFERENT name in an occupied root too', async () => {
-      // Keyed on the ROOT, not the name: two runners sharing a root would share
-      // runner.config.json and the credential store and fight over both.
+      // Keyed on the ROOT, not the name: two computers sharing a root would share
+      // computer.config.json and the credential store and fight over both.
       const res = slayNoService(
-        ['runner', 'create', `${NAME_PREFIX}second`, '--token', token, '--root', runnerRoot],
-        runnerRoot
+        ['computer', 'create', `${NAME_PREFIX}second`, '--token', token, '--root', computerRoot],
+        computerRoot
       )
       const pid = /pid (\d+)/.exec(res.stdout)?.[1]
-      if (pid) spawnedRunnerPids.push(Number(pid))
+      if (pid) spawnedComputerPids.push(Number(pid))
       assert(res.status !== 0, `exited non-zero (stdout: ${res.stdout})`)
       assert(/--root <dir>/.test(res.stderr), `suggests a separate root: ${res.stderr}`)
     })
 
     // --------------------------------------------- the config-only wedge (regression)
     //
-    // THE BUG: a `create` with no supervisor available writes runner.config.json and
+    // THE BUG: a `create` with no supervisor available writes computer.config.json and
     // no unit. From then on `create` refused ("already installed in <root>") while
-    // `start`/`stop`/`rm` refused ("No runner named X") — two different existence
+    // `start`/`stop`/`rm` refused ("No computer named X") — two different existence
     // oracles, and NO command could resolve the state. Recovery was `rm -rf` by hand.
     // Hit for real on a VPS whose XDG_RUNTIME_DIR was unset (see service-unit.ts).
     //
@@ -622,19 +622,19 @@ async function main(): Promise<void> {
     // broken path left, and it needs no spawned process to reproduce.
     const orphanRoot = join(TMP, 'orphan-root')
     const orphanName = `${NAME_PREFIX}orphan`
-    await test('a config-only runner is VISIBLE to ls (it used to be invisible)', async () => {
+    await test('a config-only computer is VISIBLE to ls (it used to be invisible)', async () => {
       mkdirSync(orphanRoot, { recursive: true })
       writeFileSync(
-        join(orphanRoot, 'runner.config.json'),
+        join(orphanRoot, 'computer.config.json'),
         JSON.stringify({
-          runnerName: orphanName,
+          computerName: orphanName,
           hubUrl: `ws://127.0.0.1:${hub.port}/computers`
         }),
         { mode: 0o600 }
       )
-      const res = slayNoService(['runner', 'ls'], orphanRoot)
+      const res = slayNoService(['computer', 'ls'], orphanRoot)
       assertEq(res.status, 0, `ls exits 0 (stderr: ${res.stderr})`)
-      assert(new RegExp(orphanName).test(res.stdout), `lists the config-only runner: ${res.stdout}`)
+      assert(new RegExp(orphanName).test(res.stdout), `lists the config-only computer: ${res.stdout}`)
       // "unmanaged", not "stopped": `start` has to REGISTER it, not merely resume it,
       // and calling that "stopped" would misdescribe what happens next.
       assert(/unmanaged/.test(res.stdout), `marks it unmanaged: ${res.stdout}`)
@@ -643,31 +643,31 @@ async function main(): Promise<void> {
     await test('ls --json stays machine-readable with no service manager', async () => {
       // Regression: the no-backend branch printed prose on stdout even under --json,
       // so anything parsing the list broke on exactly the boxes that needed it.
-      const res = slayNoService(['runner', 'ls', '--json'], orphanRoot)
+      const res = slayNoService(['computer', 'ls', '--json'], orphanRoot)
       assertEq(res.status, 0, `exits 0 (stderr: ${res.stderr})`)
       const parsed: unknown = JSON.parse(res.stdout)
       assert(Array.isArray(parsed), `stdout parses as JSON array: ${res.stdout}`)
     })
 
-    await test('rm recovers a config-only runner — the dead end is gone', async () => {
-      const res = slayNoService(['runner', 'rm', orphanName, '--purge'], orphanRoot)
+    await test('rm recovers a config-only computer — the dead end is gone', async () => {
+      const res = slayNoService(['computer', 'rm', orphanName, '--purge'], orphanRoot)
       assertEq(res.status, 0, `rm succeeds (stderr: ${res.stderr})`)
       assert(
-        !existsSync(join(orphanRoot, 'runner.config.json')),
+        !existsSync(join(orphanRoot, 'computer.config.json')),
         '--purge deleted the root that was blocking re-create'
       )
       // The precise old failure. Its absence IS the fix.
       assert(
-        !/No runner named/.test(res.stderr),
-        `no longer claims the runner does not exist: ${res.stderr}`
+        !/No computer named/.test(res.stderr),
+        `no longer claims the computer does not exist: ${res.stderr}`
       )
     })
 
     await test('rm without --purge keeps the operator’s credentials', async () => {
       mkdirSync(orphanRoot, { recursive: true })
-      const cfg = join(orphanRoot, 'runner.config.json')
-      writeFileSync(cfg, JSON.stringify({ runnerName: orphanName }), { mode: 0o600 })
-      const res = slayNoService(['runner', 'rm', orphanName], orphanRoot)
+      const cfg = join(orphanRoot, 'computer.config.json')
+      writeFileSync(cfg, JSON.stringify({ computerName: orphanName }), { mode: 0o600 })
+      const res = slayNoService(['computer', 'rm', orphanName], orphanRoot)
       assertEq(res.status, 0, `rm succeeds (stderr: ${res.stderr})`)
       assert(existsSync(cfg), 'a plain rm never deletes the root — that is operator data')
       rmSync(orphanRoot, { recursive: true, force: true })
@@ -676,9 +676,9 @@ async function main(): Promise<void> {
     await test('the enroll wait reads journald for a systemd unit, not the log dir', async () => {
       // REGRESSION (Linux only, shipped): a systemd unit declares
       // StandardOutput=journal and writes NOTHING to the log dir, but the enroll wait
-      // polled only `<root>/logs/*.log`. So `runner create`/`start` could never
+      // polled only `<root>/logs/*.log`. So `computer create`/`start` could never
       // succeed under systemd — it waited out the full 30s and reported "did not
-      // reach its hub" plus "No output was captured" for a runner that had connected.
+      // reach its hub" plus "No output was captured" for a computer that had connected.
       //
       // It passed everywhere it was exercised: launchd writes real files
       // (StandardOutPath), and this suite forces the unsupervised path, which
@@ -686,11 +686,11 @@ async function main(): Promise<void> {
       // uncovered — so assert the SOURCE SELECTION directly rather than the wait.
       const logRoot = join(TMP, 'logsrc-root')
       mkdirSync(join(logRoot, 'logs'), { recursive: true })
-      writeFileSync(join(logRoot, 'logs', 'runner.out.log'), 'connected {"mode":"enroll"}\n')
+      writeFileSync(join(logRoot, 'logs', 'computer.out.log'), 'connected {"mode":"enroll"}\n')
 
       // No unit named ⇒ file source ⇒ finds the marker.
       assert(
-        /"mode":"enroll"/.test(readServiceLogTail('runner', logRoot, 200)),
+        /"mode":"enroll"/.test(readServiceLogTail('computer', logRoot, 200)),
         'file source reads the log dir'
       )
       // A unit named ⇒ journald source. This unit does not exist, so the read yields
@@ -698,7 +698,7 @@ async function main(): Promise<void> {
       // file would be the bug: the wait would pass by reading a stale artifact
       // instead of the unit's real output.
       assertEq(
-        readServiceLogTail('runner', logRoot, 200, 'slayzone-computer-nonexistent.service'),
+        readServiceLogTail('computer', logRoot, 200, 'slayzone-computer-nonexistent.service'),
         '',
         'journald source never falls back to the log dir'
       )
@@ -713,7 +713,7 @@ async function main(): Promise<void> {
       )
     })
   } finally {
-    for (const pid of spawnedRunnerPids) {
+    for (const pid of spawnedComputerPids) {
       try {
         process.kill(pid, 'SIGKILL')
       } catch {

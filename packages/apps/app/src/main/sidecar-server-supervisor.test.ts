@@ -713,7 +713,7 @@ test('fixedPort: binds the given port instead of probing, and keeps it across a 
   }
 })
 
-// --- runner ---------------------------------------------------------------
+// --- computer ---------------------------------------------------------------
 
 async function main(): Promise<void> {
   let passed = 0

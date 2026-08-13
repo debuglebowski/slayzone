@@ -56,7 +56,7 @@ export {
   type IpcMainLike
 } from './pty-host'
 export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/pty-store'
-// Hub/runner split spawn-backend seam (wave 2, Model A) + spawn-time lookups /
+// Hub/computer split spawn-backend seam (wave 2, Model A) + spawn-time lookups /
 // session ledger (wave 1) interfaces. Default backend/lookups/ledger are the
 // in-process db-backed impls, so this lands dark; a later wave injects remote
 // impls via `setPtyBackend` / `setPtySpawnLookups` / `setPtySessionLedger`.
@@ -75,7 +75,7 @@ export {
   type PtySpawnLookups
 } from './runtime/pty-data-ops'
 // The CHAT spawn seam — the exact counterpart of `PtyBackend` above, so a chat
-// agent can run on a runner like a terminal agent already can. Injected via
+// agent can run on a computer like a terminal agent already can. Injected via
 // `configureTransport({ backend })`; unset = in-process spawn.
 export {
   childProcessToHandle,
@@ -151,10 +151,10 @@ export {
   setConversationResolver,
   type ConversationResolver,
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
-  // hub/runner wave inject a non-DB-backed ledger from the composition root.
+  // hub/computer wave inject a non-DB-backed ledger from the composition root.
   setPtySessionLedger,
-  // Wave-3 remote-MCP-env seam: the runner transport injects a provider that
-  // resolves the hub base URL so a runner-routed pty's slay CLI dials the hub.
+  // Wave-3 remote-MCP-env seam: the computer transport injects a provider that
+  // resolves the hub base URL so a computer-routed pty's slay CLI dials the hub.
   // Unset => loopback. (The agent hook posts to loopback regardless.)
   setRemoteMcpEnvProvider,
   // Spawn-time hook self-heal seam: the app injects a callback that re-runs the
@@ -176,7 +176,7 @@ export {
   // `was_spawned` recorder seam — the flag that decides whether a restart
   // restores your agents. Same orphaning as `setIdleCloseConfigGetter` above:
   // only the ELECTRON barrel exported it, so when the pty runtime moved to the
-  // side-car (and spawning to the runner) the host kept wiring a manager that
+  // side-car (and spawning to the computer) the host kept wiring a manager that
   // owns no sessions, every `spawnedSetter?.(…)` became a no-op, and restore
   // silently died. The side-car composition wires it now (tab-flag-recorders.ts)
   // and needs it reachable from the SERVER barrel to do that.
@@ -193,7 +193,7 @@ export {
   type ChatMode
 } from './runtime/chat-handlers'
 // The chat data seam. Exported so a composition root can override ONE method
-// (e.g. runner resolution) over the db-backed defaults instead of reimplementing
+// (e.g. computer resolution) over the db-backed defaults instead of reimplementing
 // the whole interface.
 export { createDbChatDataOps, type ChatDataOps } from './runtime/chat-data-ops'
 export {

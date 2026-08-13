@@ -1,5 +1,5 @@
 /**
- * Supervisor plumbing shared by `slay hub` and `slay runner`.
+ * Supervisor plumbing shared by `slay hub` and `slay computer`.
  *
  * `@slayzone/platform/service-unit` renders and installs the unit FILE; this module
  * owns everything around it that needs a child process or the local filesystem:
@@ -32,7 +32,7 @@ import {
 } from '@slayzone/platform/service-unit'
 import { getServiceRuntimeDir } from './cli-state'
 
-/** This CLI's version, substituted by build.mjs. The hub and runner are released
+/** This CLI's version, substituted by build.mjs. The hub and computer are released
  *  from the same repo at the same version, so it is what we install (see
  *  {@link resolveServiceBin}). */
 declare const __APP_VERSION__: string
@@ -64,7 +64,7 @@ export function resolveBackend(): ServiceBackend {
 /** npm package + dev-tree location for each kind. */
 const PACKAGES = {
   hub: { pkg: '@slayzone/hub', bin: 'slayzone-hub', devDir: 'hub', envOverride: 'SLZ_HUB_BIN' },
-  runner: {
+  computer: {
     pkg: '@slayzone/computer',
     bin: 'slayzone-computer',
     devDir: 'computer',
@@ -77,7 +77,7 @@ export function servicePackage(kind: ServiceKind): string {
   return PACKAGES[kind].pkg
 }
 
-/** How to invoke a resolved hub/runner bundle. */
+/** How to invoke a resolved hub/computer bundle. */
 export interface ServiceBin {
   command: string
   args: string[]
@@ -109,10 +109,10 @@ function readServicePkg(
  *
  * A monorepo checkout's native addons are compiled for ELECTRON's ABI
  * (NODE_MODULE_VERSION 145 vs plain node's 137) — `better-sqlite3` for the hub,
- * `node-pty` for the runner — so a dev-tree bundle launched with `node` dies
+ * `node-pty` for the computer — so a dev-tree bundle launched with `node` dies
  * instantly on `require()`, and under a supervisor that means an invisible
  * crash-loop. Such a bundle must run as `ELECTRON_RUN_AS_NODE=1 <electron>`, which is
- * exactly how the desktop app spawns its own sidecar and local runner.
+ * exactly how the desktop app spawns its own sidecar and local computer.
  *
  * An npm-INSTALLED bundle rebuilds its natives for the consumer's node at install
  * time, so it runs under plain node. Detection is by locating an electron binary in
@@ -160,7 +160,7 @@ export function interpreterFor(binPath: string, version: string): ServiceBin {
  *   1. Node's own resolver (a global install, or a workspace checkout that lists
  *      the package as a dependency).
  *   2. The dev tree — a sibling `packages/apps/<kind>/dist/bin.cjs` next to this
- *      CLI. The monorepo CLI does NOT depend on the hub or runner package, so step 1
+ *      CLI. The monorepo CLI does NOT depend on the hub or computer package, so step 1
  *      misses them, yet this is the build a developer means.
  *   3. `npm install` into a private prefix under the CLI's own state dir, then
  *      resolve inside it. NOT `npx --package … node -p require.resolve(…)`: npx
@@ -172,7 +172,7 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
   const { pkg, devDir, envOverride } = PACKAGES[kind]
 
   // Test-only override: point `create` at a specific bundle so the failed-boot
-  // rollback path can be exercised without a real hub/runner. Never set in normal use.
+  // rollback path can be exercised without a real hub/computer. Never set in normal use.
   const override = process.env[envOverride]
   if (override) return { command: process.execPath, args: [override], version: 'override' }
 
@@ -257,7 +257,7 @@ export function resolveServiceBin(kind: ServiceKind): ServiceBin {
  *
  * Both kinds are flat now — a hub root holds `hub.config.json`/`hub.state.json`,
  * `cli-hub-target.json`, the DB, and `logs/` directly (no `storage/` wrapper); a
- * runner root holds `runner.config.json`/`runner.state.json` and `logs/`. So
+ * computer root holds `computer.config.json`/`computer.state.json` and `logs/`. So
  * both resolve to `<ROOT>/logs` — no per-kind branch needed anymore.
  */
 export function ensureLogDir(kind: ServiceKind, root: string): string {
@@ -291,7 +291,7 @@ export function failWithLog(kind: ServiceKind, name: string, logPath: string, wh
   } catch {
     /* nothing captured */
   }
-  const label = kind === 'hub' ? 'Hub' : 'Runner'
+  const label = kind === 'hub' ? 'Hub' : 'Computer'
   fail(
     `${label} "${name}" ${what}.\n` +
       (detail
@@ -303,7 +303,7 @@ export function failWithLog(kind: ServiceKind, name: string, logPath: string, wh
 /**
  * Read the last `lines` lines a service produced, or '' when nothing is readable.
  *
- * Used to WAIT for a boot signal (the runner has no `/health`, so its stdout is the
+ * Used to WAIT for a boot signal (the computer has no `/health`, so its stdout is the
  * only evidence it enrolled) and to report a failure. Reads whichever of the
  * supervisor's two capture files is newest, since which one carries the interesting
  * output depends on how the process was started.
@@ -317,10 +317,10 @@ export function readServiceLogTail(
    * `StandardOutput=journal`, so NOTHING is ever written to the log dir and a
    * file-only read returns '' forever.
    *
-   * This is what made `slay runner create`/`start` unable to succeed on Linux: the
-   * enroll wait polls this tail for the runner's "connected to hub" line, never saw
+   * This is what made `slay computer create`/`start` unable to succeed on Linux: the
+   * enroll wait polls this tail for the computer's "connected to hub" line, never saw
    * it, and reported `did not reach its hub within 30s` alongside `No output was
-   * captured` — for a runner that had in fact connected. It passed everywhere it was
+   * captured` — for a computer that had in fact connected. It passed everywhere it was
    * exercised: launchd writes real files (StandardOutPath), and the suite forces the
    * unsupervised path, which redirects to a file too. Only systemd was broken, and
    * only systemd was never covered.
@@ -545,7 +545,7 @@ export interface SupervisorStatus {
  * Ask the supervisor whether a registered service is up, and under which pid.
  *
  * This is the RUNNER's substitute for `/health`. A hub binds a port and answers a
- * probe, so `hub ls` can discover it without asking any supervisor; a runner binds
+ * probe, so `hub ls` can discover it without asking any supervisor; a computer binds
  * nothing (it dials the hub), so the only local source of truth about whether its
  * process exists is the supervisor that owns it.
  *

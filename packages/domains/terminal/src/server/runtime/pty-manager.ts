@@ -19,7 +19,7 @@ import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnosti
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
 // path. It reaches every agent through the injected backend, which routes to a
-// runner. `spawnLocalPty` still exists in pty-backend for the RUNNER's own use.
+// computer. `spawnLocalPty` still exists in pty-backend for the RUNNER's own use.
 import { getPtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
@@ -98,7 +98,7 @@ export type PtyEventMap = {
 
 export const ptyEvents = new TypedEmitter<PtyEventMap>()
 
-// Session-provenance ledger (hub/runner split, wave 1). Null until the
+// Session-provenance ledger (hub/computer split, wave 1). Null until the
 // composition root injects a DB via `setDatabase` — every call site guards on
 // it, preserving the old null-before-init `if (db)` behavior. The default impl
 // runs the same SQL locally; wave 2 swaps in a remote-backed impl via
@@ -118,11 +118,11 @@ export function setPtySessionLedger(ops: PtySessionLedger | null): void {
   ledger = ops
 }
 
-// Remote-MCP-env provider (hub/runner split, wave 3). Null by default: with no
+// Remote-MCP-env provider (hub/computer split, wave 3). Null by default: with no
 // provider `resolveRemoteMcpEnv` returns null for EVERY spawn, so a session's
 // mcpEnv is byte-identical to today's loopback env. The composition root wires a
 // the real provider; it mints a short-lived per-task bearer +
-// resolves the hub's externally-reachable base URL so a runner-routed pty's
+// resolves the hub's externally-reachable base URL so a computer-routed pty's
 // `slay` CLI + agent hooks dial the hub instead of loopback. Injected here (not
 // baked into the ledger) so it's swappable independently of the DB ledger.
 let remoteMcpEnvProvider: RemoteMcpEnvProvider | null = null
@@ -1154,8 +1154,8 @@ export function buildBaseEnv(): Record<string, string> {
 }
 
 // `spawnLoginShell` lived here to give the warm-process pool a bare login shell on
-// the HUB. It is gone with the pool: warm agents run on runners, spawned via
-// `PtyBackend.warmSpawn` → `pty.warmSpawn`, and the runner resolves and spawns the
+// the HUB. It is gone with the pool: warm agents run on computers, spawned via
+// `PtyBackend.warmSpawn` → `pty.warmSpawn`, and the computer resolves and spawns the
 // shell itself. Removing it (rather than leaving it unused) is the point — it was
 // the last function in this process capable of starting an agent locally.
 
@@ -1172,16 +1172,16 @@ export interface CreatePtyOptions {
   taskId?: string | null
   tabId?: string | null
   /**
-   * Hub/runner split (wave 2, Model A): the runner this session's OS process
+   * Hub/computer split (wave 2, Model A): the computer this session's OS process
    * spawns on, or `null`/absent for a hub-local session (today's only path).
    * Threaded into the `PtySpawnSpec` so a remote `PtyBackend` can route the
    * spawn; resolved by pty-store's `ptyCreate` via `PtySpawnLookups`.
    */
-  runnerId?: string | null
+  computerId?: string | null
   /**
    * Threaded into the spawn spec so the RUNNER can resolve its own cwd. `cwd`
    * below still wins when non-empty — a worktree path or a `task.base_dir`
-   * override is a directory the runner created or was explicitly told about,
+   * override is a directory the computer created or was explicitly told about,
    * not a hub guess about someone else's disk.
    */
   projectId?: string | null
@@ -1216,8 +1216,8 @@ export interface CreatePtyOptions {
   adoptPty?: {
     /** Key the RUNNER currently files the warm session under. */
     warmId: string
-    /** Runner holding it. Adoption is a rekey there, not a local handoff. */
-    runnerId: string
+    /** Computer holding it. Adoption is a rekey there, not a local handoff. */
+    computerId: string
     preWarmedAgent?: boolean
     /** Pooled `agent_sessions.id` to bind to this task (preWarmedAgent only). */
     sessionId?: string
@@ -1297,9 +1297,9 @@ export async function createPty(
     opts.tabId !== undefined ? (opts.tabId ?? '') : splitTabRowId(sessionId)
   )
   const taskId = taskIdFromSessionId(sessionId)
-  // Hub/runner split (wave 2): which runner this session spawns on (null =
+  // Hub/computer split (wave 2): which computer this session spawns on (null =
   // hub-local, today's only path). Threaded into every PtySpawnSpec below.
-  const runnerId = opts.runnerId ?? null
+  const computerId = opts.computerId ?? null
   const createStartedAt = Date.now()
   let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null =
     null
@@ -1481,14 +1481,14 @@ export async function createPty(
       maybeReinstallHooksForSpawn(terminalMode)
     }
 
-    // Hub/runner split (wave 3): when this session spawns on a runner, resolve
+    // Hub/computer split (wave 3): when this session spawns on a computer, resolve
     // its remote hub target (base URL) so the CLI can reach the hub. The agent
-    // HOOK posts to loopback (local sidecar, or the runner's own relay) — never a
-    // hub URL. `runnerId == null` (every local spawn) OR no provider wired =>
+    // HOOK posts to loopback (local sidecar, or the computer's own relay) — never a
+    // hub URL. `computerId == null` (every local spawn) OR no provider wired =>
     // null, so the mcpEnv resolution stays byte-identical to today's loopback env.
     const remoteMcpEnv = await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
       taskId,
-      runnerId,
+      computerId,
       mode: terminalMode
     })
 
@@ -1620,21 +1620,21 @@ export async function createPty(
     }
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
-    // Hub/runner split (wave 2, Model A): route EVERY OS spawn — the initial
+    // Hub/computer split (wave 2, Model A): route EVERY OS spawn — the initial
     // spawn below AND the two onExit recovery re-spawns — through the swappable
     // `PtyBackend`. The default `localPtyBackend` wraps non-transport spawns in
     // `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` (transport docker/ssh
     // spawns run as-is) and returns the raw node-pty IPty SYNCHRONOUSLY, so the
     // -l / shell fallback control flow (which mutates usedArgs/usedFallback and
     // runs inside a synchronous onExit callback) stays byte-identical for the
-    // hub-local path (`runnerId == null`). A remote backend (`runnerId != null`)
+    // hub-local path (`computerId == null`). A remote backend (`computerId != null`)
     // may return a Promise; only the INITIAL spawn awaits it (`spawnRemote`), and
-    // the local -l / shell fallbacks never fire for a remote session — the runner
+    // the local -l / shell fallbacks never fire for a remote session — the computer
     // owns its own shell semantics.
     const buildSpec = (rawFile: string, rawArgs: string[]): PtySpawnSpec => ({
       sessionId,
       taskId,
-      runnerId,
+      computerId,
       projectId: opts.projectId ?? null,
       file: rawFile,
       args: rawArgs,
@@ -1642,19 +1642,19 @@ export async function createPty(
       transport: !!transport
     })
     // Synchronous spawn — the hub-local path (and every recovery re-spawn). Throws
-    // if the active backend returns a Promise: only a remote (runnerId != null)
+    // if the active backend returns a Promise: only a remote (computerId != null)
     // spawn may be async, and that path never routes through here.
     const spawn = (rawFile: string, rawArgs: string[]): pty.IPty => {
       const handle = getPtyBackend().spawn(buildSpec(rawFile, rawArgs))
       if (handle instanceof Promise) {
         throw new Error(
-          '[pty-manager] the local PtyBackend must spawn synchronously; a remote (runnerId != null) spawn takes the async spawnRemote path'
+          '[pty-manager] the local PtyBackend must spawn synchronously; a remote (computerId != null) spawn takes the async spawnRemote path'
         )
       }
       return handle as unknown as pty.IPty
     }
     // Remote spawn — awaits the backend (a network round-trip). Only reached for a
-    // runner-routed session (runnerId != null); tolerates a sync or async handle.
+    // computer-routed session (computerId != null); tolerates a sync or async handle.
     const spawnRemote = async (rawFile: string, rawArgs: string[]): Promise<pty.IPty> =>
       (await getPtyBackend().spawn(buildSpec(rawFile, rawArgs))) as unknown as pty.IPty
     if (opts.adoptPty) {
@@ -1666,18 +1666,18 @@ export async function createPty(
       const backend = getPtyBackend()
       if (!backend.adopt) {
         throw new Error(
-          '[pty-manager] warm adoption requires a routing PtyBackend — warm agents live on runners'
+          '[pty-manager] warm adoption requires a routing PtyBackend — warm agents live on computers'
         )
       }
       ptyProcess = (await backend.adopt(
-        opts.adoptPty.runnerId,
+        opts.adoptPty.computerId,
         opts.adoptPty.warmId,
         sessionId,
         spawnFile
       )) as unknown as pty.IPty
-    } else if (runnerId != null) {
-      // Remote session: await the runner spawn. No local -l / interactive-shell
-      // fallback — a runner owns its shell startup, and its handle can't be
+    } else if (computerId != null) {
+      // Remote session: await the computer spawn. No local -l / interactive-shell
+      // fallback — a computer owns its shell startup, and its handle can't be
       // re-spawned synchronously inside an onExit callback.
       ptyProcess = await spawnRemote(spawnFile, initialArgs)
     } else {
@@ -1709,11 +1709,11 @@ export async function createPty(
     // round-trip backend; a synchronous spawn has nothing left to confirm.
     const spawnConfirmation = (ptyProcess as unknown as PtyHandle).whenSpawned
     // Is the process in THIS process's table? Only then does a pid mean anything
-    // here — `process.kill(pid, 0)` against a pid that belongs to a runner is
-    // asking the wrong kernel. Adoption always targets a runner (`adoptPty`
-    // carries a required `runnerId`), so it is remote even when `runnerId` is
+    // here — `process.kill(pid, 0)` against a pid that belongs to a computer is
+    // asking the wrong kernel. Adoption always targets a computer (`adoptPty`
+    // carries a required `computerId`), so it is remote even when `computerId` is
     // unset on the spawn itself.
-    const isHubLocalProcess = runnerId == null && !opts.adoptPty
+    const isHubLocalProcess = computerId == null && !opts.adoptPty
 
     sessions.set(sessionId, {
       win: originalWin,
@@ -1849,7 +1849,7 @@ export async function createPty(
       // Declaring a session dead and leaving its process running are not allowed
       // to be different things. On a natural exit this is a no-op (the process is
       // already gone, and a remote kill for an unknown session is dropped by the
-      // runner); on any premature or mistaken finalize it is what stops an agent
+      // computer); on any premature or mistaken finalize it is what stops an agent
       // from surviving as an orphan — still burning tokens, still holding a
       // conversation id, attached to nothing that could ever show its output.
       if (exitSession) {
@@ -2339,7 +2339,7 @@ export async function createPty(
           if (!session || session.pty !== target) return
 
           const canAsyncFallback =
-            runnerId == null && // remote sessions never use the local shell fallback
+            computerId == null && // remote sessions never use the local shell fallback
             canRetryInteractiveOnly &&
             !usedFallback &&
             firstOutputTs === null &&
@@ -2438,8 +2438,8 @@ export async function createPty(
           // overlay handles that case).
           //
           // Runs for RUNNER-ROUTED sessions too. It used to be gated on
-          // `runnerId == null` back when a runner was the exotic case and a local
-          // spawn was the norm; since every pty routes through a runner that gate
+          // `computerId == null` back when a computer was the exotic case and a local
+          // spawn was the norm; since every pty routes through a computer that gate
           // disabled the feature outright — an agent that crashed left a dead pane
           // with no recovery shell, on the ONLY path that exists. What actually
           // differs remotely is the SPAWN CALL, not the recovery semantics: a
@@ -2487,7 +2487,7 @@ export async function createPty(
                   mode: terminalMode,
                   previousArgs,
                   fallbackArgs: shellOnlyArgs,
-                  runnerId
+                  computerId
                 }
               })
 
@@ -2507,12 +2507,12 @@ export async function createPty(
                 payload: {
                   shell: spawnFile,
                   attemptedArgs: shellOnlyArgs,
-                  runnerId
+                  computerId
                 }
               })
             }
 
-            if (runnerId != null) {
+            if (computerId != null) {
               // Remote: the spawn is a round-trip, so finalize is deferred to the
               // continuation rather than falling through synchronously below. On
               // failure we finalize there — the session must never be left with a
@@ -2571,14 +2571,14 @@ export async function createPty(
     //
     //  (a) Round-trip backend — await the owner's reply. It is the only authority
     //      on whether the spawn happened, and its latency is unbounded in
-    //      practice (a runner restoring a dozen sessions at once, or one reached
+    //      practice (a computer restoring a dozen sessions at once, or one reached
     //      across a network). No hub-side deadline can second-guess that
     //      correctly, so none is applied: a slow reply is slow, not dead.
     //  (b) Hub-local spawn — the pty already exists, so an invalid or vanished
     //      pid is a fact, and the short watchdog still catches a child that died
     //      before handlers attached.
-    //  (c) Remote, already confirmed (warm adoption) — the runner replied before
-    //      handing the handle over. Its pid belongs to the runner's process table,
+    //  (c) Remote, already confirmed (warm adoption) — the computer replied before
+    //      handing the handle over. Its pid belongs to the computer's process table,
     //      so probing it here would be meaningless; a real exit arrives over the
     //      wire like any other.
     //

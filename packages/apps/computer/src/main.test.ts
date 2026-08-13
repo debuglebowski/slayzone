@@ -1,21 +1,21 @@
-import type { RunnerCredentialStore } from '@slayzone/computer-transport/client'
-import { RunnerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
+import type { ComputerCredentialStore } from '@slayzone/computer-transport/client'
+import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
 import { describe, expect, it, vi } from 'vitest'
-import type { RunnerConfig } from './config'
-import type { RunnerDialer } from './handlers/types'
-import { createHubRequestHandler, startRunner } from './main'
+import type { ComputerConfig } from './config'
+import type { ComputerDialer } from './handlers/types'
+import { createHubRequestHandler, startComputer } from './main'
 
-const fakeDialer: RunnerDialer = { notify: () => true }
+const fakeDialer: ComputerDialer = { notify: () => true }
 
-const testConfig: RunnerConfig = {
+const testConfig: ComputerConfig = {
   hubUrl: 'ws://localhost:0/computers',
-  name: 'test-runner',
+  name: 'test-computer',
   allowedRoots: ['/tmp'],
   capabilities: ['pty', 'git', 'fs', 'proc']
 }
 
-/** A credential store that never touches disk (keeps startRunner unit-safe). */
-function memoryStore(): RunnerCredentialStore {
+/** A credential store that never touches disk (keeps startComputer unit-safe). */
+function memoryStore(): ComputerCredentialStore {
   return {
     load: async () => null,
     save: async () => {},
@@ -29,7 +29,7 @@ function makeDispatch(shutdown: (reason: string) => void = () => {}) {
 }
 
 describe('createHubRequestHandler dispatch table', () => {
-  // Names inside the reserved namespaces that this runner does NOT implement.
+  // Names inside the reserved namespaces that this computer does NOT implement.
   // `fs.readFile` used to sit here and stopped qualifying once the file-editor
   // ops were routed — an unimplemented-method fixture has to be a method that
   // stays unimplemented, or the test quietly starts asserting a zod parse error.
@@ -45,7 +45,7 @@ describe('createHubRequestHandler dispatch table', () => {
       (e: unknown) => e
     )
     expect(err).toBeInstanceOf(RpcError)
-    expect((err as RpcError).code).toBe(RunnerTransportErrorCodes.unimplemented)
+    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
     expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
   })
 
@@ -53,15 +53,15 @@ describe('createHubRequestHandler dispatch table', () => {
     const { handle } = makeDispatch()
     // /tmp is inside allowedRoots but not a git repo → resolves to
     // { isGitRepo: false } (the key the SHARED result schema declares; this test
-    // used to assert the runner's own divergent `isRepo`).
+    // used to assert the computer's own divergent `isRepo`).
     const result = await handle('git.isGitRepo', { path: '/tmp' })
     expect(result).toEqual({ isGitRepo: false })
   })
 
-  it('acks runner.shutdown and then triggers the shutdown callback', async () => {
+  it('acks computer.shutdown and then triggers the shutdown callback', async () => {
     const shutdown = vi.fn()
     const { handle } = makeDispatch(shutdown)
-    const pending = handle('runner.shutdown', { reason: 'maintenance' })
+    const pending = handle('computer.shutdown', { reason: 'maintenance' })
     expect(shutdown).not.toHaveBeenCalled() // ack built before shutdown fires…
     const result = await pending
     expect(result).toEqual({ ok: true })
@@ -72,7 +72,7 @@ describe('createHubRequestHandler dispatch table', () => {
   it('defaults the shutdown reason', async () => {
     const shutdown = vi.fn()
     const { handle } = makeDispatch(shutdown)
-    await handle('runner.shutdown', undefined)
+    await handle('computer.shutdown', undefined)
     await new Promise<void>((resolve) => queueMicrotask(resolve))
     expect(shutdown).toHaveBeenCalledWith('hub-requested')
   })
@@ -83,12 +83,12 @@ describe('createHubRequestHandler dispatch table', () => {
   })
 })
 
-describe('startRunner cert-pin guard', () => {
-  // Loopback port 0 keeps these hermetic: startRunner calls dialer.start() (a real
+describe('startComputer cert-pin guard', () => {
+  // Loopback port 0 keeps these hermetic: startComputer calls dialer.start() (a real
   // outbound connect attempt), so a routable/public-looking host would do real
   // network I/O. 127.0.0.1:0 fails fast + unref'd → no hang, no external traffic.
   it('feeds the pin to the dialer on a wss:// hub url (constructor accepts it)', async () => {
-    const handle = startRunner(
+    const handle = startComputer(
       {
         ...testConfig,
         hubUrl: 'wss://127.0.0.1:0/computers',
@@ -106,13 +106,13 @@ describe('startRunner cert-pin guard', () => {
   })
 
   it('does NOT throw when a token-decoded pin lands on a ws:// hub url (guard drops it)', async () => {
-    // A pin reaching startRunner on a ws:// url can only be the join-token-decoded
-    // fingerprint (an EXPLICIT env/file pin on ws:// already fails in loadRunnerConfig).
+    // A pin reaching startComputer on a ws:// url can only be the join-token-decoded
+    // fingerprint (an EXPLICIT env/file pin on ws:// already fails in loadComputerConfig).
     // The guard must strip it so a ws token stays usable for loopback/dev — without
     // it the HubDialer constructor throws "pinnedCertSha256 requires a wss:// hub url".
-    let handle: ReturnType<typeof startRunner> | null = null
+    let handle: ReturnType<typeof startComputer> | null = null
     expect(() => {
-      handle = startRunner(
+      handle = startComputer(
         {
           ...testConfig,
           hubUrl: 'ws://127.0.0.1:0/computers',
@@ -121,6 +121,6 @@ describe('startRunner cert-pin guard', () => {
         { credentialStore: memoryStore() }
       )
     }).not.toThrow()
-    if (handle) await (handle as ReturnType<typeof startRunner>).stop()
+    if (handle) await (handle as ReturnType<typeof startComputer>).stop()
   })
 })

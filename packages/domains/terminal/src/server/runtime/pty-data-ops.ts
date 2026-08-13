@@ -8,7 +8,7 @@ import type { TerminalMode, TerminalModeInfo, UsageProviderConfig } from '@slayz
 import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
 
 /**
- * Hub/runner split (wave 1): the PTY runtime's DB touchpoints, pulled behind
+ * Hub/computer split (wave 1): the PTY runtime's DB touchpoints, pulled behind
  * ops interfaces so the exec-side call sites (pty-manager, and pty-store's
  * spawn paths) reference an interface instead of raw SQL. The `createDb*`
  * factories are the default implementations — they run the SAME queries the
@@ -20,7 +20,7 @@ import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
  * the raw db — its `PtySpawnLookups` impl is db-backed and built once at
  * composition (`createPtyOps`), and `terminal_modes` CRUD stays on raw db by
  * design (hub data, not exec-side runtime state). Wave 2 adds the lookups
- * injection seam when the runner actually loses its local DB.
+ * injection seam when the computer actually loses its local DB.
  */
 
 /**
@@ -45,8 +45,8 @@ export interface PtySessionLedger {
   /**
    * Task-scoped MCP env for agent subprocesses (SLAYZONE_TASK_ID etc.).
    *
-   * `remote` (hub/runner split, wave 3): a resolved hub target when this
-   * session's pty runs on a runner — replaces the loopback hook URL/MCP port
+   * `remote` (hub/computer split, wave 3): a resolved hub target when this
+   * session's pty runs on a computer — replaces the loopback hook URL/MCP port
    * with the hub's endpoint + a scoped bearer. Absent/`null` (every local
    * spawn, today's only path) => byte-identical loopback env.
    */
@@ -77,12 +77,12 @@ export interface PtySpawnLookups {
   getTerminalMode(id: string): Promise<TerminalModeInfo | null>
   getTaskProjectId(taskId: string): Promise<string | null>
   /**
-   * Hub/runner split (wave 2, Model A): the runner a task's PTY should spawn on,
+   * Hub/computer split (wave 2, Model A): the computer a task's PTY should spawn on,
    * or `null` for hub-local (today's only path). The db default ALWAYS returns
-   * null; a later wave injects a runner-aware impl via `setPtySpawnLookups` so
+   * null; a later wave injects a computer-aware impl via `setPtySpawnLookups` so
    * `ptyCreate` can route the spawn (and gate warm-pool adoption to local).
    */
-  resolveRunnerId(taskId: string): Promise<string | null>
+  resolveComputerId(taskId: string): Promise<string | null>
 }
 
 /**
@@ -153,8 +153,8 @@ export function createDbPtySpawnLookups(db: SlayzoneDb): PtySpawnLookups {
         | undefined
       return row?.project_id ?? null
     },
-    // Hub-local by default — no runner assignment exists yet. Wave 2's
-    // runner-aware lookups impl overrides this via `setPtySpawnLookups`.
-    resolveRunnerId: async () => null
+    // Hub-local by default — no computer assignment exists yet. Wave 2's
+    // computer-aware lookups impl overrides this via `setPtySpawnLookups`.
+    resolveComputerId: async () => null
   }
 }

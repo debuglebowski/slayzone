@@ -18,13 +18,13 @@ export interface ProjectPathGuardApi {
 // the project at a new directory.
 //
 // The probe goes through `workspace.pathExists`, which runs on the machine that
-// owns the project's files (its runner), not on whichever hub the client happens
+// owns the project's files (its computer), not on whichever hub the client happens
 // to be talking to. The old `app.files.pathExists` always answered about the
-// hub's own disk, so a project on a runner was reported missing whenever the two
+// hub's own disk, so a project on a computer was reported missing whenever the two
 // were different machines — the `enabled` gate existed only to suppress that
 // wrong answer, and is gone now that the answer is right.
 //
-// `reachable: false` (runner offline) is deliberately NOT "missing": we could not
+// `reachable: false` (computer offline) is deliberately NOT "missing": we could not
 // ask, which is a different thing to tell the user than "your path is gone".
 export function useProjectPathGuard(
   selectedProjectId: string,
@@ -66,7 +66,7 @@ export function useProjectPathGuard(
   // open flag and the apply step, and the shell renders `<WorkspaceDirPicker>`
   // against them. It used to call the native dialog straight from here, which is
   // exactly the bug: that dialog browses the DESKTOP, and the path it returned
-  // need not exist on the runner that owns the project.
+  // need not exist on the computer that owns the project.
   const [fixPickerOpen, setFixPickerOpen] = useState(false)
   const handleFixProjectPath = useCallback(async (): Promise<void> => {
     setFixPickerOpen(true)

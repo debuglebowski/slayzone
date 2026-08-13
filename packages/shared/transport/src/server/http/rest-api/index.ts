@@ -2,7 +2,7 @@ import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { registerNotifyRoute } from './notify'
 import { registerAgentHookRoute } from './agent-hook'
-// Re-exported so the hub composition root can feed a runner-RELAYED agent-hook
+// Re-exported so the hub composition root can feed a computer-RELAYED agent-hook
 // envelope (arriving over the ws `event` channel) through the SAME authority as
 // the loopback HTTP route.
 export { processAgentHook } from './agent-hook'
@@ -70,8 +70,8 @@ import { registerTabsCreateRoute } from './tabs/create'
 import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
 import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
-import { registerRunnersJoinTokenRoute } from './computers/join-token'
-import { registerRunnersListRoute } from './computers/list'
+import { registerComputersJoinTokenRoute } from './computers/join-token'
+import { registerComputersListRoute } from './computers/list'
 import { registerHubUsersRoutes } from './hub/users'
 
 export type { RestApiDeps } from './types'
@@ -106,7 +106,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // status name the caller supplies (see tasks/done.ts).
   registerDoneTaskRoute(app, deps)
 
-  // Tasks — CLI-parity read/CRUD surface (hub/runner split wave 1; dark until
+  // Tasks — CLI-parity read/CRUD surface (hub/computer split wave 1; dark until
   // the slay CLI cuts over from direct sqlite reads). ORDER MATTERS: the fixed
   // /api/tasks/search path must register before the /api/tasks/:id matcher.
   registerListTasksRoute(app, deps)
@@ -174,10 +174,10 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Agent sessions (pool: session → bound task resolution for the slay CLI)
   registerResolveSessionTaskRoute(app, deps)
 
-  // Runners (hub/runner split): loopback join-token mint for the MAIN process's
-  // boot-time local-runner auto-enroll. 503 only if the runner init failed.
-  registerRunnersJoinTokenRoute(app, deps)
-  registerRunnersListRoute(app, deps)
+  // Computers (hub/computer split): loopback join-token mint for the MAIN process's
+  // boot-time local-computer auto-enroll. 503 only if the computer init failed.
+  registerComputersJoinTokenRoute(app, deps)
+  registerComputersListRoute(app, deps)
 
   // Hub accounts: loopback-only operator user management (`slay hub users`). The
   // only way to create an account now that public signup is closed. 503 where

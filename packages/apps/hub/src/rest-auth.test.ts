@@ -168,7 +168,7 @@ async function main(): Promise<void> {
   })
 
   await test('the agent-hook route is guarded from the internet', () => {
-    // Local agents post to sidecar loopback; a runner-routed agent posts to the
+    // Local agents post to sidecar loopback; a computer-routed agent posts to the
     // RUNNER's loopback and the envelope is relayed over the authed ws channel —
     // so NO legitimate caller reaches this route over the WAN.
     assertEq(remoteWan('/api/agent-hook'), 'verify', 'agent-hook guarded off-box')
@@ -197,9 +197,9 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('runner join-token stays open (its own loopback guard is the protection)', () => {
+  await test('computer join-token stays open (its own loopback guard is the protection)', () => {
     // The Electron MAIN process mints over loopback with no bearer at boot; a
-    // bearer requirement here would break local-runner auto-enroll on a remote
+    // bearer requirement here would break local-computer auto-enroll on a remote
     // hub. The route itself 403s a non-loopback peer.
     assertEq(remoteWan('/api/computers/join-token'), 'allow', 'join-token exempt')
   })
@@ -393,7 +393,7 @@ async function main(): Promise<void> {
     await test('withRestAuth: a real loopback peer is allowed with no bearer', async () => {
       // No override — the peer address is genuinely 127.0.0.1, proving the
       // loopback bypass works against a live socket (this is the path the
-      // desktop host / supervised runner / in-task `slay` take).
+      // desktop host / supervised computer / in-task `slay` take).
       const h = await mountGate({ required: true, auth, forceOffBox: false })
       try {
         const res = await h.get('/api/tasks')

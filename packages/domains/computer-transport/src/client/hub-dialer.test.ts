@@ -16,7 +16,7 @@ import { createMemoryCredentialStore } from './credential-store'
 import { HubDialer, type HubDialerOptions } from './hub-dialer'
 
 const IDENTITY = {
-  name: 'test-runner',
+  name: 'test-computer',
   platform: 'darwin-arm64',
   version: '0.0.0',
   capabilities: ['pty']
@@ -94,7 +94,7 @@ describe('reconnect with backoff', () => {
     // Share the auth backend state: revived hub must recognize the old key.
     const saved = await store.load()
     revived.auth.byApiKey.set(saved!.apiKey, {
-      runnerId: saved!.runnerId,
+      computerId: saved!.computerId,
       name: IDENTITY.name,
       platform: IDENTITY.platform,
       version: IDENTITY.version,
@@ -105,7 +105,7 @@ describe('reconnect with backoff', () => {
     await vi.advanceTimersByTimeAsync(400)
     const connected = await reconnected
     expect(connected.mode).toBe('hello')
-    expect(connected.runnerId).toBe(saved!.runnerId)
+    expect(connected.computerId).toBe(saved!.computerId)
     // Backoff attempt counter resets after a successful connection.
     const retryAfterSuccessPromise = dialer.events.once('reconnect-scheduled')
     await revived.close()
@@ -133,7 +133,7 @@ describe('reconnect with backoff', () => {
   })
 })
 
-describe('heartbeat-loss detection (runner side)', () => {
+describe('heartbeat-loss detection (computer side)', () => {
   it('tears the socket down and reconnects when the hub stops answering heartbeats', async () => {
     vi.useFakeTimers()
     // Raw ws server that authenticates but swallows heartbeats.
@@ -150,8 +150,8 @@ describe('heartbeat-loss detection (runner side)', () => {
               id: frame.id,
               result:
                 frame.method === 'enroll'
-                  ? { runnerId: 'runner-1', apiKey: 'key-1' }
-                  : { runnerId: 'runner-1' }
+                  ? { computerId: 'computer-1', apiKey: 'key-1' }
+                  : { computerId: 'computer-1' }
             })
           )
         }
@@ -193,7 +193,7 @@ describe('malformed frames from the hub', () => {
     await vi.waitFor(() => expect(parseErrors.length).toBeGreaterThanOrEqual(1))
 
     // Session is still healthy: a hub request round-trips.
-    const pong = await hub.gateway.request<{ ts: number }>(dialer.runnerId!, 'ping')
+    const pong = await hub.gateway.request<{ ts: number }>(dialer.computerId!, 'ping')
     expect(typeof pong.ts).toBe('number')
     expect(dialer.state).toBe('connected')
   })
@@ -231,7 +231,7 @@ describe('wss certificate pinning', () => {
     url: string
     fingerprint: string
   }> {
-    const dir = mkdtempSync(join(tmpdir(), 'runner-tls-'))
+    const dir = mkdtempSync(join(tmpdir(), 'computer-tls-'))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     const { certPem, keyPem } = generateCert(dir)
     const https = createHttpsServer({ cert: certPem, key: keyPem })
@@ -254,7 +254,7 @@ describe('wss certificate pinning', () => {
     dialer.start()
     const connected = await dialer.events.once('connected')
     expect(connected.mode).toBe('enroll')
-    expect(hub.gateway.listRunners()).toHaveLength(1)
+    expect(hub.gateway.listComputers()).toHaveLength(1)
   })
 
   it('refuses the connection when the pin does not match', async () => {
@@ -270,7 +270,7 @@ describe('wss certificate pinning', () => {
     const { error } = await errorEvent
     expect(error.message).toMatch(/fingerprint mismatch/)
     expect(connected).toBe(false)
-    expect(hub.gateway.listRunners()).toHaveLength(0)
+    expect(hub.gateway.listComputers()).toHaveLength(0)
     await dialer.stop()
   })
 

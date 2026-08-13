@@ -2,7 +2,7 @@
  * Address a hub over its REST surface, and report its refusals verbatim.
  *
  * ONE resolver for every command that acts ON a hub rather than on this machine's
- * hub processes — today `slay hub users add|ls|rm` and `slay runner mint`. Both
+ * hub processes — today `slay hub users add|ls|rm` and `slay computer mint`. Both
  * need the identical answer to "which hub, and with what credential", and both
  * need the identical failure wording; two copies would drift the moment one of
  * them learned about a new channel.
@@ -38,10 +38,10 @@ export interface HubRequestTarget {
  *      channels that already exist.
  *   2. Auto-discovery, when exactly ONE hub is running here. Refusing to guess
  *      between several is the point: minting a token on the wrong hub produces a
- *      runner that enrolls somewhere nobody is looking.
+ *      computer that enrolls somewhere nobody is looking.
  *
  * @param what how to name this command family in the ambiguity hint, e.g.
- *             `'hub users …'` or `'runner mint'`.
+ *             `'hub users …'` or `'computer mint'`.
  * @param discover injected so a caller can widen the sweep (the desktop app's
  *             sidecar binds outside the hub port block).
  */

@@ -6,7 +6,7 @@
  * What matters here is not the chrome but the claims it makes: it browses the
  * RUNNER's filesystem (the native dialog browsed the desktop's, which is how a
  * remote task ended up with a path that existed nowhere), it stays inside that
- * runner's jail, and when the jail is empty it says so instead of rendering a
+ * computer's jail, and when the jail is empty it says so instead of rendering a
  * blank list that reads as "this machine has no folders".
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 type Entry = { name: string; path: string; type: 'directory' | 'file'; isGitRepo?: boolean }
 
 let rootsResult: {
-  runnerId: string | null
+  computerId: string | null
   roots: string[]
   home: string | null
   platform: string
@@ -82,7 +82,7 @@ import { WorkspaceDirPicker } from './WorkspaceDirPicker'
 beforeEach(() => {
   rootsError = null
   rootsResult = {
-    runnerId: 'runner-1',
+    computerId: 'computer-1',
     roots: ['/srv/work'],
     home: '/home/deploy',
     platform: 'linux',
@@ -121,7 +121,7 @@ function renderPicker(over: Partial<Parameters<typeof WorkspaceDirPicker>[0]> = 
 
 describe('WorkspaceDirPicker', () => {
   // The jail IS the browsable set. Opening anywhere else would offer paths the
-  // runner then refuses, so the first listing must be a configured root.
+  // computer then refuses, so the first listing must be a configured root.
   it('opens on a configured root and lists only directories', async () => {
     renderPicker()
     await waitFor(() => expect(listDirSpy).toHaveBeenCalled())
@@ -157,7 +157,7 @@ describe('WorkspaceDirPicker', () => {
   })
 
   // A caller's remembered path can belong to a different machine entirely. Opening
-  // there would ask the runner to list something it will refuse.
+  // there would ask the computer to list something it will refuse.
   it('ignores a defaultPath that lies outside the target’s roots', async () => {
     renderPicker({ defaultPath: '/Users/kalle/dev/thing' })
     await waitFor(() => expect(listDirSpy).toHaveBeenCalled())
@@ -186,7 +186,7 @@ describe('WorkspaceDirPicker', () => {
     expect(onSelect).toHaveBeenCalledWith('/srv/work/typed')
   })
 
-  it('creates a folder on the runner and moves into it', async () => {
+  it('creates a folder on the computer and moves into it', async () => {
     renderPicker({ allowCreate: true })
     await waitFor(() => expect(screen.getByTestId('workspace-dir-new-folder')).toBeDefined())
     await act(async () => {
@@ -211,7 +211,7 @@ describe('WorkspaceDirPicker', () => {
     expect(screen.queryByTestId('workspace-dir-new-folder')).toBeNull()
   })
 
-  // A runner with no allowedRoots refuses every filesystem call. An empty list
+  // A computer with no allowedRoots refuses every filesystem call. An empty list
   // would read as "this machine has no folders" — a different, wrong claim.
   it('explains an empty jail instead of rendering an empty list', async () => {
     rootsResult = { ...rootsResult, roots: [] }
@@ -222,9 +222,9 @@ describe('WorkspaceDirPicker', () => {
   })
 
   it('surfaces an unreachable machine as an error, not as an empty folder', async () => {
-    rootsError = new Error('runner offline')
+    rootsError = new Error('computer offline')
     renderPicker()
     await waitFor(() => expect(screen.getByTestId('workspace-dir-picker-error')).toBeDefined())
-    expect(screen.getByTestId('workspace-dir-picker-error').textContent).toContain('runner offline')
+    expect(screen.getByTestId('workspace-dir-picker-error').textContent).toContain('computer offline')
   })
 })

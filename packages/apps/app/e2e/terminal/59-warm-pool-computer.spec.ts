@@ -3,19 +3,19 @@
  *
  * The pool pre-boots a real agent, so before this it was the last path by which
  * the HUB could start an agent itself — and `pty-store` reached for it precisely
- * when no runner resolved, i.e. the case that is supposed to raise "no runner
+ * when no computer resolved, i.e. the case that is supposed to raise "no computer
  * available". It is opt-in (`terminal_prewarm_enabled`, default off), which is
  * why it had no e2e coverage at all and the violation went unnoticed.
  *
  * These tests assert the invariant end-to-end: with pre-warm ON, the warm agent is
- * spawned through the runner, and adopting it produces a working terminal.
+ * spawned through the computer, and adopting it produces a working terminal.
  */
 // `node:sqlite`, not better-sqlite3: the latter's native binding is compiled for
-// Electron's ABI and will not load in the Playwright runner's plain node.
+// Electron's ABI and will not load in the Playwright computer's plain node.
 import { DatabaseSync } from 'node:sqlite'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH, cliDbPath } from '../fixtures/electron'
 
-test.describe('Warm pool (runner-hosted)', () => {
+test.describe('Warm pool (computer-hosted)', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
   })
@@ -30,7 +30,7 @@ test.describe('Warm pool (runner-hosted)', () => {
     )
   })
 
-  test('warm agent is spawned on a runner, never in the hub process', async ({
+  test('warm agent is spawned on a computer, never in the hub process', async ({
     mainWindow,
     electronApp
   }) => {
@@ -71,8 +71,8 @@ test.describe('Warm pool (runner-hosted)', () => {
     //
     // Reaching this state requires `backend.warmSpawn` to have RESOLVED, which only
     // the routing backend implements: the local backend has no warm pool, so a
-    // pooled row cannot exist unless a runner accepted the spawn. That the runnerId
-    // is threaded correctly, and that nothing warms when no runner resolves, are
+    // pooled row cannot exist unless a computer accepted the spawn. That the computerId
+    // is threaded correctly, and that nothing warms when no computer resolves, are
     // asserted directly in warm-process-manager.test.ts.
     await expect
       .poll(

@@ -1,26 +1,26 @@
 /**
- * `slay runner` — install and manage runners on THIS machine.
+ * `slay computer` — install and manage computers on THIS machine.
  *
- * A runner is an execution node: it dials OUT to a hub over a pinned `wss://` link
+ * A computer is an execution node: it dials OUT to a hub over a pinned `wss://` link
  * using a join token, then runs terminals/agents/git locally. `create` hands it to
  * the OS supervisor (launchd/systemd --user) so a crash or a logout doesn't silently
  * end it — the same guarantee `slay hub create` gives, with the same verbs.
  *
  * WHY THIS IS NOT A COPY OF `slay hub`. A hub BINDS a port and answers `/health`, so
  * `hub ls`/`stop`/`--hub` all work by probing the hub port block — identity comes off
- * the wire. A runner binds nothing. There is no port to probe and no `/health` to ask,
- * so a runner's machine-side identity is its UNIT FILE, and "is it up" is a question
+ * the wire. A computer binds nothing. There is no port to probe and no `/health` to ask,
+ * so a computer's machine-side identity is its UNIT FILE, and "is it up" is a question
  * only the supervisor that owns it can answer (`supervisorStatus`). That is why:
- *   - every command addresses a runner by NAME only (never a port);
+ *   - every command addresses a computer by NAME only (never a port);
  *   - `ls` enumerates unit files rather than sweeping ports, which also makes it the
- *     `hub registered` equivalent — a runner that installed but never enrolled shows
+ *     `hub registered` equivalent — a computer that installed but never enrolled shows
  *     up, which is precisely the invisible-crash-loop case worth surfacing;
  *   - `stop` cannot "confirm the port closed"; it confirms with the supervisor.
  *
- * WHERE THE SECRETS GO. The join token is written to `<ROOT>/runner.config.json` (0600) and
- * never into the unit file (0644, world-readable). The runner's display name and
+ * WHERE THE SECRETS GO. The join token is written to `<ROOT>/computer.config.json` (0600) and
+ * never into the unit file (0644, world-readable). The computer's display name and
  * filesystem path-jail likewise have no env channel at all (see
- * `runner/src/config.ts`), so runner.config.json is the only channel for them too — the unit
+ * `computer/src/config.ts`), so computer.config.json is the only channel for them too — the unit
  * pins `SLAYZONE_ROOT` and nothing else.
  */
 import { spawn } from 'node:child_process'
@@ -28,13 +28,13 @@ import { existsSync, openSync, rmSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
-import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
+import { isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { discoverHubs } from '@slayzone/platform/hub-discovery'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
-  loadRunnerConfigFile,
-  updateRunnerConfigFile
+  loadComputerConfigFile,
+  updateComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import {
   detectBackendWithReason,
@@ -50,10 +50,10 @@ import {
 import {
   configPathFor,
   isUnknown,
-  listRunners,
-  resolveRunner,
-  type RunnerFacts
-} from './runner-identity'
+  listComputers,
+  resolveComputer,
+  type ComputerFacts
+} from './computer-identity'
 import {
   ensureLogDir,
   fail,
@@ -72,18 +72,18 @@ import {
   supervisorStopQuiet
 } from '../service'
 
-const RUNNER_PACKAGE = servicePackage('runner')
+const RUNNER_PACKAGE = servicePackage('computer')
 
-/** How long to wait for a fresh runner to reach the hub before giving up. */
+/** How long to wait for a fresh computer to reach the hub before giving up. */
 const ENROLL_TIMEOUT_MS = 30_000
 
 /**
- * The runner's own log line proving it reached the hub.
+ * The computer's own log line proving it reached the hub.
  *
- * `main.ts` logs `connected to hub {"runnerId":…,"mode":"enroll"|"hello"}` from the
+ * `main.ts` logs `connected to hub {"computerId":…,"mode":"enroll"|"hello"}` from the
  * dialer's `connected` event: `enroll` on first contact (the join token was accepted
  * and credentials were minted), `hello` when it reconnected with stored credentials.
- * Either one means the link is live, which is the only success signal a runner has —
+ * Either one means the link is live, which is the only success signal a computer has —
  * unlike a hub, there is no port to probe. `publish-npm.sh` asserts on the same line.
  */
 const CONNECTED_RE = /"mode":"(enroll|hello)"/
@@ -92,8 +92,8 @@ const CONNECTED_RE = /"mode":"(enroll|hello)"/
  * Say so when a token's dial target names the hub's OWN machine.
  *
  * A hub in local mode embeds `ws://<loopback>:<port>/computers` in every token it
- * mints. That is correct for a co-located runner — the desktop app's auto-enrolled
- * one, or a `create` run on the hub box — and useless anywhere else: the runner
+ * mints. That is correct for a co-located computer — the desktop app's auto-enrolled
+ * one, or a `create` run on the hub box — and useless anywhere else: the computer
  * dials its own loopback and silently never connects.
  *
  * Deliberately a WARNING, not a failure, and phrased conditionally: this command
@@ -101,10 +101,10 @@ const CONNECTED_RE = /"mode":"(enroll|hello)"/
  * is both legitimate and the common one. Failing would break it.
  */
 function warnIfLoopbackHub(hubUrl: string): void {
-  if (!isLoopbackRunnerUrl(hubUrl)) return
+  if (!isLoopbackComputerUrl(hubUrl)) return
   console.log('')
   console.log(
-    `Note: ${hubUrl} is a loopback address, so this token only works for a runner on the\n` +
+    `Note: ${hubUrl} is a loopback address, so this token only works for a computer on the\n` +
       `hub's OWN machine. On any other machine it would dial that machine's loopback and\n` +
       `never connect. For a hub other machines can reach, recreate it with\n` +
       `\`slay hub create <name> --public-address <host:port>\`.`
@@ -136,81 +136,81 @@ export function runCreateRollback(): void {
 }
 
 /**
- * Resolve a runner the machine knows about in ANY way, or exit.
+ * Resolve a computer the machine knows about in ANY way, or exit.
  *
  * Replaces the old unit-file-only lookup. Refusing on a missing unit while the root
- * still held a runner is what produced the unrecoverable state; the only honest
+ * still held a computer is what produced the unrecoverable state; the only honest
  * "does not exist" is no source knowing the name at all (see
- * {@link runnerIdentity.isUnknown}).
+ * {@link computerIdentity.isUnknown}).
  */
-async function requireKnown(name: string, backend: ServiceBackend): Promise<RunnerFacts> {
-  const facts = await resolveRunner(name, backend)
+async function requireKnown(name: string, backend: ServiceBackend): Promise<ComputerFacts> {
+  const facts = await resolveComputer(name, backend)
   if (!isUnknown(facts)) return facts
-  const { runners } = await listRunners(backend)
-  const known = runners.map((r) => r.name)
+  const { computers } = await listComputers(backend)
+  const known = computers.map((r) => r.name)
   fail(
-    `No runner named "${name}" on this machine.\n` +
+    `No computer named "${name}" on this machine.\n` +
       (known.length > 0
-        ? `Known runners: ${known.join(', ')}`
-        : 'No runners here. Create one with `slay runner create <name> --token <token>`.')
+        ? `Known computers: ${known.join(', ')}`
+        : 'No computers here. Create one with `slay computer create <name> --token <token>`.')
   )
 }
 
 /**
- * The root of a runner we are about to act on, or exit.
+ * The root of a computer we are about to act on, or exit.
  *
- * A runner known ONLY to the hub (enrolled elsewhere, or its root deleted) has no
+ * A computer known ONLY to the hub (enrolled elsewhere, or its root deleted) has no
  * local root, so there is nothing here to start or read logs from. That is a real
  * state worth naming rather than crashing on a null path.
  */
-function requireRoot(facts: RunnerFacts, verb: string): string {
+function requireRoot(facts: ComputerFacts, verb: string): string {
   if (facts.root) return facts.root
   fail(
     `"${facts.name}" is enrolled on the hub but has no installation on this machine, ` +
       `so there is nothing to ${verb}.\n` +
-      `Install it here with \`slay runner create ${facts.name} --token <token>\`, or ` +
+      `Install it here with \`slay computer create ${facts.name} --token <token>\`, or ` +
       `run the command on the machine that hosts it.`
   )
 }
 
 /**
- * Resolve a registered runner's root, or exit with the standard not-found message.
+ * Resolve a registered computer's root, or exit with the standard not-found message.
  *
  * Still used where a UNIT is genuinely required (`restart` rewrites one). Everything
- * that can act on a partially-present runner uses {@link requireKnown} instead.
+ * that can act on a partially-present computer uses {@link requireKnown} instead.
  */
 function requireRegistered(name: string, backend: ServiceBackend): { root: string } {
   if (backend === 'none') {
     fail(
-      `This platform has no user service manager, so runners cannot be registered ` +
+      `This platform has no user service manager, so computers cannot be registered ` +
         `here. Run one in the foreground instead:\n  npx ${RUNNER_PACKAGE}`
     )
   }
-  if (!existsSync(unitPath('runner', name, backend))) {
-    const known = listRegisteredUnits('runner', backend).map((u) => u.name)
+  if (!existsSync(unitPath('computer', name, backend))) {
+    const known = listRegisteredUnits('computer', backend).map((u) => u.name)
     fail(
-      `No runner named "${name}" on this machine.\n` +
+      `No computer named "${name}" on this machine.\n` +
         (known.length > 0
-          ? `Registered runners: ${known.join(', ')}`
-          : 'No runners are registered. Create one with `slay runner create <name> --token <token>`.')
+          ? `Registered computers: ${known.join(', ')}`
+          : 'No computers are registered. Create one with `slay computer create <name> --token <token>`.')
     )
   }
-  const root = readUnitRoot('runner', name, backend)
+  const root = readUnitRoot('computer', name, backend)
   if (!root) {
     fail(
       `The unit for "${name}" does not record a root — it may be hand-edited. ` +
-        `Remove it with \`slay runner rm ${name}\` and create it again.`
+        `Remove it with \`slay computer rm ${name}\` and create it again.`
     )
   }
   return { root }
 }
 
 /**
- * Poll the runner's captured output until it reports a live hub link.
+ * Poll the computer's captured output until it reports a live hub link.
  *
  * `backend` decides WHERE that output is: a systemd unit logs to journald and writes
  * no files at all, so reading the log dir would wait out the full timeout on a
- * runner that connected immediately.
+ * computer that connected immediately.
  */
 async function waitForConnected(
   root: string,
@@ -218,34 +218,34 @@ async function waitForConnected(
   backend: ServiceBackend,
   name: string
 ): Promise<boolean> {
-  const unit = backend === 'systemd' ? systemdUnitName('runner', name) : undefined
+  const unit = backend === 'systemd' ? systemdUnitName('computer', name) : undefined
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if (CONNECTED_RE.test(readServiceLogTail('runner', root, 200, unit))) return true
+    if (CONNECTED_RE.test(readServiceLogTail('computer', root, 200, unit))) return true
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 300))
   }
 }
 
 /**
- * Bring a runner up: resolve its binary, write/refresh its unit, hand it to the
+ * Bring a computer up: resolve its binary, write/refresh its unit, hand it to the
  * supervisor, and wait until it reports a live hub link.
  *
- * Shared by `create` (first time) and `start` (an existing, stopped runner) so the
+ * Shared by `create` (first time) and `start` (an existing, stopped computer) so the
  * two cannot drift on the parts that must match — the interpreter pairing, the log
  * directory, the failure reporting. `creating` only affects wording and whether a
  * failed boot rolls the registration back.
  */
-async function launchRunner(args: {
+async function launchComputer(args: {
   name: string
   root: string
   backend: ServiceBackend
   creating: boolean
 }): Promise<void> {
   const { name, root, backend, creating } = args
-  const bin = resolveServiceBin('runner')
-  const logDir = ensureLogDir('runner', root)
-  const logs = serviceLogPaths('runner', root)
+  const bin = resolveServiceBin('computer')
+  const logDir = ensureLogDir('computer', root)
+  const logs = serviceLogPaths('computer', root)
 
   if (backend === 'none') {
     // No user-level supervisor (Windows today). Background it anyway, but never let
@@ -258,10 +258,10 @@ async function launchRunner(args: {
       env: {
         ...process.env,
         SLAYZONE_ROOT: root,
-        // A detached runner has no TTY, but be explicit: the first-run prompt must
+        // A detached computer has no TTY, but be explicit: the first-run prompt must
         // never block a spawn nobody is watching.
         SLAYZONE_NONINTERACTIVE: '1',
-        // Same interpreter requirement as the unit path: a dev-tree runner needs
+        // Same interpreter requirement as the unit path: a dev-tree computer needs
         // ELECTRON_RUN_AS_NODE or its Electron-ABI natives fail to load.
         ...(bin.env ?? {})
       }
@@ -269,20 +269,20 @@ async function launchRunner(args: {
     child.unref()
     if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
       // Same all-or-nothing rule as the supervised path: a first boot that never
-      // reached a hub must not leave root state behind claiming this runner exists.
+      // reached a hub must not leave root state behind claiming this computer exists.
       if (creating) runCreateRollback()
       failWithLog(
-        'runner',
+        'computer',
         name,
         logs.out,
         `did not reach its hub within ${ENROLL_TIMEOUT_MS / 1000}s`
       )
     }
-    console.log(`Runner "${name}" started (pid ${child.pid ?? '?'}) and reached its hub.`)
+    console.log(`Computer "${name}" started (pid ${child.pid ?? '?'}) and reached its hub.`)
     console.log(`  Root:  ${shortenPath(root)}`)
     console.log(`  Logs:  ${shortenPath(logDir)}`)
     console.log(
-      'Note: this platform has no user service manager, so the runner will NOT restart ' +
+      'Note: this platform has no user service manager, so the computer will NOT restart ' +
         'if it crashes, and will not come back after a reboot.'
     )
     return
@@ -290,7 +290,7 @@ async function launchRunner(args: {
 
   const writtenUnitPath = writeUnit(
     {
-      kind: 'runner',
+      kind: 'computer',
       name,
       root,
       command: bin.command,
@@ -302,18 +302,18 @@ async function launchRunner(args: {
   )
   // Say what is happening BEFORE the wait: registration is a real side effect, and
   // the wait can take seconds. Silence here reads as "nothing happened" while the
-  // supervisor may already be crash-looping the runner.
+  // supervisor may already be crash-looping the computer.
   if (creating) console.log(`Registered ${writtenUnitPath}`)
-  console.log(`Starting runner "${name}" (${RUNNER_PACKAGE}@${bin.version})…`)
+  console.log(`Starting computer "${name}" (${RUNNER_PACKAGE}@${bin.version})…`)
   try {
-    supervisorStart('runner', backend, name, writtenUnitPath)
+    supervisorStart('computer', backend, name, writtenUnitPath)
   } catch (e) {
-    // The supervisor refused. Never leave a unit file behind for a runner that was
-    // never started — `ls` would list a runner that does not exist. The config
+    // The supervisor refused. Never leave a unit file behind for a computer that was
+    // never started — `ls` would list a computer that does not exist. The config
     // written earlier in this same `create` goes with it (runCreateRollback), or the
-    // next `create` would meet an occupied root for a runner that never existed.
+    // next `create` would meet an occupied root for a computer that never existed.
     if (creating) {
-      removeUnit('runner', name, backend)
+      removeUnit('computer', name, backend)
       runCreateRollback()
     }
     if (!(e instanceof SupervisorError)) throw e
@@ -322,38 +322,38 @@ async function launchRunner(args: {
     // rather than echoing "Command failed".
     const noBus = /Failed to connect to bus|No medium found/i.test(e.output)
     fail(
-      `Could not register runner "${name}" with ${backend}.\n\n` +
+      `Could not register computer "${name}" with ${backend}.\n\n` +
         `  ${e.command}\n  ${e.output || '(no output)'}\n\n` +
         (noBus
           ? `systemd has no user session bus for this account, so \`systemctl --user\` ` +
             `cannot work. Enable a persistent user manager:\n` +
             `  sudo loginctl enable-linger ${process.env.USER ?? '<user>'}\n` +
             `then log out and back in, and retry. If this account is not meant to have ` +
-            `one (a container, or a root-only box), run the runner under the system ` +
+            `one (a container, or a root-only box), run the computer under the system ` +
             `manager or in the foreground instead:\n` +
             `  npx ${RUNNER_PACKAGE}\n`
           : '')
     )
   }
 
-  // WAIT FOR ENROLLMENT, not merely for a live process. A runner with a bad token
+  // WAIT FOR ENROLLMENT, not merely for a live process. A computer with a bad token
   // starts fine, fails auth, and exits non-zero — which the supervisor then retries
   // forever. Reporting success on "the process exists" would hand the operator a
-  // runner that never does any work.
+  // computer that never does any work.
   if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
     if (creating) {
       // A failed FIRST boot must not leave a registered, crash-looping unit behind:
       // the supervisor would retry it forever, invisibly, and the operator was given
-      // no working runner. An existing runner's unit is left alone — the operator may
+      // no working computer. An existing computer's unit is left alone — the operator may
       // want to fix its config and `start` again.
-      supervisorStop('runner', backend, name)
-      removeUnit('runner', name, backend)
+      supervisorStop('computer', backend, name)
+      removeUnit('computer', name, backend)
       runCreateRollback()
     } else {
-      supervisorStop('runner', backend, name)
+      supervisorStop('computer', backend, name)
     }
     failWithLog(
-      'runner',
+      'computer',
       name,
       logs.err,
       creating
@@ -362,14 +362,14 @@ async function launchRunner(args: {
     )
   }
 
-  const status = supervisorStatus('runner', backend, name)
+  const status = supervisorStatus('computer', backend, name)
   console.log(
-    `Runner "${name}" running${status.pid ? ` (pid ${status.pid})` : ''} and connected to its hub.`
+    `Computer "${name}" running${status.pid ? ` (pid ${status.pid})` : ''} and connected to its hub.`
   )
   console.log(`  Root:  ${shortenPath(root)}`)
   console.log(`  Logs:  ${shortenPath(logDir)}`)
   console.log(`  Unit:  ${writtenUnitPath}`)
-  console.log(`  Runner: ${RUNNER_PACKAGE}@${bin.version}`)
+  console.log(`  Computer: ${RUNNER_PACKAGE}@${bin.version}`)
   // State exactly what the supervisor guarantees. A user agent starts at LOGIN, not
   // at boot — claiming "survives reboot" would be wrong.
   console.log('Restarts automatically if it crashes, and starts again when you log in.')
@@ -383,30 +383,30 @@ async function waitForStopped(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if (!supervisorStatus('runner', backend, name).running) return true
+    if (!supervisorStatus('computer', backend, name).running) return true
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 250))
   }
 }
 
-export function runnerCommand(): Command {
-  const cmd = new Command('runner')
-    .description('Run and manage SlayZone runners on this machine')
+export function computerCommand(): Command {
+  const cmd = new Command('computer')
+    .description('Run and manage SlayZone computers on this machine')
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
 
-  // slay runner mint [label] — ask a HUB for an enrollment token.
+  // slay computer mint [label] — ask a HUB for an enrollment token.
   //
   // The only verb here whose subject is a hub rather than this machine, and that is
   // unavoidable: a join token can only be minted by the hub it points at (it embeds
   // that hub's dial URL + cert fingerprint), so WHICH HUB A RUNNER CONNECTS TO is
-  // decided here, not by `create`. It lives under `runner` because the thing being
-  // created is a runner's credential; addressing follows the ambient hub target
-  // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging runner
+  // decided here, not by `create`. It lives under `computer` because the thing being
+  // created is a computer's credential; addressing follows the ambient hub target
+  // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging computer
   // mint` reads the same as every other hub-targeted command.
   cmd
     .command('mint [label]')
-    .description('Mint a runner enrollment token on a hub (see `slay hub current`)')
+    .description('Mint a computer enrollment token on a hub (see `slay hub current`)')
     .option('--ttl <minutes>', 'Token lifetime in minutes', '15')
     .option('--json', 'Output as JSON')
     .action(async (label: string | undefined, opts: { ttl: string; json?: boolean }) => {
@@ -414,13 +414,13 @@ export function runnerCommand(): Command {
       if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) {
         fail(`Invalid --ttl ${opts.ttl} — expected a positive number of minutes.`)
       }
-      const target = await resolveHubRequestTarget('runner mint', discoverHubs)
+      const target = await resolveHubRequestTarget('computer mint', discoverHubs)
       const minted = await hubRequest<{ token: string; hubUrl: string }>({
         target,
         path: '/api/computers/join-token',
         method: 'POST',
         body: {
-          label: label ?? 'runner',
+          label: label ?? 'computer',
           ttlMs: Math.round(ttlMinutes * 60_000)
         },
         unwrap: 'raw',
@@ -433,7 +433,7 @@ export function runnerCommand(): Command {
             `No account yet? Create one ON the hub machine: slay hub users add <email>`,
           403:
             `This hub only mints join tokens for callers on its own machine.\n` +
-            `Run \`slay runner mint\` there, or put the hub in remote mode (` +
+            `Run \`slay computer mint\` there, or put the hub in remote mode (` +
             `\`slay hub create --public-address <host:port>\`) so it can authenticate you.`
         }
       })
@@ -446,48 +446,48 @@ export function runnerCommand(): Command {
       console.log(`Token: ${minted.token}`)
       console.log('')
       console.log(`Expires in ${ttlMinutes} minute${ttlMinutes === 1 ? '' : 's'}, single use.`)
-      console.log('Install a runner with it:')
-      console.log(`  slay runner create ${label ?? '<name>'} --token ${minted.token}`)
+      console.log('Install a computer with it:')
+      console.log(`  slay computer create ${label ?? '<name>'} --token ${minted.token}`)
       // Say this at the EARLIEST point a loopback token exists. Waiting until
-      // `runner create` means the operator has already carried a dead token to
+      // `computer create` means the operator has already carried a dead token to
       // another machine before anything mentions it.
       warnIfLoopbackHub(minted.hubUrl)
     })
 
-  // slay runner ls — every source that knows about a runner, unioned. See
-  // runner-identity.ts for why the unit file could never be the registry on its own.
+  // slay computer ls — every source that knows about a computer, unioned. See
+  // computer-identity.ts for why the unit file could never be the registry on its own.
   cmd
     .command('ls')
-    .description('List the runners this machine knows about')
+    .description('List the computers this machine knows about')
     .option('--json', 'Output as JSON')
     .action(async (opts: { json?: boolean }) => {
       const backend = resolveBackend()
-      const { runners, hubReachable } = await listRunners(backend)
+      const { computers, hubReachable } = await listComputers(backend)
       if (opts.json) {
-        console.log(JSON.stringify(runners, null, 2))
+        console.log(JSON.stringify(computers, null, 2))
         return
       }
-      if (runners.length === 0) {
-        console.log('No runners here. Create one with `slay runner create <name> --token <token>`.')
+      if (computers.length === 0) {
+        console.log('No computers here. Create one with `slay computer create <name> --token <token>`.')
         // Only mention supervision when it is actually missing — on a healthy box
         // this is noise, and the reason names the fix that applies to THIS machine.
         if (backend === 'none')
           console.log(`\n${explainNoBackend(detectBackendWithReason().reason)}`)
         return
       }
-      const state = (r: RunnerFacts): string => {
+      const state = (r: ComputerFacts): string => {
         if (r.running) return 'running'
         if (r.supervised) return 'stopped'
-        // Installed with no unit: a real runner the supervisor does not know about.
+        // Installed with no unit: a real computer the supervisor does not know about.
         // Naming it "stopped" would imply `start` merely resumes it, when `start`
         // actually has to register it first.
         return 'unmanaged'
       }
-      const enrolled = (r: RunnerFacts): string =>
+      const enrolled = (r: ComputerFacts): string =>
         !hubReachable && !r.enrolled ? '?' : r.enrolled ? 'yes' : 'no'
-      const nameW = Math.max(4, ...runners.map((r) => r.name.length))
-      const rootW = Math.max(4, ...runners.map((r) => (r.root ? shortenPath(r.root).length : 1)))
-      const hubW = Math.max(3, ...runners.map((r) => (r.hubUrl ?? '-').length))
+      const nameW = Math.max(4, ...computers.map((r) => r.name.length))
+      const rootW = Math.max(4, ...computers.map((r) => (r.root ? shortenPath(r.root).length : 1)))
+      const hubW = Math.max(3, ...computers.map((r) => (r.hubUrl ?? '-').length))
       console.log(
         `${'NAME'.padEnd(nameW)}  ${'STATE'.padEnd(9)}  ${'ROOT'.padEnd(rootW)}  ` +
           `${'HUB'.padEnd(hubW)}  ENROLLED`
@@ -496,7 +496,7 @@ export function runnerCommand(): Command {
         `${'-'.repeat(nameW)}  ${'-'.repeat(9)}  ${'-'.repeat(rootW)}  ${'-'.repeat(hubW)}  ` +
           `${'-'.repeat(8)}`
       )
-      for (const r of runners) {
+      for (const r of computers) {
         console.log(
           `${r.name.padEnd(nameW)}  ${state(r).padEnd(9)}  ` +
             `${(r.root ? shortenPath(r.root) : '?').padEnd(rootW)}  ` +
@@ -506,31 +506,31 @@ export function runnerCommand(): Command {
       // Only explain the "?" when one is actually printed. Saying "ENROLLED is
       // unknown" under a table whose every row reads `yes` contradicts the table —
       // a local credential file answers the question without any hub.
-      if (!hubReachable && runners.some((r) => enrolled(r) === '?')) {
+      if (!hubReachable && computers.some((r) => enrolled(r) === '?')) {
         console.log(
-          `\nNo hub could be reached, so ENROLLED is "?" for runners with no local ` +
+          `\nNo hub could be reached, so ENROLLED is "?" for computers with no local ` +
             `credentials — they may or may not be enrolled.`
         )
       }
-      const unmanaged = runners.filter((r) => state(r) === 'unmanaged')
+      const unmanaged = computers.filter((r) => state(r) === 'unmanaged')
       if (unmanaged.length > 0 && backend !== 'none') {
         console.log(
           `\n${unmanaged.map((r) => `"${r.name}"`).join(', ')} ${unmanaged.length === 1 ? 'is' : 'are'} ` +
             `installed but not registered with ${backend}. ` +
-            `\`slay runner start <name>\` will register and start ${unmanaged.length === 1 ? 'it' : 'them'}.`
+            `\`slay computer start <name>\` will register and start ${unmanaged.length === 1 ? 'it' : 'them'}.`
         )
       }
     })
 
-  // slay runner create <name>
+  // slay computer create <name>
   cmd
     .command('create <name>')
-    .description('Install a runner here and keep it running (crash-restart + start at login)')
+    .description('Install a computer here and keep it running (crash-restart + start at login)')
     .requiredOption('--token <token>', 'Join token minted on the hub (szjt1.…)')
-    .option('--root <dir>', 'Runner root — its config, credentials and logs (default: cwd)')
+    .option('--root <dir>', 'Computer root — its config, credentials and logs (default: cwd)')
     .option(
       '--allow <dir>',
-      'Filesystem root the runner may operate under (repeatable; default: the runner root)',
+      'Filesystem root the computer may operate under (repeatable; default: the computer root)',
       (value: string, previous: string[] = []) => [...previous, value]
     )
     .action(async (name: string, opts: { token: string; root?: string; allow?: string[] }) => {
@@ -538,107 +538,107 @@ export function runnerCommand(): Command {
       const backend = resolveBackend()
 
       // VALIDATE THE TOKEN LOCALLY FIRST. A malformed token would otherwise install a
-      // unit whose runner can never dial anywhere, and the supervisor would retry it
+      // unit whose computer can never dial anywhere, and the supervisor would retry it
       // forever. The token embeds the hub url + cert fingerprint, so decoding it also
-      // tells us (and `ls`) which hub this runner belongs to.
+      // tells us (and `ls`) which hub this computer belongs to.
       const decoded = decodeJoinToken(opts.token)
       if (!decoded) {
         fail(
           `--token is not a valid SlayZone join token (expected \`szjt1.<payload>\`).\n` +
             `Mint one on the hub:\n` +
-            `  slay runner mint ${name}\n` +
-            `(or on this machine against a specific hub: \`slay --hub <name|port> runner mint ${name}\`)`
+            `  slay computer mint ${name}\n` +
+            `(or on this machine against a specific hub: \`slay --hub <name|port> computer mint ${name}\`)`
         )
       }
 
-      // `local-runner` is the desktop app's co-located runner, and the hub COLLAPSES
+      // `local-computer` is the desktop app's co-located computer, and the hub COLLAPSES
       // every enroll under that name onto one deterministic id (see
-      // DEFAULT_LOCAL_RUNNER_NAME). A second runner claiming it would silently take
+      // DEFAULT_LOCAL_RUNNER_NAME). A second computer claiming it would silently take
       // over that row instead of appearing as its own node.
       if (name === DEFAULT_LOCAL_RUNNER_NAME) {
         fail(
-          `"${DEFAULT_LOCAL_RUNNER_NAME}" is reserved for the runner inside the SlayZone ` +
-            `desktop app — a second runner using it would collide with that one on the hub. ` +
+          `"${DEFAULT_LOCAL_RUNNER_NAME}" is reserved for the computer inside the SlayZone ` +
+            `desktop app — a second computer using it would collide with that one on the hub. ` +
             `Choose another name.`
         )
       }
 
-      // A name identifies a runner for every other command, so it must be unique —
-      // including a runner that is REGISTERED BUT NOT RUNNING (stopped, or crashed).
-      if (backend !== 'none' && existsSync(unitPath('runner', name, backend))) {
-        const existingRoot = readUnitRoot('runner', name, backend)
+      // A name identifies a computer for every other command, so it must be unique —
+      // including a computer that is REGISTERED BUT NOT RUNNING (stopped, or crashed).
+      if (backend !== 'none' && existsSync(unitPath('computer', name, backend))) {
+        const existingRoot = readUnitRoot('computer', name, backend)
         fail(
-          `A runner named "${name}" already exists${
+          `A computer named "${name}" already exists${
             existingRoot ? ` (root ${shortenPath(existingRoot)})` : ''
           }.\n` +
-            `Start it with \`slay runner start ${name}\`, or remove it with ` +
-            `\`slay runner rm ${name}\`.`
+            `Start it with \`slay computer start ${name}\`, or remove it with ` +
+            `\`slay computer rm ${name}\`.`
         )
       }
 
       // ONE ROOT, ONE RUNNER — checked independently of the unit file.
       //
-      // Two runners sharing a root would share `runner.config.json` (so the second's
+      // Two computers sharing a root would share `computer.config.json` (so the second's
       // token + name would overwrite the first's) and the credential store, then fight
       // over both. The unit check above cannot catch this: it is keyed on the NAME, so
       // a different name in an occupied root slips past it — and with no service
       // manager there is no unit to consult at all.
       //
       // ADOPT rather than refuse when the occupant IS this name. Reaching here means
-      // no unit exists (the check above returned), so the root holds a runner the
+      // no unit exists (the check above returned), so the root holds a computer the
       // supervisor does not know about — precisely what a `create` under a missing
-      // supervisor leaves behind. There is one runner there, it has the name asked
+      // supervisor leaves behind. There is one computer there, it has the name asked
       // for, and the operator asked to create it: refusing produced a state no
       // command could resolve. A DIFFERENT name in an occupied root is a genuine
       // conflict and still refuses.
-      const occupant = loadRunnerConfigFile(configPathFor(root)).runnerName
+      const occupant = loadComputerConfigFile(configPathFor(root)).computerName
       if (occupant !== undefined && occupant !== name) {
         fail(
-          `A runner is already installed in ${shortenPath(root)} — "${occupant}".\n` +
-            `Give this runner its own directory with \`--root <dir>\`, or remove ` +
-            `"${occupant}" first with \`slay runner rm ${occupant}\`.`
+          `A computer is already installed in ${shortenPath(root)} — "${occupant}".\n` +
+            `Give this computer its own directory with \`--root <dir>\`, or remove ` +
+            `"${occupant}" first with \`slay computer rm ${occupant}\`.`
         )
       }
       // ADOPT only when there is a supervisor to adopt INTO. Reaching here with the
-      // same name means the root holds a runner with no unit — repairable by
+      // same name means the root holds a computer with no unit — repairable by
       // registering it, which is exactly the wedge to undo.
       //
       // With NO supervisor there is nothing to register and, worse, no way to ask
-      // whether that runner is currently RUNNING: an unsupervised runner is a bare
+      // whether that computer is currently RUNNING: an unsupervised computer is a bare
       // detached process this command cannot see. Adopting would spawn a second one
-      // sharing the same runner.config.json and credential store, and the two would
+      // sharing the same computer.config.json and credential store, and the two would
       // fight over both. Refusing is correct there — the state is not repairable, so
       // say what is, rather than making it worse.
       const adopting = occupant === name && backend !== 'none'
       if (occupant === name && !adopting) {
         fail(
-          `A runner is already installed in ${shortenPath(root)} — "${occupant}".\n` +
-            `Start it with \`slay runner start ${name}\`, or remove it with ` +
-            `\`slay runner rm ${name}\`.`
+          `A computer is already installed in ${shortenPath(root)} — "${occupant}".\n` +
+            `Start it with \`slay computer start ${name}\`, or remove it with ` +
+            `\`slay computer rm ${name}\`.`
         )
       }
       if (adopting) {
         console.log(
-          `Adopting the runner already in ${shortenPath(root)} — it is installed but not ` +
+          `Adopting the computer already in ${shortenPath(root)} — it is installed but not ` +
             `registered with ${backend}. Its config will be refreshed with this token.`
         )
         console.log(
           `  If you started it in the foreground, stop that process first — otherwise two ` +
-            `runners would share this root.`
+            `computers would share this root.`
         )
       }
 
-      // The token, hub url, display name and path-jail ALL travel via runner.config.json:
-      // none has an env channel (by design — see runner/src/config.ts), and a 0644
-      // unit file must never carry a credential. updateRunnerConfigFile writes 0600 and
+      // The token, hub url, display name and path-jail ALL travel via computer.config.json:
+      // none has an env channel (by design — see computer/src/config.ts), and a 0644
+      // unit file must never carry a credential. updateComputerConfigFile writes 0600 and
       // merges, so an existing config in this root keeps its other keys.
       const allowedRoots =
         opts.allow && opts.allow.length > 0 ? opts.allow.map((d) => resolvePath(d)) : [root]
-      updateRunnerConfigFile(
+      updateComputerConfigFile(
         {
           joinToken: opts.token,
           hubUrl: decoded.hubUrl,
-          runnerName: name,
+          computerName: name,
           allowedRoots
         },
         configPathFor(root)
@@ -659,43 +659,43 @@ export function runnerCommand(): Command {
       // last chance to say it before the enroll wait times out with no explanation.
       warnIfLoopbackHub(decoded.hubUrl)
 
-      await launchRunner({ name, root, backend, creating: true })
+      await launchComputer({ name, root, backend, creating: true })
     })
 
-  // slay runner start <name>
+  // slay computer start <name>
   cmd
     .command('start <name>')
-    .description('Start a runner, registering it first if it is not yet supervised')
+    .description('Start a computer, registering it first if it is not yet supervised')
     .action(async (name: string) => {
       const backend = resolveBackend()
       const facts = await requireKnown(name, backend)
-      // ALREADY RUNNING is reported, not restarted: bouncing a live runner drops its
+      // ALREADY RUNNING is reported, not restarted: bouncing a live computer drops its
       // pty sessions and any agent turn in flight, which is not what someone typing
       // `start` wants. Use `restart`.
       if (facts.running) {
-        const status = supervisorStatus('runner', backend, name)
+        const status = supervisorStatus('computer', backend, name)
         console.log(
-          `Runner "${name}" is already running${status.pid ? ` (pid ${status.pid})` : ''}.`
+          `Computer "${name}" is already running${status.pid ? ` (pid ${status.pid})` : ''}.`
         )
         return
       }
       const root = requireRoot(facts, 'start')
       // SELF-HEAL, don't refuse. Installed-but-unsupervised is the state a `create`
       // under a missing supervisor leaves behind — and until now `start` rejected it
-      // as "no runner named X" while `create` rejected the same runner as "already
-      // installed", which no command could resolve. `launchRunner` writes the unit
+      // as "no computer named X" while `create` rejected the same computer as "already
+      // installed", which no command could resolve. `launchComputer` writes the unit
       // when it is absent, so simply proceeding IS the repair; say so, because
       // registering is a real side effect the operator did not explicitly ask for.
       if (!facts.supervised && backend !== 'none') {
         console.log(`"${name}" is installed but not registered with ${backend} — registering it.`)
       }
-      await launchRunner({ name, root, backend, creating: false })
+      await launchComputer({ name, root, backend, creating: false })
     })
 
-  // slay runner stop <name>
+  // slay computer stop <name>
   cmd
     .command('stop <name>')
-    .description('Stop a runner, keeping it registered so `start` can bring it back')
+    .description('Stop a computer, keeping it registered so `start` can bring it back')
     .action(async (name: string) => {
       const backend = resolveBackend()
       const facts = await requireKnown(name, backend)
@@ -706,36 +706,36 @@ export function runnerCommand(): Command {
         )
         return
       }
-      supervisorStop('runner', backend, name)
+      supervisorStop('computer', backend, name)
       if (!(await waitForStopped(name, backend, 15_000))) {
         fail(
-          `Runner "${name}" is still running after 15s according to ${backend}. ` +
+          `Computer "${name}" is still running after 15s according to ${backend}. ` +
             `It may be managed elsewhere (docker, a system unit).`
         )
       }
-      console.log(`Stopped "${name}". Start it again with \`slay runner start ${name}\`.`)
+      console.log(`Stopped "${name}". Start it again with \`slay computer start ${name}\`.`)
     })
 
-  // slay runner rm <name>
+  // slay computer rm <name>
   cmd
     .command('rm <name>')
-    .description('Stop a runner and remove its registration')
+    .description('Stop a computer and remove its registration')
     .option(
       '--purge',
-      'Also delete the runner root (config, credentials, logs) — this is the operator’s data'
+      'Also delete the computer root (config, credentials, logs) — this is the operator’s data'
     )
     .action(async (name: string, opts: { purge?: boolean }) => {
       const backend = resolveBackend()
       const facts = await requireKnown(name, backend)
       // REMOVE WHATEVER EXISTS, in any combination. `rm` refusing on a missing unit
-      // is what turned a half-created runner into a dead end — the operator could
+      // is what turned a half-created computer into a dead end — the operator could
       // neither create (root occupied) nor remove (not registered).
       if (facts.supervised && backend !== 'none') {
         // Quiet stop: the unit may be unloaded already, or the bus unreachable —
         // which is the very case that leaves a stale unit behind. Neither must block
         // removal.
-        supervisorStopQuiet('runner', backend, name)
-        removeUnit('runner', name, backend)
+        supervisorStopQuiet('computer', backend, name)
+        removeUnit('computer', name, backend)
         console.log(`Unregistered "${name}" from ${backend}.`)
       } else if (backend !== 'none') {
         console.log(`"${name}" had no ${backend} registration.`)
@@ -751,7 +751,7 @@ export function runnerCommand(): Command {
           // Leaving the config behind is safe now that `create` adopts an exact
           // name+root match — it no longer blocks a re-create the way it used to.
           console.log(`Config and credentials remain in ${shortenPath(facts.root)}.`)
-          console.log(`  Delete them too with \`slay runner rm ${name} --purge\`.`)
+          console.log(`  Delete them too with \`slay computer rm ${name} --purge\`.`)
         }
       }
       if (facts.enrolled) {
@@ -761,23 +761,23 @@ export function runnerCommand(): Command {
       }
     })
 
-  // slay runner restart <name>
+  // slay computer restart <name>
   cmd
     .command('restart <name>')
-    .description('Restart a runner')
+    .description('Restart a computer')
     .option('--upgrade', `Re-resolve ${RUNNER_PACKAGE} first (picks up a newer version)`)
     .action(async (name: string, opts: { upgrade?: boolean }) => {
       const backend = resolveBackend()
       const { root } = requireRegistered(name, backend)
       if (backend === 'none') return
-      const logDir = ensureLogDir('runner', root)
+      const logDir = ensureLogDir('computer', root)
       // --upgrade re-resolves the package so the unit points at the new version;
       // without it the existing unit is reused verbatim.
       if (opts.upgrade) {
-        const bin = resolveServiceBin('runner')
+        const bin = resolveServiceBin('computer')
         writeUnit(
           {
-            kind: 'runner',
+            kind: 'computer',
             name,
             root,
             command: bin.command,
@@ -791,30 +791,30 @@ export function runnerCommand(): Command {
         )
         console.log(`Unit updated to ${RUNNER_PACKAGE}@${bin.version}.`)
       }
-      supervisorStop('runner', backend, name)
+      supervisorStop('computer', backend, name)
       await waitForStopped(name, backend, 15_000)
-      supervisorStart('runner', backend, name, unitPath('runner', name, backend))
+      supervisorStart('computer', backend, name, unitPath('computer', name, backend))
       if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
         fail(
-          `Runner "${name}" did not reconnect within ${ENROLL_TIMEOUT_MS / 1000}s. ` +
-            `Check \`slay runner logs ${name}\`.`
+          `Computer "${name}" did not reconnect within ${ENROLL_TIMEOUT_MS / 1000}s. ` +
+            `Check \`slay computer logs ${name}\`.`
         )
       }
-      const status = supervisorStatus('runner', backend, name)
+      const status = supervisorStatus('computer', backend, name)
       console.log(
-        `Runner "${name}" restarted${status.pid ? ` (pid ${status.pid})` : ''} and reconnected.`
+        `Computer "${name}" restarted${status.pid ? ` (pid ${status.pid})` : ''} and reconnected.`
       )
     })
 
-  // slay runner logs <name>
+  // slay computer logs <name>
   cmd
     .command('logs <name>')
-    .description("Show a runner's log output")
+    .description("Show a computer's log output")
     .option('-n, --lines <n>', 'Last N lines', '50')
     .option('-f, --follow', 'Follow the log')
     .action(async (name: string, opts: { lines: string; follow?: boolean }) => {
       const backend = resolveBackend()
-      // Logs are the FIRST thing wanted when a runner misbehaves, so this must work
+      // Logs are the FIRST thing wanted when a computer misbehaves, so this must work
       // for an unsupervised one too — its output is in the root's log dir either way.
       const facts = await requireKnown(name, backend)
       const root = requireRoot(facts, 'read logs for')
@@ -823,12 +823,12 @@ export function runnerCommand(): Command {
       // systemd captures stdout into journald rather than a file, so the unit's own
       // output is only readable there.
       followServiceLog({
-        kind: 'runner',
+        kind: 'computer',
         name,
         root,
         lines,
         follow: opts.follow === true,
-        systemdUnit: backend === 'systemd' && existsSync(unitPath('runner', name, backend))
+        systemdUnit: backend === 'systemd' && existsSync(unitPath('computer', name, backend))
       })
     })
 

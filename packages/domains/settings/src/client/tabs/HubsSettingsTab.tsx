@@ -26,8 +26,8 @@ import {
   DialogFooter
 } from '@slayzone/ui'
 import { Trash2, RotateCw, Plus, X, Pencil, PlugZap, Star, MoreHorizontal } from 'lucide-react'
-import { RunnerActionsProvider } from './RunnerActions'
-import { HubCard, HubCardShell, HubStatus, RunnersHeading } from './HubCard'
+import { ComputerActionsProvider } from './ComputerActions'
+import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
 
 /**
  * Hubs tab (multi-hub federation) — manage the set of full-data hubs this client
@@ -35,19 +35,19 @@ import { HubCard, HubCardShell, HubStatus, RunnersHeading } from './HubCard'
  * shown read-only; the user adds/removes/relabels REMOTE hubs and picks the
  * default (where new projects land).
  *
- * EACH HUB IS A CARD that owns its runners (`HubCard`).
- * A runner belongs to exactly one hub, fixed when its token is minted, so the
+ * EACH HUB IS A CARD that owns its computers (`HubCard`).
+ * A computer belongs to exactly one hub, fixed when its token is minted, so the
  * containment is the shape of the UI rather than a foreign-key column — which is
  * what lets enrollment drop its hub picker entirely. Cards rather than one table:
- * a hub row and a runner row share no column grid, and the border is what makes
- * "these runners are THIS hub's" legible without a Hub column saying it again.
+ * a hub row and a computer row share no column grid, and the border is what makes
+ * "these computers are THIS hub's" legible without a Hub column saying it again.
  *
  * TWO REGISTRIES MEET HERE, and the difference is load-bearing. This tab edits the
  * DRAFT boot-config registry (`getHubRegistry` → `setBootSettings`), which can hold
  * rows the LIVE federation does not: a hub added but not yet saved, or the local
- * hub with its toggle off. A runner list can only exist for a hub that is actually
+ * hub with its toggle off. A computer list can only exist for a hub that is actually
  * connected, so `hubCardFor` renders a named placeholder for the rest. Never an
- * empty list — "no runners enrolled" is a claim about that hub's configuration,
+ * empty list — "no computers enrolled" is a claim about that hub's configuration,
  * and it would be false.
  *
  * Adding a hub is a dashed card at the end of the list ("＋ Add new hub") that
@@ -433,22 +433,22 @@ export function HubsSettingsTab() {
 
   // Hubs the client is actually connected to. A listed hub may have no url (an
   // offline remote the registry still knows), and an unresolvable hub cannot answer
-  // a query — so it is not a scope we can mount a runner list in.
+  // a query — so it is not a scope we can mount a computer list in.
   const liveHubIds = new Set((fed?.hubs ?? []).filter((h) => !!h.url).map((h) => h.id))
 
-  const NOT_CONNECTED = 'not connected yet — save and relaunch, then enroll runners'
+  const NOT_CONNECTED = 'not connected yet — save and relaunch, then enroll computers'
 
   // Same heading as a card with a real list, so a card always names what its body
   // is about — the note just replaces the rail instead of hanging under it.
   const placeholder = (text: string): ReactNode => (
-    <RunnersHeading note={text} noteTestId="hub-runners-unavailable" />
+    <ComputersHeading note={text} noteTestId="hub-computers-unavailable" />
   )
 
   /**
-   * One hub's card. A hub whose runners CAN be listed gets `HubCard`, which owns
-   * the query and fills in both the header's runner cluster and the body. The
+   * One hub's card. A hub whose computers CAN be listed gets `HubCard`, which owns
+   * the query and fills in both the header's computer cluster and the body. The
    * three that cannot each say why, in a plain shell — never an empty list, since
-   * "no runners enrolled" is a claim about that hub's configuration and it would
+   * "no computers enrolled" is a claim about that hub's configuration and it would
    * be false here.
    */
   const hubCardFor = (
@@ -549,9 +549,9 @@ export function HubsSettingsTab() {
   }
 
   return (
-    <RunnerActionsProvider>
+    <ComputerActionsProvider>
       <div className="space-y-6">
-        {/* Hub list — one card per hub, each owning its runners. */}
+        {/* Hub list — one card per hub, each owning its computers. */}
         <div className="space-y-3" data-testid="hubs-list">
           {/* Local hub — always listed; the toggle is the "run a local hub"
               switch (server_mode). Off requires ≥1 remote to fall back to. */}
@@ -899,6 +899,6 @@ export function HubsSettingsTab() {
           </DialogContent>
         </Dialog>
       </div>
-    </RunnerActionsProvider>
+    </ComputerActionsProvider>
   )
 }

@@ -287,7 +287,7 @@ if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
 //
 // This app IS the hub role. The sidecar it spawns is handed the SAME root
 // explicitly (SLAYZONE_ROOT below) rather than inheriting an ambient one, and
-// the co-located local runner is handed its own separate `runner` root — that
+// the co-located local computer is handed its own separate `computer` root — that
 // explicit per-child handoff is what actually keeps the two roles' state apart.
 // The main process's OWN ambient SLAYZONE_ROOT stays untouched, so the hook
 // installers later in this boot keep writing to the unscoped ~/.slayzone/hooks.
@@ -593,12 +593,12 @@ let discoveryPoller: NodeJS.Timeout | null = null
 let bridgeCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
-// Local-runner supervisor — spawns the co-located runner in local mode. Null
+// Local-computer supervisor — spawns the co-located computer in local mode. Null
 // in remote mode (no local hub to dial) or before the async spawn runs.
-let localRunnerCleanup: (() => void) | null = null
+let localComputerCleanup: (() => void) | null = null
 // The same supervisor's handle. Kept separately from the cleanup thunk because
-// `app:restart-local-runner` needs to CYCLE it, not just stop it at quit.
-let localRunnerHandle: import('./local-runner-supervisor').LocalRunnerHandle | null = null
+// `app:restart-local-computer` needs to CYCLE it, not just stop it at quit.
+let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
 // lets the sidecar-spawn block await the bound port. One listener now carries
@@ -642,14 +642,14 @@ function revealSidecarLogInFinder(): void {
 }
 
 /**
- * Mint a runner join token over LOOPBACK REST against the sidecar (hub/runner
- * split, Wave3.5-D3). Retries while the runner listener is still binding — the
+ * Mint a computer join token over LOOPBACK REST against the sidecar (hub/computer
+ * split, Wave3.5-D3). Retries while the computer listener is still binding — the
  * sidecar reports "ready" (health) as soon as its shared http server listens,
  * but the SEPARATE /computers wss listener binds a beat later + only THEN feeds its
- * url/fingerprint to the runners registry (server.ts), so `/api/computers/join-token`
+ * url/fingerprint to the computers registry (server.ts), so `/api/computers/join-token`
  * 503s until then. Returns the token + wss url, or null once the budget is spent.
  */
-async function mintLocalRunnerJoinToken(
+async function mintLocalComputerJoinToken(
   sidecarPort: number
 ): Promise<{ token: string; hubUrl: string } | null> {
   const url = `http://127.0.0.1:${sidecarPort}/api/computers/join-token`
@@ -669,13 +669,13 @@ async function mintLocalRunnerJoinToken(
         if (typeof body.token === 'string' && typeof body.hubUrl === 'string') {
           return { token: body.token, hubUrl: body.hubUrl }
         }
-        logBoot('[local-runner] mint response malformed — giving up')
+        logBoot('[local-computer] mint response malformed — giving up')
         return null
       }
-      // 503 = runner listener not bound yet → keep retrying. Any other status is a
-      // hard error (misconfig / runner off despite the gate) → stop.
+      // 503 = computer listener not bound yet → keep retrying. Any other status is a
+      // hard error (misconfig / computer off despite the gate) → stop.
       if (res.status !== 503) {
-        logBoot(`[local-runner] mint failed status=${res.status} — not retrying`)
+        logBoot(`[local-computer] mint failed status=${res.status} — not retrying`)
         return null
       }
     } catch {
@@ -683,46 +683,46 @@ async function mintLocalRunnerJoinToken(
     }
     if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
   }
-  logBoot(`[local-runner] mint timed out after ${MAX_ATTEMPTS} attempts`)
+  logBoot(`[local-computer] mint timed out after ${MAX_ATTEMPTS} attempts`)
   return null
 }
 
 /**
- * Boot-time local-runner auto-enroll (Wave3.5-D3). Waits for the sidecar to be
+ * Boot-time local-computer auto-enroll (Wave3.5-D3). Waits for the sidecar to be
  * ready, mints a join token over loopback REST, then spawns the co-located
- * runner with the token + wss hub url injected → it dials + enrolls with ZERO
+ * computer with the token + wss hub url injected → it dials + enrolls with ZERO
  * manual config. Called in local mode (see the boot block); a mint failure
- * leaves the runner unspawned (log-only, never crashes boot).
+ * leaves the computer unspawned (log-only, never crashes boot).
  */
-async function startLocalRunnerWithAutoEnroll(): Promise<void> {
-  logBoot('local-runner auto-enroll: awaiting sidecar ready')
+async function startLocalComputerWithAutoEnroll(): Promise<void> {
+  logBoot('local-computer auto-enroll: awaiting sidecar ready')
   const handle = await sidecarHandlePromise
   await handle.waitForReady()
   const sidecarPort = handle.getPort()
   if (!sidecarPort) {
-    logBoot('[local-runner] sidecar has no port after ready — skipping auto-enroll')
+    logBoot('[local-computer] sidecar has no port after ready — skipping auto-enroll')
     return
   }
 
-  const minted = await mintLocalRunnerJoinToken(sidecarPort)
+  const minted = await mintLocalComputerJoinToken(sidecarPort)
   if (!minted) {
-    // Do NOT spawn a token-less runner (it would only backoff-loop). The user can
-    // still enroll a remote runner via the UI.
+    // Do NOT spawn a token-less computer (it would only backoff-loop). The user can
+    // still enroll a remote computer via the UI.
     //
     // This used to be log-only, which was survivable while the hub could spawn
-    // agents in-process. It no longer can — runners run the agents — so an
-    // unspawned local runner means NO agents can start at all. Record it as a
+    // agents in-process. It no longer can — computers run the agents — so an
+    // unspawned local computer means NO agents can start at all. Record it as a
     // diagnostic error so it shows up in the Diagnostics tab instead of only in a
     // boot log nobody reads.
-    logBoot('[local-runner] no join token minted — leaving runner unspawned')
+    logBoot('[local-computer] no join token minted — leaving computer unspawned')
     try {
       recordDiagnosticEvent({
         level: 'error',
         source: 'main',
-        event: 'local_runner.unspawned',
+        event: 'local_computer.unspawned',
         message:
-          'Local runner could not be enrolled (join-token mint failed). Agents, terminals and ' +
-          'git work all run on runners — enroll one in Settings → Runners, or restart the app.'
+          'Local computer could not be enrolled (join-token mint failed). Agents, terminals and ' +
+          'git work all run on computers — enroll one in Settings → Computers, or restart the app.'
       })
     } catch {
       /* diagnostics unavailable this early — the boot log above still records it */
@@ -731,72 +731,72 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
   }
 
   // The mint window (waitForReady + retries) can straddle an app quit: the quit
-  // drain already ran localRunnerCleanup (while it was still null), so spawning
+  // drain already ran localComputerCleanup (while it was still null), so spawning
   // now would orphan a child no cleanup hook tracks. Skip if quit has drained.
   if (quitDrainComplete) {
-    logBoot('[local-runner] app quitting — skipping runner spawn')
+    logBoot('[local-computer] app quitting — skipping computer spawn')
     return
   }
 
-  const { startLocalRunner } = await import('./local-runner-supervisor')
-  const runnerScriptPath = is.dev
+  const { startLocalComputer } = await import('./local-computer-supervisor')
+  const computerScriptPath = is.dev
     ? join(app.getAppPath(), '../computer/dist/bin.cjs')
-    : join(process.resourcesPath, 'runner', 'bin.cjs')
-  // The local runner gets its OWN channel-scoped root, handed over explicitly
+    : join(process.resourcesPath, 'computer', 'bin.cjs')
+  // The local computer gets its OWN channel-scoped root, handed over explicitly
   // below — it no longer shares one ambient root with the hub (which is how a
-  // runner-owned credential store ended up loose inside the hub's state). Its FS
-  // path-jail still self-derives: under SLAYZONE_SUPERVISED=1 loadRunnerConfig
-  // defaults allowedRoots to `[homedir()]` (local runner operates on the user's
+  // computer-owned credential store ended up loose inside the hub's state). Its FS
+  // path-jail still self-derives: under SLAYZONE_SUPERVISED=1 loadComputerConfig
+  // defaults allowedRoots to `[homedir()]` (local computer operates on the user's
   // own projects), so there is no env handoff for that.
-  const handleRunner = startLocalRunner({
+  const handleComputer = startLocalComputer({
     execPath: process.execPath,
-    scriptPath: runnerScriptPath,
+    scriptPath: computerScriptPath,
     env: {
       ...process.env,
-      // This runner's own channel-scoped RUNNER root — separate from the hub's,
-      // so its credential store (runner.state.json) and logs never mix with the
-      // hub's DB/artifacts. Explicit because the runner cannot derive it:
+      // This computer's own channel-scoped RUNNER root — separate from the hub's,
+      // so its credential store (computer.state.json) and logs never mix with the
+      // hub's DB/artifacts. Explicit because the computer cannot derive it:
       // getSupervisedRoot is desktop-app-only, and an inherited-unset value would
       // land it back on the flat, channel-shared ~/.slayzone. OVERRIDES anything
-      // inherited (in dev the repo may set it) so the local runner always uses
+      // inherited (in dev the repo may set it) so the local computer always uses
       // this boot's channel root.
-      SLAYZONE_ROOT: getSupervisedRoot('runner'),
-      // This local runner is HOST-SUPERVISED: the Electron app spawns + manages it
-      // and supplies its env in full below. Flag it so the runner does NOT cwd-seed
+      SLAYZONE_ROOT: getSupervisedRoot('computer'),
+      // This local computer is HOST-SUPERVISED: the Electron app spawns + manages it
+      // and supplies its env in full below. Flag it so the computer does NOT cwd-seed
       // SLAYZONE_ROOT (bin.ts) — without this it treated the app's CWD (the repo in
       // dev) as its root. Belt-and-braces now that SLAYZONE_ROOT is set explicitly
       // above (the seed only fires when unset), but the flag still drives the
       // supervised defaults for enroll name + path-jail.
       SLAYZONE_SUPERVISED: '1',
       // Auto-enroll: the freshly minted token embeds the cert fingerprint the
-      // runner pins. The env channel carries the hub AUTHORITY only
-      // (host[:port]) — the runner re-derives ws(s):// from SLAYZONE_MODE and
-      // appends /computers (see runner config.ts). Extract the authority from the
+      // computer pins. The env channel carries the hub AUTHORITY only
+      // (host[:port]) — the computer re-derives ws(s):// from SLAYZONE_MODE and
+      // appends /computers (see computer config.ts). Extract the authority from the
       // mint's full ws(s)://host[:port]/computers url. OVERRIDES any inherited
-      // value so the local runner always dials THIS boot's hub.
+      // value so the local computer always dials THIS boot's hub.
       SLAYZONE_HUB_ADDRESS: new URL(minted.hubUrl).host,
       // No SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS handoff: under
-      // SLAYZONE_SUPERVISED=1 (above) the runner defaults its enroll name to
-      // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localRunnerName so the dedup
+      // SLAYZONE_SUPERVISED=1 (above) the computer defaults its enroll name to
+      // DEFAULT_LOCAL_RUNNER_NAME (matching the hub's localComputerName so the dedup
       // collapses to one row) and its path-jail to `[homedir()]`.
       SLAYZONE_HUB_JOIN_TOKEN: minted.token
     },
     logger: (line) => logBoot(line),
-    // Every agent pty is a direct child of the runner, so a runner exit kills
+    // Every agent pty is a direct child of the computer, so a computer exit kills
     // every agent on the machine at once and the hub renders it as "Process
     // exited with code 1" on every open task (exec-proxies disposes each session
-    // on runner-disconnected). That was previously untraceable: `logger` above
+    // on computer-disconnected). That was previously untraceable: `logger` above
     // feeds logBoot, a no-op unless SLAYZONE_DEBUG_BOOT=1, so neither the exit
-    // code nor the runner's dying output reached anywhere durable. Record it.
+    // code nor the computer's dying output reached anywhere durable. Record it.
     onExit: (info) => {
       try {
         recordDiagnosticEvent({
           // A restart-pending exit is recoverable; a terminal one is not.
           level: info.restartAttempt === null ? 'error' : 'warn',
           source: 'main',
-          event: 'local_runner.exit',
+          event: 'local_computer.exit',
           message:
-            `Local runner exited (code=${String(info.code)} signal=${String(info.signal)}) after ` +
+            `Local computer exited (code=${String(info.code)} signal=${String(info.signal)}) after ` +
             `${Math.round(info.uptimeMs / 1000)}s — every agent terminal on this machine died with it. ` +
             (info.restartAttempt === null
               ? 'No restart left in the backoff budget.'
@@ -807,7 +807,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
             uptimeMs: info.uptimeMs,
             restartAttempt: info.restartAttempt,
             restartDelayMs: info.restartDelayMs,
-            // The dying runner's own output — the only place an uncaught
+            // The dying computer's own output — the only place an uncaught
             // exception stack or a fatal dialer error is visible.
             tail: info.tail
           }
@@ -816,7 +816,7 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
         /* diagnostics unavailable — never let reporting break supervision */
       }
     },
-    // Re-mint before each restart. The token above is SINGLE-USE, so a runner that
+    // Re-mint before each restart. The token above is SINGLE-USE, so a computer that
     // exits fatally on "join token rejected: unknown" (its stored api key failed
     // verification, and its re-enroll fallback then reused a spent token) would
     // otherwise fail identically on every retry and stay dead until the app
@@ -824,66 +824,66 @@ async function startLocalRunnerWithAutoEnroll(): Promise<void> {
     mintJoinToken: async () => {
       const port = sidecarServerHandle?.getPort()
       if (!port) return null
-      const fresh = await mintLocalRunnerJoinToken(port)
+      const fresh = await mintLocalComputerJoinToken(port)
       return fresh?.token ?? null
     },
     onNeedsReEnrollment: () => {
-      // The hub no longer recognizes this runner, so restarting cannot help. Say so
+      // The hub no longer recognizes this computer, so restarting cannot help. Say so
       // where the user will see it: nothing can execute until it is enrolled again.
-      console.error('[local-runner] needs re-enrollment — the hub does not recognize this runner')
+      console.error('[local-computer] needs re-enrollment — the hub does not recognize this computer')
       try {
         recordDiagnosticEvent({
           level: 'error',
           source: 'main',
-          event: 'local_runner.needs_re_enrollment',
+          event: 'local_computer.needs_re_enrollment',
           message:
-            'The local runner must be enrolled again — the hub no longer recognizes it ' +
+            'The local computer must be enrolled again — the hub no longer recognizes it ' +
             '(its stored credentials were refused). Agents, terminals and git work all run ' +
-            'on runners, so nothing can execute until it is re-enrolled from Settings → Runners.'
+            'on computers, so nothing can execute until it is re-enrolled from Settings → Computers.'
         })
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
     },
     onPermanentFailure: (info) => {
-      console.error('[local-runner] permanent failure (local runner, non-fatal):', info)
-      // After this point NOTHING can execute — runners run the agents. Surface it
+      console.error('[local-computer] permanent failure (local computer, non-fatal):', info)
+      // After this point NOTHING can execute — computers run the agents. Surface it
       // where the user can see it rather than only in a console nobody reads.
       try {
         recordDiagnosticEvent({
           level: 'error',
           source: 'main',
-          event: 'local_runner.permanent_failure',
+          event: 'local_computer.permanent_failure',
           message:
-            `Local runner failed to stay running after ${(info as { attempts?: number }).attempts ?? 0} attempts. ` +
-            'Agents, terminals and git work all run on runners — restart the app or enroll a runner manually.'
+            `Local computer failed to stay running after ${(info as { attempts?: number }).attempts ?? 0} attempts. ` +
+            'Agents, terminals and git work all run on computers — restart the app or enroll a computer manually.'
         })
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
     }
   })
-  localRunnerHandle = handleRunner
-  localRunnerCleanup = () => void handleRunner.stop()
-  logBoot('local-runner supervisor started (auto-enrolled)')
+  localComputerHandle = handleComputer
+  localComputerCleanup = () => void handleComputer.stop()
+  logBoot('local-computer supervisor started (auto-enrolled)')
 }
 
 /**
- * Single-flight wrapper around {@link startLocalRunnerWithAutoEnroll}.
+ * Single-flight wrapper around {@link startLocalComputerWithAutoEnroll}.
  *
- * Load-bearing for the Settings → Runners "Start" action: the boot attempt polls
- * for a mintable join token for up to ~40s (`mintLocalRunnerJoinToken`), so a
+ * Load-bearing for the Settings → Computers "Start" action: the boot attempt polls
+ * for a mintable join token for up to ~40s (`mintLocalComputerJoinToken`), so a
  * user who clicks Start while that is still running would otherwise spawn a
- * SECOND supervisor — two runners enrolling under the same name, only one of
+ * SECOND supervisor — two computers enrolling under the same name, only one of
  * which any cleanup hook tracks.
  */
-let localRunnerStartInFlight: Promise<void> | null = null
-function ensureLocalRunnerStarted(): Promise<void> {
-  if (localRunnerStartInFlight) return localRunnerStartInFlight
-  localRunnerStartInFlight = startLocalRunnerWithAutoEnroll().finally(() => {
-    localRunnerStartInFlight = null
+let localComputerStartInFlight: Promise<void> | null = null
+function ensureLocalComputerStarted(): Promise<void> {
+  if (localComputerStartInFlight) return localComputerStartInFlight
+  localComputerStartInFlight = startLocalComputerWithAutoEnroll().finally(() => {
+    localComputerStartInFlight = null
   })
-  return localRunnerStartInFlight
+  return localComputerStartInFlight
 }
 let quitDrainComplete = false
 let quitSubprocessCleanupPromise: Promise<void> | null = null
@@ -1570,7 +1570,7 @@ app
     // The four `terminal_*` idle/prewarm keys used to be warmed here too. Their
     // only host readers were the duplicate idle-close + warm-pool wiring below,
     // which swept an empty session registry — the side-car owns both. They govern
-    // agents running on a runner, so they stay hub-side and the host stops
+    // agents running on a computer, so they stay hub-side and the host stops
     // reading them at all. The two `labs_*` flags now come from the client store.
     logBoot('migrations applied')
 
@@ -1957,14 +1957,14 @@ app
     // (composition.ts:509 and :547), which owns the pty runtime and the routing
     // PtyBackend. The host's copies were registered on its OWN module singletons —
     // `checkInactiveSessions` sweeps this process's session registry, which holds
-    // nothing, and the pool was constructed with `resolveRunnerId: async () => null`,
+    // nothing, and the pool was constructed with `resolveComputerId: async () => null`,
     // i.e. explicitly unable to warm anything. Two registrations of the same
     // module-global also meant whichever process wrote last silently won.
     //
     // These were the only readers of `terminal_auto_close_idle`,
     // `terminal_idle_close_value`, `terminal_idle_close_unit` and
     // `terminal_prewarm_enabled` in the host, which is why those four keys are
-    // gone from `warmCache` above: they govern agents running on a runner and
+    // gone from `warmCache` above: they govern agents running on a computer and
     // belong to the hub.
     logBoot('terminal tab runtime wired')
     // Chat ops, the chat/pty turn subscribers and the `chatMode` backfill all run
@@ -2364,7 +2364,7 @@ app
               // process PER e2e/ SUBDIRECTORY — six concurrent Electron apps — so a
               // single fixed test port would EADDRINUSE five of them. (SIDECAR_FIXED_PORT
               // .test exists for a single-app run; paths.ts's "e2e is one worker" note
-              // predates the group runner and is true only within one group.) E2E
+              // predates the group computer and is true only within one group.) E2E
               // keeps the OS-assigned port and the `settings.server_port` channel.
               fixedPort: isPlaywright
                 ? undefined
@@ -2401,10 +2401,10 @@ app
                       NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
                     }
                   : {})
-                // The sidecar always builds the runner gateway/auth (a hub always
-                // accepts runners) — no env flag needed. `/computers` rides the ONE hub
+                // The sidecar always builds the computer gateway/auth (a hub always
+                // accepts computers) — no env flag needed. `/computers` rides the ONE hub
                 // listener (same port as /trpc), demuxed by path; supervised binds
-                // loopback (127.0.0.1), so the co-located runner reaches it locally.
+                // loopback (127.0.0.1), so the co-located computer reaches it locally.
               },
               logger: (line) => logBoot(line),
               onReady: (info) => {
@@ -2473,34 +2473,34 @@ app
           })
       })
 
-    // Local-runner supervisor. Spawns a co-located @slayzone/computer subprocess so
-    // THIS machine can host runner work, pointed at the local hub's runner URL —
+    // Local-computer supervisor. Spawns a co-located @slayzone/computer subprocess so
+    // THIS machine can host computer work, pointed at the local hub's computer URL —
     // and AUTO-ENROLLS it with zero manual token. Always runs in local mode (a
-    // hub always accepts runners; there is no mode to enable). Gated only on
+    // hub always accepts computers; there is no mode to enable). Gated only on
     // local mode (remote mode has no local hub to dial).
     //
-    // Runs under Playwright TOO. e2e is runner-ON by default because runners are
-    // what run the agents — an e2e suite that boots runner-less exercises a
+    // Runs under Playwright TOO. e2e is computer-ON by default because computers are
+    // what run the agents — an e2e suite that boots computer-less exercises a
     // configuration the product does not have. A spec that genuinely needs a
-    // runner-less hub (remote-mode, sidecar-crash, the "hub accepts runners with
-    // no runner spawned" contract) opts OUT via `SLAYZONE_E2E_NO_RUNNER=1`.
+    // computer-less hub (remote-mode, sidecar-crash, the "hub accepts computers with
+    // no computer spawned" contract) opts OUT via `SLAYZONE_E2E_NO_RUNNER=1`.
     // The former opt-in `SLAYZONE_E2E_ALLOW_RUNNER` is no longer read here.
     // Off the boot critical path (setImmediate); failure is log-only.
     //
     // The auto-enroll resolves the ordering the wave-2 skeleton deferred: main has
     // NO tRPC client to the sidecar (the capability bridge only flows sidecar→main),
-    // and the runner /computers wss URL is on an OS-assigned port main never learns.
+    // and the computer /computers wss URL is on an OS-assigned port main never learns.
     // So main waits for the sidecar to report ready, then mints a join token over
     // LOOPBACK REST (`POST /api/computers/join-token`, which wraps the same store
-    // logic as the runners tRPC proc + returns the wss runner URL). It injects that
-    // token + url into the runner env; the runner decodes the token → cert
+    // logic as the computers tRPC proc + returns the wss computer URL). It injects that
+    // token + url into the computer env; the computer decodes the token → cert
     // fingerprint → dials wss with pinning → enrolls. If minting fails after
-    // retries the runner is left UNSPAWNED — boot never crashes; the user can
-    // still enroll remote runners via the UI.
+    // retries the computer is left UNSPAWNED — boot never crashes; the user can
+    // still enroll remote computers via the UI.
     if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_RUNNER !== '1') {
       setImmediate(() => {
-        void ensureLocalRunnerStarted().catch((err) => {
-          console.error('[local-runner] auto-enroll failed (local runner, non-fatal):', err)
+        void ensureLocalComputerStarted().catch((err) => {
+          console.error('[local-computer] auto-enroll failed (local computer, non-fatal):', err)
         })
       })
     }
@@ -2538,7 +2538,7 @@ app
             }
           }
           // One import now: the six installers were six sibling modules under
-          // this app and are one shared entrypoint since the runner started
+          // this app and are one shared entrypoint since the computer started
           // needing them too.
           const {
             installNotifyScript,
@@ -3158,40 +3158,40 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
       }
     })
-    // Cycle the co-located runner. Every agent pty on this machine is a direct
+    // Cycle the co-located computer. Every agent pty on this machine is a direct
     // child of it, so this is a heavier hammer than the side-car restart — but it
     // is the ONLY recovery from the supervisor's dead ends (needs-re-enrollment,
     // exhausted backoff, and the boot-time "join-token mint failed → never
     // spawned" case). All three previously required relaunching the app, while
     // nothing on the machine could execute.
-    ipcMain.handle('app:restart-local-runner', async () => {
+    ipcMain.handle('app:restart-local-computer', async () => {
       if (isRemoteMode) {
-        return { ok: false as const, error: 'Remote mode — no local runner on this machine' }
+        return { ok: false as const, error: 'Remote mode — no local computer on this machine' }
       }
       try {
-        if (localRunnerHandle) {
-          await localRunnerHandle.restart()
+        if (localComputerHandle) {
+          await localComputerHandle.restart()
         } else {
           // Never spawned (or its auto-enroll is still retrying) — the recovery
           // is the full mint-then-spawn path, not a cycle. Single-flight, so a
           // click during boot's attempt joins it rather than racing it.
-          await ensureLocalRunnerStarted()
-          if (!localRunnerHandle) {
+          await ensureLocalComputerStarted()
+          if (!localComputerHandle) {
             return {
               ok: false as const,
               error:
-                'Could not enroll a local runner — the hub refused to mint a join token. See Settings → Diagnostics.'
+                'Could not enroll a local computer — the hub refused to mint a join token. See Settings → Diagnostics.'
             }
           }
         }
         recordDiagnosticEvent({
           level: 'info',
           source: 'main',
-          event: 'local_runner.manual_restart',
+          event: 'local_computer.manual_restart',
           message:
-            'Local runner restarted from Settings → Runners. Every agent terminal on this ' +
+            'Local computer restarted from Settings → Computers. Every agent terminal on this ' +
             'machine was stopped with it.',
-          payload: { pid: localRunnerHandle.getPid() }
+          payload: { pid: localComputerHandle.getPid() }
         })
         return { ok: true as const }
       } catch (err) {
@@ -4310,7 +4310,7 @@ app.on('will-quit', () => {
   }
   bridgeCleanup?.()
   sidecarCleanup?.()
-  localRunnerCleanup?.()
+  localComputerCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
   // event of the session and proves the chain ran. stopDiagnostics() can clear timers
   // safely after.

@@ -10,10 +10,10 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  * no `storage/` nesting layer, since that root now belongs to exactly one role.
  *
  * The app main process plays the HUB role: it owns the DB, artifacts, blobs,
- * backups and sidecar logs. Its co-located local runner gets its OWN root
- * (`getSupervisedRoot('runner')`), handed over explicitly at spawn time in
+ * backups and sidecar logs. Its co-located local computer gets its OWN root
+ * (`getSupervisedRoot('computer')`), handed over explicitly at spawn time in
  * `index.ts` — the two used to silently share one ambient root, which is how a
- * runner-owned `runners/` dir ended up loose inside the hub's own state.
+ * computer-owned `computers/` dir ended up loose inside the hub's own state.
  *
  * `getSupervisedRoot` reads `SLAYZONE_RELEASE_CHANNEL`, so the channel MUST be
  * derived (in `index.ts`) before anything in this module is called.
@@ -44,10 +44,10 @@ export function initStorageDir(legacyStateDir: string, packaged: boolean): strin
   const target = getSupervisedRoot('hub')
   ensureChannelScopedStorage({
     // Migration SOURCE, strictly read-only: the pre-channel-scoping flat root,
-    // where the old shared layout kept `storage/` and `runners/`.
+    // where the old shared layout kept `storage/` and `computers/`.
     legacyRoot: getSlayzoneHomeDir(),
     hubRoot: target,
-    runnerRoot: getSupervisedRoot('runner'),
+    computerRoot: getSupervisedRoot('computer'),
     packaged
   })
   // omgslayzone → userData. MOVED HERE from the DB worker, which ran it AFTER

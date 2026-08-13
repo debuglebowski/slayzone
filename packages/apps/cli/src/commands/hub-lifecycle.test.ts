@@ -75,7 +75,7 @@ const ELECTRON_BIN = resolve(
 /**
  * A real `node` for running the CLI. This suite itself runs under Electron, so
  * `process.execPath` points at the Electron binary — see the note on `slay()`.
- * `process.env.NODE` is set by some runners; otherwise fall back to PATH lookup,
+ * `process.env.NODE` is set by some computers; otherwise fall back to PATH lookup,
  * which is how a user invokes the published bin anyway.
  */
 const NODE_BIN = process.env.SLZ_TEST_NODE ?? 'node'
@@ -292,7 +292,7 @@ function slay(
  * MUST be `node:http`, NOT `fetch`. Node's fetch (undici) attaches `Sec-Fetch-*`
  * headers, and better-auth's CSRF middleware treats their presence as a browser
  * form post — it then demands an `Origin` matching its own `baseURL` (a fixed
- * `http://127.0.0.1:8788` loopback constant; runners authenticate by api-key, so
+ * `http://127.0.0.1:8788` loopback constant; computers authenticate by api-key, so
  * nothing else depends on it). A plain fetch therefore 403s
  * `MISSING_OR_NULL_ORIGIN` before the route ever runs, which looks exactly like a
  * broken auth config while actually testing nothing.
@@ -376,7 +376,7 @@ async function startSupervisedStub(): Promise<{
         // A pid that must NOT be signalled: this stub's own. If the supervised
         // refusal is broken, the CLI kills the stub and the assertion below
         // (stub still answering) fails loudly.
-        pid: process.pid, mode: 'local', supervised: true, runnersConnected: 1,
+        pid: process.pid, mode: 'local', supervised: true, computersConnected: 1,
         uptimeMs: 1000, commit: 'x', builtAt: 'x', buildId: 'x'
       }));
     });
@@ -512,8 +512,8 @@ async function main(): Promise<void> {
       const ls = slay(['--hub', NAME_A, 'hub', 'users', 'ls'], { root: rootA })
       assertEq(ls.status, 0, `ls exited 0 (stderr: ${ls.stderr})`)
       assert(ls.stdout.includes(email), `lists the account: ${ls.stdout}`)
-      // The internal runner-key owner is a user row, but not an operator account.
-      assert(!ls.stdout.includes('runners@slayzone.internal'), 'hides the service identity')
+      // The internal computer-key owner is a user row, but not an operator account.
+      assert(!ls.stdout.includes('computers@slayzone.internal'), 'hides the service identity')
     })
 
     await test('hub users: the created password actually authenticates', async () => {
@@ -881,7 +881,7 @@ async function main(): Promise<void> {
     })
 
     await test('start on a RUNNING hub is a no-op, never a restart', async () => {
-      // A restart would drop connected runners and pty sessions. Someone typing
+      // A restart would drop connected computers and pty sessions. Someone typing
       // `start` on a running hub means "make sure it is up", so the pid must not
       // change. (This is why `start` is not an alias for `restart`.)
       const a = hubs.find((h) => basename(h.root) === NAME_A)!

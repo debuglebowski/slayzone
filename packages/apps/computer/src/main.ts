@@ -1,26 +1,26 @@
 /**
- * Runner main — wires config + credential store + hub dialer into a running
+ * Computer main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
- * `@slayzone/computer-transport`; this module owns the hub→runner request DISPATCH TABLE that
+ * `@slayzone/computer-transport`; this module owns the hub→computer request DISPATCH TABLE that
  * routes each method to its exec handler (pty.*, git.*, fs.*, proc.*), plus a
- * graceful `runner.shutdown`. Unknown methods answer `-32001 unimplemented`.
+ * graceful `computer.shutdown`. Unknown methods answer `-32001 unimplemented`.
  *
- * @module runner/main
+ * @module computer/main
  */
 
 import {
   createFileCredentialStore,
   HubDialer,
   hubHostFromUrl,
-  type RunnerCredentialStore
+  type ComputerCredentialStore
 } from '@slayzone/computer-transport/client'
 import {
-  RunnerTransportErrorCodes,
-  HubToRunnerMethods,
+  ComputerTransportErrorCodes,
+  HubToComputerMethods,
   RpcError,
-  runnerShutdownParamsSchema
+  computerShutdownParamsSchema
 } from '@slayzone/computer-transport/shared'
-import type { RunnerConfig } from './config'
+import type { ComputerConfig } from './config'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
 import { createGhHandlers } from './handlers/gh'
@@ -28,22 +28,22 @@ import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
-import { createRunnerConfigHandlers } from './handlers/runner-config'
+import { createComputerConfigHandlers } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
-import type { HandlerContext, HubMethodTable, RunnerDialer, RunnerLog } from './handlers/types'
+import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 
 /** Version advertised at enrollment; wave-1 skeleton is pre-release. */
 export const RUNNER_VERSION = '0.0.0'
 
-export interface RunnerRuntimeDeps {
-  log?: RunnerLog
-  /** Invoked after a graceful `runner.shutdown` stop completes. */
+export interface ComputerRuntimeDeps {
+  log?: ComputerLog
+  /** Invoked after a graceful `computer.shutdown` stop completes. */
   onShutdown?: (reason: string) => void
   /** Override the credential store (tests). */
-  credentialStore?: RunnerCredentialStore
+  credentialStore?: ComputerCredentialStore
 }
 
-export interface RunnerHandle {
+export interface ComputerHandle {
   dialer: HubDialer
   stop(): Promise<void>
 }
@@ -52,14 +52,14 @@ export interface HubRequestHandlerDeps {
   /** Trigger a graceful stop (after the ack flushes). */
   shutdown: (reason: string) => void
   /** Dialer used by streaming handlers (pty.data/exit, proc.data/exit, …). */
-  dialer: RunnerDialer
-  config: RunnerConfig
-  log?: RunnerLog
-  /** Runner loopback agent-hook URL — overlaid into every spawned agent's env
+  dialer: ComputerDialer
+  config: ComputerConfig
+  log?: ComputerLog
+  /** Computer loopback agent-hook URL — overlaid into every spawned agent's env
    *  (see HandlerContext.agentHookUrl). Absent → env passthrough (tests). */
   agentHookUrl?: string
   /**
-   * Where this runner keeps each project on disk. Read lazily: the map comes
+   * Where this computer keeps each project on disk. Read lazily: the map comes
    * from a file and the dispatch table is built synchronously, so the handlers
    * register immediately and report "still loading" until it arrives.
    */
@@ -67,18 +67,18 @@ export interface HubRequestHandlerDeps {
 }
 
 export interface HubRequestDispatch {
-  /** Route one hub→runner request to its handler. */
+  /** Route one hub→computer request to its handler. */
   handle(method: string, params: unknown): Promise<unknown>
-  /** Tear down live sessions/processes (runner shutdown). */
+  /** Tear down live sessions/processes (computer shutdown). */
   dispose(): void
-  /** Late-bind the runner loopback agent-hook URL once its listener has bound
+  /** Late-bind the computer loopback agent-hook URL once its listener has bound
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
   setAgentHookUrl(url: string): void
 }
 
 /**
- * Build the hub→runner dispatch table. `runner.shutdown` acks then triggers the
+ * Build the hub→computer dispatch table. `computer.shutdown` acks then triggers the
  * graceful stop; pty/git/fs/proc methods route to their handler modules;
  * everything else throws `-32001 unimplemented`.
  */
@@ -99,7 +99,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const proc = createProcHandlers(ctx, deps.getProjectPaths)
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
-    const parsed = runnerShutdownParamsSchema.safeParse(params ?? {})
+    const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
     const reason = parsed.success ? (parsed.data.reason ?? 'hub-requested') : 'hub-requested'
     // Ack first; the dialer flushes the response before the socket drops.
     queueMicrotask(() => deps.shutdown(reason))
@@ -107,12 +107,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const table: HubMethodTable = {
-    [HubToRunnerMethods.runnerShutdown]: shutdownHandler,
+    [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
     ...createFsHandlers(ctx),
-    ...createRunnerConfigHandlers(ctx),
+    ...createComputerConfigHandlers(ctx),
     ...createGhHandlers(ctx),
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
@@ -120,7 +120,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const handle = async (method: string, params: unknown): Promise<unknown> => {
     const entry = table[method]
     if (!entry) {
-      throw new RpcError(RunnerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      throw new RpcError(ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
     }
     return entry(params)
   }
@@ -137,11 +137,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   return { handle, dispose, setAgentHookUrl }
 }
 
-export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}): RunnerHandle {
+export function startComputer(config: ComputerConfig, deps: ComputerRuntimeDeps = {}): ComputerHandle {
   const log =
     deps.log ??
     (() => {
-      // Logging is opt-in — with no sink, runner lifecycle diagnostics are discarded.
+      // Logging is opt-in — with no sink, computer lifecycle diagnostics are discarded.
     })
   // Creds always derive from the ROOT anchor (`<ROOT>/computers`, see
   // credential-store slayzoneRootDir) — no override knob. Tests inject a store
@@ -151,9 +151,9 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
 
   // The dialer THROWS if a pin is set on a `ws://` url (pinning is meaningless
   // without TLS). An EXPLICITLY-configured pin (env/file) on a ws:// url already
-  // fails loudly in loadRunnerConfig — so any pin reaching here on a ws:// url can
+  // fails loudly in loadComputerConfig — so any pin reaching here on a ws:// url can
   // only be the join-token-DECODED fingerprint (the auto path). Softly drop it so a
-  // ws token stays usable for loopback/dev; the real runner path is wss:// (the hub's
+  // ws token stays usable for loopback/dev; the real computer path is wss:// (the hub's
   // /computers listener is https), where the pin is fed through and enforced.
   const isSecureUrl = (() => {
     try {
@@ -170,7 +170,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     })
   }
 
-  let handle: RunnerHandle
+  let handle: ComputerHandle
   let dispatch: HubRequestDispatch
   const dialer = new HubDialer({
     url: config.hubUrl,
@@ -187,7 +187,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     log
   })
 
-  // Where this runner keeps its projects. Loaded async (one file read) and
+  // Where this computer keeps its projects. Loaded async (one file read) and
   // late-bound, like the agent-hook URL — the dispatch table is synchronous.
   let projectPaths: ProjectPathStore | null = null
   void createProjectPathStore(hubHostFromUrl(config.hubUrl))
@@ -199,7 +199,7 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
 
   dispatch = createHubRequestHandler({
     shutdown: (reason) => {
-      log('runner shutdown requested by hub', { reason })
+      log('computer shutdown requested by hub', { reason })
       void handle.stop().then(() => deps.onShutdown?.(reason))
     },
     dialer,
@@ -208,19 +208,19 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     getProjectPaths: () => projectPaths
   })
 
-  dialer.events.on('connected', ({ runnerId, mode }) => log('connected to hub', { runnerId, mode }))
+  dialer.events.on('connected', ({ computerId, mode }) => log('connected to hub', { computerId, mode }))
   dialer.events.on('disconnected', ({ reason }) => log('disconnected from hub', { reason }))
   dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
     log('reconnect scheduled', { attempt, delayMs })
   )
   dialer.events.on('error', ({ error, fatal, reason }) => {
     // `needs-re-enrollment` is the one failure an operator can act on: the hub no
-    // longer recognizes this runner (its storage was deleted, one of its two DBs was
-    // restored without the other, or the runner was revoked). Log it as its own
+    // longer recognizes this computer (its storage was deleted, one of its two DBs was
+    // restored without the other, or the computer was revoked). Log it as its own
     // thing rather than burying it in a generic fatal, because the message carries
     // the fix and the process is about to stop.
     if (reason === 'needs-re-enrollment') {
-      log('NEEDS RE-ENROLLMENT — this runner will not reconnect until it is enrolled again', {
+      log('NEEDS RE-ENROLLMENT — this computer will not reconnect until it is enrolled again', {
         error: error.message,
         reason
       })
@@ -229,8 +229,8 @@ export function startRunner(config: RunnerConfig, deps: RunnerRuntimeDeps = {}):
     log(fatal ? 'fatal error' : 'error', { error: error.message, fatal })
   })
 
-  // Agent-hook loopback relay (hub/runner split): host /api/agent-hook on the
-  // runner's own loopback and forward each envelope to the hub over the existing
+  // Agent-hook loopback relay (hub/computer split): host /api/agent-hook on the
+  // computer's own loopback and forward each envelope to the hub over the existing
   // authed ws channel. Its ephemeral port binds async; feed the URL into the
   // dispatch (shared ctx) so ptys spawned after the bind overlay it into the
   // agent env. Best-effort — a bind failure only means remote hooks fall back to

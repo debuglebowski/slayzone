@@ -58,10 +58,10 @@ const settle = (): Promise<void> => wait(240)
 /**
  * Warm agents live on RUNNERS now, so the pool is driven through the
  * `PtyBackend` warm methods rather than by spawning a local shell. This fake
- * backend records what the pool asked the runner to do.
+ * backend records what the pool asked the computer to do.
  */
 interface WarmSpawnCall {
-  runnerId: string
+  computerId: string
   warmId: string
   command: string
   args: string[]
@@ -71,7 +71,7 @@ interface WarmSpawnCall {
 }
 
 let spawnCalls: WarmSpawnCall[] = []
-let killCalls: Array<{ runnerId: string; warmId: string }> = []
+let killCalls: Array<{ computerId: string; warmId: string }> = []
 let listResult: Array<{ warmId: string; cwd: string; pid: number }> = []
 
 const spawnCount = (): number => spawnCalls.length
@@ -81,12 +81,12 @@ const fakeBackend = {
   spawn() {
     throw new Error('cold spawn must not run from the warm pool')
   },
-  async warmSpawn(runnerId: string, spec: Omit<WarmSpawnCall, 'runnerId'>) {
-    spawnCalls.push({ runnerId, ...spec })
+  async warmSpawn(computerId: string, spec: Omit<WarmSpawnCall, 'computerId'>) {
+    spawnCalls.push({ computerId, ...spec })
     return { pid: 4242 }
   },
-  async warmKill(runnerId: string, warmId: string) {
-    killCalls.push({ runnerId, warmId })
+  async warmKill(computerId: string, warmId: string) {
+    killCalls.push({ computerId, warmId })
   },
   async warmList() {
     return listResult
@@ -114,7 +114,7 @@ const db = {
   }
 } as unknown as SlayzoneDb
 
-let runnerId: string | null = 'runner-1'
+let computerId: string | null = 'computer-1'
 
 function init(): void {
   spawnCalls = []
@@ -122,13 +122,13 @@ function init(): void {
   listResult = []
   dbRunCalls = []
   enabled = true
-  runnerId = 'runner-1'
+  computerId = 'computer-1'
   setPtyBackend(fakeBackend as unknown as PtyBackend)
   initWarmProcessManager({
     db,
     isEnabled: () => enabled,
     getProjectRoot: async () => PROJECT_ROOT,
-    resolveRunnerId: async () => runnerId
+    resolveComputerId: async () => computerId
   })
 }
 
@@ -194,7 +194,7 @@ await test('count 1→2→1 does not respawn', async () => {
   expect(spawnCount()).toBe(1)
 })
 
-await test('count →0 kills the warm agent on its runner', async () => {
+await test('count →0 kills the warm agent on its computer', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -202,8 +202,8 @@ await test('count →0 kills the warm agent on its runner', async () => {
   setProjectTabCounts(1, { p1: 0 })
   await settle()
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
-  // The process is the runner's, so teardown is a request, not a local kill.
-  expect(killCalls.some((c) => c.warmId === warmId && c.runnerId === 'runner-1')).toBe(true)
+  // The process is the computer's, so teardown is a request, not a local kill.
+  expect(killCalls.some((c) => c.warmId === warmId && c.computerId === 'computer-1')).toBe(true)
 })
 
 await test('multi-window union keeps warm while any window has the tab', async () => {
@@ -231,7 +231,7 @@ await test('disabled flag never spawns', async () => {
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('claim returns the runner handle, not a process (nothing to seed hub-side)', async () => {
+await test('claim returns the computer handle, not a process (nothing to seed hub-side)', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -240,7 +240,7 @@ await test('claim returns the runner handle, not a process (nothing to seed hub-
     mode: 'claude-code',
     cwd: PROJECT_ROOT,
     resuming: false,
-    runnerId: 'runner-1',
+    computerId: 'computer-1',
     flags: '--dangerously'
   })
   // The pool no longer owns output. The RUNNER buffers a warm session in its own
@@ -258,15 +258,15 @@ await test('claim returns the runner handle, not a process (nothing to seed hub-
   // contiguous chunk, so there is no torn `ESC[?6` / `n` split across read
   // boundaries for a stateless filter to miss.
   expect(claim!.warmId).toBe(lastSpawn()!.warmId)
-  expect(claim!.runnerId).toBe('runner-1')
+  expect(claim!.computerId).toBe('computer-1')
   expect((claim as unknown as { seedBuffer?: string }).seedBuffer).toBe(
     undefined as unknown as string
   )
 })
 
-await test('never warms when no runner resolves (no ownerless billable agent)', async () => {
+await test('never warms when no computer resolves (no ownerless billable agent)', async () => {
   init()
-  runnerId = null
+  computerId = null
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   // Warming on a machine no task will resolve to would boot an agent nothing can
@@ -275,7 +275,7 @@ await test('never warms when no runner resolves (no ownerless billable agent)', 
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('claim refuses a warm agent held by a DIFFERENT runner', async () => {
+await test('claim refuses a warm agent held by a DIFFERENT computer', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -284,26 +284,26 @@ await test('claim refuses a warm agent held by a DIFFERENT runner', async () => 
     mode: 'claude-code',
     cwd: PROJECT_ROOT,
     resuming: false,
-    runnerId: 'runner-2',
+    computerId: 'computer-2',
     flags: '--dangerously'
   })
   // The process lives on ONE machine; a spawn routed elsewhere must cold-spawn.
   expect(claim).toBe(null as unknown as ReturnType<typeof claimWarmShell>)
 })
 
-await test('reapOrphanWarms kills runner-side warms this hub is not tracking', async () => {
+await test('reapOrphanWarms kills computer-side warms this hub is not tracking', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   const mine = lastSpawn()!.warmId
-  // Warm agents are the runner's processes, so they survive a hub/sidecar restart
+  // Warm agents are the computer's processes, so they survive a hub/sidecar restart
   // that wiped the pool map — an unclaimed pre-booted agent is billable with no
-  // owner. The runner's own list is the authority on what is actually alive.
+  // owner. The computer's own list is the authority on what is actually alive.
   listResult = [
     { warmId: mine, cwd: PROJECT_ROOT, pid: 1 },
     { warmId: 'warm:orphan-from-a-previous-boot', cwd: PROJECT_ROOT, pid: 2 }
   ]
-  await reapOrphanWarms('runner-1')
+  await reapOrphanWarms('computer-1')
   expect(killCalls.length).toBe(1)
   expect(killCalls[0].warmId).toBe('warm:orphan-from-a-previous-boot')
 })
@@ -318,7 +318,7 @@ await test('adopt matches: claude-code + project-root cwd + fresh', async () => 
     mode: 'claude-code',
     cwd: PROJECT_ROOT,
     resuming: false,
-    runnerId: 'runner-1',
+    computerId: 'computer-1',
     flags: '--dangerously'
   })
   expect(claim?.warmId).toBe(adopted)
@@ -336,7 +336,7 @@ await test('adopt miss: wrong mode', async () => {
     mode: 'codex',
     cwd: PROJECT_ROOT,
     resuming: false,
-    runnerId: 'runner-1'
+    computerId: 'computer-1'
   })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready') // untouched
@@ -351,7 +351,7 @@ await test('adopt miss: resume', async () => {
     mode: 'claude-code',
     cwd: PROJECT_ROOT,
     resuming: true,
-    runnerId: 'runner-1'
+    computerId: 'computer-1'
   })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready')
@@ -366,7 +366,7 @@ await test('adopt miss: cwd mismatch (e.g. worktree path)', async () => {
     mode: 'claude-code',
     cwd: homedir(),
     resuming: false,
-    runnerId: 'runner-1'
+    computerId: 'computer-1'
   })
   expect(claim).toBeNull()
   expect(getWarmStatus().p1).toBe('ready')
@@ -379,7 +379,7 @@ await test('adopt miss: no warm for project', async () => {
     mode: 'claude-code',
     cwd: PROJECT_ROOT,
     resuming: false,
-    runnerId: 'runner-1'
+    computerId: 'computer-1'
   })
   expect(claim).toBeNull()
 })
@@ -390,7 +390,7 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
   listResult = []
   dbRunCalls = []
   enabled = true
-  runnerId = 'runner-1'
+  computerId = 'computer-1'
   setPtyBackend(fakeBackend as unknown as PtyBackend)
   const modeLookups: string[] = []
   let recorded: Parameters<WarmPoolDataOps['recordSessionSpawn']>[0] | null = null
@@ -412,7 +412,7 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
     ops,
     isEnabled: () => enabled,
     getProjectRoot: async () => PROJECT_ROOT,
-    resolveRunnerId: async () => runnerId
+    resolveComputerId: async () => computerId
   })
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -428,7 +428,7 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
   // deps.db itself stays required this wave, e.g. buildMcpEnv still takes it).
   expect(dbRunCalls.length).toBe(0)
   // Teardown → markSessionDead flows through ops with the pooled session id. The
-  // warm process is the runner's, so its death is no longer observed through a
+  // warm process is the computer's, so its death is no longer observed through a
   // local onExit; the pool marks the pooled row dead when it releases the handle.
   setProjectTabCounts(1, { p1: 0 })
   await settle()

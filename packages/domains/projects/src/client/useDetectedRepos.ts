@@ -6,7 +6,7 @@ import type { DetectedRepo } from '@slayzone/projects/shared'
  * Child git repos of a project directory, discovered on the machine that owns it.
  *
  * `projectId` is what routes the scan to that machine. Without it the hub would
- * scan its own disk, and a multi-repo project on a runner would resolve to the
+ * scan its own disk, and a multi-repo project on a computer would resolve to the
  * wrong terminal cwd (or to none at all).
  */
 export function useDetectedRepos(projectPath: string | null, projectId?: string): DetectedRepo[] {

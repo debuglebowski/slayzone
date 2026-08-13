@@ -1,9 +1,9 @@
 /**
- * Exec-boundary contract: the hub must remain fully functional with ZERO runners.
+ * Exec-boundary contract: the hub must remain fully functional with ZERO computers.
  *
  * Codifies docs/exec-boundary.md. Every hub-owned call is driven through a
  * WorktreeExecAdapters whose ROUTABLE methods all throw — simulating enforcement
- * with no runner available — and asserts the hub-owned paths still complete.
+ * with no computer available — and asserts the hub-owned paths still complete.
  *
  * Written because the boundary was previously discovered by watching e2e fail four
  * times: artifact-dir probes, the task-create git probe, and the boot-time purge
@@ -21,22 +21,22 @@ import {
 
 type Harness = Awaited<ReturnType<typeof createTestHarness>>
 
-const noRunner = (what: string) => (): never => {
-  const err = new Error(`No runner available to run ${what}`)
-  err.name = 'NoRunnerAvailableError'
+const noComputer = (what: string) => (): never => {
+  const err = new Error(`No computer available to run ${what}`)
+  err.name = 'NoComputerAvailableError'
   throw err
 }
 
 /** Adapters where every ROUTED method fails, and only hub-owned ones work. */
-const zeroRunnerAdapters = (hubCalls: string[]): WorktreeExecAdapters => ({
-  createWorktree: async () => noRunner('worktree create')(),
-  removeWorktree: async () => noRunner('worktree remove')(),
-  runWorktreeSetupScript: async () => noRunner('setup script')(),
-  copyIgnoredFiles: async () => noRunner('copy ignored')(),
-  getCurrentBranch: async () => noRunner('branch read')(),
-  isGitRepo: async () => noRunner('git repo probe')(),
-  pathExists: () => noRunner('path probe')(),
-  // Hub-owned: must be reachable with no runner.
+const zeroComputerAdapters = (hubCalls: string[]): WorktreeExecAdapters => ({
+  createWorktree: async () => noComputer('worktree create')(),
+  removeWorktree: async () => noComputer('worktree remove')(),
+  runWorktreeSetupScript: async () => noComputer('setup script')(),
+  copyIgnoredFiles: async () => noComputer('copy ignored')(),
+  getCurrentBranch: async () => noComputer('branch read')(),
+  isGitRepo: async () => noComputer('git repo probe')(),
+  pathExists: () => noComputer('path probe')(),
+  // Hub-owned: must be reachable with no computer.
   getWorktreeColor: () => {
     hubCalls.push('getWorktreeColor')
     return '#abcdef'
@@ -71,7 +71,7 @@ const seedTask = (h: Harness, id: string, pid: string): void => {
     .run(id, pid)
 }
 
-test('zero runners: task CREATE succeeds, worktree is skipped not fatal', async () => {
+test('zero computers: task CREATE succeeds, worktree is skipped not fatal', async () => {
   const h = await createTestHarness()
   const pid = crypto.randomUUID()
   const tid = crypto.randomUUID()
@@ -79,7 +79,7 @@ test('zero runners: task CREATE succeeds, worktree is skipped not fatal', async 
   seedTask(h, tid, pid)
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
-    worktrees: zeroRunnerAdapters([])
+    worktrees: zeroComputerAdapters([])
   })
 
   // Must NOT throw: auto-create is best-effort and runs before any agent exists.
@@ -91,7 +91,7 @@ test('zero runners: task CREATE succeeds, worktree is skipped not fatal', async 
   h.cleanup()
 })
 
-test('zero runners: task ARCHIVE cleanup still removes hub artifacts', async () => {
+test('zero computers: task ARCHIVE cleanup still removes hub artifacts', async () => {
   const h = await createTestHarness()
   const pid = crypto.randomUUID()
   const tid = crypto.randomUUID()
@@ -100,7 +100,7 @@ test('zero runners: task ARCHIVE cleanup still removes hub artifacts', async () 
   const hubCalls: string[] = []
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
-    worktrees: zeroRunnerAdapters(hubCalls)
+    worktrees: zeroComputerAdapters(hubCalls)
   })
 
   // Must NOT throw even though every routable method does.
@@ -112,7 +112,7 @@ test('zero runners: task ARCHIVE cleanup still removes hub artifacts', async () 
   h.cleanup()
 })
 
-test('zero runners: cleanup of a task WITH a worktree still completes', async () => {
+test('zero computers: cleanup of a task WITH a worktree still completes', async () => {
   const h = await createTestHarness()
   const pid = crypto.randomUUID()
   const tid = crypto.randomUUID()
@@ -121,11 +121,11 @@ test('zero runners: cleanup of a task WITH a worktree still completes', async ()
   h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt-x', tid)
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
-    worktrees: zeroRunnerAdapters([])
+    worktrees: zeroComputerAdapters([])
   })
 
   // removeWorktree IS routed and throws here; cleanup wraps it, so archiving a task
-  // never depends on a runner being present.
+  // never depends on a computer being present.
   await cleanupTaskFull(h.slayDb, tid)
   h.cleanup()
 })

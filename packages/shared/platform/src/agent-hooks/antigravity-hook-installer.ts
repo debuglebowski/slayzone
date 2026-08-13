@@ -98,7 +98,7 @@ async function isAntigravityInstalled(): Promise<boolean> {
 export async function installAntigravityHooks(
   opts: InstallAntigravityHooksOpts
 ): Promise<InstallAntigravityHooksResult> {
-  // E2E specs assert the file is written; the test runner doesn't have `agy`
+  // E2E specs assert the file is written; the test computer doesn't have `agy`
   // on PATH, so the probe would otherwise short-circuit.
   const skipProbe = opts.skipBinaryProbe || process.env.SLAYZONE_E2E_INSTALL_HOOKS === '1'
   if (!skipProbe) {

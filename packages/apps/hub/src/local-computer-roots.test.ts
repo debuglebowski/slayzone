@@ -1,12 +1,12 @@
 /**
- * Local-runner path-jail widening policy.
+ * Local-computer path-jail widening policy.
  *
- * Routing the filesystem through the co-resident runner gave its `[homedir()]`
+ * Routing the filesystem through the co-resident computer gave its `[homedir()]`
  * default authority over work the desktop app previously did unjailed, so every
  * project outside $HOME would have stopped working. These are the rules that
- * keep that from being a cap — pure functions, no runner needed.
+ * keep that from being a cap — pure functions, no computer needed.
  */
-import { isCoveredByRoots, missingRootsForProjects } from './local-runner-roots.js'
+import { isCoveredByRoots, missingRootsForProjects } from './local-computer-roots.js'
 
 let passed = 0
 let failed = 0
@@ -30,7 +30,7 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 }
 
 function main(): void {
-  console.log('\nlocal runner root widening\n')
+  console.log('\nlocal computer root widening\n')
 
   test('a root covers itself and anything beneath it', () => {
     assertEq(isCoveredByRoots('/home/kalle', ['/home/kalle']), true, 'the root itself')

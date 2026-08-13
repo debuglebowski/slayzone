@@ -2,14 +2,14 @@
  * hubUrlFromAddr — compose a full hub URL from an authority-only
  * `SLAYZONE_HUB_ADDRESS` (`host[:port]`, no scheme, no path) + the scheme derived
  * from SLAYZONE_MODE. This is what makes the old ws-vs-http `SLAYZONE_HUB_URL`
- * collision unrepresentable: the env channel never carries a scheme, so a runner
+ * collision unrepresentable: the env channel never carries a scheme, so a computer
  * (ws) and the CLI (http) reading the SAME var can never disagree.
  *
  * Pure Node → runs under plain `npx tsx`.
  *
  * Run with: npx tsx packages/shared/platform/src/hub-addr.test.ts
  */
-import { hubUrlFromAddr, isBareAuthority, isLoopbackRunnerUrl, parseHubAddress } from './hub-addr'
+import { hubUrlFromAddr, isBareAuthority, isLoopbackComputerUrl, parseHubAddress } from './hub-addr'
 
 let passed = 0
 let failed = 0
@@ -134,29 +134,29 @@ check('parse: reject non-numeric port', parseHubAddress('127.0.0.1:abc') === nul
 check('parse: reject empty', parseHubAddress('') === null)
 check('parse: reject undefined', parseHubAddress(undefined) === null)
 
-// --- isLoopbackRunnerUrl: is a minted join token usable OFF the hub's box? ---
+// --- isLoopbackComputerUrl: is a minted join token usable OFF the hub's box? ---
 // A hub in local mode always derives `ws://<loopback>:<port>/computers` for the URL
-// it embeds in join tokens. That is correct for a co-located runner and useless
-// for any other machine — the runner would dial its OWN loopback. This predicate
+// it embeds in join tokens. That is correct for a co-located computer and useless
+// for any other machine — the computer would dial its OWN loopback. This predicate
 // is what lets the UI and the CLI say so instead of handing over a dead token.
-check('loopback: 127.0.0.1', isLoopbackRunnerUrl('ws://127.0.0.1:51100/computers'))
-check('loopback: other 127.x', isLoopbackRunnerUrl('ws://127.0.0.53:8080/computers'))
-check('loopback: localhost', isLoopbackRunnerUrl('ws://localhost:51100/computers'))
-check('loopback: bracketed ipv6 ::1', isLoopbackRunnerUrl('ws://[::1]:51100/computers'))
-check('loopback: wss loopback still loopback', isLoopbackRunnerUrl('wss://127.0.0.1/computers'))
+check('loopback: 127.0.0.1', isLoopbackComputerUrl('ws://127.0.0.1:51100/computers'))
+check('loopback: other 127.x', isLoopbackComputerUrl('ws://127.0.0.53:8080/computers'))
+check('loopback: localhost', isLoopbackComputerUrl('ws://localhost:51100/computers'))
+check('loopback: bracketed ipv6 ::1', isLoopbackComputerUrl('ws://[::1]:51100/computers'))
+check('loopback: wss loopback still loopback', isLoopbackComputerUrl('wss://127.0.0.1/computers'))
 // Off-box targets — the whole point of `--public-address`.
-check('off-box: public dns name', !isLoopbackRunnerUrl('wss://hub.example.com:8443/computers'))
-check('off-box: private LAN ip', !isLoopbackRunnerUrl('ws://10.0.0.5:51100/computers'))
-check('off-box: public ip', !isLoopbackRunnerUrl('wss://203.0.113.9/computers'))
+check('off-box: public dns name', !isLoopbackComputerUrl('wss://hub.example.com:8443/computers'))
+check('off-box: private LAN ip', !isLoopbackComputerUrl('ws://10.0.0.5:51100/computers'))
+check('off-box: public ip', !isLoopbackComputerUrl('wss://203.0.113.9/computers'))
 // A wildcard BIND is not a dialable loopback target: a token carrying it is
 // broken for everyone, so calling it "loopback" would misdirect the operator.
 check(
   'off-box: wildcard 0.0.0.0 is not loopback',
-  !isLoopbackRunnerUrl('ws://0.0.0.0:51100/computers')
+  !isLoopbackComputerUrl('ws://0.0.0.0:51100/computers')
 )
 // Unparseable → false: never claim a URL is loopback when we cannot tell.
-check('unparseable: garbage → false', !isLoopbackRunnerUrl('not a url'))
-check('unparseable: empty → false', !isLoopbackRunnerUrl(''))
+check('unparseable: garbage → false', !isLoopbackComputerUrl('not a url'))
+check('unparseable: empty → false', !isLoopbackComputerUrl(''))
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

@@ -93,7 +93,7 @@ async function isGeminiInstalled(): Promise<boolean> {
 export async function installGeminiHooks(
   opts: InstallGeminiHooksOpts
 ): Promise<InstallGeminiHooksResult> {
-  // E2E specs assert the file is written; the test runner doesn't have
+  // E2E specs assert the file is written; the test computer doesn't have
   // `gemini` on PATH, so the probe would otherwise short-circuit. Same env
   // flag that opts the boot installer back in under PLAYWRIGHT.
   const skipProbe = opts.skipBinaryProbe || process.env.SLAYZONE_E2E_INSTALL_HOOKS === '1'

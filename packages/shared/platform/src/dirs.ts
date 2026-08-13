@@ -23,15 +23,15 @@ export function getStateDir(): string {
 
 /**
  * User-visible SlayZone home/root dir — the single anchor for on-disk state.
- * For standalone hub/runner, everything (hub.config.json/hub.state.json or
- * runner.config.json, the DB, logs, runner creds) derives directly from it.
+ * For standalone hub/computer, everything (hub.config.json/hub.state.json or
+ * computer.config.json, the DB, logs, computer creds) derives directly from it.
  * For the desktop app it anchors only what's genuinely machine-wide and
  * channel-agnostic — `hooks/`, `bin/` — since per-channel supervised state
  * derives from {@link getSupervisedRoot} instead, not this function directly.
  * Distinct from getStateDir() (Electron app state).
  *
  * Resolution (pure env reader — no CWD default here): `SLAYZONE_ROOT` >
- * `$HOME/.slayzone`. Standalone hub/runner entrypoints seed
+ * `$HOME/.slayzone`. Standalone hub/computer entrypoints seed
  * `SLAYZONE_ROOT=process.cwd()` before any reader runs, so a remote deploy
  * anchors to the launch dir; the Electron app leaves it unset and falls through
  * to `~/.slayzone`. This function stays CWD-agnostic on purpose — the app main
@@ -51,7 +51,7 @@ export function getSlayzoneHomeDir(): string {
  * The release channel this SlayZone process belongs to — `stable` / `beta` /
  * `dev` (or `unknown` when unset). Pure env reader: the Electron app main sets
  * `SLAYZONE_RELEASE_CHANNEL` at boot (derived from `app.isPackaged` + the version's
- * prerelease tag) BEFORE any sidecar / pty env is built; standalone hub/runner
+ * prerelease tag) BEFORE any sidecar / pty env is built; standalone hub/computer
  * boots and tests leave it unset → `unknown`.
  *
  * Two consumers now: attribution (packed into the opaque
@@ -68,21 +68,21 @@ export function getSlayzoneReleaseChannel(): string {
 }
 
 /** A supervised (desktop-app-spawned) process's role — the sidecar acting as
- *  the local hub, or the co-located local runner. */
-export type SlayzoneSupervisedRole = 'hub' | 'runner'
+ *  the local hub, or the co-located local computer. */
+export type SlayzoneSupervisedRole = 'hub' | 'computer'
 
 /**
- * Channel-scoped root for the desktop app's supervised sidecar/local-runner —
- * `~/.slayzone/<dev|stable>/<hub|runner>`. Two buckets, not three: `beta` folds
+ * Channel-scoped root for the desktop app's supervised sidecar/local-computer —
+ * `~/.slayzone/<dev|stable>/<hub|computer>`. Two buckets, not three: `beta` folds
  * into `stable` (they already share one DB file today via `getDbName`'s
  * packaged-only boolean, and can't even run concurrently — the sidecar's fixed
  * port only has `prod`/`dev`/`test` buckets — so a separate `beta` bucket here
  * would buy no isolation that exists today). No empty/default case either:
  * `stable` is always spelled out, so it can never collide with a standalone
- * root someone names `hub` or `runner` directly under `~/.slayzone`.
+ * root someone names `hub` or `computer` directly under `~/.slayzone`.
  *
- * CALLER RESTRICTION: only the desktop app's own sidecar/local-runner spawn
- * code may call this. Hook installers and standalone hub/runner keep resolving
+ * CALLER RESTRICTION: only the desktop app's own sidecar/local-computer spawn
+ * code may call this. Hook installers and standalone hub/computer keep resolving
  * their own root via {@link getSlayzoneHomeDir} directly — misusing this
  * function there would silently break the "hooks stay unscoped" invariant
  * (`~/.slayzone/hooks/notify.sh` must stay outside any channel/role subfolder).
@@ -125,16 +125,16 @@ export function getSupervisedRoot(
  *
  * NOT the same question as {@link getSlayzoneHomeDir}, which answers "where does
  * THIS PROCESS keep its state" and correctly follows `SLAYZONE_ROOT` (a
- * standalone hub/runner anchors to its launch dir; the desktop app's supervised
+ * standalone hub/computer anchors to its launch dir; the desktop app's supervised
  * roles are channel-scoped). This one answers "where do the files SHARED BY THE
  * WHOLE MACHINE live", and those must not move per process.
  *
  * The two coincide for the desktop app, which is why one resolver served both
- * for so long. They diverge for a runner — and the divergence is not cosmetic:
+ * for so long. They diverge for a computer — and the divergence is not cosmetic:
  * `notify.sh`'s path gets written INTO `~/.claude/settings.json`, which is one
  * file per machine that holds exactly one path. A root-scoped answer means two
- * runners with different roots each write their own path there and the last boot
- * wins, and a runner whose root was temporary leaves a path that no longer
+ * computers with different roots each write their own path there and the last boot
+ * wins, and a computer whose root was temporary leaves a path that no longer
  * exists. Anchoring on `$HOME` makes every writer compute the SAME path with the
  * SAME content, so concurrent installers converge instead of fighting.
  *

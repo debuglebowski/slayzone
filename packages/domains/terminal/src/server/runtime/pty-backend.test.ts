@@ -1,11 +1,11 @@
 /**
- * Hub/runner split (wave 2, Model A) — the PtyBackend spawn seam.
+ * Hub/computer split (wave 2, Model A) — the PtyBackend spawn seam.
  *
  * (1) A FAKE PtyBackend proves createPty routes its OS spawn through the seam:
  *     the fake handle's `onData` drives ptyEvents 'data' with a monotonic
  *     RingBuffer seq, ptyEvents 'exit' fires on the fake's `onExit`, and
  *     writePty / resizePty / killPty reach the fake handle. The injected spec
- *     carries `runnerId=null` + `transport=false` (the hub-local default).
+ *     carries `computerId=null` + `transport=false` (the hub-local default).
  * (2) The default `localPtyBackend` spawns a REAL short-lived shell (echo) and
  *     its output arrives through ptyEvents 'data' with a monotonic RingBuffer
  *     seq — proving the dark default path is byte-identical.
@@ -138,8 +138,8 @@ await test('fake backend: createPty routes spawn; onData→ptyEvents data (monot
   // The spawn went through the injected backend, with the hub-local defaults.
   expect(capturedSpec !== null, 'backend.spawn must be invoked by createPty')
   expect(
-    capturedSpec!.runnerId === null,
-    `hub-local spawn must carry runnerId null, got ${String(capturedSpec!.runnerId)}`
+    capturedSpec!.computerId === null,
+    `hub-local spawn must carry computerId null, got ${String(capturedSpec!.computerId)}`
   )
   expect(capturedSpec!.transport === false, 'host spawn must carry transport=false')
   expect(
@@ -254,8 +254,8 @@ await test('localPtyBackend: real echo shell output reaches ptyEvents with monot
 
 // ── Remote spawn confirmation: an unknown pid is NOT a dead pty ──────────────
 //
-// A runner-routed handle comes back the instant the request is sent — the pid
-// arrives later, with the runner's `pty.spawn` reply. Anything that reads the
+// A computer-routed handle comes back the instant the request is sent — the pid
+// arrives later, with the computer's `pty.spawn` reply. Anything that reads the
 // pid as a liveness signal inside that window is reading "not yet known" as
 // "dead", which buries a session whose agent is starting up perfectly well.
 // Both sentinels for "unknown" are covered so neither representation can creep
@@ -282,12 +282,12 @@ for (const unknownPid of [null, 0] as Array<number | null>) {
       cwd: '/tmp',
       mode: 'terminal',
       type: 'terminal',
-      runnerId: 'runner-1'
+      computerId: 'computer-1'
     })
 
-    // Well past any hub-side spawn watchdog, and the runner still has not
+    // Well past any hub-side spawn watchdog, and the computer still has not
     // replied — exactly the restart case where a batch of resumes queues up
-    // behind each other on a busy runner.
+    // behind each other on a busy computer.
     await new Promise((r) => setTimeout(r, 700))
 
     expect(
@@ -310,8 +310,8 @@ for (const unknownPid of [null, 0] as Array<number | null>) {
 }
 
 await test('remote backend: a REJECTED spawn confirmation finalizes the session', async () => {
-  // The other half of the contract — deferring to the runner must not mean
-  // ignoring it. A spawn the runner refused has to surface as a dead session.
+  // The other half of the contract — deferring to the computer must not mean
+  // ignoring it. A spawn the computer refused has to surface as a dead session.
   let failSpawn: (e: Error) => void = () => {}
   const whenSpawned = new Promise<{ pid: number | null }>((_res, rej) => {
     failSpawn = rej
@@ -336,9 +336,9 @@ await test('remote backend: a REJECTED spawn confirmation finalizes the session'
     cwd: '/tmp',
     mode: 'terminal',
     type: 'terminal',
-    runnerId: 'runner-1'
+    computerId: 'computer-1'
   })
-  failSpawn(new Error('runner refused the spawn'))
+  failSpawn(new Error('computer refused the spawn'))
   await new Promise((r) => setTimeout(r, 100))
 
   expect(exits.length >= 1, 'a refused remote spawn must drive an exit')

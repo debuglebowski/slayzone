@@ -26,7 +26,7 @@ describe('computer schema migration (v149 + v163)', () => {
     expect(LATEST_MIGRATION_VERSION).toBeGreaterThanOrEqual(149)
   })
 
-  it('creates the runner tables on a fresh temp DB', () => {
+  it('creates the computer tables on a fresh temp DB', () => {
     const t = createMigratedDb()
     try {
       const tables = tableNames(t.raw)
@@ -45,7 +45,7 @@ describe('computer schema migration (v149 + v163)', () => {
         'last_seen_at',
         'created_at',
         'revoked_at',
-        // v161 — who this runner belongs to. NULL = unclaimed.
+        // v161 — who this computer belongs to. NULL = unclaimed.
         'owner_user_id'
       ])
       expect(columnNames(t.raw, 'join_tokens')).toEqual([
@@ -56,7 +56,7 @@ describe('computer schema migration (v149 + v163)', () => {
         'expires_at',
         'used_at',
         'computer_id',
-        // v162 — carries the minting user through to the runner's owner at enroll.
+        // v162 — carries the minting user through to the computer's owner at enroll.
         'minted_by_user_id'
       ])
       expect(columnNames(t.raw, 'project_placements')).toEqual([
@@ -124,7 +124,7 @@ describe('computer schema migration (v149 + v163)', () => {
     }
   })
 
-  it('enforces one checkout row per (runner, project)', () => {
+  it('enforces one checkout row per (computer, project)', () => {
     const t = createMigratedDb()
     try {
       const ins = t.raw.prepare(
@@ -144,7 +144,7 @@ describe('computer schema migration (v149 + v163)', () => {
 // rename is not that it fails loudly — it is that it drops rows or silently
 // leaves a PK naming a column that no longer exists. Seed BEFORE the rename and
 // assert the rows are still addressable by their new names afterwards.
-describe('v163 runner → computer rename', () => {
+describe('v163 computer → computer rename', () => {
   it('carries rows, the composite PK and the path index across the rename', () => {
     const t = createMigratedDb()
     try {

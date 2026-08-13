@@ -1,5 +1,5 @@
 /**
- * config-prompt — interactive first-run setup for the standalone hub + runner.
+ * config-prompt — interactive first-run setup for the standalone hub + computer.
  * Pure Node (real temp files, a scripted fake IO — no TTY, no native deps) → runs
  * under plain `npx tsx`.
  *
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
       assertEq(res.collected.length, 1, 'one collected')
       assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env seeded')
       assertEq(readJson(cfgPath).publicAddress, 'hub.example.com:8443', 'persisted to file')
-      assert(io.closed === false, 'injected io NOT closed by the runner')
+      assert(io.closed === false, 'injected io NOT closed by the computer')
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
       else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv

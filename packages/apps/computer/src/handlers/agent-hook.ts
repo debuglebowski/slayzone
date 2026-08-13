@@ -1,30 +1,30 @@
 /**
- * Runner-side agent-hook loopback relay.
+ * Computer-side agent-hook loopback relay.
  *
- * Hub/runner split: a task's PTY that spawns on a runner must post its lifecycle
+ * Hub/computer split: a task's PTY that spawns on a computer must post its lifecycle
  * hook to the SAME place a local spawn does — loopback. There is no hub on the
- * runner machine, so this hosts `/api/agent-hook` on the RUNNER's own loopback
+ * computer machine, so this hosts `/api/agent-hook` on the RUNNER's own loopback
  * and relays each envelope to the hub OVER THE EXISTING authenticated ws channel
  * (a generic `event` notification, `name: 'agent-hook'`). The hub's composition
  * root consumes that event and feeds it to the shared `processAgentHook`.
  *
  * Why this exists (the sustainable topology):
- *   - The agent env is BYTE-IDENTICAL local vs remote — the runner overlays
+ *   - The agent env is BYTE-IDENTICAL local vs remote — the computer overlays
  *     SLAYZONE_AGENT_HOOK_URL to this loopback URL at pty spawn (see pty.ts), so
  *     `buildMcpEnv` never needs a remote branch for the hook and no per-agent hub
  *     bearer is ever placed in a subprocess env.
- *   - The runner reuses its ONE authed hub link (no second auth path invented).
- *   - This is where a runner could later filter/batch/retry hook traffic.
+ *   - The computer reuses its ONE authed hub link (no second auth path invented).
+ *   - This is where a computer could later filter/batch/retry hook traffic.
  *
  * This module is a DUMB PIPE: it does NOT parse or name any field of the hook
  * payload. It reads the raw body, forwards it opaquely, and always answers a
  * fast `{}` (fire-and-forget — the hook must never block the agent TUI).
  *
- * @module runner/handlers/agent-hook
+ * @module computer/handlers/agent-hook
  */
 
 import http from 'node:http'
-import { AGENT_HOOK_EVENT_NAME, RunnerNotificationMethods } from '@slayzone/computer-transport/shared'
+import { AGENT_HOOK_EVENT_NAME, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
 import type { HandlerContext } from './types'
 
 /** Loopback path the overlaid SLAYZONE_AGENT_HOOK_URL points at. */
@@ -38,12 +38,12 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024
 export interface AgentHookServer {
   /** `http://127.0.0.1:<port>/api/agent-hook` — inject as SLAYZONE_AGENT_HOOK_URL. */
   url: string
-  /** Stop the listener (called on runner shutdown). */
+  /** Stop the listener (called on computer shutdown). */
   close(): Promise<void>
 }
 
 /**
- * Start the runner's loopback agent-hook relay. Binds `127.0.0.1:0` (ephemeral
+ * Start the computer's loopback agent-hook relay. Binds `127.0.0.1:0` (ephemeral
  * port) so it never collides, and resolves once the port is bound.
  */
 export function createAgentHookServer(ctx: HandlerContext): Promise<AgentHookServer> {
@@ -86,7 +86,7 @@ export function createAgentHookServer(ctx: HandlerContext): Promise<AgentHookSer
         payload = bodyText
       }
       try {
-        ctx.dialer.notify(RunnerNotificationMethods.event, {
+        ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: AGENT_HOOK_EVENT_NAME,
           payload
         })

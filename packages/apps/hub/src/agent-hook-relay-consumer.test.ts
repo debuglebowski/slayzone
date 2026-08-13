@@ -25,9 +25,9 @@ vi.mock('@slayzone/task/server', () => ({
 /** A fake gateway that lets the test emit `event` notifications synchronously. */
 function makeFakeGateway(): {
   gateway: AgentHookRelayGateway
-  emit: (payload: { runnerId: string; name: string; payload?: unknown }) => void
+  emit: (payload: { computerId: string; name: string; payload?: unknown }) => void
 } {
-  let handler: ((payload: { runnerId: string; name: string; payload?: unknown }) => void) | null =
+  let handler: ((payload: { computerId: string; name: string; payload?: unknown }) => void) | null =
     null
   const gateway: AgentHookRelayGateway = {
     events: {
@@ -89,10 +89,10 @@ describe('attachAgentHookRelayConsumer', () => {
     const { gateway, emit } = makeFakeGateway()
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
 
-    // Envelope shape a runner relays: the raw {ctx,raw,arg} the benign notify.sh
-    // POSTed to the runner loopback, forwarded verbatim as the event payload.
+    // Envelope shape a computer relays: the raw {ctx,raw,arg} the benign notify.sh
+    // POSTed to the computer loopback, forwarded verbatim as the event payload.
     emit({
-      runnerId: 'runner-a',
+      computerId: 'computer-a',
       name: 'agent-hook',
       payload: {
         ctx: { v: 1, taskId: 'task-r', agentId: 'claude-code', releaseChannel: 'stable' },
@@ -111,7 +111,7 @@ describe('attachAgentHookRelayConsumer', () => {
     const { gateway, emit } = makeFakeGateway()
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
 
-    emit({ runnerId: 'runner-a', name: 'some-other-event', payload: { hookEvent: 'Stop' } })
+    emit({ computerId: 'computer-a', name: 'some-other-event', payload: { hookEvent: 'Stop' } })
     await flush()
 
     expect(lifecycleSpy).not.toHaveBeenCalled()
@@ -123,9 +123,9 @@ describe('attachAgentHookRelayConsumer', () => {
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
 
     // No identity at all → processAgentHook returns 'bad'; the consumer must
-    // swallow it (a thrown error here would destabilize every runner).
+    // swallow it (a thrown error here would destabilize every computer).
     expect(() =>
-      emit({ runnerId: 'runner-a', name: 'agent-hook', payload: { ctx: { v: 1 } } })
+      emit({ computerId: 'computer-a', name: 'agent-hook', payload: { ctx: { v: 1 } } })
     ).not.toThrow()
     await flush()
     expect(transitionSpy).not.toHaveBeenCalled()
@@ -139,7 +139,7 @@ describe('attachAgentHookRelayConsumer', () => {
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
 
     emit({
-      runnerId: 'runner-a',
+      computerId: 'computer-a',
       name: 'agent-hook',
       payload: {
         ctx: { v: 1, slaySessionId: 'pool-1', agentId: 'claude-code' },

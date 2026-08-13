@@ -1,5 +1,5 @@
 /**
- * Runner-side child-process exec handlers. Spawns non-pty processes on the runner
+ * Computer-side child-process exec handlers. Spawns non-pty processes on the computer
  * and streams their stdout/stderr back to the hub as `proc.data` notifications,
  * emitting `proc.exit` on completion. Sessions are tracked in a Map keyed by the
  * hub-assigned `sessionId` and cleaned up on exit.
@@ -8,7 +8,7 @@
  * imported, not mirrored. It used to be re-declared locally with `id` as the key
  * while the hub sent `sessionId`, so every routed `proc.spawn` threw a zod error
  * and every `proc.data` notification was dropped on validation. That went
- * unnoticed because `ProcSpawnSpec.runnerId` was hardcoded null, so the routing
+ * unnoticed because `ProcSpawnSpec.computerId` was hardcoded null, so the routing
  * backend always fell through to a local spawn. Importing the schemas makes that
  * divergence unrepresentable.
  *
@@ -26,20 +26,20 @@
  * root-constrained (it typically lives in /usr/bin etc.); containment is
  * enforced on the directory the process runs in.
  *
- * @module runner/handlers/proc
+ * @module computer/handlers/proc
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { buildShellInvocation } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import {
-  HubToRunnerMethods,
+  HubToComputerMethods,
   procGetBufferSinceParamsSchema,
   type ProcListResult,
   procKillParamsSchema,
   procSpawnParamsSchema,
   procWriteParamsSchema,
-  RunnerNotificationMethods
+  ComputerNotificationMethods
 } from '@slayzone/computer-transport/shared'
 import { assertPathAllowed } from '../config'
 import { RingBuffer } from '../ring-buffer'
@@ -50,16 +50,16 @@ const MAX_BUFFER_SIZE = 750 * 1024
 
 /** Re-exported for tests + main.ts wiring. Values come from the shared contract. */
 export const ProcMethods = {
-  procSpawn: HubToRunnerMethods.procSpawn,
-  procKill: HubToRunnerMethods.procKill,
-  procWrite: HubToRunnerMethods.procWrite,
-  procGetBufferSince: HubToRunnerMethods.procGetBufferSince,
-  procList: HubToRunnerMethods.procList
+  procSpawn: HubToComputerMethods.procSpawn,
+  procKill: HubToComputerMethods.procKill,
+  procWrite: HubToComputerMethods.procWrite,
+  procGetBufferSince: HubToComputerMethods.procGetBufferSince,
+  procList: HubToComputerMethods.procList
 } as const
 
 export const ProcNotifications = {
-  procData: RunnerNotificationMethods.procData,
-  procExit: RunnerNotificationMethods.procExit
+  procData: ComputerNotificationMethods.procData,
+  procExit: ComputerNotificationMethods.procExit
 } as const
 
 interface ProcSession {
@@ -70,7 +70,7 @@ interface ProcSession {
 
 export interface ProcHandlers {
   handlers: HubMethodTable
-  /** Kill every live process (called on runner shutdown). */
+  /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
 }
 
@@ -85,18 +85,18 @@ export function createProcHandlers(
   const procs = new Map<string, ProcSession>()
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
-    // Sanitize the inherited runner env through the shared manifest: keep the
+    // Sanitize the inherited computer env through the shared manifest: keep the
     // user env (PATH/HOME) but strip every SlayZone infra/secret/identity var
-    // (and any unmanifested SLAYZONE_*, fail closed) so a runner-hosted process
-    // never inherits the runner's own creds/wiring. Hub-passed `overrides` layer
+    // (and any unmanifested SLAYZONE_*, fail closed) so a computer-hosted process
+    // never inherits the computer's own creds/wiring. Hub-passed `overrides` layer
     // on top as the authoritative per-spawn values.
     const merged: Record<string, string> = overrides
       ? { ...sanitizeSpawnEnv(process.env), ...overrides }
       : sanitizeSpawnEnv(process.env)
     // Same override channel as handlers/pty.ts: force the agent's lifecycle hook
-    // to the runner's OWN loopback relay (which forwards to the hub over the
+    // to the computer's OWN loopback relay (which forwards to the hub over the
     // authed ws channel) and strip any hub bearer the hub baked into `overrides`.
-    // Without this a runner-hosted CHAT agent would post its hooks at a hub URL
+    // Without this a computer-hosted CHAT agent would post its hooks at a hub URL
     // that does not resolve from this machine — no spinner, no unread dot — and
     // could carry a hub token into a subprocess env.
     if (ctx.agentHookUrl) {
@@ -242,9 +242,9 @@ export function createProcHandlers(
   }
 
   /**
-   * Every live child process this runner still holds, for hub reattach after a
+   * Every live child process this computer still holds, for hub reattach after a
    * dropped connection. The `proc.list` twin of the pty handler's `list` — the
-   * runner is the authority on what survived, the hub's registry is only a
+   * computer is the authority on what survived, the hub's registry is only a
    * belief about it.
    */
   function procList(): ProcListResult {

@@ -1,5 +1,5 @@
 /**
- * Runner-side hub dialer. Owns the single outbound WebSocket to the hub and
+ * Computer-side hub dialer. Owns the single outbound WebSocket to the hub and
  * the full session lifecycle:
  *
  *  - dial `wss://hub/...` (optionally pinning the hub's TLS cert by sha256)
@@ -8,10 +8,10 @@
  *  - heartbeat loop — an unanswered heartbeat tears the socket down
  *  - reconnect with exponential backoff; a rejected join token is fatal
  *
- * Hub→runner requests are dispatched to `onHubRequest`; `ping` is answered
+ * Hub→computer requests are dispatched to `onHubRequest`; `ping` is answered
  * internally. The dialer knows nothing about pty/fs/git semantics.
  *
- * @module runner/client/hub-dialer
+ * @module computer/client/hub-dialer
  */
 
 import { randomUUID } from 'node:crypto'
@@ -22,10 +22,10 @@ import { TypedEventEmitter } from '../shared/events'
 import {
   enrollResultSchema,
   RUNNER_PROTOCOL_VERSION,
-  RunnerTransportErrorCodes,
+  ComputerTransportErrorCodes,
   helloResultSchema,
-  HubToRunnerMethods,
-  RunnerToHubMethods
+  HubToComputerMethods,
+  ComputerToHubMethods
 } from '../shared/frames'
 import {
   certMatchesFingerprint,
@@ -35,7 +35,7 @@ import {
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
 import { wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
-import type { RunnerCredentialStore } from './credential-store'
+import type { ComputerCredentialStore } from './credential-store'
 
 export type HubDialerState =
   | 'stopped'
@@ -44,7 +44,7 @@ export type HubDialerState =
   | 'connected'
   | 'waiting-retry'
 
-export interface RunnerIdentity {
+export interface ComputerIdentity {
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -54,29 +54,29 @@ export interface RunnerIdentity {
 
 export type HubDialerEvents = {
   'state-change': { state: HubDialerState }
-  connected: { runnerId: string; mode: 'enroll' | 'hello' }
+  connected: { computerId: string; mode: 'enroll' | 'hello' }
   disconnected: { reason: string }
   'reconnect-scheduled': { attempt: number; delayMs: number }
   /**
    * `fatal: true` means the dialer gave up (bad join token, missing creds…).
    *
    * `reason: 'needs-re-enrollment'` is the one an operator can act on: the hub
-   * refused this runner's stored api key, so the runner's identity no longer
+   * refused this computer's stored api key, so the computer's identity no longer
    * exists as far as the hub is concerned. That is always the result of a human
    * action — storage deleted, one of the two DBs restored without the other, or
-   * the runner revoked — so the fix is to enroll it again, not to retry. Callers
+   * the computer revoked — so the fix is to enroll it again, not to retry. Callers
    * should surface it rather than string-matching the message.
    */
   error: { error: Error; fatal: boolean; reason?: 'needs-re-enrollment' }
-  /** Hub→runner notification (none defined in protocol v1; future-proofing). */
+  /** Hub→computer notification (none defined in protocol v1; future-proofing). */
   notification: { method: string; params: unknown }
 }
 
 export interface HubDialerOptions {
-  /** `ws://` or `wss://` hub runner endpoint. */
+  /** `ws://` or `wss://` hub computer endpoint. */
   url: string
-  identity: RunnerIdentity
-  credentialStore: RunnerCredentialStore
+  identity: ComputerIdentity
+  credentialStore: ComputerCredentialStore
   /** Required for first contact; reconnects use stored credentials. */
   joinToken?: string
   /**
@@ -85,11 +85,11 @@ export interface HubDialerOptions {
    * path below.
    *
    * Why this exists: join tokens are SINGLE-USE. If a stored api key ever fails
-   * verification (a rebuilt hub-auth DB, a wiped `runners` row, a restored
+   * verification (a rebuilt hub-auth DB, a wiped `computers` row, a restored
    * backup), the dialer falls back to enrolling — with a token it already spent.
    * The hub answers "join token rejected: unknown", which is an explicit refusal,
-   * so it was treated as fatal and the runner never came back until its process
-   * was restarted. With runners as the only execution path, that means nothing
+   * so it was treated as fatal and the computer never came back until its process
+   * was restarted. With computers as the only execution path, that means nothing
    * can run at all.
    *
    * Return `null` when a token cannot be minted; enrollment then fails as before.
@@ -99,7 +99,7 @@ export interface HubDialerOptions {
   /** Lowercase-hex sha256 of the hub leaf cert DER (colons tolerated). wss only. */
   pinnedCertSha256?: string
   /**
-   * Handle a hub→runner request; resolve with the result or throw an
+   * Handle a hub→computer request; resolve with the result or throw an
    * `RpcError` to control the error code. When omitted, every request is
    * answered with `-32001 unimplemented`.
    */
@@ -108,13 +108,13 @@ export interface HubDialerOptions {
   heartbeatIntervalMs?: number
   /** Reply window for one heartbeat before the socket is torn down. Default 10s. */
   heartbeatTimeoutMs?: number
-  /** Default timeout for runner→hub requests. Default 30s. */
+  /** Default timeout for computer→hub requests. Default 30s. */
   requestTimeoutMs?: number
   backoff?: Partial<BackoffOptions>
   /**
    * Override this process's epoch (see {@link PROCESS_EPOCH}). Only tests should
    * set it — two dialers in ONE process share the module-level epoch, so
-   * simulating a runner RESTART (rather than a reconnect) requires saying so.
+   * simulating a computer RESTART (rather than a reconnect) requires saying so.
    */
   epoch?: string
   /** Injectable randomness for backoff jitter (tests). */
@@ -123,10 +123,10 @@ export interface HubDialerOptions {
 }
 
 /**
- * This runner PROCESS's epoch — minted once at module load, sent on every
+ * This computer PROCESS's epoch — minted once at module load, sent on every
  * enroll/hello. Constant across all of this process's reconnects, different in
  * any restarted process, which is exactly what lets the hub tell "my socket
- * dropped" from "the runner died" and reattach to still-live pty sessions
+ * dropped" from "the computer died" and reattach to still-live pty sessions
  * instead of declaring them dead. See `epochField` in shared/frames.
  */
 const PROCESS_EPOCH = randomUUID()
@@ -153,7 +153,7 @@ export class HubDialer {
   private current: Connection | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
-  private runnerIdValue: string | null = null
+  private computerIdValue: string | null = null
   private stopping = false
   private fatalStop = false
   /** Fresh token from `refreshJoinToken`, preferred over `opts.joinToken` once set. */
@@ -171,7 +171,7 @@ export class HubDialer {
         // route, and it must stay usable (tests, the CLI) without one.
       })
     this.events = new TypedEventEmitter<HubDialerEvents>((event, err) => {
-      this.log('runner dialer listener threw', { event: String(event), error: String(err) })
+      this.log('computer dialer listener threw', { event: String(event), error: String(err) })
     })
     const protocol = new URL(opts.url).protocol
     if (protocol !== 'ws:' && protocol !== 'wss:') {
@@ -192,8 +192,8 @@ export class HubDialer {
   }
 
   /** Set once authenticated; survives reconnects. */
-  get runnerId(): string | null {
-    return this.runnerIdValue
+  get computerId(): string | null {
+    return this.computerIdValue
   }
 
   /** This process's incarnation id, sent on every enroll/hello. */
@@ -219,7 +219,7 @@ export class HubDialer {
     if (conn) {
       const closed = new Promise<void>((resolve) => conn.ws.once('close', () => resolve()))
       if (conn.ws.readyState === WebSocket.OPEN) {
-        conn.ws.close(1000, 'runner-stop')
+        conn.ws.close(1000, 'computer-stop')
       } else {
         conn.ws.terminate()
       }
@@ -240,11 +240,11 @@ export class HubDialer {
     return true
   }
 
-  /** Runner→hub request. Rejects when not connected. */
+  /** Computer→hub request. Rejects when not connected. */
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     const conn = this.current
     if (!conn?.authenticated || conn.rpc.isDisposed) {
-      return Promise.reject(new Error('runner dialer is not connected to the hub'))
+      return Promise.reject(new Error('computer dialer is not connected to the hub'))
     }
     return conn.rpc.request<T>(method, params, timeoutMs)
   }
@@ -287,7 +287,7 @@ export class HubDialer {
   /**
    * Hard pin enforcement. Runs on the ws 'upgrade' event — after the TLS
    * handshake and the (secret-free) HTTP upgrade request, but before 'open',
-   * so no runner frame (hello/enroll credentials) is ever sent to an unpinned
+   * so no computer frame (hello/enroll credentials) is ever sent to an unpinned
    * peer. Returns false and tears the socket down on mismatch.
    */
   private verifyPinnedCert(ws: WebSocket, tlsSocket: TLSSocket): boolean {
@@ -301,7 +301,7 @@ export class HubDialer {
     const error = new Error(
       `hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`
     )
-    this.log('runner dialer rejected hub certificate', { error: error.message })
+    this.log('computer dialer rejected hub certificate', { error: error.message })
     this.events.emit('error', { error, fatal: false })
     ws.terminate()
     return false
@@ -322,7 +322,7 @@ export class HubDialer {
       authenticated: false
     }
     conn.rpc = new DuplexRpc({
-      label: 'runner-runner',
+      label: 'computer-computer',
       defaultRequestTimeoutMs: this.opts.requestTimeoutMs,
       write: (line) => {
         ws.send(line)
@@ -330,7 +330,7 @@ export class HubDialer {
       onPeerRequest: (method, params, id) => this.handleHubRequest(conn, method, params, id),
       onNotification: (method, params) => this.events.emit('notification', { method, params }),
       onParseError: (line, err) => {
-        this.log('runner dialer received malformed frame', { error: String(err), line })
+        this.log('computer dialer received malformed frame', { error: String(err), line })
       }
     })
     this.current = conn
@@ -350,7 +350,7 @@ export class HubDialer {
     })
     ws.on('error', (err) => {
       if (this.current !== conn) return
-      this.log('runner dialer socket error', { error: String(err) })
+      this.log('computer dialer socket error', { error: String(err) })
       this.events.emit('error', {
         error: err instanceof Error ? err : new Error(String(err)),
         fatal: false
@@ -365,8 +365,8 @@ export class HubDialer {
   private async enroll(
     conn: Connection,
     joinToken: string
-  ): Promise<{ runnerId: string; apiKey: string }> {
-    const raw = await conn.rpc.request(RunnerToHubMethods.enroll, {
+  ): Promise<{ computerId: string; apiKey: string }> {
+    const raw = await conn.rpc.request(ComputerToHubMethods.enroll, {
       joinToken,
       name: this.opts.identity.name,
       platform: this.opts.identity.platform,
@@ -384,32 +384,32 @@ export class HubDialer {
       const stored = await this.opts.credentialStore.load()
       if (stored) {
         try {
-          const raw = await conn.rpc.request(RunnerToHubMethods.hello, {
+          const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
             epoch: this.epoch
           })
           const result = helloResultSchema.parse(raw)
-          this.onAuthenticated(conn, result.runnerId, 'hello')
+          this.onAuthenticated(conn, result.computerId, 'hello')
           return
         } catch (err) {
           // Only an explicit credential rejection means the stored key is
           // dead. Transient hub-side RpcErrors and socket failures both go to
           // the reconnect path (rethrow → outer catch → backoff).
-          if (!(err instanceof RpcError) || err.code !== RunnerTransportErrorCodes.unauthorized)
+          if (!(err instanceof RpcError) || err.code !== ComputerTransportErrorCodes.unauthorized)
             throw err
           if (!this.opts.joinToken) {
             this.fatal(
               new Error(
-                `This runner needs to be enrolled again: the hub rejected its stored ` +
-                  `credentials, so the hub no longer recognizes this runner. ` +
-                  `Enroll it from Settings → Runners (or \`slay runner enroll\`). (${err.message})`
+                `This computer needs to be enrolled again: the hub rejected its stored ` +
+                  `credentials, so the hub no longer recognizes this computer. ` +
+                  `Enroll it from Settings → Computers (or \`slay computer enroll\`). (${err.message})`
               ),
               conn,
               'needs-re-enrollment'
             )
             return
           }
-          this.log('runner dialer hello rejected — hub does not recognize this runner', {
+          this.log('computer dialer hello rejected — hub does not recognize this computer', {
             code: err.code
           })
         }
@@ -426,28 +426,28 @@ export class HubDialer {
         // protocol mismatch is unfixable, so it stays fatal. An `unauthorized`
         // refusal usually means the token was already spent — which a FRESH token
         // does fix, so try to mint one and enroll once more before giving up.
-        // Without this, one bad api-key verification retired the runner for the
+        // Without this, one bad api-key verification retired the computer for the
         // lifetime of its process.
         const explicitlyRefused =
           err instanceof RpcError &&
-          (err.code === RunnerTransportErrorCodes.unauthorized ||
-            err.code === RunnerTransportErrorCodes.protocolMismatch)
+          (err.code === ComputerTransportErrorCodes.unauthorized ||
+            err.code === ComputerTransportErrorCodes.protocolMismatch)
         if (!explicitlyRefused) throw err
 
         const retriable =
           err instanceof RpcError &&
-          err.code === RunnerTransportErrorCodes.unauthorized &&
+          err.code === ComputerTransportErrorCodes.unauthorized &&
           this.opts.refreshJoinToken !== undefined &&
           !this.triedTokenRefresh
         if (!retriable) {
           const isAuth =
-            err instanceof RpcError && err.code === RunnerTransportErrorCodes.unauthorized
+            err instanceof RpcError && err.code === ComputerTransportErrorCodes.unauthorized
           this.fatal(
             new Error(
               isAuth
-                ? `This runner needs to be enrolled again: the hub refused its join token ` +
-                    `(a join token is single-use). Enroll it from Settings → Runners ` +
-                    `(or \`slay runner enroll\`). (${err instanceof Error ? err.message : String(err)})`
+                ? `This computer needs to be enrolled again: the hub refused its join token ` +
+                    `(a join token is single-use). Enroll it from Settings → Computers ` +
+                    `(or \`slay computer enroll\`). (${err instanceof Error ? err.message : String(err)})`
                 : `hub rejected enrollment (${(err as RpcError).code}): ${err instanceof Error ? err.message : String(err)}`
             ),
             conn,
@@ -459,12 +459,12 @@ export class HubDialer {
         // One attempt only, per connection, so a hub that refuses every token
         // cannot become a mint loop.
         this.triedTokenRefresh = true
-        this.log('runner dialer enrollment refused — minting a fresh join token')
+        this.log('computer dialer enrollment refused — minting a fresh join token')
         let fresh: string | null = null
         try {
           fresh = await this.opts.refreshJoinToken!()
         } catch (mintErr) {
-          this.log('runner dialer join-token mint failed', { error: String(mintErr) })
+          this.log('computer dialer join-token mint failed', { error: String(mintErr) })
         }
         if (!fresh) {
           this.fatal(
@@ -481,8 +481,8 @@ export class HubDialer {
         } catch (retryErr) {
           if (
             retryErr instanceof RpcError &&
-            (retryErr.code === RunnerTransportErrorCodes.unauthorized ||
-              retryErr.code === RunnerTransportErrorCodes.protocolMismatch)
+            (retryErr.code === ComputerTransportErrorCodes.unauthorized ||
+              retryErr.code === ComputerTransportErrorCodes.protocolMismatch)
           ) {
             this.fatal(
               new Error(
@@ -497,7 +497,7 @@ export class HubDialer {
       }
       try {
         await this.opts.credentialStore.save({
-          runnerId: result.runnerId,
+          computerId: result.computerId,
           apiKey: result.apiKey,
           ...(this.pinnedFingerprint ? { pinnedFingerprint: this.pinnedFingerprint } : {})
         })
@@ -506,29 +506,29 @@ export class HubDialer {
         // (join tokens may be single-use): keep the session, surface the
         // problem, and rely on re-enroll only if the process restarts.
         const error = new Error(
-          `failed to persist runner credentials: ${err instanceof Error ? err.message : String(err)}`
+          `failed to persist computer credentials: ${err instanceof Error ? err.message : String(err)}`
         )
-        this.log('runner dialer credential save failed', { error: error.message })
+        this.log('computer dialer credential save failed', { error: error.message })
         this.events.emit('error', { error, fatal: false })
       }
-      this.onAuthenticated(conn, result.runnerId, 'enroll')
+      this.onAuthenticated(conn, result.computerId, 'enroll')
     } catch (err) {
       if (this.current !== conn || this.stopping) return
       // Socket-level failure mid-auth — let the close handler drive the retry.
-      this.log('runner dialer authentication interrupted', { error: String(err) })
+      this.log('computer dialer authentication interrupted', { error: String(err) })
       conn.ws.terminate()
     }
   }
 
-  private onAuthenticated(conn: Connection, runnerId: string, mode: 'enroll' | 'hello'): void {
+  private onAuthenticated(conn: Connection, computerId: string, mode: 'enroll' | 'hello'): void {
     if (this.current !== conn || this.stopping) return
     conn.authenticated = true
-    this.runnerIdValue = runnerId
+    this.computerIdValue = computerId
     this.retryAttempt = 0
     this.setState('connected')
     this.startHeartbeat(conn)
-    this.events.emit('connected', { runnerId, mode })
-    this.log('runner dialer connected', { runnerId, mode })
+    this.events.emit('connected', { computerId, mode })
+    this.log('computer dialer connected', { computerId, mode })
   }
 
   private startHeartbeat(conn: Connection): void {
@@ -544,14 +544,14 @@ export class HubDialer {
       if (conn.heartbeatInFlight || conn.rpc.isDisposed) return
       conn.heartbeatInFlight = true
       conn.rpc
-        .request(RunnerToHubMethods.heartbeat, { ts: Date.now() }, timeoutMs)
+        .request(ComputerToHubMethods.heartbeat, { ts: Date.now() }, timeoutMs)
         .then(() => {
           conn.heartbeatInFlight = false
         })
         .catch((err: unknown) => {
           conn.heartbeatInFlight = false
           if (this.current !== conn || conn.rpc.isDisposed) return
-          this.log('runner dialer heartbeat failed, dropping connection', { error: String(err) })
+          this.log('computer dialer heartbeat failed, dropping connection', { error: String(err) })
           conn.ws.terminate()
         })
     }, intervalMs)
@@ -564,13 +564,13 @@ export class HubDialer {
     params: unknown,
     id: string | number
   ): void {
-    if (method === HubToRunnerMethods.ping) {
+    if (method === HubToComputerMethods.ping) {
       conn.rpc.respond(id, { ts: Date.now() })
       return
     }
     const handler = this.opts.onHubRequest
     if (!handler) {
-      conn.rpc.respondError(id, RunnerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      conn.rpc.respondError(id, ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
       return
     }
     void (async () => {
@@ -623,7 +623,7 @@ export class HubDialer {
     if (this.fatalStop) return
     this.fatalStop = true
     this.events.emit('error', { error, fatal: true, ...(reason ? { reason } : {}) })
-    this.log('runner dialer fatal error', { error: error.message })
+    this.log('computer dialer fatal error', { error: error.message })
     conn.ws.terminate()
   }
 }

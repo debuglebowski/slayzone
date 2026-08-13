@@ -7,7 +7,7 @@ export {
   setWorkspaceDeps,
   getWorkspaceDeps,
   type WorkspaceDeps,
-  type WorkspaceRunnerTarget
+  type WorkspaceComputerTarget
 } from './app-deps'
 export { setPtyDeps, getPtyDeps, type PtyDeps } from './app-deps'
 export { setIntegrationOps, getIntegrationOps } from './app-deps'
@@ -46,11 +46,11 @@ export {
 } from './app-deps'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 export {
-  setRunnersDeps,
-  getRunnersDeps,
-  getRunnersDepsOrNull,
-  type RunnersDeps,
-  type RunnerGateway
+  setComputersDeps,
+  getComputersDeps,
+  getComputersDepsOrNull,
+  type ComputersDeps,
+  type ComputerGateway
 } from './app-deps'
 export {
   setHubDescribeDeps,

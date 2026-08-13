@@ -11,13 +11,13 @@ import { interpolateTemplate } from '../adapters/template-interpolation'
 import { parseShellArgs } from '../adapters/flag-parser'
 
 /**
- * Keeps ONE warm, pre-booted agent ready per (runner, project), so the first agent a
+ * Keeps ONE warm, pre-booted agent ready per (computer, project), so the first agent a
  * task opens skips both shell-init and agent boot. The warm process lives ON THE
  * RUNNER — never on the hub — and is held outside the pty-manager `sessions` map
  * until `claimWarmShell` → `createPty({ adoptPty })` promotes it, registered under
  * its real `taskId:tabId` from the start so terminal identity is never renamed.
  *
- * Gate: a (runner, project) keeps a warm agent while that project has ≥1 open task
+ * Gate: a (computer, project) keeps a warm agent while that project has ≥1 open task
  * tab (unioned across windows).
  *
  * **The agent is pre-BOOTED, not merely a warm shell.** `spawnWarm` execs the mode's
@@ -29,8 +29,8 @@ import { parseShellArgs } from '../adapters/flag-parser'
  * agent's `slay` CLI + conversation hook resolve the task via session→task once the
  * pool binds it.
  *
- * Adoption is a REKEY on the runner (`pty.warmAdopt`), not a handoff of a live
- * process object: the runner renames the session in place, so pid, output buffer and
+ * Adoption is a REKEY on the computer (`pty.warmAdopt`), not a handoff of a live
+ * process object: the computer renames the session in place, so pid, output buffer and
  * seq counter all carry over and the hub receives an ordinary routed handle. That is
  * what makes a warm pool possible across a wire at all.
  */
@@ -43,9 +43,9 @@ const RECONCILE_DEBOUNCE_MS = 150
 interface WarmHandle {
   /** Placeholder key the RUNNER files this session under until adoption rekeys it. */
   warmId: string
-  /** The runner holding the process. Part of the pool key — a warm agent is only
+  /** The computer holding the process. Part of the pool key — a warm agent is only
    *  useful to a task that resolves to the SAME machine. */
-  runnerId: string
+  computerId: string
   cwd: string
   state: 'ready' | 'adopting'
   /** Runtime session id of the pre-warmed agent (= `agent_sessions.id`,
@@ -65,7 +65,7 @@ interface WarmHandle {
 /**
  * Output buffering and device-status filtering are NOT done here any more.
  *
- * The runner buffers a warm session in its own RingBuffer and hands the whole
+ * The computer buffers a warm session in its own RingBuffer and hands the whole
  * thing over at `pty.warmAdopt`, which the routing backend emits as ONE chunk
  * through the ordinary session data path — so it passes through pty-manager's
  * `onData` (`interceptSyncQueries` + `filterBufferData`) exactly like live output.
@@ -79,9 +79,9 @@ interface WarmHandle {
  */
 
 /**
- * Data seam for every DB touchpoint of the warm pool (hub/runner split, wave 1).
+ * Data seam for every DB touchpoint of the warm pool (hub/computer split, wave 1).
  * The default impl (`createDbWarmPoolDataOps`) runs the same SQL / barrel calls
- * against the local db; an exec-side runner can inject a remote impl instead.
+ * against the local db; an exec-side computer can inject a remote impl instead.
  */
 export interface WarmPoolDataOps {
   /** The warmed mode's command template (`terminal_modes` row), or null if unknown. */
@@ -137,11 +137,11 @@ interface WarmDeps {
   refreshEnabled?: () => Promise<void>
   getProjectRoot: (projectId: string) => Promise<string | null>
   /**
-   * Which runner a task in this project would spawn on. `null` ⇒ no usable
-   * runner, so nothing is warmed — warming on a machine no task will resolve to
+   * Which computer a task in this project would spawn on. `null` ⇒ no usable
+   * computer, so nothing is warmed — warming on a machine no task will resolve to
    * would boot a billable agent nobody can adopt.
    */
-  resolveRunnerId: (projectId: string) => Promise<string | null>
+  resolveComputerId: (projectId: string) => Promise<string | null>
 }
 
 type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
@@ -149,9 +149,9 @@ type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
 let deps: ResolvedWarmDeps | null = null
 let shuttingDown = false
 /**
- * Keyed by projectId. One warm agent per project, on whichever runner that
- * project currently resolves to — the handle carries its own `runnerId`, and a
- * claim only matches when the claimant resolves to that same runner (a warm agent
+ * Keyed by projectId. One warm agent per project, on whichever computer that
+ * project currently resolves to — the handle carries its own `computerId`, and a
+ * claim only matches when the claimant resolves to that same computer (a warm agent
  * on machine A is worthless to a task that will run on machine B).
  */
 const warm = new Map<string /* projectId */, WarmHandle>()
@@ -197,16 +197,16 @@ export function claimWarmShell(criteria: {
   mode: string
   cwd: string
   resuming: boolean
-  /** The runner this spawn will run on. Must equal the warm agent's runner — a
+  /** The computer this spawn will run on. Must equal the warm agent's computer — a
    *  pre-booted process on another machine cannot be adopted. */
-  runnerId: string
+  computerId: string
   /** The task's effective provider flags. Must equal the warm agent's baked
    *  default flags (it can't be re-flagged after boot) or there's no match.
    *  Optional: omitted ⇒ treated as no-flags (only matches a no-flags warm). */
   flags?: string | null
 }): {
   warmId: string
-  runnerId: string
+  computerId: string
   preWarmedAgent: true
   sessionId: string
   conversationId: string | null
@@ -218,11 +218,11 @@ export function claimWarmShell(criteria: {
   if (!handle || handle.state !== 'ready') return null
   if (handle.cwd !== criteria.cwd) return null
   // The process lives on ONE machine; a spawn routed elsewhere must cold-spawn.
-  if (handle.runnerId !== criteria.runnerId) return null
+  if (handle.computerId !== criteria.computerId) return null
   // Flags are baked into the running agent — adopt only on an exact match.
   if ((handle.flags ?? '') !== (criteria.flags ?? '')) return null
 
-  // Hand it off. No output plumbing to unwind: the runner has been buffering all
+  // Hand it off. No output plumbing to unwind: the computer has been buffering all
   // along and replays it in the `pty.warmAdopt` reply.
   handle.state = 'adopting'
   warm.delete(criteria.projectId)
@@ -231,13 +231,13 @@ export function claimWarmShell(criteria: {
     source: 'pty',
     event: 'warm.adopted',
     sessionId: handle.sessionId,
-    payload: { projectId: criteria.projectId, cwd: criteria.cwd, runnerId: handle.runnerId }
+    payload: { projectId: criteria.projectId, cwd: criteria.cwd, computerId: handle.computerId }
   })
   // The task being opened still counts as ≥1 open tab, so re-arm immediately.
   void spawnWarm(criteria.projectId)
   return {
     warmId: handle.warmId,
-    runnerId: handle.runnerId,
+    computerId: handle.computerId,
     preWarmedAgent: true,
     sessionId: handle.sessionId,
     conversationId: handle.conversationId
@@ -328,10 +328,10 @@ async function spawnWarm(projectId: string): Promise<void> {
   try {
     const cwd = await deps.getProjectRoot(projectId)
     // KNOWN LIMITATION: this probes the HUB's filesystem, but the warm agent now
-    // spawns on the runner's. Correct for a co-located runner (the overwhelmingly
+    // spawns on the computer's. Correct for a co-located computer (the overwhelmingly
     // common case, and the only one pre-warm has ever been exercised in); for a
-    // genuinely remote runner it can bail on a path that exists there, or admit one
-    // that does not — in which case the spawn fails runner-side and is caught below
+    // genuinely remote computer it can bail on a path that exists there, or admit one
+    // that does not — in which case the spawn fails computer-side and is caught below
     // as `warm.spawn_failed`, i.e. it degrades to "no warm agent", never to a wrong
     // one. Fixing it properly needs a routed existence probe, which belongs with the
     // broader remote-workspace question (where does a remote task's cwd come from at
@@ -364,19 +364,19 @@ async function spawnWarm(projectId: string): Promise<void> {
 
     // Which machine will this project's tasks actually run on? Warming anywhere
     // else boots an agent (billable, with no task) that nothing can ever adopt.
-    const runnerId = await deps.resolveRunnerId(projectId)
-    if (runnerId == null) {
+    const computerId = await deps.resolveComputerId(projectId)
+    if (computerId == null) {
       recordDiagnosticEvent({
         level: 'info',
         source: 'pty',
-        event: 'warm.spawn_skip_no_runner',
+        event: 'warm.spawn_skip_no_computer',
         payload: { projectId }
       })
       return
     }
     const backend = getPtyBackend()
     if (!backend.warmSpawn) {
-      // Local/test backend: no warm pool. Agents run on runners, so there is no
+      // Local/test backend: no warm pool. Agents run on computers, so there is no
       // hub-local warm path to fall back to — by design, not by omission.
       recordDiagnosticEvent({
         level: 'info',
@@ -397,9 +397,9 @@ async function spawnWarm(projectId: string): Promise<void> {
     maybeReinstallHooksForSpawn(WARM_MODE)
 
     // The agent command is built HERE and sent as `postSpawnCommand`, so the
-    // runner execs it inside the freshly rc-initialized shell. Building it hub-side
+    // computer execs it inside the freshly rc-initialized shell. Building it hub-side
     // keeps the hub the sole authority on mode templates + conversation ids; the
-    // runner stays a byte pipe that does what it is told.
+    // computer stays a byte pipe that does what it is told.
     let postSpawnCommand: string | undefined
     if (modeRow?.initial_command) {
       const binary = interpolateTemplate({
@@ -412,7 +412,7 @@ async function spawnWarm(projectId: string): Promise<void> {
 
     const warmId = `warm:${sessionId}`
     const shell = resolveUserShell()
-    await backend.warmSpawn(runnerId, {
+    await backend.warmSpawn(computerId, {
       warmId,
       command: shell,
       args: getShellStartupArgs(shell),
@@ -423,7 +423,7 @@ async function spawnWarm(projectId: string): Promise<void> {
 
     const handle: WarmHandle = {
       warmId,
-      runnerId,
+      computerId,
       cwd,
       state: 'ready',
       sessionId,
@@ -451,7 +451,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       source: 'pty',
       event: 'warm.agent_spawned',
       sessionId,
-      payload: { projectId, cwd, runnerId, hasConversationId: !!conversationId }
+      payload: { projectId, cwd, computerId, hasConversationId: !!conversationId }
     })
   } catch (err) {
     recordDiagnosticEvent({
@@ -471,17 +471,17 @@ function killWarm(projectId: string): void {
   if (!handle) return
   warm.delete(projectId)
   // The process is the RUNNER's, so this is a request, not a local kill — and it
-  // is fire-and-forget: a runner that has gone away already took its warm agents
+  // is fire-and-forget: a computer that has gone away already took its warm agents
   // with it, and `reapOrphanWarms` covers anything that outlives us.
   void getPtyBackend()
-    .warmKill?.(handle.runnerId, handle.warmId)
+    .warmKill?.(handle.computerId, handle.warmId)
     .catch(() => {
-      // Only reachable when the runner is unreachable — which already means its
+      // Only reachable when the computer is unreachable — which already means its
       // warm agents are gone. Nothing left to kill, nothing to report.
     })
   // The pooled session's process is gone → mark it dead so a stale `pooled` row
   // never lingers as resumable. Previously driven by the local pty's onExit,
-  // which no longer exists here (warm output/exit is the runner's business until
+  // which no longer exists here (warm output/exit is the computer's business until
   // adoption).
   void deps?.ops.markSessionDead(handle.sessionId).catch(() => {
     // The row is already off the pool map, so a failed write can only leave a
@@ -490,21 +490,21 @@ function killWarm(projectId: string): void {
 }
 
 /**
- * Kill warm sessions on `runnerId` that this hub is not tracking.
+ * Kill warm sessions on `computerId` that this hub is not tracking.
  *
  * Warm agents are the RUNNER's processes now, so — unlike the old hub-local pool,
  * whose children died with the hub — they survive a hub restart, a sidecar
  * restart, or any reconnect that rebuilt the pool map. An unclaimed pre-booted
  * agent is a billable LLM process with no owner, so the hub reconciles against
- * the runner's own list whenever a runner (re)connects and reaps the difference.
+ * the computer's own list whenever a computer (re)connects and reaps the difference.
  */
-export async function reapOrphanWarms(runnerId: string): Promise<void> {
+export async function reapOrphanWarms(computerId: string): Promise<void> {
   const backend = getPtyBackend()
   if (!backend.warmList || !backend.warmKill) return
   try {
-    const remote = await backend.warmList(runnerId)
+    const remote = await backend.warmList(computerId)
     const tracked = new Set(
-      [...warm.values()].filter((h) => h.runnerId === runnerId).map((h) => h.warmId)
+      [...warm.values()].filter((h) => h.computerId === computerId).map((h) => h.warmId)
     )
     for (const entry of remote) {
       if (tracked.has(entry.warmId)) continue
@@ -512,15 +512,15 @@ export async function reapOrphanWarms(runnerId: string): Promise<void> {
         level: 'warn',
         source: 'pty',
         event: 'warm.orphan_reaped',
-        payload: { runnerId, warmId: entry.warmId, pid: entry.pid }
+        payload: { computerId, warmId: entry.warmId, pid: entry.pid }
       })
-      await backend.warmKill(runnerId, entry.warmId).catch(() => {
+      await backend.warmKill(computerId, entry.warmId).catch(() => {
         // One unkillable orphan must not abort the sweep — the remaining
         // entries are still billable, and this one is retried on the next
         // reconnect.
       })
     }
   } catch {
-    // Best-effort: a runner that cannot answer warmList has nothing we can reap.
+    // Best-effort: a computer that cannot answer warmList has nothing we can reap.
   }
 }

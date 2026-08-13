@@ -29,7 +29,7 @@ async function resolveGhPath(): Promise<string | null> {
  * executing it here meant the PR panel spoke as the HUB while the agent pushed as
  * the RUNNER — two identities for one repository, only one of them holding
  * credentials. The hub injects a routed executor so the process lands on the
- * runner; the eleven typed functions below, and all their JSON parsing, are
+ * computer; the eleven typed functions below, and all their JSON parsing, are
  * untouched.
  *
  * ONE seam rather than eleven routed functions: this is already the single
@@ -45,7 +45,7 @@ export interface GhExecutor {
 /**
  * Run gh in THIS process, with the user's shell environment so PATH is correct.
  *
- * Exported so a routed executor can delegate to it for the zero-runner case,
+ * Exported so a routed executor can delegate to it for the zero-computer case,
  * where this host's disk is the only one and its own `gh` is therefore the only
  * meaningful identity.
  */
@@ -63,9 +63,9 @@ export const runGhLocally: GhExecutor = async (args, opts) => {
 let ghExecutor: GhExecutor = runGhLocally
 
 /**
- * Point every gh call at a runner. Called by the hub composition once the runner
+ * Point every gh call at a computer. Called by the hub composition once the computer
  * gateway exists; without it the local executor stands, which is correct for a
- * host with no runners.
+ * host with no computers.
  */
 export function setGhExecutor(executor: GhExecutor | null): void {
   ghExecutor = executor ?? runGhLocally

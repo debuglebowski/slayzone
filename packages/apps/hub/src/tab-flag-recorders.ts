@@ -9,7 +9,7 @@ import { setPtySpawnedTabRecorder, setChatSpawnedTabRecorder } from '@slayzone/t
  * pty-manager / chat-transport-manager flip this flag through an injected
  * recorder (true on spawn, false on exit — unless the shutdown gate is set).
  * The recorder was installed ONLY by the Electron host. Once the pty runtime
- * moved into the side-car and spawning moved to the runner, the host owned no
+ * moved into the side-car and spawning moved to the computer, the host owned no
  * sessions, so its recorder never fired and nothing in this process installed
  * one: `was_spawned` stayed 0 for every live agent, `listAutoRestoreTasks`
  * returned nothing, and a restart came up on the Start gate. Third instance of

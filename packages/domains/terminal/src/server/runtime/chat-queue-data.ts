@@ -3,9 +3,9 @@ import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queu
 import type { QueuedChatMessage } from '../../shared/types'
 
 /**
- * Data seam for the chat-queue runtime (hub/runner split, wave 1). The drain
+ * Data seam for the chat-queue runtime (hub/computer split, wave 1). The drain
  * loop + queue ops in `chat-queue-handlers.ts` consume this interface instead
- * of touching the DB directly, so an exec-side runner can be handed a remote
+ * of touching the DB directly, so an exec-side computer can be handed a remote
  * implementation later. `createDbChatQueueData` is the default (hub-side)
  * implementation — it runs the exact same SQL as before via the existing
  * `chat-queue-store.ts` functions and `db.namedTxn` registrations.

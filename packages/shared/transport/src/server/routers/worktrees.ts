@@ -114,23 +114,23 @@ export const worktreesRouter = router({
   isGitRepo: publicProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
   // Repo discovery runs on the machine that owns the directory — it decides the
   // terminal cwd, the editor root, and the git panel, so a hub-local walk pointed
-  // all three at the wrong filesystem for any project living on a runner.
+  // all three at the wrong filesystem for any project living on a computer.
   // `projectId`/`taskId` resolve that machine the same way a pty spawn does.
   listProjectRepos: publicProcedure
     .input(
       obj({ projectPath: s, projectId: s.optional(), taskId: s.optional(), opts: u.optional() })
     )
     .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      return listProjectRepos(fs, runnerId, input.projectPath, (input.opts ?? {}) as never)
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      return listProjectRepos(fs, computerId, input.projectPath, (input.opts ?? {}) as never)
     }),
   detectChildRepos: publicProcedure
     .input(obj({ projectPath: s, projectId: s.optional(), taskId: s.optional() }))
     .query(async ({ input }) => {
-      const { fs, resolveRunner } = getWorkspaceDeps()
-      const runnerId = await resolveRunner(input)
-      return detectChildRepos(fs, runnerId, input.projectPath)
+      const { fs, resolveComputer } = getWorkspaceDeps()
+      const computerId = await resolveComputer(input)
+      return detectChildRepos(fs, computerId, input.projectPath)
     }),
   detectWorktrees: publicProcedure
     .input(obj({ repoPath: s }))

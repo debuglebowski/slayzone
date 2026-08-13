@@ -1,15 +1,15 @@
 /**
- * Runner-side ring buffer for pty output. A faithful mirror of the terminal
+ * Computer-side ring buffer for pty output. A faithful mirror of the terminal
  * domain's RingBuffer (`@slayzone/terminal` server/ring-buffer.ts): fixed byte
  * cap, oldest-first eviction, and a MONOTONIC per-session sequence number
- * assigned at append time. The runner owns seq assignment so the hub can detect
+ * assigned at append time. The computer owns seq assignment so the hub can detect
  * gaps and request replay via `pty.getBufferSince`.
  *
- * It is re-implemented here (rather than imported) to keep the runner a
+ * It is re-implemented here (rather than imported) to keep the computer a
  * lightweight standalone bundle — the terminal package drags in the full
- * React/electron app tree, which must never leak into the runner.
+ * React/electron app tree, which must never leak into the computer.
  *
- * @module runner/ring-buffer
+ * @module computer/ring-buffer
  */
 
 /** A single buffered output chunk with its monotonic sequence number. */

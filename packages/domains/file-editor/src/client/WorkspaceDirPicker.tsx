@@ -20,19 +20,19 @@ import {
  * Pick a directory on the machine that will run the agent.
  *
  * This replaces the native file dialog for every workspace path. A native dialog
- * browses the DESKTOP's filesystem, so on a remote hub or runner it yields a path
+ * browses the DESKTOP's filesystem, so on a remote hub or computer it yields a path
  * that does not exist where the work happens — which is how a task ends up
  * reporting "No repository path configured" for a path the user just chose. The
- * runner enumerates its own disk, the hub relays, and this renders it.
+ * computer enumerates its own disk, the hub relays, and this renders it.
  *
- * Scope is the runner's `allowedRoots` path-jail. That is not a limitation this
+ * Scope is the computer's `allowedRoots` path-jail. That is not a limitation this
  * picker imposes; it is the same boundary every other filesystem op on that
- * runner obeys, so showing anything else would offer paths that would then be
- * refused. When the jail is too narrow the answer is Settings → Runners, which
+ * computer obeys, so showing anything else would offer paths that would then be
+ * refused. When the jail is too narrow the answer is Settings → Computers, which
  * the empty state says out loud rather than rendering a blank tree.
  *
- * Which runner is resolved server-side, by the SAME resolution the pty backend
- * uses (`{runnerId} | {taskId} | {projectId}` → explicit binding → project
+ * Which computer is resolved server-side, by the SAME resolution the pty backend
+ * uses (`{computerId} | {taskId} | {projectId}` → explicit binding → project
  * default → connected default). The picker therefore cannot disagree with the
  * agent about which machine is meant.
  */
@@ -44,9 +44,9 @@ export interface WorkspaceDirPickerProps {
   onSelect: (path: string) => void
   /**
    * Which machine to browse. Resolved server-side; omit every field to get the
-   * connected default runner (the create-project case, before a project exists).
+   * connected default computer (the create-project case, before a project exists).
    */
-  target?: { runnerId?: string | null; taskId?: string; projectId?: string }
+  target?: { computerId?: string | null; taskId?: string; projectId?: string }
   title?: string
   description?: string
   /** Where to open. Ignored when it falls outside the target's roots. */
@@ -83,7 +83,7 @@ export function WorkspaceDirPicker({
   /**
    * Where to open: the caller's path if it is actually inside the target's roots,
    * else home, else the first root. A stale project path from ANOTHER machine
-   * would otherwise open the picker on a directory the runner will refuse.
+   * would otherwise open the picker on a directory the computer will refuse.
    *
    * Derived rather than pushed into state by an effect — the roots arrive
    * asynchronously, and setting state on their arrival is a cascading render for
@@ -139,7 +139,7 @@ export function WorkspaceDirPicker({
 
   const entries = listQuery.data?.entries ?? []
   const parent = listQuery.data?.parent ?? null
-  const runnerId = rootsQuery.data?.runnerId ?? null
+  const computerId = rootsQuery.data?.computerId ?? null
 
   const confirm = (): void => {
     const chosen = (manual ?? cwd)?.trim()
@@ -158,7 +158,7 @@ export function WorkspaceDirPicker({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {description ??
-              (runnerId
+              (computerId
                 ? 'Folders on the machine that will run this task’s agents.'
                 : 'Folders on this machine.')}
           </DialogDescription>
@@ -170,12 +170,12 @@ export function WorkspaceDirPicker({
             {rootsQuery.error instanceof Error ? rootsQuery.error.message : 'unknown error'}
           </p>
         ) : rootsQuery.isSuccess && roots.length === 0 ? (
-          // A runner with no allowedRoots refuses every filesystem call. Saying
+          // A computer with no allowedRoots refuses every filesystem call. Saying
           // so — and where to fix it — beats an empty list that reads as "this
           // machine has no folders".
           <p className="text-muted-foreground text-xs" data-testid="workspace-dir-picker-no-roots">
-            This runner has no allowed folders configured, so it will not open anything. Add one in
-            Settings → Connections, on the runner’s row.
+            This computer has no allowed folders configured, so it will not open anything. Add one in
+            Settings → Connections, on the computer’s row.
           </p>
         ) : (
           <>

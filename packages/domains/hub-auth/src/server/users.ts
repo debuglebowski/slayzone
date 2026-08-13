@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { API_KEY_TABLE_NAME } from '@better-auth/api-key'
 import type { HubAuth } from './auth'
-import { RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
+import { RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
 
 /**
  * Operator-facing account management for a hub — the server half of
@@ -16,7 +16,7 @@ import { RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
  * A shell on the hub box is the credential, exactly as for
  * `POST /api/computers/join-token`.
  *
- * Shape mirrors `runner-keys.ts` deliberately — both reach through `auth.$context`
+ * Shape mirrors `computer-keys.ts` deliberately — both reach through `auth.$context`
  * to better-auth's internal adapter for things the public `auth.api` surface only
  * exposes session-bound. No express here; the route layer owns HTTP.
  *
@@ -148,7 +148,7 @@ export async function createHubUser(
  * Every human account on this hub, oldest first.
  *
  * Excludes {@link RUNNER_SERVICE_USER_EMAIL} — the internal identity that owns
- * runner API keys (see runner-keys.ts). It is not a person, was never created by
+ * computer API keys (see computer-keys.ts). It is not a person, was never created by
  * an operator, and must not be presented as removable.
  */
 export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
@@ -172,9 +172,9 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
  *
  * Two refusals, both protecting against an unrecoverable state:
  *
- *  - `'protected'` — the runner service user. Its id is the `referenceId` on every
- *    runner API key; deleting it makes the api-key plugin's user lookup fail, which
- *    401s EVERY enrolled runner. Nothing about the request looks dangerous, so the
+ *  - `'protected'` — the computer service user. Its id is the `referenceId` on every
+ *    computer API key; deleting it makes the api-key plugin's user lookup fail, which
+ *    401s EVERY enrolled computer. Nothing about the request looks dangerous, so the
  *    guard has to live here.
  *  - `'last-user'` — the final human account. With signup disabled there is no path
  *    back: no one could authenticate to the hub, and no one could create an account

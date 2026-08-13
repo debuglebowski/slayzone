@@ -2,8 +2,8 @@ import * as pty from 'node-pty'
 import { wrapShellWithUlimit } from '../shell-env'
 
 /**
- * Hub/runner split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
- * piece a remote runner replaces — pulled behind a backend seam. pty-manager
+ * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
+ * piece a remote computer replaces — pulled behind a backend seam. pty-manager
  * still owns everything else (session state, buffers, DB writes, the -l / shell
  * fallback orchestration) and calls `getPtyBackend().spawn(spec)` at each of its
  * spawn sites (initial + the two onExit recovery re-spawns). Default is the
@@ -11,22 +11,22 @@ import { wrapShellWithUlimit } from '../shell-env'
  * injects a remote backend via `setPtyBackend`.
  */
 
-/** Everything the exec side needs to spawn one PTY. `runnerId === null` means
+/** Everything the exec side needs to spawn one PTY. `computerId === null` means
  *  the session runs locally on the hub (today's only path). A remote backend
- *  reads `runnerId`/`sessionId`/`taskId` to route; the local backend ignores
+ *  reads `computerId`/`sessionId`/`taskId` to route; the local backend ignores
  *  them and just spawns `file`/`args` with `options`. */
 export interface PtySpawnSpec {
   sessionId: string
   taskId: string
-  runnerId: string | null
+  computerId: string | null
   /**
    * Which project this session belongs to, so the RUNNER can resolve its own
    * cwd. The hub cannot: it held one `projects.path` column naming a directory
    * on a machine it does not own, which could only ever be right about one
-   * runner.
+   * computer.
    *
    * `options.cwd` still wins when set, and legitimately so — a worktree path or
-   * a `task.base_dir` override is a directory the runner itself created or was
+   * a `task.base_dir` override is a directory the computer itself created or was
    * explicitly told about, not a hub guess.
    */
   projectId: string | null
@@ -34,7 +34,7 @@ export interface PtySpawnSpec {
   args: string[]
   options: {
     /**
-     * Absolute cwd, or empty to let the runner resolve it from `projectId`.
+     * Absolute cwd, or empty to let the computer resolve it from `projectId`.
      * Empty + no projectId is a spawn with nowhere to run and is refused.
      */
     cwd: string
@@ -64,7 +64,7 @@ export interface PtyHandle {
    *
    * A local spawn knows its pid the instant `pty.spawn` returns. A remote one
    * cannot: the handle is created when the request is SENT, and the pid arrives
-   * with the runner's reply. Typed nullable so that distinction is impossible to
+   * with the computer's reply. Typed nullable so that distinction is impossible to
    * skip — reading an unknown pid as a dead process is exactly how a batch of
    * healthy sessions gets buried on a slow reply (see `whenSpawned`).
    */
@@ -76,7 +76,7 @@ export interface PtyHandle {
    * Absent on a synchronous backend, where the spawn has already happened by the
    * time the handle exists and `pid` is authoritative immediately. Present on any
    * backend whose spawn is a round-trip, so callers can await the fact instead of
-   * guessing with a timer — no timeout tuned on one machine, one runner load or
+   * guessing with a timer — no timeout tuned on one machine, one computer load or
    * one batch size can be wrong on another.
    */
   readonly whenSpawned?: Promise<{ pid: number | null }>
@@ -92,29 +92,29 @@ export interface PtyHandle {
 export interface PtyBackend {
   spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle>
   /**
-   * Promote a runner's pre-warmed session into a real one (warm pool, Phase 6).
+   * Promote a computer's pre-warmed session into a real one (warm pool, Phase 6).
    *
-   * NOT a spawn: the runner rekeys the process it already booted, so pid, output
+   * NOT a spawn: the computer rekeys the process it already booted, so pid, output
    * buffer and seq counter all carry over and the handle returned here is an
    * ordinary routed session from that point on. `processName` is cosmetic — it
    * populates `PtyHandle.process`, which the warm path cannot infer from a spec.
    *
    * Optional because only the ROUTING backend can do it; the local backend has
-   * no warm pool of its own (that is the point — warm agents live on runners).
+   * no warm pool of its own (that is the point — warm agents live on computers).
    */
   adopt?(
-    runnerId: string,
+    computerId: string,
     warmId: string,
     sessionId: string,
     processName: string
   ): Promise<PtyHandle>
   /**
-   * Pre-boot a warm session on `runnerId`. It buffers output but streams nothing
+   * Pre-boot a warm session on `computerId`. It buffers output but streams nothing
    * until `adopt` gives it a real session id — the hub has nowhere to route it to
    * before then.
    */
   warmSpawn?(
-    runnerId: string,
+    computerId: string,
     spec: {
       warmId: string
       command: string
@@ -125,9 +125,9 @@ export interface PtyBackend {
       postSpawnCommand?: string
     }
   ): Promise<{ pid: number }>
-  warmKill?(runnerId: string, warmId: string): Promise<void>
-  /** Warm sessions the runner still holds — used to reap orphans on reconnect. */
-  warmList?(runnerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
+  warmKill?(computerId: string, warmId: string): Promise<void>
+  /** Warm sessions the computer still holds — used to reap orphans on reconnect. */
+  warmList?(computerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
 }
 
 /**
@@ -166,11 +166,11 @@ export const localPtyBackend: PtyBackend = {
 //
 // The default remains `localPtyBackend` so TESTS (and any harness that never
 // wires a composition root) keep spawning in-process. In the real app the
-// composition root installs the routing backend, which requires a runner and has
-// no local fallback — see `NoRunnerAvailableError`. `setPtyBackend(null)`
+// composition root installs the routing backend, which requires a computer and has
+// no local fallback — see `NoComputerAvailableError`. `setPtyBackend(null)`
 // therefore means "restore the test/default in-process backend", NOT "fall back
 // to local for a routed session": once the routing backend is installed, nothing
-// resets it, so a null runner is an error rather than a silent hub spawn.
+// resets it, so a null computer is an error rather than a silent hub spawn.
 let ptyBackend: PtyBackend = localPtyBackend
 
 export function getPtyBackend(): PtyBackend {

@@ -371,14 +371,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Project path validation.
   //
-  // Probed on the machine that owns the workspace (the task's runner), NOT on
+  // Probed on the machine that owns the workspace (the task's computer), NOT on
   // whichever hub this client is talking to. The old probe was hub-local and
   // ungated — App.tsx had learned to suppress it for remote projects, this copy
-  // never did — so a task whose files live on a runner reported
+  // never did — so a task whose files live on a computer reported
   // "No repository path configured" for a path that was perfectly fine.
   //
   // Three states, deliberately distinct: a path that is set and present, one
-  // that is set but gone, and one we could not ask about because the runner is
+  // that is set but gone, and one we could not ask about because the computer is
   // offline. Collapsing the last two is what made a transient disconnect look
   // like a misconfiguration.
   const [projectPathMissing, setProjectPathMissing] = useState(
@@ -875,7 +875,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         setProjectPathMissing(res.reachable && !res.exists)
       } catch {
         // The request itself failed (hub down mid-flight). Same meaning as an
-        // unreachable runner: we do not know, so do not claim the path is gone.
+        // unreachable computer: we do not know, so do not claim the path is gone.
         setWorkspaceUnreachable(true)
         setProjectPathMissing(false)
       }
@@ -2577,7 +2577,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         // which was a false claim in two of the three cases: it
                         // told users to set a path they had already set, while the
                         // real cause was a probe run against the wrong machine or
-                        // a runner that was simply offline.
+                        // a computer that was simply offline.
                         <div className="h-full flex items-center justify-center text-muted-foreground">
                           <div className="text-center p-8">
                             {!project?.path && !effectiveRepoPath ? (
@@ -2591,7 +2591,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <>
                                 <p className="mb-2">Can’t reach the machine for this task</p>
                                 <p className="text-sm">
-                                  Its runner is offline, so the workspace can’t be opened. The path
+                                  Its computer is offline, so the workspace can’t be opened. The path
                                   itself is unchanged.
                                 </p>
                               </>
@@ -2963,7 +2963,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       <X className="size-3.5 text-muted-foreground" />
                                     </button>
                                   )}
-                                  {/* Scoped to the TASK, so it browses the runner
+                                  {/* Scoped to the TASK, so it browses the computer
                                       this task's agents spawn on — a cwd chosen on
                                       any other machine would not exist for them. */}
                                   <WorkspaceDirPicker

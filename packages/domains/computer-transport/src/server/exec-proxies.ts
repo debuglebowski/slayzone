@@ -1,30 +1,30 @@
 /**
  * Hub-side exec proxies — routing backends that forward OS-level exec work (ptys,
- * chat agents, child processes, git/fs worktree ops) to a runner over the runner
- * gateway. A runner is REQUIRED; see the next paragraph.
+ * chat agents, child processes, git/fs worktree ops) to a computer over the computer
+ * gateway. A computer is REQUIRED; see the next paragraph.
  *
- * ── Runners run the agents ────────────────────────────────────────────────────
- * There is NO in-process fallback: an unresolved runner raises
- * {@link NoRunnerAvailableError} rather than silently executing on the hub. The old
+ * ── Computers run the agents ────────────────────────────────────────────────────
+ * There is NO in-process fallback: an unresolved computer raises
+ * {@link NoComputerAvailableError} rather than silently executing on the hub. The old
  * fallback made "which machine ran this?" an invisible property of DB state — a
  * task with nothing bound looked identical to one deliberately pinned local, and a
  * chat agent could land on a different machine than its own worktree.
  *
- * This rests on `gateway.listUsableRunners()` (authenticated + inside the heartbeat
+ * This rests on `gateway.listUsableComputers()` (authenticated + inside the heartbeat
  * window) being the single presence authority. An earlier attempt at this
  * enforcement failed because it resolved through signals that lie — a DB row that
- * survives a runner which never connected, a socket map wiped on restart, a cache
- * that can name a dead runner.
+ * survives a computer which never connected, a socket map wiped on restart, a cache
+ * that can name a dead computer.
  *
  * Two categories are hub-local by DESIGN, not by fallback, and must never route:
  * worktree COLOR state (`getWorktreeColor` is sync UI state) and HUB-STORAGE fs
  * ops (`hubPathExists` / `removeArtifactDir` — artifacts live under the hub's own
- * `<ROOT>/storage`, a path that does not exist on a runner).
+ * `<ROOT>/storage`, a path that does not exist on a computer).
  *
  * These are drop-in replacements for the terminal/processes/task exec backends:
  * `spawn(spec)` is served by a remote handle whose data/exit stream is demuxed
  * from the shared gateway event bus and whose write/resize/kill translate to
- * hub → runner requests.
+ * hub → computer requests.
  *
  * ── Seam types (wave-2B reconciliation) ───────────────────────────────────
  * The consumed backend contracts are imported from the REAL seams they mirror,
@@ -32,16 +32,16 @@
  * `@slayzone/terminal/server`, `ProcessBackend`/`ProcHandle`/`ProcSpawnSpec`
  * from `@slayzone/processes/server`, `WorktreeExecAdapters` from
  * `@slayzone/task/server`, and the gateway surface (`RoutingGateway`, a `Pick`
- * of `HubRunnerGateway`) from this package. The two remoting divergences the
+ * of `HubComputerGateway`) from this package. The two remoting divergences the
  * earlier dark landing flagged are now resolved at their source:
- *   1. The gateway emits `proc.data`/`proc.exit` (added to `RunnerGatewayEvents`).
+ *   1. The gateway emits `proc.data`/`proc.exit` (added to `ComputerGatewayEvents`).
  *   2. `WorktreeExecAdapters.pathExists`/`removeArtifactDir` were widened to
  *      `boolean | Promise<boolean>` / `void | Promise<void>` so a remote
  *      (async) impl is valid alongside the sync local default. `getWorktreeColor`
  *      stays SYNC and is always served locally — a documented cosmetic
  *      degradation for remote worktrees.
  *
- * @module runner/server/exec-proxies
+ * @module computer/server/exec-proxies
  */
 
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
@@ -74,7 +74,7 @@ import {
   gitIsGitRepoResultSchema,
   gitRemoveWorktreeResultSchema,
   gitRunWorktreeSetupScriptResultSchema,
-  HubToRunnerMethods,
+  HubToComputerMethods,
   procGetBufferSinceResultSchema,
   procListResultSchema,
   procSpawnResultSchema,
@@ -84,28 +84,28 @@ import {
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
   ptyWarmSpawnResultSchema,
-  runnerSetAllowedRootsResultSchema
+  computerSetAllowedRootsResultSchema
 } from '../shared/frames'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import type { HubRunnerGateway } from './hub-gateway'
+import type { HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
 // Gateway surface
 // ===========================================================================
 
 /**
- * The slice of the runner hub gateway the routing backends consume: addressed
- * request/notify, the demux event bus, and the connected-runner roster. A `Pick`
- * of the real `HubRunnerGateway` (not a re-declared mirror) so it can never
+ * The slice of the computer hub gateway the routing backends consume: addressed
+ * request/notify, the demux event bus, and the connected-computer roster. A `Pick`
+ * of the real `HubComputerGateway` (not a re-declared mirror) so it can never
  * drift from the gateway the composition root injects.
  *
- * `listRunners` is here for the detach controller's epoch baseline: the chat
- * backend builds its routing backend at SPAWN time, long after the runner
- * connected, so a controller that learned epochs only from `runner-connected`
+ * `listComputers` is here for the detach controller's epoch baseline: the chat
+ * backend builds its routing backend at SPAWN time, long after the computer
+ * connected, so a controller that learned epochs only from `computer-connected`
  * events would have no baseline for exactly those sessions and would finalize
  * them on the first disconnect. Reading the roster at construction closes that.
  */
-export type RoutingGateway = Pick<HubRunnerGateway, 'request' | 'events' | 'listRunners'>
+export type RoutingGateway = Pick<HubComputerGateway, 'request' | 'events' | 'listComputers'>
 
 // ===========================================================================
 // Internal helpers
@@ -119,8 +119,8 @@ interface ExecDisposable {
 /**
  * Terminal exit payload streamed by the routing pty handle. Wider than the
  * terminal seam's `onExit` param (`{ exitCode: number; signal?: number }`):
- * a remote runner can report a null exit code (signal death) and a string
- * signal (`runner-lost` / `runner-disconnected`). The handle stays assignable
+ * a remote computer can report a null exit code (signal death) and a string
+ * signal (`computer-lost` / `computer-disconnected`). The handle stays assignable
  * to the terminal `PtyHandle` because `onExit` is a method (bivariant params);
  * pty-manager only reads `exitCode`, so the extra breadth is lossless there.
  */
@@ -161,44 +161,44 @@ class BufferingEmitter<T> {
   }
 }
 
-const sessionKey = (runnerId: string, sessionId: string): string => `${runnerId}:${sessionId}`
+const sessionKey = (computerId: string, sessionId: string): string => `${computerId}:${sessionId}`
 
 const noop = (): void => {
   // Shared rejection sink for the fire-and-forget gateway calls below (write,
   // resize, kill, …). Each is a best-effort nudge at a session that may already
   // be gone; nothing waits on the reply and the authoritative teardown arrives
   // as an exit/close frame regardless. Swallowing here is what keeps a
-  // disconnected runner from raising an unhandled rejection in the hub.
+  // disconnected computer from raising an unhandled rejection in the hub.
 }
 
 /**
- * Raised when exec work has no runner to go to.
+ * Raised when exec work has no computer to go to.
  *
- * Runners run the agents — there is no in-process spawn path — so an unresolved
- * runner is a hard, visible failure rather than a silent degradation to the hub.
+ * Computers run the agents — there is no in-process spawn path — so an unresolved
+ * computer is a hard, visible failure rather than a silent degradation to the hub.
  * The message is user-facing: it says what to do, because the only fix is to
- * enroll or connect a runner.
+ * enroll or connect a computer.
  */
-export class NoRunnerAvailableError extends Error {
+export class NoComputerAvailableError extends Error {
   constructor(readonly what: string) {
     super(
-      `No runner available to run ${what}. Agents, terminals and git work all run on runners — ` +
-        `enroll one (Settings → Runners) or wait for the local runner to reconnect.`
+      `No computer available to run ${what}. Agents, terminals and git work all run on computers — ` +
+        `enroll one (Settings → Computers) or wait for the local computer to reconnect.`
     )
-    this.name = 'NoRunnerAvailableError'
+    this.name = 'NoComputerAvailableError'
   }
 }
 
 // ===========================================================================
-// Detach / reattach across a dropped runner connection
+// Detach / reattach across a dropped computer connection
 // ===========================================================================
 
 /**
- * How long the hub keeps tracking sessions on a runner it cannot reach.
+ * How long the hub keeps tracking sessions on a computer it cannot reach.
  *
- * This is NOT a claim that the runner is dead when it expires — the hub cannot
+ * This is NOT a claim that the computer is dead when it expires — the hub cannot
  * know that, and a timer is not evidence. It bounds the hub's own bookkeeping:
- * without it, a runner that never returns leaks its entries forever and every
+ * without it, a computer that never returns leaks its entries forever and every
  * task it owned hangs in "reconnecting" with nothing able to resolve it.
  *
  * Long enough to cover a lunch-break lid close, short enough not to hoard dead
@@ -210,10 +210,10 @@ const DETACH_GRACE_MS = 10 * 60_000
 
 /** The entry shape the detach controller needs, common to pty and proc. */
 interface DetachableEntry {
-  runnerId: string
+  computerId: string
   sessionId: string
   disposed: boolean
-  /** Runner unreachable: outcome unknown, still tracked, NOT finalized. */
+  /** Computer unreachable: outcome unknown, still tracked, NOT finalized. */
   detached: boolean
 }
 
@@ -223,28 +223,28 @@ interface DetachControllerOptions<E extends DetachableEntry> {
   sessions: Map<string, E>
   /** `pty` / `proc` — diagnostics and log text only. */
   kind: string
-  /** Hub→runner method listing the sessions the runner still holds. */
+  /** Hub→computer method listing the sessions the computer still holds. */
   listMethod: string
-  /** Hub→runner method ending one session, for orphans the hub no longer tracks. */
+  /** Hub→computer method ending one session, for orphans the hub no longer tracks. */
   killMethod: string
   /** Parse that reply into session ids; `null` when it does not parse. */
   parseListedSessionIds: (raw: unknown) => string[] | null
   /** Report a session as ended, with the reason the hub let go of it. */
   finalize: (entry: E, reason: string) => void
-  /** Runner confirmed this session is still alive: resume delivery + backfill. */
+  /** Computer confirmed this session is still alive: resume delivery + backfill. */
   resume: (entry: E) => void
 }
 
 /**
- * Keeps sessions alive across a dropped runner connection, and resolves each
- * one against the runner itself on reconnect.
+ * Keeps sessions alive across a dropped computer connection, and resolves each
+ * one against the computer itself on reconnect.
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
- * Both routing backends used to wire `runner-lost` / `runner-disconnected`
- * straight to a disposal that finalized every session on the runner. Since the
+ * Both routing backends used to wire `computer-lost` / `computer-disconnected`
+ * straight to a disposal that finalized every session on the computer. Since the
  * handle seam coerces a null exit code to 1, one dropped socket surfaced as N
- * independent "Process exited with code 1" — while the runner and every agent
- * on it were still running (the runner only kills ptys on its OWN shutdown).
+ * independent "Process exited with code 1" — while the computer and every agent
+ * on it were still running (the computer only kills ptys on its OWN shutdown).
  * Closing a laptop lid did exactly this: the heartbeat watchdog fired on wake
  * having never observed the window it was judging.
  *
@@ -253,7 +253,7 @@ interface DetachControllerOptions<E extends DetachableEntry> {
  * partitioned from asleep, so a disconnect resolves NOTHING — it only moves
  * sessions to `detached`. Every session is then closed out by a decisive signal:
  *
- *   - reconnect, SAME epoch, present in the runner's list → still alive, resume
+ *   - reconnect, SAME epoch, present in the computer's list → still alive, resume
  *   - reconnect, SAME epoch, ABSENT from the list        → really did exit
  *   - reconnect, DIFFERENT (or unknown) epoch            → fresh process, gone
  *   - grace expired, no reconnect                        → hub stops tracking
@@ -315,13 +315,13 @@ function createDetachController<E extends DetachableEntry>(
   const { gateway, kind, listMethod, killMethod, parseListedSessionIds } = options
   const participants: DetachParticipant[] = []
   /**
-   * Epoch seen on each runner's LAST connect — the baseline a reconnect is
+   * Epoch seen on each computer's LAST connect — the baseline a reconnect is
    * compared against. Seeded from the roster because a controller can be built
-   * after the runner already connected (chat), and a missing baseline is
+   * after the computer already connected (chat), and a missing baseline is
    * indistinguishable from a restart, which would finalize live sessions.
    */
-  const epochByRunner = new Map<string, string | undefined>(
-    gateway.listRunners().map((r) => [r.runnerId, r.epoch] as const)
+  const epochByComputer = new Map<string, string | undefined>(
+    gateway.listComputers().map((r) => [r.computerId, r.epoch] as const)
   )
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -348,43 +348,43 @@ function createDetachController<E extends DetachableEntry>(
     }
   }
 
-  const liveEntries = (runnerId: string): Owned[] =>
+  const liveEntries = (computerId: string): Owned[] =>
     participants.flatMap((owner) =>
       [...owner.sessions.values()]
-        .filter((e) => e.runnerId === runnerId && !e.disposed)
+        .filter((e) => e.computerId === computerId && !e.disposed)
         .map((entry) => ({ entry, owner }))
     )
 
-  function clearGrace(runnerId: string): void {
-    const timer = graceTimers.get(runnerId)
+  function clearGrace(computerId: string): void {
+    const timer = graceTimers.get(computerId)
     if (!timer) return
     clearTimeout(timer)
-    graceTimers.delete(runnerId)
+    graceTimers.delete(computerId)
   }
 
-  function armGrace(runnerId: string): void {
-    clearGrace(runnerId)
+  function armGrace(computerId: string): void {
+    clearGrace(computerId)
     const timer = setTimeout(() => {
-      graceTimers.delete(runnerId)
-      const stranded = liveEntries(runnerId).filter((o) => o.entry.detached)
+      graceTimers.delete(computerId)
+      const stranded = liveEntries(computerId).filter((o) => o.entry.detached)
       if (stranded.length === 0) return
       for (const o of stranded) o.owner.finalize(o.entry, 'reattach-timeout')
-      record('runner.sessions_dropped', 'error', stranded, runnerId, {
+      record('computer.sessions_dropped', 'error', stranded, computerId, {
         message:
-          `Runner unreachable for ${String(Math.round(DETACH_GRACE_MS / 60_000))} minutes — ` +
+          `Computer unreachable for ${String(Math.round(DETACH_GRACE_MS / 60_000))} minutes — ` +
           `${String(stranded.length)} ${kind} session(s) dropped. The hub has stopped tracking ` +
-          'them; any process still running on the runner is no longer attached to a task.'
+          'them; any process still running on the computer is no longer attached to a task.'
       })
     }, DETACH_GRACE_MS)
     timer.unref?.()
-    graceTimers.set(runnerId, timer)
+    graceTimers.set(computerId, timer)
   }
 
   function record(
     event: string,
     level: 'info' | 'error',
     entries: Owned[],
-    runnerId: string,
+    computerId: string,
     extra: { message: string; [k: string]: unknown }
   ): void {
     const { message, ...rest } = extra
@@ -395,7 +395,7 @@ function createDetachController<E extends DetachableEntry>(
         event,
         message,
         payload: {
-          runnerId,
+          computerId,
           kind,
           sessionCount: entries.length,
           sessionIds: entries.map((o) => o.entry.sessionId),
@@ -407,45 +407,45 @@ function createDetachController<E extends DetachableEntry>(
     }
   }
 
-  function detachRunner(runnerId: string, reason: string): void {
+  function detachComputer(computerId: string, reason: string): void {
     prune()
-    const fresh = liveEntries(runnerId).filter((o) => !o.entry.detached)
+    const fresh = liveEntries(computerId).filter((o) => !o.entry.detached)
     for (const o of fresh) o.entry.detached = true
-    if (liveEntries(runnerId).some((o) => o.entry.detached)) armGrace(runnerId)
+    if (liveEntries(computerId).some((o) => o.entry.detached)) armGrace(computerId)
     if (fresh.length === 0) return
     // INFO, not error: nothing has gone wrong yet. Recorded because it is the
     // one place that knows the blast radius, and because the reattach that
     // follows is only legible next to it.
-    record('runner.sessions_detached', 'info', fresh, runnerId, {
+    record('computer.sessions_detached', 'info', fresh, computerId, {
       reason,
       message:
-        `Runner connection lost (${reason}) — ${String(fresh.length)} ${kind} session(s) ` +
+        `Computer connection lost (${reason}) — ${String(fresh.length)} ${kind} session(s) ` +
         'detached, awaiting reattach. Nothing has been killed.'
     })
   }
 
-  async function reattachRunner(runnerId: string, epoch: string | undefined): Promise<void> {
+  async function reattachComputer(computerId: string, epoch: string | undefined): Promise<void> {
     prune()
-    const previousEpoch = epochByRunner.get(runnerId)
-    epochByRunner.set(runnerId, epoch)
-    const detached = liveEntries(runnerId).filter((o) => o.entry.detached)
-    // First contact with this runner: nothing was ever detached, and the sweep
+    const previousEpoch = epochByComputer.get(computerId)
+    epochByComputer.set(computerId, epoch)
+    const detached = liveEntries(computerId).filter((o) => o.entry.detached)
+    // First contact with this computer: nothing was ever detached, and the sweep
     // below has no baseline to sweep against.
     if (previousEpoch === undefined && detached.length === 0) return
-    clearGrace(runnerId)
+    clearGrace(computerId)
 
-    // A missing epoch on EITHER side proves nothing — an old runner that cannot
+    // A missing epoch on EITHER side proves nothing — an old computer that cannot
     // report one, or a hub that never saw the pre-disconnect value. Absence is
     // not a match: fall back to the conservative pre-epoch outcome rather than
     // reattaching to a process whose identity is unverified.
     if (epoch === undefined || previousEpoch === undefined || epoch !== previousEpoch) {
       if (detached.length === 0) return
-      for (const o of detached) o.owner.finalize(o.entry, 'runner-restarted')
-      record('runner.sessions_disposed', 'error', detached, runnerId, {
+      for (const o of detached) o.owner.finalize(o.entry, 'computer-restarted')
+      record('computer.sessions_disposed', 'error', detached, computerId, {
         previousEpoch: previousEpoch ?? null,
         epoch: epoch ?? null,
         message:
-          `Runner reconnected as a different process — ${String(detached.length)} ${kind} ` +
+          `Computer reconnected as a different process — ${String(detached.length)} ${kind} ` +
           'session(s) it was running are gone with the old one.'
       })
       return
@@ -455,14 +455,14 @@ function createDetachController<E extends DetachableEntry>(
     // registry is only a belief about that.
     let listed: string[] | null = null
     try {
-      listed = parseListedSessionIds(await gateway.request(runnerId, listMethod, {}))
+      listed = parseListedSessionIds(await gateway.request(computerId, listMethod, {}))
     } catch {
       listed = null
     }
     if (listed === null) {
       // Unanswerable right now. Leave everything detached and re-arm: a later
       // reconnect can still resolve it, and the grace timer bounds the wait.
-      armGrace(runnerId)
+      armGrace(computerId)
       return
     }
 
@@ -478,30 +478,30 @@ function createDetachController<E extends DetachableEntry>(
         ended.push(o)
       }
     }
-    // Sessions the runner holds that the hub no longer tracks — e.g. dropped by
+    // Sessions the computer holds that the hub no longer tracks — e.g. dropped by
     // an earlier grace expiry. Nothing will ever attach to them again, so end
     // them here rather than leaving an agent running against no task.
-    const tracked = new Set(liveEntries(runnerId).map((o) => o.entry.sessionId))
+    const tracked = new Set(liveEntries(computerId).map((o) => o.entry.sessionId))
     for (const sessionId of live) {
       if (tracked.has(sessionId)) continue
-      void gateway.request(runnerId, killMethod, { sessionId }).catch(noop)
+      void gateway.request(computerId, killMethod, { sessionId }).catch(noop)
     }
     if (resumed.length > 0) {
-      record('runner.sessions_reattached', 'info', resumed, runnerId, {
-        message: `Runner reconnected — ${String(resumed.length)} ${kind} session(s) reattached.`
+      record('computer.sessions_reattached', 'info', resumed, computerId, {
+        message: `Computer reconnected — ${String(resumed.length)} ${kind} session(s) reattached.`
       })
     }
     if (ended.length > 0) {
-      record('runner.sessions_disposed', 'error', ended, runnerId, {
-        message: `${String(ended.length)} ${kind} session(s) exited while the runner was unreachable.`
+      record('computer.sessions_disposed', 'error', ended, computerId, {
+        message: `${String(ended.length)} ${kind} session(s) exited while the computer was unreachable.`
       })
     }
   }
 
-  gateway.events.on('runner-lost', (p) => detachRunner(p.runnerId, 'runner-lost'))
-  gateway.events.on('runner-disconnected', (p) => detachRunner(p.runnerId, 'runner-disconnected'))
-  gateway.events.on('runner-connected', (p) => {
-    void reattachRunner(p.runner.runnerId, p.runner.epoch)
+  gateway.events.on('computer-lost', (p) => detachComputer(p.computerId, 'computer-lost'))
+  gateway.events.on('computer-disconnected', (p) => detachComputer(p.computerId, 'computer-disconnected'))
+  gateway.events.on('computer-connected', (p) => {
+    void reattachComputer(p.computer.computerId, p.computer.epoch)
   })
 
   return {
@@ -515,17 +515,17 @@ function createDetachController<E extends DetachableEntry>(
 
 export interface RoutingPtyBackendOptions {
   gateway: RoutingGateway
-  /** Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError} —
+  /** Route a spawn to a computerId. `null` throws {@link NoComputerAvailableError} —
    *  there is no in-process fallback. */
-  resolveRunnerId: (spec: PtySpawnSpec) => string | null
+  resolveComputerId: (spec: PtySpawnSpec) => string | null
 }
 
 interface PtyEntry {
   key: string
-  runnerId: string
+  computerId: string
   sessionId: string
   /**
-   * Highest contiguously-delivered seq. Starts at **-1**, not 0: the runner's
+   * Highest contiguously-delivered seq. Starts at **-1**, not 0: the computer's
    * `RingBuffer` numbers its FIRST chunk seq 0 (`nextSeq = 0`), and `ingest`
    * drops `seq <= lastSeq` — so a 0 here silently discarded the opening chunk of
    * every remote pty session, which is where a shell's banner and first prompt
@@ -544,16 +544,16 @@ interface PtyEntry {
   backfilledAt: number | null
   disposed: boolean
   /**
-   * The runner went unreachable while this session was live: its outcome is
+   * The computer went unreachable while this session was live: its outcome is
    * UNKNOWN, not decided. Still tracked, never finalized — resolved on
-   * reconnect against the runner's own session list. See
+   * reconnect against the computer's own session list. See
    * {@link createDetachController}.
    */
   detached: boolean
   /**
    * Withhold delivery until the warm-adopt seed lands (adopt only).
    *
-   * The runner starts streaming the instant it rekeys, so live frames can reach
+   * The computer starts streaming the instant it rekeys, so live frames can reach
    * the hub BEFORE the `pty.warmAdopt` reply carrying everything the session
    * emitted while warm. Such a frame sits far above the initial `lastSeq` of -1,
    * which reads as a gap and fires a `getBufferSince` on EVERY adopt — a wasted
@@ -573,10 +573,10 @@ interface PtyEntry {
  * A `PtyBackend` that forwards remote spawns over the gateway. Maintains ONE
  * `pty.data` + ONE `pty.exit` gateway listener and a per-session demux Map;
  * out-of-order frames trigger a `pty.getBufferSince` backfill so delivery stays
- * monotonic. Sessions are disposed on `pty.exit` and on runner loss/disconnect.
+ * monotonic. Sessions are disposed on `pty.exit` and on computer loss/disconnect.
  */
 export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyBackend {
-  const { gateway, resolveRunnerId } = options
+  const { gateway, resolveComputerId } = options
   const sessions = new Map<string, PtyEntry>()
 
   function drain(entry: PtyEntry): void {
@@ -592,7 +592,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
     if (entry.backfilledAt === entry.lastSeq) {
       // A backfill already ran at this position and the gap is STILL unfilled, so
-      // the missing seq is unrecoverable — evicted from the runner's ring buffer,
+      // the missing seq is unrecoverable — evicted from the computer's ring buffer,
       // or never sent. Skip forward to the lowest pending seq and deliver rather
       // than waiting for a frame that will never arrive: holding the line would
       // stall the session permanently, which is strictly worse than a visible
@@ -611,7 +611,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
   async function backfill(entry: PtyEntry): Promise<void> {
     try {
-      const res = await gateway.request(entry.runnerId, HubToRunnerMethods.ptyGetBufferSince, {
+      const res = await gateway.request(entry.computerId, HubToComputerMethods.ptyGetBufferSince, {
         sessionId: entry.sessionId,
         seq: entry.lastSeq
       })
@@ -645,19 +645,19 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   }
 
   gateway.events.on('pty.data', (payload) => {
-    const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
+    const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (entry) ingest(entry, payload.seq, payload.data)
   })
   gateway.events.on('pty.exit', (payload) => {
-    const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
+    const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
   })
   joinDetachController<PtyEntry>({
     gateway,
     sessions,
     kind: 'terminal',
-    listMethod: HubToRunnerMethods.ptyList,
-    killMethod: HubToRunnerMethods.ptyKill,
+    listMethod: HubToComputerMethods.ptyList,
+    killMethod: HubToComputerMethods.ptyKill,
     parseListedSessionIds: (raw) => {
       const parsed = ptyListResultSchema.safeParse(raw)
       return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
@@ -676,21 +676,21 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   /**
    * Register a routed session and build its handle. Shared by `spawn` and
    * `adopt`: both end up with an ordinary remote session keyed by
-   * `(runnerId, sessionId)`; they differ only in the request that starts it and
+   * `(computerId, sessionId)`; they differ only in the request that starts it and
    * whether delivery is sealed pending a seed.
    */
   function register(
-    runnerId: string,
+    computerId: string,
     sessionId: string,
     processName: string,
     sealed: boolean
   ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number | null) => void } {
-    const key = sessionKey(runnerId, sessionId)
+    const key = sessionKey(computerId, sessionId)
     const dataEmitter = new BufferingEmitter<string>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
     const entry: PtyEntry = {
       key,
-      runnerId,
+      computerId,
       sessionId,
       lastSeq: -1,
       pending: new Map(),
@@ -703,7 +703,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     sessions.set(key, entry)
 
-    // `null`, not 0 — the pid is UNKNOWN until the runner replies, and a
+    // `null`, not 0 — the pid is UNKNOWN until the computer replies, and a
     // placeholder that reads as a number invites callers to treat it as one.
     let pid: number | null = null
     const handle: PtyHandle = {
@@ -720,16 +720,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       write: (data: string): void => {
-        void gateway.request(runnerId, HubToRunnerMethods.ptyWrite, { sessionId, data }).catch(noop)
+        void gateway.request(computerId, HubToComputerMethods.ptyWrite, { sessionId, data }).catch(noop)
       },
       resize: (cols: number, rows: number): void => {
         void gateway
-          .request(runnerId, HubToRunnerMethods.ptyResize, { sessionId, cols, rows })
+          .request(computerId, HubToComputerMethods.ptyResize, { sessionId, cols, rows })
           .catch(noop)
       },
       kill: (signal?: string): void => {
         void gateway
-          .request(runnerId, HubToRunnerMethods.ptyKill, {
+          .request(computerId, HubToComputerMethods.ptyKill, {
             sessionId,
             ...(signal ? { signal } : {})
           })
@@ -741,11 +741,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
   return {
     /**
-     * Promote a warm session on `runnerId` into a real one. No spawn happens —
-     * the runner rekeys the existing process, so pid/buffer/seq all carry over.
+     * Promote a warm session on `computerId` into a real one. No spawn happens —
+     * the computer rekeys the existing process, so pid/buffer/seq all carry over.
      */
     async warmSpawn(
-      runnerId: string,
+      computerId: string,
       spec: {
         warmId: string
         command: string
@@ -756,24 +756,24 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
     ) {
       // No session entry: a warm session has no hub-side identity yet, and the
-      // runner streams nothing for it. It becomes routable at `adopt`.
-      const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmSpawn, spec)
+      // computer streams nothing for it. It becomes routable at `adopt`.
+      const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmSpawn, spec)
       return ptyWarmSpawnResultSchema.parse(res)
     },
 
-    async warmKill(runnerId: string, warmId: string) {
-      await gateway.request(runnerId, HubToRunnerMethods.ptyWarmKill, { warmId })
+    async warmKill(computerId: string, warmId: string) {
+      await gateway.request(computerId, HubToComputerMethods.ptyWarmKill, { warmId })
     },
 
-    async warmList(runnerId: string) {
-      const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmList, {})
+    async warmList(computerId: string) {
+      const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmList, {})
       return ptyWarmListResultSchema.parse(res).warms
     },
 
-    async adopt(runnerId: string, warmId: string, sessionId: string, processName: string) {
-      const { entry, handle, setPid } = register(runnerId, sessionId, processName, true)
+    async adopt(computerId: string, warmId: string, sessionId: string, processName: string) {
+      const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
       try {
-        const res = await gateway.request(runnerId, HubToRunnerMethods.ptyWarmAdopt, {
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
           warmId,
           sessionId
         })
@@ -794,31 +794,31 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
-      const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) throw new NoRunnerAvailableError(`terminal session ${spec.sessionId}`)
+      const computerId = resolveComputerId(spec)
+      if (computerId == null) throw new NoComputerAvailableError(`terminal session ${spec.sessionId}`)
 
       // `pid` is null until the remote `pty.spawn` reply lands (remote ptys key by
       // sessionId, not pid). The handle exposes it via a getter so it stays a
       // valid `readonly pid` under the terminal `PtyHandle` seam. `onExit` adapts
       // the wider remote `PtyExitEvent` (exitCode may be null on signal death /
-      // runner-loss; signal may be a string like 'runner-lost') to the seam's
+      // computer-loss; signal may be a string like 'computer-lost') to the seam's
       // `{ exitCode: number; signal?: number }` — lossless for pty-manager, which
       // only reads `exitCode`.
-      const { entry, handle, setPid } = register(runnerId, spec.sessionId, spec.file, false)
+      const { entry, handle, setPid } = register(computerId, spec.sessionId, spec.file, false)
 
       // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
       // signal, so anything that needs to know the session really started awaits
       // this rather than sampling `pid` on a timer. Latency here is unbounded in
-      // practice — a runner restoring a dozen sessions at once, or one across a
+      // practice — a computer restoring a dozen sessions at once, or one across a
       // real network — and no hub-side deadline can second-guess it correctly.
       const whenSpawned = gateway
-        .request(runnerId, HubToRunnerMethods.ptySpawn, {
+        .request(computerId, HubToComputerMethods.ptySpawn, {
           sessionId: spec.sessionId,
           command: spec.file,
           args: spec.args,
           // Send cwd only when there IS one — an empty string used to travel as a
-          // "path" and land the agent in the runner's launch directory. Absent,
-          // the runner resolves the project's own checkout from `projectId`,
+          // "path" and land the agent in the computer's launch directory. Absent,
+          // the computer resolves the project's own checkout from `projectId`,
           // which is the only side that knows where it is.
           ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
@@ -834,7 +834,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             return { pid: spawnedPid }
           },
           (err: unknown) => {
-            // The runner refused the spawn: finalize (which emits the exit through
+            // The computer refused the spawn: finalize (which emits the exit through
             // the buffering emitter, so a not-yet-subscribed caller still gets it)
             // AND propagate, so a caller awaiting confirmation sees the failure
             // rather than a promise that never settles.
@@ -861,10 +861,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
 
 export interface RoutingProcessBackendOptions {
   gateway: RoutingGateway
-  /** Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError}.
+  /** Route a spawn to a computerId. `null` throws {@link NoComputerAvailableError}.
    *  Sync by necessity: the process manager's `doSpawn` is synchronous (also driven
    *  by restart timers), so it cannot await a reconnect. */
-  resolveRunnerId: (spec: ProcSpawnSpec) => string | null
+  resolveComputerId: (spec: ProcSpawnSpec) => string | null
   /**
    * Override how a spec becomes `proc.spawn` params. Default: treat
    * `spec.command` as a shell STRING (`shell: true`, no argv) — correct for the
@@ -880,10 +880,10 @@ export interface RoutingProcessBackendOptions {
 
 interface ProcEntry {
   key: string
-  runnerId: string
+  computerId: string
   sessionId: string
   /** Highest contiguously-delivered stdout seq. Starts at **-1** for the same
-   *  reason as {@link PtyEntry.lastSeq}: the runner's RingBuffer numbers its
+   *  reason as {@link PtyEntry.lastSeq}: the computer's RingBuffer numbers its
    *  FIRST chunk 0, and `ingest` drops `seq <= lastSeq`, so a 0 here would
    *  silently discard the opening chunk of every routed session — which for a
    *  chat agent is its protocol handshake. */
@@ -893,7 +893,7 @@ interface ProcEntry {
   /** `lastSeq` the in-flight/last backfill was issued for; `null` = never. */
   backfilledAt: number | null
   disposed: boolean
-  /** Runner unreachable, outcome unknown — see {@link createDetachController}. */
+  /** Computer unreachable, outcome unknown — see {@link createDetachController}. */
   detached: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
   exitEmitter: BufferingEmitter<{ code: number | null; signal: string | null }>
@@ -914,7 +914,7 @@ interface ProcEntry {
  * `proc.spawn` frame.
  */
 export function createRoutingProcessBackend(options: RoutingProcessBackendOptions): ProcessBackend {
-  const { gateway, resolveRunnerId } = options
+  const { gateway, resolveComputerId } = options
   const sessions = new Map<string, ProcEntry>()
 
   function finalize(entry: ProcEntry, code: number | null, signal: string | null): void {
@@ -936,7 +936,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     if (entry.pending.has(entry.lastSeq + 1)) return // filled by the loop above
     if (entry.backfilledAt === entry.lastSeq) {
       // A backfill already ran at this position and the gap is STILL unfilled, so
-      // the missing seq is unrecoverable (evicted from the runner's ring buffer,
+      // the missing seq is unrecoverable (evicted from the computer's ring buffer,
       // or never sent). Skip to the lowest pending seq rather than stalling the
       // session forever — a visible gap beats a permanent hang.
       const lowest = Math.min(...entry.pending.keys())
@@ -952,7 +952,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
   async function backfill(entry: ProcEntry): Promise<void> {
     try {
-      const res = await gateway.request(entry.runnerId, HubToRunnerMethods.procGetBufferSince, {
+      const res = await gateway.request(entry.computerId, HubToComputerMethods.procGetBufferSince, {
         sessionId: entry.sessionId,
         seq: entry.lastSeq
       })
@@ -972,7 +972,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
   }
 
   gateway.events.on('proc.data', (payload) => {
-    const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
+    const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (!entry || entry.disposed) return
     const stream = payload.stream ?? 'stdout'
     // stderr (and any legacy unsequenced frame) bypasses the ordering machinery.
@@ -985,15 +985,15 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     drain(entry)
   })
   gateway.events.on('proc.exit', (payload) => {
-    const entry = sessions.get(sessionKey(payload.runnerId, payload.sessionId))
+    const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
   })
   joinDetachController<ProcEntry>({
     gateway,
     sessions,
     kind: 'process',
-    listMethod: HubToRunnerMethods.procList,
-    killMethod: HubToRunnerMethods.procKill,
+    listMethod: HubToComputerMethods.procList,
+    killMethod: HubToComputerMethods.procKill,
     parseListedSessionIds: (raw) => {
       const parsed = procListResultSchema.safeParse(raw)
       return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
@@ -1008,15 +1008,15 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
   return {
     spawn(spec: ProcSpawnSpec): ProcHandle {
-      const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) throw new NoRunnerAvailableError(`process ${spec.id}`)
+      const computerId = resolveComputerId(spec)
+      if (computerId == null) throw new NoComputerAvailableError(`process ${spec.id}`)
 
-      const key = sessionKey(runnerId, spec.id)
+      const key = sessionKey(computerId, spec.id)
       const dataEmitter = new BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>()
       const exitEmitter = new BufferingEmitter<{ code: number | null; signal: string | null }>()
       const entry: ProcEntry = {
         key,
-        runnerId,
+        computerId,
         sessionId: spec.id,
         lastSeq: -1,
         pending: new Map(),
@@ -1045,12 +1045,12 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
          */
         write: (data: string): void => {
           void gateway
-            .request(runnerId, HubToRunnerMethods.procWrite, { sessionId: spec.id, data })
+            .request(computerId, HubToComputerMethods.procWrite, { sessionId: spec.id, data })
             .catch(noop)
         },
         kill: (signal?: string): void => {
           void gateway
-            .request(runnerId, HubToRunnerMethods.procKill, {
+            .request(computerId, HubToComputerMethods.procKill, {
               sessionId: spec.id,
               ...(signal ? { signal } : {})
             })
@@ -1059,21 +1059,21 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
       }
 
       // Default: `ProcSpawnSpec.command` is a shell command STRING (e.g.
-      // `pnpm dev`), so ask the runner to run it through a shell. `shell: true` —
+      // `pnpm dev`), so ask the computer to run it through a shell. `shell: true` —
       // NOT a hub-side `buildShellInvocation` — because that helper resolves the
-      // HUB's `$SHELL`, a path that need not exist on the runner's machine (the
+      // HUB's `$SHELL`, a path that need not exist on the computer's machine (the
       // same hub-local assumption that makes `whichBinary` wrong for a routed
-      // spawn). The runner wraps with ITS own shell. Overridable via
+      // spawn). The computer wraps with ITS own shell. Overridable via
       // `buildSpawnParams` (the chat backend needs literal argv).
       void gateway
         .request(
-          runnerId,
-          HubToRunnerMethods.procSpawn,
+          computerId,
+          HubToComputerMethods.procSpawn,
           options.buildSpawnParams?.(spec) ?? {
             sessionId: spec.id,
             command: spec.command,
             shell: true,
-            // Same rule as pty.spawn: an absent cwd lets the runner resolve the
+            // Same rule as pty.spawn: an absent cwd lets the computer resolve the
             // project's checkout, rather than an empty string travelling as a path.
             ...(spec.cwd ? { cwd: spec.cwd } : {}),
             ...(spec.projectId ? { projectId: spec.projectId } : {}),
@@ -1094,7 +1094,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     },
     // Crash-reap (process-manager.ts's reapStaleIfNeeded) is a local-backend-only
     // feature: it depends on inspecting/killing a bare OS pid, and a routed
-    // session only ever exposes the runner's own sessionId/key, not one the hub
+    // session only ever exposes the computer's own sessionId/key, not one the hub
     // can act on independently. `getCommandLine` -> null is the same "can't
     // verify, so don't touch it" signal `localProcessBackend` returns on win32.
     getCommandLine(): Promise<string | null> {
@@ -1102,7 +1102,7 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     },
     killByPid(): void {
       // Nothing to kill: same reasoning as `getCommandLine` above — the pid a
-      // routed session reports belongs to the runner's machine, so the hub has
+      // routed session reports belongs to the computer's machine, so the hub has
       // no process of its own to signal.
     }
   }
@@ -1114,13 +1114,13 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
 
 export interface RoutingChatBackendOptions {
   gateway: RoutingGateway
-  /** Route a spawn to a runnerId. `null` throws {@link NoRunnerAvailableError}. */
-  resolveRunnerId: (spec: ChatSpawnSpec) => string | null
+  /** Route a spawn to a computerId. `null` throws {@link NoComputerAvailableError}. */
+  resolveComputerId: (spec: ChatSpawnSpec) => string | null
 }
 
 /**
  * A `ChatBackend` that forwards remote spawns over the gateway, so a chat-mode
- * agent runs on a runner exactly as a terminal-mode agent already does.
+ * agent runs on a computer exactly as a terminal-mode agent already does.
  *
  * Rides the SAME sequenced duplex `proc.*` channel as
  * {@link createRoutingProcessBackend} — no `chat.*` namespace. A chat agent is
@@ -1129,29 +1129,29 @@ export interface RoutingChatBackendOptions {
  *
  * Line framing is NOT done here: raw chunks are handed to the transport, which
  * reassembles lines hub-side (`createLineSplitter`) and feeds its
- * `ChatSessionDriver`. So the runner stays a byte pipe and all protocol state —
+ * `ChatSessionDriver`. So the computer stays a byte pipe and all protocol state —
  * handshake, request correlation — remains on the hub.
  */
 export function createRoutingChatBackend(options: RoutingChatBackendOptions): ChatBackend {
-  const { gateway, resolveRunnerId } = options
+  const { gateway, resolveComputerId } = options
 
   return {
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
-      const runnerId = resolveRunnerId(spec)
-      if (runnerId == null) throw new NoRunnerAvailableError(`chat agent ${spec.binaryName}`)
+      const computerId = resolveComputerId(spec)
+      if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
 
       const backend = createRoutingProcessBackend({
         gateway,
-        resolveRunnerId: () => runnerId,
+        resolveComputerId: () => computerId,
         // An agent spawn is a resolved binary + argv, NOT a shell string: `sh
         // <script>` must stay two argv entries. The default sender would set
-        // `shell: true` and drop `args`, so the runner would hand the binary to a
+        // `shell: true` and drop `args`, so the computer would hand the binary to a
         // shell and the agent would never receive its arguments.
         buildSpawnParams: (procSpec) => ({
           sessionId: procSpec.id,
           command: spec.binaryName,
           args: spec.args,
-          // Same rule as pty/proc: absent rather than empty, so the runner
+          // Same rule as pty/proc: absent rather than empty, so the computer
           // resolves the project's checkout instead of taking '' as a path.
           ...(spec.cwd ? { cwd: spec.cwd } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
@@ -1170,7 +1170,7 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
         id: spec.sessionId,
         taskId: spec.taskId,
         projectId: null,
-        runnerId,
+        computerId,
         // The binary NAME, resolved against the RUNNER's PATH — never a
         // hub-resolved absolute path, which would not exist there. `shell` is
         // deliberately unset: argv must reach execve unsplit.
@@ -1181,7 +1181,7 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
       } as never)
 
       // A routed spawn has no kernel `'spawn'` event. The remote `proc.spawn`
-      // reply is the equivalent readiness signal — it means the runner has a pid
+      // reply is the equivalent readiness signal — it means the computer has a pid
       // — so surface it as `onSpawn`, which is what promotes the session out of
       // `starting` and starts the protocol driver. Deferred a tick so a caller
       // that subscribes right after `spawn()` resolves still sees it.
@@ -1257,41 +1257,41 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
 export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
   /** In-process adapters. Used ONLY for the two color ops, which are hub-local UI
-   *  state and never routed — every other method requires a runner. */
+   *  state and never routed — every other method requires a computer. */
   /** In-process adapters. Used ONLY for the ops that are hub-owned by design —
    *  worktree colors and the `<ROOT>/storage` artifact paths (see
-   *  docs/exec-boundary.md). Every workspace op requires a runner. */
+   *  docs/exec-boundary.md). Every workspace op requires a computer. */
   local: Pick<
     WorktreeExecAdapters,
     'getWorktreeColor' | 'ensureProjectWorktreeColors' | 'hubPathExists' | 'removeArtifactDir'
   >
   /**
-   * The runner a given TASK's worktree work belongs to, or null for hub-local.
-   * Takes the taskId because that is the only thing a runner can be resolved
-   * from (`resolveTaskRunnerId`). Previously argument-less, which is why the
+   * The computer a given TASK's worktree work belongs to, or null for hub-local.
+   * Takes the taskId because that is the only thing a computer can be resolved
+   * from (`resolveTaskComputerId`). Previously argument-less, which is why the
    * composition root had to pin it to `() => null` and every method degraded to
-   * local — so a task whose agent ran on a runner got its worktree on the hub.
+   * local — so a task whose agent ran on a computer got its worktree on the hub.
    */
-  resolveRunnerId: (taskId: string) => string | null | Promise<string | null>
+  resolveComputerId: (taskId: string) => string | null | Promise<string | null>
 }
 
 /**
- * A COMPLETE `WorktreeExecAdapters` that forwards git/fs work to a runner.
+ * A COMPLETE `WorktreeExecAdapters` that forwards git/fs work to a computer.
  * `getWorktreeColor` (SYNC) and `ensureProjectWorktreeColors` are always served
  * by `local` — worktree colors are hub-local UI state, and a sync getter cannot
  * be a network call (documented cosmetic degradation for remote worktrees).
- * When `resolveRunnerId()` is null every method degrades to `local`.
+ * When `resolveComputerId()` is null every method degrades to `local`.
  */
 export function createRemoteWorktreeAdapters(
   options: RemoteWorktreeAdaptersOptions
 ): WorktreeExecAdapters {
-  const { gateway, local, resolveRunnerId } = options
+  const { gateway, local, resolveComputerId } = options
 
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`worktree create for task ${taskId}`)
-      await gateway.request(runnerId, HubToRunnerMethods.gitCreateWorktree, {
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`worktree create for task ${taskId}`)
+      await gateway.request(computerId, HubToComputerMethods.gitCreateWorktree, {
         repoPath,
         worktreePath,
         branch,
@@ -1300,9 +1300,9 @@ export function createRemoteWorktreeAdapters(
     },
 
     async removeWorktree(taskId, projectPath, worktreePath) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`worktree remove for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.gitRemoveWorktree, {
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
+      const res = await gateway.request(computerId, HubToComputerMethods.gitRemoveWorktree, {
         projectPath,
         worktreePath
       })
@@ -1310,9 +1310,9 @@ export function createRemoteWorktreeAdapters(
     },
 
     async runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`worktree setup for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.gitRunWorktreeSetupScript, {
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`worktree setup for task ${taskId}`)
+      const res = await gateway.request(computerId, HubToComputerMethods.gitRunWorktreeSetupScript, {
         worktreePath,
         repoPath,
         sourceBranch
@@ -1321,9 +1321,9 @@ export function createRemoteWorktreeAdapters(
     },
 
     async copyIgnoredFiles(taskId, repoPath, worktreePath, behavior, customPaths) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`ignored-file copy for task ${taskId}`)
-      await gateway.request(runnerId, HubToRunnerMethods.gitCopyIgnoredFiles, {
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`ignored-file copy for task ${taskId}`)
+      await gateway.request(computerId, HubToComputerMethods.gitCopyIgnoredFiles, {
         repoPath,
         worktreePath,
         behavior,
@@ -1332,18 +1332,18 @@ export function createRemoteWorktreeAdapters(
     },
 
     async getCurrentBranch(taskId, repoPath) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`git branch read for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.gitGetCurrentBranch, {
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`git branch read for task ${taskId}`)
+      const res = await gateway.request(computerId, HubToComputerMethods.gitGetCurrentBranch, {
         repoPath
       })
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 
     async isGitRepo(taskId, path) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`git repo probe for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.gitIsGitRepo, { path })
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`git repo probe for task ${taskId}`)
+      const res = await gateway.request(computerId, HubToComputerMethods.gitIsGitRepo, { path })
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
 
@@ -1356,18 +1356,18 @@ export function createRemoteWorktreeAdapters(
       return local.ensureProjectWorktreeColors(projectPath)
     },
 
-    // WORKSPACE path probe → routed (the workspace lives on the runner).
+    // WORKSPACE path probe → routed (the workspace lives on the computer).
     async pathExists(taskId, path) {
-      const runnerId = await resolveRunnerId(taskId)
-      if (runnerId == null) throw new NoRunnerAvailableError(`path probe for task ${taskId}`)
-      const res = await gateway.request(runnerId, HubToRunnerMethods.fsPathExists, { path })
+      const computerId = await resolveComputerId(taskId)
+      if (computerId == null) throw new NoComputerAvailableError(`path probe for task ${taskId}`)
+      const res = await gateway.request(computerId, HubToComputerMethods.fsPathExists, { path })
       return fsPathExistsResultSchema.parse(res).exists
     },
 
-    // HUB-storage ops: always local, never routed, and never require a runner.
+    // HUB-storage ops: always local, never routed, and never require a computer.
     // Artifacts live under the hub's own <ROOT>/storage — that directory does not
-    // exist on a runner, and routing these made archiving a task impossible
-    // whenever no runner was connected.
+    // exist on a computer, and routing these made archiving a task impossible
+    // whenever no computer was connected.
     hubPathExists(absPath) {
       return local.hubPathExists(absPath)
     },
@@ -1385,10 +1385,10 @@ export function createRemoteWorktreeAdapters(
 export interface RemoteFsAdaptersOptions {
   gateway: RoutingGateway
   /**
-   * In-process filesystem, used ONLY when `runnerId` is null — i.e. this hub has
-   * no runner to ask. See the note on `WorkspaceFsAdapters`: that is a boundary
-   * condition (standalone/fork sidecar, or before the local runner enrolls), not
-   * a preference for the hub's disk. Whenever a runner is connected the caller's
+   * In-process filesystem, used ONLY when `computerId` is null — i.e. this hub has
+   * no computer to ask. See the note on `WorkspaceFsAdapters`: that is a boundary
+   * condition (standalone/fork sidecar, or before the local computer enrolls), not
+   * a preference for the hub's disk. Whenever a computer is connected the caller's
    * resolver returns it and nothing here touches local.
    */
   local: LocalWorkspaceFs
@@ -1399,201 +1399,201 @@ export interface RemoteFsAdaptersOptions {
 let watchSeq = 0
 
 /**
- * `WorkspaceFsAdapters` that forward filesystem work to a runner's `fs.*` frames.
+ * `WorkspaceFsAdapters` that forward filesystem work to a computer's `fs.*` frames.
  *
- * Every method takes the runner explicitly rather than deriving it from a taskId
+ * Every method takes the computer explicitly rather than deriving it from a taskId
  * (as the worktree adapters do). The directory picker is the reason: it has to
  * describe a machine's disk BEFORE a project — let alone a task — exists, so
  * there is nothing to resolve from. Callers that do have a task resolve it once,
- * with the same `resolveExecRunner` the pty backend uses, and pass the result.
+ * with the same `resolveExecComputer` the pty backend uses, and pass the result.
  */
 export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): WorkspaceFsAdapters {
   const { gateway, local } = options
   const newWatchId = options.newWatchId ?? (() => `w${++watchSeq}`)
 
   const req = <T>(
-    runnerId: string,
+    computerId: string,
     method: string,
     params: unknown,
     schema: { parse: (v: unknown) => T }
-  ): Promise<T> => gateway.request(runnerId, method, params).then((res) => schema.parse(res))
+  ): Promise<T> => gateway.request(computerId, method, params).then((res) => schema.parse(res))
 
   return {
-    async listRoots(runnerId) {
-      if (runnerId == null) return local.listRoots()
-      return req(runnerId, HubToRunnerMethods.fsListRoots, {}, fsListRootsResultSchema)
+    async listRoots(computerId) {
+      if (computerId == null) return local.listRoots()
+      return req(computerId, HubToComputerMethods.fsListRoots, {}, fsListRootsResultSchema)
     },
 
-    async listDir(runnerId, path, opts) {
-      if (runnerId == null) return local.listDir(path, opts)
+    async listDir(computerId, path, opts) {
+      if (computerId == null) return local.listDir(path, opts)
       return req(
-        runnerId,
-        HubToRunnerMethods.fsListDir,
+        computerId,
+        HubToComputerMethods.fsListDir,
         { path, dirsOnly: opts?.dirsOnly, includeHidden: opts?.includeHidden },
         fsListDirResultSchema
       )
     },
 
-    async mkdir(runnerId, path) {
-      if (runnerId == null) return local.mkdir(path)
-      return req(runnerId, HubToRunnerMethods.fsMkdir, { path }, fsMkdirResultSchema)
+    async mkdir(computerId, path) {
+      if (computerId == null) return local.mkdir(path)
+      return req(computerId, HubToComputerMethods.fsMkdir, { path }, fsMkdirResultSchema)
     },
 
-    async pathExists(runnerId, path) {
-      if (runnerId == null) return local.pathExists(path)
+    async pathExists(computerId, path) {
+      if (computerId == null) return local.pathExists(path)
       const res = await req(
-        runnerId,
-        HubToRunnerMethods.fsPathExists,
+        computerId,
+        HubToComputerMethods.fsPathExists,
         { path },
         fsPathExistsResultSchema
       )
       return res.exists
     },
 
-    async setAllowedRoots(runnerId, roots) {
-      if (runnerId == null) return local.setAllowedRoots(roots)
+    async setAllowedRoots(computerId, roots) {
+      if (computerId == null) return local.setAllowedRoots(roots)
       return req(
-        runnerId,
-        HubToRunnerMethods.runnerSetAllowedRoots,
+        computerId,
+        HubToComputerMethods.computerSetAllowedRoots,
         { roots },
-        runnerSetAllowedRootsResultSchema
+        computerSetAllowedRootsResultSchema
       )
     },
 
-    async resolveProjectPath(runnerId, projectId) {
-      if (runnerId == null) return local.resolveProjectPath(projectId)
+    async resolveProjectPath(computerId, projectId) {
+      if (computerId == null) return local.resolveProjectPath(projectId)
       return req(
-        runnerId,
-        HubToRunnerMethods.projectResolvePath,
+        computerId,
+        HubToComputerMethods.projectResolvePath,
         { projectId },
         projectResolvePathResultSchema
       )
     },
 
-    async setProjectPath(runnerId, projectId, path) {
-      if (runnerId == null) return local.setProjectPath(projectId, path)
+    async setProjectPath(computerId, projectId, path) {
+      if (computerId == null) return local.setProjectPath(projectId, path)
       return req(
-        runnerId,
-        HubToRunnerMethods.projectSetPath,
+        computerId,
+        HubToComputerMethods.projectSetPath,
         { projectId, path },
         projectSetPathResultSchema
       )
     },
 
-    async forgetProjectPath(runnerId, projectId) {
-      if (runnerId == null) return local.forgetProjectPath(projectId)
-      await req(runnerId, HubToRunnerMethods.projectForgetPath, { projectId }, fsOkResultSchema)
+    async forgetProjectPath(computerId, projectId) {
+      if (computerId == null) return local.forgetProjectPath(projectId)
+      await req(computerId, HubToComputerMethods.projectForgetPath, { projectId }, fsOkResultSchema)
     },
 
 
-    async discoverRepos(runnerId, rootPath, maxDepth) {
-      if (runnerId == null) return local.discoverRepos(rootPath, maxDepth)
+    async discoverRepos(computerId, rootPath, maxDepth) {
+      if (computerId == null) return local.discoverRepos(rootPath, maxDepth)
       const res = await req(
-        runnerId,
-        HubToRunnerMethods.fsDiscoverRepos,
+        computerId,
+        HubToComputerMethods.fsDiscoverRepos,
         { rootPath, maxDepth },
         fsDiscoverReposResultSchema
       )
       return res.repos
     },
 
-    async readDir(runnerId, rootPath, dirPath) {
-      if (runnerId == null) return local.readDir(rootPath, dirPath)
+    async readDir(computerId, rootPath, dirPath) {
+      if (computerId == null) return local.readDir(rootPath, dirPath)
       const res = await req(
-        runnerId,
-        HubToRunnerMethods.fsReadDir,
+        computerId,
+        HubToComputerMethods.fsReadDir,
         { rootPath, dirPath },
         fsReadDirResultSchema
       )
       return res.entries
     },
 
-    async readFile(runnerId, rootPath, filePath, force) {
-      if (runnerId == null) return local.readFile(rootPath, filePath, force)
+    async readFile(computerId, rootPath, filePath, force) {
+      if (computerId == null) return local.readFile(rootPath, filePath, force)
       return req(
-        runnerId,
-        HubToRunnerMethods.fsReadFile,
+        computerId,
+        HubToComputerMethods.fsReadFile,
         { rootPath, filePath, force },
         fsReadFileResultSchema
       )
     },
 
-    async writeFile(runnerId, rootPath, filePath, content) {
-      if (runnerId == null) return local.writeFile(rootPath, filePath, content)
+    async writeFile(computerId, rootPath, filePath, content) {
+      if (computerId == null) return local.writeFile(rootPath, filePath, content)
       await req(
-        runnerId,
-        HubToRunnerMethods.fsWriteFile,
+        computerId,
+        HubToComputerMethods.fsWriteFile,
         { rootPath, filePath, content },
         fsOkResultSchema
       )
     },
 
-    async createFile(runnerId, rootPath, filePath) {
-      if (runnerId == null) return local.createFile(rootPath, filePath)
-      await req(runnerId, HubToRunnerMethods.fsCreateFile, { rootPath, filePath }, fsOkResultSchema)
+    async createFile(computerId, rootPath, filePath) {
+      if (computerId == null) return local.createFile(rootPath, filePath)
+      await req(computerId, HubToComputerMethods.fsCreateFile, { rootPath, filePath }, fsOkResultSchema)
     },
 
-    async createDir(runnerId, rootPath, dirPath) {
-      if (runnerId == null) return local.createDir(rootPath, dirPath)
-      await req(runnerId, HubToRunnerMethods.fsCreateDir, { rootPath, dirPath }, fsOkResultSchema)
+    async createDir(computerId, rootPath, dirPath) {
+      if (computerId == null) return local.createDir(rootPath, dirPath)
+      await req(computerId, HubToComputerMethods.fsCreateDir, { rootPath, dirPath }, fsOkResultSchema)
     },
 
-    async rename(runnerId, rootPath, oldPath, newPath) {
-      if (runnerId == null) return local.rename(rootPath, oldPath, newPath)
+    async rename(computerId, rootPath, oldPath, newPath) {
+      if (computerId == null) return local.rename(rootPath, oldPath, newPath)
       await req(
-        runnerId,
-        HubToRunnerMethods.fsRename,
+        computerId,
+        HubToComputerMethods.fsRename,
         { rootPath, oldPath, newPath },
         fsOkResultSchema
       )
     },
 
-    async delete(runnerId, rootPath, targetPath) {
-      if (runnerId == null) return local.delete(rootPath, targetPath)
-      await req(runnerId, HubToRunnerMethods.fsDelete, { rootPath, targetPath }, fsOkResultSchema)
+    async delete(computerId, rootPath, targetPath) {
+      if (computerId == null) return local.delete(rootPath, targetPath)
+      await req(computerId, HubToComputerMethods.fsDelete, { rootPath, targetPath }, fsOkResultSchema)
     },
 
-    async copyIn(runnerId, rootPath, absoluteSrc, targetDir) {
-      if (runnerId == null) return local.copyIn(rootPath, absoluteSrc, targetDir)
+    async copyIn(computerId, rootPath, absoluteSrc, targetDir) {
+      if (computerId == null) return local.copyIn(rootPath, absoluteSrc, targetDir)
       const res = await req(
-        runnerId,
-        HubToRunnerMethods.fsCopyIn,
+        computerId,
+        HubToComputerMethods.fsCopyIn,
         { rootPath, absoluteSrc, targetDir },
         fsCopyInResultSchema
       )
       return res.path
     },
 
-    async copy(runnerId, rootPath, srcPath, destPath) {
-      if (runnerId == null) return local.copy(rootPath, srcPath, destPath)
+    async copy(computerId, rootPath, srcPath, destPath) {
+      if (computerId == null) return local.copy(rootPath, srcPath, destPath)
       await req(
-        runnerId,
-        HubToRunnerMethods.fsCopy,
+        computerId,
+        HubToComputerMethods.fsCopy,
         { rootPath, srcPath, destPath },
         fsOkResultSchema
       )
     },
 
-    async gitStatus(runnerId, rootPath) {
-      if (runnerId == null) return local.gitStatus(rootPath)
-      return req(runnerId, HubToRunnerMethods.fsGitStatus, { rootPath }, fsGitStatusResultSchema)
+    async gitStatus(computerId, rootPath) {
+      if (computerId == null) return local.gitStatus(rootPath)
+      return req(computerId, HubToComputerMethods.fsGitStatus, { rootPath }, fsGitStatusResultSchema)
     },
 
-    async searchFiles(runnerId, rootPath, query, opts) {
-      if (runnerId == null) return local.searchFiles(rootPath, query, opts)
+    async searchFiles(computerId, rootPath, query, opts) {
+      if (computerId == null) return local.searchFiles(rootPath, query, opts)
       return req(
-        runnerId,
-        HubToRunnerMethods.fsSearchFiles,
+        computerId,
+        HubToComputerMethods.fsSearchFiles,
         { rootPath, query, options: opts },
         fsSearchFilesResultSchema
       )
     },
 
-    async listAllFiles(runnerId, rootPath) {
-      if (runnerId == null) return local.listAllFiles(rootPath)
+    async listAllFiles(computerId, rootPath) {
+      if (computerId == null) return local.listAllFiles(rootPath)
       return req(
-        runnerId,
-        HubToRunnerMethods.fsListAllFiles,
+        computerId,
+        HubToComputerMethods.fsListAllFiles,
         { rootPath },
         fsListAllFilesResultSchema
       )
@@ -1606,44 +1606,44 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
      * which must hand back a teardown before any await) while the `fs.watchStart`
      * round-trip runs in the background. Disposing before that lands sets
      * `stopped`, so the late `then` sends `fs.watchStop` immediately instead of
-     * leaving an orphan watcher running on the runner forever.
+     * leaving an orphan watcher running on the computer forever.
      *
-     * A runner disconnect COMPLETES the stream rather than silently going quiet:
+     * A computer disconnect COMPLETES the stream rather than silently going quiet:
      * the client must learn its view may be stale and resubscribe, and a watcher
      * that stops emitting is indistinguishable from a directory that stopped
      * changing.
      */
-    watch(runnerId, rootPath, listener) {
-      if (runnerId == null) return local.watch(rootPath, listener)
+    watch(computerId, rootPath, listener) {
+      if (computerId == null) return local.watch(rootPath, listener)
 
       const watchId = newWatchId()
       let stopped = false
 
       const onChange = (e: {
-        runnerId: string
+        computerId: string
         watchId: string
         type: 'changed' | 'deleted'
         relPath: string
       }): void => {
-        if (e.runnerId !== runnerId || e.watchId !== watchId) return
+        if (e.computerId !== computerId || e.watchId !== watchId) return
         listener({ type: e.type, root: rootPath, relPath: e.relPath })
       }
-      const onDisconnected = (e: { runnerId: string }): void => {
-        if (e.runnerId === runnerId) stop()
+      const onDisconnected = (e: { computerId: string }): void => {
+        if (e.computerId === computerId) stop()
       }
 
       gateway.events.on('fs.change', onChange)
-      gateway.events.on('runner-disconnected', onDisconnected)
-      gateway.events.on('runner-lost', onDisconnected)
+      gateway.events.on('computer-disconnected', onDisconnected)
+      gateway.events.on('computer-lost', onDisconnected)
 
       void gateway
-        .request(runnerId, HubToRunnerMethods.fsWatchStart, { watchId, rootPath })
+        .request(computerId, HubToComputerMethods.fsWatchStart, { watchId, rootPath })
         .then(() => {
           if (stopped) {
             void gateway
-              .request(runnerId, HubToRunnerMethods.fsWatchStop, { watchId })
+              .request(computerId, HubToComputerMethods.fsWatchStop, { watchId })
               .catch(() => {
-                /* runner gone — its watcher died with the connection */
+                /* computer gone — its watcher died with the connection */
               })
           }
         })
@@ -1653,7 +1653,7 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
             source: 'server',
             event: 'fs.watch_start_failed',
             message: err instanceof Error ? err.message : String(err),
-            payload: { runnerId, rootPath }
+            payload: { computerId, rootPath }
           })
         })
 
@@ -1661,9 +1661,9 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         if (stopped) return
         stopped = true
         gateway.events.off('fs.change', onChange)
-        gateway.events.off('runner-disconnected', onDisconnected)
-        gateway.events.off('runner-lost', onDisconnected)
-        void gateway.request(runnerId!, HubToRunnerMethods.fsWatchStop, { watchId }).catch(() => {
+        gateway.events.off('computer-disconnected', onDisconnected)
+        gateway.events.off('computer-lost', onDisconnected)
+        void gateway.request(computerId!, HubToComputerMethods.fsWatchStop, { watchId }).catch(() => {
           /* already gone */
         })
       }

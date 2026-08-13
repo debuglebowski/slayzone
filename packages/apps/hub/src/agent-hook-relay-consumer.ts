@@ -3,24 +3,24 @@ import { processAgentHook } from '@slayzone/transport/server'
 import { AGENT_HOOK_EVENT_NAME } from '@slayzone/computer-transport/shared'
 
 /**
- * Minimal slice of the hub runner gateway this consumer needs: subscribe to the
- * generic runner→hub `event` notification. Kept structural so the unit test can
- * drive it with a tiny fake instead of a full `createHubRunnerGateway`.
+ * Minimal slice of the hub computer gateway this consumer needs: subscribe to the
+ * generic computer→hub `event` notification. Kept structural so the unit test can
+ * drive it with a tiny fake instead of a full `createHubComputerGateway`.
  */
 export interface AgentHookRelayGateway {
   events: {
     on(
       event: 'event',
-      listener: (payload: { runnerId: string; name: string; payload?: unknown }) => void
+      listener: (payload: { computerId: string; name: string; payload?: unknown }) => void
     ): void
   }
 }
 
 /**
- * Wire the hub-side consumer for runner-RELAYED agent hooks (hub/runner split).
+ * Wire the hub-side consumer for computer-RELAYED agent hooks (hub/computer split).
  *
- * A runner-routed pty posts its lifecycle hook to the RUNNER's OWN loopback
- * `/api/agent-hook`; the runner forwards the raw envelope to the hub over its
+ * A computer-routed pty posts its lifecycle hook to the RUNNER's OWN loopback
+ * `/api/agent-hook`; the computer forwards the raw envelope to the hub over its
  * authenticated ws channel as a generic `event` with `name: 'agent-hook'`. This
  * feeds that envelope through the SAME `processAgentHook` authority the local
  * loopback HTTP route uses — identical field resolution, state machine, prompt
@@ -30,7 +30,7 @@ export interface AgentHookRelayGateway {
  * Extracted from the composition root so it is directly unit-testable (the
  * composition root's async gateway init is not). Best-effort by contract: a
  * non-matching event is ignored, and a malformed/failing relayed hook must NEVER
- * throw out of the gateway's event loop (that would destabilize every runner).
+ * throw out of the gateway's event loop (that would destabilize every computer).
  */
 export function attachAgentHookRelayConsumer(
   gateway: AgentHookRelayGateway,

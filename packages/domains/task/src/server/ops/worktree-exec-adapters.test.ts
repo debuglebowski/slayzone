@@ -1,5 +1,5 @@
 /**
- * WorktreeExecAdapters seam contract tests (hub/runner split, wave 1).
+ * WorktreeExecAdapters seam contract tests (hub/computer split, wave 1).
  * maybeAutoCreateWorktree + cleanupTaskFull must run every git/fs side effect
  * through the injected `runtimeAdapters.worktrees` seam. Fake adapters record
  * call order against an in-memory DB:
@@ -208,13 +208,13 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   const calls: string[] = []
   const fakes = makeFakes(calls, {
     // Signature is (taskId, projectPath, worktreePath) — the leading taskId is
-    // what lets a routing impl pick the runner this task's worktree lives on.
+    // what lets a routing impl pick the computer this task's worktree lives on.
     removeWorktree: async (_taskId, projPath, wtPath) => {
       removeCalls.push([projPath, wtPath])
       return {}
     },
     // Artifacts dir "exists" → removeArtifactDir seam must fire. It's HUB storage,
-    // so the guard is hubPathExists (never routed to a runner).
+    // so the guard is hubPathExists (never routed to a computer).
     hubPathExists: () => true
   })
   configureTaskRuntimeAdapters({ getDataRoot: () => dataRoot, worktrees: fakes })
@@ -231,30 +231,30 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   h.cleanup()
 })
 
-test('maybeAutoCreateWorktree: no runner → skips the worktree, task creation still succeeds', async () => {
+test('maybeAutoCreateWorktree: no computer → skips the worktree, task creation still succeeds', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   const taskId = crypto.randomUUID()
   seedProject(h, projectId, { copyBehavior: 'all' })
-  seedTask(h, taskId, projectId, 'No Runner Task')
+  seedTask(h, taskId, projectId, 'No Computer Task')
 
-  // The exec seams throw NoRunnerAvailableError when nothing routes. Auto-creation
+  // The exec seams throw NoComputerAvailableError when nothing routes. Auto-creation
   // runs during task CREATE — before any agent exists to need a workspace — so it
   // must degrade to a skip rather than fail the create. (It did fail it, which is
   // what broke task creation e2e-wide.)
-  const noRunner = (): never => {
-    const err = new Error('No runner available to run git repo probe')
-    err.name = 'NoRunnerAvailableError'
+  const noComputer = (): never => {
+    const err = new Error('No computer available to run git repo probe')
+    err.name = 'NoComputerAvailableError'
     throw err
   }
   const calls: string[] = []
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
-    worktrees: makeFakes(calls, { isGitRepo: async () => noRunner() })
+    worktrees: makeFakes(calls, { isGitRepo: async () => noComputer() })
   })
 
   // Must NOT throw.
-  await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'No Runner Task')
+  await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'No Computer Task')
 
   expect(taskRow(h, taskId).worktree_path).toBeNull() // skipped, not half-linked
   expect(calls.filter((c) => c === 'create' || c === 'copy' || c === 'setup')).toHaveLength(0)

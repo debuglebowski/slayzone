@@ -2,24 +2,24 @@
  * `slay update` — bump globally installed @slayzone packages, across npm, pnpm,
  * and bun.
  *
- * Three install paths exist for the hub/runner/cli trio, and only one of them is
+ * Three install paths exist for the hub/computer/cli trio, and only one of them is
  * NOT already self-updating:
  *   - the CLI's own private runtime prefix (`<dataDir>/${kind}-runtime`,
- *     `../service.ts:resolveServiceBin`) auto-(re)installs hub/runner pinned to
- *     the running CLI's own version; `slay hub|runner restart <name> --upgrade`
+ *     `../service.ts:resolveServiceBin`) auto-(re)installs hub/computer pinned to
+ *     the running CLI's own version; `slay hub|computer restart <name> --upgrade`
  *     already re-triggers that resolution.
  *   - the desktop app's bundled `slay` (symlinked from
  *     `SlayZone.app/Contents/Resources/bin/slay`) updates via the app's own
  *     auto-updater, not npm.
  *   - a plain global install (`npm install -g` / `pnpm add -g` / `bun add -g`
- *     `@slayzone/cli|hub|runner` — the standalone/headless path documented in
+ *     `@slayzone/cli|hub|computer` — the standalone/headless path documented in
  *     each package's published README, npm-only there) is pinned forever —
  *     nothing re-checks or bumps it. That is what this command is for. pnpm/bun
  *     are covered too since either is a plausible choice for someone setting up
  *     a headless box even though only npm is documented.
  *
  * Scope is deliberately narrow: only global installs, and only reinstall — never
- * restart a live hub/runner (that can drop terminals/agents mid-session), so a
+ * restart a live hub/computer (that can drop terminals/agents mid-session), so a
  * restart stays a printed hint the operator runs themselves.
  *
  * A package can be found under more than one manager at once (e.g. installed via
@@ -42,7 +42,7 @@ type PackageName = (typeof PACKAGE_NAMES)[number]
  *  / node-pty): exactly the two packages with a ServiceKind. */
 const KIND_FOR_PACKAGE: Partial<Record<PackageName, ServiceKind>> = {
   '@slayzone/hub': 'hub',
-  '@slayzone/computer': 'runner'
+  '@slayzone/computer': 'computer'
 }
 
 type ManagerId = 'npm' | 'pnpm' | 'bun'
@@ -91,7 +91,7 @@ const MANAGERS: Manager[] = [
     globalRoot: () => runCapture('pnpm', ['root', '-g']),
     // pnpm prompts interactively (or silently skips, off a TTY) before running a
     // global package's install scripts — `--allow-build=<name>` pre-approves it,
-    // needed for hub/runner's native rebuild (better-sqlite3/node-pty). Verified
+    // needed for hub/computer's native rebuild (better-sqlite3/node-pty). Verified
     // via `pnpm add --help` (10.30.3); harmless to pass for cli, which has none.
     installArgs: (names, target) => [
       'add',
@@ -160,7 +160,7 @@ interface FoundPackage {
 }
 
 /**
- * Point at any registered (launchd/systemd) hub or runner units backed by a
+ * Point at any registered (launchd/systemd) hub or computer units backed by a
  * package that just got bumped — informational only, never auto-restarted.
  */
 function printRestartHints(updatedPackages: PackageName[]): void {
@@ -182,7 +182,7 @@ function printRestartHints(updatedPackages: PackageName[]): void {
 export function updateCommand(): Command {
   const cmd = new Command('update')
     .description(
-      'Update globally installed @slayzone packages (cli, hub, runner) — npm, pnpm, or bun'
+      'Update globally installed @slayzone packages (cli, hub, computer) — npm, pnpm, or bun'
     )
     .option('--check', 'Report available updates without installing anything')
     .action((opts: { check?: boolean }) => {

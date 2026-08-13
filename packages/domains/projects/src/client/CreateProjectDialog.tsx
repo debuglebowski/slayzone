@@ -74,11 +74,11 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const [targetHubId, setTargetHubId] = useState(fed?.defaultHubId ?? 'local')
 
   // Which MACHINE the project lives on, distinct from which hub owns its row.
-  // A hub can have several runners; the path is meaningless without saying whose
-  // filesystem it is. Null = the hub's connected default runner.
-  const [targetRunnerId, setTargetRunnerId] = useState<string | null>(null)
-  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
-  const runners = runnersQuery.data ?? []
+  // A hub can have several computers; the path is meaningless without saying whose
+  // filesystem it is. Null = the hub's connected default computer.
+  const [targetComputerId, setTargetComputerId] = useState<string | null>(null)
+  const computersQuery = useQuery(trpc.computers.list.queryOptions())
+  const computers = computersQuery.data ?? []
   const [browseOpen, setBrowseOpen] = useState(false)
 
   const handlePicked = (picked: string): void => {
@@ -107,19 +107,19 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
         color,
         path: path || undefined
       })
-      // Persist the machine choice: the path was browsed on THAT runner, so
+      // Persist the machine choice: the path was browsed on THAT computer, so
       // leaving the binding unset would let a later default change point the
       // project's agents at a filesystem where the path does not exist.
-      if (targetRunnerId) {
-        await client.computers.setProjectDefaultRunner.mutate({
+      if (targetComputerId) {
+        await client.computers.setProjectDefaultComputer.mutate({
           projectId: project.id,
-          runnerId: targetRunnerId
+          computerId: targetComputerId
         })
       }
       onCreated(project, { startMode })
       setName('')
       setPath('')
-      setTargetRunnerId(null)
+      setTargetComputerId(null)
       setStartMode('scratch')
       setColor(DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
     } finally {
@@ -167,7 +167,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
               open={browseOpen}
               onOpenChange={setBrowseOpen}
               onSelect={handlePicked}
-              target={{ runnerId: targetRunnerId }}
+              target={{ computerId: targetComputerId }}
               title="Select project directory"
               defaultPath={path || null}
               allowCreate
@@ -176,21 +176,21 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
               Claude Code terminal will open in this directory
             </p>
           </div>
-          {/* Only when there is a choice to make. With one runner the path is
+          {/* Only when there is a choice to make. With one computer the path is
               unambiguous, and a select with a single option is noise. */}
-          {runners.length > 1 && (
+          {computers.length > 1 && (
             <div className="space-y-2">
-              <Label htmlFor="runner">Machine</Label>
+              <Label htmlFor="computer">Machine</Label>
               <Select
-                value={targetRunnerId ?? DEFAULT_RUNNER_VALUE}
-                onValueChange={(v) => setTargetRunnerId(v === DEFAULT_RUNNER_VALUE ? null : v)}
+                value={targetComputerId ?? DEFAULT_RUNNER_VALUE}
+                onValueChange={(v) => setTargetComputerId(v === DEFAULT_RUNNER_VALUE ? null : v)}
               >
-                <SelectTrigger id="runner" data-testid="create-project-runner">
+                <SelectTrigger id="computer" data-testid="create-project-computer">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_RUNNER_VALUE}>Default runner</SelectItem>
-                  {runners.map((r) => (
+                  <SelectItem value={DEFAULT_RUNNER_VALUE}>Default computer</SelectItem>
+                  {computers.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}
                       {r.usable ? '' : ' (offline)'}

@@ -19,7 +19,7 @@ import { templatesCommand } from './commands/templates'
 import { automationsCommand } from './commands/automations'
 import { panelsCommand } from './commands/panels'
 import { hubCommand } from './commands/hub'
-import { runnerCommand } from './commands/runner'
+import { computerCommand } from './commands/computer'
 import { updateCommand } from './commands/update'
 
 const program = new Command()
@@ -86,7 +86,7 @@ program.addCommand(completionsCommand())
 program.addCommand(initCommand())
 program.addCommand(ptyCommand())
 program.addCommand(hubCommand())
-program.addCommand(runnerCommand())
+program.addCommand(computerCommand())
 program.addCommand(updateCommand())
 
 program.parseAsync(process.argv).catch((err) => {

@@ -2,7 +2,7 @@
  * Normalize a `ws` message payload (`Buffer | ArrayBuffer | Buffer[] | string`)
  * to a UTF-8 string. Typed as `unknown` so shared code carries no ws types.
  *
- * @module runner/shared/ws-data
+ * @module computer/shared/ws-data
  */
 
 export function wsDataToText(data: unknown): string {

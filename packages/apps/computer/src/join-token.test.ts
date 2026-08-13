@@ -1,7 +1,7 @@
 import type { RunResult, SlayzoneDb } from '@slayzone/platform'
 // The decoder under test lives on the lean `@slayzone/platform/join-token` subpath —
 // no @slayzone/computers RUNTIME dep, which would drag better-sqlite3 into both the
-// runner and CLI bundles. This test-only import of the HUB minter is what guards the
+// computer and CLI bundles. This test-only import of the HUB minter is what guards the
 // two szjt1 codecs against silent drift, and it stays HERE (not in platform) because
 // @slayzone/computers already depends on @slayzone/platform — devDep'ing it back would
 // close a cycle.
@@ -75,7 +75,7 @@ describe('decodeJoinToken', () => {
   })
 
   it('decodes a token produced by the HUB minter (guards against codec drift)', async () => {
-    // Feed the runner decoder the EXACT output of @slayzone/computers/server
+    // Feed the computer decoder the EXACT output of @slayzone/computers/server
     // mintJoinToken. If the hub ever changes the prefix or payload shape, this
     // fails here even though the local encode()-based tests above stay green.
     const minted = await mintJoinToken(fakeDb(), {

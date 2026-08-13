@@ -1,22 +1,22 @@
 /**
- * Where THIS runner keeps each project on its own disk.
+ * Where THIS computer keeps each project on its own disk.
  *
  * The hub used to hold one `projects.path` column: a directory it cannot see, on
- * a machine it does not own, with no room for a second answer. Two runners laying
+ * a machine it does not own, with no room for a second answer. Two computers laying
  * the same project out differently made the hub necessarily wrong about one of
- * them, and a Windows runner does not even agree on the separator. So the mapping
+ * them, and a Windows computer does not even agree on the separator. So the mapping
  * moved here, where the disk is.
  *
- * Persisted at `<ROOT>/runner.projects.json`, keyed by hub host then project id —
- * the same two-level shape as `runner.state.json`, and for the same reason: a
- * runner can be enrolled with several hubs, and dropping one hub's entry must not
+ * Persisted at `<ROOT>/computer.projects.json`, keyed by hub host then project id —
+ * the same two-level shape as `computer.state.json`, and for the same reason: a
+ * computer can be enrolled with several hubs, and dropping one hub's entry must not
  * disturb another's.
  *
  * Not a secret, but written 0600 through the same atomic replace anyway: a
  * half-written map would strand every project on this machine, which is a worse
  * failure than a slightly over-tight mode bit.
  *
- * @module runner/project-paths
+ * @module computer/project-paths
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -42,7 +42,7 @@ const projectMapSchema = z.record(z.string(), projectPathEntrySchema)
 type ProjectMap = z.infer<typeof projectMapSchema>
 
 export interface ProjectPathStore {
-  /** Null when this runner has no checkout of that project — a real state. */
+  /** Null when this computer has no checkout of that project — a real state. */
   get(projectId: string): ProjectPathEntry | null
   set(projectId: string, path: string): Promise<ProjectPathEntry>
   forget(projectId: string): Promise<void>
@@ -52,7 +52,7 @@ export interface ProjectPathStore {
 }
 
 export function projectsFilePath(baseDir?: string): string {
-  return join(baseDir ?? slayzoneRootDir(), 'runner.projects.json')
+  return join(baseDir ?? slayzoneRootDir(), 'computer.projects.json')
 }
 
 /** Whole file: `{ [hubHost]: { [projectId]: entry } }`. */
@@ -106,7 +106,7 @@ async function writeFileMap(filePath: string, map: Record<string, ProjectMap>): 
  * Reads once at construction and serves `get` from memory: resolving a cwd sits
  * directly in the agent-spawn path, and a disk read per spawn would put file I/O
  * between the user pressing start and the pty existing. Writes are write-through,
- * and re-read the whole file first so a concurrent runner for a DIFFERENT hub
+ * and re-read the whole file first so a concurrent computer for a DIFFERENT hub
  * cannot be clobbered by this one's write.
  */
 export async function createProjectPathStore(

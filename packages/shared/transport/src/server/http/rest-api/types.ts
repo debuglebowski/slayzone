@@ -7,7 +7,7 @@ import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 /**
  * Pluggable bridge to the PTY state machine. The Electron host wires the live
  * `@slayzone/terminal/electron` impl; tests override with stubs to avoid pulling
- * node-pty / Electron native modules into the test runner. Absent (standalone
+ * node-pty / Electron native modules into the test computer. Absent (standalone
  * server until pty lands there): agent-hook still persists conversation ids +
  * diagnostics but skips state transitions.
  */
@@ -158,28 +158,28 @@ export interface RestApiDeps {
   windowActions?: { raiseMainWindow: () => void }
   artifactExport?: ArtifactExportAccess
   /**
-   * Runner listener info accessors (hub/runner split, Wave3.5-D3). Set ONLY under
+   * Computer listener info accessors (hub/computer split, Wave3.5-D3). Set ONLY under
    * the composition root wires it, closed over the same late-bound refs the
-   * `computersRouter`'s `RunnersDeps` reads). Powers `POST /api/computers/join-token`
+   * `computersRouter`'s `ComputersDeps` reads). Powers `POST /api/computers/join-token`
    * — the loopback channel the Electron MAIN process hits at boot to mint a token
-   * for its auto-enrolling local runner (main has no tRPC client to the sidecar).
-   * Absent (runner off — the default) → the route 503s and nothing mints, so the
+   * for its auto-enrolling local computer (main has no tRPC client to the sidecar).
+   * Absent (computer off — the default) → the route 503s and nothing mints, so the
    * default boot is byte-identical.
    */
-  runners?: {
+  computers?: {
     /** `wss://host:port/computers` URL the join token embeds. Null until bound. */
     getHubUrl: () => string | null
     /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
     getCertFingerprint: () => string | null
     /**
-     * The live runner gateway, for `GET /api/computers` connection status. Null until
-     * the async runner init resolves, and permanently null if it failed — that route
+     * The live computer gateway, for `GET /api/computers` connection status. Null until
+     * the async computer init resolves, and permanently null if it failed — that route
      * degrades to store rows with `connected: false` rather than erroring, so this
      * stays optional and nothing depends on it being present.
      */
     getGateway?: () => {
-      listRunners: () => Array<{ runnerId: string }>
-      listUsableRunners: () => Array<{ runnerId: string }>
+      listComputers: () => Array<{ computerId: string }>
+      listUsableComputers: () => Array<{ computerId: string }>
     } | null
   }
   /**
@@ -192,7 +192,7 @@ export interface RestApiDeps {
    *
    * GETTER-SHAPED for `ready`, because hub-auth is created ASYNCHRONOUSLY (its
    * better-auth migrations run off the main boot path) long after `restDeps` is
-   * built synchronously — same reason as the `runners` slot above. `ready()` false
+   * built synchronously — same reason as the `computers` slot above. `ready()` false
    * means either init has not finished or it FAILED permanently; the routes 503
    * either way. Absent slot (the Electron host) → 503 as well, so a host without
    * hub-auth degrades instead of throwing.

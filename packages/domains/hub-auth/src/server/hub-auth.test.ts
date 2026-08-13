@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth, RUNNER_KEY_PREFIX } from './auth'
-import { mintRunnerApiKey, revokeRunnerApiKey, RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
+import { mintComputerApiKey, revokeComputerApiKey, RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
 import { createHubUser } from './users'
-import { requireApiKey, requireSession, verifyRunnerApiKey, verifySession } from './verify'
+import { requireApiKey, requireSession, verifyComputerApiKey, verifySession } from './verify'
 
 const EMAIL = 'alice@example.com'
 
@@ -179,37 +179,37 @@ describe('bearer-token verification', () => {
   })
 })
 
-describe('runner API keys (create / verify / revoke)', () => {
-  it('mints, verifies, and revokes a runner key', async () => {
-    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-1', name: 'ci-runner' })
+describe('computer API keys (create / verify / revoke)', () => {
+  it('mints, verifies, and revokes a computer key', async () => {
+    const minted = await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     expect(minted.key.startsWith(RUNNER_KEY_PREFIX)).toBe(true)
     expect(minted.keyId).toBeTruthy()
-    expect(minted.runnerId).toBe('runner-1')
+    expect(minted.computerId).toBe('computer-1')
 
-    const principal = await verifyRunnerApiKey(auth, minted.key)
-    expect(principal).toEqual({ runnerId: 'runner-1', keyId: minted.keyId })
+    const principal = await verifyComputerApiKey(auth, minted.key)
+    expect(principal).toEqual({ computerId: 'computer-1', keyId: minted.keyId })
 
     const verified = await auth.api.verifyApiKey({ body: { key: minted.key } })
     expect(verified.valid).toBe(true)
 
-    const revoked = await revokeRunnerApiKey(auth, minted.keyId)
+    const revoked = await revokeComputerApiKey(auth, minted.keyId)
     expect(revoked).toBe(true)
 
-    expect(await verifyRunnerApiKey(auth, minted.key)).toBeNull()
+    expect(await verifyComputerApiKey(auth, minted.key)).toBeNull()
     const afterRevoke = await auth.api.verifyApiKey({ body: { key: minted.key } })
     expect(afterRevoke.valid).toBe(false)
   })
 
   it('revoking an unknown key returns false', async () => {
-    expect(await revokeRunnerApiKey(auth, 'no-such-key-id')).toBe(false)
+    expect(await revokeComputerApiKey(auth, 'no-such-key-id')).toBe(false)
   })
 
-  it('verifies the same runner key far more than 10 times (no verify rate limit)', async () => {
+  it('verifies the same computer key far more than 10 times (no verify rate limit)', async () => {
     // Regression: the api-key plugin rate-limits KEY VERIFICATION to 10 requests
     // per 24h by default (`rateLimit.maxRequests = 10`, `timeWindow = 86400000`),
-    // and every runner reconnect verifies its key once. So the 11th reconnect in a
-    // day was denied → `verifyRunnerApiKey` → null → the gateway answered `hello`
-    // with -32002 → the runner's re-enroll fallback burned its single-use join
+    // and every computer reconnect verifies its key once. So the 11th reconnect in a
+    // day was denied → `verifyComputerApiKey` → null → the gateway answered `hello`
+    // with -32002 → the computer's re-enroll fallback burned its single-use join
     // token → fatal exit, bricked until an operator re-enrolled it. Hub restarts,
     // laptop sleep and network flaps trivially exceed 10 reconnects in a day.
     //
@@ -217,11 +217,11 @@ describe('runner API keys (create / verify / revoke)', () => {
     // only then evaluates the limit, so an unknown key never reaches it. It can
     // only throttle the legitimate holder — a machine credential that is either
     // valid or not. 30 here is well past the old ceiling of 10.
-    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-reconnect', name: 'flappy' })
+    const minted = await mintComputerApiKey(auth, { computerId: 'computer-reconnect', name: 'flappy' })
     for (let i = 1; i <= 30; i += 1) {
-      const principal = await verifyRunnerApiKey(auth, minted.key)
+      const principal = await verifyComputerApiKey(auth, minted.key)
       expect(principal, `verify #${i} should still succeed`).toEqual({
-        runnerId: 'runner-reconnect',
+        computerId: 'computer-reconnect',
         keyId: minted.keyId
       })
     }
@@ -234,8 +234,8 @@ describe('runner API keys (create / verify / revoke)', () => {
     // `evaluateRateLimit` checks the global `opts.rateLimit.enabled === false`
     // BEFORE the per-key flag, which is what makes this work; asserted here so a
     // plugin upgrade that reorders those checks fails loudly instead of silently
-    // re-bricking every existing runner.
-    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-upgraded', name: 'old-key' })
+    // re-bricking every existing computer.
+    const minted = await mintComputerApiKey(auth, { computerId: 'computer-upgraded', name: 'old-key' })
     const raw = new DatabaseSync(dbPath)
     raw.exec(
       `UPDATE apikey SET rateLimitEnabled = 1, rateLimitMax = 10, rateLimitTimeWindow = 86400000,
@@ -243,28 +243,28 @@ describe('runner API keys (create / verify / revoke)', () => {
     )
     raw.close()
 
-    expect(await verifyRunnerApiKey(auth, minted.key)).toEqual({
-      runnerId: 'runner-upgraded',
+    expect(await verifyComputerApiKey(auth, minted.key)).toEqual({
+      computerId: 'computer-upgraded',
       keyId: minted.keyId
     })
   })
 
-  it('rejects keys that carry no runner metadata', async () => {
+  it('rejects keys that carry no computer metadata', async () => {
     const ctx = await auth.$context
     const serviceUser = await ctx.internalAdapter.findUserByEmail(RUNNER_SERVICE_USER_EMAIL)
     expect(serviceUser).not.toBeNull()
     const plain = await auth.api.createApiKey({
-      body: { name: 'not-a-runner-key', userId: serviceUser!.user.id }
+      body: { name: 'not-a-computer-key', userId: serviceUser!.user.id }
     })
-    expect(await verifyRunnerApiKey(auth, plain.key)).toBeNull()
+    expect(await verifyComputerApiKey(auth, plain.key)).toBeNull()
   })
 
-  it('requireApiKey middleware attaches res.locals.runner and calls next', async () => {
-    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-2', name: 'mw-runner' })
+  it('requireApiKey middleware attaches res.locals.computer and calls next', async () => {
+    const minted = await mintComputerApiKey(auth, { computerId: 'computer-2', name: 'mw-computer' })
     const { req, res, next, state } = fakeReqRes({ 'x-api-key': minted.key })
     await requireApiKey(auth)(req, res as never, next)
     expect(state.nextCalls).toEqual([[]])
-    expect(res.locals.runner).toEqual({ runnerId: 'runner-2', keyId: minted.keyId })
+    expect(res.locals.computer).toEqual({ computerId: 'computer-2', keyId: minted.keyId })
   })
 
   it('requireApiKey middleware rejects missing and invalid keys with 401', async () => {

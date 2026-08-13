@@ -1,5 +1,5 @@
 /**
- * Tests for the PtySessionLedger seam (hub/runner split, wave 1): createPty's
+ * Tests for the PtySessionLedger seam (hub/computer split, wave 1): createPty's
  * session-provenance DB touchpoints go through the injected ledger, not a raw
  * db handle. Asserts the ordering contract with a fake ledger:
  *   - pending-spawn is recorded (and AWAITED durable) before the agent starts
@@ -135,7 +135,7 @@ function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: Le
  * Warm adoption is a REKEY on a RUNNER (`pty.warmAdopt`) reached through
  * `PtyBackend.adopt` — there is no hub-local warm pool. These tests exercise the
  * adoption BRANCH of createPty, so they stand in a backend whose `adopt` returns
- * the fake pty the runner would have handed back.
+ * the fake pty the computer would have handed back.
  */
 function installAdoptBackend(fake: unknown): void {
   setPtyBackend({
@@ -166,7 +166,7 @@ await test('pending-spawn is recorded durably BEFORE the agent starts (no bind o
       conversationId: 'conv-L1',
       initialCommand: 'claude --session-id {id} {flags}',
       defaultFlags: '--allow-dangerously-skip-permissions',
-      adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+      adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
     })
     expect(res.success === true, `createPty failed: ${res.error}`)
     expect(calls.record.length === 1, `expected 1 recordPendingSpawn, got ${calls.record.length}`)
@@ -211,7 +211,7 @@ await test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mod
       conversationId: 'conv-L2',
       initialCommand: 'claude --session-id {id} {flags}',
       defaultFlags: '--allow-dangerously-skip-permissions',
-      adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+      adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
     })
     expect(calls.prune.length === 0, 'prune must not fire before exit')
     // Natural exit through the REAL production path: emit output first (so the
@@ -253,7 +253,7 @@ await test('bindSessionToTask fires ONLY on pre-warmed pooled adoption (and skip
       initialPrompt: 'HI',
       adoptPty: {
         warmId: 'warm-1',
-        runnerId: 'runner-1',
+        computerId: 'computer-1',
         preWarmedAgent: true,
         sessionId: 'poolX',
         conversationId: 'convPool'
@@ -290,7 +290,7 @@ await test('null ledger (pre-init): spawn still succeeds, nothing recorded', asy
     conversationId: 'conv-L4',
     initialCommand: 'claude --session-id {id} {flags}',
     defaultFlags: '--x',
-    adoptPty: { warmId: 'warm-1', runnerId: 'runner-1' }
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   expect(res.success === true, `createPty must succeed without a ledger: ${res.error}`)
   // The mcp-env fallback still exports the task identity without a db.

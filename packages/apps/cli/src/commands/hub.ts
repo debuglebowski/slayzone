@@ -447,7 +447,7 @@ async function hubSignIn(baseUrl: string, email: string, password: string): Prom
 /**
  * Call `/api/hub/users` and return the parsed `data`, or exit with the hub's own
  * error text. Resolution + error surfacing live in `../hub-request` — shared with
- * `slay runner mint`, which needs the identical "which hub, what credential"
+ * `slay computer mint`, which needs the identical "which hub, what credential"
  * answer (see that module's note).
  *
  * `discoverAllHubs` is passed in so the sweep also sees the desktop app's
@@ -527,7 +527,7 @@ function hubUsersCommand(): Command {
     .description('Remove an account and revoke its sessions')
     .action(async (email: string) => {
       // No confirmation prompt: the operator typed an exact email, the hub refuses
-      // the two dangerous cases itself (last remaining account, runner service
+      // the two dangerous cases itself (last remaining account, computer service
       // identity), and an account is re-creatable with `add`.
       const removed = await hubUsersRequest<{ email: string }>('DELETE', {
         email
@@ -589,7 +589,7 @@ export function hubCommand(): Command {
         const mine = ownRoot && resolvePath(h.root) === ownRoot ? '  ← this shell' : ''
         console.log(
           `${h.name.padEnd(nameW)}  ${String(h.port).padEnd(5)}  ${String(h.pid).padEnd(7)}  ` +
-            `${root.padEnd(rootW)}  ${String(h.runnersConnected).padEnd(7)}  ` +
+            `${root.padEnd(rootW)}  ${String(h.computersConnected).padEnd(7)}  ` +
             `${formatUptime(h.uptimeMs)}${mine}`
         )
       }
@@ -625,9 +625,9 @@ export function hubCommand(): Command {
         // --- remote-hub setup ---------------------------------------------------
         //
         // WHY THIS EXISTS. Without a public address a hub boots in LOCAL mode, and
-        // `deriveRunnerHubUrl` then embeds `ws://127.0.0.1:<port>/computers` in every
+        // `deriveComputerHubUrl` then embeds `ws://127.0.0.1:<port>/computers` in every
         // join token it mints. Minting still succeeds — so the failure is silent: a
-        // runner on another machine dials its OWN loopback and never connects.
+        // computer on another machine dials its OWN loopback and never connects.
         // `--public-address` is what turns that into a usable deployment.
         //
         // Both values are bare AUTHORITIES (`host[:port]`, no scheme): the scheme
@@ -714,7 +714,7 @@ export function hubCommand(): Command {
           console.log('Mode:   remote (client auth + TLS enforced)')
           console.log(`Bind:   ${address ?? '(hub block default)'}`)
           console.log(`Public: ${publicAddress}`)
-          console.log(`Join tokens will point runners at wss://${publicAddress}/computers.`)
+          console.log(`Join tokens will point computers at wss://${publicAddress}/computers.`)
           // Printed BEFORE the boot wait, not after: remote mode enforces auth AND
           // closes public signup, so a hub with no account is permanently
           // unauthenticatable — and a first boot that fails (a missing cert chain, a
@@ -742,13 +742,13 @@ export function hubCommand(): Command {
         if (publicAddress === undefined) {
           // Loopback is the RIGHT default (a personal hub, dev, the desktop app), so
           // this informs rather than warns. Silence, though, is how an operator mints a
-          // token on a VPS, pastes it into a runner elsewhere, and gets no explanation
+          // token on a VPS, pastes it into a computer elsewhere, and gets no explanation
           // for why it never connects. Safe to print after the wait: a hub that failed
           // to boot has already exited non-zero with its own log excerpt.
           console.log('')
           console.log(
             `This hub is local-only: it binds loopback, so join tokens it mints point at\n` +
-              `127.0.0.1 and only a runner on THIS machine can use them. For a hub other\n` +
+              `127.0.0.1 and only a computer on THIS machine can use them. For a hub other\n` +
               `machines dial, recreate it with \`--public-address <host:port>\`.`
           )
         }
@@ -764,7 +764,7 @@ export function hubCommand(): Command {
       // ALREADY RUNNING is checked FIRST, before any registration lookup: a hub
       // that is up plainly exists, whatever started it, so "no hub named …" would
       // be a lie. Reporting it and stopping is deliberately NOT a restart —
-      // bouncing a live hub drops its connected runners and pty sessions, which is
+      // bouncing a live hub drops its connected computers and pty sessions, which is
       // not what someone typing `start` on a running hub wants. Use `restart`.
       const live = await findAnyHub(name)
       if (live) {
@@ -973,7 +973,7 @@ export function hubCommand(): Command {
   // slay hub login <url>
   //
   // `use --token` can only STORE a bearer somebody already had. On a hub that
-  // enforces auth, every off-box command (`runner mint`, the whole REST surface)
+  // enforces auth, every off-box command (`computer mint`, the whole REST surface)
   // needs one — so without this the only way to get a token was to read it out of
   // the desktop app's encrypted store by hand. This exchanges an account for one,
   // then stores it exactly as `use` does (0600 cli-hub-target.json).

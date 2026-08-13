@@ -1,7 +1,7 @@
 /**
- * fs.* end-to-end contract: hub routed adapters ⇄ REAL runner handlers.
+ * fs.* end-to-end contract: hub routed adapters ⇄ REAL computer handlers.
  *
- * `handlers/fs.test.ts` exercises the runner side alone and `exec-proxies.test.ts`
+ * `handlers/fs.test.ts` exercises the computer side alone and `exec-proxies.test.ts`
  * drives a fake gateway; neither can catch the two sides DISAGREEING about a wire
  * shape. That disagreement is not hypothetical here — it shipped four times in
  * the git.* and proc.* frames (`{sessionId}` vs `{id}`, `isRepo` vs `isGitRepo`,
@@ -11,10 +11,10 @@
  * picker depends on, so it gets the same treatment: both real implementations,
  * wired to each other through the shared schemas, over real files in a tmpdir.
  *
- * The runner handler lives in `@slayzone/computer` (an app, not a dep of this
+ * The computer handler lives in `@slayzone/computer` (an app, not a dep of this
  * package), so it is loaded by path and the suite skips if unresolvable.
  *
- * @module runner/server/fs-roundtrip.test
+ * @module computer/server/fs-roundtrip.test
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -23,11 +23,11 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import { TypedEventEmitter } from '../shared/events'
-import { RunnerNotificationMethods } from '../shared/frames'
+import { ComputerNotificationMethods } from '../shared/frames'
 import { createRemoteFsAdapters, type RoutingGateway } from './exec-proxies'
-import type { RunnerGatewayEvents } from './hub-gateway'
+import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'runner-1'
+const RUNNER_ID = 'computer-1'
 
 type FsHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
@@ -35,23 +35,23 @@ type FsHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unk
 const refuseLocal = new Proxy({} as LocalWorkspaceFs, {
   get(_t, prop: string) {
     return () => {
-      throw new Error(`must not fall back to local: a runnerId was resolved (called ${prop})`)
+      throw new Error(`must not fall back to local: a computerId was resolved (called ${prop})`)
     }
   }
 })
 
 function bridge(
   handlers: FsHandlerTable,
-  events: TypedEventEmitter<RunnerGatewayEvents>
+  events: TypedEventEmitter<ComputerGatewayEvents>
 ): RoutingGateway {
   return {
-    request: async (_runnerId: string, method: string, params?: unknown) => {
+    request: async (_computerId: string, method: string, params?: unknown) => {
       const handler = handlers[method]
-      if (!handler) throw new Error(`runner has no handler for ${method}`)
+      if (!handler) throw new Error(`computer has no handler for ${method}`)
       return await handler(params)
     },
     events,
-    listRunners: () => []
+    listComputers: () => []
   }
 }
 
@@ -64,25 +64,25 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-interface LoadedRunner {
+interface LoadedComputer {
   handlers: FsHandlerTable
-  events: TypedEventEmitter<RunnerGatewayEvents>
+  events: TypedEventEmitter<ComputerGatewayEvents>
 }
 
-async function loadRunnerFsHandlers(roots: string[]): Promise<LoadedRunner | null> {
+async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer | null> {
   let mod: { createFsHandlers: (ctx: unknown) => FsHandlerTable }
   try {
-    mod = await import('../../../../apps/runner/src/handlers/fs')
+    mod = await import('../../../../apps/computer/src/handlers/fs')
   } catch {
     return null
   }
-  const events = new TypedEventEmitter<RunnerGatewayEvents>()
+  const events = new TypedEventEmitter<ComputerGatewayEvents>()
   const handlers = mod.createFsHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
-        if (method === RunnerNotificationMethods.fsChange) {
+        if (method === ComputerNotificationMethods.fsChange) {
           events.emit('fs.change', {
-            runnerId: RUNNER_ID,
+            computerId: RUNNER_ID,
             ...((params ?? {}) as Record<string, never>)
           })
         }
@@ -101,17 +101,17 @@ async function loadRunnerFsHandlers(roots: string[]): Promise<LoadedRunner | nul
 }
 
 async function adaptersFor(roots: string[]) {
-  const runner = await loadRunnerFsHandlers(roots)
-  if (!runner) return null
+  const computer = await loadComputerFsHandlers(roots)
+  if (!computer) return null
   return createRemoteFsAdapters({
-    gateway: bridge(runner.handlers, runner.events),
+    gateway: bridge(computer.handlers, computer.events),
     local: refuseLocal,
     newWatchId: () => 'watch-1'
   })
 }
 
-describe('fs.* hub⇄runner round trip — browse', () => {
-  it('reports the runner jail as the browsable roots', async () => {
+describe('fs.* hub⇄computer round trip — browse', () => {
+  it('reports the computer jail as the browsable roots', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
     const res = await fs.listRoots(RUNNER_ID)
@@ -136,7 +136,7 @@ describe('fs.* hub⇄runner round trip — browse', () => {
     expect(below.parent).toBe(dir)
   })
 
-  it('creates a directory on the runner and confirms it exists there', async () => {
+  it('creates a directory on the computer and confirms it exists there', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
     const target = join(dir, 'made', 'deep')
@@ -145,7 +145,7 @@ describe('fs.* hub⇄runner round trip — browse', () => {
     expect(await fs.pathExists(RUNNER_ID, target)).toBe(true)
   })
 
-  // The jail is the runner's, and it must survive the round trip as a REJECTION
+  // The jail is the computer's, and it must survive the round trip as a REJECTION
   // rather than an empty listing — an empty tree reads as "nothing here", which
   // is a different (and wrong) thing to tell the user than "not permitted".
   it('propagates a jail violation as an error, not an empty result', async () => {
@@ -157,7 +157,7 @@ describe('fs.* hub⇄runner round trip — browse', () => {
   })
 })
 
-describe('fs.* hub⇄runner round trip — editor', () => {
+describe('fs.* hub⇄computer round trip — editor', () => {
   beforeEach(() => {
     mkdirSync(join(dir, 'src'), { recursive: true })
     writeFileSync(join(dir, 'src', 'index.ts'), 'export const a = 1\n')
@@ -196,8 +196,8 @@ describe('fs.* hub⇄runner round trip — editor', () => {
   })
 })
 
-describe('fs.* hub⇄runner round trip — watch', () => {
-  it('delivers a real file change from the runner watcher to the hub listener', async () => {
+describe('fs.* hub⇄computer round trip — watch', () => {
+  it('delivers a real file change from the computer watcher to the hub listener', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
 

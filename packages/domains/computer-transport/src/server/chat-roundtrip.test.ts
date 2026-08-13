@@ -1,17 +1,17 @@
 /**
- * Routed CHAT agent contract: hub `ChatBackend` ⇄ REAL runner proc handler.
+ * Routed CHAT agent contract: hub `ChatBackend` ⇄ REAL computer proc handler.
  *
- * The point of the whole hub/runner chat work is that an agent's PROCESS runs on
- * the runner while all protocol state stays on the hub. This drives that: a fake
+ * The point of the whole hub/computer chat work is that an agent's PROCESS runs on
+ * the computer while all protocol state stays on the hub. This drives that: a fake
  * "agent" (a shell loop reading stdin and answering NDJSON on stdout) is spawned
- * through `createRoutingChatBackend` against the real runner handler, and the
+ * through `createRoutingChatBackend` against the real computer handler, and the
  * test asserts the hub can hold a full request/response exchange with it.
  *
  * That exchange is what a real provider driver does — write a line, read a line —
  * so if this passes, the transport's driver has a working duplex channel to a
  * process on another machine.
  *
- * @module runner/server/chat-roundtrip.test
+ * @module computer/server/chat-roundtrip.test
  */
 
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -19,15 +19,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { RunnerNotificationMethods } from '../shared/frames'
+import { ComputerNotificationMethods } from '../shared/frames'
 import {
   createRoutingChatBackend,
-  NoRunnerAvailableError,
+  NoComputerAvailableError,
   type RoutingGateway
 } from './exec-proxies'
-import type { RunnerGatewayEvents } from './hub-gateway'
+import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'runner-1'
+const RUNNER_ID = 'computer-1'
 
 type ProcHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
@@ -43,7 +43,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-async function loadRunner(): Promise<{
+async function loadComputer(): Promise<{
   gateway: RoutingGateway
   disposeAll: () => void
 } | null> {
@@ -51,19 +51,19 @@ async function loadRunner(): Promise<{
     createProcHandlers: (ctx: unknown) => { handlers: ProcHandlerTable; disposeAll: () => void }
   }
   try {
-    mod = await import('../../../../apps/runner/src/handlers/proc')
+    mod = await import('../../../../apps/computer/src/handlers/proc')
   } catch {
     return null
   }
-  const events = new TypedEventEmitter<RunnerGatewayEvents>()
+  const events = new TypedEventEmitter<ComputerGatewayEvents>()
   const created = mod.createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         const p = (params ?? {}) as Record<string, unknown>
-        if (method === RunnerNotificationMethods.procData) {
-          events.emit('proc.data', { runnerId: RUNNER_ID, ...p } as never)
-        } else if (method === RunnerNotificationMethods.procExit) {
-          events.emit('proc.exit', { runnerId: RUNNER_ID, ...p } as never)
+        if (method === ComputerNotificationMethods.procData) {
+          events.emit('proc.data', { computerId: RUNNER_ID, ...p } as never)
+        } else if (method === ComputerNotificationMethods.procExit) {
+          events.emit('proc.exit', { computerId: RUNNER_ID, ...p } as never)
         }
         return true
       }
@@ -78,29 +78,29 @@ async function loadRunner(): Promise<{
   })
   return {
     gateway: {
-      request: async (_runnerId: string, method: string, params?: unknown) => {
+      request: async (_computerId: string, method: string, params?: unknown) => {
         const handler = created.handlers[method]
-        if (!handler) throw new Error(`runner has no handler for ${method}`)
+        if (!handler) throw new Error(`computer has no handler for ${method}`)
         return await handler(params)
       },
       events,
       // Never disconnects here, so the detach controller's epoch baseline is
       // never consulted — an empty roster is the honest answer.
-      listRunners: () => []
+      listComputers: () => []
     },
     disposeAll: created.disposeAll
   }
 }
 
 describe('routed chat agent', () => {
-  it('holds an NDJSON request/response exchange with a process on the runner', async () => {
-    const runner = await loadRunner()
-    if (!runner) return
-    cleanup.push(() => runner.disposeAll())
+  it('holds an NDJSON request/response exchange with a process on the computer', async () => {
+    const computer = await loadComputer()
+    if (!computer) return
+    cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingChatBackend({
-      gateway: runner.gateway,
-      resolveRunnerId: (spec) => spec.runnerId
+      gateway: computer.gateway,
+      resolveComputerId: (spec) => spec.computerId
     })
 
     // Stand-in agent: read a line, echo back a JSON envelope naming it. Written to
@@ -121,7 +121,7 @@ describe('routed chat agent', () => {
     const handle = await backend.spawn({
       sessionId: 'task-1:tab-1',
       taskId: 'task-1',
-      runnerId: RUNNER_ID,
+      computerId: RUNNER_ID,
       binaryName: 'sh',
       args: [agentPath],
       cwd: dir,
@@ -129,7 +129,7 @@ describe('routed chat agent', () => {
     })
 
     // Assemble lines exactly as the transport does, to prove the hub — not the
-    // runner — can frame this stream.
+    // computer — can frame this stream.
     const lines: string[] = []
     let buf = ''
     handle.onStdout((chunk) => {
@@ -167,29 +167,29 @@ describe('routed chat agent', () => {
     await exited
   })
 
-  it('throws NoRunnerAvailableError when no runner resolves (no hub-local spawn)', async () => {
-    const runner = await loadRunner()
-    if (!runner) return
-    cleanup.push(() => runner.disposeAll())
+  it('throws NoComputerAvailableError when no computer resolves (no hub-local spawn)', async () => {
+    const computer = await loadComputer()
+    if (!computer) return
+    cleanup.push(() => computer.disposeAll())
 
     const backend = createRoutingChatBackend({
-      gateway: runner.gateway,
-      resolveRunnerId: (spec) => spec.runnerId
+      gateway: computer.gateway,
+      resolveComputerId: (spec) => spec.computerId
     })
 
     // Chat used to be the ONE agent kind that always ran in the hub's own process.
-    // An unresolved runner is now a visible error, which is what keeps a chat agent
+    // An unresolved computer is now a visible error, which is what keeps a chat agent
     // and its worktree on the same machine.
     await expect(
       backend.spawn({
         sessionId: 'task-2:tab-1',
         taskId: 'task-2',
-        runnerId: null,
+        computerId: null,
         binaryName: 'sh',
         args: ['-c', 'true'],
         cwd: dir,
         env: {}
       })
-    ).rejects.toThrow(NoRunnerAvailableError)
+    ).rejects.toThrow(NoComputerAvailableError)
   })
 })

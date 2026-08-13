@@ -4,15 +4,15 @@
  * ONE CONCEPT, TWO ROLES. `SLAYZONE_HUB_ADDRESS` means "the hub's address" —
  * `host[:port]`, no scheme, no path. Its VALUE differs by which app holds it:
  *   - the hub        BINDS it       → {@link parseHubAddress} (host + port)
- *   - runner / `slay` CONNECT to it → {@link hubUrlFromAddr} (full URL)
+ *   - computer / `slay` CONNECT to it → {@link hubUrlFromAddr} (full URL)
  * Different processes holding different values under one name is intended, not a
  * collision: `sanitizeSpawnEnv` strips the var at every terminal-spawn boundary,
  * so a value can never bleed from one role into the other.
  *
  * WHY NO SCHEME IN THE ENV CHANNEL: the two dial-side consumers need different
- * schemes (the runner `ws(s)://…/computers`, the CLI `http(s)://…`), so a stored
+ * schemes (the computer `ws(s)://…/computers`, the CLI `http(s)://…`), so a stored
  * scheme meant one of them was always reading the wrong shape — the retired
- * `SLAYZONE_HUB_URL` bug (a runner-hosted `slay` inheriting a `ws://` url and
+ * `SLAYZONE_HUB_URL` bug (a computer-hosted `slay` inheriting a `ws://` url and
  * hard-exiting). Both now DERIVE the scheme from the single `SLAYZONE_MODE`
  * lever, which makes the mismatch unrepresentable rather than merely unlikely.
  *
@@ -21,7 +21,7 @@
  * the same outright. Dial side → the scheme's default port stays implicit (the
  * normal published-DNS / reverse-proxy shape for a remote hub).
  *
- * Lean leaf (only ./slayzone-mode + node builtins) so the runner bundle can
+ * Lean leaf (only ./slayzone-mode + node builtins) so the computer bundle can
  * import it via `@slayzone/platform/hub-addr` WITHOUT the platform barrel.
  *
  * @module platform/hub-addr
@@ -49,12 +49,12 @@ export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localh
  *              `SLAYZONE_HUB_ADDRESS`. Used verbatim; a host-only value keeps the
  *              scheme's default port implicit (the normal published-DNS / reverse
  *              proxy shape for a remote hub).
- * @param kind  `'ws'` for the runner transport (ws/wss) or `'http'` for the CLI
+ * @param kind  `'ws'` for the computer transport (ws/wss) or `'http'` for the CLI
  *              REST base (http/https).
  * @param path  optional path to append (e.g. `'/computers'`). Empty by default.
  * @param mode  the deployment mode. Defaults to `getSlayzoneMode()` (reads
  *              `process.env`); pass an explicit mode to stay hermetic under a
- *              test that supplies its own env (e.g. `loadRunnerConfig(customEnv)`).
+ *              test that supplies its own env (e.g. `loadComputerConfig(customEnv)`).
  * @returns     `<scheme>://<addr><path>`, where scheme is secure (`wss`/`https`)
  *              in `remote` mode and plaintext (`ws`/`http`) otherwise.
  */
@@ -102,27 +102,27 @@ export function isBareAuthority(addr: string): boolean {
 
 /**
  * True when a `ws(s)://…/computers` URL names THIS machine — so a join token
- * carrying it is only usable by a runner on the SAME box.
+ * carrying it is only usable by a computer on the SAME box.
  *
- * WHY THIS EXISTS: a hub in local mode derives its runner URL as
+ * WHY THIS EXISTS: a hub in local mode derives its computer URL as
  * `ws://<loopback>:<hubPort>/computers` unconditionally (see the hub's
- * `deriveRunnerHubUrl`). That is right for the co-located runner the desktop app
- * auto-enrolls, and useless for any other machine — an off-box runner handed such
+ * `deriveComputerHubUrl`). That is right for the co-located computer the desktop app
+ * auto-enrolls, and useless for any other machine — an off-box computer handed such
  * a token dials its own loopback and silently never connects. Minting cannot
  * refuse (the loopback case is legitimate and common), so the surfaces that hand a
- * token to a human — the UI's mint dialog, `slay runner mint`, `slay runner
+ * token to a human — the UI's mint dialog, `slay computer mint`, `slay computer
  * create` — use this to SAY so.
  *
  * Reuses {@link LOOPBACK_HOSTS}, the single source of truth for "names this
  * machine", so this predicate can never drift from the bind-side checks.
  *
  * A wildcard bind (`0.0.0.0` / `::`) is deliberately NOT loopback: such a token is
- * broken for every runner including a local one, so reporting it as a
+ * broken for every computer including a local one, so reporting it as a
  * same-machine URL would send the operator to the wrong fix.
  *
  * Returns false for anything unparseable — never claim loopback without knowing.
  */
-export function isLoopbackRunnerUrl(url: string): boolean {
+export function isLoopbackComputerUrl(url: string): boolean {
   let host: string
   try {
     // `hostname` never carries the port, but DOES keep IPv6 brackets — strip them

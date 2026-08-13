@@ -11,7 +11,7 @@ import type { AppRouter } from '../server/router'
  * promise, and that promise only settles when the hub answers. A hub that is
  * simply GONE therefore produces neither a result nor an error — every caller
  * sits on `isPending` for as long as the app runs. That is what a remote hub
- * card's runner list showed: skeleton rows with no end, on a hub the header had
+ * card's computer list showed: skeleton rows with no end, on a hub the header had
  * already reported unreachable. (Requests that were already IN FLIGHT when a
  * socket dies do get errored by @trpc/client — this link closes the gap for the
  * ones queued while it is down, so both cases now end the same way.)

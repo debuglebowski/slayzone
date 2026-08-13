@@ -44,8 +44,8 @@ export function isLoopbackAddress(addr: string | undefined): boolean {
   )
 }
 
-/** The internal identity that owns runner API keys — never operator-creatable. */
-const RUNNER_SERVICE_USER_EMAIL = 'runners@slayzone.internal'
+/** The internal identity that owns computer API keys — never operator-creatable. */
+const RUNNER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
 
 /** Cheap shape check. Real validation is the hub operator's judgement; this only
  *  rejects input that could not possibly be an address. */
@@ -83,7 +83,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
       // to look rather than implying the caller should just retry.
       res.status(503).json({
         ok: false,
-        error: 'hub-auth unavailable — check the hub log for `runner.init_failed`'
+        error: 'hub-auth unavailable — check the hub log for `computer.init_failed`'
       })
       return null
     }
@@ -103,7 +103,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     if (email.toLowerCase() === RUNNER_SERVICE_USER_EMAIL) {
       res.status(400).json({
         ok: false,
-        error: `${RUNNER_SERVICE_USER_EMAIL} is reserved for the internal runner service identity`
+        error: `${RUNNER_SERVICE_USER_EMAIL} is reserved for the internal computer service identity`
       })
       return
     }
@@ -124,7 +124,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     }
   })
 
-  // List accounts. Excludes the runner service identity (see users.ts).
+  // List accounts. Excludes the computer service identity (see users.ts).
   app.get('/api/hub/users', async (req, res) => {
     const users = gate(req, res)
     if (!users) return
@@ -162,8 +162,8 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
           res.status(409).json({
             ok: false,
             error:
-              `${RUNNER_SERVICE_USER_EMAIL} is the internal runner service identity — ` +
-              `removing it would lock out every enrolled runner`
+              `${RUNNER_SERVICE_USER_EMAIL} is the internal computer service identity — ` +
+              `removing it would lock out every enrolled computer`
           })
           return
         case 'last-user':

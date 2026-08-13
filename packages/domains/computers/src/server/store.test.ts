@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RunnerRecord } from '../shared/types'
+import type { ComputerRecord } from '../shared/types'
 import {
-  deterministicLocalRunnerId,
-  getRunner,
-  listRunners,
-  registerOrReplaceRunner,
-  registerRunner,
-  resolveTaskRunnerId,
-  resolveTaskRunnerIdOrDefault,
-  retireStaleLocalRunners,
-  revokeRunner,
-  setProjectDefaultRunner,
-  setTaskRunner,
-  touchRunnerLastSeen
+  deterministicLocalComputerId,
+  getComputer,
+  listComputers,
+  registerOrReplaceComputer,
+  registerComputer,
+  resolveTaskComputerId,
+  resolveTaskComputerIdOrDefault,
+  retireStaleLocalComputers,
+  revokeComputer,
+  setProjectDefaultComputer,
+  setTaskComputer,
+  touchComputerLastSeen
 } from './store'
 import { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
 import { createMigratedDb, seedProjectAndTask, type TestDb } from './test-db'
@@ -27,8 +27,8 @@ afterEach(() => {
   t.close()
 })
 
-function mkRunner(over: { name?: string; now?: number } = {}) {
-  return registerRunner(t.db, {
+function mkComputer(over: { name?: string; now?: number } = {}) {
+  return registerComputer(t.db, {
     name: over.name ?? 'mac-studio',
     platform: 'darwin-arm64',
     version: '0.35.0',
@@ -37,10 +37,10 @@ function mkRunner(over: { name?: string; now?: number } = {}) {
   })
 }
 
-describe('runner CRUD', () => {
-  it('registerRunner persists and getRunner round-trips', async () => {
-    const r = await mkRunner()
-    const row = await getRunner(t.db, r.id)
+describe('computer CRUD', () => {
+  it('registerComputer persists and getComputer round-trips', async () => {
+    const r = await mkComputer()
+    const row = await getComputer(t.db, r.id)
     expect(row).not.toBeNull()
     expect(row!.name).toBe('mac-studio')
     expect(row!.platform).toBe('darwin-arm64')
@@ -52,53 +52,53 @@ describe('runner CRUD', () => {
     expect(row!.revoked_at).toBeNull()
   })
 
-  it('getRunner returns null for unknown id', async () => {
-    expect(await getRunner(t.db, 'nope')).toBeNull()
+  it('getComputer returns null for unknown id', async () => {
+    expect(await getComputer(t.db, 'nope')).toBeNull()
   })
 
-  it('listRunners excludes revoked by default, includes with flag', async () => {
-    const a = await mkRunner({ name: 'a', now: 1 })
-    const b = await mkRunner({ name: 'b', now: 2 })
-    await revokeRunner(t.db, a.id, 50)
+  it('listComputers excludes revoked by default, includes with flag', async () => {
+    const a = await mkComputer({ name: 'a', now: 1 })
+    const b = await mkComputer({ name: 'b', now: 2 })
+    await revokeComputer(t.db, a.id, 50)
 
-    const active = await listRunners(t.db)
-    expect(active.map((r: RunnerRecord) => r.id)).toEqual([b.id])
+    const active = await listComputers(t.db)
+    expect(active.map((r: ComputerRecord) => r.id)).toEqual([b.id])
 
-    const all = await listRunners(t.db, { includeRevoked: true })
-    expect(all.map((r: RunnerRecord) => r.id)).toEqual([a.id, b.id])
+    const all = await listComputers(t.db, { includeRevoked: true })
+    expect(all.map((r: ComputerRecord) => r.id)).toEqual([a.id, b.id])
   })
 
-  it('touchRunnerLastSeen advances but never rewinds', async () => {
-    const r = await mkRunner({ now: 1000 })
-    await touchRunnerLastSeen(t.db, r.id, 2000)
-    expect((await getRunner(t.db, r.id))!.last_seen_at).toBe(2000)
-    await touchRunnerLastSeen(t.db, r.id, 1500)
-    expect((await getRunner(t.db, r.id))!.last_seen_at).toBe(2000)
+  it('touchComputerLastSeen advances but never rewinds', async () => {
+    const r = await mkComputer({ now: 1000 })
+    await touchComputerLastSeen(t.db, r.id, 2000)
+    expect((await getComputer(t.db, r.id))!.last_seen_at).toBe(2000)
+    await touchComputerLastSeen(t.db, r.id, 1500)
+    expect((await getComputer(t.db, r.id))!.last_seen_at).toBe(2000)
   })
 
-  it('revokeRunner is idempotent — first revocation time wins', async () => {
-    const r = await mkRunner()
-    await revokeRunner(t.db, r.id, 5000)
-    await revokeRunner(t.db, r.id, 9000)
-    expect((await getRunner(t.db, r.id))!.revoked_at).toBe(5000)
+  it('revokeComputer is idempotent — first revocation time wins', async () => {
+    const r = await mkComputer()
+    await revokeComputer(t.db, r.id, 5000)
+    await revokeComputer(t.db, r.id, 9000)
+    expect((await getComputer(t.db, r.id))!.revoked_at).toBe(5000)
   })
 })
 
-describe('local-runner dedup (Wave3.5-D5)', () => {
-  it('deterministicLocalRunnerId is stable for a name and uuid-shaped', () => {
-    const a = deterministicLocalRunnerId('local-runner')
-    const b = deterministicLocalRunnerId('local-runner')
+describe('local-computer dedup (Wave3.5-D5)', () => {
+  it('deterministicLocalComputerId is stable for a name and uuid-shaped', () => {
+    const a = deterministicLocalComputerId('local-computer')
+    const b = deterministicLocalComputerId('local-computer')
     expect(a).toBe(b) // same name ⇒ same id (idempotent enroll key)
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     // A different name ⇒ a different id (no accidental collision).
-    expect(deterministicLocalRunnerId('other-runner')).not.toBe(a)
+    expect(deterministicLocalComputerId('other-computer')).not.toBe(a)
   })
 
-  it('registerOrReplaceRunner UPSERTs onto one row (no orphan per enroll)', async () => {
-    const id = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+  it('registerOrReplaceComputer UPSERTs onto one row (no orphan per enroll)', async () => {
+    const id = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'darwin-arm64',
       version: '0.35.0',
       capabilities: { modes: ['claude-code'] },
@@ -107,9 +107,9 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
     })
     // Second enroll (a relaunch) with the SAME deterministic id: refresh identity
     // + auth, preserve created_at, stay a single row.
-    await registerOrReplaceRunner(t.db, {
+    await registerOrReplaceComputer(t.db, {
       id,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'darwin-arm64',
       version: '0.36.0',
       capabilities: { modes: ['codex'] },
@@ -117,7 +117,7 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
       now: 2000
     })
 
-    const rows = await listRunners(t.db)
+    const rows = await listComputers(t.db)
     expect(rows).toHaveLength(1)
     expect(rows[0].id).toBe(id)
     expect(rows[0].version).toBe('0.36.0') // refreshed
@@ -126,132 +126,132 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
     expect(rows[0].last_seen_at).toBe(2000) // heartbeat advanced
   })
 
-  it('registerOrReplaceRunner un-revokes on re-enroll (operator asked it back)', async () => {
-    const id = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+  it('registerOrReplaceComputer un-revokes on re-enroll (operator asked it back)', async () => {
+    const id = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 1000
     })
-    await revokeRunner(t.db, id, 1500)
-    expect((await getRunner(t.db, id))!.revoked_at).toBe(1500)
-    await registerOrReplaceRunner(t.db, {
+    await revokeComputer(t.db, id, 1500)
+    expect((await getComputer(t.db, id))!.revoked_at).toBe(1500)
+    await registerOrReplaceComputer(t.db, {
       id,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 2000
     })
-    expect((await getRunner(t.db, id))!.revoked_at).toBeNull()
+    expect((await getComputer(t.db, id))!.revoked_at).toBeNull()
   })
 
-  it('retireStaleLocalRunners collapses historical duplicate local rows to one', async () => {
-    // Simulate the pre-fix state: three random-id rows all named 'local-runner'
-    // (one accumulated per relaunch) plus a legitimate REMOTE runner.
-    const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+  it('retireStaleLocalComputers collapses historical duplicate local rows to one', async () => {
+    // Simulate the pre-fix state: three random-id rows all named 'local-computer'
+    // (one accumulated per relaunch) plus a legitimate REMOTE computer.
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id: keep,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 3
     })
-    await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 1 })
-    await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 2 })
-    const remote = await registerRunner(t.db, {
+    await registerComputer(t.db, { name: 'local-computer', platform: 'p', version: 'v', now: 1 })
+    await registerComputer(t.db, { name: 'local-computer', platform: 'p', version: 'v', now: 2 })
+    const remote = await registerComputer(t.db, {
       name: 'mac-studio-remote',
       platform: 'p',
       version: 'v',
       now: 4
     })
 
-    const removed = await retireStaleLocalRunners(t.db, {
-      name: 'local-runner',
-      keepRunnerId: keep
+    const removed = await retireStaleLocalComputers(t.db, {
+      name: 'local-computer',
+      keepComputerId: keep
     })
     expect(removed).toBe(2) // the two orphaned random-id local rows
 
-    const rows = await listRunners(t.db)
-    const localRows = rows.filter((r) => r.name === 'local-runner')
+    const rows = await listComputers(t.db)
+    const localRows = rows.filter((r) => r.name === 'local-computer')
     expect(localRows).toHaveLength(1)
     expect(localRows[0].id).toBe(keep)
-    // The remote runner is UNTOUCHED — dedup is scoped to the local name only.
+    // The remote computer is UNTOUCHED — dedup is scoped to the local name only.
     expect(rows.find((r) => r.id === remote.id)).toBeTruthy()
   })
 
-  it('retireStaleLocalRunners NEVER touches a disconnected remote runner (identity-only)', async () => {
-    const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+  it('retireStaleLocalComputers NEVER touches a disconnected remote computer (identity-only)', async () => {
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id: keep,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 1
     })
-    // A remote runner (different name) — represents a sleeping laptop, no live
+    // A remote computer (different name) — represents a sleeping laptop, no live
     // connection. It must survive: dedup matches by name, never by status.
-    const sleeping = await registerRunner(t.db, {
+    const sleeping = await registerComputer(t.db, {
       name: 'colleague-laptop',
       platform: 'p',
       version: 'v',
       now: 2
     })
 
-    const removed = await retireStaleLocalRunners(t.db, {
-      name: 'local-runner',
-      keepRunnerId: keep
+    const removed = await retireStaleLocalComputers(t.db, {
+      name: 'local-computer',
+      keepComputerId: keep
     })
     expect(removed).toBe(0) // nothing else shares the local name
-    expect(await getRunner(t.db, sleeping.id)).not.toBeNull()
+    expect(await getComputer(t.db, sleeping.id)).not.toBeNull()
   })
 
-  it('retireStaleLocalRunners is idempotent — a second call is a no-op', async () => {
-    const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+  it('retireStaleLocalComputers is idempotent — a second call is a no-op', async () => {
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id: keep,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 1
     })
-    await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 2 })
-    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(
+    await registerComputer(t.db, { name: 'local-computer', platform: 'p', version: 'v', now: 2 })
+    expect(await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })).toBe(
       1
     )
-    expect(await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })).toBe(
+    expect(await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })).toBe(
       0
     )
-    expect(await listRunners(t.db)).toHaveLength(1)
+    expect(await listComputers(t.db)).toHaveLength(1)
   })
 
   it('RE-POINTS task + project bindings off the collapsed local ids', async () => {
     // A task + project bound to an OLD (orphan) local id must follow the collapse
-    // to the survivor — otherwise resolveTaskRunnerId returns a dead id and the
-    // routing backend forwards the spawn to a nonexistent runner with no fallback.
+    // to the survivor — otherwise resolveTaskComputerId returns a dead id and the
+    // routing backend forwards the spawn to a nonexistent computer with no fallback.
     seedProjectAndTask(t.raw, 'proj-b', 'task-b')
-    const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id: keep,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 3
     })
-    const orphan = await registerRunner(t.db, {
-      name: 'local-runner',
+    const orphan = await registerComputer(t.db, {
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 1
     })
-    await setTaskRunner(t.db, 'task-b', orphan.id)
-    await setProjectDefaultRunner(t.db, 'proj-b', orphan.id)
+    await setTaskComputer(t.db, 'task-b', orphan.id)
+    await setProjectDefaultComputer(t.db, 'proj-b', orphan.id)
 
-    await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })
+    await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
 
-    // Bindings now resolve to the SURVIVING local runner, not a dead id.
-    expect(await resolveTaskRunnerId(t.db, 'task-b')).toBe(keep)
+    // Bindings now resolve to the SURVIVING local computer, not a dead id.
+    expect(await resolveTaskComputerId(t.db, 'task-b')).toBe(keep)
     const proj = await t.db.get<{ default_computer_id: string | null }>(
       `SELECT default_computer_id FROM projects WHERE id = ?`,
       ['proj-b']
@@ -259,32 +259,32 @@ describe('local-runner dedup (Wave3.5-D5)', () => {
     expect(proj!.default_computer_id).toBe(keep)
   })
 
-  it('leaves bindings to UNRELATED (remote) runners untouched during a local collapse', async () => {
+  it('leaves bindings to UNRELATED (remote) computers untouched during a local collapse', async () => {
     seedProjectAndTask(t.raw, 'proj-c', 'task-c')
-    const keep = deterministicLocalRunnerId('local-runner')
-    await registerOrReplaceRunner(t.db, {
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
       id: keep,
-      name: 'local-runner',
+      name: 'local-computer',
       platform: 'p',
       version: 'v',
       now: 2
     })
-    await registerRunner(t.db, { name: 'local-runner', platform: 'p', version: 'v', now: 1 })
-    const remote = await registerRunner(t.db, {
+    await registerComputer(t.db, { name: 'local-computer', platform: 'p', version: 'v', now: 1 })
+    const remote = await registerComputer(t.db, {
       name: 'remote-x',
       platform: 'p',
       version: 'v',
       now: 3
     })
-    await setTaskRunner(t.db, 'task-c', remote.id)
+    await setTaskComputer(t.db, 'task-c', remote.id)
 
-    await retireStaleLocalRunners(t.db, { name: 'local-runner', keepRunnerId: keep })
+    await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
 
-    expect(await resolveTaskRunnerId(t.db, 'task-c')).toBe(remote.id) // unchanged
+    expect(await resolveTaskComputerId(t.db, 'task-c')).toBe(remote.id) // unchanged
   })
 })
 
-describe('task/project runner binding', () => {
+describe('task/project computer binding', () => {
   const projectId = 'proj-1'
   const taskId = 'task-1'
 
@@ -294,26 +294,26 @@ describe('task/project runner binding', () => {
 
   it('both NULL resolves to null (no EXPLICIT binding)', async () => {
     // null here means "nothing bound" — NOT "run on the hub". There is no
-    // in-process exec path; resolveTaskRunnerIdOrDefault supplies the fallback.
-    expect(await resolveTaskRunnerId(t.db, taskId)).toBeNull()
+    // in-process exec path; resolveTaskComputerIdOrDefault supplies the fallback.
+    expect(await resolveTaskComputerId(t.db, taskId)).toBeNull()
   })
 
-  describe('resolveTaskRunnerIdOrDefault', () => {
+  describe('resolveTaskComputerIdOrDefault', () => {
     // Both binding columns are nullable TEXT with no default, so an install that
     // never opened project settings has NOTHING bound. Since removing the
-    // in-process fallback, such a task must still resolve to a real runner or no
+    // in-process fallback, such a task must still resolve to a real computer or no
     // agent could ever start on an existing install.
-    it('falls back to the sole connected runner when nothing is bound', async () => {
-      expect(await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [{ runnerId: 'r-only' }])).toBe(
+    it('falls back to the sole connected computer when nothing is bound', async () => {
+      expect(await resolveTaskComputerIdOrDefault(t.db, taskId, () => [{ computerId: 'r-only' }])).toBe(
         'r-only'
       )
     })
 
-    it('prefers the local runner by name when several are connected', async () => {
+    it('prefers the local computer by name when several are connected', async () => {
       expect(
-        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
-          { runnerId: 'r-remote', name: 'build-box' },
-          { runnerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+        await resolveTaskComputerIdOrDefault(t.db, taskId, () => [
+          { computerId: 'r-remote', name: 'build-box' },
+          { computerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
         ])
       ).toBe('r-local')
     })
@@ -321,46 +321,46 @@ describe('task/project runner binding', () => {
     it('refuses to guess when several are connected and none is the local one', async () => {
       // Silently picking one would run the agent on an arbitrary machine.
       expect(
-        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
-          { runnerId: 'r-a', name: 'box-a' },
-          { runnerId: 'r-b', name: 'box-b' }
+        await resolveTaskComputerIdOrDefault(t.db, taskId, () => [
+          { computerId: 'r-a', name: 'box-a' },
+          { computerId: 'r-b', name: 'box-b' }
         ])
       ).toBeNull()
     })
 
     it('an EXPLICIT binding always wins over the connected default', async () => {
-      await setTaskRunner(t.db, taskId, 'runner-pinned')
+      await setTaskComputer(t.db, taskId, 'computer-pinned')
       expect(
-        await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [
-          { runnerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
+        await resolveTaskComputerIdOrDefault(t.db, taskId, () => [
+          { computerId: 'r-local', name: DEFAULT_LOCAL_RUNNER_NAME }
         ])
-      ).toBe('runner-pinned')
+      ).toBe('computer-pinned')
     })
 
     it('null when nothing is bound and nothing is connected', async () => {
-      expect(await resolveTaskRunnerIdOrDefault(t.db, taskId, () => [])).toBeNull()
+      expect(await resolveTaskComputerIdOrDefault(t.db, taskId, () => [])).toBeNull()
     })
   })
 
   it('task NULL inherits the project default', async () => {
-    await setProjectDefaultRunner(t.db, projectId, 'runner-default')
-    expect(await resolveTaskRunnerId(t.db, taskId)).toBe('runner-default')
+    await setProjectDefaultComputer(t.db, projectId, 'computer-default')
+    expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-default')
   })
 
-  it('explicit task runner overrides the project default', async () => {
-    await setProjectDefaultRunner(t.db, projectId, 'runner-default')
-    await setTaskRunner(t.db, taskId, 'runner-pinned')
-    expect(await resolveTaskRunnerId(t.db, taskId)).toBe('runner-pinned')
+  it('explicit task computer overrides the project default', async () => {
+    await setProjectDefaultComputer(t.db, projectId, 'computer-default')
+    await setTaskComputer(t.db, taskId, 'computer-pinned')
+    expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-pinned')
   })
 
   it('clearing the task binding falls back to inherit', async () => {
-    await setProjectDefaultRunner(t.db, projectId, 'runner-default')
-    await setTaskRunner(t.db, taskId, 'runner-pinned')
-    await setTaskRunner(t.db, taskId, null)
-    expect(await resolveTaskRunnerId(t.db, taskId)).toBe('runner-default')
+    await setProjectDefaultComputer(t.db, projectId, 'computer-default')
+    await setTaskComputer(t.db, taskId, 'computer-pinned')
+    await setTaskComputer(t.db, taskId, null)
+    expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-default')
   })
 
   it('unknown task resolves to null', async () => {
-    expect(await resolveTaskRunnerId(t.db, 'nope')).toBeNull()
+    expect(await resolveTaskComputerId(t.db, 'nope')).toBeNull()
   })
 })

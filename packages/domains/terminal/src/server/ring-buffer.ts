@@ -47,7 +47,7 @@ const ORPHANED_SEQUENCE_HEAD = /^[0-9;:?<>]+[@-~]/
  *
  * Stored chunks are IMMUTABLE: `getChunksSince` hands back exactly the bytes that
  * were appended, because incremental catch-up is applied to an already-correct
- * terminal (and the hub↔runner contract requires a seq's bytes not to vary by
+ * terminal (and the hub↔computer contract requires a seq's bytes not to vary by
  * delivery path). Eviction resync is applied at READ time by {@link toString},
  * which is the wholesale-replay-into-a-fresh-terminal path.
  */

@@ -1,8 +1,8 @@
 /**
- * OS-supervisor registration for hubs AND runners (plans/hub-lifecycle-and-discovery.md
- * Phase 5 for the hub; the `slay runner` group for the runner).
+ * OS-supervisor registration for hubs AND computers (plans/hub-lifecycle-and-discovery.md
+ * Phase 5 for the hub; the `slay computer` group for the computer).
  *
- * `slay hub create` / `slay runner create` hand the process to launchd (macOS) or
+ * `slay hub create` / `slay computer create` hand the process to launchd (macOS) or
  * systemd --user (Linux) so it restarts on crash and comes back at login. This suite
  * asserts the GENERATED FILE CONTENT and the path/name derivation — never real
  * `launchctl bootstrap` / `systemctl enable`, which would leave units behind on
@@ -14,8 +14,8 @@
  *   - the unit pins SLAYZONE_ROOT + an absolute command (no `npx` at boot);
  *   - one (kind, name) pair ⇒ one unit path, so start/stop agree on which file to touch;
  *   - a hostile name can't escape the unit dir or inject unit syntax;
- *   - the two KINDS never see each other's units, and a runner unit carries NO
- *     hub env (its name/token/path-jail have no env channel — see runner/src/config.ts).
+ *   - the two KINDS never see each other's units, and a computer unit carries NO
+ *     hub env (its name/token/path-jail have no env channel — see computer/src/config.ts).
  *
  * Pure Node (temp dirs, no native deps, no supervisor calls) → runs under plain
  * `npx tsx`.
@@ -94,7 +94,7 @@ const SPEC: ServiceUnitSpec = {
 }
 
 const RUNNER_SPEC: ServiceUnitSpec = {
-  kind: 'runner',
+  kind: 'computer',
   name: 'builder',
   root: '/srv/computers/builder',
   command: '/usr/local/bin/node',
@@ -308,9 +308,9 @@ test('address WINS over the legacy port (no silent loopback downgrade)', () => {
   assert(!unit.includes('127.0.0.1'), 'no loopback address emitted')
 })
 
-test('a runner spec ignores address too (a runner binds nothing)', () => {
+test('a computer spec ignores address too (a computer binds nothing)', () => {
   const unit = renderSystemdUnit({ ...RUNNER_SPEC, address: '0.0.0.0:51234' })
-  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var for a runner')
+  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var for a computer')
   assert(!unit.includes('0.0.0.0'), 'address not emitted')
 })
 
@@ -329,34 +329,34 @@ test('spec.env reaches the unit — an Electron-ABI hub needs ELECTRON_RUN_AS_NO
   assert(plist.includes('SLAYZONE_HUB_NAME'), 'name still pinned')
 })
 
-console.log('\nservice-unit: runner kind')
+console.log('\nservice-unit: computer kind')
 console.log('─'.repeat(40))
 
-test('runner identity is namespaced apart from the hub', () => {
-  assertEq(launchdLabel('runner', 'builder'), 'com.slayzone.runner.builder', 'launchd label')
-  assertEq(systemdUnitName('runner', 'builder'), 'slayzone-computer-builder.service', 'systemd unit')
+test('computer identity is namespaced apart from the hub', () => {
+  assertEq(launchdLabel('computer', 'builder'), 'com.slayzone.computer.builder', 'launchd label')
+  assertEq(systemdUnitName('computer', 'builder'), 'slayzone-computer-builder.service', 'systemd unit')
   // Same NAME under the two kinds must never resolve to the same file, or
-  // `runner rm dev` would delete a hub named dev.
+  // `computer rm dev` would delete a hub named dev.
   assert(
-    unitPath('runner', 'dev', backend, '/units') !== unitPath('hub', 'dev', backend, '/units'),
+    unitPath('computer', 'dev', backend, '/units') !== unitPath('hub', 'dev', backend, '/units'),
     'a name shared across kinds does not collide'
   )
 })
 
-test('runner plist/unit identify the runner and use runner log names', () => {
+test('computer plist/unit identify the computer and use computer log names', () => {
   const plist = renderLaunchdPlist(RUNNER_SPEC)
-  assert(plist.includes('<string>com.slayzone.runner.builder</string>'), `label: ${plist}`)
-  assert(plist.includes('/srv/computers/builder/logs/runner.out.log'), 'stdout log')
-  assert(plist.includes('/srv/computers/builder/logs/runner.err.log'), 'stderr log')
+  assert(plist.includes('<string>com.slayzone.computer.builder</string>'), `label: ${plist}`)
+  assert(plist.includes('/srv/computers/builder/logs/computer.out.log'), 'stdout log')
+  assert(plist.includes('/srv/computers/builder/logs/computer.err.log'), 'stderr log')
   assert(!plist.includes('hub.out.log'), 'no hub log name leaked')
   const unit = renderSystemdUnit(RUNNER_SPEC)
-  assert(unit.includes('Description=SlayZone runner (builder)'), `description: ${unit}`)
-  assert(unit.includes('slay runner logs builder'), 'log hint names the runner command')
+  assert(unit.includes('Description=SlayZone computer (builder)'), `description: ${unit}`)
+  assert(unit.includes('slay computer logs builder'), 'log hint names the computer command')
 })
 
-test('a runner unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
-  // The runner's name, path-jail, join token and cert pin deliberately have NO env
-  // channel (runner/src/config.ts) — they come from <ROOT>/config.json, which is
+test('a computer unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
+  // The computer's name, path-jail, join token and cert pin deliberately have NO env
+  // channel (computer/src/config.ts) — they come from <ROOT>/config.json, which is
   // 0600. A unit file is 0644, so a token must never reach it.
   const unit = renderSystemdUnit(RUNNER_SPEC)
   assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/computers/builder'), 'root pinned')
@@ -367,13 +367,13 @@ test('a runner unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
   assertEq(envLines.length, 1, `exactly one env line, got ${envLines.join(' | ')}`)
 })
 
-test('a runner spec ignores port (only a hub binds one)', () => {
+test('a computer spec ignores port (only a hub binds one)', () => {
   const unit = renderSystemdUnit({ ...RUNNER_SPEC, port: 51234 })
-  assert(!unit.includes('51234'), 'port not emitted for a runner')
+  assert(!unit.includes('51234'), 'port not emitted for a computer')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var')
 })
 
-test('spec.env reaches a runner unit too — node-pty is Electron-ABI in a dev tree', () => {
+test('spec.env reaches a computer unit too — node-pty is Electron-ABI in a dev tree', () => {
   const unit = renderSystemdUnit({ ...RUNNER_SPEC, env: { ELECTRON_RUN_AS_NODE: '1' } })
   assert(unit.includes('Environment=ELECTRON_RUN_AS_NODE=1'), `systemd: ${unit}`)
   assert(unit.includes('Environment=SLAYZONE_ROOT='), 'root still pinned')
@@ -386,29 +386,29 @@ test('the two kinds never list each other, even in one unit dir', () => {
     const hubs = listRegisteredUnits('hub', backend, dir)
     assertEq(hubs.length, 1, `one hub, got ${hubs.map((h) => h.name).join(',')}`)
     assertEq(hubs[0]?.name, 'staging', 'the hub')
-    const runners = listRegisteredUnits('runner', backend, dir)
-    assertEq(runners.length, 1, `one runner, got ${runners.map((r) => r.name).join(',')}`)
-    assertEq(runners[0]?.name, 'builder', 'the runner')
+    const computers = listRegisteredUnits('computer', backend, dir)
+    assertEq(computers.length, 1, `one computer, got ${computers.map((r) => r.name).join(',')}`)
+    assertEq(computers[0]?.name, 'builder', 'the computer')
   })
 })
 
-test('a hub named like a runner prefix is not mistaken for a runner', () => {
-  // `slayzone-hub-runner-x.service` must not parse as runner `x`: the runner listing
+test('a hub named like a computer prefix is not mistaken for a computer', () => {
+  // `slayzone-hub-computer-x.service` must not parse as computer `x`: the computer listing
   // only accepts its own prefix, which the hub filename does not carry.
   withTempDir((dir) => {
-    writeUnit({ ...SPEC, name: 'runner-x' }, backend, dir)
-    assertEq(listRegisteredUnits('runner', backend, dir).length, 0, 'no runner found')
-    assertEq(listRegisteredUnits('hub', backend, dir)[0]?.name, 'runner-x', 'listed as a hub')
+    writeUnit({ ...SPEC, name: 'computer-x' }, backend, dir)
+    assertEq(listRegisteredUnits('computer', backend, dir).length, 0, 'no computer found')
+    assertEq(listRegisteredUnits('hub', backend, dir)[0]?.name, 'computer-x', 'listed as a hub')
   })
 })
 
-test('a runner root round-trips through its unit while stopped', () => {
+test('a computer root round-trips through its unit while stopped', () => {
   withTempDir((dir) => {
     writeUnit(RUNNER_SPEC, backend, dir)
-    assertEq(readUnitRoot('runner', 'builder', backend, dir), RUNNER_SPEC.root, 'root read back')
+    assertEq(readUnitRoot('computer', 'builder', backend, dir), RUNNER_SPEC.root, 'root read back')
     assertEq(readUnitRoot('hub', 'builder', backend, dir), null, 'not visible as a hub')
-    assertEq(removeUnit('runner', 'builder', backend, dir), true, 'removable while stopped')
-    assertEq(readUnitRoot('runner', 'builder', backend, dir), null, 'gone')
+    assertEq(removeUnit('computer', 'builder', backend, dir), true, 'removable while stopped')
+    assertEq(readUnitRoot('computer', 'builder', backend, dir), null, 'gone')
   })
 })
 
@@ -429,11 +429,11 @@ test('rejects a name that would escape the unit dir', () => {
   assertThrows(() => unitPath('hub', '../../evil', 'systemd', '/units'), 'name', 'traversal')
   assertThrows(() => unitPath('hub', 'a/b', 'systemd', '/units'), 'name', 'slash')
   assertThrows(() => unitPath('hub', '', 'systemd', '/units'), 'name', 'empty')
-  // The runner path validates identically — the guard is not hub-specific.
+  // The computer path validates identically — the guard is not hub-specific.
   assertThrows(
-    () => unitPath('runner', '../../evil', 'systemd', '/units'),
+    () => unitPath('computer', '../../evil', 'systemd', '/units'),
     'name',
-    'runner traversal'
+    'computer traversal'
   )
 })
 
@@ -445,13 +445,13 @@ test('rejects a name carrying unit/plist syntax or whitespace', () => {
 })
 
 test('the invalid-name error names the kind it is talking about', () => {
-  // The hub error points at the config.json `hubName` key; a runner operator has no
+  // The hub error points at the config.json `hubName` key; a computer operator has no
   // such key, so a hub-worded message would misdirect them.
   assertThrows(() => unitPath('hub', 'a b', 'systemd', '/units'), 'hub name', 'hub wording')
   assertThrows(
-    () => unitPath('runner', 'a b', 'systemd', '/units'),
-    'runner name',
-    'runner wording'
+    () => unitPath('computer', 'a b', 'systemd', '/units'),
+    'computer name',
+    'computer wording'
   )
 })
 

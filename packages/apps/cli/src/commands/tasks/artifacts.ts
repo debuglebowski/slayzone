@@ -28,7 +28,7 @@ import {
 import { cliAuthor, resolveId } from './_shared'
 
 /*
- * Hub/runner split (Wave 3.5): the subcommands below route through api.ts — the
+ * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
  * hub when configured, else the local app's REST — so they work against a hub on
  * another machine, where the SQLite file simply does not exist:
  *   list        → GET    /api/tasks/:id/artifacts

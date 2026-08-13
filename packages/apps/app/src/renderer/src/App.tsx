@@ -275,7 +275,7 @@ function App(): React.JSX.Element {
   )
   // Path existence and repo detection used to be gated to the local hub, because
   // they ran against whichever hub the client was talking to and so said nothing
-  // true about a project whose files live elsewhere. They now route to the runner
+  // true about a project whose files live elsewhere. They now route to the computer
   // that owns the workspace, so the gate is gone — the answer is correct for
   // every hub. `selectedProjectHubId` remains for routing the queries themselves.
 
@@ -1849,7 +1849,7 @@ function App(): React.JSX.Element {
           {/* Re-point a project whose directory has moved. Rendered here rather
               than inside the guard hook (a hook cannot render), and browsing the
               RUNNER that owns the project — the native dialog it replaces browsed
-              this desktop, so on a remote runner it returned a path that did not
+              this desktop, so on a remote computer it returned a path that did not
               exist there. */}
           <WorkspaceDirPicker
             open={fixPickerOpen}

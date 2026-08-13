@@ -1,37 +1,37 @@
 /**
- * Local-runner supervisor exit-reporting + manual-restart tests.
+ * Local-computer supervisor exit-reporting + manual-restart tests.
  *
- * The local runner OWNS every agent pty (each `claude` process is a direct
- * child of it), so a runner exit kills every agent at once and the hub renders
+ * The local computer OWNS every agent pty (each `claude` process is a direct
+ * child of it), so a computer exit kills every agent at once and the hub renders
  * it as "Process exited with code 1" on every open task. Until now the reason
- * was unrecoverable: the supervisor's own `runner exited code=…` notice and the
+ * was unrecoverable: the supervisor's own `computer exited code=…` notice and the
  * child's stdout/stderr both went to `logBoot`, a no-op unless
  * SLAYZONE_DEBUG_BOOT=1, and nothing recorded a diagnostics event. These tests
  * pin the structured `onExit` report that replaces that blind spot.
  *
- * The second group pins `restart()` — the Settings → Runners button. It is the
+ * The second group pins `restart()` — the Settings → Computers button. It is the
  * only recovery from the supervisor's two DEAD ENDS (backoff exhausted, and the
  * needs-re-enrollment latch), so the tests assert it clears both rather than
  * merely cycling a healthy child.
  *
- * Driven against a controllable fake runner script so exit codes, output tails
+ * Driven against a controllable fake computer script so exit codes, output tails
  * and backoff exhaustion are deterministic and fast. Timing constants are
  * shrunk through the additive `opts.timing` override (defaults unchanged in
  * production).
  *
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
- *     packages/apps/app/src/main/local-runner-supervisor.test.ts
+ *     packages/apps/app/src/main/local-computer-supervisor.test.ts
  */
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
-  startLocalRunner,
-  type LocalRunnerExitInfo,
-  type LocalRunnerHandle,
-  type LocalRunnerOpts
-} from './local-runner-supervisor.js'
+  startLocalComputer,
+  type LocalComputerExitInfo,
+  type LocalComputerHandle,
+  type LocalComputerOpts
+} from './local-computer-supervisor.js'
 
 // --- tiny async test harness (matches repo style — no vitest) -------------
 
@@ -61,18 +61,18 @@ async function waitFor(cond: () => boolean, timeoutMs: number, msg: string): Pro
   throw new Error(`timeout after ${timeoutMs}ms: ${msg}`)
 }
 
-// --- fake runner script (controllable exit code / output) -----------------
+// --- fake computer script (controllable exit code / output) -----------------
 
 const FAKE_RUNNER = `'use strict'
 const code = Number(process.env.FAKE_EXIT_CODE || '0')
 const lines = Number(process.env.FAKE_LINES || '0')
 // Echoed so a test can see WHICH join token this particular spawn was handed —
 // that is how the re-mint on restart is observed from outside.
-process.stdout.write('fake-runner token=' + (process.env.SLAYZONE_HUB_JOIN_TOKEN || '') + '\\n')
-for (let i = 1; i <= lines; i++) process.stderr.write('runner-line-' + i + '\\n')
-process.stdout.write('fake-runner bye\\n')
+process.stdout.write('fake-computer token=' + (process.env.SLAYZONE_HUB_JOIN_TOKEN || '') + '\\n')
+for (let i = 1; i <= lines; i++) process.stderr.write('computer-line-' + i + '\\n')
+process.stdout.write('fake-computer bye\\n')
 if (process.env.FAKE_STAY_ALIVE === '1') {
-  // A long-lived runner, like the real one: only a signal ends it. SIGTERM is
+  // A long-lived computer, like the real one: only a signal ends it. SIGTERM is
   // handled explicitly so the supervisor's graceful-stop path is exercised
   // rather than its SIGKILL fallback.
   process.on('SIGTERM', function () { process.exit(0) })
@@ -84,10 +84,10 @@ if (process.env.FAKE_STAY_ALIVE === '1') {
 `
 
 const tmpDirs: string[] = []
-function writeFakeRunner(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-runner-sup-test-'))
+function writeFakeComputer(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-sup-test-'))
   tmpDirs.push(dir)
-  const p = path.join(dir, 'fake-runner.cjs')
+  const p = path.join(dir, 'fake-computer.cjs')
   fs.writeFileSync(p, FAKE_RUNNER)
   return p
 }
@@ -102,7 +102,7 @@ function cleanup(): void {
 }
 
 type HarnessCtx = {
-  exits: LocalRunnerExitInfo[]
+  exits: LocalComputerExitInfo[]
   permanentFailure: { attempts: number; lastError: unknown } | null
   needsReEnrollment: number
   /** Every stdout/stderr line from every child, in order. */
@@ -113,10 +113,10 @@ type HarnessCtx = {
 
 function makeHarness(
   fakeEnv: Record<string, string>,
-  timing: LocalRunnerOpts['timing'],
+  timing: LocalComputerOpts['timing'],
   /** Opt in to the re-mint hook (production always supplies one). */
   withMint = false
-): { handle: LocalRunnerHandle; ctx: HarnessCtx } {
+): { handle: LocalComputerHandle; ctx: HarnessCtx } {
   const ctx: HarnessCtx = {
     exits: [],
     permanentFailure: null,
@@ -124,9 +124,9 @@ function makeHarness(
     lines: [],
     mintedTokens: []
   }
-  const handle = startLocalRunner({
+  const handle = startLocalComputer({
     execPath: process.execPath,
-    scriptPath: writeFakeRunner(),
+    scriptPath: writeFakeComputer(),
     env: { ...process.env, SLAYZONE_HUB_JOIN_TOKEN: 'token-boot', ...fakeEnv },
     logger: (line) => ctx.lines.push(line),
     onExit: (info) => ctx.exits.push(info),
@@ -153,7 +153,7 @@ function makeHarness(
 /** Lines the children echoed their join token on, oldest first. */
 function tokensSeenByChildren(ctx: HarnessCtx): string[] {
   return ctx.lines
-    .filter((l) => l.includes('fake-runner token='))
+    .filter((l) => l.includes('fake-computer token='))
     .map((l) => l.slice(l.indexOf('token=') + 'token='.length).trim())
 }
 
@@ -165,19 +165,19 @@ test('reports the exit code, uptime and the dying child output tail', async () =
     { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
   )
   try {
-    await waitFor(() => ctx.exits.length >= 1, 15_000, 'first runner exit reported')
+    await waitFor(() => ctx.exits.length >= 1, 15_000, 'first computer exit reported')
     const first = ctx.exits[0]
     assertEq(first.code, 7, 'exit code surfaced verbatim')
     assertEq(first.signal, null, 'no signal on a self-exit')
     assert(first.uptimeMs >= 0, 'uptimeMs is present')
-    // The tail is what makes an exit diagnosable — a runner that dies on an
+    // The tail is what makes an exit diagnosable — a computer that dies on an
     // uncaught exception prints the stack here and nowhere else.
     assert(
-      first.tail.includes('runner-line-3'),
+      first.tail.includes('computer-line-3'),
       `tail carries the child's last stderr line, got ${JSON.stringify(first.tail)}`
     )
     assert(
-      first.tail.includes('fake-runner bye'),
+      first.tail.includes('fake-computer bye'),
       `tail carries stdout too, got ${JSON.stringify(first.tail)}`
     )
   } finally {
@@ -193,7 +193,7 @@ test('reports the scheduled restart, then reports the give-up exit', async () =>
     { backoffMs: [5, 5], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
   )
   try {
-    await waitFor(() => ctx.exits.length >= 3, 20_000, 'three runner exits reported')
+    await waitFor(() => ctx.exits.length >= 3, 20_000, 'three computer exits reported')
     assertEq(ctx.exits[0].restartAttempt, 1, 'first exit schedules restart 1')
     assertEq(ctx.exits[0].restartDelayMs, 5, 'first exit reports its backoff delay')
     assertEq(ctx.exits[1].restartAttempt, 2, 'second exit schedules restart 2')
@@ -205,19 +205,19 @@ test('reports the scheduled restart, then reports the give-up exit', async () =>
   }
 })
 
-// --- manual restart (Settings → Runners button) ---------------------------
+// --- manual restart (Settings → Computers button) ---------------------------
 
-test('restart cycles a live runner without reporting it as a crash', async () => {
+test('restart cycles a live computer without reporting it as a crash', async () => {
   const { handle, ctx } = makeHarness(
     { FAKE_STAY_ALIVE: '1' },
     { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
   )
   try {
-    await waitFor(() => handle.getPid() !== null, 15_000, 'first runner spawned')
+    await waitFor(() => handle.getPid() !== null, 15_000, 'first computer spawned')
     const firstPid = handle.getPid()
     await handle.restart()
     const secondPid = handle.getPid()
-    assert(secondPid !== null, 'a replacement runner is running after restart')
+    assert(secondPid !== null, 'a replacement computer is running after restart')
     assert(
       secondPid !== firstPid,
       `restart replaced the process (was ${String(firstPid)}, now ${String(secondPid)})`
@@ -254,7 +254,7 @@ test('restart re-mints the join token for the new child', async () => {
   }
 })
 
-test('restart recovers a runner that exhausted its backoff budget', async () => {
+test('restart recovers a computer that exhausted its backoff budget', async () => {
   // One-slot budget: exit → restart 1 → exit → give up. Nothing auto-recovers
   // from there today; the button is the whole recovery.
   const { handle, ctx } = makeHarness(
@@ -263,7 +263,7 @@ test('restart recovers a runner that exhausted its backoff budget', async () => 
   )
   try {
     await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
-    assertEq(handle.getPid(), null, 'no runner is running after the give-up')
+    assertEq(handle.getPid(), null, 'no computer is running after the give-up')
     ctx.exits.length = 0
     await handle.restart()
     // A fresh budget, so the respawned (still-failing) fake gets to retry again —
@@ -279,7 +279,7 @@ test('restart recovers a runner that exhausted its backoff budget', async () => 
 })
 
 test('restart clears the needs-re-enrollment latch', async () => {
-  // Exit 78 = the hub no longer recognizes this runner. The supervisor latches
+  // Exit 78 = the hub no longer recognizes this computer. The supervisor latches
   // it and refuses every further restart — permanently, until the app relaunches.
   const { handle, ctx } = makeHarness(
     { FAKE_EXIT_CODE: '78' },
@@ -287,14 +287,14 @@ test('restart clears the needs-re-enrollment latch', async () => {
     true
   )
   try {
-    await waitFor(() => ctx.needsReEnrollment >= 1, 20_000, 'runner latched needs-re-enrollment')
-    assertEq(handle.getPid(), null, 'no runner is running while latched')
+    await waitFor(() => ctx.needsReEnrollment >= 1, 20_000, 'computer latched needs-re-enrollment')
+    assertEq(handle.getPid(), null, 'no computer is running while latched')
     const spawnsBefore = tokensSeenByChildren(ctx).length
     await handle.restart()
     await waitFor(
       () => tokensSeenByChildren(ctx).length > spawnsBefore,
       15_000,
-      'restart spawned a runner despite the latch'
+      'restart spawned a computer despite the latch'
     )
     // Re-enrolling is exactly what a fresh token is for — the latch means the
     // stored credential is dead, so the new child must not be handed the spent one.
@@ -304,12 +304,12 @@ test('restart clears the needs-re-enrollment latch', async () => {
   }
 })
 
-// --- runner ---------------------------------------------------------------
+// --- computer ---------------------------------------------------------------
 
 async function main(): Promise<void> {
   let passed = 0
   let failed = 0
-  console.log('\n=== local-runner-supervisor exit reporting + manual restart ===\n')
+  console.log('\n=== local-computer-supervisor exit reporting + manual restart ===\n')
   for (const { name, fn } of tests) {
     try {
       await fn()

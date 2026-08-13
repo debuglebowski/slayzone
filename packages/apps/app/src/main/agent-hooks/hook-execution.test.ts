@@ -15,7 +15,7 @@ import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
  * runs it the way an agent CLI does — `bash -c <command>` — and asserts the
  * envelope reaches a loopback HTTP listener.
  *
- * On the Windows CI runner `bash` is Git Bash + the temp path is a real
+ * On the Windows CI computer `bash` is Git Bash + the temp path is a real
  * backslash NTFS path, so this reproduces the exact #88 failure (bash eating
  * backslashes) and proves the fix.
  */

@@ -15,7 +15,7 @@
  * No mocks of hub-auth: a real better-auth instance on a throwaway node:sqlite
  * file mints a genuine session token via signInEmail. Native ABI: createHubAuth
  * uses node:sqlite, so this runs under the Electron strict loader like
- * runner-auth.test.ts (hand-rolled harness, no vitest import).
+ * computer-auth.test.ts (hand-rolled harness, no vitest import).
  *
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \

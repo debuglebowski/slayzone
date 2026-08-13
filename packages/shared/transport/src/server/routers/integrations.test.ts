@@ -49,7 +49,7 @@ const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
 const h = await createTestHarness()
 // No cipher injected → credentials use the plaintext fallback (allowed precisely
 // because no working cipher exists — cipher-availability is the gate now, no env
-// flag). Explicit for clarity / isolation from other suites in the runner.
+// flag). Explicit for clarity / isolation from other suites in the computer.
 setCredentialCipher(null)
 
 // Seed a readable credential via the plaintext fallback (the same row shape

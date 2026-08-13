@@ -4,17 +4,17 @@
  * `global-setup` reaps leftovers from previous interrupted test runs by
  * `pgrep`ing for bundle paths. The bundle paths of a TEST run and of the
  * developer's live `pnpm dev` app are IDENTICAL, so a pattern match alone
- * cannot tell them apart — and matching `runner/dist/bin.cjs` SIGTERM'd the
- * supervised dev app's local runner, which owns every agent pty on the machine.
+ * cannot tell them apart — and matching `computer/dist/bin.cjs` SIGTERM'd the
+ * supervised dev app's local computer, which owns every agent pty on the machine.
  * Each agent terminal then showed "Process exited with code 1" at the same
  * instant, once per `pnpm test:e2e` invocation.
  *
  * The discriminator is the Playwright marker in the process ENVIRONMENT
  * (`e2e/fixtures/electron.ts` sets `PLAYWRIGHT=1` on every app it launches, and
- * the sidecar + runner it spawns inherit it). A dev-run process never has it.
+ * the sidecar + computer it spawns inherit it). A dev-run process never has it.
  *
  * Selection fails CLOSED: an unreadable environment is not killed. A missed
- * orphan costs a warning; a killed dev runner costs every running agent.
+ * orphan costs a warning; a killed dev computer costs every running agent.
  *
  * Run with:
  *   npx tsx packages/apps/app/e2e/fixtures/stale-processes.test.ts
@@ -67,7 +67,7 @@ test('ignores blank and malformed pgrep lines', () => {
 test('does NOT select a dev-run process — the regression', () => {
   // Same bundle path as a test run; only the environment tells them apart.
   const candidates = parsePgrepOutput(`4242 Electron ${RUNNER}`)
-  assertEq(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), [], 'dev runner spared')
+  assertEq(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), [], 'dev computer spared')
 })
 
 test('selects a process carrying the Playwright marker', () => {
@@ -99,7 +99,7 @@ test('does not match PLAYWRIGHT as a substring of another variable', () => {
   assertEq(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), [], 'no substring match')
 })
 
-// --- runner ---------------------------------------------------------------
+// --- computer ---------------------------------------------------------------
 
 let passed = 0
 let failed = 0

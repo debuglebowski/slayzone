@@ -1,5 +1,5 @@
 /**
- * Runner-side filesystem exec handlers.
+ * Computer-side filesystem exec handlers.
  *
  * Three groups, matching the `fs.` frame contract:
  *
@@ -13,18 +13,18 @@
  *  - **file editor** (`fs.readDir` … `fs.watchStop`) — root-scoped, gitignore
  *    aware. These delegate to `@slayzone/file-editor/server`, the SAME module
  *    the hub used to call in-process. It is pure `node:fs` + `ignore`, so the
- *    runner imports it rather than reimplementing it; hub-local and runner-routed
+ *    computer imports it rather than reimplementing it; hub-local and computer-routed
  *    execution then run identical code and cannot drift in behaviour.
  *
  *    (Contrast `./git.ts`, which does reimplement: `@slayzone/worktrees/server`
  *    drags in electron/React and would not bundle.)
  *
  * Every path argument passes {@link assertPathAllowed} — realpath containment
- * against the runner's `allowedRoots` — before any access. The editor ops then
+ * against the computer's `allowedRoots` — before any access. The editor ops then
  * ALSO pass file-editor's own `assertWithinRoot`. Two guards, different jobs:
  * the jail bounds the machine, the root bounds the workspace.
  *
- * @module runner/handlers/fs
+ * @module computer/handlers/fs
  */
 
 import { existsSync, realpathSync } from 'node:fs'
@@ -71,8 +71,8 @@ import {
   fsWatchStartParamsSchema,
   fsWatchStopParamsSchema,
   fsWriteFileParamsSchema,
-  HubToRunnerMethods,
-  RunnerNotificationMethods,
+  HubToComputerMethods,
+  ComputerNotificationMethods,
   type FsChangeParams,
   type FsDiscoverReposResult,
   type FsGitStatusResult,
@@ -92,7 +92,7 @@ import type { HandlerContext, HubMethodTable } from './types'
  * dependency for types alone), so this module — the one place that imports both
  * — is where a shape divergence has to fail. Widening `DirEntry` without
  * widening `fsDirEntrySchema` breaks the build here rather than at runtime on a
- * remote runner, which is the failure mode this codebase has already paid for
+ * remote computer, which is the failure mode this codebase has already paid for
  * four times over in the git and proc frames.
  */
 type _AssertDirEntry = DirEntry extends FsReadDirResult['entries'][number] ? true : never
@@ -106,10 +106,10 @@ const BROWSE_ALWAYS_HIDDEN = new Set(['.git', '.DS_Store', 'node_modules'])
 
 export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
   // Read the jail through `ctx` on EVERY call rather than capturing the array at
-  // construction: `runner.setAllowedRoots` edits it live (same shared-ctx trick
+  // construction: `computer.setAllowedRoots` edits it live (same shared-ctx trick
   // as `setAgentHookUrl`), and a captured reference would keep enforcing the
   // boot-time set — the user widens the roots in Settings, the UI reports
-  // success, and the runner silently keeps refusing.
+  // success, and the computer silently keeps refusing.
   const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
 
   /** Live watches, keyed by the hub-minted watchId. */
@@ -134,7 +134,7 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
   // --- workspace browse -----------------------------------------------------
 
   /**
-   * The runner's browsable roots ARE its path-jail — there is nothing else it
+   * The computer's browsable roots ARE its path-jail — there is nothing else it
    * would be willing to open. Roots are realpath-resolved so the client's
    * subsequent `fs.listDir` calls compare equal to what the jail returns; a
    * configured root that does not exist is dropped rather than offered as a
@@ -328,7 +328,7 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
     const abs = allow(rootPath)
     const dispose = subscribeFileWatcher(abs, (e) => {
       const params: FsChangeParams = { watchId, type: e.type, relPath: e.relPath }
-      ctx.dialer.notify(RunnerNotificationMethods.fsChange, params)
+      ctx.dialer.notify(ComputerNotificationMethods.fsChange, params)
     })
     watches.set(watchId, dispose)
     return { ok: true }
@@ -342,27 +342,27 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
   }
 
   return {
-    [HubToRunnerMethods.fsPathExists]: pathExists,
-    [HubToRunnerMethods.fsRemoveDir]: removeDir,
+    [HubToComputerMethods.fsPathExists]: pathExists,
+    [HubToComputerMethods.fsRemoveDir]: removeDir,
 
-    [HubToRunnerMethods.fsListRoots]: listRoots,
-    [HubToRunnerMethods.fsListDir]: listDir,
-    [HubToRunnerMethods.fsMkdir]: mkdirHandler,
+    [HubToComputerMethods.fsListRoots]: listRoots,
+    [HubToComputerMethods.fsListDir]: listDir,
+    [HubToComputerMethods.fsMkdir]: mkdirHandler,
 
-    [HubToRunnerMethods.fsReadDir]: readDirHandler,
-    [HubToRunnerMethods.fsReadFile]: readFileHandler,
-    [HubToRunnerMethods.fsWriteFile]: writeFileHandler,
-    [HubToRunnerMethods.fsCreateFile]: createFileHandler,
-    [HubToRunnerMethods.fsCreateDir]: createDirHandler,
-    [HubToRunnerMethods.fsRename]: renameHandler,
-    [HubToRunnerMethods.fsDelete]: deleteHandler,
-    [HubToRunnerMethods.fsCopyIn]: copyInHandler,
-    [HubToRunnerMethods.fsCopy]: copyHandler,
-    [HubToRunnerMethods.fsGitStatus]: gitStatusHandler,
-    [HubToRunnerMethods.fsSearchFiles]: searchFilesHandler,
-    [HubToRunnerMethods.fsListAllFiles]: listAllFilesHandler,
-    [HubToRunnerMethods.fsDiscoverRepos]: discoverReposHandler,
-    [HubToRunnerMethods.fsWatchStart]: watchStart,
-    [HubToRunnerMethods.fsWatchStop]: watchStop
+    [HubToComputerMethods.fsReadDir]: readDirHandler,
+    [HubToComputerMethods.fsReadFile]: readFileHandler,
+    [HubToComputerMethods.fsWriteFile]: writeFileHandler,
+    [HubToComputerMethods.fsCreateFile]: createFileHandler,
+    [HubToComputerMethods.fsCreateDir]: createDirHandler,
+    [HubToComputerMethods.fsRename]: renameHandler,
+    [HubToComputerMethods.fsDelete]: deleteHandler,
+    [HubToComputerMethods.fsCopyIn]: copyInHandler,
+    [HubToComputerMethods.fsCopy]: copyHandler,
+    [HubToComputerMethods.fsGitStatus]: gitStatusHandler,
+    [HubToComputerMethods.fsSearchFiles]: searchFilesHandler,
+    [HubToComputerMethods.fsListAllFiles]: listAllFilesHandler,
+    [HubToComputerMethods.fsDiscoverRepos]: discoverReposHandler,
+    [HubToComputerMethods.fsWatchStart]: watchStart,
+    [HubToComputerMethods.fsWatchStop]: watchStop
   }
 }

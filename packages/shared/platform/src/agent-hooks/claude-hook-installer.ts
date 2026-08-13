@@ -67,7 +67,7 @@ export interface InstallClaudeHooksResult {
  *   This handles users who hand-edit or relocate the script.
  * - The read, the merge and the write are ONE guarded cycle
  *   (`updateFileAtomically`). This file is shared with the user and with any other
- *   SlayZone process on the machine — a standalone runner installs the same hooks
+ *   SlayZone process on the machine — a standalone computer installs the same hooks
  *   — so computing the merge from a snapshot and writing it back separately would
  *   silently drop whatever a peer committed in between. On contention the merge is
  *   re-run against the peer's result instead.

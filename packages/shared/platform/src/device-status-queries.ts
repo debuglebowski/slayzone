@@ -44,7 +44,7 @@
  *
  * Lives in `@slayzone/platform` rather than `@slayzone/terminal/shared` because
  * BOTH pty output paths need it and they cannot share a domain package: the
- * terminal domain's `pty-manager` (local spawns) and the runner's `handlers/pty`
+ * terminal domain's `pty-manager` (local spawns) and the computer's `handlers/pty`
  * (remote spawns, bundled standalone). A mirrored copy is exactly the drift that
  * let this bug exist on one path — one definition, two importers.
  */

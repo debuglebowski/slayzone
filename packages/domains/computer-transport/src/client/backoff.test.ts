@@ -10,7 +10,7 @@ describe('computeBackoffDelayMs', () => {
 
   it('defaults to 100ms → 30s doubling', () => {
     // The FIRST retry is fast on purpose: the common disconnect is a hub restart
-    // that is listening again within a few hundred ms, and with runners as the only
+    // that is listening again within a few hundred ms, and with computers as the only
     // execution path any work attempted inside that gap fails outright.
     expect(computeBackoffDelayMs(1)).toBe(100)
     expect(computeBackoffDelayMs(2)).toBe(200)

@@ -1,18 +1,18 @@
 export {
-  registerRunner,
-  registerOrReplaceRunner,
-  deterministicLocalRunnerId,
-  retireStaleLocalRunners,
-  getRunner,
-  listRunners,
-  touchRunnerLastSeen,
-  revokeRunner,
-  setTaskRunner,
-  setProjectDefaultRunner,
-  setRunnerOwner,
-  resolveTaskRunnerId,
-  resolveTaskRunnerIdOrDefault,
-  type RegisterRunnerInput
+  registerComputer,
+  registerOrReplaceComputer,
+  deterministicLocalComputerId,
+  retireStaleLocalComputers,
+  getComputer,
+  listComputers,
+  touchComputerLastSeen,
+  revokeComputer,
+  setTaskComputer,
+  setProjectDefaultComputer,
+  setComputerOwner,
+  resolveTaskComputerId,
+  resolveTaskComputerIdOrDefault,
+  type RegisterComputerInput
 } from './store'
 export {
   JOIN_TOKEN_PREFIX,
@@ -25,9 +25,9 @@ export {
   type MintedJoinToken,
   type VerifyJoinTokenResult
 } from './join-tokens'
-// Shared local-runner identity constant — re-exported through the server barrel
+// Shared local-computer identity constant — re-exported through the server barrel
 // so sidecar composition (which already imports from '@slayzone/computers/server')
-// reads it from one place. Single source of truth for the local runner's name.
+// reads it from one place. Single source of truth for the local computer's name.
 export { DEFAULT_LOCAL_RUNNER_NAME } from '../shared'
 
-export { recordRunnerProjectPaths, resolveProjectByPath } from './project-paths'
+export { recordComputerProjectPaths, resolveProjectByPath } from './project-paths'

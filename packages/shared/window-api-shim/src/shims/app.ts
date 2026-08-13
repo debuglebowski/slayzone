@@ -91,8 +91,8 @@ export const appShim = {
     ok: false,
     error: 'Not supported in the Chromium shell'
   }),
-  // Same for the runner: the fork does not spawn it, so it cannot cycle it.
-  restartLocalRunner: async (): Promise<{ ok: boolean; error?: string }> => ({
+  // Same for the computer: the fork does not spawn it, so it cannot cycle it.
+  restartLocalComputer: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,
     error: 'Not supported in the Chromium shell'
   }),

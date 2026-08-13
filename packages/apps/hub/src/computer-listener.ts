@@ -1,5 +1,5 @@
 /**
- * Derive the runner-transport URL a minted join token carries.
+ * Derive the computer-transport URL a minted join token carries.
  *
  * `/computers` no longer has its own listener/port — it rides the ONE hub listener
  * (`/trpc` + `/health` + `/mcp` + REST), demuxed by path (see server.ts). So there
@@ -8,7 +8,7 @@
  *   local  → `ws://<loopback>:<hubPort>/computers`  (dev / e2e / supervised)
  *   remote → `wss://<public-address>/computers`      (from SLAYZONE_HUB_PUBLIC_ADDRESS)
  *
- * The runner learns proto/host/port from this URL when it comes from a join token;
+ * The computer learns proto/host/port from this URL when it comes from a join token;
  * via the env channel it gets AUTHORITY ONLY (`SLAYZONE_HUB_ADDRESS` = host[:port])
  * and derives the scheme from SLAYZONE_MODE itself — the scheme gates its TLS + cert-pin path
  * (hub-dialer: `ws:` = no pin, `wss:` = pin the leaf). In remote the single hub
@@ -16,10 +16,10 @@
  * carries is enforced end-to-end, unchanged from the old separate-listener design.
  *
  * The URL's port is the hub port itself (stable via claimServerPort /
- * SIDECAR_FIXED_PORT), so the runner credential key (hubHostFromUrl → host_port)
- * stays stable across reboots WITHOUT the old dedicated runner-port persistence.
+ * SIDECAR_FIXED_PORT), so the computer credential key (hubHostFromUrl → host_port)
+ * stays stable across reboots WITHOUT the old dedicated computer-port persistence.
  *
- * @module server/runner-listener
+ * @module server/computer-listener
  */
 
 import { hubUrlFromAddr, isBareAuthority } from '@slayzone/platform/hub-addr'
@@ -30,7 +30,7 @@ function dialableLoopback(host: string): string {
   return host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
 }
 
-export interface DeriveRunnerHubUrlOptions {
+export interface DeriveComputerHubUrlOptions {
   /** True in SLAYZONE_MODE=remote — derive `wss://` from the public address. */
   remote: boolean
   /** The hub's bind host (used as the local `ws://` host). */
@@ -51,11 +51,11 @@ export interface DeriveRunnerHubUrlOptions {
  * - remote: `wss://<public-address>/computers` from SLAYZONE_HUB_PUBLIC_ADDRESS.
  *   The value is authority ONLY, so there is no scheme to disagree about — `wss`
  *   is implied by remote mode. Returns null for a missing/malformed address; the
- *   caller then leaves runner enroll unavailable rather than embedding a broken
+ *   caller then leaves computer enroll unavailable rather than embedding a broken
  *   target in a token.
  * - local: `ws://<loopback>:<port>/computers`.
  */
-export function deriveRunnerHubUrl(opts: DeriveRunnerHubUrlOptions): string | null {
+export function deriveComputerHubUrl(opts: DeriveComputerHubUrlOptions): string | null {
   if (!opts.remote) {
     return `ws://${dialableLoopback(opts.host)}:${opts.port}/computers`
   }

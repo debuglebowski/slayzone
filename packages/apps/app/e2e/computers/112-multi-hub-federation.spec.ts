@@ -24,8 +24,8 @@ import {
  *      (the union is a client-side merge, not cross-hub data bleed).
  *   3. ROUTING — a routed task write (via the federated useTasksData path the UI
  *      uses) on a remote-hub task lands on the REMOTE hub's DB, not local.
- *   4. RUNNER ENROLLMENT — the Runners tab merges every hub's runners into one
- *      table and mints a join token on the hub the operator PICKS (a runner belongs
+ *   4. RUNNER ENROLLMENT — the Computers tab merges every hub's computers into one
+ *      table and mints a join token on the hub the operator PICKS (a computer belongs
  *      to exactly one hub, decided at mint time).
  *
  * The "second hub" is the sidecar bin run unsupervised on its own port + store
@@ -37,7 +37,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
 const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
-/** Built by `ensureRunnerBuilt()` in global-setup, so it exists before any spec. */
+/** Built by `ensureComputerBuilt()` in global-setup, so it exists before any spec. */
 const RUNNER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
 
 /**
@@ -148,32 +148,32 @@ async function waitForHubHealth(port: number, timeoutMs = 30_000): Promise<void>
   throw new Error(`second hub /health not ready on :${port} within ${timeoutMs}ms`)
 }
 
-interface HubRunner {
+interface HubComputer {
   proc: ChildProcess
-  runnerId: string
+  computerId: string
   stop: () => Promise<void>
 }
 
 /**
- * Enroll + spawn a runner against a hub, and wait until that hub reports it
+ * Enroll + spawn a computer against a hub, and wait until that hub reports it
  * USABLE.
  *
- * Needed because agents, terminals and git work run ONLY on runners — a hub with
+ * Needed because agents, terminals and git work run ONLY on computers — a hub with
  * none refuses `pty.create` with an actionable error instead of quietly spawning
  * the process itself. `spawnSecondHub` starts a bare hub, so a PTY test against it
- * has to bring its own runner; without this the spawn correctly fails.
+ * has to bring its own computer; without this the spawn correctly fails.
  *
- * Mirrors `110-runner-loopback`'s loopback runner: mint a join token from the hub
- * that will own the runner, hand the runner its `<ROOT>/runner.config.json` (display name
+ * Mirrors `110-computer-loopback`'s loopback computer: mint a join token from the hub
+ * that will own the computer, hand the computer its `<ROOT>/computer.config.json` (display name
  * + FS path-jail) and dial the url encoded in the token.
  */
-async function attachRunnerToHub(opts: {
+async function attachComputerToHub(opts: {
   hubUrl: string
   rootDir: string
   credentialsDir: string
   allowedRoots: string
   name: string
-}): Promise<HubRunner> {
+}): Promise<HubComputer> {
   const minted = (await withHubClient(opts.hubUrl, (c) =>
     c.computers.mintJoinToken.mutate({ label: opts.name })
   )) as { token: string }
@@ -183,18 +183,18 @@ async function attachRunnerToHub(opts: {
 
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
-    path.join(opts.rootDir, 'runner.config.json'),
-    JSON.stringify({ runnerName: opts.name, allowedRoots: [opts.allowedRoots] })
+    path.join(opts.rootDir, 'computer.config.json'),
+    JSON.stringify({ computerName: opts.name, allowedRoots: [opts.allowedRoots] })
   )
 
   const electronPath = require('electron') as unknown as string
-  // ELECTRON_RUN_AS_NODE: the runner's node-pty native addon must share the app's
+  // ELECTRON_RUN_AS_NODE: the computer's node-pty native addon must share the app's
   // ABI — same way the app supervisor spawns it.
   const proc = spawn(electronPath, [RUNNER_BIN], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      // Standalone runner: clear any leaked SUPERVISED so it reads <ROOT>/runner.config.json.
+      // Standalone computer: clear any leaked SUPERVISED so it reads <ROOT>/computer.config.json.
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
       SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
@@ -209,7 +209,7 @@ async function attachRunnerToHub(opts: {
   // Gate on `usable`, NOT `connected`: usable means authenticated AND heard from
   // inside the heartbeat window. A spawn dispatched to an open-but-silent socket
   // would hang until the watchdog reaped it.
-  let runnerId: string | null = null
+  let computerId: string | null = null
   await expect
     .poll(
       async () => {
@@ -217,8 +217,8 @@ async function attachRunnerToHub(opts: {
           id: string
           usable: boolean
         }>
-        runnerId = rows.find((r) => r.usable)?.id ?? null
-        return runnerId !== null
+        computerId = rows.find((r) => r.usable)?.id ?? null
+        return computerId !== null
       },
       { timeout: 60_000, intervals: [500, 1_000, 2_000] }
     )
@@ -226,7 +226,7 @@ async function attachRunnerToHub(opts: {
 
   return {
     proc,
-    runnerId: runnerId!,
+    computerId: computerId!,
     stop: () =>
       new Promise<void>((resolve) => {
         if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
@@ -613,11 +613,11 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base('Connections tab nests runners per hub and mints on the hub they sit under', async () => {
+  base('Connections tab nests computers per hub and mints on the hub they sit under', async () => {
     base.setTimeout(180_000)
 
-    // A runner belongs to exactly ONE hub, and which hub is decided when the token is
-    // MINTED (it embeds that hub's dial url + cert fingerprint). Listing runners
+    // A computer belongs to exactly ONE hub, and which hub is decided when the token is
+    // MINTED (it embeds that hub's dial url + cert fingerprint). Listing computers
     // inside their hub makes the enrollment control's POSITION the hub choice, so a
     // federated client can enroll against a remote hub with no picker to get wrong —
     // which is what this asserts end-to-end.
@@ -631,7 +631,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       const remoteHubUrl = hub.url
 
       launched = await launchIsolatedElectron({
-        name: 'multi-hub-runners',
+        name: 'multi-hub-computers',
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
@@ -659,9 +659,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(dialog).toBeVisible({ timeout: 10_000 })
       await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
 
-      // Runners are listed INSIDE their hub — one block per connected hub, since a
-      // runner belongs to exactly one. Both hubs are connected here.
-      await expect(page.locator('[data-testid="runners-table"]')).toHaveCount(2, {
+      // Computers are listed INSIDE their hub — one block per connected hub, since a
+      // computer belongs to exactly one. Both hubs are connected here.
+      await expect(page.locator('[data-testid="computers-table"]')).toHaveCount(2, {
         timeout: 10_000
       })
 
@@ -669,23 +669,23 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // to get wrong. That absence is the federated affordance under test.
       const remoteGroup = page.locator('[data-testid="hub-group-remote-b"]')
       await expect(remoteGroup).toBeVisible({ timeout: 10_000 })
-      await remoteGroup.locator('[data-testid="runner-add-open"]').click()
-      await expect(page.locator('[data-testid="runner-add-hub"]')).toHaveCount(0)
-      await remoteGroup.locator('[data-testid="runner-add"]').click()
+      await remoteGroup.locator('[data-testid="computer-add-open"]').click()
+      await expect(page.locator('[data-testid="computer-add-hub"]')).toHaveCount(0)
+      await remoteGroup.locator('[data-testid="computer-add"]').click()
 
       // The dialog must name the hub the token belongs to: with several connected, a
       // token pasted onto the wrong machine is indistinguishable from a broken one.
-      const mintedHub = page.locator('[data-testid="runner-minted-hub"]')
+      const mintedHub = page.locator('[data-testid="computer-minted-hub"]')
       await expect(mintedHub).toBeVisible({ timeout: 20_000 })
       await expect(mintedHub).toContainText('Hub B')
       // The dial target must be the REMOTE hub's own port — the proof the mint was
       // routed rather than served by the default hub.
       await expect(mintedHub).toContainText(`:${remotePort}/computers`)
 
-      // A mint creates a join_tokens row, NOT a runner row, so the remote hub's
-      // runner list is still empty — assert the token instead, via the hub that
+      // A mint creates a join_tokens row, NOT a computer row, so the remote hub's
+      // computer list is still empty — assert the token instead, via the hub that
       // issued it.
-      const tokenText = await page.locator('[data-testid="runner-minted-token"] code').innerText()
+      const tokenText = await page.locator('[data-testid="computer-minted-token"] code').innerText()
       expect(tokenText.startsWith('szjt1.')).toBe(true)
       const payload = JSON.parse(
         Buffer.from(tokenText.slice('szjt1.'.length), 'base64url').toString('utf8')
@@ -705,24 +705,24 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
       let hub: SecondHub | null = null
-      let hubRunner: HubRunner | null = null
+      let hubComputer: HubComputer | null = null
       let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
       try {
         hub = await spawnSecondHub(secondStore)
         await waitForHubHealth(hub.port)
         const remoteHubUrl = hub.url
 
-        // The remote hub needs its OWN runner: terminals run only on runners, so a
+        // The remote hub needs its OWN computer: terminals run only on computers, so a
         // bare hub refuses pty.create with an actionable error. This is also what
         // makes the assertion below meaningful — the PTY genuinely runs on the
         // remote hub's machine rather than inside the hub process itself.
-        hubRunner = await attachRunnerToHub({
+        hubComputer = await attachComputerToHub({
           hubUrl: remoteHubUrl,
-          rootDir: path.join(secondStore, 'runner-root'),
-          credentialsDir: path.join(secondStore, 'runner-creds'),
+          rootDir: path.join(secondStore, 'computer-root'),
+          credentialsDir: path.join(secondStore, 'computer-creds'),
           // Path-jail must admit the pty cwd used below.
           allowedRoots: secondStore,
-          name: 'e2e-remote-hub-runner'
+          name: 'e2e-remote-hub-computer'
         })
 
         // Remote hub: create a project (path = the remote store dir, a real dir) +
@@ -825,9 +825,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           .toMatch(/running|idle/)
       } finally {
         if (launched) await launched.close()
-        // Runner before hub: it re-dials on disconnect, so killing the hub first
+        // Computer before hub: it re-dials on disconnect, so killing the hub first
         // leaves it reconnecting against a dead port for the whole teardown.
-        if (hubRunner) await hubRunner.stop()
+        if (hubComputer) await hubComputer.stop()
         if (hub) await hub.stop()
         fs.rmSync(secondStore, { recursive: true, force: true })
       }

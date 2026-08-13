@@ -34,7 +34,7 @@ async function maybeInteractiveSetup(): Promise<void> {
         envKey: 'SLAYZONE_HUB_PUBLIC_ADDRESS',
         // Authority only — the scheme follows SLAYZONE_MODE, so asking for it here
         // would let the two disagree.
-        label: 'Public hub address for remote runners (leave empty for loopback-only)',
+        label: 'Public hub address for remote computers (leave empty for loopback-only)',
         hint: 'host[:port], e.g. hub.example.com:8443'
       }
     ]
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   await maybeInteractiveSetup()
 
   // Standalone-only: fold hub.config.json/hub.state.json into process.env
-  // (env-wins) + resolve/persist the runner secret, BEFORE any downstream env
+  // (env-wins) + resolve/persist the computer secret, BEFORE any downstream env
   // reader runs. A
   // no-op under SLAYZONE_SUPERVISED=1 (the Electron host owns the env + secret),
   // so the supervised sidecar boot is byte-identical. See ./standalone-config.ts.

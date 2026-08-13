@@ -33,11 +33,11 @@ import { getStorageDir } from '@slayzone/platform'
  * `~/.slayzone/cli` — the CLI's own state directory.
  *
  * Deliberately NOT channel- or role-scoped, unlike `getSupervisedRoot()`: nothing
- * in here belongs to a hub or a runner, so there is no role to scope by, and the
+ * in here belongs to a hub or a computer, so there is no role to scope by, and the
  * one thing that does vary per channel (which hub `hub use` targeted) is expressed
  * in the filename instead. Anchored on `$HOME` directly rather than on the
  * platform's root resolver, because that reads `SLAYZONE_ROOT` — the exact coupling
- * this module exists to remove. A hub or runner process that seeds `SLAYZONE_ROOT`
+ * this module exists to remove. A hub or computer process that seeds `SLAYZONE_ROOT`
  * to its own working directory must not drag the invoking user's CLI config along
  * with it. (The one backward-looking exception is {@link legacyHubTargetPaths}.)
  */

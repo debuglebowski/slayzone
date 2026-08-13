@@ -75,7 +75,7 @@ function healthState(overrides: Partial<HealthState>): HealthState {
     mode: 'local',
     supervised: false,
     authRequired: false,
-    runnersConnected: () => 0,
+    computersConnected: () => 0,
     ...overrides
   }
 }

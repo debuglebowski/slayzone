@@ -5,7 +5,7 @@
  * The regression this pins: `terminal_tabs.was_spawned` is written by
  * `spawnedSetter` inside pty-manager/chat-transport-manager, and that setter was
  * installed ONLY by the Electron host (`apps/app/src/main/index.ts`). When the
- * pty runtime moved to the side-car (slice 9) and spawning moved to the runner,
+ * pty runtime moved to the side-car (slice 9) and spawning moved to the computer,
  * the host stopped owning any session — so every `spawnedSetter?.(…)` became a
  * no-op, `was_spawned` stayed 0 forever, and `listAutoRestoreTasks` had nothing
  * to restore. Same orphaning that killed idle-close and the warm pool.
@@ -16,7 +16,7 @@
  * `markTabSpawned` into the real `terminal_tabs` row.
  *
  * Plus a narrow source check that the hub's `stop()` sets the shutdown gate
- * BEFORE tearing the runner gateway down — the gate is what keeps a quit-time
+ * BEFORE tearing the computer gateway down — the gate is what keeps a quit-time
  * exit cascade from clearing the very flags the next boot needs.
  *
  * Run with:
@@ -100,13 +100,13 @@ test('composition root: calls wireTabFlagRecorders', () => {
   expect(src.includes('wireTabFlagRecorders(db)')).toBe(true)
 })
 
-test('hub stop(): sets the terminal shutdown gate before tearing down runners', () => {
+test('hub stop(): sets the terminal shutdown gate before tearing down computers', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const src = readFileSync(join(here, 'server.ts'), 'utf8')
   const stopBody = src.slice(src.indexOf('stop: async () => {'))
   const gateAt = stopBody.indexOf('beginTerminalShutdown()')
-  const runnerTeardownAt = stopBody.indexOf('runnerGateway.close()')
+  const computerTeardownAt = stopBody.indexOf('computerGateway.close()')
   expect(gateAt).toBeGreaterThan(-1)
-  expect(runnerTeardownAt).toBeGreaterThan(-1)
-  expect(gateAt < runnerTeardownAt).toBe(true)
+  expect(computerTeardownAt).toBeGreaterThan(-1)
+  expect(gateAt < computerTeardownAt).toBe(true)
 })

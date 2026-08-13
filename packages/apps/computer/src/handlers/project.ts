@@ -1,25 +1,25 @@
 /**
- * Runner-side project → path handlers.
+ * Computer-side project → path handlers.
  *
- * The hub asks "where is project X on you?" instead of telling each runner where
+ * The hub asks "where is project X on you?" instead of telling each computer where
  * a project lives. That inversion is the whole point: a hub holding one path
- * column had to be wrong about at least one machine as soon as two runners laid
+ * column had to be wrong about at least one machine as soon as two computers laid
  * the same project out differently.
  *
- * `path: null` is a first-class answer, not an error — "this runner has no
+ * `path: null` is a first-class answer, not an error — "this computer has no
  * checkout of that project" is exactly the state the single column could never
  * express, since it always had *a* path even for a machine that had never seen
  * the project.
  *
  * Every path passes {@link assertPathAllowed} before it is recorded, so a stored
- * mapping can never point outside the jail the runner enforces everywhere else.
+ * mapping can never point outside the jail the computer enforces everywhere else.
  *
- * @module runner/handlers/project
+ * @module computer/handlers/project
  */
 
 import { existsSync } from 'node:fs'
 import {
-  HubToRunnerMethods,
+  HubToComputerMethods,
   projectForgetPathParamsSchema,
   projectListParamsSchema,
   projectResolvePathParamsSchema,
@@ -98,9 +98,9 @@ export function createProjectHandlers(
   }
 
   return {
-    [HubToRunnerMethods.projectResolvePath]: resolvePath,
-    [HubToRunnerMethods.projectSetPath]: setPath,
-    [HubToRunnerMethods.projectForgetPath]: forgetPath,
-    [HubToRunnerMethods.projectList]: list
+    [HubToComputerMethods.projectResolvePath]: resolvePath,
+    [HubToComputerMethods.projectSetPath]: setPath,
+    [HubToComputerMethods.projectForgetPath]: forgetPath,
+    [HubToComputerMethods.projectList]: list
   }
 }

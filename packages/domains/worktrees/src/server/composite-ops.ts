@@ -30,7 +30,7 @@ import type {
 // `detectChildRepos` moved to ./list-project-repos, where it is now a projection
 // of the same discovery `listProjectRepos` uses. Two independent walks with
 // subtly different rules for "is this a repo" was one bug waiting to happen; and
-// the walk itself had to move to the runner regardless, since it decides the
+// the walk itself had to move to the computer regardless, since it decides the
 // terminal cwd for a workspace that may live on another machine.
 
 /** Detected worktrees with per-worktree colors assigned (main excluded). */
@@ -44,7 +44,7 @@ export async function detectWorktreesWithColors(repoPath: string) {
 // ── Copy / submodule behavior resolvers ──────────────────────────────────────
 /**
  * Policy reads the worktree-creation flow depends on. The default impl
- * (`createDbWorktreePolicyOps`) reads the local DB; a hub/runner split can
+ * (`createDbWorktreePolicyOps`) reads the local DB; a hub/computer split can
  * substitute an impl that resolves policy remotely — exec-side code depends
  * only on this interface, never on the DB directly.
  */

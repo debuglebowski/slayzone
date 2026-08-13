@@ -15,9 +15,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth } from './auth'
-import { mintRunnerApiKey, RUNNER_SERVICE_USER_EMAIL } from './runner-keys'
+import { mintComputerApiKey, RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
 import { createHubUser, listHubUsers, removeHubUser, type CreatedHubUser } from './users'
-import { verifyRunnerApiKey, verifySession } from './verify'
+import { verifyComputerApiKey, verifySession } from './verify'
 
 let tmpDir: string
 let auth: HubAuth
@@ -113,10 +113,10 @@ describe('listHubUsers', () => {
     ])
   })
 
-  it('excludes the internal runner service user', async () => {
-    // Minting a runner key lazily creates the service user, so this is the state
-    // any hub with an enrolled runner is really in.
-    await mintRunnerApiKey(auth, { runnerId: 'runner-1', name: 'ci-runner' })
+  it('excludes the internal computer service user', async () => {
+    // Minting a computer key lazily creates the service user, so this is the state
+    // any hub with an enrolled computer is really in.
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
 
     const listed = await listHubUsers(auth)
@@ -181,25 +181,25 @@ describe('removeHubUser', () => {
   })
 
   it('counts humans only — the service user does not unlock the last-user refusal', async () => {
-    // Two USER ROWS exist here (alice + the runner service identity), but only one
+    // Two USER ROWS exist here (alice + the computer service identity), but only one
     // human. Counting rows instead of humans would let the operator delete alice
     // and leave the hub with no way to authenticate.
-    await mintRunnerApiKey(auth, { runnerId: 'runner-1', name: 'ci-runner' })
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
     expect(await removeHubUser(auth, 'alice@example.com')).toBe('last-user')
   })
 
-  it('refuses the runner service user, leaving runner keys working', async () => {
-    const minted = await mintRunnerApiKey(auth, { runnerId: 'runner-1', name: 'ci-runner' })
+  it('refuses the computer service user, leaving computer keys working', async () => {
+    const minted = await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
     await create('bob@example.com')
 
     expect(await removeHubUser(auth, RUNNER_SERVICE_USER_EMAIL)).toBe('protected')
 
-    // The point of the refusal: every enrolled runner would 401 if this identity
-    // were deleted, because its id is the referenceId on each runner API key.
-    expect(await verifyRunnerApiKey(auth, minted.key)).toEqual({
-      runnerId: 'runner-1',
+    // The point of the refusal: every enrolled computer would 401 if this identity
+    // were deleted, because its id is the referenceId on each computer API key.
+    expect(await verifyComputerApiKey(auth, minted.key)).toEqual({
+      computerId: 'computer-1',
       keyId: minted.keyId
     })
   })

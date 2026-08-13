@@ -17,10 +17,10 @@
  * byte-identical to today (its env is fully supplied by the Electron host).
  *
  * SECURITY SEAM (hub-auth secret): the standalone boot resolves the secret
- * (`env SLAYZONE_HUB_AUTH_SECRET > hub.state.json runnerTransportSecret > generate + persist`)
+ * (`env SLAYZONE_HUB_AUTH_SECRET > hub.state.json computerTransportSecret > generate + persist`)
  * and sets `process.env.SLAYZONE_HUB_AUTH_SECRET` to it BEFORE composeServer runs.
  * composition.ts then reads that env value and NEVER falls back to the shared
- * `'slayzone-dev-runner-secret'` dev constant in standalone (that forgeable-token
+ * `'slayzone-dev-computer-secret'` dev constant in standalone (that forgeable-token
  * default now only applies in supervised/dev, where the Electron host controls
  * the secret). The generated secret is 256-bit and persisted 0600 so it is
  * stable across reboots.

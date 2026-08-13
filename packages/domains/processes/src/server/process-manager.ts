@@ -191,18 +191,18 @@ function doSpawn(proc: ManagedProcess): void {
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
   // Spawn via the pluggable backend. The default (local) backend keeps the exact
-  // shell/env/detached semantics this used to run inline; a runner backend can
-  // remote the exec. `runnerId: null` = run in-process.
+  // shell/env/detached semantics this used to run inline; a computer backend can
+  // remote the exec. `computerId: null` = run in-process.
   //
-  // NOT runner-resolved: `doSpawn` is sync (also driven by restart timers), so it
-  // cannot resolve a runner the way the pty/chat spawn paths do. Routing background
+  // NOT computer-resolved: `doSpawn` is sync (also driven by restart timers), so it
+  // cannot resolve a computer the way the pty/chat spawn paths do. Routing background
   // processes needs an async doSpawn — see the plan's phase C (they are
   // project-level dev servers, not agents, so they are low priority).
   const handle = getProcessBackend().spawn({
     id: proc.id,
     taskId: proc.taskId,
     projectId: proc.projectId,
-    runnerId: null,
+    computerId: null,
     command: proc.command,
     cwd: proc.cwd
   })

@@ -1,13 +1,13 @@
 /**
- * Certificate pinning spec for the runner transport.
+ * Certificate pinning spec for the computer transport.
  *
- * A runner that dials a hub over wss may pin the hub's TLS identity instead
+ * A computer that dials a hub over wss may pin the hub's TLS identity instead
  * of relying on a CA chain (hubs typically present self-signed certs). The
  * pin is the **lowercase hex SHA-256 digest of the server leaf certificate in
  * DER encoding** — the same value OpenSSL prints via
  * `openssl x509 -fingerprint -sha256` (minus colons, lowercased).
  *
- * @module runner/shared/pinning
+ * @module computer/shared/pinning
  */
 
 import { createHash, X509Certificate } from 'node:crypto'

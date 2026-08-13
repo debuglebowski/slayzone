@@ -95,8 +95,8 @@ describe('shouldShellFallback', () => {
 
 // --- decideRecoveryAdoption ---
 //
-// Guards the runner-routed recovery shell. The fallback used to be gated on
-// `runnerId == null`, which silently disabled it once runners ran every pty (a
+// Guards the computer-routed recovery shell. The fallback used to be gated on
+// `computerId == null`, which silently disabled it once computers ran every pty (a
 // crashed agent left a dead pane with no recovery shell). Enabling it remotely
 // introduced a window the local path never had: the spawn is a network
 // round-trip, so the session can be torn down while it is in flight. Only the

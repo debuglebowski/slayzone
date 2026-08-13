@@ -1,5 +1,5 @@
 /**
- * Unit tests for the runner-side ring buffer.
+ * Unit tests for the computer-side ring buffer.
  *
  * The invariant under test is the one the hub's demux depends on: a chunk's bytes
  * are IMMUTABLE once appended. `handlers/pty.ts` documents live frames and

@@ -42,10 +42,10 @@ import { setShellOverride } from '../shell-env'
 const execFileAsync = promisify(execFile)
 
 /**
- * Injectable spawn-time lookups (hub/runner split, wave 2, Model A). Default
+ * Injectable spawn-time lookups (hub/computer split, wave 2, Model A). Default
  * `null` → each `createPtyOps` builds the db-backed impl below, so behavior is
  * byte-identical. A later wave calls `setPtySpawnLookups` at boot (BEFORE
- * `createPtyOps`) to route spawn-time reads — including `resolveRunnerId` —
+ * `createPtyOps`) to route spawn-time reads — including `resolveComputerId` —
  * through the hub RPC. Swap only at a boot quiesce point (no in-flight spawn).
  */
 let injectedSpawnLookups: PtySpawnLookups | null = null
@@ -81,11 +81,11 @@ export interface PtyCreateOpts {
  * of which transport pushed the counts.
  */
 export function createPtyOps(db: SlayzoneDb) {
-  // Wires the pty-manager's session ledger (hub/runner wave 1: the runtime's
+  // Wires the pty-manager's session ledger (hub/computer wave 1: the runtime's
   // DB touchpoints go through an injected ops interface, db-backed by default).
   setDatabase(db)
-  // Spawn-time reads (mode row, task→project, runner assignment) — same queries,
-  // behind the seam. Injectable (wave 2) so a runner-aware impl can replace the
+  // Spawn-time reads (mode row, task→project, computer assignment) — same queries,
+  // behind the seam. Injectable (wave 2) so a computer-aware impl can replace the
   // db default; unset → the db-backed impl (byte-identical). The terminal_modes
   // CRUD below stays on the raw db: that's hub data.
   const lookups = injectedSpawnLookups ?? createDbPtySpawnLookups(db)
@@ -303,29 +303,29 @@ export function createPtyOps(db: SlayzoneDb) {
     // start, same flags), adopt it instead of cold-spawning. A miss is silent —
     // createPty cold-spawns exactly as before.
     //
-    // Claiming is gated on a RESOLVED runner, the inverse of the old rule. It used
-    // to fire only when `runnerId == null`, because the pool was hub-local — which
+    // Claiming is gated on a RESOLVED computer, the inverse of the old rule. It used
+    // to fire only when `computerId == null`, because the pool was hub-local — which
     // meant the hub booted the agent itself in precisely the case that is supposed
-    // to raise "no runner available". The pool now lives on the runner, so a claim
-    // needs a runner rather than the absence of one.
+    // to raise "no computer available". The pool now lives on the computer, so a claim
+    // needs a computer rather than the absence of one.
     let warmClaim: ReturnType<typeof claimWarmShell> = null
     const taskId = opts.sessionId.split(':')[0]
-    let runnerId: string | null = null
+    let computerId: string | null = null
     // Resolved regardless of whether a warm agent is claimed: it is threaded into
     // the spawn spec so the RUNNER can resolve its own cwd when the caller has no
     // absolute path to give (see PtySpawnSpec.projectId).
     let projectId: string | null = null
     if (taskId) {
-      runnerId = await lookups.resolveRunnerId(taskId)
+      computerId = await lookups.resolveComputerId(taskId)
       projectId = await lookups.getTaskProjectId(taskId)
-      if (runnerId != null) {
+      if (computerId != null) {
         if (projectId) {
           warmClaim = claimWarmShell({
             projectId,
             mode: modeId,
             cwd: opts.cwd,
             resuming: !!opts.existingConversationId,
-            runnerId,
+            computerId,
             // The warm agent baked the mode's default flags; only adopt it when
             // this spawn's flags match (else cold-spawn with the right flags).
             flags: opts.providerFlags ?? null
@@ -337,7 +337,7 @@ export function createPtyOps(db: SlayzoneDb) {
     return createPty({
       win: targetWin,
       sessionId: opts.sessionId,
-      runnerId,
+      computerId,
       projectId,
       cwd: opts.cwd,
       conversationId: opts.conversationId,

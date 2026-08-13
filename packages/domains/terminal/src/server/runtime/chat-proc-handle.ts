@@ -1,5 +1,5 @@
 /**
- * The chat spawn seam — the ONE piece a remote runner replaces.
+ * The chat spawn seam — the ONE piece a remote computer replaces.
  *
  * Mirrors the role `PtyBackend`/`PtyHandle` play for terminal mode
  * (`runtime/pty-backend.ts`): the transport owns every bit of session logic
@@ -13,7 +13,7 @@
  * {@link childProcessToHandle} and behaves identically to before.
  *
  * Line framing deliberately stays HUB-side (see {@link createLineSplitter}): the
- * runner is a byte pipe, and `ChatSessionDriver` — handshake, NDJSON parsing,
+ * computer is a byte pipe, and `ChatSessionDriver` — handshake, NDJSON parsing,
  * request correlation — remains the hub's sole responsibility, exactly as
  * `pty-manager` keeps all session logic for routed ptys.
  *
@@ -63,22 +63,22 @@ export interface ChatSpawnSpec {
   sessionId: string
   taskId: string
   /** `null` means "run on the hub". A routing backend reads this to dispatch. */
-  runnerId: string | null
+  computerId: string | null
   /**
    * The provider's binary NAME (e.g. `claude`), not an absolute path. Resolution
    * is the responsibility of whoever will run it — the hub's `whichBinary` runs a
    * LOCAL login shell, so a hub-resolved absolute path is meaningless on a
-   * runner's filesystem.
+   * computer's filesystem.
    */
   binaryName: string
   args: string[]
   /**
    * Absolute cwd, or empty to let the RUNNER resolve it from `projectId`. The
-   * hub cannot: it held one path column covering every runner, so it could only
+   * hub cannot: it held one path column covering every computer, so it could only
    * ever be right about one of them.
    */
   cwd: string
-  /** Lets the runner resolve its own cwd when `cwd` is empty. */
+  /** Lets the computer resolve its own cwd when `cwd` is empty. */
   projectId?: string | null
   /** Identity/MCP env overlay for this spawn. */
   env: Record<string, string>

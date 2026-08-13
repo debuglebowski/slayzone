@@ -108,7 +108,7 @@ const HUB_A = {
   pid: 111,
   mode: 'local',
   supervised: false,
-  runnersConnected: 2,
+  computersConnected: 2,
   uptimeMs: 90_000,
   commit: 'abc1234',
   builtAt: '2026-07-30T00:00:00.000Z',
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
       assertEq(h.pid, 111, 'pid')
       assertEq(h.mode, 'local', 'mode')
       assertEq(h.supervised, false, 'supervised')
-      assertEq(h.runnersConnected, 2, 'runnersConnected')
+      assertEq(h.computersConnected, 2, 'computersConnected')
       assertEq(h.uptimeMs, 90_000, 'uptimeMs')
       assertEq(h.buildId, HUB_A.buildId, 'buildId')
     })

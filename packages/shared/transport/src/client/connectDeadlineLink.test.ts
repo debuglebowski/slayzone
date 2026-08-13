@@ -7,7 +7,7 @@
  * awaits `open()`, and a failed `open()` returns the reconnect promise, which
  * only settles once the hub comes back. Nothing errors it in the meantime, so
  * every consumer sits on `isPending` forever (the symptom: a remote hub card
- * whose runner list is skeleton rows with no end).
+ * whose computer list is skeleton rows with no end).
  *
  * If a future @trpc/client errors those queued requests on its own, that first
  * test fails — which is the signal to reconsider this link, not to loosen it.

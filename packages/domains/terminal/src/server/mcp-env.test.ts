@@ -1,12 +1,12 @@
 /**
  * Unit tests for buildMcpEnv + resolveRemoteMcpEnv — the per-PTY env injected
- * for AI-agent subprocesses (hub/runner split, wave 3).
+ * for AI-agent subprocesses (hub/computer split, wave 3).
  *
  * The load-bearing invariant: NEITHER a local nor a remote spawn injects hub
- * dial/auth env. A LOCAL spawn (`runnerId == null`, or no remote target) gets the
+ * dial/auth env. A LOCAL spawn (`computerId == null`, or no remote target) gets the
  * loopback SLAYZONE_AGENT_HOOK_URL and no hub env; no port var either — the CLI
  * reads the port from the DB. A REMOTE spawn is byte-identical for identity: the
- * agent posts to the RUNNER's loopback, and the runner overlays the hook URL and
+ * agent posts to the RUNNER's loopback, and the computer overlays the hook URL and
  * relays to the hub over its own ws channel.
  *
  * `HUB_ENV_KEYS` below pins both the live dial var (SLAYZONE_HUB_ADDRESS) and the
@@ -36,8 +36,8 @@ const HUB_ENV_KEYS = ['SLAYZONE_HUB_ADDRESS', ...RETIRED_HUB_ENV_KEYS] as const
 /**
  * No hub dial env AT ALL — the REMOTE invariant.
  *
- * A remote spawn runs on someone else's runner box, so handing it the hub's
- * address is a leak; the runner already owns its own relay. Unchanged.
+ * A remote spawn runs on someone else's computer box, so handing it the hub's
+ * address is a leak; the computer already owns its own relay. Unchanged.
  */
 function assertNoHubEnv(env: Record<string, string>, where: string): void {
   for (const key of HUB_ENV_KEYS) {
@@ -78,11 +78,11 @@ const MCP_PORT = 54321
 ;(globalThis as Record<string, unknown>).__serverPort = MCP_PORT
 
 const REMOTE: RemoteMcpEnv = {
-  runnerId: 'runner-xyz',
+  computerId: 'computer-xyz',
   hubBaseUrl: 'https://hub.example:8443'
 }
 
-// ── LOCAL (runnerId == null): byte-identical to today's loopback env ─────────
+// ── LOCAL (computerId == null): byte-identical to today's loopback env ─────────
 
 // 1. Local hook-capable agent → loopback hook URL, no port env, no hub env.
 {
@@ -163,11 +163,11 @@ const REMOTE: RemoteMcpEnv = {
 
 // 3b. SLAYZONE_ROOT is set for EVERY spawn, not only hook-capable ones —
 // including a plain shell with no mode at all. Regression guard for the
-// channel-scoped layout: a pty routed through the co-located local runner
-// inherits THAT runner's own role-scoped SLAYZONE_ROOT through the base env
+// channel-scoped layout: a pty routed through the co-located local computer
+// inherits THAT computer's own role-scoped SLAYZONE_ROOT through the base env
 // (the manifest tags the var `global`, so sanitizeSpawnEnv keeps it). The hub's
 // value must override it at the spawn boundary, or `slay` inside a plain
-// terminal resolves the runner's credential dir instead of the hub's DB.
+// terminal resolves the computer's credential dir instead of the hub's DB.
 {
   for (const [label, env] of [
     ['non-hook mode', await buildMcpEnv(null, 'task-3b', 'some-unknown-mode' as never)],
@@ -184,22 +184,22 @@ const REMOTE: RemoteMcpEnv = {
   }
 }
 
-// ── REMOTE (runnerId != null + provider): agent posts to RUNNER LOOPBACK ──────
+// ── REMOTE (computerId != null + provider): agent posts to RUNNER LOOPBACK ──────
 //
 // New topology: the agent env is byte-identical local vs remote. The agent
-// ALWAYS posts to runner loopback; the RUNNER overlays SLAYZONE_AGENT_HOOK_URL
+// ALWAYS posts to computer loopback; the RUNNER overlays SLAYZONE_AGENT_HOOK_URL
 // (it owns its own loopback port) and relays to the hub over its ws channel.
 // So buildMcpEnv's remote branch sets NO hub URL, NO bearer, and NO hook URL
-// (the runner supplies it) — only the agent id + ROOT + the opaque ctx blob.
+// (the computer supplies it) — only the agent id + ROOT + the opaque ctx blob.
 
 // 4. Remote hook-capable → agent id + ROOT + ctx blob; NO hub env, NO hook URL.
 {
   const env = await buildMcpEnv(null, 'task-r1', 'claude-code', undefined, undefined, REMOTE)
-  assertNoHubEnv(env, 'remote (agent posts to runner loopback)')
+  assertNoHubEnv(env, 'remote (agent posts to computer loopback)')
   assert(!('SLAYZONE_HUB_TOKEN' in env), 'remote must NOT inject a bearer (loopback is unauthed)')
   assert(
     !('SLAYZONE_AGENT_HOOK_URL' in env),
-    'remote buildMcpEnv must NOT set the hook URL — the runner overlays its own loopback URL'
+    'remote buildMcpEnv must NOT set the hook URL — the computer overlays its own loopback URL'
   )
   assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'remote still sets SLAYZONE_AGENT_ID')
   assert('SLAYZONE_ROOT' in env, 'remote hook-capable still sets SLAYZONE_ROOT')
@@ -214,7 +214,7 @@ const REMOTE: RemoteMcpEnv = {
   const remote = await buildMcpEnv(null, 'task-same', 'claude-code', undefined, undefined, REMOTE)
   // Same identity blob + agent id. Two deliberate differences, both loopback-shaped
   // and neither an identity field: local carries the hook URL (remote defers to the
-  // runner overlay) and local carries the hub authority (remote must not — it would
+  // computer overlay) and local carries the hub authority (remote must not — it would
   // ship this hub's address to another box).
   assert(remote.SLAYZONE_AGENT_ID === local.SLAYZONE_AGENT_ID, 'agent id identical local vs remote')
   assert(!('SLAYZONE_HUB_ADDRESS' in remote), 'remote must NOT carry this hub address')
@@ -223,7 +223,7 @@ const REMOTE: RemoteMcpEnv = {
     'ctx blob identical local vs remote'
   )
   assert('SLAYZONE_AGENT_HOOK_URL' in local, 'local sets the loopback hook URL')
-  assert(!('SLAYZONE_AGENT_HOOK_URL' in remote), 'remote leaves the hook URL to the runner')
+  assert(!('SLAYZONE_AGENT_HOOK_URL' in remote), 'remote leaves the hook URL to the computer')
 }
 
 // 6. Remote non-hook-capable → nothing hook-related, no hub env.
@@ -243,7 +243,7 @@ const REMOTE: RemoteMcpEnv = {
 
 // ── resolveRemoteMcpEnv: the seam that gates remote vs local ─────────────────
 
-// 7. runnerId == null → null regardless of provider (local, today's only path).
+// 7. computerId == null → null regardless of provider (local, today's only path).
 {
   let called = false
   const provider = () => {
@@ -252,34 +252,34 @@ const REMOTE: RemoteMcpEnv = {
   }
   const r = await resolveRemoteMcpEnv(provider, {
     taskId: 't',
-    runnerId: null,
+    computerId: null,
     mode: 'claude-code'
   })
-  assert(r === null, 'runnerId null must resolve to null')
-  assert(called === false, 'provider must NOT be called for a local (null-runner) spawn')
+  assert(r === null, 'computerId null must resolve to null')
+  assert(called === false, 'provider must NOT be called for a local (null-computer) spawn')
 }
 
-// 8. runnerId != null + no provider → null (runner off / provider unset).
+// 8. computerId != null + no provider → null (computer off / provider unset).
 {
-  const r = await resolveRemoteMcpEnv(null, { taskId: 't', runnerId: 'r1', mode: 'claude-code' })
-  assert(r === null, 'no provider must resolve to null even with a runnerId')
+  const r = await resolveRemoteMcpEnv(null, { taskId: 't', computerId: 'r1', mode: 'claude-code' })
+  assert(r === null, 'no provider must resolve to null even with a computerId')
 }
 
-// 9. runnerId != null + provider → the provider's resolved target, args forwarded.
+// 9. computerId != null + provider → the provider's resolved target, args forwarded.
 {
-  let seen: { taskId?: string; runnerId?: string; mode?: string } | null = null
-  const provider = (args: { taskId: string | undefined; runnerId: string; mode?: string }) => {
+  let seen: { taskId?: string; computerId?: string; mode?: string } | null = null
+  const provider = (args: { taskId: string | undefined; computerId: string; mode?: string }) => {
     seen = args
     return REMOTE
   }
   const r = await resolveRemoteMcpEnv(provider, {
     taskId: 'task-9',
-    runnerId: 'runner-xyz',
+    computerId: 'computer-xyz',
     mode: 'claude-code'
   })
   assert(r === REMOTE, 'provider result is returned verbatim')
   assert(seen !== null && seen!.taskId === 'task-9', 'taskId forwarded to provider')
-  assert(seen!.runnerId === 'runner-xyz', 'runnerId forwarded to provider')
+  assert(seen!.computerId === 'computer-xyz', 'computerId forwarded to provider')
   assert(seen!.mode === 'claude-code', 'mode forwarded to provider')
 }
 
@@ -290,7 +290,7 @@ const REMOTE: RemoteMcpEnv = {
   }
   const r = await resolveRemoteMcpEnv(provider, {
     taskId: 't',
-    runnerId: 'r1',
+    computerId: 'r1',
     mode: 'claude-code'
   })
   assert(r === null, 'a throwing provider must degrade to null')
@@ -300,7 +300,7 @@ const REMOTE: RemoteMcpEnv = {
 {
   const r = await resolveRemoteMcpEnv(() => null, {
     taskId: 't',
-    runnerId: 'r1',
+    computerId: 'r1',
     mode: 'claude-code'
   })
   assert(r === null, 'provider returning null resolves to null')
@@ -311,13 +311,13 @@ const REMOTE: RemoteMcpEnv = {
 {
   const blank = await resolveRemoteMcpEnv(() => ({ ...REMOTE, hubBaseUrl: '' }), {
     taskId: 't',
-    runnerId: 'r1',
+    computerId: 'r1',
     mode: 'claude-code'
   })
   assert(blank === null, 'blank hubBaseUrl must resolve to null')
   const ws = await resolveRemoteMcpEnv(() => ({ ...REMOTE, hubBaseUrl: '   ' }), {
     taskId: 't',
-    runnerId: 'r1',
+    computerId: 'r1',
     mode: 'claude-code'
   })
   assert(ws === null, 'whitespace-only hubBaseUrl must resolve to null')

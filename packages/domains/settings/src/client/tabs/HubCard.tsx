@@ -4,32 +4,32 @@ import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
-import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/runner-identity'
+import { DEFAULT_LOCAL_RUNNER_NAME } from '@slayzone/platform/computer-identity'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
-import { useRunnerActions } from './RunnerActions'
+import { useComputerActions } from './ComputerActions'
 
 /**
- * A hub, as a card that owns its runners.
+ * A hub, as a card that owns its computers.
  *
- * WHY NESTED. A runner belongs to exactly ONE hub, and which hub is decided when
+ * WHY NESTED. A computer belongs to exactly ONE hub, and which hub is decided when
  * the token is MINTED — the token embeds that hub's dial URL and TLS fingerprint.
- * Listing runners inside their hub makes that containment the shape of the UI, so
+ * Listing computers inside their hub makes that containment the shape of the UI, so
  * the enrollment affordance's POSITION is the hub choice: no picker, and no way to
  * mint a token against a hub the operator didn't mean.
  *
  * WHY A RAIL. The card border alone did not carry it: a bare column grid under a
  * hub row reads as that hub's own properties, because every column header
- * (Name/Platform/Status) is generic. Runners hang off an indented connector
- * instead, under a "Runners" heading, with ＋ Add runner as the LAST LEAF — so
+ * (Name/Platform/Status) is generic. Computers hang off an indented connector
+ * instead, under a "Computers" heading, with ＋ Add computer as the LAST LEAF — so
  * enrolling is visibly an operation inside this hub rather than a page action.
  * Column headers are gone with it; the values (`darwin-arm64`, `pty, git`) label
  * themselves, and the heading names the rows once.
  *
- * WHY THE CARD LIVES HERE rather than in `HubsSettingsTab`. The body is the runner
+ * WHY THE CARD LIVES HERE rather than in `HubsSettingsTab`. The body is the computer
  * list and only this component can query it, so the hub's own identity/controls
  * come in as slots. `HubCardShell` is the shared chrome, exported for the hubs
- * that CANNOT have a runner list at all (see `HubsSettingsTab.hubCardFor`).
+ * that CANNOT have a computer list at all (see `HubsSettingsTab.hubCardFor`).
  *
  * WHY A SEPARATE COMPONENT FROM THE TAB. `useTRPC()` resolves to the nearest
  * provider, so one component cannot query more than one hub with hooks. Mounted
@@ -45,7 +45,7 @@ import { useRunnerActions } from './RunnerActions'
  * THE LOCAL RUNNER is the one row this client can control as a PROCESS rather than
  * as a registry entry: it is the app's own supervised child. So on the local hub
  * only, its row carries a restart action, and its ABSENCE gets a leaf of its own —
- * a local hub with no local runner cannot execute anything at all, and that state
+ * a local hub with no local computer cannot execute anything at all, and that state
  * is reachable (boot-time join-token mint failure) with no way out but relaunching.
  */
 
@@ -74,7 +74,7 @@ export interface HubCardShellProps {
   primary?: ReactNode
   /** Everything else, behind `⋯`. */
   more: ReactNode
-  /** The card body — the runners area. */
+  /** The card body — the computers area. */
   body: ReactNode
 }
 
@@ -93,10 +93,10 @@ export function HubCardShell({
       data-testid={`hub-group-${hubId}`}
       data-hub-id={hubId}
     >
-      {/* The header is the HUB's alone. Nothing runner-derived sits here — a count
+      {/* The header is the HUB's alone. Nothing computer-derived sits here — a count
           beside the hub's own address reads as a property of the hub, and the rows
           below state it anyway. */}
-      {/* NO gap between the slots — the runner rows below are table cells, which
+      {/* NO gap between the slots — the computer rows below are table cells, which
           have no gaps to mirror, so a gap here would offset every column by the
           accumulated 8px and the two rows would never line up. Spacing lives
           inside the slots (their fixed widths) instead. */}
@@ -153,12 +153,12 @@ export function HubStatus({
 }
 
 /**
- * "Runners", plus an optional note for the states that are NOT a list of rows.
+ * "Computers", plus an optional note for the states that are NOT a list of rows.
  *
  * Shared with the hubs that cannot be queried at all, so every card names what its
  * body is about — even when that body is one line of explanation.
  */
-export function RunnersHeading({
+export function ComputersHeading({
   note,
   noteTestId,
   action
@@ -170,7 +170,7 @@ export function RunnersHeading({
 }) {
   return (
     <div className="flex min-h-7 items-center gap-2 pb-1">
-      <span className="text-muted-foreground text-xs font-medium">Runners</span>
+      <span className="text-muted-foreground text-xs font-medium">Computers</span>
       {note ? (
         <span className="text-muted-foreground text-xs" data-testid={noteTestId}>
           {note}
@@ -184,7 +184,7 @@ export function RunnersHeading({
 /** One placeholder leaf, shown while the first load is in flight. */
 function SkeletonRow({ rail = true, last = false }: { rail?: boolean; last?: boolean }) {
   return (
-    <tr data-testid="runner-row-skeleton">
+    <tr data-testid="computer-row-skeleton">
       {rail ? <Rail last={last} /> : <td className="w-8" />}
       <td className="py-2 pr-3 pl-2">
         <div className="flex items-center gap-2">
@@ -207,8 +207,8 @@ export interface HubCardProps {
   /** Display label, used when naming the hub a freshly minted token points at. */
   hubLabel: string
   /**
-   * This hub is the LOCAL one — i.e. its runners include the app's own supervised
-   * child, the only runner this client can restart. False for every remote hub:
+   * This hub is the LOCAL one — i.e. its computers include the app's own supervised
+   * child, the only computer this client can restart. False for every remote hub:
    * their machines' processes are not ours to cycle.
    */
   isLocalHub: boolean
@@ -222,7 +222,7 @@ export interface HubCardProps {
 /**
  * Connection state and last-seen as ONE field.
  *
- * They were two columns, and for a connected runner both read "Connected" — the
+ * They were two columns, and for a connected computer both read "Connected" — the
  * second carried information only while disconnected. Merged, the cell always
  * answers "can this take work right now, and if not, when did it last check in".
  */
@@ -244,7 +244,7 @@ function statusText(row: { connected: boolean; lastSeenAt: number | null }): str
  * `last` terminates the vertical at the elbow, which is the whole job of `└`.
  */
 /**
- * The leading 32px of a runner row, matching the width of the header's star
+ * The leading 32px of a computer row, matching the width of the header's star
  * button (`icon-sm` = `size-8`). Whatever fills it — rail or marker — the name
  * beside it therefore starts at the same x as the hub's own name one row up.
  */
@@ -295,39 +295,39 @@ export function HubCard({
     requestRestart,
     requestStart,
     restarting,
-    runnerRevision
-  } = useRunnerActions()
+    computerRevision
+  } = useComputerActions()
 
   const [adding, setAdding] = useState(false)
   const [label, setLabel] = useState('')
 
-  // A hub always accepts runners, so the list is always available (no mode to
-  // enable). `list` merges live connection status when a runner is connected;
+  // A hub always accepts computers, so the list is always available (no mode to
+  // enable). `list` merges live connection status when a computer is connected;
   // it's a plain DB read otherwise.
-  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
-  const runners = runnersQuery.data ?? []
+  const computersQuery = useQuery(trpc.computers.list.queryOptions())
+  const computers = computersQuery.data ?? []
 
-  const revokeMutation = useMutation(trpc.computers.revokeRunner.mutationOptions())
+  const revokeMutation = useMutation(trpc.computers.revokeComputer.mutationOptions())
   const mintMutation = useMutation(trpc.computers.mintJoinToken.mutationOptions())
 
-  // Refetch after the local runner is restarted/started. The runner re-dials
-  // asynchronously after the spawn returns and `runners.list` does not poll, so
+  // Refetch after the local computer is restarted/started. The computer re-dials
+  // asynchronously after the spawn returns and `computers.list` does not poll, so
   // without this the list would sit on "Disconnected".
   useEffect(() => {
-    if (runnerRevision === 0) return
+    if (computerRevision === 0) return
     void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
-  }, [runnerRevision, queryClient, trpc])
+  }, [computerRevision, queryClient, trpc])
 
   // Only meaningful on the local hub. Gated on `isSuccess` so the first render
-  // (no data yet) doesn't flash "not running" at a perfectly healthy runner.
-  const localRunnerMissing =
+  // (no data yet) doesn't flash "not running" at a perfectly healthy computer.
+  const localComputerMissing =
     isLocalHub &&
-    runnersQuery.isSuccess &&
-    !runners.some((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
+    computersQuery.isSuccess &&
+    !computers.some((r) => r.name === DEFAULT_LOCAL_RUNNER_NAME)
 
   const mint = async (): Promise<void> => {
     try {
-      const res = await mintMutation.mutateAsync({ label: label.trim() || 'runner' })
+      const res = await mintMutation.mutateAsync({ label: label.trim() || 'computer' })
       showMintedToken({ token: res.token, hubLabel, hubUrl: res.hubUrl })
       setLabel('')
       setAdding(false)
@@ -340,37 +340,37 @@ export function HubCard({
 
   // First load only — a background refetch keeps the current rows on screen
   // rather than replacing a live list with placeholders.
-  const firstLoad = !runnersQuery.isSuccess && !runnersQuery.isError
+  const firstLoad = !computersQuery.isSuccess && !computersQuery.isError
 
   /**
-   * THE LOCAL HUB'S RUNNER SET IS A SINGLETON — exactly one runner, the app's own
+   * THE LOCAL HUB'S RUNNER SET IS A SINGLETON — exactly one computer, the app's own
    * supervised child, spawned and enrolled at boot. A machine you point at a hub
-   * is a runner for a hub OTHER machines can reach, which a local hub is not: a
+   * is a computer for a hub OTHER machines can reach, which a local hub is not: a
    * token minted here carries a loopback dial address, redeemable only by
-   * something already on this machine, where that one runner already is.
+   * something already on this machine, where that one computer already is.
    *
    * Every piece of list chrome presupposes more than one, so none of it renders
-   * here: no rail to branch, no plural "Runners" heading, no refresh-the-LIST
-   * button, no add leaf. What remains is the runner row itself, laid out exactly
+   * here: no rail to branch, no plural "Computers" heading, no refresh-the-LIST
+   * button, no add leaf. What remains is the computer row itself, laid out exactly
    * as a remote hub's rows are — the row is the same, only the scaffolding it
    * doesn't need is gone.
    *
    * Remote hubs keep all of it; that is the case it was built for.
    */
-  const singleRunner = isLocalHub
-  const canEnroll = !singleRunner
+  const singleComputer = isLocalHub
+  const canEnroll = !singleComputer
 
   /**
    * The rail's terminator belongs to whichever leaf renders LAST, and that is no
    * longer always the add leaf — a local card has none. Resolved once here rather
    * than guessed per row, so the elbow can't end up on two rows or none.
    */
-  const lastLeaf: 'add' | 'missing' | 'runner' | 'skeleton' = canEnroll
+  const lastLeaf: 'add' | 'missing' | 'computer' | 'skeleton' = canEnroll
     ? 'add'
-    : localRunnerMissing
+    : localComputerMissing
       ? 'missing'
-      : runners.length > 0
-        ? 'runner'
+      : computers.length > 0
+        ? 'computer'
         : 'skeleton'
 
   /**
@@ -381,28 +381,28 @@ export function HubCard({
    * about that hub's configuration rather than a description of a failed request.
    */
   const note = (): string | undefined => {
-    if (runnersQuery.isError) return 'could not reach this hub'
+    if (computersQuery.isError) return 'could not reach this hub'
     if (firstLoad) return undefined
-    if (runners.length === 0 && !localRunnerMissing) return 'none enrolled'
+    if (computers.length === 0 && !localComputerMissing) return 'none enrolled'
     return undefined
   }
 
   /**
-   * `runners.list` does not poll — connection status is whatever it was when the
-   * query last ran. Without this, a runner that reconnected is indistinguishable
+   * `computers.list` does not poll — connection status is whatever it was when the
+   * query last ran. Without this, a computer that reconnected is indistinguishable
    * from one that is still down until something else happens to invalidate.
    */
   const refresh = (
     <IconButton
       size="icon-sm"
       variant="ghost"
-      aria-label="Refresh runner status"
-      title="Re-check which runners are connected"
-      disabled={runnersQuery.isFetching}
-      onClick={() => void runnersQuery.refetch()}
-      data-testid="runner-refresh"
+      aria-label="Refresh computer status"
+      title="Re-check which computers are connected"
+      disabled={computersQuery.isFetching}
+      onClick={() => void computersQuery.refetch()}
+      data-testid="computer-refresh"
     >
-      <RefreshCw className={cn('size-3.5', runnersQuery.isFetching && 'animate-spin')} />
+      <RefreshCw className={cn('size-3.5', computersQuery.isFetching && 'animate-spin')} />
     </IconButton>
   )
 
@@ -416,35 +416,35 @@ export function HubCard({
       more={more}
       body={
         <>
-          {singleRunner ? (
-            // No heading and no list-refresh on a one-runner hub, but the states
+          {singleComputer ? (
+            // No heading and no list-refresh on a one-computer hub, but the states
             // that are NOT a row still have to be said out loud — an unreachable
             // hub must not simply render nothing.
             note() ? (
-              <p className="text-muted-foreground pb-1 text-xs" data-testid="hub-runners-summary">
+              <p className="text-muted-foreground pb-1 text-xs" data-testid="hub-computers-summary">
                 {note()}
               </p>
             ) : null
           ) : (
-            <RunnersHeading note={note()} noteTestId="hub-runners-summary" action={refresh} />
+            <ComputersHeading note={note()} noteTestId="hub-computers-summary" action={refresh} />
           )}
           {/* `table-fixed`: with no column headers the values are the only thing
               setting width, so auto layout would re-flow the whole rail whenever a
-              runner name changed length. */}
-          <table className="w-full table-fixed text-sm" data-testid="runners-table">
+              computer name changed length. */}
+          <table className="w-full table-fixed text-sm" data-testid="computers-table">
             <tbody>
               {firstLoad && (
                 <>
-                  <SkeletonRow rail={!singleRunner} />
-                  <SkeletonRow rail={!singleRunner} last={lastLeaf === 'skeleton'} />
+                  <SkeletonRow rail={!singleComputer} />
+                  <SkeletonRow rail={!singleComputer} last={lastLeaf === 'skeleton'} />
                 </>
               )}
-              {runners.map((runner, i) => (
-                <tr key={runner.id} data-testid="runner-row">
-                  {singleRunner ? (
+              {computers.map((computer, i) => (
+                <tr key={computer.id} data-testid="computer-row">
+                  {singleComputer ? (
                     <Marker />
                   ) : (
-                    <Rail last={lastLeaf === 'runner' && i === runners.length - 1} />
+                    <Rail last={lastLeaf === 'computer' && i === computers.length - 1} />
                   )}
                   {/* Name then muted meta on one line — the same shape as the
                       hub's own `Local  this machine` directly above. Three equal
@@ -452,12 +452,12 @@ export function HubCard({
                       two rows read as unrelated tables. */}
                   <td className="py-2 pr-3 pl-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="shrink-0 text-sm font-medium">{runner.name}</span>
+                      <span className="shrink-0 text-sm font-medium">{computer.name}</span>
                       <span className="text-muted-foreground truncate font-mono text-xs">
-                        {runner.platform}
+                        {computer.platform}
                       </span>
                       <span className="text-muted-foreground truncate text-xs">
-                        {runner.capabilities.length > 0 ? runner.capabilities.join(', ') : '—'}
+                        {computer.capabilities.length > 0 ? computer.capabilities.join(', ') : '—'}
                       </span>
                     </div>
                   </td>
@@ -466,76 +466,76 @@ export function HubCard({
                       similar. */}
                   <td className="w-32 py-2 pr-3">
                     <HubStatus
-                      tone={runner.connected ? 'ok' : 'idle'}
-                      label={statusText(runner)}
-                      title={statusText(runner)}
+                      tone={computer.connected ? 'ok' : 'idle'}
+                      label={statusText(computer)}
+                      title={statusText(computer)}
                     />
                   </td>
                   <td className="w-24 py-2 text-right">
-                    {/* Which folders this runner may touch. Offered for EVERY
-                        runner, local included: the app's filesystem work now runs
-                        on the runner that owns the workspace, so a project outside
+                    {/* Which folders this computer may touch. Offered for EVERY
+                        computer, local included: the app's filesystem work now runs
+                        on the computer that owns the workspace, so a project outside
                         these roots is one the UI genuinely cannot open — and the
-                        local runner's default jail is only $HOME. */}
+                        local computer's default jail is only $HOME. */}
                     <Button
                       variant="ghost"
                       size="sm"
-                      title="Folders this runner may access"
+                      title="Folders this computer may access"
                       onClick={() =>
                         requestEditRoots({
-                          id: runner.id,
-                          name: runner.name,
-                          load: () => trpcClient.workspace.listRoots.query({ runnerId: runner.id }),
+                          id: computer.id,
+                          name: computer.name,
+                          load: () => trpcClient.workspace.listRoots.query({ computerId: computer.id }),
                           save: (roots) =>
                             trpcClient.workspace.setAllowedRoots.mutate({
-                              runnerId: runner.id,
+                              computerId: computer.id,
                               roots
                             })
                         })
                       }
-                      data-testid="runner-edit-roots"
+                      data-testid="computer-edit-roots"
                     >
                       <FolderCog className="size-3.5" />
                     </Button>
-                    {/* The app's OWN supervised child — the one runner it can cycle
+                    {/* The app's OWN supervised child — the one computer it can cycle
                         as a process. Restarting kills every agent pty on this
                         machine, so the provider gates it behind a confirm. */}
-                    {isLocalHub && runner.name === DEFAULT_LOCAL_RUNNER_NAME && (
+                    {isLocalHub && computer.name === DEFAULT_LOCAL_RUNNER_NAME && (
                       <Button
                         variant="ghost"
                         size="sm"
                         disabled={restarting}
-                        title="Restart local runner (stops running agents + terminals; reconnects automatically)"
+                        title="Restart local computer (stops running agents + terminals; reconnects automatically)"
                         onClick={requestRestart}
-                        data-testid="runner-local-restart"
+                        data-testid="computer-local-restart"
                       >
                         <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
                       </Button>
                     )}
-                    {/* The app's own supervised runner is NOT revocable. Revoking
+                    {/* The app's own supervised computer is NOT revocable. Revoking
                         it would delete the credential the app re-dials with, and
                         nothing on this machine could execute until a relaunch
                         re-enrolled one — a one-click way to break the install with
-                        no corresponding way to undo it. Every OTHER runner on this
+                        no corresponding way to undo it. Every OTHER computer on this
                         hub keeps its revoke, including ones enrolled before the
                         local hub stopped offering enrollment. */}
-                    {!(isLocalHub && runner.name === DEFAULT_LOCAL_RUNNER_NAME) && (
+                    {!(isLocalHub && computer.name === DEFAULT_LOCAL_RUNNER_NAME) && (
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() =>
                           requestRevoke({
-                            id: runner.id,
-                            name: runner.name,
+                            id: computer.id,
+                            name: computer.name,
                             // Closed over this hub's mutation + QueryClient, so a
                             // revoke cannot be routed to the wrong hub.
                             revoke: async () => {
-                              await revokeMutation.mutateAsync({ runnerId: runner.id })
+                              await revokeMutation.mutateAsync({ computerId: computer.id })
                               void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
                             }
                           })
                         }
-                        data-testid="runner-revoke"
+                        data-testid="computer-revoke"
                       >
                         <Trash2 className="text-destructive size-3.5" />
                       </Button>
@@ -547,14 +547,14 @@ export function HubCard({
                 </tr>
               ))}
 
-              {/* No local runner on the local hub = nothing on this machine can
-                  execute: agents, terminals and git work all run on runners.
+              {/* No local computer on the local hub = nothing on this machine can
+                  execute: agents, terminals and git work all run on computers.
                   Reachable when the boot-time join-token mint fails (diagnostic
-                  `local_runner.unspawned`), which used to be recoverable only by
+                  `local_computer.unspawned`), which used to be recoverable only by
                   relaunching the app. */}
-              {localRunnerMissing && (
-                <tr data-testid="runner-local-missing">
-                  {singleRunner ? (
+              {localComputerMissing && (
+                <tr data-testid="computer-local-missing">
+                  {singleComputer ? (
                     <td className="text-destructive/70 w-8 py-2 text-center" aria-hidden="true">
                       ⨯
                     </td>
@@ -564,10 +564,10 @@ export function HubCard({
                   <td className="py-2 pr-3 pl-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="text-muted-foreground shrink-0 text-sm font-medium">
-                        Local runner
+                        Local computer
                       </span>
                       <span className="text-muted-foreground truncate text-xs">
-                        agents, terminals and git work all run on runners
+                        agents, terminals and git work all run on computers
                       </span>
                     </div>
                   </td>
@@ -579,9 +579,9 @@ export function HubCard({
                       variant="outline"
                       size="sm"
                       disabled={restarting}
-                      title="Start the local runner"
+                      title="Start the local computer"
                       onClick={requestStart}
-                      data-testid="runner-local-start"
+                      data-testid="computer-local-start"
                     >
                       {restarting ? <RotateCw className="mr-1 size-3.5 animate-spin" /> : null}
                       Start
@@ -592,10 +592,10 @@ export function HubCard({
               )}
 
               {/* Last leaf: enrolling is an operation INSIDE this hub, and sits
-                  where the runner it creates will appear. Absent on the local hub
+                  where the computer it creates will appear. Absent on the local hub
                   — see `canEnroll`. */}
               {canEnroll && (
-                <tr data-testid="runner-add-row">
+                <tr data-testid="computer-add-row">
                   <Rail last />
                   <td colSpan={4} className="py-1">
                     {adding ? (
@@ -604,10 +604,10 @@ export function HubCard({
                           <Input
                             value={label}
                             onChange={(e) => setLabel(e.target.value)}
-                            placeholder="Runner label (e.g. office-mac)"
+                            placeholder="Computer label (e.g. office-mac)"
                             disabled={mintMutation.isPending}
                             className="max-w-xs"
-                            data-testid="runner-enroll-label"
+                            data-testid="computer-enroll-label"
                           />
                           <Button
                             variant="outline"
@@ -615,12 +615,12 @@ export function HubCard({
                             onClick={() => {
                               void mint()
                             }}
-                            data-testid="runner-add"
+                            data-testid="computer-add"
                           >
                             {mintMutation.isPending ? (
                               <Loader2 className="mr-2 size-4 animate-spin" />
                             ) : null}
-                            Add a runner
+                            Add a computer
                           </Button>
                           <Button
                             variant="ghost"
@@ -630,7 +630,7 @@ export function HubCard({
                               setAdding(false)
                               setLabel('')
                             }}
-                            data-testid="runner-add-cancel"
+                            data-testid="computer-add-cancel"
                           >
                             <X className="size-4" />
                           </Button>
@@ -638,7 +638,7 @@ export function HubCard({
                         <p className="text-muted-foreground mt-2 text-xs">
                           Mint a one-time enrollment token for{' '}
                           <span className="text-foreground">{hubLabel || 'this hub'}</span> and
-                          paste it into the runner machine&apos;s config. The token embeds that
+                          paste it into the computer machine&apos;s config. The token embeds that
                           hub&apos;s address and TLS fingerprint, and expires after 15 minutes.
                         </p>
                       </>
@@ -647,10 +647,10 @@ export function HubCard({
                         type="button"
                         onClick={() => setAdding(true)}
                         className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
-                        data-testid="runner-add-open"
+                        data-testid="computer-add-open"
                       >
                         <Plus className="size-4" />
-                        Add runner
+                        Add computer
                       </button>
                     )}
                   </td>

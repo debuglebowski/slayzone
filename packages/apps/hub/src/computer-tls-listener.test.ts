@@ -1,27 +1,27 @@
 /**
- * Runner `/computers` cert-pinning seam + URL derivation (single-listener model).
+ * Computer `/computers` cert-pinning seam + URL derivation (single-listener model).
  *
  * `/computers` no longer has its own listener — it rides the ONE hub listener,
  * demuxed by path (server.ts). In remote mode that listener terminates TLS with
- * the hub identity leaf (loadOrCreateHubIdentity), so a runner still pins the
+ * the hub identity leaf (loadOrCreateHubIdentity), so a computer still pins the
  * leaf's sha256 fingerprint (carried in its join token) on the ws 'upgrade' event
- * before sending any runner frame (hub-dialer verifyPinnedCert). This test proves
- * the pin seam still holds on the SHARED listener, and that `deriveRunnerHubUrl`
+ * before sending any computer frame (hub-dialer verifyPinnedCert). This test proves
+ * the pin seam still holds on the SHARED listener, and that `deriveComputerHubUrl`
  * emits the right `ws(s)://…/computers` URL per mode.
  *
  * Pure Node (real https + ws + @peculiar/x509 via hub-identity; no better-sqlite3,
  * so plain `npx tsx`):
  *   1. The REAL identity cert TLS-terminates the shared listener AND presents a
  *      leaf whose fingerprint equals `identity.fingerprintSha256Hex` — the pin the
- *      runner extracts from the token matches the leaf the hub actually serves.
+ *      computer extracts from the token matches the leaf the hub actually serves.
  *   2. A mismatched pin does not match the served leaf.
- *   3. `deriveRunnerHubUrl`: local → `ws://` loopback; remote → `wss://` from the
+ *   3. `deriveComputerHubUrl`: local → `ws://` loopback; remote → `wss://` from the
  *      public URL; missing/malformed remote public URL → null.
  *
  * The full through-`startServer` boot (composeServer → better-auth migrations) is
  * covered by the e2e specs, not here.
  *
- * Run with: npx tsx packages/apps/hub/src/runner-tls-listener.test.ts
+ * Run with: npx tsx packages/apps/hub/src/computer-tls-listener.test.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
@@ -35,7 +35,7 @@ import {
   certSha256FingerprintFromDer
 } from '@slayzone/computer-transport/shared'
 import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
-import { deriveRunnerHubUrl } from './runner-listener.js'
+import { deriveComputerHubUrl } from './computer-listener.js'
 
 let passed = 0
 let failed = 0
@@ -56,7 +56,7 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`assertion failed: ${msg}`)
 }
 
-interface TlsRunnerHub {
+interface TlsComputerHub {
   https: HttpsServer
   url: string
   fingerprint: string
@@ -66,7 +66,7 @@ interface TlsRunnerHub {
 /** Stand up the SHARED-listener shape server.ts uses in remote mode: one https
  *  server (hub identity leaf) whose `/trpc` + `/computers` upgrades are demuxed to
  *  noServer WSS handlers — here we only wire `/computers` (the pin seam under test). */
-async function startTlsRunnerHub(dir: string): Promise<TlsRunnerHub> {
+async function startTlsComputerHub(dir: string): Promise<TlsComputerHub> {
   const identity = await loadOrCreateHubIdentity(dir)
   const https = createHttpsServer({ key: identity.keyPem, cert: identity.certPem })
   const wss = new WebSocketServer({ noServer: true })
@@ -84,7 +84,7 @@ async function startTlsRunnerHub(dir: string): Promise<TlsRunnerHub> {
   const port = (https.address() as AddressInfo).port
   return {
     https,
-    url: deriveRunnerHubUrl({ remote: false, host: '127.0.0.1', port })!.replace('ws://', 'wss://'),
+    url: deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port })!.replace('ws://', 'wss://'),
     fingerprint: identity.fingerprintSha256Hex,
     close: async () => {
       wss.close()
@@ -94,7 +94,7 @@ async function startTlsRunnerHub(dir: string): Promise<TlsRunnerHub> {
 }
 
 /** Dial + capture the leaf cert seen on the ws 'upgrade' event — the exact point
- *  the runner's hub-dialer enforces its pin. */
+ *  the computer's hub-dialer enforces its pin. */
 function dialAndCaptureLeaf(url: string): Promise<{ der: Uint8Array | null; opened: boolean }> {
   return new Promise((resolve) => {
     let der: Uint8Array | null = null
@@ -123,11 +123,11 @@ function dialAndCaptureLeaf(url: string): Promise<{ der: Uint8Array | null; open
 }
 
 async function main(): Promise<void> {
-  console.log('runner /computers cert-pin seam (shared listener) + URL derivation')
+  console.log('computer /computers cert-pin seam (shared listener) + URL derivation')
 
   await test('hub identity cert TLS-terminates the shared listener and its fingerprint is the pinned leaf', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'runner-tls-listener-'))
-    const hub = await startTlsRunnerHub(dir)
+    const dir = mkdtempSync(join(tmpdir(), 'computer-tls-listener-'))
+    const hub = await startTlsComputerHub(dir)
     try {
       assert(/^wss:\/\/127\.0\.0\.1:\d+\/computers$/.test(hub.url), `wss url shape: ${hub.url}`)
       const { der, opened } = await dialAndCaptureLeaf(hub.url)
@@ -150,8 +150,8 @@ async function main(): Promise<void> {
   })
 
   await test('a mismatched pin does NOT match the served leaf', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'runner-tls-listener-'))
-    const hub = await startTlsRunnerHub(dir)
+    const dir = mkdtempSync(join(tmpdir(), 'computer-tls-listener-'))
+    const hub = await startTlsComputerHub(dir)
     try {
       const { der } = await dialAndCaptureLeaf(hub.url)
       assert(der !== null, 'leaf present')
@@ -166,23 +166,23 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('deriveRunnerHubUrl: local → ws:// loopback on the hub port', async () => {
+  await test('deriveComputerHubUrl: local → ws:// loopback on the hub port', async () => {
     assert(
-      deriveRunnerHubUrl({ remote: false, host: '127.0.0.1', port: 51101 }) ===
+      deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port: 51101 }) ===
         'ws://127.0.0.1:51101/computers',
       'local loopback ws url'
     )
     // A wildcard bind host goes into the token as a dialable loopback, never 0.0.0.0.
     assert(
-      deriveRunnerHubUrl({ remote: false, host: '0.0.0.0', port: 51101 }) ===
+      deriveComputerHubUrl({ remote: false, host: '0.0.0.0', port: 51101 }) ===
         'ws://127.0.0.1:51101/computers',
       'wildcard bind → loopback in the token'
     )
   })
 
-  await test('deriveRunnerHubUrl: remote → wss:// from the public ADDRESS (authority only)', async () => {
+  await test('deriveComputerHubUrl: remote → wss:// from the public ADDRESS (authority only)', async () => {
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
       'explicit port preserved'
     )
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
       'bare host keeps the implicit TLS port (443)'
     )
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -210,9 +210,9 @@ async function main(): Promise<void> {
     )
   })
 
-  await test('deriveRunnerHubUrl: remote with missing/non-authority public address → null', async () => {
+  await test('deriveComputerHubUrl: remote with missing/non-authority public address → null', async () => {
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -221,12 +221,12 @@ async function main(): Promise<void> {
       'unset public address → null'
     )
     assert(
-      deriveRunnerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) ===
+      deriveComputerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) ===
         null,
       'blank public address → null'
     )
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
     // The whole point of the authority-only channel: a scheme is NOT accepted, so
     // no reader can ever disagree with the one derived from SLAYZONE_MODE.
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
       'a full url (scheme present) → null'
     )
     assert(
-      deriveRunnerHubUrl({
+      deriveComputerHubUrl({
         remote: true,
         host: '0.0.0.0',
         port: 51101,

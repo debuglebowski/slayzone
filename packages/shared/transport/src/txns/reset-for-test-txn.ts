@@ -20,23 +20,23 @@ import { normalizeProjectStatusData } from '../db-bootstrap'
  */
 export const resetForTestTxns = {
   'db:reset-for-test': (db: Database): null => {
-    // Enrolled runners must SURVIVE the reset.
+    // Enrolled computers must SURVIVE the reset.
     //
-    // Agents, terminals and git work all run on runners now, so a wiped `runners`
+    // Agents, terminals and git work all run on computers now, so a wiped `computers`
     // table means the worker's app can no longer execute anything. And it does not
-    // self-heal: the runner still holds valid on-disk credentials, so it sends
+    // self-heal: the computer still holds valid on-disk credentials, so it sends
     // `hello`, the hub (having forgotten it) rejects with -32002, and the re-enroll
-    // fallback fails because its join token was single-use — the runner then exits
+    // fallback fails because its join token was single-use — the computer then exits
     // fatally for the rest of the worker's life. Every spec calls resetApp() in
     // beforeAll, so this silently disabled exec for whole spec files.
     //
     // Snapshot + restore rather than skipping the DROP: the reset's contract is a
-    // full schema rebuild (it re-runs migrations from user_version 0), and runner
+    // full schema rebuild (it re-runs migrations from user_version 0), and computer
     // rows carry no test-visible state, so re-inserting them keeps isolation while
     // preserving the connection.
-    let runners: Record<string, unknown>[] = []
+    let computers: Record<string, unknown>[] = []
     try {
-      runners = db.prepare('SELECT * FROM computers').all() as Record<string, unknown>[]
+      computers = db.prepare('SELECT * FROM computers').all() as Record<string, unknown>[]
     } catch {
       // Table absent (fresh DB / pre-v149 schema) — nothing to preserve.
     }
@@ -53,7 +53,7 @@ export const resetForTestTxns = {
     normalizeProjectStatusData(db)
     syncTerminalModes(db)
 
-    for (const row of runners) {
+    for (const row of computers) {
       const cols = Object.keys(row)
       if (cols.length === 0) continue
       try {
@@ -63,7 +63,7 @@ export const resetForTestTxns = {
         ).run(...cols.map((c) => row[c] as never))
       } catch {
         // A column set that no longer matches the rebuilt schema is not worth
-        // failing the reset over — the runner will re-enroll on next boot.
+        // failing the reset over — the computer will re-enroll on next boot.
       }
     }
     return null

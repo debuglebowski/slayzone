@@ -24,9 +24,9 @@ export interface HubAuthContext {
   session: HubAuthSession
 }
 
-/** Principal resolved from a runner API key. */
-export interface RunnerPrincipal {
-  runnerId: string
-  /** better-auth apikey row id — pass to `revokeRunnerApiKey`. */
+/** Principal resolved from a computer API key. */
+export interface ComputerPrincipal {
+  computerId: string
+  /** better-auth apikey row id — pass to `revokeComputerApiKey`. */
   keyId: string
 }

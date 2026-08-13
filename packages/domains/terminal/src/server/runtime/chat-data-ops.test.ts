@@ -4,7 +4,7 @@
  *   --experimental-loader ./packages/shared/test-utils/loader.ts \
  *   packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
  *
- * Covers the three behaviors the hub/runner split must not regress:
+ * Covers the three behaviors the hub/computer split must not regress:
  *   - provider_config merge writes are idempotent (no-op writes are skipped)
  *     and field-preserving (writing one key keeps the others)
  *   - bumpLastInteraction is monotonic (older/equal timestamps are no-ops and

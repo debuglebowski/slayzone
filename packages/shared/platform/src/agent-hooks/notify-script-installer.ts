@@ -6,10 +6,10 @@ export interface InstallNotifyScriptOpts {
   /**
    * The `notify.sh` body to install. REQUIRED, and deliberately not defaulted
    * here: the content is inlined by the CALLER's bundler (the desktop app via
-   * Vite `?raw`, the standalone runner via esbuild's `text` loader), so this
+   * Vite `?raw`, the standalone computer via esbuild's `text` loader), so this
    * module stays free of any bundler-specific import syntax and can be shared by
    * both. A runtime file read is not an option — `@slayzone/hooks` is private
-   * and never published, and the runner ships as one self-contained bundle.
+   * and never published, and the computer ships as one self-contained bundle.
    */
   source: string
   /** Override target path. Defaults to `~/.slayzone/hooks/notify.sh`. */
@@ -55,7 +55,7 @@ export function parseNotifyVersion(script: string): number {
  * could still happen through the gap. Now the comparison and the replacement are
  * one guarded cycle, and a peer that commits first forces the gate to be
  * re-evaluated against what is actually on disk. This matters more than it used
- * to: the desktop app is no longer the only installer — a standalone runner
+ * to: the desktop app is no longer the only installer — a standalone computer
  * installs the same shared script on the same machine.
  *
  * Returns the absolute target path so the agent hook installers can wire it.

@@ -1,9 +1,9 @@
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
-import type { RunnerConfig } from '../config'
+import type { ComputerConfig } from '../config'
 import { createAgentHookServer } from './agent-hook'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
 interface Notify {
   method: string
@@ -12,13 +12,13 @@ interface Notify {
 
 function makeCtx() {
   const notifies: Notify[] = []
-  const dialer: RunnerDialer = {
+  const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
       return true
     }
   }
-  const config: RunnerConfig = {
+  const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: [tmpdir()],
@@ -55,7 +55,7 @@ function post(url: string, body: string): Promise<{ status: number; body: string
   })
 }
 
-describe('createAgentHookServer (runner loopback relay)', () => {
+describe('createAgentHookServer (computer loopback relay)', () => {
   it('binds a loopback /api/agent-hook URL and relays the raw envelope to the hub as an `event`', async () => {
     const { notifies, ctx } = makeCtx()
     const server = await createAgentHookServer(ctx)
@@ -74,7 +74,7 @@ describe('createAgentHookServer (runner loopback relay)', () => {
       // Fire-and-forget contract: always a fast 200 so the hook never blocks.
       expect(res.status).toBe(200)
 
-      // The runner does NO field extraction — it relays the whole envelope opaquely
+      // The computer does NO field extraction — it relays the whole envelope opaquely
       // over its existing ws channel as a generic `event` (name: 'agent-hook').
       const relayed = notifies.find((n) => n.method === 'event')
       expect(relayed).toBeDefined()
@@ -91,7 +91,7 @@ describe('createAgentHookServer (runner loopback relay)', () => {
     try {
       const res = await post(server.url, '')
       expect(res.status).toBe(200)
-      // An unparseable body still relays (as a string payload) — the runner is a
+      // An unparseable body still relays (as a string payload) — the computer is a
       // dumb pipe; the hub's processAgentHook is the single authority that judges.
       expect(notifies.some((n) => n.method === 'event')).toBe(true)
     } finally {
@@ -112,12 +112,12 @@ describe('createAgentHookServer (runner loopback relay)', () => {
     // throws, the loopback POST must return promptly so the agent TUI is never
     // blocked or shown an error. The relay failure is swallowed + logged.
     const logs: string[] = []
-    const throwingDialer: RunnerDialer = {
+    const throwingDialer: ComputerDialer = {
       notify: () => {
         throw new Error('hub socket closed')
       }
     }
-    const config: RunnerConfig = {
+    const config: ComputerConfig = {
       hubUrl: 'ws://localhost:0/computers',
       name: 'test',
       allowedRoots: [tmpdir()],

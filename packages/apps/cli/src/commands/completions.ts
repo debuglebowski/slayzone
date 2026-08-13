@@ -10,13 +10,13 @@ complete -c slay -n '__fish_use_subcommand' -a 'templates' -d 'Manage task templ
 complete -c slay -n '__fish_use_subcommand' -a 'automations' -d 'Manage automations'
 complete -c slay -n '__fish_use_subcommand' -a 'processes' -d 'Manage processes'
 complete -c slay -n '__fish_use_subcommand' -a 'hub' -d 'Run, list and target SlayZone hubs'
-complete -c slay -n '__fish_use_subcommand' -a 'runner' -d 'Run and manage SlayZone runners'
+complete -c slay -n '__fish_use_subcommand' -a 'computer' -d 'Run and manage SlayZone computers'
 complete -c slay -n '__fish_use_subcommand' -a 'update' -d 'Update globally npm-installed @slayzone packages'
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
 complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use login current forget users'
-complete -c slay -n '__fish_seen_subcommand_from runner' -a 'ls mint create start stop rm restart logs'
+complete -c slay -n '__fish_seen_subcommand_from computer' -a 'ls mint create start stop rm restart logs'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
 complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
 complete -c slay -n '__fish_seen_subcommand_from templates' -a 'list view create update delete'
@@ -37,7 +37,7 @@ _slay() {
     'automations:Manage automations'
     'processes:Manage processes'
     'hub:Run, list and target SlayZone hubs'
-    'runner:Run and manage SlayZone runners'
+    'computer:Run and manage SlayZone computers'
     'update:Update globally npm-installed @slayzone packages'
     'completions:Print shell completions'
   )
@@ -104,16 +104,16 @@ _slay() {
     'forget:Drop the stored hub target'
     'users:Manage the accounts that can sign in to a hub'
   )
-  local -a runner_commands
-  runner_commands=(
-    'ls:List installed runners'
-    'mint:Mint a runner enrollment token on a hub'
-    'create:Install a runner here and keep it running'
-    'start:Start a stopped runner'
-    'stop:Stop a runner, keeping it registered'
-    'rm:Stop a runner and remove its registration'
-    'restart:Restart a runner'
-    'logs:Show a runner log'
+  local -a computer_commands
+  computer_commands=(
+    'ls:List installed computers'
+    'mint:Mint a computer enrollment token on a hub'
+    'create:Install a computer here and keep it running'
+    'start:Start a stopped computer'
+    'stop:Stop a computer, keeping it registered'
+    'rm:Stop a computer and remove its registration'
+    'restart:Restart a computer'
+    'logs:Show a computer log'
   )
   case $words[2] in
     tasks)
@@ -137,8 +137,8 @@ _slay() {
     hub)
       _describe 'hub commands' hub_commands
       ;;
-    runner)
-      _describe 'runner commands' runner_commands
+    computer)
+      _describe 'computer commands' computer_commands
       ;;
     update)
       _arguments '--check[Report available updates without installing]'
@@ -162,7 +162,7 @@ _slay_completions() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
   if [ $COMP_CWORD -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes hub runner update completions" -- "$cur") )
+    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes hub computer update completions" -- "$cur") )
   elif [ $COMP_CWORD -eq 2 ]; then
     case "$prev" in
       tasks)
@@ -186,7 +186,7 @@ _slay_completions() {
       hub)
         COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use login current forget users" -- "$cur") )
         ;;
-      runner)
+      computer)
         COMPREPLY=( $(compgen -W "ls mint create start stop rm restart logs" -- "$cur") )
         ;;
       update)

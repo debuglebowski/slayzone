@@ -2,9 +2,9 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RunnerConfig } from '../config'
+import type { ComputerConfig } from '../config'
 import { createProcHandlers, ProcMethods, ProcNotifications } from './proc'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
 interface Notify {
   method: string
@@ -13,13 +13,13 @@ interface Notify {
 
 function makeCtx(roots: string[]) {
   const notifies: Notify[] = []
-  const dialer: RunnerDialer = {
+  const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
       return true
     }
   }
-  const config: RunnerConfig = {
+  const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
@@ -57,7 +57,7 @@ let dir: string
 let roots: string[]
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'runner-proc-'))
+  dir = mkdtempSync(join(tmpdir(), 'computer-proc-'))
   roots = [realpathSync(tmpdir())]
 })
 
@@ -84,7 +84,7 @@ describe('createProcHandlers — proc.spawn streaming', () => {
   })
 
   it('sanitizes the inherited process.env base: strips SlayZone infra/secret, keeps PATH', async () => {
-    // A runner-hosted background process must not inherit the runner's own
+    // A computer-hosted background process must not inherit the computer's own
     // SlayZone infra/secret env (it would leak creds + confuse any nested slay).
     // User env (PATH) survives.
     const saved: Record<string, string | undefined> = {}

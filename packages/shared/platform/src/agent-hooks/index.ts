@@ -1,22 +1,22 @@
 /**
  * Agent lifecycle hook installers — shared by EVERY process that can spawn an
- * agent, which since the hub/runner split means the desktop app AND a standalone
- * runner.
+ * agent, which since the hub/computer split means the desktop app AND a standalone
+ * computer.
  *
  * WHY THIS IS NOT IN THE APP ANYMORE. These lived under
- * `apps/app/src/main/agent-hooks/`, called from exactly one place. A runner on a
+ * `apps/app/src/main/agent-hooks/`, called from exactly one place. A computer on a
  * box where the desktop app never runs therefore installed nothing: no
  * `~/.slayzone/hooks/notify.sh`, no `~/.claude/settings.json` entry, so no hook
  * ever fired and every agent it spawned showed no running state and no unread
  * marker. Hook-driven status is most of what the terminal UI is, so a remote
- * runner was silently missing it.
+ * computer was silently missing it.
  *
  * NO BUNDLER SYNTAX LIVES HERE. The two installers that ship a file body take
  * that body as a required `source` parameter instead of importing it. The app
- * inlines it with Vite (`?raw`), the runner with esbuild (`text` loader) — one
+ * inlines it with Vite (`?raw`), the computer with esbuild (`text` loader) — one
  * shared implementation, each composition root supplying content the way its own
  * build understands. A runtime read would be simpler but cannot work: the
- * `@slayzone/hooks` package is private and never published, and the runner ships
+ * `@slayzone/hooks` package is private and never published, and the computer ships
  * as a single self-contained bundle.
  *
  * MACHINE-WIDE, NEVER ROLE- OR CHANNEL-SCOPED. Every path here resolves through

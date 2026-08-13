@@ -27,7 +27,7 @@ export function buildRecoveryMessage(terminalMode: string, exitCode: number): st
 }
 
 /**
- * State observed when an AWAITED (runner-routed) recovery-shell spawn resolves.
+ * State observed when an AWAITED (computer-routed) recovery-shell spawn resolves.
  *
  * Only the remote path can observe these: a local spawn is synchronous inside
  * `onExit`, so nothing can intervene between deciding to recover and holding

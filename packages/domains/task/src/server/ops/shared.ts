@@ -75,7 +75,7 @@ export interface DiagnosticEventPayload {
 /**
  * Exec-side worktree/git/fs operations task ops previously ran inline. Injected
  * behind this seam so hub-side task code never spawns git or touches the
- * filesystem directly (hub/runner split, wave 1). Method signatures mirror the
+ * filesystem directly (hub/computer split, wave 1). Method signatures mirror the
  * `@slayzone/worktrees/server` exports they wrap (narrowed to the parameters
  * task ops actually pass), plus two raw-fs seams (`pathExists`,
  * `removeArtifactDir`) that replace direct `existsSync`/`rmSync` calls.
@@ -87,10 +87,10 @@ export interface DiagnosticEventPayload {
 export interface WorktreeExecAdapters {
   /**
    * ── `taskId` on every routable method ──────────────────────────────────────
-   * Each of these can run on a runner, and picking one requires knowing WHICH
-   * TASK the work is for (`resolveTaskRunnerId`). The seam previously carried
+   * Each of these can run on a computer, and picking one requires knowing WHICH
+   * TASK the work is for (`resolveTaskComputerId`). The seam previously carried
    * only paths, so the hub-side router had nothing to route on and was pinned to
-   * `() => null` — meaning a task whose agent runs on a runner had its worktree
+   * `() => null` — meaning a task whose agent runs on a computer had its worktree
    * created on the HUB, leaving the agent with a cwd that does not exist on its
    * own machine. Every call site already has the id in scope.
    *
@@ -137,16 +137,16 @@ export interface WorktreeExecAdapters {
   ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
   /** `fs.existsSync` for a path in the task's WORKSPACE (e.g. the recovered-worktree
    *  check). Routed: the workspace lives wherever the task's agents run. The local
-   *  default stays sync (`boolean`); a runner-backed impl needs a network
+   *  default stays sync (`boolean`); a computer-backed impl needs a network
    *  round-trip, so the return is widened to allow a Promise (call sites await). */
   pathExists: (taskId: string, path: string) => boolean | Promise<boolean>
   /**
    * `fs.existsSync` for a path in the HUB's own storage (`<ROOT>/storage/...`).
    *
    * Separate from {@link pathExists} on purpose: artifacts are hub-owned data, not
-   * workspace files, so this must NEVER be routed to a runner — the directory does
-   * not exist there, and requiring a runner to probe it would make archiving a task
-   * impossible with no runner connected (which is exactly what happened when both
+   * workspace files, so this must NEVER be routed to a computer — the directory does
+   * not exist there, and requiring a computer to probe it would make archiving a task
+   * impossible with no computer connected (which is exactly what happened when both
    * shared one seam).
    */
   hubPathExists: (absPath: string) => boolean | Promise<boolean>
@@ -177,13 +177,13 @@ export interface TaskRuntimeAdapters {
 /**
  * Default exec adapters wrap today's direct imports 1:1 — the build-time
  * dependency on `@slayzone/worktrees/server` intentionally REMAINS this wave.
- * The seam (not the import) is what a later wave rebinds to a runner-backed
+ * The seam (not the import) is what a later wave rebinds to a computer-backed
  * implementation. Neither composition root passes `worktrees`, so this default
  * must survive every partial `configureTaskRuntimeAdapters` call.
  */
 export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
-  // so a routing impl can resolve which runner the work belongs to.
+  // so a routing impl can resolve which computer the work belongs to.
   createWorktree: (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
     createWorktree(repoPath, worktreePath, branch, sourceBranch),
   removeWorktree: (_taskId, projectPath, worktreePath) => removeWorktree(projectPath, worktreePath),
@@ -475,7 +475,7 @@ export async function cleanupTaskFull(
   // Clean up artifact files on disk. getDataRoot() is the single source of truth
   // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
   const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
-  // HUB storage, not workspace: never routed to a runner (see hubPathExists).
+  // HUB storage, not workspace: never routed to a computer (see hubPathExists).
   if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
@@ -560,21 +560,21 @@ export async function maybeAutoCreateWorktree(
 
   // Auto-creation is BEST-EFFORT by contract (hence "maybe", and the
   // `auto_worktree_skipped` diagnostics below): the task must be created either
-  // way. So a missing runner SKIPS the worktree instead of failing the create —
+  // way. So a missing computer SKIPS the worktree instead of failing the create —
   // the exec seams throw when unrouted, and this runs during task creation,
   // before any agent exists to need a workspace. The user can attach a worktree
-  // later once a runner is connected.
+  // later once a computer is connected.
   try {
     await createWorktreeForTask(db, taskId, projectId, taskTitle, repoName)
   } catch (err) {
-    if (err instanceof Error && err.name === 'NoRunnerAvailableError') {
+    if (err instanceof Error && err.name === 'NoComputerAvailableError') {
       runtimeAdapters.recordDiagnosticEvent({
         level: 'warn',
         source: 'task',
         event: 'task.auto_worktree_skipped',
         taskId,
         projectId,
-        message: 'No runner available — worktree not created'
+        message: 'No computer available — worktree not created'
       })
       return
     }
@@ -583,7 +583,7 @@ export async function maybeAutoCreateWorktree(
 }
 
 /** The actual auto-create flow. Split out so `maybeAutoCreateWorktree` can treat
- *  "no runner" as a skip without wrapping every internal step. */
+ *  "no computer" as a skip without wrapping every internal step. */
 async function createWorktreeForTask(
   db: SlayzoneDb,
   taskId: string,

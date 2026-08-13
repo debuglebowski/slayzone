@@ -2,7 +2,7 @@
  * Reconnect backoff policy for the hub dialer. Pure and injectable so the
  * schedule is unit-testable without timers.
  *
- * @module runner/client/backoff
+ * @module computer/client/backoff
  */
 
 export interface BackoffOptions {
@@ -10,9 +10,9 @@ export interface BackoffOptions {
    * Delay before the first retry. Default 100ms.
    *
    * Deliberately small: the overwhelmingly common disconnect is the HUB
-   * restarting, where the runner's socket closes and the hub is listening again
+   * restarting, where the computer's socket closes and the hub is listening again
    * within a few hundred ms. A full second of dead time there is user-visible —
-   * and since runners are now the only execution path, work attempted inside that
+   * and since computers are now the only execution path, work attempted inside that
    * window fails rather than quietly running on the hub.
    *
    * The exponential growth below still protects a hub that is genuinely down: 100ms

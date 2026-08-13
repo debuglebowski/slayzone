@@ -125,7 +125,7 @@ test('env WINS over hub.config.json (does not overwrite a set env)', () => {
 })
 
 // `mode` is what makes `slay hub create --public-address` actually work: without it
-// the hub boots local, and `deriveRunnerHubUrl` hands out `ws://127.0.0.1:<port>`
+// the hub boots local, and `deriveComputerHubUrl` hands out `ws://127.0.0.1:<port>`
 // tokens no other machine can use.
 test('hub.config.json mode seeds SLAYZONE_MODE', () => {
   withIsolatedEnv({}, () => {
@@ -173,7 +173,7 @@ test('generates + persists a hub-auth secret into hub.state.json (!= dev constan
     assert(secret !== DEV_HUB_AUTH_SECRET, 'not the shared dev constant')
     assertEq(secret!.length, 64, '256-bit hex')
     // persisted into the temp hub.state.json
-    assertEq(loadHubStateFile().runnerTransportSecret, secret, 'persisted')
+    assertEq(loadHubStateFile().computerTransportSecret, secret, 'persisted')
   })
 })
 
@@ -197,9 +197,9 @@ test('env SLAYZONE_HUB_AUTH_SECRET wins + no state-file write', () => {
   })
 })
 
-test('hub.state.json runnerTransportSecret used (env unset) and NOT regenerated', () => {
+test('hub.state.json computerTransportSecret used (env unset) and NOT regenerated', () => {
   withIsolatedEnv({}, () => {
-    saveHubStateFile({ runnerTransportSecret: 'from-state-file' })
+    saveHubStateFile({ computerTransportSecret: 'from-state-file' })
     applyStandaloneHubConfig()
     assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, 'from-state-file', 'state-file secret used')
   })
@@ -212,7 +212,7 @@ test('EMPTY env SLAYZONE_HUB_AUTH_SECRET counts as absent ⇒ generates (no misl
     assert(!!secret, 'a real secret was generated (empty treated as absent)')
     assert(secret !== DEV_HUB_AUTH_SECRET, 'not the dev constant')
     assertEq(secret!.length, 64, '256-bit hex generated')
-    assertEq(loadHubStateFile().runnerTransportSecret, secret, 'persisted')
+    assertEq(loadHubStateFile().computerTransportSecret, secret, 'persisted')
   })
 })
 
@@ -264,10 +264,10 @@ test('supervised does NOT read or write hub.config.json/hub.state.json (no file 
 test('supervised IGNORES an existing hub.config.json/hub.state.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
     saveHubConfigFile({ address: '0.0.0.0:8080' })
-    saveHubStateFile({ runnerTransportSecret: 'should-be-ignored' })
+    saveHubStateFile({ computerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
     assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'ignored address')
-    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'ignored runnerTransportSecret')
+    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'ignored computerTransportSecret')
   })
 })
 

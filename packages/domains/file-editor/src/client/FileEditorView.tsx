@@ -67,7 +67,7 @@ interface FileEditorViewProps {
   projectPath: string
   /**
    * Which machine owns `projectPath`. Every filesystem call below is routed to
-   * it; omitting this falls back to the connected default runner, which is only
+   * it; omitting this falls back to the connected default computer, which is only
    * correct for callers with no task context.
    */
   target?: WorkspaceTarget
@@ -79,7 +79,7 @@ interface FileEditorViewProps {
  * The provider has to sit ABOVE the component that reads it, so the exported
  * `FileEditorView` is the wrapper and the body is a separate component. Putting
  * the provider inside the body would leave that body's own hooks reading the
- * default (empty) target — i.e. the default runner — while everything beneath it
+ * default (empty) target — i.e. the default computer — while everything beneath it
  * read the right one.
  */
 export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewProps>(

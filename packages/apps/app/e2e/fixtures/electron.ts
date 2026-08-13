@@ -238,16 +238,16 @@ export async function resetApp(page: Page): Promise<void> {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
 
-  // `app:reset-for-test` restarts the SIDE-CAR, which builds a fresh runner gateway
-  // — the runner's session belonged to the old one, so briefly the hub has zero
-  // connected runners while the runner (healthy) re-dials. Any spec spawning inside
-  // that gap resolves no runner and, with the in-process fallback gone, fails.
+  // `app:reset-for-test` restarts the SIDE-CAR, which builds a fresh computer gateway
+  // — the computer's session belonged to the old one, so briefly the hub has zero
+  // connected computers while the computer (healthy) re-dials. Any spec spawning inside
+  // that gap resolves no computer and, with the in-process fallback gone, fails.
   //
-  // Measured: resolver miss at t=2300ms, runner connect at t=2442ms.
+  // Measured: resolver miss at t=2300ms, computer connect at t=2442ms.
   //
-  // Cheap wait, deliberately: the runner's first redial is now 100ms
+  // Cheap wait, deliberately: the computer's first redial is now 100ms
   // (DEFAULT_BACKOFF.initialDelayMs), so a fixed sleep costs less than polling and
-  // adds no load. An earlier version polled `runners.list` over the renderer in
+  // adds no load. An earlier version polled `computers.list` over the renderer in
   // every spec's beforeAll across 12 workers — the polling itself became the
   // bottleneck, adding ~7min of wall-clock and causing load-shaped failures (30s
   // click timeouts, closed pages) that looked like product bugs.
@@ -381,7 +381,7 @@ async function launchElectronWithRetry(args: {
           SLAYZONE_E2E_INSTALL_HOOKS: '1',
           // The machine-wide dir (hooks/, bin/) is anchored on $HOME and does
           // NOT follow SLAYZONE_ROOT — that is the whole point of it, so a
-          // runner cannot drag notify.sh under its own root. Which means ROOT
+          // computer cannot drag notify.sh under its own root. Which means ROOT
           // alone no longer sandboxes it: without this the suite would install
           // into the developer's REAL ~/.slayzone/hooks. Same dir as ROOT here,
           // so `notifyScriptPath()` is unchanged.
@@ -404,8 +404,8 @@ async function launchElectronWithRetry(args: {
           ),
           XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
           // Explicit passthrough for otherwise-stripped SLAYZONE_* vars an
-          // isolated spec needs (runner-loopback: SLAYZONE_ROOT,
-          // SLAYZONE_HUB_ADDRESS, SLAYZONE_HUB_JOIN_TOKEN; runner-less specs:
+          // isolated spec needs (computer-loopback: SLAYZONE_ROOT,
+          // SLAYZONE_HUB_ADDRESS, SLAYZONE_HUB_JOIN_TOKEN; computer-less specs:
           // SLAYZONE_E2E_NO_RUNNER). Merged LAST so a spec can also override an
           // isolation default on purpose. Undefined for every default launch
           // (shared worker app + 103) → byte-identical there.
@@ -469,7 +469,7 @@ export async function launchIsolatedElectron(opts: {
   seedUserData?: (userDataDir: string) => void
   /** Extra env for the launch (merged last, past the env strip for
    *  `SLAYZONE_`/`ELECTRON_` prefixes). Receives the resolved `userDataDir` so a
-   *  spec can pin store/hub paths into it (e.g. the runner-loopback spec sets
+   *  spec can pin store/hub paths into it (e.g. the computer-loopback spec sets
    *  SLAYZONE_ROOT + opt-in flags). */
   extraEnv?: (userDataDir: string) => Record<string, string>
 }): Promise<{
@@ -503,33 +503,33 @@ export async function launchIsolatedElectron(opts: {
 }
 
 /**
- * Block until the app's auto-enrolled local runner reports `connected`.
+ * Block until the app's auto-enrolled local computer reports `connected`.
  *
- * e2e boots runner-ON (see index.ts's local-runner supervisor gate), but the
+ * e2e boots computer-ON (see index.ts's local-computer supervisor gate), but the
  * auto-enroll chain is deliberately OFF the boot critical path: main waits for
  * the sidecar to be ready, mints a join token over loopback REST (retrying up to
- * ~40s while the /computers listener binds), spawns the runner, and only then does
+ * ~40s while the /computers listener binds), spawns the computer, and only then does
  * it dial + enroll. `#root` is present long before any of that finishes.
  *
- * Every agent spawn routes through a runner, so a spec that starts a terminal or
+ * Every agent spawn routes through a computer, so a spec that starts a terminal or
  * chat before enrollment completes would race it. Gating once per worker — after
  * launch, before any test body — removes that race for the whole suite.
  *
  * Gates on `usable`, NOT `connected`. `connected` is derived from a persisted
- * `runners` row joined against live gateway state, so it can be true for a runner
+ * `computers` row joined against live gateway state, so it can be true for a computer
  * that is not actually reachable — this gate once passed in 14ms in a run where the
- * runner never connected at all, which is worse than having no gate. `usable`
+ * computer never connected at all, which is worse than having no gate. `usable`
  * means authenticated + heard from inside the heartbeat window.
  *
- * Returns false (rather than throwing) when no runner appears: a suite-wide throw
+ * Returns false (rather than throwing) when no computer appears: a suite-wide throw
  * here would convert an infrastructure hiccup into ~70 confusing failures, and
- * specs that legitimately boot runner-less (SLAYZONE_E2E_NO_RUNNER=1) call this
+ * specs that legitimately boot computer-less (SLAYZONE_E2E_NO_RUNNER=1) call this
  * too. The individual spec still fails loudly on its own assertion.
  */
-/** What `runners.list` returned when the gate last passed (diagnostic). */
+/** What `computers.list` returned when the gate last passed (diagnostic). */
 let lastGateSnapshot: { atMs: number; rows: unknown[] } | null = null
 
-async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boolean> {
+async function waitForUsableComputer(page: Page, timeoutMs = 120_000): Promise<boolean> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -544,7 +544,7 @@ async function waitForUsableRunner(page: Page, timeoutMs = 120_000): Promise<boo
       )
       if (rows.some((r) => r.usable === true)) {
         // Diagnostic: this gate has passed implausibly fast (~17ms, before the
-        // runner's first dial at ~2.4s) while reporting a usable runner. Record
+        // computer's first dial at ~2.4s) while reporting a usable computer. Record
         // exactly what the router returned at pass time so the cause is a
         // measurement rather than a guess.
         lastGateSnapshot = { atMs: Date.now() - startedAt, rows }
@@ -579,7 +579,7 @@ export async function cliRoot(app: ElectronApplication): Promise<string> {
  *
  * The app splits its supervised state by release channel AND role
  * (`getSupervisedRoot`): the main process + sidecar are the `hub` role, the
- * co-located local runner gets its own sibling `runner` root. The bucket is
+ * co-located local computer gets its own sibling `computer` root. The bucket is
  * always `dev` here — e2e always launches unpackaged, so the app derives
  * `SLAYZONE_RELEASE_CHANNEL=dev`, which is why no third e2e bucket is needed.
  *
@@ -719,7 +719,7 @@ async function readSidecarPort(app: ElectronApplication): Promise<number> {
  * root, mirroring what `buildMcpEnv` gives a real task terminal) for the specs
  * that read the DB or artifact files directly. The CLI itself no longer needs it.
  *
- * `SLAYZONE_DEV=1` is required, not decorative — the Playwright runner's own env
+ * `SLAYZONE_DEV=1` is required, not decorative — the Playwright computer's own env
  * may not carry it. Callers overlay task/project identity on top.
  */
 export function cliEnv(root: string): Record<string, string> {
@@ -776,15 +776,15 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
           sharedProcExit = { code, signal, at: new Date().toISOString() }
         })
 
-        // Runner-ready gate: agents only run on runners, so no spec may start
-        // before the auto-enrolled local runner is USABLE (not merely listed). Recorded in the
+        // Computer-ready gate: agents only run on computers, so no spec may start
+        // before the auto-enrolled local computer is USABLE (not merely listed). Recorded in the
         // worker artifacts so a suite-wide agent failure is diagnosable from the
         // run output instead of looking like N unrelated spec failures.
-        const runnerReadyStartedAt = Date.now()
-        const runnerReady = await waitForUsableRunner(launched.page)
-        if (!runnerReady) {
+        const computerReadyStartedAt = Date.now()
+        const computerReady = await waitForUsableComputer(launched.page)
+        if (!computerReady) {
           console.warn(
-            `[e2e] no connected runner after ${Date.now() - runnerReadyStartedAt}ms — ` +
+            `[e2e] no connected computer after ${Date.now() - computerReadyStartedAt}ms — ` +
               `agent-spawning specs in worker ${workerInfo.workerIndex} will fail`
           )
         }
@@ -795,9 +795,9 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
           userDataDir,
           testProjectPath: TEST_PROJECT_PATH,
           attempts: launched.attempts,
-          runnerReady,
-          runnerReadyMs: Date.now() - runnerReadyStartedAt,
-          runnerGateSnapshot: lastGateSnapshot
+          computerReady,
+          computerReadyMs: Date.now() - computerReadyStartedAt,
+          computerGateSnapshot: lastGateSnapshot
         })
 
         attachSessionLogCapture(sharedApp, workerArtifactsDir)
@@ -808,7 +808,7 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
       if (sharedApp) {
         // Bounded on purpose. `close()` has been measured wedging under
         // full-suite load, and the fixture timeout below is sized for the SETUP
-        // budget (launch retries + the runner gate) — letting a stuck close
+        // budget (launch retries + the computer gate) — letting a stuck close
         // consume that same ceiling would add minutes of dead wall clock per
         // worker. Report it and move on: the process is about to be reaped
         // anyway, and a silent raise of the ceiling would just hide the hang.
@@ -842,10 +842,10 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
     },
     // Playwright bounds fixture setup by the TEST timeout (30s) unless given its
     // own. Setup here can legitimately need far longer: up to 3 launch attempts
-    // (20s window each, plus backoff) and then `waitForUsableRunner`'s 120s
+    // (20s window each, plus backoff) and then `waitForUsableComputer`'s 120s
     // gate — ~181s worst case. At 30s that 120s budget was unreachable, so a
     // slow sidecar surfaced as "Fixture electronApp timeout of 30000ms exceeded
-    // during setup" instead of the gate's own "no connected runner" warning,
+    // during setup" instead of the gate's own "no connected computer" warning,
     // and the reasoning behind the 120s never actually applied. Teardown is
     // bounded separately above so this ceiling only ever covers setup.
     { scope: 'worker', timeout: 200_000 }

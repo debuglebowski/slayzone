@@ -59,8 +59,8 @@ vi.mock('@slayzone/transport/client', () => ({
 
 /**
  * The card's own behaviour is covered in HubCard.test.tsx. Here it only needs to
- * report WHETHER a hub got the runner-owning card and under WHICH scope — this
- * file is about which hubs can have a runner list at all.
+ * report WHETHER a hub got the computer-owning card and under WHICH scope — this
+ * file is about which hubs can have a computer list at all.
  *
  * Both exports are stubbed, and both render the hub's identity + controls slots:
  * the Sign in / Verify / signed-in assertions below live in those slots, and a
@@ -98,16 +98,16 @@ vi.mock('./HubCard', () => ({
       {label}
     </span>
   ),
-  RunnersHeading: ({ note, noteTestId }: any) => (
+  ComputersHeading: ({ note, noteTestId }: any) => (
     <div>
-      <span>Runners</span>
+      <span>Computers</span>
       {note ? <span data-testid={noteTestId}>{note}</span> : null}
     </div>
   )
 }))
 
-vi.mock('./RunnerActions', () => ({
-  RunnerActionsProvider: ({ children }: any) => <>{children}</>
+vi.mock('./ComputerActions', () => ({
+  ComputerActionsProvider: ({ children }: any) => <>{children}</>
 }))
 
 vi.mock('@slayzone/ui', () => {
@@ -246,13 +246,13 @@ describe('HubsSettingsTab — Sign in visibility', () => {
 })
 
 /**
- * Runners are listed INSIDE their hub. Which means the tab has to reconcile two
+ * Computers are listed INSIDE their hub. Which means the tab has to reconcile two
  * different registries: the draft boot-config it edits, and the live federation a
- * runner list can actually be queried through. A hub present in the first but not
+ * computer list can actually be queried through. A hub present in the first but not
  * the second must say so — an empty list there would be a false claim about that
  * hub's configuration rather than a description of a hub we haven't connected to.
  */
-describe('HubsSettingsTab — nested runners', () => {
+describe('HubsSettingsTab — nested computers', () => {
   beforeEach(() => {
     registryHubs = []
     hubTokens = {}
@@ -270,7 +270,7 @@ describe('HubsSettingsTab — nested runners', () => {
   }
   const LIVE_REMOTE = { id: 'hub:remote', kind: 'remote', label: 'Remote', url: REMOTE_URL }
 
-  /** Every live runner-owning card on screen, as `{hub, scope}` pairs. */
+  /** Every live computer-owning card on screen, as `{hub, scope}` pairs. */
   const blocks = (): Array<{ hub: string | null; scope: string | null; local: string | null }> =>
     screen.queryAllByTestId('hub-card-live').map((el) => ({
       hub: el.getAttribute('data-hub'),
@@ -301,12 +301,12 @@ describe('HubsSettingsTab — nested runners', () => {
     await rowSettled()
     await waitFor(() => expect(blocks().length).toBe(1))
     expect(blocks()[0]?.hub).toBe('local')
-    expect(screen.getByTestId('hub-runners-unavailable').textContent).toContain('not connected yet')
+    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain('not connected yet')
   })
 
-  it('says the local hub is off rather than listing runners for it', async () => {
+  it('says the local hub is off rather than listing computers for it', async () => {
     // No local entry in the registry = "run a local hub" is off. Nothing on this
-    // machine can execute, so a runner list would be meaningless.
+    // machine can execute, so a computer list would be meaningless.
     registryHubs = [{ id: 'hub:remote', kind: 'remote', label: 'Remote', url: REMOTE_URL }]
     probeReplies = { [REMOTE_URL]: { ok: true, normalizedUrl: REMOTE_URL, authRequired: false } }
     federation = { hubs: [LIVE_REMOTE], defaultHubId: 'hub:remote' }
@@ -314,7 +314,7 @@ describe('HubsSettingsTab — nested runners', () => {
     await rowSettled()
     await waitFor(() => expect(blocks().length).toBe(1))
     expect(blocks()[0]?.hub).toBe('hub:remote')
-    expect(screen.getByTestId('hub-runners-unavailable').textContent).toContain('local hub is off')
+    expect(screen.getByTestId('hub-computers-unavailable').textContent).toContain('local hub is off')
   })
 
   it('gives every hub the same status vocabulary', async () => {
@@ -363,7 +363,7 @@ describe('HubsSettingsTab — nested runners', () => {
     expect(screen.getByTestId('hub-default-local').getAttribute('aria-checked')).toBe('false')
   })
 
-  it('fork (no federation at all): the local hub still lists its runners', async () => {
+  it('fork (no federation at all): the local hub still lists its computers', async () => {
     // The Chromium fork renders this surface outside a FederationProvider. It must
     // degrade to the single-hub view rather than throwing — which is why the
     // component uses the OrNull variant.

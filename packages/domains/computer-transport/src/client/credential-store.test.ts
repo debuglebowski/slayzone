@@ -8,22 +8,22 @@ import { createFileCredentialStore, credentialsFilePath, hubHostFromUrl } from '
 let baseDir: string
 
 beforeEach(() => {
-  baseDir = mkdtempSync(join(tmpdir(), 'runner-creds-'))
+  baseDir = mkdtempSync(join(tmpdir(), 'computer-creds-'))
 })
 
 afterEach(() => {
   rmSync(baseDir, { recursive: true, force: true })
 })
 
-const CREDS = { runnerId: 'runner-1', apiKey: 'key-abc', pinnedFingerprint: 'a'.repeat(64) }
+const CREDS = { computerId: 'computer-1', apiKey: 'key-abc', pinnedFingerprint: 'a'.repeat(64) }
 
 describe('createFileCredentialStore', () => {
-  it('round-trips credentials through the shared runner.state.json map', async () => {
+  it('round-trips credentials through the shared computer.state.json map', async () => {
     const store = createFileCredentialStore('hub.example_8443', { baseDir })
     expect(await store.load()).toBeNull()
     await store.save(CREDS)
     expect(await store.load()).toEqual(CREDS)
-    expect(store.filePath).toBe(join(baseDir, 'runner.state.json'))
+    expect(store.filePath).toBe(join(baseDir, 'computer.state.json'))
   })
 
   it('writes the file with 0600 permissions', async () => {
@@ -36,8 +36,8 @@ describe('createFileCredentialStore', () => {
   it('overwrites atomically on re-save', async () => {
     const store = createFileCredentialStore('hub.example', { baseDir })
     await store.save(CREDS)
-    await store.save({ runnerId: 'runner-2', apiKey: 'key-new' })
-    expect(await store.load()).toEqual({ runnerId: 'runner-2', apiKey: 'key-new' })
+    await store.save({ computerId: 'computer-2', apiKey: 'key-new' })
+    expect(await store.load()).toEqual({ computerId: 'computer-2', apiKey: 'key-new' })
     const mode = (await stat(store.filePath)).mode & 0o777
     expect(mode).toBe(0o600)
   })
@@ -48,7 +48,7 @@ describe('createFileCredentialStore', () => {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(store.filePath, 'not json', 'utf8')
     expect(await store.load()).toBeNull()
-    await writeFile(store.filePath, JSON.stringify({ 'hub.example': { runnerId: '' } }), 'utf8')
+    await writeFile(store.filePath, JSON.stringify({ 'hub.example': { computerId: '' } }), 'utf8')
     expect(await store.load()).toBeNull()
   })
 
@@ -83,22 +83,22 @@ describe('multi-hub isolation (the reason this is a map, not a per-host file)', 
     expect(storeA.filePath).toBe(storeB.filePath)
 
     await storeA.save(CREDS)
-    await storeB.save({ runnerId: 'runner-b', apiKey: 'key-b' })
+    await storeB.save({ computerId: 'computer-b', apiKey: 'key-b' })
 
     expect(await storeA.load()).toEqual(CREDS)
-    expect(await storeB.load()).toEqual({ runnerId: 'runner-b', apiKey: 'key-b' })
+    expect(await storeB.load()).toEqual({ computerId: 'computer-b', apiKey: 'key-b' })
   })
 
   it("clearing one hub's entry leaves the other hub's entry intact", async () => {
     const storeA = createFileCredentialStore('hub-a.example', { baseDir })
     const storeB = createFileCredentialStore('hub-b.example', { baseDir })
     await storeA.save(CREDS)
-    await storeB.save({ runnerId: 'runner-b', apiKey: 'key-b' })
+    await storeB.save({ computerId: 'computer-b', apiKey: 'key-b' })
 
     await storeA.clear()
 
     expect(await storeA.load()).toBeNull()
-    expect(await storeB.load()).toEqual({ runnerId: 'runner-b', apiKey: 'key-b' })
+    expect(await storeB.load()).toEqual({ computerId: 'computer-b', apiKey: 'key-b' })
   })
 
   it("one hub's corrupt entry does not hide another hub's valid entry", async () => {
@@ -106,7 +106,7 @@ describe('multi-hub isolation (the reason this is a map, not a per-host file)', 
     await store.save(CREDS)
     const { writeFile } = await import('node:fs/promises')
     const raw = JSON.parse(await readFile(store.filePath, 'utf8'))
-    raw['hub-b.example'] = { runnerId: '' } // fails schema (min length 1)
+    raw['hub-b.example'] = { computerId: '' } // fails schema (min length 1)
     await writeFile(store.filePath, JSON.stringify(raw), 'utf8')
 
     expect(await store.load()).toEqual(CREDS)
@@ -122,7 +122,7 @@ describe('credential map path + host validation', () => {
   })
 
   it('credentialsFilePath is one shared file, independent of hub host', () => {
-    expect(credentialsFilePath(baseDir)).toBe(join(baseDir, 'runner.state.json'))
+    expect(credentialsFilePath(baseDir)).toBe(join(baseDir, 'computer.state.json'))
   })
 
   it('rejects an empty/whitespace-only hub host rather than silently storing a garbage key', () => {

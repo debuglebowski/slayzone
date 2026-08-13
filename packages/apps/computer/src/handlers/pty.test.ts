@@ -1,8 +1,8 @@
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
-import type { RunnerConfig } from '../config'
+import type { ComputerConfig } from '../config'
 import { createPtyHandlers } from './pty'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
 interface Notify {
   method: string
@@ -11,13 +11,13 @@ interface Notify {
 
 function makeCtx() {
   const notifies: Notify[] = []
-  const dialer: RunnerDialer = {
+  const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
       return true
     }
   }
-  const config: RunnerConfig = {
+  const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: [tmpdir()],
@@ -104,7 +104,7 @@ describe('createPtyHandlers', () => {
     // from live frame 3 + backfilled frame 4 + live frame 5. That makes the two
     // sources interchangeable BY CONTRACT: any per-seq divergence corrupts the
     // assembled stream — dropping bytes in one ordering and stranding a torn
-    // escape prefix in the other. So the runner must never emit a frame whose
+    // escape prefix in the other. So the computer must never emit a frame whose
     // buffered bytes differ from its live bytes.
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
@@ -324,9 +324,9 @@ describe('createPtyHandlers', () => {
     expect(res.frames).toEqual([])
   })
 
-  it('overlays the runner loopback SLAYZONE_AGENT_HOOK_URL and strips any hub token', async () => {
-    // The agent must ALWAYS post its hook to the runner's OWN loopback relay —
-    // never to a hub URL the hub baked in. The runner overlays the URL at spawn
+  it('overlays the computer loopback SLAYZONE_AGENT_HOOK_URL and strips any hub token', async () => {
+    // The agent must ALWAYS post its hook to the computer's OWN loopback relay —
+    // never to a hub URL the hub baked in. The computer overlays the URL at spawn
     // and strips any stray SLAYZONE_HUB_TOKEN so no per-agent bearer leaks into
     // the subprocess env.
     const { ctx } = makeCtx()
@@ -336,7 +336,7 @@ describe('createPtyHandlers', () => {
 
     // Spawn `env` and capture its output to inspect the child's environment.
     let out = ''
-    const dialer: RunnerDialer = {
+    const dialer: ComputerDialer = {
       notify: (method, params) => {
         if (method === 'pty.data') out += (params as { data: string }).data
         return true
@@ -349,7 +349,7 @@ describe('createPtyHandlers', () => {
       args: ['-c', 'echo HOOK=$SLAYZONE_AGENT_HOOK_URL; echo TOKEN=[$SLAYZONE_HUB_TOKEN]'],
       cwd: process.cwd(),
       env: {
-        // The hub baked in a (now-wrong) hub hook URL + a bearer; the runner
+        // The hub baked in a (now-wrong) hub hook URL + a bearer; the computer
         // must override the URL and drop the token.
         SLAYZONE_AGENT_HOOK_URL: 'https://hub.example:8443/api/agent-hook',
         SLAYZONE_HUB_TOKEN: 'should-be-stripped',
@@ -364,9 +364,9 @@ describe('createPtyHandlers', () => {
   })
 
   it('sanitizes the inherited process.env base: strips infra/secret/identity + non-prefixed infra, keeps PATH', async () => {
-    // The runner inherits its parent (supervisor) process.env, which carries
+    // The computer inherits its parent (supervisor) process.env, which carries
     // SlayZone infra/secret/identity vars. NONE of those may leak into a spawned
-    // agent's env — a runner-hosted `slay` reinterpreting an inherited
+    // agent's env — a computer-hosted `slay` reinterpreting an inherited
     // SLAYZONE_HUB_ADDRESS/HUB_TOKEN/TASK_ID is the exact leak this closes. The
     // user env (PATH/HOME/toolchains) MUST survive. This is the BASE channel
     // (process.env), distinct from the hub-passed override channel tested above.
@@ -386,7 +386,7 @@ describe('createPtyHandlers', () => {
     try {
       const { ctx } = makeCtx()
       let out = ''
-      const dialer: RunnerDialer = {
+      const dialer: ComputerDialer = {
         notify: (method, params) => {
           if (method === 'pty.data') out += (params as { data: string }).data
           return true
@@ -429,7 +429,7 @@ describe('createPtyHandlers', () => {
     // identical to before the split existed).
     const { ctx } = makeCtx()
     let out = ''
-    const dialer: RunnerDialer = {
+    const dialer: ComputerDialer = {
       notify: (method, params) => {
         if (method === 'pty.data') out += (params as { data: string }).data
         return true

@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { gitIsGitRepoResultSchema } from '@slayzone/computer-transport/shared'
-import type { RunnerConfig } from '../config'
+import type { ComputerConfig } from '../config'
 import { GitMethods, createGitHandlers } from './git'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
-const dialer: RunnerDialer = { notify: () => true }
+const dialer: ComputerDialer = { notify: () => true }
 
 function ctxWithRoots(roots: string[]) {
-  const config: RunnerConfig = {
+  const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
@@ -28,7 +28,7 @@ let dir: string
 let roots: string[]
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'runner-git-'))
+  dir = mkdtempSync(join(tmpdir(), 'computer-git-'))
   // Canonicalize so containment holds on macOS (/var → /private/var).
   roots = [realpathSync(tmpdir())]
 })
@@ -41,7 +41,7 @@ describe('createGitHandlers — git.isGitRepo', () => {
   it('is false for a bare directory and true after git init', async () => {
     const handlers = createGitHandlers(ctxWithRoots(roots))
     // Assert through the SHARED result schema, not a hand-written literal: this
-    // test previously encoded the runner's own `{isRepo}` shape, so it passed while
+    // test previously encoded the computer's own `{isRepo}` shape, so it passed while
     // the hub (parsing `{isGitRepo}`) rejected every reply.
     expect(gitIsGitRepoResultSchema.parse(await handlers['git.isGitRepo']({ path: dir }))).toEqual({
       isGitRepo: false
@@ -90,7 +90,7 @@ describe('createGitHandlers — allowedRoots guard', () => {
 
 describe('createGitHandlers — runWorktreeSetupScript env sanitize', () => {
   it('sanitizes the inherited process.env base: strips SlayZone infra/secret, keeps PATH + WORKTREE_PATH overlay', async () => {
-    // The worktree setup script inherits the runner's process.env. SlayZone
+    // The worktree setup script inherits the computer's process.env. SlayZone
     // infra/secret must NOT leak into it; the WORKTREE_PATH/REPO_PATH/SOURCE_BRANCH
     // overlay + user env (PATH) MUST survive.
     const saved: Record<string, string | undefined> = {}

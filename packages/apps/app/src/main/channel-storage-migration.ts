@@ -7,7 +7,7 @@ import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-util
 /**
  * One-time COPY of the desktop app's state from the legacy FLAT, shared
  * `~/.slayzone` root into the new channel-scoped roots
- * (`~/.slayzone/<dev|stable>/hub`, `~/.slayzone/<dev|stable>/runner`).
+ * (`~/.slayzone/<dev|stable>/hub`, `~/.slayzone/<dev|stable>/computer`).
  *
  * ── The legacy root is treated as STRICTLY READ-ONLY, same rule as
  * `storage-migration.ts` and for the identical reason: dev/beta/stable all
@@ -18,18 +18,18 @@ import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-util
  * header) — so this migration NEVER calls `rm`/`rename`/`unlink` on
  * `legacyRoot`, only copies out of it.
  *
- * ── Two independent slices, two independent sentinels — hub state and runner
+ * ── Two independent slices, two independent sentinels — hub state and computer
  * state move to two DIFFERENT destination roots, so each gets its own
  * per-channel completion marker and neither slice blocks the other.
  *
- * ── The runner slice is a TRANSFORM, not a directory copy: today's per-hub
+ * ── The computer slice is a TRANSFORM, not a directory copy: today's per-hub
  * credential files (`<legacyRoot>/computers/<hub-host>.json`) become entries in
- * one shared map file (`<runnerRoot>/runner.state.json`), matching the
+ * one shared map file (`<computerRoot>/computer.state.json`), matching the
  * consolidation `credential-store.ts` already does for new writes.
  */
 
 /** Per-channel completion sentinel — one per destination root, so the hub and
- *  runner slices (different destinations) never gate on each other. */
+ *  computer slices (different destinations) never gate on each other. */
 function sentinelPath(destRoot: string): string {
   return join(destRoot, '.channel-migrated')
 }
@@ -109,26 +109,26 @@ function migrateHubSlice(legacyRoot: string, hubRoot: string, packaged: boolean)
 }
 
 /**
- * Runner slice: read every legacy per-hub credential file
+ * Computer slice: read every legacy per-hub credential file
  * (`<legacyRoot>/computers/<hub-host>.json`) and merge each one in as a key of
- * the new shared `<runnerRoot>/runner.state.json` map — via the same
+ * the new shared `<computerRoot>/computer.state.json` map — via the same
  * `updateJsonFile` atomic-merge primitive `slayzone-config.ts` already uses,
  * not a bespoke write path. A malformed legacy file is skipped (logged, not
  * thrown) rather than aborting the whole migration over one bad entry.
  */
-function migrateRunnerSlice(legacyRoot: string, runnerRoot: string): void {
-  mkdirSync(runnerRoot, { recursive: true })
-  const sentinel = sentinelPath(runnerRoot)
+function migrateComputerSlice(legacyRoot: string, computerRoot: string): void {
+  mkdirSync(computerRoot, { recursive: true })
+  const sentinel = sentinelPath(computerRoot)
   if (existsSync(sentinel)) return
 
-  const legacyRunnersDir = join(legacyRoot, 'runners')
-  if (existsSync(legacyRunnersDir)) {
-    const stateFilePath = join(runnerRoot, 'runner.state.json')
-    for (const entry of readdirSync(legacyRunnersDir)) {
+  const legacyComputersDir = join(legacyRoot, 'computers')
+  if (existsSync(legacyComputersDir)) {
+    const stateFilePath = join(computerRoot, 'computer.state.json')
+    for (const entry of readdirSync(legacyComputersDir)) {
       if (!entry.endsWith('.json')) continue
       const hubHost = basename(entry, '.json')
       try {
-        const credentials: unknown = JSON.parse(readFileSync(join(legacyRunnersDir, entry), 'utf8'))
+        const credentials: unknown = JSON.parse(readFileSync(join(legacyComputersDir, entry), 'utf8'))
         updateJsonFile({ [hubHost]: credentials }, stateFilePath)
       } catch (err) {
         console.error(
@@ -144,7 +144,7 @@ function migrateRunnerSlice(legacyRoot: string, runnerRoot: string): void {
 
 /**
  * COPY (never move) the desktop app's state from the legacy flat
- * `~/.slayzone` into the new channel-scoped hub/runner roots. Idempotent
+ * `~/.slayzone` into the new channel-scoped hub/computer roots. Idempotent
  * (per-slice sentinels) and safe to call on every boot — a fresh install with
  * no legacy state just creates the destination dirs and marks both slices done.
  *
@@ -154,9 +154,9 @@ function migrateRunnerSlice(legacyRoot: string, runnerRoot: string): void {
 export function ensureChannelScopedStorage(opts: {
   legacyRoot: string
   hubRoot: string
-  runnerRoot: string
+  computerRoot: string
   packaged: boolean
 }): void {
   migrateHubSlice(opts.legacyRoot, opts.hubRoot, opts.packaged)
-  migrateRunnerSlice(opts.legacyRoot, opts.runnerRoot)
+  migrateComputerSlice(opts.legacyRoot, opts.computerRoot)
 }

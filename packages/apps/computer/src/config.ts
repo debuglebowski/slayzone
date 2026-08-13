@@ -1,14 +1,14 @@
 /**
- * Runner configuration — env-first, layered over the runner's own config file
- * at `<ROOT>/runner.config.json` (see @slayzone/platform/slayzone-config). Precedence:
+ * Computer configuration — env-first, layered over the computer's own config file
+ * at `<ROOT>/computer.config.json` (see @slayzone/platform/slayzone-config). Precedence:
  *
- *   env var  >  <ROOT>/runner.config.json  >  default
+ *   env var  >  <ROOT>/computer.config.json  >  default
  *
  * (plus the join-token embedded hubUrl/cert as the lowest fallback). Env still
  * wins so operators / the supervised host can override per boot. There is no
  * separate `SLAYZONE_RUNNER_CONFIG` path-pointing knob — one derived config file.
  *
- * @module runner/config
+ * @module computer/config
  */
 
 import { realpathSync } from 'node:fs'
@@ -17,58 +17,58 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_RUNNER_NAME,
-  loadRunnerConfigFile,
-  type RunnerConfig as RunnerConfigFile
+  loadComputerConfigFile,
+  type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, type SlayzoneMode } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
 
-export const runnerConfigSchema = z.object({
-  /** `ws://` or `wss://` hub runner endpoint. */
+export const computerConfigSchema = z.object({
+  /** `ws://` or `wss://` hub computer endpoint. */
   hubUrl: z.string().min(1),
   /** Required for first contact; later runs reconnect with stored credentials. */
   joinToken: z.string().min(1).optional(),
-  /** Human-readable runner name shown on the hub. Defaults to the hostname. */
+  /** Human-readable computer name shown on the hub. Defaults to the hostname. */
   name: z.string().min(1),
-  /** Filesystem roots this runner may operate under (fs./git. commands). */
+  /** Filesystem roots this computer may operate under (fs./git. commands). */
   allowedRoots: z.array(z.string().min(1)),
   /** Capability tags advertised at enrollment. */
   capabilities: z.array(z.string().min(1)),
   /** sha256 pin of the hub TLS leaf cert (lowercase hex; colons tolerated). */
   pinnedCertSha256: z.string().min(1).optional()
 })
-export type RunnerConfig = z.infer<typeof runnerConfigSchema>
+export type ComputerConfig = z.infer<typeof computerConfigSchema>
 
 export const ENV_VARS = {
   // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
   // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/computers` is
   // appended here, so this env channel can never carry a scheme the CLI would
-  // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). runner.config.json
+  // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). computer.config.json
   // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
   // into terminals, so outside the collision).
   hubAddress: 'SLAYZONE_HUB_ADDRESS',
   // HUB_-prefixed because the token is hub-scoped BY VALUE, not by reader: the hub
   // mints it and it embeds the hub's `wss://…/computers` url, the hub's TLS cert
   // fingerprint, and a secret checked against the hub's `join_tokens` row.
-  // `mintJoinToken` binds it to NO runner (computer_id is NULL until redemption), so
-  // any runner can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
+  // `mintJoinToken` binds it to NO computer (computer_id is NULL until redemption), so
+  // any computer can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
   // `HUB_` family per rule 3, matching the domain term used everywhere else
   // (`szjt1.`, the `join_tokens` table, mintJoinToken, POST /api/computers/join-token).
   joinToken: 'SLAYZONE_HUB_JOIN_TOKEN'
   // No alias for the pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN`: it never shipped.
-  // The published runner betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
+  // The published computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, and
   // the name it was renamed FROM only ever existed on unreleased main, so there is
   // no operator env carrying it. Unmanifested ⇒ sanitizeSpawnEnv strips it, and
-  // loadRunnerConfig ignores it, so setting it fails loudly with the
+  // loadComputerConfig ignores it, so setting it fails loudly with the
   // missing-SLAYZONE_HUB_JOIN_TOKEN error rather than half-working.
-  // allowedRoots has NO env channel: a SUPERVISED runner self-derives its FS
-  // path-jail to `[homedir()]` (below), a STANDALONE runner gets it from
-  // <ROOT>/runner.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
-  // runner NAME likewise has no env channel — it derives from SUPERVISED (→
-  // DEFAULT_LOCAL_RUNNER_NAME) or runner.config.json `runnerName`, else the hostname.
+  // allowedRoots has NO env channel: a SUPERVISED computer self-derives its FS
+  // path-jail to `[homedir()]` (below), a STANDALONE computer gets it from
+  // <ROOT>/computer.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
+  // computer NAME likewise has no env channel — it derives from SUPERVISED (→
+  // DEFAULT_LOCAL_RUNNER_NAME) or computer.config.json `computerName`, else the hostname.
   // The cert pin has NO env channel either: it arrives via the join token (auto
-  // path) or <ROOT>/runner.config.json `pinnedCertSha256` (explicit standalone path).
+  // path) or <ROOT>/computer.config.json `pinnedCertSha256` (explicit standalone path).
   // Never a bare env var — a fingerprint is never fished out of ambient env.
 } as const
 
@@ -109,13 +109,13 @@ function realpathBoundary(target: string): string {
  * its canonical absolute path. Throws a clear error on traversal outside every
  * configured root (or when no roots are configured at all).
  *
- * Every fs./git./proc. path argument on the runner MUST pass through this guard
+ * Every fs./git./proc. path argument on the computer MUST pass through this guard
  * before touching the filesystem.
  */
 export function assertPathAllowed(candidate: string, allowedRoots: readonly string[]): string {
   if (allowedRoots.length === 0) {
     throw new Error(
-      `runner has no allowedRoots configured; refusing filesystem access to '${candidate}'`
+      `computer has no allowedRoots configured; refusing filesystem access to '${candidate}'`
     )
   }
   const resolved = realpathBoundary(candidate)
@@ -132,23 +132,23 @@ export function assertPathAllowed(candidate: string, allowedRoots: readonly stri
     }
   }
   throw new Error(
-    `path '${candidate}' is outside the runner's allowedRoots [${allowedRoots.join(', ')}]`
+    `path '${candidate}' is outside the computer's allowedRoots [${allowedRoots.join(', ')}]`
   )
 }
 
 type Env = Record<string, string | undefined>
 
 /**
- * Map `<ROOT>/runner.config.json` onto the runner's effective config shape.
- * This is the SINGLE config file for a standalone runner — the former
+ * Map `<ROOT>/computer.config.json` onto the computer's effective config shape.
+ * This is the SINGLE config file for a standalone computer — the former
  * `SLAYZONE_RUNNER_CONFIG` env var (a second path-pointing knob at an arbitrary
- * file) is gone; there is one derived config at `<ROOT>/runner.config.json`.
+ * file) is gone; there is one derived config at `<ROOT>/computer.config.json`.
  */
-function fromSharedConfig(shared: RunnerConfigFile): Partial<RunnerConfig> {
-  const out: Partial<RunnerConfig> = {}
+function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
+  const out: Partial<ComputerConfig> = {}
   if (shared.hubUrl !== undefined) out.hubUrl = shared.hubUrl
   if (shared.joinToken !== undefined) out.joinToken = shared.joinToken
-  if (shared.runnerName !== undefined) out.name = shared.runnerName
+  if (shared.computerName !== undefined) out.name = shared.computerName
   // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
   if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
   if (shared.pinnedCertSha256 !== undefined) out.pinnedCertSha256 = shared.pinnedCertSha256
@@ -157,40 +157,40 @@ function fromSharedConfig(shared: RunnerConfigFile): Partial<RunnerConfig> {
 
 /**
  * Assemble the effective config. Precedence (low→high):
- *   defaults ← <ROOT>/runner.config.json ← environment
+ *   defaults ← <ROOT>/computer.config.json ← environment
  * (with the join-token embedded hubUrl/cert as the lowest fallback). Throws with
  * a readable message when required fields are missing.
  *
- * `shared` defaults to reading `<ROOT>/runner.config.json` ONLY for a STANDALONE
- * runner using the real `process.env`. It is skipped ({}) when:
+ * `shared` defaults to reading `<ROOT>/computer.config.json` ONLY for a STANDALONE
+ * computer using the real `process.env`. It is skipped ({}) when:
  *   - a test passes its own `env` object (hermetic — never touch the dev's real
  *     config file), or
- *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local runner
- *     (startLocalRunnerWithAutoEnroll passes `{...process.env}`, which carries
+ *   - `SLAYZONE_SUPERVISED=1` — the app-spawned local computer
+ *     (startLocalComputerWithAutoEnroll passes `{...process.env}`, which carries
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
- *     supplies the runner's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN),
+ *     supplies the computer's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN),
  *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_RUNNER_NAME), so the
- *     shared file must not leak into it. Keeps the supervised runner boot
+ *     shared file must not leak into it. Keeps the supervised computer boot
  *     byte-identical to pre-config behavior.
  * Callers can also pass an explicit shared config to test the layering.
  */
-export function loadRunnerConfig(
+export function loadComputerConfig(
   env: Env = process.env,
-  shared: RunnerConfigFile = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
-    ? loadRunnerConfigFile()
+  shared: ComputerConfigFile = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
+    ? loadComputerConfigFile()
     : {}
-): RunnerConfig {
+): ComputerConfig {
   const fromShared = fromSharedConfig(shared)
 
   // A join token is self-sufficient: it embeds the hub's `wss://…/computers` URL and
   // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
-  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_HUB_JOIN_TOKEN=… runner` works
+  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_HUB_JOIN_TOKEN=… computer` works
   // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
   // operator can point a token at a different endpoint or override the pin. A
   // malformed token decodes to null → no fallback (schema then reports the missing
   // hubUrl, exactly as before).
   //
-  // Env precedence: env > runner.config.json. Resolved ONCE here so the token-decode
+  // Env precedence: env > computer.config.json. Resolved ONCE here so the token-decode
   // fallback and the `joinToken` field can never disagree about which channel won.
   const envJoinToken = env[ENV_VARS.joinToken]
   const joinToken = envJoinToken ?? fromShared.joinToken
@@ -198,7 +198,7 @@ export function loadRunnerConfig(
 
   // The env channel carries only the hub AUTHORITY (host[:port]); compose the
   // full `ws(s)://<addr>/computers` dial url here, scheme from SLAYZONE_MODE (read
-  // from the passed `env` so tests stay hermetic). runner.config.json / join-token
+  // from the passed `env` so tests stay hermetic). computer.config.json / join-token
   // fallbacks below still supply a full url directly.
   const mode: SlayzoneMode =
     env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' ? 'remote' : 'local'
@@ -207,38 +207,38 @@ export function loadRunnerConfig(
     envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/computers', mode) : undefined
 
   const merged = {
-    // Supervised local runner → the shared const so the hub's dedup collapses it
-    // to one row; standalone → the hostname (runner.config.json `runnerName` overrides
+    // Supervised local computer → the shared const so the hub's dedup collapses it
+    // to one row; standalone → the hostname (computer.config.json `computerName` overrides
     // via ...fromShared below).
     name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_RUNNER_NAME : hostname(),
-    // FS path-jail default. Supervised local runner → `[homedir()]` (it operates
+    // FS path-jail default. Supervised local computer → `[homedir()]` (it operates
     // on the user's own projects under $HOME); standalone → `[]` here, then
-    // runner.config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
+    // computer.config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
     ...(fromToken ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint } : {}),
-    // <ROOT>/runner.config.json — base under env (spread after). The single config file.
+    // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
     ...(envJoinToken !== undefined ? { joinToken: envJoinToken } : {})
   }
 
-  const result = runnerConfigSchema.safeParse(merged)
+  const result = computerConfigSchema.safeParse(merged)
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('; ')
     throw new Error(
-      `invalid runner configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/runner.config.json.`
+      `invalid computer configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/computer.config.json.`
     )
   }
 
-  // Fail-fast on an EXPLICITLY-configured pin (runner.config.json `pinnedCertSha256`)
+  // Fail-fast on an EXPLICITLY-configured pin (computer.config.json `pinnedCertSha256`)
   // against a plaintext ws:// hub: pinning is meaningless without TLS, and silently
   // dropping it would downgrade an operator who asked for pinning to an unpinned
   // connection. A pin that came ONLY from the join token (the auto path) is NOT
-  // explicit — it is softly ignored downstream (startRunner) when the resolved url
+  // explicit — it is softly ignored downstream (startComputer) when the resolved url
   // is ws://, so a ws token stays usable for loopback/dev without a hard failure.
   const explicitPin = fromShared.pinnedCertSha256
   if (explicitPin !== undefined && urlProtocol(result.data.hubUrl) === 'ws:') {
@@ -248,17 +248,17 @@ export function loadRunnerConfig(
     )
   }
 
-  // SLAYZONE_MODE=remote hardening: a remote runner MUST dial the hub over TLS.
+  // SLAYZONE_MODE=remote hardening: a remote computer MUST dial the hub over TLS.
   // A plaintext ws:// hub on the open internet is a hard error (credentials +
   // command stream would be unencrypted). This can now only trip on a full ws://
-  // url supplied via runner.config.json / join token — an env SLAYZONE_HUB_ADDRESS is
+  // url supplied via computer.config.json / join token — an env SLAYZONE_HUB_ADDRESS is
   // authority-only and hubUrlFromAddr forces wss:// in remote mode, so the env
   // path is unrepresentable-as-ws here (the whole point of the ADDRESS redesign).
   // The guard stays to catch the file/token paths. `mode` derived above.
   if (mode === 'remote' && urlProtocol(result.data.hubUrl) === 'ws:') {
     throw new Error(
       `SLAYZONE_MODE=remote requires a wss:// hub url; got '${result.data.hubUrl}'. ` +
-        `A remote runner must use TLS — use a wss:// url (or SLAYZONE_MODE=local for loopback/dev).`
+        `A remote computer must use TLS — use a wss:// url (or SLAYZONE_MODE=local for loopback/dev).`
     )
   }
   return result.data

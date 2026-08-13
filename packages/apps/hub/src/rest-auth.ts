@@ -56,12 +56,12 @@ const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
  * bearer.
  *
  * `/api/computers/join-token`: the Electron MAIN process mints a token over
- * loopback at boot to auto-enroll the co-located runner, and main has no session
- * (no tRPC client, no credentials) — requiring a bearer would break local-runner
+ * loopback at boot to auto-enroll the co-located computer, and main has no session
+ * (no tRPC client, no credentials) — requiring a bearer would break local-computer
  * auto-enroll on an otherwise-enforcing hub. The route self-guards on loopback OR
  * a verified bearer (see its `joinTokenAuthDecision`), which is still at least as
  * tight as this gate: an off-box caller is admitted only on the same authority
- * `/trpc` already accepts for the identical `runners.mintJoinToken` operation.
+ * `/trpc` already accepts for the identical `computers.mintJoinToken` operation.
  * Keeping the exemption is what preserves that route's own status codes — gating
  * here would 401 an off-box request before it could report the 503 (listener not
  * yet bound) or the 403 that says "wrong machine" rather than "no credential".
@@ -105,7 +105,7 @@ export interface RestAuthActionOptions {
  * Fail-CLOSED by default once the hub enforces auth: an unparseable/absent url or
  * an unknown peer address resolves to `verify`, never `allow`. The only openings
  * are the three deliberate ones — the gate being off, a loopback peer (a
- * co-located process: the Electron host, the supervised runner, a task terminal's
+ * co-located process: the Electron host, the supervised computer, a task terminal's
  * `slay`), and the exempt paths documented above.
  *
  * Only `/api/*` and `/mcp` are gated at all. `/health` is answered pre-express
@@ -116,7 +116,7 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   if (!opts.hubAuthRequired) return 'allow'
   // A co-located caller is inside the trust boundary the loopback bind already
   // established; keeping it open is what makes an enforcing hub byte-identical
-  // for the desktop host, the supervised runner, and in-task `slay` calls.
+  // for the desktop host, the supervised computer, and in-task `slay` calls.
   if (isLoopbackAddress(opts.remoteAddress)) return 'allow'
   // No url at all → cannot prove the route is exempt, so demand a bearer.
   if (!opts.url) return 'verify'

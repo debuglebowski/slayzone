@@ -48,7 +48,7 @@ const trpcClientMock = {
   },
   // The project-path probe routes to the machine that owns the workspace, not to
   // whichever hub answered the rest of the load. `reachable` is what separates
-  // "the runner says it is gone" from "we could not ask" — only the first may
+  // "the computer says it is gone" from "we could not ask" — only the first may
   // set `projectPathMissing`.
   workspace: { pathExists: { query: vi.fn() } }
 }
@@ -126,10 +126,10 @@ describe('fetchTaskDetail', () => {
     expect(result!.projectPathMissing).toBe(true)
   })
 
-  // An offline runner means the question went unanswered. Reporting "missing"
+  // An offline computer means the question went unanswered. Reporting "missing"
   // would send the user to fix a path that is very likely fine — the exact false
   // alarm this routing exists to remove.
-  it('does not call the path missing when its runner could not be reached', async () => {
+  it('does not call the path missing when its computer could not be reached', async () => {
     trpcClientMock.workspace.pathExists.query.mockResolvedValue({
       exists: false,
       reachable: false

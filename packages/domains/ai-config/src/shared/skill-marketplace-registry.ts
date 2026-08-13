@@ -552,7 +552,7 @@ description: "List and manage running processes via the slay CLI"
 trigger: auto
 ---
 
-Processes are background tasks managed by the SlayZone app — distinct from PTY terminal sessions (see slay-pty). These include automation runners, background jobs, and other managed child processes.
+Processes are background tasks managed by the SlayZone app — distinct from PTY terminal sessions (see slay-pty). These include automation computers, background jobs, and other managed child processes.
 
 All process commands require the SlayZone app to be running, as data comes from the app's HTTP API.
 

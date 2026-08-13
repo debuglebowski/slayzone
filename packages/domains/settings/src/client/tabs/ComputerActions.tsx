@@ -8,7 +8,7 @@ import {
   type ReactNode
 } from 'react'
 import { electronBootstrap } from '@slayzone/transport/client'
-import { isLoopbackRunnerUrl } from '@slayzone/platform/hub-addr'
+import { isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { AlertTriangle, Copy } from 'lucide-react'
 import {
   Button,
@@ -28,20 +28,20 @@ import {
   DialogFooter,
   toast
 } from '@slayzone/ui'
-import { RunnerRootsDialog, type RootsTarget } from './RunnerRootsDialog'
+import { ComputerRootsDialog, type RootsTarget } from './ComputerRootsDialog'
 
 /**
- * The runner actions that must exist ONCE, not once per hub.
+ * The computer actions that must exist ONCE, not once per hub.
  *
- * Runners are listed inside their hub (a runner belongs to exactly one hub, fixed
+ * Computers are listed inside their hub (a computer belongs to exactly one hub, fixed
  * at mint time), so the list itself is per-hub — see `HubCard`. But three
- * things are not: the minted-token modal, the restart-local-runner confirm, and
+ * things are not: the minted-token modal, the restart-local-computer confirm, and
  * the revoke confirm. Each is a single dialog instance driven by whichever hub's
  * block asked for it.
  *
  * A context rather than props because the blocks are nested two layers down inside
  * the hub table, and drilling six handlers through it (which is what the flat
- * Runners table used to do) puts dialog state in a component that has no business
+ * Computers table used to do) puts dialog state in a component that has no business
  * holding it.
  *
  * WHAT IS *NOT* HERE: mint and revoke themselves. Those are hub-scoped mutations
@@ -64,32 +64,32 @@ export type RevokeTarget = {
   revoke: () => Promise<void>
 }
 
-export interface RunnerActionsValue {
+export interface ComputerActionsValue {
   /** Show the one-time enrollment token a block just minted. */
   showMintedToken: (minted: MintedToken) => void
   /** Ask for confirmation before revoking; the target carries its own thunk. */
   requestRevoke: (target: RevokeTarget) => void
-  /** Edit a runner's filesystem path-jail; the target carries hub-bound thunks. */
+  /** Edit a computer's filesystem path-jail; the target carries hub-bound thunks. */
   requestEditRoots: (target: RootsTarget) => void
-  /** Confirm-gated restart of the app's own supervised runner. */
+  /** Confirm-gated restart of the app's own supervised computer. */
   requestRestart: () => void
-  /** Start a local runner that never came up. No confirm — nothing is running. */
+  /** Start a local computer that never came up. No confirm — nothing is running. */
   requestStart: () => void
   /** True while a restart/start is in flight. */
   restarting: boolean
   /**
    * Bumped after a restart/start settles, so a block can refetch its list.
-   * `runners.list` does not poll, and the runner re-dials asynchronously after the
+   * `computers.list` does not poll, and the computer re-dials asynchronously after the
    * spawn returns — without this the table would sit on "Disconnected".
    */
-  runnerRevision: number
+  computerRevision: number
 }
 
-const RunnerActionsContext = createContext<RunnerActionsValue | null>(null)
+const ComputerActionsContext = createContext<ComputerActionsValue | null>(null)
 
-export function useRunnerActions(): RunnerActionsValue {
-  const value = useContext(RunnerActionsContext)
-  if (!value) throw new Error('useRunnerActions must be used inside <RunnerActionsProvider>')
+export function useComputerActions(): ComputerActionsValue {
+  const value = useContext(ComputerActionsContext)
+  if (!value) throw new Error('useComputerActions must be used inside <ComputerActionsProvider>')
   return value
 }
 
@@ -99,13 +99,13 @@ export function useRunnerActions(): RunnerActionsValue {
  */
 const RECONNECT_SETTLE_MS = 2000
 
-export function RunnerActionsProvider({ children }: { children: ReactNode }) {
+export function ComputerActionsProvider({ children }: { children: ReactNode }) {
   const [minted, setMinted] = useState<MintedToken | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<RevokeTarget | null>(null)
   const [rootsTarget, setRootsTarget] = useState<RootsTarget | null>(null)
   const [restartOpen, setRestartOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [runnerRevision, setRunnerRevision] = useState(0)
+  const [computerRevision, setComputerRevision] = useState(0)
 
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
@@ -116,10 +116,10 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
   )
 
   /**
-   * Restart (or first-start) the app's own supervised runner.
+   * Restart (or first-start) the app's own supervised computer.
    *
-   * `electronBootstrap` rather than tRPC on purpose: the runner is a child of the
-   * MAIN process, not of the hub. The hub can see the runner's registry row but
+   * `electronBootstrap` rather than tRPC on purpose: the computer is a child of the
+   * MAIN process, not of the hub. The hub can see the computer's registry row but
    * has no handle on the process, so only the desktop bridge can cycle it — and on
    * the Chromium fork, which does not spawn it, the shim answers "not supported"
    * and this surfaces as an ordinary error toast.
@@ -127,16 +127,16 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
   const runRestart = useCallback(async (): Promise<void> => {
     setRestarting(true)
     try {
-      const result = await electronBootstrap.restartLocalRunner()
-      if (result.ok) toast.success('Local runner restarted')
+      const result = await electronBootstrap.restartLocalComputer()
+      if (result.ok) toast.success('Local computer restarted')
       else toast.error(`Restart failed: ${result.error ?? 'unknown error'}`)
     } catch (err) {
       toast.error(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setRestarting(false)
-      setRunnerRevision((r) => r + 1)
+      setComputerRevision((r) => r + 1)
       if (settleTimer.current) clearTimeout(settleTimer.current)
-      settleTimer.current = setTimeout(() => setRunnerRevision((r) => r + 1), RECONNECT_SETTLE_MS)
+      settleTimer.current = setTimeout(() => setComputerRevision((r) => r + 1), RECONNECT_SETTLE_MS)
     }
   }, [])
 
@@ -167,14 +167,14 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // A loopback dial target means the token only works for a runner on the hub's OWN
+  // A loopback dial target means the token only works for a computer on the hub's OWN
   // machine. Legitimate (that is the co-located case), so this informs rather than
-  // blocks — but silence here is how an operator ends up with a runner that never
+  // blocks — but silence here is how an operator ends up with a computer that never
   // connects and no clue why.
-  const mintedIsLoopback = minted?.hubUrl !== undefined && isLoopbackRunnerUrl(minted.hubUrl)
+  const mintedIsLoopback = minted?.hubUrl !== undefined && isLoopbackComputerUrl(minted.hubUrl)
 
   return (
-    <RunnerActionsContext.Provider
+    <ComputerActionsContext.Provider
       value={{
         showMintedToken,
         requestRevoke,
@@ -182,18 +182,18 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
         requestRestart,
         requestStart,
         restarting,
-        runnerRevision
+        computerRevision
       }}
     >
       {children}
 
-      {/* The runner's filesystem path-jail. Lives here for the same reason the
+      {/* The computer's filesystem path-jail. Lives here for the same reason the
           other two do — one instance, driven by whichever hub's block asked —
           and the target carries hub-bound read/write thunks so an edit cannot
-          land on the wrong hub's runner. */}
-      {/* Keyed by runner so opening a DIFFERENT one gets a fresh dialog rather
-          than one still holding the previous runner's unsaved edits. */}
-      <RunnerRootsDialog
+          land on the wrong hub's computer. */}
+      {/* Keyed by computer so opening a DIFFERENT one gets a fresh dialog rather
+          than one still holding the previous computer's unsaved edits. */}
+      <ComputerRootsDialog
         key={rootsTarget?.id ?? 'none'}
         target={rootsTarget}
         onClose={() => setRootsTarget(null)}
@@ -201,18 +201,18 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
 
       {/* Enrollment token — one-time secret; modal forces a copy before dismiss. */}
       <Dialog open={!!minted} onOpenChange={(open) => !open && setMinted(null)}>
-        <DialogContent data-testid="runner-minted-token">
+        <DialogContent data-testid="computer-minted-token">
           <DialogHeader>
             <DialogTitle>Enrollment token</DialogTitle>
             <DialogDescription>
-              Shown once. Paste it into the runner&apos;s config now — it can&apos;t be retrieved
+              Shown once. Paste it into the computer&apos;s config now — it can&apos;t be retrieved
               later.
             </DialogDescription>
           </DialogHeader>
           {/* Name the hub: with several connected, a token pasted onto the wrong
               machine is indistinguishable from a broken one. */}
-          <p className="text-muted-foreground text-xs" data-testid="runner-minted-hub">
-            This runner will connect to <span className="text-foreground">{minted?.hubLabel}</span>
+          <p className="text-muted-foreground text-xs" data-testid="computer-minted-hub">
+            This computer will connect to <span className="text-foreground">{minted?.hubLabel}</span>
             {minted?.hubUrl ? <span className="font-mono"> ({minted.hubUrl})</span> : null}
           </p>
           <code className="text-muted-foreground border-border block max-w-full overflow-x-auto rounded-md border p-3 font-mono text-xs break-all">
@@ -221,11 +221,11 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
           {mintedIsLoopback && (
             <p
               className="text-muted-foreground flex gap-2 text-xs"
-              data-testid="runner-token-loopback-warning"
+              data-testid="computer-token-loopback-warning"
             >
               <AlertTriangle className="text-destructive mt-0.5 size-3.5 shrink-0" />
               <span>
-                This hub&apos;s address is loopback, so only a runner on the SAME machine can use
+                This hub&apos;s address is loopback, so only a computer on the SAME machine can use
                 this token — anywhere else it would dial its own loopback and never connect. For a
                 hub other machines reach, recreate it with{' '}
                 <span className="font-mono">slay hub create --public-address</span>.
@@ -242,23 +242,23 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
               <Copy className="mr-1 size-3.5" />
               Copy
             </Button>
-            <Button onClick={() => setMinted(null)} data-testid="runner-token-dismiss">
+            <Button onClick={() => setMinted(null)} data-testid="computer-token-dismiss">
               Done
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Restarting the local runner is not like restarting the hub: every agent
+      {/* Restarting the local computer is not like restarting the hub: every agent
           pty on this machine is a DIRECT CHILD of that process, so confirm. */}
       <AlertDialog open={restartOpen} onOpenChange={setRestartOpen}>
-        <AlertDialogContent data-testid="runner-local-restart-dialog">
+        <AlertDialogContent data-testid="computer-local-restart-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>Restart local runner</AlertDialogTitle>
+            <AlertDialogTitle>Restart local computer</AlertDialogTitle>
             <AlertDialogDescription>
               Every agent and terminal running on this machine stops immediately — they are all
-              child processes of the runner. The runner reconnects on its own, but running agents do
-              not resume and unsaved terminal state is lost. Runners on other machines are
+              child processes of the computer. The computer reconnects on its own, but running agents do
+              not resume and unsaved terminal state is lost. Computers on other machines are
               unaffected.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -268,7 +268,7 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
               onClick={() => {
                 void runRestart()
               }}
-              data-testid="runner-local-restart-confirm"
+              data-testid="computer-local-restart-confirm"
             >
               Restart
             </AlertDialogAction>
@@ -279,7 +279,7 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke Runner</AlertDialogTitle>
+            <AlertDialogTitle>Revoke Computer</AlertDialogTitle>
             <AlertDialogDescription>
               Revoke <strong>{revokeTarget?.name}</strong>? It will no longer be able to connect to
               its hub, and any task pinned to it falls back to the project default. This cannot be
@@ -298,6 +298,6 @@ export function RunnerActionsProvider({ children }: { children: ReactNode }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </RunnerActionsContext.Provider>
+    </ComputerActionsContext.Provider>
   )
 }

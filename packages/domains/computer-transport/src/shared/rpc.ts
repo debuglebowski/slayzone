@@ -1,10 +1,10 @@
 /**
- * DuplexRpc — generalized duplex JSON-RPC 2.0 endpoint for the runner protocol.
+ * DuplexRpc — generalized duplex JSON-RPC 2.0 endpoint for the computer protocol.
  *
- * Both peers (hub gateway and runner dialer) instantiate one of these over a
+ * Both peers (hub gateway and computer dialer) instantiate one of these over a
  * shared transport. Responsibility is *only* JSON-RPC framing — request-id
  * correlation, timeout bookkeeping, peer-request dispatch. It has no knowledge
- * of runner semantics (enroll, heartbeats, pty); that lives in the gateway and
+ * of computer semantics (enroll, heartbeats, pty); that lives in the gateway and
  * dialer. The split keeps this class unit-testable against canned NDJSON.
  *
  * Transport contract: `write(line)` sends exactly one JSON document with no
@@ -21,7 +21,7 @@
  *  - A response for an unknown/expired id is silently ignored (a reply racing
  *    its own timeout is expected, not a protocol error).
  *
- * @module runner/shared/rpc
+ * @module computer/shared/rpc
  */
 
 export type JsonRpcId = string | number
@@ -82,7 +82,7 @@ export interface DuplexRpcOptions {
   onParseError?: (line: string, err: unknown) => void
   /** Default per-request timeout; `<= 0` disables. Defaults to 30s. */
   defaultRequestTimeoutMs?: number
-  /** Short name used in error messages (e.g. 'runner-hub'). */
+  /** Short name used in error messages (e.g. 'computer-hub'). */
   label?: string
 }
 
@@ -106,7 +106,7 @@ export class DuplexRpc {
 
   constructor(opts: DuplexRpcOptions) {
     this.opts = opts
-    this.label = opts.label ?? 'runner-rpc'
+    this.label = opts.label ?? 'computer-rpc'
   }
 
   get isDisposed(): boolean {

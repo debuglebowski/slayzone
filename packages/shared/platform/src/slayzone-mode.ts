@@ -1,14 +1,14 @@
 /**
- * `SLAYZONE_MODE` — the single hardening-intent flag for a standalone hub/runner.
+ * `SLAYZONE_MODE` — the single hardening-intent flag for a standalone hub/computer.
  *
  *   local  (default) — loopback / dev: auth off, plaintext `ws` allowed, TLS optional.
- *   remote           — internet-facing: hub enforces client auth + TLS; runner
+ *   remote           — internet-facing: hub enforces client auth + TLS; computer
  *                      requires `wss` + a pinned cert. One flag flips the whole
  *                      secure bundle so an operator declares intent explicitly
  *                      instead of it being derived from a networking knob.
  *
  * Read by BOTH binaries, so it stays unprefixed (like SLAYZONE_ROOT). Kept a
- * lean leaf module (only ./dirs-free) so the runner bundle can import it without
+ * lean leaf module (only ./dirs-free) so the computer bundle can import it without
  * the platform barrel.
  *
  * @module platform/slayzone-mode

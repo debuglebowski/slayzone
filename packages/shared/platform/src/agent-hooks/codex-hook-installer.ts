@@ -87,7 +87,7 @@ export interface InstallCodexHooksResult {
 export async function installCodexHooks(
   opts: InstallCodexHooksOpts
 ): Promise<InstallCodexHooksResult> {
-  // E2E specs assert the file is written; the runner has no `codex` on PATH.
+  // E2E specs assert the file is written; the computer has no `codex` on PATH.
   const skipProbe = opts.skipVersionProbe || process.env.SLAYZONE_E2E_INSTALL_HOOKS === '1'
   if (!skipProbe) {
     const probed = await probeCodexVersion()

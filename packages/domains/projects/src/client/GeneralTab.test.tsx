@@ -3,10 +3,10 @@ import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-// tRPC surface used by GeneralTab. runners.list drives useQuery (data swapped per
-// test); runners.setProjectDefaultRunner + the project mutations route to spies.
-let runnersData: Array<{ id: string; name: string }> = []
-const setProjectDefaultRunnerSpy = vi.fn()
+// tRPC surface used by GeneralTab. computers.list drives useQuery (data swapped per
+// test); computers.setProjectDefaultComputer + the project mutations route to spies.
+let computersData: Array<{ id: string; name: string }> = []
+const setProjectDefaultComputerSpy = vi.fn()
 const genericMutateAsync = vi.fn()
 
 vi.mock('@slayzone/transport/client', () => ({
@@ -18,26 +18,26 @@ vi.mock('@slayzone/transport/client', () => ({
     },
     computers: {
       list: { queryOptions: () => ({ queryKey: ['computers.list'] }) },
-      setProjectDefaultRunner: {
-        mutationOptions: () => ({ __key: 'computers.setProjectDefaultRunner' })
+      setProjectDefaultComputer: {
+        mutationOptions: () => ({ __key: 'computers.setProjectDefaultComputer' })
       }
     }
   })
 }))
 
 // The directory picker is its own unit with its own queries; GeneralTab only has
-// to open it. Stubbing keeps this file about the runner select and the path
+// to open it. Stubbing keeps this file about the computer select and the path
 // field, and keeps the picker's data layer out of this mock.
 vi.mock('@slayzone/file-editor/client/WorkspaceDirPicker', () => ({
   WorkspaceDirPicker: () => null
 }))
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: runnersData, isLoading: false, refetch: vi.fn() }),
+  useQuery: () => ({ data: computersData, isLoading: false, refetch: vi.fn() }),
   useMutation: (opts: { __key: string }) => ({
     mutateAsync:
-      opts.__key === 'computers.setProjectDefaultRunner'
-        ? setProjectDefaultRunnerSpy
+      opts.__key === 'computers.setProjectDefaultComputer'
+        ? setProjectDefaultComputerSpy
           : genericMutateAsync
   })
 }))
@@ -86,7 +86,7 @@ vi.mock('@slayzone/ui', () => {
       onValueChange
     }: Kids & { value?: string; onValueChange: (value: string) => void }) => (
       <select
-        data-testid="default-runner-select"
+        data-testid="default-computer-select"
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
       >
@@ -135,8 +135,8 @@ function makeProject(overrides: Record<string, unknown> = {}): Project {
 afterEach(cleanup)
 beforeEach(() => {
   vi.clearAllMocks()
-  runnersData = []
-  setProjectDefaultRunnerSpy.mockResolvedValue({ ok: true })
+  computersData = []
+  setProjectDefaultComputerSpy.mockResolvedValue({ ok: true })
 })
 
 function renderTab(project = makeProject()) {
@@ -145,61 +145,61 @@ function renderTab(project = makeProject()) {
   )
 }
 
-describe('GeneralTab default runner', () => {
-  it('shows a "runs locally" note when no runners are enrolled', () => {
-    runnersData = []
+describe('GeneralTab default computer', () => {
+  it('shows a "runs locally" note when no computers are enrolled', () => {
+    computersData = []
     renderTab()
-    expect(screen.getByText('No runners — tasks run locally')).toBeDefined()
-    expect(screen.queryByTestId('default-runner-select')).toBeNull()
+    expect(screen.getByText('No computers — tasks run locally')).toBeDefined()
+    expect(screen.queryByTestId('default-computer-select')).toBeNull()
   })
 
-  it('renders Local + each enrolled runner as options', () => {
-    runnersData = [
-      { id: 'runner-a', name: 'mac-studio' },
-      { id: 'runner-b', name: 'linux-box' }
+  it('renders Local + each enrolled computer as options', () => {
+    computersData = [
+      { id: 'computer-a', name: 'mac-studio' },
+      { id: 'computer-b', name: 'linux-box' }
     ]
     renderTab()
     const options = Array.from(
-      screen.getByTestId('default-runner-select').querySelectorAll('option')
+      screen.getByTestId('default-computer-select').querySelectorAll('option')
     ).map((o) => o.textContent)
     expect(options).toContain('Local')
     expect(options).toContain('mac-studio')
     expect(options).toContain('linux-box')
   })
 
-  it('selecting a runner fires setProjectDefaultRunner with that runnerId', async () => {
-    runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
+  it('selecting a computer fires setProjectDefaultComputer with that computerId', async () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
     renderTab()
-    fireEvent.change(screen.getByTestId('default-runner-select'), {
-      target: { value: 'runner-a' }
+    fireEvent.change(screen.getByTestId('default-computer-select'), {
+      target: { value: 'computer-a' }
     })
     await waitFor(() => {
-      expect(setProjectDefaultRunnerSpy).toHaveBeenCalledWith({
+      expect(setProjectDefaultComputerSpy).toHaveBeenCalledWith({
         projectId: 'proj-1',
-        runnerId: 'runner-a'
+        computerId: 'computer-a'
       })
     })
   })
 
-  it('selecting Local fires setProjectDefaultRunner with null', async () => {
-    runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    renderTab(makeProject({ default_computer_id: 'runner-a' }))
-    fireEvent.change(screen.getByTestId('default-runner-select'), {
+  it('selecting Local fires setProjectDefaultComputer with null', async () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    renderTab(makeProject({ default_computer_id: 'computer-a' }))
+    fireEvent.change(screen.getByTestId('default-computer-select'), {
       target: { value: '__local__' }
     })
     await waitFor(() => {
-      expect(setProjectDefaultRunnerSpy).toHaveBeenCalledWith({
+      expect(setProjectDefaultComputerSpy).toHaveBeenCalledWith({
         projectId: 'proj-1',
-        runnerId: null
+        computerId: null
       })
     })
   })
 
-  it('preselects the project default runner', () => {
-    runnersData = [{ id: 'runner-a', name: 'mac-studio' }]
-    renderTab(makeProject({ default_computer_id: 'runner-a' }))
-    expect((screen.getByTestId('default-runner-select') as HTMLSelectElement).value).toBe(
-      'runner-a'
+  it('preselects the project default computer', () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    renderTab(makeProject({ default_computer_id: 'computer-a' }))
+    expect((screen.getByTestId('default-computer-select') as HTMLSelectElement).value).toBe(
+      'computer-a'
     )
   })
 })

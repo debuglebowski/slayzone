@@ -85,7 +85,7 @@ function dedupeProviderFiles(
 /**
  * The instructions file lives on the project's machine, so the watch inside
  * `useWatchedFile` has to be routed there. The provider is the seam that carries
- * it — without it the watch resolves to the connected default runner and would
+ * it — without it the watch resolves to the connected default computer and would
  * report changes from the wrong filesystem (or none at all).
  */
 export function ProjectInstructions(props: ProjectInstructionsProps) {

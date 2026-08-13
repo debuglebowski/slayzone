@@ -20,7 +20,7 @@ import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
  * a stored override.
  *
  * This is the `/trpc` (client↔hub) axis — deliberately distinct from the
- * `runners` router's `/computers` (hub↔runner) axis.
+ * `computers` router's `/computers` (hub↔computer) axis.
  */
 
 const HUB_LABEL_KEY = 'hub_label'

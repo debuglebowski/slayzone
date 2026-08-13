@@ -4,8 +4,8 @@
  * Every filesystem op the UI performs against a *workspace* — browsing for a
  * project directory, reading the editor tree, writing a file, watching for
  * changes — must execute on the machine that owns that workspace. With the
- * hub/runner split that machine is a runner, which may be a different host
- * entirely. Running these on the hub is how a task on a remote runner reported
+ * hub/computer split that machine is a computer, which may be a different host
+ * entirely. Running these on the hub is how a task on a remote computer reported
  * "No repository path configured" for a path that existed perfectly well: the
  * hub was answering about its own disk.
  *
@@ -15,23 +15,23 @@
  *    `file-ops`/`watcher` functions plus the three browse ops, bound to THIS
  *    process's disk.
  *  - {@link WorkspaceFsAdapters} — the same surface with a leading
- *    `runnerId: string | null`. `createRemoteFsAdapters` (runner-transport)
- *    implements it by forwarding to the runner's `fs.*` frames.
+ *    `computerId: string | null`. `createRemoteFsAdapters` (computer-transport)
+ *    implements it by forwarding to the computer's `fs.*` frames.
  *
- * The interface lives here rather than in runner-transport because
- * `@slayzone/transport` is deliberately decoupled from runner-transport (see the
- * `RunnerGateway` note in transport's app-deps) and both sides already depend on
+ * The interface lives here rather than in computer-transport because
+ * `@slayzone/transport` is deliberately decoupled from computer-transport (see the
+ * `ComputerGateway` note in transport's app-deps) and both sides already depend on
  * this package. Keeping ONE declaration is the point: a structurally mirrored
- * copy is precisely the drift that cost four wire-contract fixes in the runner
+ * copy is precisely the drift that cost four wire-contract fixes in the computer
  * frames.
  *
- * **On `runnerId: null`.** It means "no runner exists to ask", not "prefer the
- * hub". Resolution goes through the same `resolveExecRunner` the pty backend
- * uses, so whenever any runner is connected it is chosen; null is reached only
- * on a hub with zero runners — the standalone/fork sidecar, or before the local
- * runner has enrolled. There the hub's disk is the only disk there is, and
+ * **On `computerId: null`.** It means "no computer exists to ask", not "prefer the
+ * hub". Resolution goes through the same `resolveExecComputer` the pty backend
+ * uses, so whenever any computer is connected it is chosen; null is reached only
+ * on a hub with zero computers — the standalone/fork sidecar, or before the local
+ * computer has enrolled. There the hub's disk is the only disk there is, and
  * refusing would break the editor and the picker for no safety gain. This is
- * consistent with docs/exec-boundary.md, whose zero-runner acceptance test
+ * consistent with docs/exec-boundary.md, whose zero-computer acceptance test
  * requires the UI to keep rendering and reserves hard failure for spawning
  * agents and mutating worktrees.
  *
@@ -68,7 +68,7 @@ import type {
 
 /** Where a picker may start browsing, described in the target machine's idiom. */
 export interface WorkspaceRoots {
-  /** Browsable roots. On a runner these are its `allowedRoots` path-jail. */
+  /** Browsable roots. On a computer these are its `allowedRoots` path-jail. */
   roots: string[]
   /** The target user's home directory, for a sensible default expansion. */
   home: string | null
@@ -119,15 +119,15 @@ export interface SearchResult {
  * gitignore-aware) because they answer different questions: the picker must
  * describe a machine before a project exists; the editor works inside one.
  */
-/** Where a runner keeps one project, and whether that path is still there. */
+/** Where a computer keeps one project, and whether that path is still there. */
 export interface ProjectLocation {
-  /** Null = this runner has no checkout of that project. A real state. */
+  /** Null = this computer has no checkout of that project. A real state. */
   path: string | null
   /** False when the recorded path has since vanished from disk. */
   exists?: boolean
 }
 
-/** Outcome of editing a runner's path-jail — see `setAllowedRoots`. */
+/** Outcome of editing a computer's path-jail — see `setAllowedRoots`. */
 export interface SetRootsResult {
   /** The set actually applied, canonicalized and de-duplicated. */
   roots: string[]
@@ -162,81 +162,81 @@ export interface LocalWorkspaceFs {
 }
 
 /**
- * The routed seam. Same surface, addressed by runner.
+ * The routed seam. Same surface, addressed by computer.
  *
- * `runnerId: null` = execute in-process (see the module note on why that is a
+ * `computerId: null` = execute in-process (see the module note on why that is a
  * boundary condition and not a fallback).
  */
 export interface WorkspaceFsAdapters {
-  listRoots(runnerId: string | null): Promise<WorkspaceRoots>
-  listDir(runnerId: string | null, path: string, options?: BrowseOptions): Promise<BrowseResult>
-  mkdir(runnerId: string | null, path: string): Promise<{ path: string }>
-  pathExists(runnerId: string | null, path: string): Promise<boolean>
+  listRoots(computerId: string | null): Promise<WorkspaceRoots>
+  listDir(computerId: string | null, path: string, options?: BrowseOptions): Promise<BrowseResult>
+  mkdir(computerId: string | null, path: string): Promise<{ path: string }>
+  pathExists(computerId: string | null, path: string): Promise<boolean>
   /**
-   * Replace a runner's path-jail. Only meaningful for a real runner — a hub has
-   * no jail, so `runnerId: null` rejects rather than pretending to save.
+   * Replace a computer's path-jail. Only meaningful for a real computer — a hub has
+   * no jail, so `computerId: null` rejects rather than pretending to save.
    */
-  setAllowedRoots(runnerId: string | null, roots: string[]): Promise<SetRootsResult>
+  setAllowedRoots(computerId: string | null, roots: string[]): Promise<SetRootsResult>
 
   /**
-   * Where does this runner keep that project?
+   * Where does this computer keep that project?
    *
    * The hub does not know and must not guess — it held one `projects.path`
-   * column, which could only ever be right about one machine. Ask the runner.
+   * column, which could only ever be right about one machine. Ask the computer.
    */
-  resolveProjectPath(runnerId: string | null, projectId: string): Promise<ProjectLocation>
+  resolveProjectPath(computerId: string | null, projectId: string): Promise<ProjectLocation>
   /** Record the folder the user pointed at as this project's checkout there. */
   setProjectPath(
-    runnerId: string | null,
+    computerId: string | null,
     projectId: string,
     path: string
   ): Promise<{ path: string }>
   /** Drop the mapping. Never touches the checkout itself. */
-  forgetProjectPath(runnerId: string | null, projectId: string): Promise<void>
+  forgetProjectPath(computerId: string | null, projectId: string): Promise<void>
   /**
    * Every git repo under `rootPath`, discovered ON the target machine.
    *
    * One call, not one per directory: a depth-3 walk routed directory-by-directory
-   * would be dozens of round-trips for a result the runner can compute locally.
+   * would be dozens of round-trips for a result the computer can compute locally.
    */
   discoverRepos(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     maxDepth?: number
   ): Promise<DiscoveredRepo[]>
 
-  readDir(runnerId: string | null, rootPath: string, dirPath: string): Promise<DirEntry[]>
+  readDir(computerId: string | null, rootPath: string, dirPath: string): Promise<DirEntry[]>
   readFile(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     filePath: string,
     force?: boolean
   ): Promise<ReadFileResult>
   writeFile(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     filePath: string,
     content: string
   ): Promise<void>
-  createFile(runnerId: string | null, rootPath: string, filePath: string): Promise<void>
-  createDir(runnerId: string | null, rootPath: string, dirPath: string): Promise<void>
-  rename(runnerId: string | null, rootPath: string, oldPath: string, newPath: string): Promise<void>
-  delete(runnerId: string | null, rootPath: string, targetPath: string): Promise<void>
+  createFile(computerId: string | null, rootPath: string, filePath: string): Promise<void>
+  createDir(computerId: string | null, rootPath: string, dirPath: string): Promise<void>
+  rename(computerId: string | null, rootPath: string, oldPath: string, newPath: string): Promise<void>
+  delete(computerId: string | null, rootPath: string, targetPath: string): Promise<void>
   copyIn(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     absoluteSrc: string,
     targetDir?: string
   ): Promise<string>
-  copy(runnerId: string | null, rootPath: string, srcPath: string, destPath: string): Promise<void>
-  gitStatus(runnerId: string | null, rootPath: string): Promise<GitStatusMap>
+  copy(computerId: string | null, rootPath: string, srcPath: string, destPath: string): Promise<void>
+  gitStatus(computerId: string | null, rootPath: string): Promise<GitStatusMap>
   searchFiles(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     query: string,
     options?: SearchFilesOptions
   ): Promise<SearchResult>
-  listAllFiles(runnerId: string | null, rootPath: string): Promise<ListAllFilesResult>
+  listAllFiles(computerId: string | null, rootPath: string): Promise<ListAllFilesResult>
   /**
    * Subscribe to changes under `rootPath`. Returns a disposer.
    *
@@ -246,7 +246,7 @@ export interface WorkspaceFsAdapters {
    * whatever state that start reached.
    */
   watch(
-    runnerId: string | null,
+    computerId: string | null,
     rootPath: string,
     listener: (e: FileWatchEvent) => void
   ): () => void
@@ -263,7 +263,7 @@ export const WORKSPACE_MAX_SEARCH_RESULTS = 2_000
  * Build the in-process implementation.
  *
  * Browse ops are unjailed here on purpose: a hub has no `allowedRoots` (that is
- * a runner concept), so the only honest answer to "what may I browse" is the
+ * a computer concept), so the only honest answer to "what may I browse" is the
  * whole filesystem, seeded at `$HOME`.
  */
 export function createLocalWorkspaceFs(): LocalWorkspaceFs {
@@ -332,19 +332,19 @@ export function createLocalWorkspaceFs(): LocalWorkspaceFs {
       return existsSync(resolve(path))
     },
 
-    // A hub has no path-jail — `allowedRoots` is a runner concept. Saying so is
+    // A hub has no path-jail — `allowedRoots` is a computer concept. Saying so is
     // better than accepting the edit and discarding it, which would leave the
     // user believing they had restricted (or widened) something.
     setAllowedRoots() {
       return Promise.reject(
-        new Error('this host has no path jail to configure — allowedRoots is a runner setting')
+        new Error('this host has no path jail to configure — allowedRoots is a computer setting')
       )
     },
 
-    // With no runner there is exactly one machine, so this process keeps the map
+    // With no computer there is exactly one machine, so this process keeps the map
     // itself. In-memory rather than on disk: the only hosts that reach here are
     // the fork sidecar and tests, neither of which should be minting a new
-    // persistent state file for a mapping a real runner owns.
+    // persistent state file for a mapping a real computer owns.
     resolveProjectPath(projectId) {
       const path = localProjectPaths.get(projectId)
       if (!path) return { path: null }
@@ -393,11 +393,11 @@ export function createLocalWorkspaceFs(): LocalWorkspaceFs {
 }
 
 /**
- * Adapters that always execute in-process, whatever `runnerId` says.
+ * Adapters that always execute in-process, whatever `computerId` says.
  *
- * For hosts with no runner gateway at all — the standalone/fork sidecar and
+ * For hosts with no computer gateway at all — the standalone/fork sidecar and
  * tests. A hub that HAS a gateway installs `createRemoteFsAdapters` instead,
- * which falls through to a `LocalWorkspaceFs` only on `runnerId: null`.
+ * which falls through to a `LocalWorkspaceFs` only on `computerId: null`.
  */
 export function createLocalWorkspaceFsAdapters(
   local: LocalWorkspaceFs = createLocalWorkspaceFs()

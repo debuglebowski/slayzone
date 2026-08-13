@@ -15,30 +15,30 @@ import {
 } from '@slayzone/ui'
 
 /**
- * Edit one runner's filesystem path-jail.
+ * Edit one computer's filesystem path-jail.
  *
- * `allowedRoots` bounds every path that runner will read, write, or run a
+ * `allowedRoots` bounds every path that computer will read, write, or run a
  * command in. It matters more than it used to: the app's filesystem work —
  * browsing for a project directory, the editor tree, the project-path probe —
- * now executes on the runner that owns the workspace rather than on the hub, so
+ * now executes on the computer that owns the workspace rather than on the hub, so
  * a directory outside these roots is one the UI genuinely cannot reach.
  *
  * It is not a permission boundary against the hub, which can already spawn
- * arbitrary commands on a runner. It is a guard against a mistaken path — a
+ * arbitrary commands on a computer. It is a guard against a mistaken path — a
  * stale project row pointing somewhere it should not, and the hub dutifully
  * removing a directory there. That is why widening it is an ordinary setting
  * rather than a privileged operation.
  *
- * Saving replaces the set wholesale. The runner canonicalizes what it accepts
+ * Saving replaces the set wholesale. The computer canonicalizes what it accepts
  * and returns whatever it refused, which is surfaced verbatim: a saved list that
  * silently differs from the enforced one is the failure mode worth avoiding.
  */
 
-/** A runner whose jail is being edited, with hub-bound thunks. */
+/** A computer whose jail is being edited, with hub-bound thunks. */
 export type RootsTarget = {
   id: string
   name: string
-  /** Read the current jail from THIS runner's hub. */
+  /** Read the current jail from THIS computer's hub. */
   load: () => Promise<{ roots: string[]; home: string | null }>
   /** Write it back through the same hub. */
   save: (roots: string[]) => Promise<{
@@ -47,7 +47,7 @@ export type RootsTarget = {
   }>
 }
 
-export function RunnerRootsDialog({
+export function ComputerRootsDialog({
   target,
   onClose
 }: {
@@ -60,14 +60,14 @@ export function RunnerRootsDialog({
 
   /**
    * Re-read on every open rather than caching: another client (or the hub's own
-   * widening when a runner connects) may have changed the jail since this dialog
+   * widening when a computer connects) may have changed the jail since this dialog
    * last ran, and editing a stale list would silently revert their change.
    *
-   * `gcTime: 0` is what makes "every open" true — the query is keyed by runner,
+   * `gcTime: 0` is what makes "every open" true — the query is keyed by computer,
    * so without it a reopen would paint the previous answer first.
    */
   const query = useQuery({
-    queryKey: ['runner-allowed-roots', target?.id],
+    queryKey: ['computer-allowed-roots', target?.id],
     queryFn: () => target!.load(),
     enabled: !!target,
     gcTime: 0,
@@ -98,7 +98,7 @@ export function RunnerRootsDialog({
       setEdited(res.roots)
       if (res.rejected.length > 0) {
         // Not a failure — the rest was applied. But naming the entries that did
-        // not take is the whole reason the runner reports them.
+        // not take is the whole reason the computer reports them.
         toast.warning(
           `Saved without ${res.rejected.length}: ${res.rejected
             .map((r) => `${r.path} (${r.reason})`)
@@ -117,31 +117,31 @@ export function RunnerRootsDialog({
 
   return (
     <Dialog open={!!target} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg" data-testid="runner-roots-dialog">
+      <DialogContent className="max-w-lg" data-testid="computer-roots-dialog">
         <DialogHeader>
           <DialogTitle>Allowed folders — {target?.name}</DialogTitle>
           <DialogDescription>
-            Directories this runner may read, write, and run commands in. Projects outside every
-            entry cannot be browsed or opened on this runner.
+            Directories this computer may read, write, and run commands in. Projects outside every
+            entry cannot be browsed or opened on this computer.
           </DialogDescription>
         </DialogHeader>
 
         {error ? (
-          <p className="text-destructive text-xs" data-testid="runner-roots-error">
-            Could not read this runner&apos;s folders: {error}
+          <p className="text-destructive text-xs" data-testid="computer-roots-error">
+            Could not read this computer&apos;s folders: {error}
           </p>
         ) : (
           <div className="space-y-2">
             {loading ? (
               <p className="text-muted-foreground text-xs">Reading…</p>
             ) : roots.length === 0 ? (
-              // Not cosmetic: a runner with no roots refuses every filesystem
+              // Not cosmetic: a computer with no roots refuses every filesystem
               // call, so this is the explanation for an otherwise silent failure.
-              <p className="text-muted-foreground text-xs" data-testid="runner-roots-empty">
-                No folders configured — this runner refuses all filesystem access.
+              <p className="text-muted-foreground text-xs" data-testid="computer-roots-empty">
+                No folders configured — this computer refuses all filesystem access.
               </p>
             ) : (
-              <ul className="space-y-1" data-testid="runner-roots-list">
+              <ul className="space-y-1" data-testid="computer-roots-list">
                 {roots.map((root) => (
                   <li
                     key={root}
@@ -169,7 +169,7 @@ export function RunnerRootsDialog({
             <div className="flex gap-2">
               <Input
                 value={draft}
-                placeholder="/absolute/path/on/the/runner"
+                placeholder="/absolute/path/on/the/computer"
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -177,7 +177,7 @@ export function RunnerRootsDialog({
                     addDraft()
                   }
                 }}
-                data-testid="runner-roots-input"
+                data-testid="computer-roots-input"
               />
               <Button variant="outline" onClick={addDraft} disabled={!draft.trim()}>
                 <Plus className="mr-1 size-3.5" />
@@ -194,7 +194,7 @@ export function RunnerRootsDialog({
           <Button
             onClick={() => void save()}
             disabled={saving || loading || !!error}
-            data-testid="runner-roots-save"
+            data-testid="computer-roots-save"
           >
             Save
           </Button>

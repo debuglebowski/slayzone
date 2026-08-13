@@ -27,7 +27,7 @@ export interface PersistedProcess {
  * Persistence seam for the process manager. The manager never touches the DB
  * directly; it talks to this interface. The default impl
  * (`createDbProcessPersistence`) runs the exact SQL the manager used to run
- * inline — zero behavior change. A future runner-side impl can forward these
+ * inline — zero behavior change. A future computer-side impl can forward these
  * calls to the hub instead.
  */
 export interface ProcessPersistence {

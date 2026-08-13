@@ -18,7 +18,7 @@ import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { isLoopbackAddress, registerHubUsersRoutes } from './users.js'
 import type { RestApiDeps } from '../types.js'
 
-const SERVICE_EMAIL = 'runners@slayzone.internal'
+const SERVICE_EMAIL = 'computers@slayzone.internal'
 
 type HubUsers = NonNullable<RestApiDeps['hubUsers']>
 
@@ -141,7 +141,7 @@ await describe('POST /api/hub/users', () => {
     }
   })
 
-  test('400 for the reserved runner service identity, never reaching the domain layer', async () => {
+  test('400 for the reserved computer service identity, never reaching the domain layer', async () => {
     let called = false
     const res = await call<{ error: string }>(
       stubUsers({
@@ -152,7 +152,7 @@ await describe('POST /api/hub/users', () => {
       }),
       'POST',
       // Mixed case: the guard must normalize before comparing, or it is bypassable.
-      { email: 'Runners@SlayZone.Internal' }
+      { email: 'Computers@SlayZone.Internal' }
     )
     expect(res.status).toBe(400)
     expect(called).toBe(false)
@@ -232,14 +232,14 @@ await describe('DELETE /api/hub/users', () => {
     expect(res.status).toBe(404)
   })
 
-  test('409 for the protected runner service identity', async () => {
+  test('409 for the protected computer service identity', async () => {
     const res = await call<{ ok: boolean; error: string }>(
       stubUsers({ remove: async () => 'protected' as const }),
       'DELETE',
       { email: SERVICE_EMAIL }
     )
     expect(res.status).toBe(409)
-    expect(res.body.error.includes('runner service identity')).toBe(true)
+    expect(res.body.error.includes('computer service identity')).toBe(true)
   })
 
   test('409 when it would remove the last remaining account', async () => {
@@ -275,7 +275,7 @@ await describe('the capability gate (slot absent / not ready)', () => {
     expect(res.status).toBe(503)
     // The failure is often PERMANENT (createHubAuth threw and was swallowed into a
     // diagnostic), so the message must not merely imply "retry".
-    expect(res.body.error.includes('runner.init_failed')).toBe(true)
+    expect(res.body.error.includes('computer.init_failed')).toBe(true)
   })
 
   test('not-ready short-circuits before the domain layer is called', async () => {

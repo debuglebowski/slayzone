@@ -1,6 +1,6 @@
 /**
  * channel-storage-migration — COPY-ONLY move of the desktop app's state from
- * the legacy FLAT, shared `~/.slayzone` into the new channel-scoped hub/runner
+ * the legacy FLAT, shared `~/.slayzone` into the new channel-scoped hub/computer
  * roots. The legacy dir is treated as STRICTLY READ-ONLY, same rule and same
  * reason as `storage-migration.ts`: dev/beta/stable currently share one flat
  * root, so an old, not-yet-updated build could still be live and writing to it
@@ -29,27 +29,27 @@ function check(name: string, cond: boolean, detail = ''): void {
   }
 }
 
-/** `runner.state.json` legitimately may not exist on disk when there was no
+/** `computer.state.json` legitimately may not exist on disk when there was no
  *  legacy credential data to migrate — `credential-store.ts`'s reader already
  *  treats a missing file as an empty map, so the migration doesn't force-create
  *  one just to have something present. Mirror that same graceful read here. */
-function readState(runnerRoot: string): Record<string, unknown> {
-  const path = join(runnerRoot, 'runner.state.json')
+function readState(computerRoot: string): Record<string, unknown> {
+  const path = join(computerRoot, 'computer.state.json')
   return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : {}
 }
 
-function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
+function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } {
   const base = mkdtempSync(join(tmpdir(), 'slz-channel-mig-'))
   return {
     legacyRoot: join(base, 'legacy'),
     hubRoot: join(base, 'dev', 'hub'),
-    runnerRoot: join(base, 'dev', 'runner')
+    computerRoot: join(base, 'dev', 'computer')
   }
 }
 
 // --- hub slice: DB + content + backups + loose files, source untouched -------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
+  const { legacyRoot, hubRoot, computerRoot } = setup()
   const legacyStorage = join(legacyRoot, 'storage')
   mkdirSync(legacyStorage, { recursive: true })
   writeFileSync(join(legacyStorage, 'slayzone.dev.sqlite'), 'DEVDB')
@@ -66,7 +66,7 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   writeFileSync(join(legacyStorage, 'boot-config.json'), '{"server_mode":"local"}')
   writeFileSync(join(legacyStorage, 'hub-tokens.json'), '{"hub-a":"cipher"}')
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
   check('DB copied', readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
   check(
@@ -110,62 +110,62 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   )
 }
 
-// --- runner slice: TRANSFORM, per-host files → one shared map ----------------
+// --- computer slice: TRANSFORM, per-host files → one shared map ----------------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
-  const legacyRunners = join(legacyRoot, 'runners')
-  mkdirSync(legacyRunners, { recursive: true })
+  const { legacyRoot, hubRoot, computerRoot } = setup()
+  const legacyComputers = join(legacyRoot, 'computers')
+  mkdirSync(legacyComputers, { recursive: true })
   writeFileSync(
-    join(legacyRunners, 'hub-a.example_8443.json'),
-    JSON.stringify({ runnerId: 'r-a', apiKey: 'key-a' })
+    join(legacyComputers, 'hub-a.example_8443.json'),
+    JSON.stringify({ computerId: 'r-a', apiKey: 'key-a' })
   )
   writeFileSync(
-    join(legacyRunners, 'hub-b.example_9000.json'),
-    JSON.stringify({ runnerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
+    join(legacyComputers, 'hub-b.example_9000.json'),
+    JSON.stringify({ computerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
   )
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
-  const statePath = join(runnerRoot, 'runner.state.json')
-  check('runner.state.json created (single file, not a directory of files)', existsSync(statePath))
+  const statePath = join(computerRoot, 'computer.state.json')
+  check('computer.state.json created (single file, not a directory of files)', existsSync(statePath))
   const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
   check(
     'first hub entry merged in, keyed by hub-host derived from filename',
     JSON.stringify(state['hub-a.example_8443']) ===
-      JSON.stringify({ runnerId: 'r-a', apiKey: 'key-a' })
+      JSON.stringify({ computerId: 'r-a', apiKey: 'key-a' })
   )
   check(
     'second hub entry merged in alongside the first — not overwritten',
     JSON.stringify(state['hub-b.example_9000']) ===
-      JSON.stringify({ runnerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
+      JSON.stringify({ computerId: 'r-b', apiKey: 'key-b', pinnedFingerprint: 'f'.repeat(64) })
   )
   check('exactly two entries — no stray keys', Object.keys(state).length === 2)
   check(
     'legacy per-host files PRESERVED (copy semantics, not move)',
-    existsSync(join(legacyRunners, 'hub-a.example_8443.json')) &&
-      existsSync(join(legacyRunners, 'hub-b.example_9000.json'))
+    existsSync(join(legacyComputers, 'hub-a.example_8443.json')) &&
+      existsSync(join(legacyComputers, 'hub-b.example_9000.json'))
   )
 }
 
 // --- a malformed legacy credential file is skipped, not fatal ----------------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
-  const legacyRunners = join(legacyRoot, 'runners')
-  mkdirSync(legacyRunners, { recursive: true })
+  const { legacyRoot, hubRoot, computerRoot } = setup()
+  const legacyComputers = join(legacyRoot, 'computers')
+  mkdirSync(legacyComputers, { recursive: true })
   writeFileSync(
-    join(legacyRunners, 'good-hub.json'),
-    JSON.stringify({ runnerId: 'r1', apiKey: 'k1' })
+    join(legacyComputers, 'good-hub.json'),
+    JSON.stringify({ computerId: 'r1', apiKey: 'k1' })
   )
-  writeFileSync(join(legacyRunners, 'corrupt-hub.json'), 'not json at all')
+  writeFileSync(join(legacyComputers, 'corrupt-hub.json'), 'not json at all')
 
   let threw = false
   try {
-    ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+    ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
   } catch {
     threw = true
   }
   check('does not throw on one corrupt legacy file', !threw)
-  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
+  const state = JSON.parse(readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')) as Record<
     string,
     unknown
   >
@@ -173,65 +173,65 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   check('the corrupt entry is simply absent, not a garbage value', !('corrupt-hub' in state))
 }
 
-// --- independent sentinels: hub and runner slices don't gate on each other ---
+// --- independent sentinels: hub and computer slices don't gate on each other ---
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
+  const { legacyRoot, hubRoot, computerRoot } = setup()
   mkdirSync(join(legacyRoot, 'storage'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'DB')
-  // No legacy runners/ dir at all this time.
+  // No legacy computers/ dir at all this time.
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
   check('hub slice completed independently', existsSync(join(hubRoot, 'slayzone.dev.sqlite')))
   check(
-    'runner slice completed independently (empty state, no legacy creds)',
-    Object.keys(readState(runnerRoot)).length === 0
+    'computer slice completed independently (empty state, no legacy creds)',
+    Object.keys(readState(computerRoot)).length === 0
   )
   check('hub sentinel written', existsSync(join(hubRoot, '.channel-migrated')))
-  check('runner sentinel written', existsSync(join(runnerRoot, '.channel-migrated')))
+  check('computer sentinel written', existsSync(join(computerRoot, '.channel-migrated')))
 }
 
 // --- sentinel makes a re-run a genuine no-op --------------------------------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
+  const { legacyRoot, hubRoot, computerRoot } = setup()
   mkdirSync(join(legacyRoot, 'storage'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'DB')
-  mkdirSync(join(legacyRoot, 'runners'), { recursive: true })
+  mkdirSync(join(legacyRoot, 'computers'), { recursive: true })
   writeFileSync(
-    join(legacyRoot, 'runners', 'hub-a.json'),
-    JSON.stringify({ runnerId: 'r1', apiKey: 'k1' })
+    join(legacyRoot, 'computers', 'hub-a.json'),
+    JSON.stringify({ computerId: 'r1', apiKey: 'k1' })
   )
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
   // Simulate the legacy shared dir gaining new content after the first boot
   // (an old, not-yet-updated peer build still writing to it).
   writeFileSync(
-    join(legacyRoot, 'runners', 'hub-b.json'),
-    JSON.stringify({ runnerId: 'r2', apiKey: 'k2' })
+    join(legacyRoot, 'computers', 'hub-b.json'),
+    JSON.stringify({ computerId: 'r2', apiKey: 'k2' })
   )
   mkdirSync(join(legacyRoot, 'storage', 'blobs', 'ff'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'blobs', 'ff', 'laterblob'), 'LATER')
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false }) // second boot
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false }) // second boot
 
   check(
     'sentinel makes 2nd run a no-op — later hub blob NOT picked up',
     !existsSync(join(hubRoot, 'blobs', 'ff', 'laterblob'))
   )
-  const state = JSON.parse(readFileSync(join(runnerRoot, 'runner.state.json'), 'utf8')) as Record<
+  const state = JSON.parse(readFileSync(join(computerRoot, 'computer.state.json'), 'utf8')) as Record<
     string,
     unknown
   >
   check(
-    'sentinel makes 2nd run a no-op — later runner credential NOT picked up',
+    'sentinel makes 2nd run a no-op — later computer credential NOT picked up',
     !('hub-b' in state)
   )
 }
 
 // --- never clobbers already-populated destination content --------------------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
+  const { legacyRoot, hubRoot, computerRoot } = setup()
   mkdirSync(hubRoot, { recursive: true })
   writeFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'EXISTING')
   writeFileSync(join(hubRoot, 'boot-config.json'), '{"already":"here"}')
@@ -239,7 +239,7 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'INCOMING')
   writeFileSync(join(legacyRoot, 'storage', 'boot-config.json'), '{"incoming":"value"}')
 
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
   check(
     'existing DB not clobbered',
@@ -253,13 +253,13 @@ function setup(): { legacyRoot: string; hubRoot: string; runnerRoot: string } {
 
 // --- no-op when there is nothing to migrate (fresh install) ------------------
 {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
-  ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+  const { legacyRoot, hubRoot, computerRoot } = setup()
+  ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
   check('fresh install: hub root created, no throw', existsSync(hubRoot))
-  check('fresh install: runner root created, no throw', existsSync(runnerRoot))
+  check('fresh install: computer root created, no throw', existsSync(computerRoot))
   check(
-    'fresh install: no runner.state.json forced into existence with nothing to migrate',
-    Object.keys(readState(runnerRoot)).length === 0
+    'fresh install: no computer.state.json forced into existence with nothing to migrate',
+    Object.keys(readState(computerRoot)).length === 0
   )
 }
 
@@ -275,7 +275,7 @@ if (process.platform === 'win32') {
 } else if (process.getuid?.() === 0) {
   console.log('  (skipped copy-failure regression guard — running as root ignores permission bits)')
 } else {
-  const { legacyRoot, hubRoot, runnerRoot } = setup()
+  const { legacyRoot, hubRoot, computerRoot } = setup()
   mkdirSync(join(legacyRoot, 'storage'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'DEVDB')
   mkdirSync(hubRoot, { recursive: true })
@@ -283,7 +283,7 @@ if (process.platform === 'win32') {
 
   let threw = false
   try {
-    ensureChannelScopedStorage({ legacyRoot, hubRoot, runnerRoot, packaged: false })
+    ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
   } catch {
     threw = true
   } finally {

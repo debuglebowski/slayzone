@@ -53,7 +53,7 @@ console.log('─'.repeat(40))
 test("channel='dev' → the dev bucket", () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
     assertEq(getSupervisedRoot('hub', 'dev'), join('/tmp/root', 'dev', 'hub'), 'dev hub')
-    assertEq(getSupervisedRoot('runner', 'dev'), join('/tmp/root', 'dev', 'runner'), 'dev runner')
+    assertEq(getSupervisedRoot('computer', 'dev'), join('/tmp/root', 'dev', 'computer'), 'dev computer')
   })
 })
 
@@ -67,9 +67,9 @@ test("channel='stable' → the stable bucket", () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
     assertEq(getSupervisedRoot('hub', 'stable'), join('/tmp/root', 'stable', 'hub'), 'stable hub')
     assertEq(
-      getSupervisedRoot('runner', 'stable'),
-      join('/tmp/root', 'stable', 'runner'),
-      'stable runner'
+      getSupervisedRoot('computer', 'stable'),
+      join('/tmp/root', 'stable', 'computer'),
+      'stable computer'
     )
   })
 })
@@ -112,7 +112,7 @@ test('no channel arg ⇒ reads SLAYZONE_RELEASE_CHANNEL from env', () => {
 
 test('SLAYZONE_RELEASE_CHANNEL unset ⇒ getSlayzoneReleaseChannel() defaults to unknown ⇒ stable bucket', () => {
   withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-    assertEq(getSupervisedRoot('runner'), join('/tmp/root', 'stable', 'runner'), 'unset → stable')
+    assertEq(getSupervisedRoot('computer'), join('/tmp/root', 'stable', 'computer'), 'unset → stable')
   })
 })
 

@@ -1,10 +1,10 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { RequestHandler, Response } from 'express'
-import type { HubAuthContext, RunnerPrincipal } from '../shared/types'
+import type { HubAuthContext, ComputerPrincipal } from '../shared/types'
 import type { HubAuth } from './auth'
 
-/** Header runners present their API key in (mirrors the apiKey plugin default). */
+/** Header computers present their API key in (mirrors the apiKey plugin default). */
 export const API_KEY_HEADER = 'x-api-key'
 
 function toWebHeaders(headers: Headers | IncomingHttpHeaders): Headers {
@@ -26,7 +26,7 @@ export async function verifySession(
   return { userId: result.user.id, orgId, session: result.session }
 }
 
-function readRunnerId(metadata: unknown): string | null {
+function readComputerId(metadata: unknown): string | null {
   let parsed = metadata
   if (typeof parsed === 'string') {
     try {
@@ -36,24 +36,24 @@ function readRunnerId(metadata: unknown): string | null {
     }
   }
   if (parsed === null || typeof parsed !== 'object') return null
-  const runnerId = (parsed as Record<string, unknown>).runnerId
-  return typeof runnerId === 'string' && runnerId.length > 0 ? runnerId : null
+  const computerId = (parsed as Record<string, unknown>).computerId
+  return typeof computerId === 'string' && computerId.length > 0 ? computerId : null
 }
 
 /**
  * Plain API-key verify usable outside express. Valid only for keys minted by
- * `mintRunnerApiKey` (i.e. carrying `{ runnerId }` metadata). Returns null
- * for unknown, revoked, expired, or non-runner keys.
+ * `mintComputerApiKey` (i.e. carrying `{ computerId }` metadata). Returns null
+ * for unknown, revoked, expired, or non-computer keys.
  */
-export async function verifyRunnerApiKey(
+export async function verifyComputerApiKey(
   auth: HubAuth,
   key: string
-): Promise<RunnerPrincipal | null> {
+): Promise<ComputerPrincipal | null> {
   const result = await auth.api.verifyApiKey({ body: { key } })
   if (!result.valid || !result.key) return null
-  const runnerId = readRunnerId(result.key.metadata)
-  if (!runnerId) return null
-  return { runnerId, keyId: result.key.id }
+  const computerId = readComputerId(result.key.metadata)
+  if (!computerId) return null
+  return { computerId, keyId: result.key.id }
 }
 
 /**
@@ -79,8 +79,8 @@ export function requireSession(auth: HubAuth): RequestHandler {
 
 /**
  * Express middleware factory: rejects with 401 unless the request carries a
- * valid runner API key in the `x-api-key` header. On success the principal is
- * attached as `res.locals.runner` (read it via `getRunnerPrincipal`).
+ * valid computer API key in the `x-api-key` header. On success the principal is
+ * attached as `res.locals.computer` (read it via `getComputerPrincipal`).
  */
 export function requireApiKey(auth: HubAuth): RequestHandler {
   return async (req, res, next) => {
@@ -91,12 +91,12 @@ export function requireApiKey(auth: HubAuth): RequestHandler {
         res.status(401).json({ error: 'Missing API key' })
         return
       }
-      const principal = await verifyRunnerApiKey(auth, key)
+      const principal = await verifyComputerApiKey(auth, key)
       if (!principal) {
         res.status(401).json({ error: 'Invalid API key' })
         return
       }
-      res.locals.runner = principal
+      res.locals.computer = principal
       next()
     } catch (error) {
       next(error)
@@ -110,6 +110,6 @@ export function getHubAuthContext(res: Response): HubAuthContext | null {
 }
 
 /** Typed accessor for the principal `requireApiKey` attached. */
-export function getRunnerPrincipal(res: Response): RunnerPrincipal | null {
-  return (res.locals.runner as RunnerPrincipal | undefined) ?? null
+export function getComputerPrincipal(res: Response): ComputerPrincipal | null {
+  return (res.locals.computer as ComputerPrincipal | undefined) ?? null
 }

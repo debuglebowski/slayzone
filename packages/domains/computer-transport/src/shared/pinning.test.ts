@@ -46,7 +46,7 @@ let certPem: string
 let certPath: string
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'runner-pin-'))
+  dir = mkdtempSync(join(tmpdir(), 'computer-pin-'))
   const generated = generateSelfSignedCert(dir)
   certPem = generated.certPem
   certPath = generated.certPath

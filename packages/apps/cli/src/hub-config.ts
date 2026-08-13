@@ -13,7 +13,7 @@
  *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
  *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
  *      SLAYZONE_MODE (local → http, remote → https). The env channel never
- *      carries a scheme, so it can't collide with the runner's ws(s):// reading
+ *      carries a scheme, so it can't collide with the computer's ws(s):// reading
  *      of the same deployment (the retired `SLAYZONE_HUB_URL` bug).
  *   2. `hub-target[.dev].json` in the CLI's own state dir, `~/.slayzone/cli`
  *      (written by `slay hub use` / `slay hub login`; pre-move locations are still

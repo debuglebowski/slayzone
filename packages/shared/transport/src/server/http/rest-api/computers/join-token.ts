@@ -3,33 +3,33 @@ import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**
- * REST: `POST /api/computers/join-token` — mint a single-use runner enrollment
- * token over loopback (hub/runner split, Wave3.5-D3).
+ * REST: `POST /api/computers/join-token` — mint a single-use computer enrollment
+ * token over loopback (hub/computer split, Wave3.5-D3).
  *
  * WHY REST (not tRPC): the Electron MAIN process has no tRPC client to the
  * sidecar (the capability bridge only flows sidecar→main). Main already knows
  * the sidecar's loopback HTTP base (via the sidecar supervisor's onReady port),
  * so a plain loopback fetch is the minimal channel for boot-time auto-enroll —
  * far simpler than standing up a WS tRPC client in main just to call
- * `runners.mintJoinToken`. This route wraps the SAME store `mintJoinToken`
+ * `computers.mintJoinToken`. This route wraps the SAME store `mintJoinToken`
  * logic as that proc.
  *
- * Gating (mirrors the runners router's `mintJoinToken`): only functional under
- * `deps.runners` is wired by the composition (always, barring init failure),
- * and its getters return the runner listener's bound `wss://…/computers` URL + hub
+ * Gating (mirrors the computers router's `mintJoinToken`): only functional under
+ * `deps.computers` is wired by the composition (always, barring init failure),
+ * and its getters return the computer listener's bound `wss://…/computers` URL + hub
  * cert fingerprint — both null until the listener has bound. So:
- *   - runner OFF (`deps.runners` absent)              → 503 (never mints)
- *   - runner ON but listener not yet bound (null url) → 503 (caller retries)
- *   - runner ON + listener bound                      → 200 `{ token, hubUrl }`
+ *   - computer OFF (`deps.computers` absent)              → 503 (never mints)
+ *   - computer ON but listener not yet bound (null url) → 503 (caller retries)
+ *   - computer ON + listener bound                      → 200 `{ token, hubUrl }`
  *
  * WHO MAY CALL IT — loopback, or an authenticated off-box operator.
  *
  * A join token is a bearer-equivalent secret, so being on the box was originally
  * the sole authority (the shared HTTP server binds loopback anyway; the check is
  * defense-in-depth against an accidental non-loopback `SLAYZONE_HUB_ADDRESS`).
- * That left `slay runner mint` unable to target a hub on another machine — while
+ * That left `slay computer mint` unable to target a hub on another machine — while
  * an off-box client with a session could already mint the SAME token over `/trpc`
- * (`runners.mintJoinToken` is not loopback-gated). The 403 was therefore a
+ * (`computers.mintJoinToken` is not loopback-gated). The 403 was therefore a
  * capability gap between two transports, not a security boundary, so an off-box
  * caller is now admitted on the same authority `/trpc` accepts: a verified
  * better-auth session. See {@link joinTokenAuthDecision} for the exact matrix.
@@ -89,7 +89,7 @@ export function joinTokenAuthDecision(opts: {
   return opts.bearerOk ? 'mint' : 'unauthorized'
 }
 
-export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
+export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/computers/join-token', async (req, res) => {
     const loopback = isLoopbackAddress(req.socket.remoteAddress ?? undefined)
     // An absent `restAuth` slot (the Electron host) means no bearer authority at
@@ -103,7 +103,7 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
     if (decision === 'forbid') {
       res.status(403).json({
         error:
-          'runner join-token is loopback-only on this hub — run `slay runner mint` on the ' +
+          'computer join-token is loopback-only on this hub — run `slay computer mint` on the ' +
           'hub machine, or put the hub in remote mode so it can authenticate you'
       })
       return
@@ -114,20 +114,20 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
       })
       return
     }
-    if (!deps.runners) {
-      res.status(503).json({ error: 'runner listener not ready — no join token available' })
+    if (!deps.computers) {
+      res.status(503).json({ error: 'computer listener not ready — no join token available' })
       return
     }
-    const hubUrl = deps.runners.getHubUrl()
-    const certFingerprint = deps.runners.getCertFingerprint()
+    const hubUrl = deps.computers.getHubUrl()
+    const certFingerprint = deps.computers.getCertFingerprint()
     if (!hubUrl || !certFingerprint) {
-      res.status(503).json({ error: 'runner listener has not bound its URL / hub identity yet' })
+      res.status(503).json({ error: 'computer listener has not bound its URL / hub identity yet' })
       return
     }
 
     const body = (req.body ?? {}) as { label?: unknown; ttlMs?: unknown }
     const label =
-      typeof body.label === 'string' && body.label.length > 0 ? body.label : 'local-runner'
+      typeof body.label === 'string' && body.label.length > 0 ? body.label : 'local-computer'
     const ttlMs =
       typeof body.ttlMs === 'number' && Number.isInteger(body.ttlMs) && body.ttlMs > 0
         ? body.ttlMs
@@ -140,8 +140,8 @@ export function registerRunnersJoinTokenRoute(app: Express, deps: RestApiDeps): 
         ttlMs,
         label
       })
-      // Return the token + the wss runner URL the runner should dial. The cert
-      // fingerprint is embedded IN the token (decoded runner-side) — never sent
+      // Return the token + the wss computer URL the computer should dial. The cert
+      // fingerprint is embedded IN the token (decoded computer-side) — never sent
       // as a separate field.
       res.json({ token: minted.token, hubUrl })
     } catch (err) {

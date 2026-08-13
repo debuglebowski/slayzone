@@ -10,28 +10,28 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { HubToRunnerMethods, RunnerNotificationMethods } from '@slayzone/computer-transport/shared'
-import type { RunnerConfig } from '../config'
+import { HubToComputerMethods, ComputerNotificationMethods } from '@slayzone/computer-transport/shared'
+import type { ComputerConfig } from '../config'
 import { createProjectPathStore, projectsFilePath } from '../project-paths'
 import { createPtyHandlers } from './pty'
 import { createProjectHandlers } from './project'
-import type { RunnerDialer } from './types'
+import type { ComputerDialer } from './types'
 
-const M = HubToRunnerMethods
-const dialer: RunnerDialer = { notify: () => true }
+const M = HubToComputerMethods
+const dialer: ComputerDialer = { notify: () => true }
 const HUB = 'hub.example_8443'
 
 let dir: string
 
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), 'runner-projects-')))
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'computer-projects-')))
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
 function ctxWith(roots: string[]) {
-  const config: RunnerConfig = {
+  const config: ComputerConfig = {
     hubUrl: 'wss://hub.example:8443/computers',
     name: 'test',
     allowedRoots: roots,
@@ -48,7 +48,7 @@ async function handlersFor(roots: string[], baseDir = dir) {
 describe('project path mapping', () => {
   // The state the hub's single `projects.path` column could never express: it
   // always had *a* path, even for a machine that had never seen the project.
-  it('answers null for a project this runner has never held', async () => {
+  it('answers null for a project this computer has never held', async () => {
     const { handlers } = await handlersFor([dir])
     expect(handlers[M.projectResolvePath]({ projectId: 'p1' })).toEqual({ path: null })
   })
@@ -107,7 +107,7 @@ describe('project path mapping', () => {
     expect(realpathSync(target)).toBe(target)
   })
 
-  it('lists what this runner holds', async () => {
+  it('lists what this computer holds', async () => {
     const a = join(dir, 'a')
     const b = join(dir, 'b')
     mkdirSync(a, { recursive: true })
@@ -134,7 +134,7 @@ describe('project path store — persistence', () => {
     expect(second.get('p1')?.path).toBe(target)
   })
 
-  // A runner can be enrolled with several hubs. One hub's mappings must not be
+  // A computer can be enrolled with several hubs. One hub's mappings must not be
   // visible to — or clobbered by — another's, exactly as with credentials.
   it('keeps each hub’s mappings separate', async () => {
     const a = join(dir, 'a')
@@ -172,7 +172,7 @@ describe('project path store — persistence', () => {
 
 describe('a spawn with no cwd resolves the project’s own checkout', () => {
   // The point of the whole inversion: the hub sends WHICH project, not WHERE it
-  // is. It cannot know where — it held one path column covering every runner.
+  // is. It cannot know where — it held one path column covering every computer.
   it('spawns in the recorded path when only projectId is given', async () => {
     const target = join(dir, 'app')
     mkdirSync(target, { recursive: true })
@@ -190,7 +190,7 @@ describe('a spawn with no cwd resolves the project’s own checkout', () => {
     pty[M.ptyKill]({ sessionId: 's1' })
   })
 
-  // Falling back to the runner's launch directory would start the agent in the
+  // Falling back to the computer's launch directory would start the agent in the
   // wrong tree and look like it worked — the exact silent failure this removes.
   it('refuses loudly when the project is not checked out here', async () => {
     const store = await createProjectPathStore(HUB, { baseDir: dir })
@@ -198,11 +198,11 @@ describe('a spawn with no cwd resolves the project’s own checkout', () => {
     // Synchronous throw — the dispatch table awaits handler results, so this
     // still reaches the hub as a rejected request.
     expect(() => pty[M.ptySpawn]({ sessionId: 's2', command: 'pwd', projectId: 'nope' })).toThrow(
-      /not checked out on this runner/
+      /not checked out on this computer/
     )
   })
 
-  // An explicit cwd is a worktree the runner created or a base_dir the user set —
+  // An explicit cwd is a worktree the computer created or a base_dir the user set —
   // never a hub guess — so it must win over the mapping.
   it('prefers an explicit cwd over the mapping', async () => {
     const mapped = join(dir, 'mapped')

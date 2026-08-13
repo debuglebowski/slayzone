@@ -55,7 +55,7 @@ export interface DiscoveredHub {
   /** True for the desktop app's sidecar. `slay hub stop` refuses these — the app
    *  owns its own lifecycle. */
   supervised: boolean
-  runnersConnected: number
+  computersConnected: number
   uptimeMs: number
   commit: string
   builtAt: string
@@ -162,7 +162,7 @@ function parseHub(body: string, port: number): DiscoveredHub | null {
     dbPath: typeof b.dbPath === 'string' ? b.dbPath : '',
     mode: typeof b.mode === 'string' ? b.mode : 'local',
     supervised: b.supervised === true,
-    runnersConnected: typeof b.runnersConnected === 'number' ? b.runnersConnected : 0,
+    computersConnected: typeof b.computersConnected === 'number' ? b.computersConnected : 0,
     uptimeMs: typeof b.uptimeMs === 'number' ? b.uptimeMs : 0,
     commit: typeof b.commit === 'string' ? b.commit : 'unknown',
     builtAt: typeof b.builtAt === 'string' ? b.builtAt : 'unknown',

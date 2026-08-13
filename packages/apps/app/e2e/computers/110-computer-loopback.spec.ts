@@ -7,44 +7,44 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
 
 /**
- * Wave 3 — runner-ON loopback end-to-end.
+ * Wave 3 — computer-ON loopback end-to-end.
  *
- * Validates the WHOLE hub/runner chain over a real runner link, in-process:
+ * Validates the WHOLE hub/computer chain over a real computer link, in-process:
  *   1. Boot a fully isolated app with boot-config `{ server_mode:'local' }`. A hub
- *      always accepts runners, so the sidecar comes up with the gateway + hub-auth
+ *      always accepts computers, so the sidecar comes up with the gateway + hub-auth
  *      + identity live, and binds the TLS `/computers` wss listener on its own port
  *      (separate https server from the shared http /trpc; see server.ts).
- *   2. Mint a real join token via the `runners.mintJoinToken` tRPC mutation
+ *   2. Mint a real join token via the `computers.mintJoinToken` tRPC mutation
  *      (embeds the hub's bound `wss://…/computers` URL + cert fingerprint to pin).
  *   3. Spawn the bundled @slayzone/computer as a loopback child process, pointed
  *      at that token → it dials the hub, enrolls, and appears connected in
- *      `runners.list`.
- *   4. Bind a seeded task to that runnerId (`setTaskRunner`), open a `terminal`
+ *      `computers.list`.
+ *   4. Bind a seeded task to that computerId (`setTaskComputer`), open a `terminal`
  *      PTY for it, and drive a command. The routing pty backend forwards the
- *      spawn → runner node-pty → `pty.data` → hub → renderer buffer, so the
+ *      spawn → computer node-pty → `pty.data` → hub → renderer buffer, so the
  *      command's output streams back into `pty.getBuffer`.
  *
- * Two tests share this runner-ON boot:
- *   (b) MANUAL runner — mint a token via the tRPC proc, spawn the bundled runner
+ * Two tests share this computer-ON boot:
+ *   (b) MANUAL computer — mint a token via the tRPC proc, spawn the bundled computer
  *       DIRECTLY as a loopback child, assert enroll + a pty round-trips output.
  *       The deterministic full-loop baseline.
- *   (a) AUTO-ENROLL runner (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_RUNNER=1` so
- *       the in-app supervisor spawns the runner itself: main waits for the
+ *   (a) AUTO-ENROLL computer (Wave3.5-D3) — set `SLAYZONE_E2E_ALLOW_RUNNER=1` so
+ *       the in-app supervisor spawns the computer itself: main waits for the
  *       sidecar ready, mints a token over loopback REST (`POST
- *       /api/computers/join-token`), injects it + the wss url into the runner env,
- *       and the runner auto-enrolls with ZERO manual token/spawn. Asserts the
- *       local runner reaches "connected" in `runners.list`. (The full pty-exec
+ *       /api/computers/join-token`), injects it + the wss url into the computer env,
+ *       and the computer auto-enrolls with ZERO manual token/spawn. Asserts the
+ *       local computer reaches "connected" in `computers.list`. (The full pty-exec
  *       round-trip stays on the manual test (b) — auto-enroll timing to a live
  *       pty is the flaky part; connected is the D3 contract.)
  *
  * Isolation: `launchIsolatedElectron` gives a throwaway userdata dir, and the
- * spec pins `SLAYZONE_ROOT` to it (via the fixture's extraEnv) so the runner
+ * spec pins `SLAYZONE_ROOT` to it (via the fixture's extraEnv) so the computer
  * boot's identity/*.pem + hub-auth.sqlite land under the app's channel-scoped
- * hub root inside it, NOT the real dev store. The runner's credential store +
+ * hub root inside it, NOT the real dev store. The computer's credential store +
  * config also live under the temp dir.
  *
  * Uses the raw Playwright base (like 103): the shared worker fixture assumes a
- * plain non-runner server, which is exactly what this spec must boot without.
+ * plain non-computer server, which is exactly what this spec must boot without.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -53,10 +53,10 @@ const APP_DIR = path.resolve(__dirname, '..', '..')
 const RUNNER_DIR = path.resolve(APP_DIR, '..', 'computer')
 const RUNNER_BIN = path.join(RUNNER_DIR, 'dist', 'bin.cjs')
 
-/** Build the runner bundle on demand — it is not part of the app build pipeline
+/** Build the computer bundle on demand — it is not part of the app build pipeline
  *  (see packages/apps/computer/build.mjs). Idempotent: skip when the bundle is
- *  present AND newer than every runner source file, else (re)build. */
-function ensureRunnerBuilt(): void {
+ *  present AND newer than every computer source file, else (re)build. */
+function ensureComputerBuilt(): void {
   let needsBuild = !fs.existsSync(RUNNER_BIN)
   if (!needsBuild) {
     const binMtime = fs.statSync(RUNNER_BIN).mtimeMs
@@ -67,7 +67,7 @@ function ensureRunnerBuilt(): void {
   if (!needsBuild) return
   execFileSync('node', ['build.mjs'], { cwd: RUNNER_DIR, stdio: 'inherit' })
   if (!fs.existsSync(RUNNER_BIN)) {
-    throw new Error(`runner build did not produce ${RUNNER_BIN}`)
+    throw new Error(`computer build did not produce ${RUNNER_BIN}`)
   }
 }
 
@@ -93,44 +93,44 @@ function decodeHubUrl(token: string): string {
   return payload.hubUrl
 }
 
-interface SpawnedRunner {
+interface SpawnedComputer {
   proc: ChildProcess
   logs: string[]
   stop: () => Promise<void>
 }
 
-/** Spawn the bundled runner as a loopback child, dialing `hubUrl` with `token`.
+/** Spawn the bundled computer as a loopback child, dialing `hubUrl` with `token`.
  *  node-pty (used by the pty handler) loads under plain node here — the repo's
  *  prebuilt binary is ABI-compatible with the e2e node runtime (verified). */
-function spawnLoopbackRunner(opts: {
+function spawnLoopbackComputer(opts: {
   hubUrl: string
   joinToken: string
   rootDir: string
   credentialsDir: string
   allowedRoots: string
-}): SpawnedRunner {
+}): SpawnedComputer {
   const electronPath = require('electron') as unknown as string
   const logs: string[] = []
-  // The display name + FS path-jail now come from <ROOT>/runner.config.json (the
+  // The display name + FS path-jail now come from <ROOT>/computer.config.json (the
   // SLAYZONE_RUNNER_NAME / SLAYZONE_RUNNER_ALLOWED_ROOTS env channels are gone).
-  // Write them before spawn so the STANDALONE runner reads them.
+  // Write them before spawn so the STANDALONE computer reads them.
   fs.mkdirSync(opts.rootDir, { recursive: true })
   fs.writeFileSync(
-    path.join(opts.rootDir, 'runner.config.json'),
-    JSON.stringify({ runnerName: 'e2e-loopback-runner', allowedRoots: [opts.allowedRoots] })
+    path.join(opts.rootDir, 'computer.config.json'),
+    JSON.stringify({ computerName: 'e2e-loopback-computer', allowedRoots: [opts.allowedRoots] })
   )
-  // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the runner's
+  // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the computer's
   // node-pty native addon shares the app's ABI — mirrors how the app supervisor
-  // spawns it (local-runner-supervisor.ts).
+  // spawns it (local-computer-supervisor.ts).
   const proc = spawn(electronPath, [RUNNER_BIN], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      // Standalone runner: clear any leaked SUPERVISED so loadRunnerConfig reads
-      // <ROOT>/runner.config.json (it skips the shared file when SUPERVISED=1).
+      // Standalone computer: clear any leaked SUPERVISED so loadComputerConfig reads
+      // <ROOT>/computer.config.json (it skips the shared file when SUPERVISED=1).
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
-      // Authority only — the runner composes ws(s)://<addr>/computers from
+      // Authority only — the computer composes ws(s)://<addr>/computers from
       // SLAYZONE_MODE (local here → ws, matching the loopback hub).
       SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: opts.joinToken,
@@ -174,8 +174,8 @@ function spawnLoopbackRunner(opts: {
   }
 }
 
-/** All runners the hub currently knows about (store rows + live status). */
-function listRunners(page: Page): Promise<Array<{ id: string; name: string; connected: boolean }>> {
+/** All computers the hub currently knows about (store rows + live status). */
+function listComputers(page: Page): Promise<Array<{ id: string; name: string; connected: boolean }>> {
   return page.evaluate(
     () =>
       window.getTrpcVanillaClient().computers.list.query() as Promise<
@@ -184,13 +184,13 @@ function listRunners(page: Page): Promise<Array<{ id: string; name: string; conn
   )
 }
 
-base.describe('Runner loopback (runner ON)', () => {
-  base('runner enrolls over the runner link and runs a pty that streams back', async () => {
+base.describe('Computer loopback (computer ON)', () => {
+  base('computer enrolls over the computer link and runs a pty that streams back', async () => {
     base.setTimeout(180_000)
-    ensureRunnerBuilt()
+    ensureComputerBuilt()
 
     const launched = await launchIsolatedElectron({
-      name: 'runner-loopback',
+      name: 'computer-loopback',
       seedUserData: (userDataDir) => {
         // Local mode — a hub always builds the gateway + binds the /computers
         // listener, so no flag is needed.
@@ -203,23 +203,23 @@ base.describe('Runner loopback (runner ON)', () => {
       // Pin the sidecar store to the isolated dir (identity + hub-auth.sqlite land
       // here, NOT the real dev store).
       //
-      // e2e is runner-ON by default, so the in-app supervisor ALSO auto-enrolls a
-      // 'local-runner' here. Harmless: every assertion below resolves our own
-      // runner BY NAME ('e2e-loopback-runner') and binds the task to that id
-      // explicitly, so a second connected runner is never mistaken for ours.
+      // e2e is computer-ON by default, so the in-app supervisor ALSO auto-enrolls a
+      // 'local-computer' here. Harmless: every assertion below resolves our own
+      // computer BY NAME ('e2e-loopback-computer') and binds the task to that id
+      // explicitly, so a second connected computer is never mistaken for ours.
       extraEnv: (userDataDir) => ({
         SLAYZONE_ROOT: userDataDir
       })
     })
 
-    let runner: SpawnedRunner | null = null
+    let computer: SpawnedComputer | null = null
     try {
       const page = launched.page
       await page.waitForSelector('#root', { timeout: 20_000 })
 
-      // The sidecar's runner init (createHubAuth migrations) + listener bind are
+      // The sidecar's computer init (createHubAuth migrations) + listener bind are
       // async and happen after boot. mintJoinToken throws until the listener has
-      // fed its URL/fingerprint into the runners registry, so poll it.
+      // fed its URL/fingerprint into the computers registry, so poll it.
       let minted: { token: string } | null = null
       await expect
         .poll(
@@ -247,51 +247,51 @@ base.describe('Runner loopback (runner ON)', () => {
       // `/computers` rides the ONE hub listener, demuxed by path, and its scheme
       // follows SLAYZONE_MODE: local (this test) → plaintext `ws://` loopback on the
       // hub's own port; only remote terminates TLS and mints `wss://` (from
-      // SLAYZONE_HUB_PUBLIC_ADDRESS). The runner extracts this url from the token.
+      // SLAYZONE_HUB_PUBLIC_ADDRESS). The computer extracts this url from the token.
       expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/computers$/)
 
-      // Spawn the loopback runner against the freshly minted token. Its creds +
+      // Spawn the loopback computer against the freshly minted token. Its creds +
       // allowedRoots live under the isolated userdata dir (nothing leaks).
-      const credentialsDir = path.join(launched.userDataDir, 'runner-creds')
-      runner = spawnLoopbackRunner({
+      const credentialsDir = path.join(launched.userDataDir, 'computer-creds')
+      computer = spawnLoopbackComputer({
         hubUrl,
         joinToken: token,
-        rootDir: path.join(launched.userDataDir, 'runner-root'),
+        rootDir: path.join(launched.userDataDir, 'computer-root'),
         credentialsDir,
         allowedRoots: launched.userDataDir
       })
 
-      // ── Enroll handshake: the runner appears connected in runners.list. ──
-      let runnerId: string | null = null
+      // ── Enroll handshake: the computer appears connected in computers.list. ──
+      let computerId: string | null = null
       await expect
         .poll(
           async () => {
-            const rows = await listRunners(page)
-            const mine = rows.find((r) => r.name === 'e2e-loopback-runner' && r.connected)
-            runnerId = mine?.id ?? null
-            return runnerId !== null
+            const rows = await listComputers(page)
+            const mine = rows.find((r) => r.name === 'e2e-loopback-computer' && r.connected)
+            computerId = mine?.id ?? null
+            return computerId !== null
           },
           { timeout: 60_000, intervals: [500, 1_000, 2_000] }
         )
         .toBe(true)
-      expect(runnerId).not.toBeNull()
+      expect(computerId).not.toBeNull()
 
-      // ── PTY exec over the runner link. ──
-      // Seed a project + task, bind the task to the runner, then create a
+      // ── PTY exec over the computer link. ──
+      // Seed a project + task, bind the task to the computer, then create a
       // `terminal` (raw shell) PTY. The routing pty backend resolves the task's
-      // runnerId and forwards the spawn to the runner; its node-pty output
+      // computerId and forwards the spawn to the computer; its node-pty output
       // streams back through the gateway into the session buffer.
       const projectPath = launched.userDataDir // an existing, readable dir
       const taskId = await page.evaluate(async (dir) => {
         const c = window.getTrpcVanillaClient()
         const project = await c.projects.create.mutate({
-          name: 'Runner Loopback',
+          name: 'Computer Loopback',
           color: '#22c55e',
           path: dir
         })
         const task = await c.task.create.mutate({
           projectId: project.id,
-          title: 'Runner loopback task',
+          title: 'Computer loopback task',
           status: 'in_progress'
         })
         return task.id as string
@@ -299,18 +299,18 @@ base.describe('Runner loopback (runner ON)', () => {
 
       await page.evaluate(
         ({ tId, rId }) =>
-          window.getTrpcVanillaClient().computers.setTaskRunner.mutate({
+          window.getTrpcVanillaClient().computers.setTaskComputer.mutate({
             taskId: tId,
-            runnerId: rId
+            computerId: rId
           }),
-        { tId: taskId, rId: runnerId! }
+        { tId: taskId, rId: computerId! }
       )
-      // Sanity: the binding resolves to our runner (routing reads this per-spawn).
+      // Sanity: the binding resolves to our computer (routing reads this per-spawn).
       const resolved = await page.evaluate(
-        (tId) => window.getTrpcVanillaClient().computers.resolveTaskRunner.query({ taskId: tId }),
+        (tId) => window.getTrpcVanillaClient().computers.resolveTaskComputer.query({ taskId: tId }),
         taskId
       )
-      expect(resolved.runnerId).toBe(runnerId)
+      expect(resolved.computerId).toBe(computerId)
 
       const sessionId = `${taskId}:${taskId}`
       const marker = `RUNNER_OK_${Date.now()}`
@@ -365,22 +365,22 @@ base.describe('Runner loopback (runner ON)', () => {
         )
         .toBe(true)
     } finally {
-      if (runner) await runner.stop()
+      if (computer) await computer.stop()
       await launched.close()
     }
   })
 
-  base('in-app supervisor auto-enrolls a local runner with zero manual token (D3)', async () => {
+  base('in-app supervisor auto-enrolls a local computer with zero manual token (D3)', async () => {
     base.setTimeout(180_000)
-    ensureRunnerBuilt()
+    ensureComputerBuilt()
 
     // The in-app supervisor (index.ts, runs in local mode — and under Playwright by
     // default now) waits for the sidecar ready, mints a join token over loopback
-    // REST, and spawns + auto-enrolls the co-located runner — no manual mint/spawn
+    // REST, and spawns + auto-enrolls the co-located computer — no manual mint/spawn
     // here. This test asserts that chain explicitly rather than relying on the
     // suite-wide default, which is why it still pins the flag below.
     const launched = await launchIsolatedElectron({
-      name: 'runner-auto-enroll',
+      name: 'computer-auto-enroll',
       seedUserData: (userDataDir) => {
         fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
         fs.writeFileSync(
@@ -391,15 +391,15 @@ base.describe('Runner loopback (runner ON)', () => {
       extraEnv: (userDataDir) => ({
         SLAYZONE_ROOT: userDataDir,
         // Documents intent: this spec's subject IS the auto-enroll chain, so it
-        // must not silently depend on the suite-wide runner-ON default. The boot
+        // must not silently depend on the suite-wide computer-ON default. The boot
         // gate no longer reads this key (only SLAYZONE_E2E_NO_RUNNER changes
         // behavior); it stays as a declaration of what the test requires.
         SLAYZONE_E2E_ALLOW_RUNNER: '1',
-        // The supervised runner self-derives its path-jail to `[homedir()]` (no
+        // The supervised computer self-derives its path-jail to `[homedir()]` (no
         // env channel). userDataDir lives under `.e2e-runtime` → under the repo →
         // under $HOME, so it is inside the jail and the PTY exec below passes.
-        // The runner enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-runner').
-        SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-runner-creds')
+        // The computer enrolls as DEFAULT_LOCAL_RUNNER_NAME ('local-computer').
+        SLAYZONE_RUNNER_CREDENTIALS_DIR: path.join(userDataDir, 'auto-computer-creds')
       })
     })
 
@@ -408,41 +408,41 @@ base.describe('Runner loopback (runner ON)', () => {
       await page.waitForSelector('#root', { timeout: 20_000 })
 
       // The whole chain is automatic: sidecar ready → main mints over loopback
-      // REST → runner spawns → dials wss → enrolls. Poll runners.list until the
-      // auto-spawned runner reports connected. Generous budget: it waits on the
-      // async runner init (createHubAuth migrations) + listener bind + a mint
-      // retry cycle + the runner build/spawn/dial.
-      let connectedRunnerId: string | null = null
+      // REST → computer spawns → dials wss → enrolls. Poll computers.list until the
+      // auto-spawned computer reports connected. Generous budget: it waits on the
+      // async computer init (createHubAuth migrations) + listener bind + a mint
+      // retry cycle + the computer build/spawn/dial.
+      let connectedComputerId: string | null = null
       await expect
         .poll(
           async () => {
-            const rows = await listRunners(page)
-            const mine = rows.find((r) => r.name === 'local-runner' && r.connected)
-            connectedRunnerId = mine?.id ?? null
-            return connectedRunnerId !== null
+            const rows = await listComputers(page)
+            const mine = rows.find((r) => r.name === 'local-computer' && r.connected)
+            connectedComputerId = mine?.id ?? null
+            return connectedComputerId !== null
           },
           { timeout: 120_000, intervals: [1_000, 2_000, 3_000] }
         )
         .toBe(true)
-      expect(connectedRunnerId).not.toBeNull()
+      expect(connectedComputerId).not.toBeNull()
     } finally {
       await launched.close()
     }
   })
 
   base(
-    'a hub always accepts runners: mintJoinToken works with no flag, no supervisor',
+    'a hub always accepts computers: mintJoinToken works with no flag, no supervisor',
     async () => {
       base.setTimeout(120_000)
 
       // Boot with the supervisor explicitly OPTED OUT (`SLAYZONE_E2E_NO_RUNNER=1`)
-      // — e2e is otherwise runner-ON by default, which would auto-spawn a local
-      // runner and invalidate the zero-connected assertion below. This proves the
+      // — e2e is otherwise computer-ON by default, which would auto-spawn a local
+      // computer and invalidate the zero-connected assertion below. This proves the
       // always-on contract: the hub still builds the gateway + binds the /computers
-      // listener at boot, so mintJoinToken succeeds and a runner COULD connect —
+      // listener at boot, so mintJoinToken succeeds and a computer COULD connect —
       // there just isn't one spawned in this test.
       const launched = await launchIsolatedElectron({
-        name: 'runner-always-on',
+        name: 'computer-always-on',
         seedUserData: (userDataDir) => {
           fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
           fs.writeFileSync(
@@ -460,14 +460,14 @@ base.describe('Runner loopback (runner ON)', () => {
         const page = launched.page
         await page.waitForSelector('#root', { timeout: 20_000 })
 
-        // Supervisor opted out → no runner auto-spawns, so nothing is connected.
+        // Supervisor opted out → no computer auto-spawns, so nothing is connected.
         await page.waitForTimeout(3_000)
-        const rows = await listRunners(page)
+        const rows = await listComputers(page)
         expect(rows.filter((r) => r.connected).length).toBe(0)
 
-        // But the runner listener IS bound (always-on) → mintJoinToken succeeds and
-        // returns a decodable szjt1 token embedding the wss runner URL. Poll: the
-        // async runner init (createHubAuth migrations + listener bind) resolves
+        // But the computer listener IS bound (always-on) → mintJoinToken succeeds and
+        // returns a decodable szjt1 token embedding the wss computer URL. Poll: the
+        // async computer init (createHubAuth migrations + listener bind) resolves
         // shortly after boot.
         await expect
           .poll(
@@ -494,7 +494,7 @@ base.describe('Runner loopback (runner ON)', () => {
 
 /** True when `marker` appears in the buffer on a line that is not the `echo
  *  <marker>` command echo — i.e. the command's actual stdout came back over the
- *  runner link. */
+ *  computer link. */
 function bufferHasCommandOutput(buffer: string, marker: string): boolean {
   const lines = buffer.split(/\r?\n/)
   return lines.some((line) => line.includes(marker) && !line.includes(`echo ${marker}`))

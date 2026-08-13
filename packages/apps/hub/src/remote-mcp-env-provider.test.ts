@@ -1,10 +1,10 @@
 /**
- * Unit tests for createRemoteMcpEnvProvider — the runner-transport provider the
- * composition root injects via setRemoteMcpEnvProvider (hub/runner split). Asserts
- * the RemoteMcpEnv contract: a runner-routed spawn resolves the hub base URL
+ * Unit tests for createRemoteMcpEnvProvider — the computer-transport provider the
+ * composition root injects via setRemoteMcpEnvProvider (hub/computer split). Asserts
+ * the RemoteMcpEnv contract: a computer-routed spawn resolves the hub base URL
  * (public-url override vs loopback boundPort); an unresolvable base yields null
  * (→ loopback fallback upstream). The base URL is used ONLY by the `slay` CLI's
- * hub REST access — the agent lifecycle HOOK posts to the runner's own loopback
+ * hub REST access — the agent lifecycle HOOK posts to the computer's own loopback
  * relay, so NO per-task bearer is minted here anymore.
  *
  * Run with: npx tsx packages/apps/hub/src/remote-mcp-env-provider.test.ts
@@ -40,12 +40,12 @@ function withPublicAddress<T>(value: string | undefined, fn: () => T, mode?: str
 }
 
 // 1. Loopback base (no public URL) + a task → hubBaseUrl matches boundPort. No
-//    token is produced (the field was removed — the hook uses runner loopback).
+//    token is produced (the field was removed — the hook uses computer loopback).
 withPublicAddress(undefined, () => {
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-  const env = provider({ taskId: 'task-1', runnerId: 'runner-a' })
-  assert(env !== null, 'runner-routed spawn must resolve a non-null target')
-  assert(env!.runnerId === 'runner-a', 'runnerId echoed back')
+  const env = provider({ taskId: 'task-1', computerId: 'computer-a' })
+  assert(env !== null, 'computer-routed spawn must resolve a non-null target')
+  assert(env!.computerId === 'computer-a', 'computerId echoed back')
   assert(
     env!.hubBaseUrl === 'http://127.0.0.1:4141',
     `loopback base on boundPort, got ${env!.hubBaseUrl}`
@@ -62,7 +62,7 @@ withPublicAddress(
   'hub.example:8443',
   () => {
     const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-    const env = provider({ taskId: 'task-3', runnerId: 'r' })
+    const env = provider({ taskId: 'task-3', computerId: 'r' })
     assert(
       env!.hubBaseUrl === 'https://hub.example:8443',
       `public address wins, https from remote MODE, got ${env!.hubBaseUrl}`
@@ -72,12 +72,12 @@ withPublicAddress(
 )
 
 // 2a. Same address in local MODE → http. Proves the scheme tracks MODE alone, so
-//     it can never disagree with the runner's ws(s) reading of the same hub.
+//     it can never disagree with the computer's ws(s) reading of the same hub.
 withPublicAddress(
   'hub.example:8443',
   () => {
     const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-    const env = provider({ taskId: 'task-3', runnerId: 'r' })
+    const env = provider({ taskId: 'task-3', computerId: 'r' })
     assert(
       env!.hubBaseUrl === 'http://hub.example:8443',
       `local MODE → http, got ${env!.hubBaseUrl}`
@@ -91,19 +91,19 @@ withPublicAddress(
 //     base; degrade via the contract).
 withPublicAddress('https://hub.example:8443', () => {
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-  assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'address carrying a scheme → null')
+  assert(provider({ taskId: 't', computerId: 'r' }) === null, 'address carrying a scheme → null')
 })
 
 // 2c. A value carrying a PATH is rejected too (no path-prefixed proxy mount).
 withPublicAddress('hub.example:8443/slayzone', () => {
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-  assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'address carrying a path → null')
+  assert(provider({ taskId: 't', computerId: 'r' }) === null, 'address carrying a path → null')
 })
 
 // 3. Taskless spawn (pooled agent, taskId undefined) → base still resolved.
 withPublicAddress(undefined, () => {
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-  const env = provider({ taskId: undefined, runnerId: 'r' })
+  const env = provider({ taskId: undefined, computerId: 'r' })
   assert(env !== null, 'taskless spawn still resolves a base')
   assert(env!.hubBaseUrl === 'http://127.0.0.1:4141', 'taskless base on boundPort')
 })
@@ -112,7 +112,7 @@ withPublicAddress(undefined, () => {
 //    fallback upstream, never a poisoned/unreachable hub target).
 withPublicAddress(undefined, () => {
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 0 })
-  const env = provider({ taskId: 'task-5', runnerId: 'r' })
+  const env = provider({ taskId: 'task-5', computerId: 'r' })
   assert(env === null, 'no reachable base → null')
 })
 
@@ -121,9 +121,9 @@ withPublicAddress(undefined, () => {
 withPublicAddress(undefined, () => {
   let port = 0
   const provider = createRemoteMcpEnvProvider({ getBoundPort: () => port })
-  assert(provider({ taskId: 't', runnerId: 'r' }) === null, 'null while port unbound')
+  assert(provider({ taskId: 't', computerId: 'r' }) === null, 'null while port unbound')
   port = 5555
-  const env = provider({ taskId: 't', runnerId: 'r' })
+  const env = provider({ taskId: 't', computerId: 'r' })
   assert(env?.hubBaseUrl === 'http://127.0.0.1:5555', 'picks up boundPort once set (lazy read)')
 })
 

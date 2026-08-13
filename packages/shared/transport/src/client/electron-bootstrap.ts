@@ -12,7 +12,7 @@ function api(): ElectronAPI {
 
 export const electronBootstrap = {
   getServerUrl: () => api().app.getServerUrl(),
-  // Pre-boot config not backed by the settings DB (runner/multi-hub — decided at boot).
+  // Pre-boot config not backed by the settings DB (computer/multi-hub — decided at boot).
   getBootConfig: () => api().app.getBootConfig(),
   // Resolved multi-hub registry (local always first + present when multiHub on).
   getHubRegistry: () => api().app.getHubRegistry(),
@@ -32,7 +32,7 @@ export const electronBootstrap = {
   probeServerHealth: (url: string) => api().app.probeServerHealth(url),
   relaunch: () => api().app.relaunch(),
   restartSidecar: () => api().app.restartSidecar(),
-  restartLocalRunner: () => api().app.restartLocalRunner(),
+  restartLocalComputer: () => api().app.restartLocalComputer(),
   // Boot instrumentation is pure timing telemetry — optional outside Electron
   // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
   // chain so a missing host method is a no-op, not a TypeError that aborts the

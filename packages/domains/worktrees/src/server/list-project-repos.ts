@@ -4,7 +4,7 @@
  * The walk itself moved to `@slayzone/file-editor/server` (`discoverRepos`) so it
  * can execute on the machine that owns the directory. It used to run here, in the
  * hub, against the hub's own disk — which resolved the terminal cwd, the editor
- * root, and the git panel to the wrong place for any project living on a runner.
+ * root, and the git panel to the wrong place for any project living on a computer.
  * What stays here is the part that is genuinely hub-side: the cache and the
  * task-bound annotation.
  *
@@ -17,9 +17,9 @@ import path from 'path'
 import type { RepoEntry, ListProjectReposOpts } from '../shared/types'
 
 /**
- * Cache key is (runner, path), NOT path alone.
+ * Cache key is (computer, path), NOT path alone.
  *
- * Two runners routinely hold the same absolute path — `/home/user/dev/app` is
+ * Two computers routinely hold the same absolute path — `/home/user/dev/app` is
  * the common case, not an exotic one — and a path-keyed cache would serve one
  * machine's repo layout as the other's. Short TTL; only paid on tab focus /
  * strip render.
@@ -32,8 +32,8 @@ const cache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 5_000
 const CACHE_MAX = 50
 
-const cacheKey = (runnerId: string | null, projectPath: string): string =>
-  `${runnerId ?? 'local'}\u0000${projectPath}`
+const cacheKey = (computerId: string | null, projectPath: string): string =>
+  `${computerId ?? 'local'}\u0000${projectPath}`
 
 function evictStale(): void {
   if (cache.size <= CACHE_MAX) return
@@ -47,7 +47,7 @@ function evictStale(): void {
   }
 }
 
-/** Drop cached layouts. Without a path, drops everything (all runners). */
+/** Drop cached layouts. Without a path, drops everything (all computers). */
 export function invalidateProjectReposCache(projectPath?: string): void {
   if (!projectPath) {
     cache.clear()
@@ -60,18 +60,18 @@ export function invalidateProjectReposCache(projectPath?: string): void {
 
 export async function listProjectRepos(
   fs: WorkspaceFsAdapters,
-  runnerId: string | null,
+  computerId: string | null,
   projectPath: string,
   opts: ListProjectReposOpts = {}
 ): Promise<RepoEntry[]> {
-  const key = cacheKey(runnerId, projectPath)
+  const key = cacheKey(computerId, projectPath)
   const cached = cache.get(key)
   if (cached && cached.expiresAt > Date.now()) {
     return reannotateTaskBound(cached.repos, opts.taskBoundPath ?? null)
   }
 
   const taskBoundPath = opts.taskBoundPath ?? null
-  const discovered = await fs.discoverRepos(runnerId, projectPath)
+  const discovered = await fs.discoverRepos(computerId, projectPath)
   const entries: RepoEntry[] = discovered.map((d) => ({
     path: d.path,
     name: d.name,
@@ -94,10 +94,10 @@ export async function listProjectRepos(
  */
 export async function detectChildRepos(
   fs: WorkspaceFsAdapters,
-  runnerId: string | null,
+  computerId: string | null,
   projectPath: string
 ): Promise<{ name: string; path: string }[]> {
-  const repos = await listProjectRepos(fs, runnerId, projectPath)
+  const repos = await listProjectRepos(fs, computerId, projectPath)
   // A project that IS a repo has no child repos — multi-repo mode is off.
   if (repos.some((r) => r.kind === 'project-root')) return []
   return repos

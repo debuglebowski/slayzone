@@ -1,10 +1,10 @@
 /**
- * Runner auth adapter factory — end-to-end against real dependencies.
+ * Computer auth adapter factory — end-to-end against real dependencies.
  *
- * Exercises `createRunnerAuthAdapters` over a real migrated `SlayzoneDb` (the
- * full production migration chain, incl. the v149 runner tables) and a real
+ * Exercises `createComputerAuthAdapters` over a real migrated `SlayzoneDb` (the
+ * full production migration chain, incl. the v149 computer tables) and a real
  * `createHubAuth` better-auth instance on a throwaway sqlite file. No mocks of
- * the runners store, join-token verifier, or api-key mint/verify.
+ * the computers store, join-token verifier, or api-key mint/verify.
  *
  * Native ABI: the `SlayzoneDb` rides better-sqlite3 (rebuilt for Electron's
  * ABI), and createHubAuth uses `node:sqlite` — so this runs under the Electron
@@ -14,7 +14,7 @@
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/runner-auth.test.ts
+ *     packages/apps/hub/src/computer-auth.test.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,15 +24,15 @@ import { RUNNER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { createHubAuth, RUNNER_KEY_PREFIX } from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import {
-  deterministicLocalRunnerId,
-  getRunner,
-  listRunners,
+  deterministicLocalComputerId,
+  getComputer,
+  listComputers,
   mintJoinToken,
-  revokeRunner
+  revokeComputer
 } from '@slayzone/computers/server'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
 import { runMigrations } from '@slayzone/transport/db-bootstrap'
-import { createRunnerAuthAdapters } from './runner-auth.js'
+import { createComputerAuthAdapters } from './computer-auth.js'
 
 let passed = 0
 let failed = 0
@@ -86,33 +86,33 @@ const ENROLL_BASE = {
 }
 
 async function main(): Promise<void> {
-  console.log('\nrunner-auth adapters (real DB + real hub-auth)')
+  console.log('\ncomputer-auth adapters (real DB + real hub-auth)')
   console.log('─'.repeat(48))
 
-  const tmpDir = mkdtempSync(join(tmpdir(), 'runner-auth-test-'))
+  const tmpDir = mkdtempSync(join(tmpdir(), 'computer-auth-test-'))
   const { db, close } = createMigratedDb()
   const auth = await createHubAuth({
     dbPath: join(tmpDir, 'hub-auth.sqlite'),
     baseURL: 'http://127.0.0.1:9999',
-    secret: 'runner-auth-test-secret-at-least-32-chars-long'
+    secret: 'computer-auth-test-secret-at-least-32-chars-long'
   })
-  const adapters = createRunnerAuthAdapters({ db, auth })
+  const adapters = createComputerAuthAdapters({ db, auth })
 
   try {
-    await test('verifyEnrollment registers a runner + returns {runnerId, apiKey}', async () => {
+    await test('verifyEnrollment registers a computer + returns {computerId, apiKey}', async () => {
       const token = await mintToken(db)
       const result = await adapters.verifyEnrollment({ ...ENROLL_BASE, joinToken: token })
 
-      assert(typeof result.runnerId === 'string' && result.runnerId.length > 0, 'runnerId set')
-      assert(result.apiKey.startsWith(RUNNER_KEY_PREFIX), 'apiKey carries the runner prefix')
+      assert(typeof result.computerId === 'string' && result.computerId.length > 0, 'computerId set')
+      assert(result.apiKey.startsWith(RUNNER_KEY_PREFIX), 'apiKey carries the computer prefix')
 
-      const row = await getRunner(db, result.runnerId)
-      assert(row !== null, 'runners row persisted')
+      const row = await getComputer(db, result.computerId)
+      assert(row !== null, 'computers row persisted')
       assertEq(row!.name, 'mac-studio', 'name persisted')
       assertEq(row!.platform, 'darwin-arm64', 'platform persisted')
       assertEq(row!.version, '0.35.0', 'version persisted')
       assert(row!.auth_key_id !== null && row!.auth_key_id!.length > 0, 'auth_key_id persisted')
-      assertEq(row!.revoked_at, null, 'runner is active')
+      assertEq(row!.revoked_at, null, 'computer is active')
       const storedCaps = JSON.parse(row!.capabilities_json) as Record<string, unknown>
       assert(
         storedCaps.pty === true && storedCaps.git === true,
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
 
       const descriptor = await adapters.verifyApiKey(enrolled.apiKey)
       assert(descriptor !== null, 'descriptor resolved')
-      assertEq(descriptor!.runnerId, enrolled.runnerId, 'descriptor runnerId matches')
+      assertEq(descriptor!.computerId, enrolled.computerId, 'descriptor computerId matches')
       assertEq(descriptor!.name, 'descriptor-host', 'descriptor name')
       assertEq(descriptor!.platform, 'darwin-arm64', 'descriptor platform')
       assertEq(descriptor!.version, '0.35.0', 'descriptor version')
@@ -151,29 +151,29 @@ async function main(): Promise<void> {
       )
     })
 
-    await test('re-enroll after socket drop returns the SAME runnerId + apiKey', async () => {
+    await test('re-enroll after socket drop returns the SAME computerId + apiKey', async () => {
       const token = await mintToken(db, 'reenroll')
       const params = { ...ENROLL_BASE, name: 'flaky-host', joinToken: token }
 
-      const before = (await listRunners(db)).length
+      const before = (await listComputers(db)).length
       const first = await adapters.verifyEnrollment(params)
-      // Socket dropped before the runner got `first` — it re-dials and enrolls
+      // Socket dropped before the computer got `first` — it re-dials and enrolls
       // again with the identical (joinToken, name). Single-use token is already
       // stamped; the grace ledger must make this a no-op re-issue, not a reject.
       const second = await adapters.verifyEnrollment(params)
 
-      assertEq(second.runnerId, first.runnerId, 'stable runnerId across re-enroll')
+      assertEq(second.computerId, first.computerId, 'stable computerId across re-enroll')
       assertEq(second.apiKey, first.apiKey, 'identical apiKey across re-enroll')
       assertEq(
-        (await listRunners(db)).length,
+        (await listComputers(db)).length,
         before + 1,
-        'exactly one runner registered (no duplicate)'
+        'exactly one computer registered (no duplicate)'
       )
 
       // And the re-issued key still authenticates.
       const descriptor = await adapters.verifyApiKey(second.apiKey)
       assert(descriptor !== null, 're-enroll key verifies')
-      assertEq(descriptor!.runnerId, first.runnerId, 're-enroll key maps to same runner')
+      assertEq(descriptor!.computerId, first.computerId, 're-enroll key maps to same computer')
     })
 
     await test('a raw re-verify of a used token (miss ⇒ used) is rejected', async () => {
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
       let threw = false
       try {
         // now() well past the 1001 expiry.
-        const adaptersExpired = createRunnerAuthAdapters({ db, auth, now: () => 10_000 })
+        const adaptersExpired = createComputerAuthAdapters({ db, auth, now: () => 10_000 })
         await adaptersExpired.verifyEnrollment({ ...ENROLL_BASE, joinToken: stale.token })
       } catch {
         threw = true
@@ -209,7 +209,7 @@ async function main(): Promise<void> {
       assert(threw, 'expired token rejected')
     })
 
-    await test('revoked runner ⇒ verifyApiKey returns null', async () => {
+    await test('revoked computer ⇒ verifyApiKey returns null', async () => {
       const token = await mintToken(db, 'revoke')
       const enrolled = await adapters.verifyEnrollment({
         ...ENROLL_BASE,
@@ -218,47 +218,47 @@ async function main(): Promise<void> {
       })
       assert((await adapters.verifyApiKey(enrolled.apiKey)) !== null, 'valid before revoke')
 
-      await revokeRunner(db, enrolled.runnerId)
+      await revokeComputer(db, enrolled.computerId)
       assertEq(
         await adapters.verifyApiKey(enrolled.apiKey),
         null,
-        'revoked runner no longer authenticates'
+        'revoked computer no longer authenticates'
       )
     })
 
-    // --- Local-runner dedup (Wave3.5-D5) -----------------------------------
+    // --- Local-computer dedup (Wave3.5-D5) -----------------------------------
     await test('LOCAL enroll uses a deterministic id + UPSERTs one row across relaunches', async () => {
-      const localAdapters = createRunnerAuthAdapters({ db, auth, localRunnerName: 'local-runner' })
-      const before = (await listRunners(db)).filter((r) => r.name === 'local-runner').length
+      const localAdapters = createComputerAuthAdapters({ db, auth, localComputerName: 'local-computer' })
+      const before = (await listComputers(db)).filter((r) => r.name === 'local-computer').length
 
       const t1 = await mintToken(db, 'local-1')
       const first = await localAdapters.verifyEnrollment({
         ...ENROLL_BASE,
-        name: 'local-runner',
+        name: 'local-computer',
         joinToken: t1
       })
       // A relaunch: a NEW join token (new port/creds) but the same local name.
       const t2 = await mintToken(db, 'local-2')
       const second = await localAdapters.verifyEnrollment({
         ...ENROLL_BASE,
-        name: 'local-runner',
+        name: 'local-computer',
         joinToken: t2
       })
 
-      assertEq(first.runnerId, deterministicLocalRunnerId('local-runner'), 'id is deterministic')
-      assertEq(second.runnerId, first.runnerId, 'relaunch keeps the SAME local runnerId')
+      assertEq(first.computerId, deterministicLocalComputerId('local-computer'), 'id is deterministic')
+      assertEq(second.computerId, first.computerId, 'relaunch keeps the SAME local computerId')
       assertEq(
-        (await listRunners(db)).filter((r) => r.name === 'local-runner').length,
+        (await listComputers(db)).filter((r) => r.name === 'local-computer').length,
         before + 1,
-        'exactly one local runner row after two enrolls (no orphan)'
+        'exactly one local computer row after two enrolls (no orphan)'
       )
     })
 
     await test('a fresh LOCAL enroll collapses PRE-EXISTING duplicate local rows to one', async () => {
-      const localAdapters = createRunnerAuthAdapters({ db, auth, localRunnerName: 'dup-local' })
+      const localAdapters = createComputerAuthAdapters({ db, auth, localComputerName: 'dup-local' })
       // Seed the pre-fix state: two random-id rows named 'dup-local' (orphans from
       // prior boots) via the REMOTE (fresh-uuid) path, imitating the historical bug.
-      const remoteAdapters = createRunnerAuthAdapters({ db, auth }) // no localRunnerName
+      const remoteAdapters = createComputerAuthAdapters({ db, auth }) // no localComputerName
       await remoteAdapters.verifyEnrollment({
         ...ENROLL_BASE,
         name: 'dup-local',
@@ -270,30 +270,30 @@ async function main(): Promise<void> {
         joinToken: await mintToken(db, 'd2')
       })
       assert(
-        (await listRunners(db)).filter((r) => r.name === 'dup-local').length === 2,
+        (await listComputers(db)).filter((r) => r.name === 'dup-local').length === 2,
         'two orphaned local rows seeded'
       )
 
-      // The next runner-enabled boot enrolls the local runner → cleanup collapses.
+      // The next computer-enabled boot enrolls the local computer → cleanup collapses.
       const enrolled = await localAdapters.verifyEnrollment({
         ...ENROLL_BASE,
         name: 'dup-local',
         joinToken: await mintToken(db, 'd3')
       })
-      const localRows = (await listRunners(db)).filter((r) => r.name === 'dup-local')
+      const localRows = (await listComputers(db)).filter((r) => r.name === 'dup-local')
       assertEq(localRows.length, 1, 'collapsed to a single local row')
-      assertEq(localRows[0].id, enrolled.runnerId, 'the surviving row is the deterministic-id one')
+      assertEq(localRows[0].id, enrolled.computerId, 'the surviving row is the deterministic-id one')
       assertEq(
         localRows[0].id,
-        deterministicLocalRunnerId('dup-local'),
+        deterministicLocalComputerId('dup-local'),
         'kept the deterministic id'
       )
     })
 
     await test('REMOTE enroll keeps a fresh uuid + is never deduped by the local path', async () => {
-      // A hub configured with a local name; a REMOTE runner (different name) must
+      // A hub configured with a local name; a REMOTE computer (different name) must
       // NOT get the deterministic id and NEVER be retired.
-      const localAdapters = createRunnerAuthAdapters({ db, auth, localRunnerName: 'the-local' })
+      const localAdapters = createComputerAuthAdapters({ db, auth, localComputerName: 'the-local' })
       const r1 = await localAdapters.verifyEnrollment({
         ...ENROLL_BASE,
         name: 'remote-alpha',
@@ -305,12 +305,12 @@ async function main(): Promise<void> {
         joinToken: await mintToken(db, 'r2')
       })
       assert(
-        r1.runnerId !== deterministicLocalRunnerId('remote-alpha'),
+        r1.computerId !== deterministicLocalComputerId('remote-alpha'),
         'remote id is a fresh uuid'
       )
-      // Both remote runners survive — dedup is scoped to the single local name only.
-      assert((await getRunner(db, r1.runnerId)) !== null, 'remote-alpha survives')
-      assert((await getRunner(db, r2.runnerId)) !== null, 'remote-beta survives')
+      // Both remote computers survive — dedup is scoped to the single local name only.
+      assert((await getComputer(db, r1.computerId)) !== null, 'remote-alpha survives')
+      assert((await getComputer(db, r2.computerId)) !== null, 'remote-beta survives')
     })
   } finally {
     close()

@@ -231,7 +231,7 @@ test('generates + persists a secret when absent (0600, != dev constant)', () => 
   assert(secret !== DEV_HUB_AUTH_SECRET, 'not the shared dev constant')
   assert(/^[0-9a-f]{64}$/.test(secret), 'lowercase hex')
   const onDisk = loadHubStateFile(p)
-  assertEq(onDisk.runnerTransportSecret, secret, 'persisted into hub.state.json')
+  assertEq(onDisk.computerTransportSecret, secret, 'persisted into hub.state.json')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
   }
@@ -247,10 +247,10 @@ test('stable across calls (reuses persisted secret, no re-generate)', () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('honors a pre-existing state-file runnerTransportSecret (does not overwrite)', () => {
+test('honors a pre-existing state-file computerTransportSecret (does not overwrite)', () => {
   const dir = tmp()
   const p = join(dir, 'hub.state.json')
-  saveHubStateFile({ runnerTransportSecret: 'preset-secret-value' }, p)
+  saveHubStateFile({ computerTransportSecret: 'preset-secret-value' }, p)
   const secret = ensureHubAuthSecret(p)
   assertEq(secret, 'preset-secret-value', 'returned the pre-existing secret')
   rmSync(dir, { recursive: true, force: true })
@@ -267,7 +267,7 @@ test('concurrent fresh boots CONVERGE on one secret (atomic create-if-absent)', 
   const a = ensureHubAuthSecret(p)
   const b = ensureHubAuthSecret(p)
   assertEq(a, b, 'both boots converge on ONE secret')
-  assertEq(loadHubStateFile(p).runnerTransportSecret, a, 'on-disk secret matches')
+  assertEq(loadHubStateFile(p).computerTransportSecret, a, 'on-disk secret matches')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -314,10 +314,10 @@ test('hub.config.json absent, legacy config.json present ⇒ hub keys coerced fr
 test('hub.state.json absent, legacy config.json present ⇒ secret coerced from it', () => {
   const dir = tmp()
   const legacyPath = join(dir, 'config.json')
-  writeFileSync(legacyPath, JSON.stringify({ runnerTransportSecret: 'legacy-secret' }))
+  writeFileSync(legacyPath, JSON.stringify({ computerTransportSecret: 'legacy-secret' }))
   const statePath = join(dir, 'hub.state.json')
   const state = loadHubStateFile(statePath)
-  assertEq(state.runnerTransportSecret, 'legacy-secret', 'secret from legacy file')
+  assertEq(state.computerTransportSecret, 'legacy-secret', 'secret from legacy file')
   assert(!existsSync(statePath), 'never auto-upgrades — hub.state.json not created by a read')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -325,7 +325,7 @@ test('hub.state.json absent, legacy config.json present ⇒ secret coerced from 
 test('ensureHubAuthSecret reuses a legacy secret rather than generating a new one', () => {
   const dir = tmp()
   const legacyPath = join(dir, 'config.json')
-  writeFileSync(legacyPath, JSON.stringify({ runnerTransportSecret: 'legacy-secret-value' }))
+  writeFileSync(legacyPath, JSON.stringify({ computerTransportSecret: 'legacy-secret-value' }))
   const statePath = join(dir, 'hub.state.json')
   const secret = ensureHubAuthSecret(statePath)
   assertEq(secret, 'legacy-secret-value', 'the legacy secret, not a freshly generated one')

@@ -1,12 +1,12 @@
 /**
- * Runner credential persistence. After enrollment the runner holds a
- * hub-scoped {runnerId, apiKey} pair; every hub a runner has joined is kept
- * as one entry in a single 0600 map file at `<ROOT>/runner.state.json`
- * (`{ [hubHost]: StoredRunnerCredentials }`), so reconnects (`hello`) survive
+ * Computer credential persistence. After enrollment the computer holds a
+ * hub-scoped {computerId, apiKey} pair; every hub a computer has joined is kept
+ * as one entry in a single 0600 map file at `<ROOT>/computer.state.json`
+ * (`{ [hubHost]: StoredComputerCredentials }`), so reconnects (`hello`) survive
  * restarts without re-consuming a join token, and enrolling with a second hub
  * never touches the first hub's entry.
  *
- * @module runner/client/credential-store
+ * @module computer/client/credential-store
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -17,10 +17,10 @@ import { z } from 'zod'
 /**
  * The SlayZone root dir for the default credential store. Mirrors platform's
  * getSlayzoneHomeDir precedence (`SLAYZONE_ROOT` > `$HOME/.slayzone`) — inlined
- * here so runner-transport stays free of the @slayzone/platform dep (keeps the
- * runner bundle lean). The standalone runner entrypoint seeds `SLAYZONE_ROOT=cwd`,
+ * here so computer-transport stays free of the @slayzone/platform dep (keeps the
+ * computer bundle lean). The standalone computer entrypoint seeds `SLAYZONE_ROOT=cwd`,
  * so this honors the ROOT anchor; without it, the raw home fallback applied and
- * creds landed at `~/.slayzone/runner.state.json`.
+ * creds landed at `~/.slayzone/computer.state.json`.
  */
 function slayzoneRootDir(): string {
   if (process.env.SLAYZONE_ROOT) return process.env.SLAYZONE_ROOT
@@ -28,21 +28,21 @@ function slayzoneRootDir(): string {
   return join(home, '.slayzone')
 }
 
-export const storedRunnerCredentialsSchema = z.object({
-  runnerId: z.string().min(1),
+export const storedComputerCredentialsSchema = z.object({
+  computerId: z.string().min(1),
   apiKey: z.string().min(1),
   /** Pin recorded at enroll time (lowercase hex sha256 of the hub leaf DER). */
   pinnedFingerprint: z.string().optional()
 })
-export type StoredRunnerCredentials = z.infer<typeof storedRunnerCredentialsSchema>
+export type StoredComputerCredentials = z.infer<typeof storedComputerCredentialsSchema>
 
-const credentialsMapSchema = z.record(z.string(), storedRunnerCredentialsSchema)
+const credentialsMapSchema = z.record(z.string(), storedComputerCredentialsSchema)
 type CredentialsMap = z.infer<typeof credentialsMapSchema>
 
-export interface RunnerCredentialStore {
+export interface ComputerCredentialStore {
   /** Null when absent or unreadable/corrupt (treated as not-yet-enrolled). */
-  load(): Promise<StoredRunnerCredentials | null>
-  save(credentials: StoredRunnerCredentials): Promise<void>
+  load(): Promise<StoredComputerCredentials | null>
+  save(credentials: StoredComputerCredentials): Promise<void>
   clear(): Promise<void>
   /** Absolute path of the backing file (diagnostics). */
   readonly filePath: string
@@ -66,7 +66,7 @@ function assertValidHubHost(hubHost: string): void {
 }
 
 export function credentialsFilePath(baseDir?: string): string {
-  return join(baseDir ?? slayzoneRootDir(), 'runner.state.json')
+  return join(baseDir ?? slayzoneRootDir(), 'computer.state.json')
 }
 
 /** Reads the whole map, tolerating a missing/corrupt file (→ `{}`) and dropping any single entry that fails schema validation rather than discarding every other hub's credentials. */
@@ -87,7 +87,7 @@ async function readCredentialsMap(filePath: string): Promise<CredentialsMap> {
   if (typeof parsedJson !== 'object' || parsedJson === null || Array.isArray(parsedJson)) return {}
   const map: CredentialsMap = {}
   for (const [key, value] of Object.entries(parsedJson as Record<string, unknown>)) {
-    const entry = storedRunnerCredentialsSchema.safeParse(value)
+    const entry = storedComputerCredentialsSchema.safeParse(value)
     if (entry.success) map[key] = entry.data
   }
   return map
@@ -110,7 +110,7 @@ async function writeCredentialsMap(filePath: string, map: CredentialsMap): Promi
 export function createFileCredentialStore(
   hubHost: string,
   options: { baseDir?: string } = {}
-): RunnerCredentialStore {
+): ComputerCredentialStore {
   assertValidHubHost(hubHost)
   const filePath = credentialsFilePath(options.baseDir)
 
@@ -140,8 +140,8 @@ export function createFileCredentialStore(
 
 /** In-memory store for tests and embedded use. */
 export function createMemoryCredentialStore(
-  initial: StoredRunnerCredentials | null = null
-): RunnerCredentialStore {
+  initial: StoredComputerCredentials | null = null
+): ComputerCredentialStore {
   let credentials = initial
   return {
     filePath: '<memory>',

@@ -5,9 +5,9 @@ import { useTRPC } from '@slayzone/transport/client'
 /**
  * Which machine the editor's filesystem calls are for.
  *
- * Every `fileEditor.*` procedure is routed to the runner that owns the workspace,
+ * Every `fileEditor.*` procedure is routed to the computer that owns the workspace,
  * because the panel used to read and write the HUB's disk — so a task whose
- * checkout lived on a runner saw the wrong tree, and a save landed on a machine
+ * checkout lived on a computer saw the wrong tree, and a save landed on a machine
  * no agent was working in.
  *
  * Ambient rather than a prop threaded through eight hooks, deliberately: the
@@ -15,18 +15,18 @@ import { useTRPC } from '@slayzone/transport/client'
  * it, and passing it individually to `useFileEditor`, `useFileTreeData`,
  * `useFileTreeCrud`, `useFileTreeClipboard`, `useFileTreeDragDrop`,
  * `useFileDropZone`, `useWatchedFile` and `SearchPanel` would be eight chances to
- * forget one — and a forgotten one silently falls back to the default runner,
+ * forget one — and a forgotten one silently falls back to the default computer,
  * which looks like it works right up until the workspace is elsewhere.
  *
  * It still reaches the query keys: each hook spreads it into its tRPC input, so
- * rebinding a task to another runner invalidates that panel's cached tree rather
+ * rebinding a task to another computer invalidates that panel's cached tree rather
  * than showing the previous machine's files.
  *
- * The empty default means "the connected default runner", which is the right
+ * The empty default means "the connected default computer", which is the right
  * answer for callers with no task context (the standalone artifact viewer, tests).
  */
 export interface WorkspaceTarget {
-  runnerId?: string | null
+  computerId?: string | null
   taskId?: string
   projectId?: string
 }
@@ -44,11 +44,11 @@ export function WorkspaceTargetProvider({
   // fresh identity every render would re-key every query beneath this provider.
   const value = useMemo(
     () => ({
-      runnerId: target?.runnerId,
+      computerId: target?.computerId,
       taskId: target?.taskId,
       projectId: target?.projectId
     }),
-    [target?.runnerId, target?.taskId, target?.projectId]
+    [target?.computerId, target?.taskId, target?.projectId]
   )
   return <WorkspaceTargetContext value={value}>{children}</WorkspaceTargetContext>
 }
@@ -61,7 +61,7 @@ export function useWorkspaceTarget(): WorkspaceTarget {
  * Is this panel's workspace on the user's own machine?
  *
  * Gates the desktop-only affordances — "Reveal in Finder" resolves against THIS
- * desktop, so on a remote runner it would either fail or, worse, reveal an
+ * desktop, so on a remote computer it would either fail or, worse, reveal an
  * unrelated directory that happens to share the path. Pending the answer it
  * returns false: briefly hiding an action beats offering one that misfires.
  */

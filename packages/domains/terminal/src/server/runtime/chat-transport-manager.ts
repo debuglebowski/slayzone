@@ -54,7 +54,7 @@ export interface TransportDeps {
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
   /**
    * Optional routed spawn seam. When set, ALL spawns go through it and it decides
-   * per-spec whether the process runs on the hub or on a runner — the same shape
+   * per-spec whether the process runs on the hub or on a computer — the same shape
    * `PtyBackend` has for terminal mode. When unset (tests, and any composition
    * root that never wires it) the local `spawn` above is used directly, so
    * behavior is byte-identical to before this seam existed.
@@ -513,7 +513,7 @@ function fireWatchdog(session: Session): void {
   // hub-local process happens to share that number — a false "alive" (or a false
   // "dead" that reaps a healthy remote turn). For a routed spawn we cannot observe
   // liveness from here, so skip straight to kill escalation, whose frames the
-  // runner answers authoritatively.
+  // computer answers authoritatively.
   const pid = child.pid
   const canProbe = session.rawChild !== null && pid > 0
   const alive = canProbe ? deps.isProcessAlive(pid) : true
@@ -841,11 +841,11 @@ export interface CreateChatOpts {
   /** Shell-parsed flags (e.g. ['--allow-dangerously-skip-permissions']). */
   providerFlags: string[]
   /**
-   * Runner this session's agent process should spawn on. `null`/absent = the hub.
-   * Mirrors `PtySpawnSpec.runnerId` — the routing backend reads it to dispatch,
+   * Computer this session's agent process should spawn on. `null`/absent = the hub.
+   * Mirrors `PtySpawnSpec.computerId` — the routing backend reads it to dispatch,
    * and a non-routing (test/default) setup ignores it entirely.
    */
-  runnerId?: string | null
+  computerId?: string | null
   /**
    * Project this session belongs to, so the RUNNER can resolve its own cwd when
    * `cwd` is empty — the hub cannot, having no path column that could be right
@@ -1095,14 +1095,14 @@ async function spawnSubprocess(session: Session): Promise<void> {
   if (deps.backend) {
     // Routed (or routing-capable) spawn. Binary resolution is NOT done here:
     // `whichBinary` runs a LOCAL login shell, so a hub-resolved absolute path is
-    // meaningless on a runner's filesystem. The spec carries the binary NAME and
+    // meaningless on a computer's filesystem. The spec carries the binary NAME and
     // whoever executes it resolves it against its own PATH. Likewise no
     // `sanitizeSpawnEnv(process.env)` base — that would ship the HUB's
     // environment; the executor merges its own sanitized base under `env`.
     handle = await deps.backend.spawn({
       sessionId: `${session.taskId}:${session.tabId}`,
       taskId: session.taskId,
-      runnerId: opts.runnerId ?? null,
+      computerId: opts.computerId ?? null,
       binaryName: backend.binaryName,
       args,
       // Carried so a chat agent resolves its cwd exactly as a terminal agent
@@ -1219,7 +1219,7 @@ async function spawnSubprocess(session: Session): Promise<void> {
   // `createLineSplitter` replaces `readline.createInterface` (which needs a real
   // stream a routed handle cannot supply) with the same contract: emit on \n or
   // \r\n, never emit a partial line, hold an unterminated tail. Framing here — not
-  // on the runner — keeps the driver's protocol state entirely on the hub.
+  // on the computer — keeps the driver's protocol state entirely on the hub.
   const feedStdout = createLineSplitter((line) => {
     try {
       driver.handleLine(line)

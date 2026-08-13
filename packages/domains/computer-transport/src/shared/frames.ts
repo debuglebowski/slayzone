@@ -1,92 +1,92 @@
 /**
- * Runner wire contract — zod schemas for every frame exchanged between a hub
- * and its runners over the duplex JSON-RPC channel.
+ * Computer wire contract — zod schemas for every frame exchanged between a hub
+ * and its computers over the duplex JSON-RPC channel.
  *
  * Versioning: the contract is versioned via `protocolVersion` carried in the
- * `enroll` request. A hub rejects enrollment from a runner speaking a
- * different major protocol version with `RunnerTransportErrorCodes.protocolMismatch`.
+ * `enroll` request. A hub rejects enrollment from a computer speaking a
+ * different major protocol version with `ComputerTransportErrorCodes.protocolMismatch`.
  * Reconnects (`hello`) reuse credentials minted at enroll time, so the
  * version negotiated at enrollment governs the session.
  *
  * Direction map (v1):
- *  runner → hub requests:      enroll, hello, heartbeat
- *  runner → hub notifications: pty.data, pty.exit, proc.data, proc.exit,
+ *  computer → hub requests:      enroll, hello, heartbeat
+ *  computer → hub notifications: pty.data, pty.exit, proc.data, proc.exit,
  *                              event, fs.change
- *  hub → runner requests:      pty.spawn, pty.kill, pty.resize, pty.write,
+ *  hub → computer requests:      pty.spawn, pty.kill, pty.resize, pty.write,
  *                              pty.getBufferSince, git.isGitRepo,
  *                              git.getCurrentBranch, git.createWorktree,
  *                              git.removeWorktree, git.runWorktreeSetupScript,
  *                              git.copyIgnoredFiles, fs.* (see below),
- *                              proc.spawn, proc.kill, ping, runner.shutdown
+ *                              proc.spawn, proc.kill, ping, computer.shutdown
  *
  * The `fs.` namespace has three groups, kept distinct on purpose:
  *   - raw probes    — fs.pathExists, fs.removeDir
  *   - workspace browse (ABSOLUTE paths, jail-scoped) — fs.listRoots, fs.listDir,
  *     fs.mkdir. Back the desktop's directory picker, which must describe the
- *     runner's disk before a project root exists.
+ *     computer's disk before a project root exists.
  *   - file editor (ROOT-SCOPED, gitignore-aware) — fs.readDir, fs.readFile,
  *     fs.writeFile, fs.createFile, fs.createDir, fs.rename, fs.delete,
  *     fs.copyIn, fs.copy, fs.gitStatus, fs.searchFiles, fs.listAllFiles,
  *     fs.watchStart, fs.watchStop.
  *
  * `pty.data.seq` is a per-session monotonic sequence number assigned by the
- * runner at emission and preserved end-to-end, so the hub can detect gaps and
+ * computer at emission and preserved end-to-end, so the hub can detect gaps and
  * request replay via `pty.getBufferSince`.
  *
- * @module runner/shared/frames
+ * @module computer/shared/frames
  */
 
 import { z } from 'zod'
 
 /**
- * Runner process exit code meaning "the hub no longer recognizes this runner".
+ * Computer process exit code meaning "the hub no longer recognizes this computer".
  *
  * 78 = EX_CONFIG (sysexits.h): a configuration problem a restart cannot fix. A
- * supervisor must NOT respawn on this — the hub has lost this runner's identity
- * (storage deleted, one of its two DBs restored without the other, or the runner
+ * supervisor must NOT respawn on this — the hub has lost this computer's identity
+ * (storage deleted, one of its two DBs restored without the other, or the computer
  * revoked) and only an operator enrolling it again resolves it. Lives here so the
- * runner that exits with it and the supervisor that reads it cannot disagree.
+ * computer that exits with it and the supervisor that reads it cannot disagree.
  */
 export const RUNNER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /** Bump on any breaking change to the frames below. */
 export const RUNNER_PROTOCOL_VERSION = 2
 
-/** JSON-RPC application error codes used by the runner protocol. */
-export const RunnerTransportErrorCodes = {
+/** JSON-RPC application error codes used by the computer protocol. */
+export const ComputerTransportErrorCodes = {
   /** Command is part of the contract but not implemented by this peer. */
   unimplemented: -32001,
   /** Join token / api key rejected, or method used before authentication. */
   unauthorized: -32002,
-  /** Runner and hub speak incompatible protocol versions. */
+  /** Computer and hub speak incompatible protocol versions. */
   protocolMismatch: -32003,
-  /** Addressed runner is not connected to this hub. */
-  unknownRunner: -32004
+  /** Addressed computer is not connected to this hub. */
+  unknownComputer: -32004
 } as const
 
 // ---------------------------------------------------------------------------
-// runner → hub requests
+// computer → hub requests
 // ---------------------------------------------------------------------------
 
-export const RunnerToHubMethods = {
+export const ComputerToHubMethods = {
   enroll: 'enroll',
   hello: 'hello',
   heartbeat: 'heartbeat'
 } as const
 
 /**
- * Identifies one runner PROCESS INCARNATION. Minted once at runner startup,
+ * Identifies one computer PROCESS INCARNATION. Minted once at computer startup,
  * unchanged across every reconnect that process makes, and different after any
  * restart.
  *
- * This is what makes "the socket dropped" distinguishable from "the runner
+ * This is what makes "the socket dropped" distinguishable from "the computer
  * died" without guessing: reconnecting with the SAME epoch proves the process
  * that owns the pty sessions never went away, so the hub may reattach to them.
  * A different epoch proves the opposite — everything the old process held is
  * gone, and its sessions can be reaped immediately instead of waiting out a
  * lease.
  *
- * OPTIONAL on the wire: a runner too old to send one leaves the hub unable to
+ * OPTIONAL on the wire: a computer too old to send one leaves the hub unable to
  * prove either, so it falls back to the conservative pre-epoch behavior
  * (finalize on disconnect). Fail closed, never reattach on an unproven identity.
  */
@@ -95,11 +95,11 @@ const epochField = z.string().min(1).optional()
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   joinToken: z.string().min(1),
-  /** Human-readable runner name (e.g. hostname). */
+  /** Human-readable computer name (e.g. hostname). */
   name: z.string().min(1),
   /** `${process.platform}-${process.arch}`, e.g. `darwin-arm64`. */
   platform: z.string().min(1),
-  /** Runner app version. */
+  /** Computer app version. */
   version: z.string().min(1),
   /** Capability tags, e.g. `['pty', 'git']`. */
   capabilities: z.array(z.string()),
@@ -109,7 +109,7 @@ export const enrollParamsSchema = z.object({
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
 export const enrollResultSchema = z.object({
-  runnerId: z.string().min(1),
+  computerId: z.string().min(1),
   apiKey: z.string().min(1)
 })
 export type EnrollResult = z.infer<typeof enrollResultSchema>
@@ -122,11 +122,11 @@ export const helloParamsSchema = z.object({
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
 export const helloResultSchema = z.object({
-  runnerId: z.string().min(1)
+  computerId: z.string().min(1)
 })
 export type HelloResult = z.infer<typeof helloResultSchema>
 
-/** Liveness probe; also lets the runner detect an unresponsive hub. */
+/** Liveness probe; also lets the computer detect an unresponsive hub. */
 export const heartbeatParamsSchema = z.object({
   /** Sender wall-clock ms, for skew diagnostics. */
   ts: z.number().optional()
@@ -139,10 +139,10 @@ export const heartbeatResultSchema = z.object({
 export type HeartbeatResult = z.infer<typeof heartbeatResultSchema>
 
 // ---------------------------------------------------------------------------
-// runner → hub notifications
+// computer → hub notifications
 // ---------------------------------------------------------------------------
 
-export const RunnerNotificationMethods = {
+export const ComputerNotificationMethods = {
   ptyData: 'pty.data',
   ptyExit: 'pty.exit',
   procData: 'proc.data',
@@ -166,18 +166,18 @@ export const ptyExitParamsSchema = z.object({
 })
 export type PtyExitParams = z.infer<typeof ptyExitParamsSchema>
 
-/** Generic runner-side event (agent lifecycle, diagnostics, …). */
-export const runnerEventParamsSchema = z.object({
+/** Generic computer-side event (agent lifecycle, diagnostics, …). */
+export const computerEventParamsSchema = z.object({
   name: z.string().min(1),
   payload: z.unknown().optional()
 })
-export type RunnerEventParams = z.infer<typeof runnerEventParamsSchema>
+export type ComputerEventParams = z.infer<typeof computerEventParamsSchema>
 
 /**
- * `RunnerEventParams.name` for a relayed agent lifecycle hook. A runner-routed
- * pty posts its hook to the runner's OWN loopback `/api/agent-hook`, and the
- * runner forwards the raw envelope to the hub as a generic `event` with THIS
- * name. Shared wire contract: the runner emits it, the hub matches on it.
+ * `ComputerEventParams.name` for a relayed agent lifecycle hook. A computer-routed
+ * pty posts its hook to the computer's OWN loopback `/api/agent-hook`, and the
+ * computer forwards the raw envelope to the hub as a generic `event` with THIS
+ * name. Shared wire contract: the computer emits it, the hub matches on it.
  */
 export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
 
@@ -185,7 +185,7 @@ export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
  * Child-process output chunk (proc.spawn stream).
  *
  * SEQUENCED, like `pty.data`: `seq` is a per-session monotonic counter assigned
- * by the runner at emission, and the hub detects gaps + replays them via
+ * by the computer at emission, and the hub detects gaps + replays them via
  * `proc.getBufferSince`. This is not symmetry for its own sake — a chat agent's
  * stdout is an NDJSON protocol stream, so a single dropped or reordered chunk
  * desynchronizes the driver's request correlation irrecoverably (a torn line is
@@ -211,10 +211,10 @@ export const procExitParamsSchema = z.object({
 export type ProcExitParams = z.infer<typeof procExitParamsSchema>
 
 /**
- * A watched file changed on the runner (file-editor panel).
+ * A watched file changed on the computer (file-editor panel).
  *
  * Correlated by `watchId`, which the HUB mints and passes to `fs.watchStart` —
- * not by `rootPath`. Two tasks can watch the same root on the same runner, and a
+ * not by `rootPath`. Two tasks can watch the same root on the same computer, and a
  * root-keyed stream could not tell their subscriptions apart on unsubscribe.
  * `relPath` is relative to the watched root, matching `FileWatchEvent` in
  * `@slayzone/file-editor/server`, which is what produces these events.
@@ -226,29 +226,29 @@ export const fsChangeParamsSchema = z.object({
 })
 export type FsChangeParams = z.infer<typeof fsChangeParamsSchema>
 
-export const runnerNotificationSchemas = {
-  [RunnerNotificationMethods.ptyData]: ptyDataParamsSchema,
-  [RunnerNotificationMethods.ptyExit]: ptyExitParamsSchema,
-  [RunnerNotificationMethods.procData]: procDataParamsSchema,
-  [RunnerNotificationMethods.procExit]: procExitParamsSchema,
-  [RunnerNotificationMethods.event]: runnerEventParamsSchema,
-  [RunnerNotificationMethods.fsChange]: fsChangeParamsSchema
+export const computerNotificationSchemas = {
+  [ComputerNotificationMethods.ptyData]: ptyDataParamsSchema,
+  [ComputerNotificationMethods.ptyExit]: ptyExitParamsSchema,
+  [ComputerNotificationMethods.procData]: procDataParamsSchema,
+  [ComputerNotificationMethods.procExit]: procExitParamsSchema,
+  [ComputerNotificationMethods.event]: computerEventParamsSchema,
+  [ComputerNotificationMethods.fsChange]: fsChangeParamsSchema
 } as const
-export type RunnerNotificationMethod = keyof typeof runnerNotificationSchemas
+export type ComputerNotificationMethod = keyof typeof computerNotificationSchemas
 
 // ---------------------------------------------------------------------------
-// hub → runner requests
+// hub → computer requests
 // ---------------------------------------------------------------------------
 
-export const HubToRunnerMethods = {
+export const HubToComputerMethods = {
   ptySpawn: 'pty.spawn',
   ptyKill: 'pty.kill',
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
   ptyGetBufferSince: 'pty.getBufferSince',
-  /** Live (non-warm) sessions the runner still holds — drives reattach. */
+  /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
-  // warm pool (pre-warmed agents live ON the runner — see server/warm-*)
+  // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
   ptyWarmKill: 'pty.warmKill',
@@ -263,13 +263,13 @@ export const HubToRunnerMethods = {
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   fsPathExists: 'fs.pathExists',
   fsRemoveDir: 'fs.removeDir',
-  // workspace browse ops — ABSOLUTE paths inside the runner's allowedRoots, used
+  // workspace browse ops — ABSOLUTE paths inside the computer's allowedRoots, used
   // by the desktop's directory picker before any project/root exists.
   fsListRoots: 'fs.listRoots',
   fsListDir: 'fs.listDir',
   fsMkdir: 'fs.mkdir',
   // file-editor ops — ROOT-SCOPED (rootPath + a path relative to it), gitignore
-  // aware. One-to-one with `@slayzone/file-editor/server`, which the runner
+  // aware. One-to-one with `@slayzone/file-editor/server`, which the computer
   // imports directly rather than reimplementing.
   fsReadDir: 'fs.readDir',
   fsReadFile: 'fs.readFile',
@@ -293,23 +293,23 @@ export const HubToRunnerMethods = {
   procKill: 'proc.kill',
   procWrite: 'proc.write',
   procGetBufferSince: 'proc.getBufferSince',
-  /** Live child processes the runner still holds — drives reattach. */
+  /** Live child processes the computer still holds — drives reattach. */
   procList: 'proc.list',
   // project → path mapping. The RUNNER owns where a project lives on its own
-  // disk; the hub knows only which runner. See `project.resolvePath` below.
+  // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
-  runnerShutdown: 'runner.shutdown',
-  /** Edit the runner's own path-jail (Settings → Runners). */
-  runnerSetAllowedRoots: 'runner.setAllowedRoots',
-  /** Run `gh` on the runner (PR panel). One frame, not one per gh subcommand. */
+  computerShutdown: 'computer.shutdown',
+  /** Edit the computer's own path-jail (Settings → Computers). */
+  computerSetAllowedRoots: 'computer.setAllowedRoots',
+  /** Run `gh` on the computer (PR panel). One frame, not one per gh subcommand. */
   ghExec: 'gh.exec'
 } as const
 
-/** Reserved method namespaces for future hub → runner exec commands. */
+/** Reserved method namespaces for future hub → computer exec commands. */
 export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.', 'project.'] as const
 
 export const ptySpawnParamsSchema = z
@@ -323,18 +323,18 @@ export const ptySpawnParamsSchema = z
      * it held one path column naming a directory on a machine it does not own.
      *
      * Still sent, and authoritative when it is, for the two cases where the path
-     * is not a hub guess: a worktree the runner itself created, and an explicit
+     * is not a hub guess: a worktree the computer itself created, and an explicit
      * `task.base_dir` override.
      */
     cwd: z.string().min(1).optional(),
-    /** Lets the runner resolve its own cwd when `cwd` is absent. */
+    /** Lets the computer resolve its own cwd when `cwd` is absent. */
     projectId: z.string().min(1).optional(),
     env: z.record(z.string(), z.string()).optional(),
     cols: z.number().int().positive().optional(),
     rows: z.number().int().positive().optional()
   })
   // Neither one means a spawn with nowhere to run. Refuse at the schema rather
-  // than landing an agent in the runner's launch directory, which is the kind of
+  // than landing an agent in the computer's launch directory, which is the kind of
   // silent wrong-cwd this whole change exists to remove.
   .refine((p) => p.cwd !== undefined || p.projectId !== undefined, {
     message: 'pty.spawn needs either cwd or projectId'
@@ -395,13 +395,13 @@ export const ptyGetBufferSinceResultSchema = z.object({
 export type PtyGetBufferSinceResult = z.infer<typeof ptyGetBufferSinceResultSchema>
 
 /**
- * Live (non-warm) sessions the runner still holds. The runner is the AUTHORITY
+ * Live (non-warm) sessions the computer still holds. The computer is the AUTHORITY
  * on this — the hub's own registry is only a belief about it, and after a
  * dropped connection the two can disagree in both directions.
  *
- * `seq` is the highest seq the runner has assigned, so the hub can tell whether
+ * `seq` is the highest seq the computer has assigned, so the hub can tell whether
  * it missed anything while detached and backfill via `pty.getBufferSince`.
- * Empty on a runner holding nothing, which is a legitimate answer, NOT an error:
+ * Empty on a computer holding nothing, which is a legitimate answer, NOT an error:
  * it means every session really did exit while the hub was away.
  */
 export const ptyListResultSchema = z.object({
@@ -417,16 +417,16 @@ export const ptyListResultSchema = z.object({
 export type PtyListResult = z.infer<typeof ptyListResultSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: warm pool
+// hub → computer requests: warm pool
 //
-// A pre-warmed agent is an ORDINARY pty session on the runner, keyed by a
+// A pre-warmed agent is an ORDINARY pty session on the computer, keyed by a
 // `warmId` instead of a real `sessionId`. Adoption REKEYS that entry rather than
 // spawning anything: the process, its pid and — critically — its RingBuffer and
 // assigned seqs all carry over untouched, so `pty.getBufferSince` stays coherent
 // across the adopt boundary. Replaying a seed into a fresh buffer instead would
 // restart seq numbering under a stream the hub is already tracking.
 //
-// The runner owns the process; the hub owns the POLICY (which projects deserve a
+// The computer owns the process; the hub owns the POLICY (which projects deserve a
 // warm agent) and the `agent_sessions` rows. That split is why there is no
 // "warm state" frame — the hub already knows what it asked for.
 // ---------------------------------------------------------------------------
@@ -479,12 +479,12 @@ export const ptyWarmKillParamsSchema = z.object({
 export type PtyWarmKillParams = z.infer<typeof ptyWarmKillParamsSchema>
 
 /**
- * Every warm session this runner still holds.
+ * Every warm session this computer still holds.
  *
- * Load-bearing on reconnect: warm agents are the runner's processes, so unlike
+ * Load-bearing on reconnect: warm agents are the computer's processes, so unlike
  * the old hub-local pool they SURVIVE a hub restart — and an unclaimed pre-booted
  * agent is a billable process with no owner. The hub reconciles against this list
- * when a runner (re)connects and kills what it no longer wants.
+ * when a computer (re)connects and kills what it no longer wants.
  */
 export const ptyWarmListResultSchema = z.object({
   warms: z.array(
@@ -509,38 +509,38 @@ export const pingResultSchema = z.object({
 export type PingResult = z.infer<typeof pingResultSchema>
 
 /**
- * Replace the runner's `allowedRoots` path-jail, persisting to its
- * `runner.config.json` and applying without a restart.
+ * Replace the computer's `allowedRoots` path-jail, persisting to its
+ * `computer.config.json` and applying without a restart.
  *
  * Not a privilege grant: a hub that can `pty.spawn` already runs arbitrary
- * commands on the runner, so the jail is a safety rail against a mistaken path,
+ * commands on the computer, so the jail is a safety rail against a mistaken path,
  * not a security boundary against the hub. It exists so a stale project path
  * cannot make the hub delete the wrong tree — which is exactly why the operator
  * needs to be able to widen it when their projects legitimately live elsewhere.
  */
-export const runnerSetAllowedRootsParamsSchema = z.object({
+export const computerSetAllowedRootsParamsSchema = z.object({
   /** Absolute paths. Replaces the current set wholesale. */
   roots: z.array(z.string().min(1))
 })
-export type RunnerSetAllowedRootsParams = z.infer<typeof runnerSetAllowedRootsParamsSchema>
+export type ComputerSetAllowedRootsParams = z.infer<typeof computerSetAllowedRootsParamsSchema>
 
-export const runnerSetAllowedRootsResultSchema = z.object({
+export const computerSetAllowedRootsResultSchema = z.object({
   /** The set actually applied, realpath-resolved and de-duplicated. */
   roots: z.array(z.string()),
   /** Requested roots that were dropped, with the reason (absent dir, relative). */
   rejected: z.array(z.object({ path: z.string(), reason: z.string() }))
 })
-export type RunnerSetAllowedRootsResult = z.infer<typeof runnerSetAllowedRootsResultSchema>
+export type ComputerSetAllowedRootsResult = z.infer<typeof computerSetAllowedRootsResultSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: project → path mapping
+// hub → computer requests: project → path mapping
 //
 // `projects.path` used to live on the hub: ONE column naming a directory the hub
-// cannot see, on a machine it does not own. Two runners laying the same project
+// cannot see, on a machine it does not own. Two computers laying the same project
 // out differently made the hub necessarily wrong about one of them, and a Windows
-// runner does not even agree on the separator.
+// computer does not even agree on the separator.
 //
-// So the hub knows WHAT a project is (id, name) and each runner knows WHERE it
+// So the hub knows WHAT a project is (id, name) and each computer knows WHERE it
 // put that project. Every path is one the user pointed at: nothing here creates
 // a checkout, so there is no second kind to distinguish.
 // ---------------------------------------------------------------------------
@@ -551,7 +551,7 @@ export const projectResolvePathParamsSchema = z.object({
 export type ProjectResolvePathParams = z.infer<typeof projectResolvePathParamsSchema>
 
 /**
- * `path: null` = this runner has no checkout of that project.
+ * `path: null` = this computer has no checkout of that project.
  *
  * A real, actionable state — not an error. It is the honest answer the single
  * hub-side column could never give: it always had *a* path, even for a machine
@@ -602,7 +602,7 @@ export type ProjectListResult = z.infer<typeof projectListResultSchema>
  * ONE generic frame rather than one per subcommand. The hub already has a single
  * `spawnGh` chokepoint with eleven typed functions above it (`listOpenPrs`,
  * `createPr`, `getPrComments`, …); routing the chokepoint keeps that typing and
- * its parsing on the hub while the process runs on the runner. Eleven frames
+ * its parsing on the hub while the process runs on the computer. Eleven frames
  * would be eleven chances for the schema drift this contract has already paid
  * for four times.
  *
@@ -615,7 +615,7 @@ export type ProjectListResult = z.infer<typeof projectListResultSchema>
  */
 export const ghExecParamsSchema = z.object({
   args: z.array(z.string()),
-  /** Repo directory. Passes the runner's allowedRoots jail. */
+  /** Repo directory. Passes the computer's allowedRoots jail. */
   cwd: z.string().min(1),
   timeoutMs: z.number().int().positive().optional(),
   /** Written to gh's stdin — used for a PR body, which can be long. */
@@ -631,15 +631,15 @@ export const ghExecResultSchema = z.object({
 })
 export type GhExecResult = z.infer<typeof ghExecResultSchema>
 
-export const runnerShutdownParamsSchema = z.object({
+export const computerShutdownParamsSchema = z.object({
   reason: z.string().optional(),
-  /** Grace period before the runner may hard-exit. */
+  /** Grace period before the computer may hard-exit. */
   deadlineMs: z.number().int().nonnegative().optional()
 })
-export type RunnerShutdownParams = z.infer<typeof runnerShutdownParamsSchema>
+export type ComputerShutdownParams = z.infer<typeof computerShutdownParamsSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: git ops
+// hub → computer requests: git ops
 //
 // Param/result shapes mirror the task-domain `WorktreeExecAdapters` seam
 // (narrowed to the arguments task ops actually pass); the hub-side routing
@@ -709,7 +709,7 @@ export const gitCopyIgnoredFilesParamsSchema = z.object({
 export type GitCopyIgnoredFilesParams = z.infer<typeof gitCopyIgnoredFilesParamsSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: raw-fs ops
+// hub → computer requests: raw-fs ops
 // ---------------------------------------------------------------------------
 
 export const fsPathExistsParamsSchema = z.object({
@@ -728,33 +728,33 @@ export const fsRemoveDirParamsSchema = z.object({
 export type FsRemoveDirParams = z.infer<typeof fsRemoveDirParamsSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: workspace browse ops
+// hub → computer requests: workspace browse ops
 //
-// ABSOLUTE paths, scoped to the runner's `allowedRoots`. These back the desktop's
+// ABSOLUTE paths, scoped to the computer's `allowedRoots`. These back the desktop's
 // directory picker, which has to answer "what is on the machine that will run the
 // agent" BEFORE a project (and therefore a root) exists — so unlike the editor ops
 // below they take no rootPath and return no relative paths.
 // ---------------------------------------------------------------------------
 
-/** No params: a runner's browsable roots are its configured path-jail. */
+/** No params: a computer's browsable roots are its configured path-jail. */
 export const fsListRootsParamsSchema = z.object({})
 export type FsListRootsParams = z.infer<typeof fsListRootsParamsSchema>
 
 export const fsListRootsResultSchema = z.object({
-  /** The runner's `allowedRoots`, realpath-resolved. Empty = fs access refused. */
+  /** The computer's `allowedRoots`, realpath-resolved. Empty = fs access refused. */
   roots: z.array(z.string()),
-  /** The runner user's home dir, for a sensible default expansion. */
+  /** The computer user's home dir, for a sensible default expansion. */
   home: z.string().nullable(),
-  /** `process.platform` — lets the client render paths in the runner's idiom. */
+  /** `process.platform` — lets the client render paths in the computer's idiom. */
   platform: z.string(),
-  /** Path separator on the runner, so the client never assumes POSIX. */
+  /** Path separator on the computer, so the client never assumes POSIX. */
   sep: z.string()
 })
 export type FsListRootsResult = z.infer<typeof fsListRootsResultSchema>
 
 export const fsListDirEntrySchema = z.object({
   name: z.string(),
-  /** ABSOLUTE path on the runner. */
+  /** ABSOLUTE path on the computer. */
   path: z.string(),
   type: z.enum(['directory', 'file']),
   isSymlink: z.boolean().optional(),
@@ -795,14 +795,14 @@ export const fsMkdirResultSchema = z.object({
 export type FsMkdirResult = z.infer<typeof fsMkdirResultSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: file-editor ops
+// hub → computer requests: file-editor ops
 //
 // ROOT-SCOPED: every path is relative to `rootPath`, gitignore is honoured, and
-// the shapes are one-to-one with `@slayzone/file-editor/server`. The runner
+// the shapes are one-to-one with `@slayzone/file-editor/server`. The computer
 // imports that module directly, so these schemas describe ITS types — the
-// compile-time assertions in `runner/src/handlers/fs.ts` pin the two together.
+// compile-time assertions in `computer/src/handlers/fs.ts` pin the two together.
 //
-// `rootPath` still passes the allowedRoots jail on the runner; `assertWithinRoot`
+// `rootPath` still passes the allowedRoots jail on the computer; `assertWithinRoot`
 // inside file-editor then contains the relative part. Two independent guards,
 // deliberately: the jail bounds the machine, the root bounds the workspace.
 // ---------------------------------------------------------------------------
@@ -997,7 +997,7 @@ export const fsOkResultSchema = z.object({ ok: z.literal(true) })
 export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 // ---------------------------------------------------------------------------
-// hub → runner requests: child-process ops
+// hub → computer requests: child-process ops
 // ---------------------------------------------------------------------------
 
 export const procSpawnParamsSchema = z.object({
@@ -1013,8 +1013,8 @@ export const procSpawnParamsSchema = z.object({
    * passes a resolved binary + argv that a shell would re-parse (splitting any
    * arg containing spaces).
    *
-   * The shell is resolved runner-side deliberately: the hub's `$SHELL` is a path
-   * that need not exist on the runner's machine.
+   * The shell is resolved computer-side deliberately: the hub's `$SHELL` is a path
+   * that need not exist on the computer's machine.
    */
   shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
@@ -1023,7 +1023,7 @@ export const procSpawnParamsSchema = z.object({
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 
 export const procSpawnResultSchema = z.object({
-  /** `null` when the OS never assigned one (immediate spawn failure). The runner
+  /** `null` when the OS never assigned one (immediate spawn failure). The computer
    *  reports `child.pid ?? null`, so a non-nullable int here rejected that reply —
    *  the hub then treated a legitimately-failed spawn as a protocol error. */
   pid: z.number().int().nullable()
@@ -1063,7 +1063,7 @@ export const procGetBufferSinceResultSchema = z.object({
 export type ProcGetBufferSinceResult = z.infer<typeof procGetBufferSinceResultSchema>
 
 /**
- * Live child processes the runner still holds. The `proc.list` twin of
+ * Live child processes the computer still holds. The `proc.list` twin of
  * {@link ptyListResultSchema} — same role in reattach, and the two must not
  * drift.
  */

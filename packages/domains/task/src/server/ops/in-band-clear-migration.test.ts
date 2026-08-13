@@ -17,7 +17,7 @@
  *
  * Plain asserts + the electron strict loader (NOT vitest): better-sqlite3's
  * native ABI matches Electron's node only, and `run-all.sh` has no
- * electron+vitest runner — a vitest-style DB test cannot be registered there, so
+ * electron+vitest computer — a vitest-style DB test cannot be registered there, so
  * it would silently never run in CI.
  */
 import Database from 'better-sqlite3'

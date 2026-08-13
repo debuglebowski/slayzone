@@ -54,7 +54,7 @@ export async function writeFileIfChanged(
  * That was accidentally harmless while exactly one process type (the desktop app)
  * ever wrote these files: identical version + identical inputs produce identical
  * bytes, so even a race converged. It stops being harmless as soon as a second
- * installer exists on the same machine (a standalone runner), because the two can
+ * installer exists on the same machine (a standalone computer), because the two can
  * be on DIFFERENT builds — and then the stale one's write is not equal, it is a
  * downgrade. Crucially that includes a version GATE: an installer that reads the
  * on-disk version, decides "mine is newer", and writes, has evaluated its own gate

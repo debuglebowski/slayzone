@@ -6,15 +6,15 @@ import { getEnrichedPath } from '@slayzone/terminal/server'
 /**
  * The exec inputs the process manager hands a backend to launch a process.
  * Mirrors exactly what the in-process `doSpawn` consumed: identity + routing
- * metadata (`id`, `taskId`, `projectId`, `runnerId`) plus the exec spec proper
- * (`command`, `cwd`, optional `env`). `runnerId` is dark today (always `null`
- * for the local backend); a future runner-side backend routes on it.
+ * metadata (`id`, `taskId`, `projectId`, `computerId`) plus the exec spec proper
+ * (`command`, `cwd`, optional `env`). `computerId` is dark today (always `null`
+ * for the local backend); a future computer-side backend routes on it.
  */
 export interface ProcSpawnSpec {
   id: string
   taskId: string | null
   projectId: string | null
-  runnerId: string | null
+  computerId: string | null
   command: string
   cwd: string
   env?: Record<string, string>
@@ -24,7 +24,7 @@ export interface ProcSpawnSpec {
  * Structural superset of the `ChildProcess` surface the process manager needs.
  * The manager holds one of these per running process instead of a raw
  * `ChildProcess`, so the exec substrate — local `child_process.spawn` today, a
- * remote runner tomorrow — can vary without the manager changing. `onData` /
+ * remote computer tomorrow — can vary without the manager changing. `onData` /
  * `onExit` return disposables (the manager attaches one listener; shutdown adds
  * a second — Node's `EventEmitter` allowed both, so the fan-out below must too).
  */

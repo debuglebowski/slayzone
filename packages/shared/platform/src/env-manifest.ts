@@ -1,12 +1,12 @@
 /**
  * The typed env-var scope manifest + the central spawn-env sanitizer.
  *
- * WHY: one desktop client hosts the hub sidecar + a local runner + user
+ * WHY: one desktop client hosts the hub sidecar + a local computer + user
  * terminals, all forked from the SAME `process.env`. Every spawn used
  * `{...process.env}` with no allowlist, so a var set high in the tree (e.g. the
- * runner's `SLAYZONE_HUB_ADDRESS`) silently leaked DOWN into a user terminal,
+ * computer's `SLAYZONE_HUB_ADDRESS`) silently leaked DOWN into a user terminal,
  * where a different consumer (`slay` CLI) reinterpreted it and hard-exited. An
- * ALLOWLIST can't work at these boundaries — the hub/runner ARE the parents of
+ * ALLOWLIST can't work at these boundaries — the hub/computer ARE the parents of
  * user terminals, which legitimately need the full user env (PATH/HOME/
  * toolchains). So the mechanism is a DENYLIST derived from this manifest.
  *
@@ -17,7 +17,7 @@
  * strips it (safe default). The only way to leak a var into a terminal is the
  * deliberate `global` tag.
  *
- * Lean leaf (node builtins only, like slayzone-mode.ts) so the runner bundle can
+ * Lean leaf (node builtins only, like slayzone-mode.ts) so the computer bundle can
  * import it via the `@slayzone/platform/env-manifest` subpath WITHOUT pulling the
  * platform barrel (which references better-sqlite3 + the shell/cli-install graph).
  *
@@ -58,26 +58,26 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // --- secret: credentials/tokens, never in a terminal ---
   SLAYZONE_HUB_TOKEN: 'secret',
   // HMAC signing key for ALL of hub-auth (better-auth's session/cookie signer AND
-  // the runner enroll/api-key credentials) — hence `HUB_AUTH`, not the former
+  // the computer enroll/api-key credentials) — hence `HUB_AUTH`, not the former
   // `HUB_RUNNER_TRANSPORT_SECRET`, which named just one of its consumers. Rule 2
   // (name by what the value IS). `_SECRET` = a key you HOLD and sign with, vs
   // `_TOKEN` = a bearer you PRESENT (SLAYZONE_HUB_TOKEN above).
   SLAYZONE_HUB_AUTH_SECRET: 'secret',
   // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url, the hub's
   // TLS cert fingerprint, and a secret verified against the hub's `join_tokens`
-  // row. `mintJoinToken` binds it to NO runner (computer_id stays NULL until
-  // redemption), so any runner can redeem any unused token — there is no runner in
+  // row. `mintJoinToken` binds it to NO computer (computer_id stays NULL until
+  // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
   // The pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` is deliberately UNLISTED: it is
-  // retired, not aliased. It never shipped (the published runner betas read
+  // retired, not aliased. It never shipped (the published computer betas read
   // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to
   // keep working. Unlisted ⇒ the fail-closed default strips it, same as every
   // other retired name in this rename sweep.
 
   // --- infra: SlayZone wiring a terminal must not reinterpret ---
   // The hub's address, host[:port], scheme from MODE. ONE concept whose value
-  // depends on the app: the hub BINDS it, the runner/CLI CONNECT to it. Stripping
+  // depends on the app: the hub BINDS it, the computer/CLI CONNECT to it. Stripping
   // it here is what keeps those two values from ever bleeding into each other.
   SLAYZONE_HUB_ADDRESS: 'infra',
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; written into join tokens
@@ -94,14 +94,14 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_DEBUG_BOOT: 'infra',
   SLAYZONE_REGISTER_DEV_PROTOCOL: 'infra',
   SLAYZONE_NONINTERACTIVE: 'infra',
-  // Historical opt-IN, now a NO-OP: e2e runs runner-ON by default, so the boot
+  // Historical opt-IN, now a NO-OP: e2e runs computer-ON by default, so the boot
   // gate no longer reads this. Kept manifested because specs still set it to
-  // document "this spec wants a runner" (an unmanifested var would be stripped
+  // document "this spec wants a computer" (an unmanifested var would be stripped
   // by sanitizeSpawnEnv, fail-closed, and read as a silent typo).
   SLAYZONE_E2E_ALLOW_RUNNER: 'infra',
   // Opt-OUT, and the only lever that changes behavior now: set by the specs that
-  // must boot runner-less (remote-mode, sidecar-crash, and the "hub accepts
-  // runners with none spawned" contract test).
+  // must boot computer-less (remote-mode, sidecar-crash, and the "hub accepts
+  // computers with none spawned" contract test).
   SLAYZONE_E2E_NO_RUNNER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
   // Redirects the MACHINE-WIDE ~/.slayzone (hooks/, bin/) — the files shared by
@@ -152,7 +152,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
 
 /**
  * Non-`SLAYZONE_`-prefixed keys that are still SlayZone INFRA and must be
- * stripped from a terminal child. These wire the spawned sidecar/runner to the
+ * stripped from a terminal child. These wire the spawned sidecar/computer to the
  * Node runtime + native modules; a user terminal must inherit none of them
  * (e.g. `ELECTRON_RUN_AS_NODE=1` would make a nested Electron launch run as bare
  * Node; `PLAYWRIGHT=1` would flip in-app test-only branches).

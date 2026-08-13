@@ -134,7 +134,7 @@ function barrier(n: number, timeoutMs = 60): () => Promise<void> {
  * FINAL bytes, so by the time it is called the caller's merge has already been
  * computed against a baseline that may be stale. That was harmless while exactly
  * one process type (the desktop app) installed hooks — identical inputs converge
- * on identical bytes — and stops being harmless the moment a standalone runner
+ * on identical bytes — and stops being harmless the moment a standalone computer
  * becomes a second installer on the same machine.
  */
 describe('updateFileAtomically', () => {

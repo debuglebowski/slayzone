@@ -1,18 +1,18 @@
 /**
- * Keep the co-resident local runner's path-jail wide enough for the projects
+ * Keep the co-resident local computer's path-jail wide enough for the projects
  * this hub already has.
  *
  * Before the filesystem ops were routed, the desktop app read and wrote the
- * user's disk directly, with no jail. Routing them through the local runner —
+ * user's disk directly, with no jail. Routing them through the local computer —
  * whose supervised default is `[homedir()]` — would therefore have silently
  * broken every project living outside the home directory (`/Volumes/...`,
  * `/opt`, an external drive). Widening the jail to match what already worked is
  * not a new permission; it restores the scope the app had before the seam moved.
  *
- * Scope is deliberately the SUPERVISED LOCAL runner only. A remote runner's
+ * Scope is deliberately the SUPERVISED LOCAL computer only. A remote computer's
  * `allowedRoots` is an operator's deliberate configuration on a machine we do
  * not own, and silently rewriting it on connect would be rude and surprising;
- * that case is served by Settings → Runners instead.
+ * that case is served by Settings → Computers instead.
  *
  * The unit seeded is each project's PARENT directory, not the project itself.
  * The default worktree layout is `../{project-folder-name}-workspaces` — a
@@ -21,7 +21,7 @@
  * `worktree_base_path` pointing somewhere else entirely still needs a manual
  * entry; nothing here can infer it.
  *
- * @module hub/local-runner-roots
+ * @module hub/local-computer-roots
  */
 
 import { dirname, resolve, sep } from 'node:path'
@@ -38,7 +38,7 @@ export function isCoveredByRoots(candidate: string, roots: readonly string[]): b
 /**
  * Which parent directories are missing from `currentRoots` for these projects.
  *
- * Pure so the policy is testable without a runner: the caller supplies the
+ * Pure so the policy is testable without a computer: the caller supplies the
  * project paths and the jail, and gets back only the additions.
  */
 export function missingRootsForProjects(

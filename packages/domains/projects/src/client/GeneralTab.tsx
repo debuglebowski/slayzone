@@ -13,7 +13,7 @@ import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/settings/client'
 import { SettingsTabIntro } from './project-settings-shared'
 
-/** Select sentinel for the project's Local (in-process) default runner (null). */
+/** Select sentinel for the project's Local (in-process) default computer (null). */
 const LOCAL_RUNNER_VALUE = '__local__'
 
 interface GeneralTabProps {
@@ -29,9 +29,9 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const showOpenDialog = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
   const uploadProjectIcon = useMutation(trpc.projects.uploadIcon.mutationOptions())
   const updateProject = useMutation(trpc.projects.update.mutationOptions())
-  const runnersQuery = useQuery(trpc.computers.list.queryOptions())
-  const setProjectDefaultRunner = useMutation(
-    trpc.computers.setProjectDefaultRunner.mutationOptions()
+  const computersQuery = useQuery(trpc.computers.list.queryOptions())
+  const setProjectDefaultComputer = useMutation(
+    trpc.computers.setProjectDefaultComputer.mutationOptions()
   )
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
@@ -41,10 +41,10 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const [iconCacheKey, setIconCacheKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [iconBusy, setIconBusy] = useState(false)
-  // Default runner (hub/runner split). `default_computer_id` is a v149 column present
+  // Default computer (hub/computer split). `default_computer_id` is a v149 column present
   // at runtime (parseProject spreads the row) but not yet on the shared Project type
   // — read via a narrow local cast. null = Local (in-process).
-  const [defaultRunnerId, setDefaultRunnerId] = useState<string | null>(null)
+  const [defaultComputerId, setDefaultComputerId] = useState<string | null>(null)
 
   useEffect(() => {
     setName(project.name)
@@ -53,17 +53,17 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setIconLetters(project.icon_letters || '')
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
-    setDefaultRunnerId((project as { default_computer_id?: string | null }).default_computer_id ?? null)
+    setDefaultComputerId((project as { default_computer_id?: string | null }).default_computer_id ?? null)
   }, [project])
 
-  const runners = runnersQuery.data ?? []
+  const computers = computersQuery.data ?? []
 
   const fallbackLetters = (name || project.name).slice(0, 2).toUpperCase()
   const lettersPreview = iconLetters.trim().toUpperCase() || fallbackLetters
 
   // The project directory lives on the machine that runs this project's agents,
   // which need not be this one. A native dialog browses THIS desktop and would
-  // hand back a path that does not exist there — the picker browses the runner.
+  // hand back a path that does not exist there — the picker browses the computer.
   const [browseOpen, setBrowseOpen] = useState(false)
 
   const handleUploadIcon = async () => {
@@ -99,12 +99,12 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     }
   }
 
-  // The default runner is its own binding (persisted immediately), not part of the
+  // The default computer is its own binding (persisted immediately), not part of the
   // name/color/path form save. null = Local.
-  const handleDefaultRunnerChange = async (value: string): Promise<void> => {
-    const runnerId = value === LOCAL_RUNNER_VALUE ? null : value
-    setDefaultRunnerId(runnerId)
-    await setProjectDefaultRunner.mutateAsync({ projectId: project.id, runnerId })
+  const handleDefaultComputerChange = async (value: string): Promise<void> => {
+    const computerId = value === LOCAL_RUNNER_VALUE ? null : value
+    setDefaultComputerId(computerId)
+    await setProjectDefaultComputer.mutateAsync({ projectId: project.id, computerId })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -159,14 +159,14 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
                 <FolderOpen className="h-4 w-4" />
               </IconButton>
             </div>
-            {/* Scoped to this project so the picker resolves the SAME runner its
-                agents will spawn on — including a default runner just changed in
+            {/* Scoped to this project so the picker resolves the SAME computer its
+                agents will spawn on — including a default computer just changed in
                 the select below. */}
             <WorkspaceDirPicker
               open={browseOpen}
               onOpenChange={setBrowseOpen}
               onSelect={setPath}
-              target={{ runnerId: defaultRunnerId, projectId: project.id }}
+              target={{ computerId: defaultComputerId, projectId: project.id }}
               title="Select project directory"
               defaultPath={path || null}
               allowCreate
@@ -176,22 +176,22 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
             </p>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="default-runner">Default runner</Label>
-            {runners.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No runners — tasks run locally</p>
+            <Label htmlFor="default-computer">Default computer</Label>
+            {computers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No computers — tasks run locally</p>
             ) : (
               <Select
-                value={defaultRunnerId ?? LOCAL_RUNNER_VALUE}
-                onValueChange={handleDefaultRunnerChange}
+                value={defaultComputerId ?? LOCAL_RUNNER_VALUE}
+                onValueChange={handleDefaultComputerChange}
               >
-                <SelectTrigger id="default-runner" className="max-w-sm">
+                <SelectTrigger id="default-computer" className="max-w-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={LOCAL_RUNNER_VALUE}>Local</SelectItem>
-                  {runners.map((runner) => (
-                    <SelectItem key={runner.id} value={runner.id}>
-                      {runner.name}
+                  {computers.map((computer) => (
+                    <SelectItem key={computer.id} value={computer.id}>
+                      {computer.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

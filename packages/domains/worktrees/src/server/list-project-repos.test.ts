@@ -7,8 +7,8 @@ import { listProjectRepos, invalidateProjectReposCache } from './list-project-re
 import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 
 // The walk now executes on the machine that owns the directory, reached through
-// the workspace-fs seam. `runnerId: null` runs it in-process — the same code the
-// runner runs — so these disk-level assertions are unchanged by the move.
+// the workspace-fs seam. `computerId: null` runs it in-process — the same code the
+// computer runs — so these disk-level assertions are unchanged by the move.
 const fs_ = createLocalWorkspaceFsAdapters()
 const listRepos = (root: string, opts?: unknown) =>
   listProjectRepos(fs_, null, root, (opts ?? {}) as never)

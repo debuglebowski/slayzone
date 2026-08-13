@@ -39,7 +39,7 @@ check('SLAYZONE_HUB_ADDRESS is infra', ENV_MANIFEST.SLAYZONE_HUB_ADDRESS === 'in
 check('SLAYZONE_HUB_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_TOKEN === 'secret')
 check('SLAYZONE_HUB_JOIN_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_JOIN_TOKEN === 'secret')
 // The pre-rename name is RETIRED, not aliased. It never shipped: the published
-// runner betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, so there is no
+// computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, so there is no
 // operator env anywhere carrying this name to keep working. Unmanifested → the
 // fail-closed default strips it, same as every other retired var.
 check(
@@ -83,8 +83,8 @@ check(
   `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`
 )
 // Identity-scoped, so it is STRIPPED from the inherited base and re-added per
-// spawn by buildMcpEnv (local) or the runner's overlay (remote). Tagging it
-// `global` would let task A's hook URL — and on a runner, a stale port — bleed
+// spawn by buildMcpEnv (local) or the computer's overlay (remote). Tagging it
+// `global` would let task A's hook URL — and on a computer, a stale port — bleed
 // into task B's terminal.
 check(
   'SLAYZONE_AGENT_HOOK_URL is identity (stripped; overlay re-adds per spawn)',
@@ -171,9 +171,9 @@ check('strips infra SLAYZONE_SUPERVISED', !('SLAYZONE_SUPERVISED' in out))
 
 check('strips identity SLAYZONE_TASK_ID', !('SLAYZONE_TASK_ID' in out))
 check('strips identity SLAYZONE_PROJECT_ID', !('SLAYZONE_PROJECT_ID' in out))
-// A leaked hook URL is worse than a stale id: on a runner it names a PORT, so an
+// A leaked hook URL is worse than a stale id: on a computer it names a PORT, so an
 // inherited value would POST this agent's lifecycle events at whatever listens
-// there. The runner's per-spawn overlay (handlers/pty.ts) re-adds the right one.
+// there. The computer's per-spawn overlay (handlers/pty.ts) re-adds the right one.
 check('strips identity SLAYZONE_AGENT_HOOK_URL', !('SLAYZONE_AGENT_HOOK_URL' in out))
 // Same reasoning for the ctx blob: an inherited one attributes THIS agent's hooks
 // to the PARENT's task (the clobber class of bug). buildMcpEnv re-adds the right

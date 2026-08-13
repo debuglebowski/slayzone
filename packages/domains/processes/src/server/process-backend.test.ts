@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     lastSpec!.taskId === 'task' && lastSpec!.projectId === 'proj',
     'spec carries task/project id'
   )
-  assert(lastSpec!.runnerId === null, 'runnerId is dark (null) on the local path')
+  assert(lastSpec!.computerId === null, 'computerId is dark (null) on the local path')
   assert(
     listAllProcesses().find((p) => p.id === idA)?.pid === 4242,
     'handle.pid propagates to proc.pid'

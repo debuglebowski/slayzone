@@ -1,11 +1,11 @@
 /**
  * Unit tests for the HUB-side pty ring buffer.
  *
- * This buffer's job is different from the runner's mirror
+ * This buffer's job is different from the computer's mirror
  * (`packages/apps/computer/src/ring-buffer.ts`), and the difference decides the
  * design:
  *
- *   - The runner's copy exists ONLY for short-range gap backfill, where a chunk
+ *   - The computer's copy exists ONLY for short-range gap backfill, where a chunk
  *     must stay byte-identical to what was streamed live under the same seq. It
  *     therefore never rewrites a chunk.
  *   - This one is replayed WHOLESALE into a freshly-created xterm on every mount /
