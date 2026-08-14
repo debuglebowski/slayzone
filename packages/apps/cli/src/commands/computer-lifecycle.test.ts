@@ -75,10 +75,10 @@ import { readServiceLogTail } from '../service'
 const REPO_ROOT = process.env.SLZ_REPO_ROOT ?? process.cwd()
 const CLI_DIR = resolve(REPO_ROOT, 'packages/apps/cli')
 const HUB_DIR = resolve(REPO_ROOT, 'packages/apps/hub')
-const RUNNER_DIR = resolve(REPO_ROOT, 'packages/apps/computer')
+const COMPUTER_DIR = resolve(REPO_ROOT, 'packages/apps/computer')
 const CLI_BIN = join(CLI_DIR, 'dist', 'slay.js')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
-const RUNNER_BIN = join(RUNNER_DIR, 'dist', 'bin.cjs')
+const COMPUTER_BIN = join(COMPUTER_DIR, 'dist', 'bin.cjs')
 
 /**
  * The REAL Electron executable, not `node_modules/.bin/electron` — that is a Node shim
@@ -302,13 +302,13 @@ function leakedUnits(backend: ServiceBackend): string[] {
 async function main(): Promise<void> {
   console.log('\nslay computer — end-to-end against a real hub\n')
 
-  if (!existsSync(CLI_DIR) || !existsSync(HUB_DIR) || !existsSync(RUNNER_DIR)) {
+  if (!existsSync(CLI_DIR) || !existsSync(HUB_DIR) || !existsSync(COMPUTER_DIR)) {
     throw new Error(
       `cannot locate packages under ${REPO_ROOT} — run from the repo root, or set SLZ_REPO_ROOT`
     )
   }
   ensureBuilt(HUB_DIR, HUB_BIN, 'hub')
-  ensureBuilt(RUNNER_DIR, RUNNER_BIN, 'computer')
+  ensureBuilt(COMPUTER_DIR, COMPUTER_BIN, 'computer')
   ensureBuilt(CLI_DIR, CLI_BIN, 'cli')
   TMP = mkdtempSync(join(tmpdir(), 'slz-computerctl-'))
   const backend = detectBackend()
@@ -388,7 +388,7 @@ async function main(): Promise<void> {
           name,
           root: rejectRoot,
           command: NODE_BIN,
-          args: [RUNNER_BIN],
+          args: [COMPUTER_BIN],
           logDir: join(rejectRoot, 'logs')
         },
         backend

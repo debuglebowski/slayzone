@@ -1,8 +1,8 @@
-name: Publish hub + runner + cli (npm)
+name: Publish hub + computer + cli (npm)
 
-# Publishes @slayzone/hub, @slayzone/runner and @slayzone/cli to npm.
+# Publishes @slayzone/hub, @slayzone/computer and @slayzone/cli to npm.
 #
-# hub + runner are install-time-rebuild packages (bin.cjs bundles workspace deps;
+# hub + computer are install-time-rebuild packages (bin.cjs bundles workspace deps;
 # native addons rebuild on the consumer's machine at `npm install`). The CLI has
 # no native deps — its bundle is self-contained, so it publishes with zero
 # dependencies and nothing to rebuild.
@@ -19,7 +19,7 @@ name: Publish hub + runner + cli (npm)
 #
 # NOTE for @slayzone/cli: it is newly published, so it needs its own Trusted
 # Publisher entry on npm before the first `--publish` run — otherwise hub and
-# runner publish and the CLI fails. The script is idempotent per package, so a
+# computer publish and the CLI fails. The script is idempotent per package, so a
 # re-dispatch after adding the entry skips what already landed.
 #
 # SAFE TO COMMIT / INERT UNTIL ENABLED: live `npm publish` only runs when the
@@ -46,7 +46,7 @@ on:
           - publish
 
 concurrency:
-  group: publish-hub-runner-${{ github.event_name == 'push' && github.ref_name || github.run_id }}
+  group: publish-hub-computer-${{ github.event_name == 'push' && github.ref_name || github.run_id }}
   cancel-in-progress: false
 
 permissions:

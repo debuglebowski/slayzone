@@ -79,7 +79,7 @@ export type LocalComputerOpts = {
   execPath: string
   /** Absolute path to the computer's dist/bin.cjs. */
   scriptPath: string
-  /** Base env for the child (ELECTRON_RUN_AS_NODE + the SLAYZONE_RUNNER_* /
+  /** Base env for the child (ELECTRON_RUN_AS_NODE + the SLAYZONE_COMPUTER_* /
    *  SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN vars are merged in by the caller). */
   env: NodeJS.ProcessEnv
   /**

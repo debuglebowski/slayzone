@@ -28,7 +28,7 @@ import { ComputerNotificationMethods } from '../shared/frames'
 import { createRoutingProcessBackend, type RoutingGateway } from './exec-proxies'
 import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'computer-1'
+const COMPUTER_ID = 'computer-1'
 
 type ProcHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
@@ -90,9 +90,9 @@ async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
       notify: (method: string, params?: unknown) => {
         const p = (params ?? {}) as Record<string, unknown>
         if (method === ComputerNotificationMethods.procData) {
-          events.emit('proc.data', { computerId: RUNNER_ID, ...p })
+          events.emit('proc.data', { computerId: COMPUTER_ID, ...p })
         } else if (method === ComputerNotificationMethods.procExit) {
-          events.emit('proc.exit', { computerId: RUNNER_ID, ...p })
+          events.emit('proc.exit', { computerId: COMPUTER_ID, ...p })
         }
         return true
       }
@@ -121,14 +121,14 @@ describe('proc.* hub⇄computer round trip', () => {
           throw new Error('must not fall back to local: a computerId was resolved')
         }
       },
-      resolveComputerId: () => RUNNER_ID
+      resolveComputerId: () => COMPUTER_ID
     })
 
     const handle = backend.spawn({
       id: 'rt-1',
       taskId: 'task-1',
       projectId: null,
-      computerId: RUNNER_ID,
+      computerId: COMPUTER_ID,
       command: 'printf "alpha\\nbeta\\n"',
       cwd: dir
     } as never)
@@ -162,7 +162,7 @@ describe('proc.* hub⇄computer round trip', () => {
           throw new Error('must not fall back to local')
         }
       },
-      resolveComputerId: () => RUNNER_ID
+      resolveComputerId: () => COMPUTER_ID
     })
 
     // `cat` echoes stdin to stdout — proves the write reached the child.
@@ -170,7 +170,7 @@ describe('proc.* hub⇄computer round trip', () => {
       id: 'rt-2',
       taskId: 'task-1',
       projectId: null,
-      computerId: RUNNER_ID,
+      computerId: COMPUTER_ID,
       command: 'cat',
       cwd: dir
     } as never)
@@ -222,7 +222,7 @@ describe('proc.* hub⇄computer round trip', () => {
           throw new Error('must not fall back to local')
         }
       },
-      resolveComputerId: () => RUNNER_ID
+      resolveComputerId: () => COMPUTER_ID
     })
 
     // Three separate writes with gaps → three distinct seqs, so seq 1 is a real
@@ -231,7 +231,7 @@ describe('proc.* hub⇄computer round trip', () => {
       id: 'rt-3',
       taskId: 'task-1',
       projectId: null,
-      computerId: RUNNER_ID,
+      computerId: COMPUTER_ID,
       command: 'printf one; sleep 0.2; printf two; sleep 0.2; printf three',
       shell: true,
       cwd: dir

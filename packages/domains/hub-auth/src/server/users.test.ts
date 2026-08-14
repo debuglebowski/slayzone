@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth } from './auth'
-import { mintComputerApiKey, RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
+import { mintComputerApiKey, COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import { createHubUser, listHubUsers, removeHubUser, type CreatedHubUser } from './users'
 import { verifyComputerApiKey, verifySession } from './verify'
 
@@ -121,11 +121,11 @@ describe('listHubUsers', () => {
 
     const listed = await listHubUsers(auth)
     expect(listed.map((u) => u.email)).toEqual(['alice@example.com'])
-    expect(listed.some((u) => u.email === RUNNER_SERVICE_USER_EMAIL)).toBe(false)
+    expect(listed.some((u) => u.email === COMPUTER_SERVICE_USER_EMAIL)).toBe(false)
 
     // It still EXISTS — it is hidden from the operator, not deleted.
     const ctx = await auth.$context
-    expect(await ctx.internalAdapter.findUserByEmail(RUNNER_SERVICE_USER_EMAIL)).not.toBeNull()
+    expect(await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)).not.toBeNull()
   })
 
   it('reports createdAt as an ISO-8601 string', async () => {
@@ -194,7 +194,7 @@ describe('removeHubUser', () => {
     await create('alice@example.com')
     await create('bob@example.com')
 
-    expect(await removeHubUser(auth, RUNNER_SERVICE_USER_EMAIL)).toBe('protected')
+    expect(await removeHubUser(auth, COMPUTER_SERVICE_USER_EMAIL)).toBe('protected')
 
     // The point of the refusal: every enrolled computer would 401 if this identity
     // were deleted, because its id is the referenceId on each computer API key.

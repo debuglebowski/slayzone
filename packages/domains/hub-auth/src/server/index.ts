@@ -12,7 +12,7 @@ export {
 export {
   mintComputerApiKey,
   revokeComputerApiKey,
-  RUNNER_SERVICE_USER_EMAIL,
+  COMPUTER_SERVICE_USER_EMAIL,
   type MintedComputerApiKey,
   type MintComputerApiKeyInput
 } from './computer-keys'

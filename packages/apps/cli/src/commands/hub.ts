@@ -568,11 +568,11 @@ export function hubCommand(): Command {
       )
       console.log(
         `${'NAME'.padEnd(nameW)}  ${'PORT'.padEnd(5)}  ${'PID'.padEnd(7)}  ` +
-          `${'ROOT'.padEnd(rootW)}  ${'RUNNERS'.padEnd(7)}  UPTIME`
+          `${'ROOT'.padEnd(rootW)}  ${'COMPUTERS'.padEnd(9)}  UPTIME`
       )
       console.log(
         `${'-'.repeat(nameW)}  ${'-'.repeat(5)}  ${'-'.repeat(7)}  ${'-'.repeat(rootW)}  ` +
-          `${'-'.repeat(7)}  ${'-'.repeat(8)}`
+          `${'-'.repeat(9)}  ${'-'.repeat(8)}`
       )
       // Which of these is THIS shell's? The sweep is machine-wide by design (that
       // is the point of multi-hub), so it legitimately lists hubs this invocation
@@ -589,7 +589,7 @@ export function hubCommand(): Command {
         const mine = ownRoot && resolvePath(h.root) === ownRoot ? '  ← this shell' : ''
         console.log(
           `${h.name.padEnd(nameW)}  ${String(h.port).padEnd(5)}  ${String(h.pid).padEnd(7)}  ` +
-            `${root.padEnd(rootW)}  ${String(h.computersConnected).padEnd(7)}  ` +
+            `${root.padEnd(rootW)}  ${String(h.computersConnected).padEnd(9)}  ` +
             `${formatUptime(h.uptimeMs)}${mine}`
         )
       }

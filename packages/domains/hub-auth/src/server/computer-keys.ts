@@ -5,7 +5,7 @@ import type { HubAuth } from './auth'
  * Internal service user that owns computer API keys — the api-key plugin
  * requires every key to reference a user. Created lazily on first mint.
  */
-export const RUNNER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
+export const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
 
 export interface MintComputerApiKeyInput {
   computerId: string
@@ -23,10 +23,10 @@ export interface MintedComputerApiKey {
 
 async function ensureComputerServiceUser(auth: HubAuth): Promise<string> {
   const ctx = await auth.$context
-  const existing = await ctx.internalAdapter.findUserByEmail(RUNNER_SERVICE_USER_EMAIL)
+  const existing = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
   if (existing) return existing.user.id
   const created = await ctx.internalAdapter.createUser({
-    email: RUNNER_SERVICE_USER_EMAIL,
+    email: COMPUTER_SERVICE_USER_EMAIL,
     name: 'SlayZone Computer Service',
     emailVerified: true
   })

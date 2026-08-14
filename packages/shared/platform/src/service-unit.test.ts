@@ -93,7 +93,7 @@ const SPEC: ServiceUnitSpec = {
   logDir: '/Users/x/hubs/staging/storage/logs'
 }
 
-const RUNNER_SPEC: ServiceUnitSpec = {
+const COMPUTER_SPEC: ServiceUnitSpec = {
   kind: 'computer',
   name: 'builder',
   root: '/srv/computers/builder',
@@ -309,7 +309,7 @@ test('address WINS over the legacy port (no silent loopback downgrade)', () => {
 })
 
 test('a computer spec ignores address too (a computer binds nothing)', () => {
-  const unit = renderSystemdUnit({ ...RUNNER_SPEC, address: '0.0.0.0:51234' })
+  const unit = renderSystemdUnit({ ...COMPUTER_SPEC, address: '0.0.0.0:51234' })
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var for a computer')
   assert(!unit.includes('0.0.0.0'), 'address not emitted')
 })
@@ -348,12 +348,12 @@ test('computer identity is namespaced apart from the hub', () => {
 })
 
 test('computer plist/unit identify the computer and use computer log names', () => {
-  const plist = renderLaunchdPlist(RUNNER_SPEC)
+  const plist = renderLaunchdPlist(COMPUTER_SPEC)
   assert(plist.includes('<string>com.slayzone.computer.builder</string>'), `label: ${plist}`)
   assert(plist.includes('/srv/computers/builder/logs/computer.out.log'), 'stdout log')
   assert(plist.includes('/srv/computers/builder/logs/computer.err.log'), 'stderr log')
   assert(!plist.includes('hub.out.log'), 'no hub log name leaked')
-  const unit = renderSystemdUnit(RUNNER_SPEC)
+  const unit = renderSystemdUnit(COMPUTER_SPEC)
   assert(unit.includes('Description=SlayZone computer (builder)'), `description: ${unit}`)
   assert(unit.includes('slay computer logs builder'), 'log hint names the computer command')
 })
@@ -362,7 +362,7 @@ test('a computer unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
   // The computer's name, path-jail, join token and cert pin deliberately have NO env
   // channel (computer/src/config.ts) — they come from <ROOT>/config.json, which is
   // 0600. A unit file is 0644, so a token must never reach it.
-  const unit = renderSystemdUnit(RUNNER_SPEC)
+  const unit = renderSystemdUnit(COMPUTER_SPEC)
   assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/computers/builder'), 'root pinned')
   assert(!unit.includes('SLAYZONE_HUB_NAME'), 'no hub name var')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no hub address var')
@@ -372,13 +372,13 @@ test('a computer unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
 })
 
 test('a computer spec ignores port (only a hub binds one)', () => {
-  const unit = renderSystemdUnit({ ...RUNNER_SPEC, port: 51234 })
+  const unit = renderSystemdUnit({ ...COMPUTER_SPEC, port: 51234 })
   assert(!unit.includes('51234'), 'port not emitted for a computer')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var')
 })
 
 test('spec.env reaches a computer unit too — node-pty is Electron-ABI in a dev tree', () => {
-  const unit = renderSystemdUnit({ ...RUNNER_SPEC, env: { ELECTRON_RUN_AS_NODE: '1' } })
+  const unit = renderSystemdUnit({ ...COMPUTER_SPEC, env: { ELECTRON_RUN_AS_NODE: '1' } })
   assert(unit.includes('Environment=ELECTRON_RUN_AS_NODE=1'), `systemd: ${unit}`)
   assert(unit.includes('Environment=SLAYZONE_ROOT='), 'root still pinned')
 })
@@ -386,7 +386,7 @@ test('spec.env reaches a computer unit too — node-pty is Electron-ABI in a dev
 test('the two kinds never list each other, even in one unit dir', () => {
   withTempDir((dir) => {
     writeUnit(SPEC, backend, dir)
-    writeUnit(RUNNER_SPEC, backend, dir)
+    writeUnit(COMPUTER_SPEC, backend, dir)
     const hubs = listRegisteredUnits('hub', backend, dir)
     assertEq(hubs.length, 1, `one hub, got ${hubs.map((h) => h.name).join(',')}`)
     assertEq(hubs[0]?.name, 'staging', 'the hub')
@@ -408,8 +408,12 @@ test('a hub named like a computer prefix is not mistaken for a computer', () => 
 
 test('a computer root round-trips through its unit while stopped', () => {
   withTempDir((dir) => {
-    writeUnit(RUNNER_SPEC, backend, dir)
-    assertEq(readUnitRoot('computer', 'builder', backend, dir), RUNNER_SPEC.root, 'root read back')
+    writeUnit(COMPUTER_SPEC, backend, dir)
+    assertEq(
+      readUnitRoot('computer', 'builder', backend, dir),
+      COMPUTER_SPEC.root,
+      'root read back'
+    )
     assertEq(readUnitRoot('hub', 'builder', backend, dir), null, 'not visible as a hub')
     assertEq(removeUnit('computer', 'builder', backend, dir), true, 'removable while stopped')
     assertEq(readUnitRoot('computer', 'builder', backend, dir), null, 'gone')

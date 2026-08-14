@@ -50,24 +50,24 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
-const RUNNER_DIR = path.resolve(APP_DIR, '..', 'computer')
-const RUNNER_BIN = path.join(RUNNER_DIR, 'dist', 'bin.cjs')
+const COMPUTER_DIR = path.resolve(APP_DIR, '..', 'computer')
+const COMPUTER_BIN = path.join(COMPUTER_DIR, 'dist', 'bin.cjs')
 
 /** Build the computer bundle on demand — it is not part of the app build pipeline
  *  (see packages/apps/computer/build.mjs). Idempotent: skip when the bundle is
  *  present AND newer than every computer source file, else (re)build. */
 function ensureComputerBuilt(): void {
-  let needsBuild = !fs.existsSync(RUNNER_BIN)
+  let needsBuild = !fs.existsSync(COMPUTER_BIN)
   if (!needsBuild) {
-    const binMtime = fs.statSync(RUNNER_BIN).mtimeMs
-    const srcDir = path.join(RUNNER_DIR, 'src')
+    const binMtime = fs.statSync(COMPUTER_BIN).mtimeMs
+    const srcDir = path.join(COMPUTER_DIR, 'src')
     const newest = newestMtime(srcDir)
     if (newest > binMtime) needsBuild = true
   }
   if (!needsBuild) return
-  execFileSync('node', ['build.mjs'], { cwd: RUNNER_DIR, stdio: 'inherit' })
-  if (!fs.existsSync(RUNNER_BIN)) {
-    throw new Error(`computer build did not produce ${RUNNER_BIN}`)
+  execFileSync('node', ['build.mjs'], { cwd: COMPUTER_DIR, stdio: 'inherit' })
+  if (!fs.existsSync(COMPUTER_BIN)) {
+    throw new Error(`computer build did not produce ${COMPUTER_BIN}`)
   }
 }
 
@@ -122,7 +122,7 @@ function spawnLoopbackComputer(opts: {
   // ELECTRON_RUN_AS_NODE runs the Electron binary as plain Node so the computer's
   // node-pty native addon shares the app's ABI — mirrors how the app supervisor
   // spawns it (local-computer-supervisor.ts).
-  const proc = spawn(electronPath, [RUNNER_BIN], {
+  const proc = spawn(electronPath, [COMPUTER_BIN], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
@@ -315,7 +315,7 @@ base.describe('Computer loopback (computer ON)', () => {
       expect(resolved.computerId).toBe(computerId)
 
       const sessionId = `${taskId}:${taskId}`
-      const marker = `RUNNER_OK_${Date.now()}`
+      const marker = `COMPUTER_OK_${Date.now()}`
 
       // Create the PTY (terminal mode = raw shell) bound to this task.
       await page.evaluate(

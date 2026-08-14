@@ -19,10 +19,10 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_DIR = path.resolve(__dirname, '..', '..')
-const RUNNER_DIR = path.resolve(APP_DIR, '..', 'computer')
+const COMPUTER_DIR = path.resolve(APP_DIR, '..', 'computer')
 
 /** Absolute path to the bundle the local-computer supervisor spawns. */
-export const RUNNER_BIN = path.join(RUNNER_DIR, 'dist', 'bin.cjs')
+export const COMPUTER_BIN = path.join(COMPUTER_DIR, 'dist', 'bin.cjs')
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -40,16 +40,16 @@ function newestMtime(dir: string): number {
 /** Build the computer bundle on demand. Idempotent: skip when the bundle is
  *  present AND newer than every computer source file, else (re)build. */
 export function ensureComputerBuilt(): void {
-  let needsBuild = !fs.existsSync(RUNNER_BIN)
+  let needsBuild = !fs.existsSync(COMPUTER_BIN)
   if (!needsBuild) {
-    const binMtime = fs.statSync(RUNNER_BIN).mtimeMs
-    const srcDir = path.join(RUNNER_DIR, 'src')
+    const binMtime = fs.statSync(COMPUTER_BIN).mtimeMs
+    const srcDir = path.join(COMPUTER_DIR, 'src')
     const newest = newestMtime(srcDir)
     if (newest > binMtime) needsBuild = true
   }
   if (!needsBuild) return
-  execFileSync('node', ['build.mjs'], { cwd: RUNNER_DIR, stdio: 'inherit' })
-  if (!fs.existsSync(RUNNER_BIN)) {
-    throw new Error(`computer build did not produce ${RUNNER_BIN}`)
+  execFileSync('node', ['build.mjs'], { cwd: COMPUTER_DIR, stdio: 'inherit' })
+  if (!fs.existsSync(COMPUTER_BIN)) {
+    throw new Error(`computer build did not produce ${COMPUTER_BIN}`)
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Tests for WarmProcessManager — the per-project warm gate + adopt-match logic.
  * Run under Electron's node (pty-manager pulls in `electron`); a fake PtyBackend is
- * injected so nothing is spawned anywhere — warm agents run on RUNNERS, reached
+ * injected so nothing is spawned anywhere — warm agents run on COMPUTERS, reached
  * through the backend's warm methods.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
@@ -56,7 +56,7 @@ const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)
 const settle = (): Promise<void> => wait(240)
 
 /**
- * Warm agents live on RUNNERS now, so the pool is driven through the
+ * Warm agents live on COMPUTERS now, so the pool is driven through the
  * `PtyBackend` warm methods rather than by spawning a local shell. This fake
  * backend records what the pool asked the computer to do.
  */

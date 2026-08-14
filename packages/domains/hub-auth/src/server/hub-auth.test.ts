@@ -7,7 +7,7 @@ import { createHubAuth, type HubAuth, COMPUTER_KEY_PREFIX } from './auth'
 import {
   mintComputerApiKey,
   revokeComputerApiKey,
-  RUNNER_SERVICE_USER_EMAIL
+  COMPUTER_SERVICE_USER_EMAIL
 } from './computer-keys'
 import { createHubUser } from './users'
 import { requireApiKey, requireSession, verifyComputerApiKey, verifySession } from './verify'
@@ -261,7 +261,7 @@ describe('computer API keys (create / verify / revoke)', () => {
 
   it('rejects keys that carry no computer metadata', async () => {
     const ctx = await auth.$context
-    const serviceUser = await ctx.internalAdapter.findUserByEmail(RUNNER_SERVICE_USER_EMAIL)
+    const serviceUser = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
     expect(serviceUser).not.toBeNull()
     const plain = await auth.api.createApiKey({
       body: { name: 'not-a-computer-key', userId: serviceUser!.user.id }

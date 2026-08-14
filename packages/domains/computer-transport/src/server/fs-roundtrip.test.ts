@@ -27,7 +27,7 @@ import { ComputerNotificationMethods } from '../shared/frames'
 import { createRemoteFsAdapters, type RoutingGateway } from './exec-proxies'
 import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'computer-1'
+const COMPUTER_ID = 'computer-1'
 
 type FsHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
@@ -82,7 +82,7 @@ async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer |
       notify: (method: string, params?: unknown) => {
         if (method === ComputerNotificationMethods.fsChange) {
           events.emit('fs.change', {
-            computerId: RUNNER_ID,
+            computerId: COMPUTER_ID,
             ...((params ?? {}) as Record<string, never>)
           })
         }
@@ -114,7 +114,7 @@ describe('fs.* hub⇄computer round trip — browse', () => {
   it('reports the computer jail as the browsable roots', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
-    const res = await fs.listRoots(RUNNER_ID)
+    const res = await fs.listRoots(COMPUTER_ID)
     expect(res.roots).toEqual([dir])
     expect(res.platform).toBe(process.platform)
   })
@@ -127,12 +127,12 @@ describe('fs.* hub⇄computer round trip — browse', () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
 
-    const atRoot = await fs.listDir(RUNNER_ID, dir, { dirsOnly: true })
+    const atRoot = await fs.listDir(COMPUTER_ID, dir, { dirsOnly: true })
     expect(atRoot.entries.map((e) => e.name)).toEqual(['plain', 'repo'])
     expect(atRoot.entries.find((e) => e.name === 'repo')?.isGitRepo).toBe(true)
     expect(atRoot.parent).toBeNull()
 
-    const below = await fs.listDir(RUNNER_ID, join(dir, 'plain'))
+    const below = await fs.listDir(COMPUTER_ID, join(dir, 'plain'))
     expect(below.parent).toBe(dir)
   })
 
@@ -140,9 +140,9 @@ describe('fs.* hub⇄computer round trip — browse', () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
     const target = join(dir, 'made', 'deep')
-    expect(await fs.pathExists(RUNNER_ID, target)).toBe(false)
-    expect((await fs.mkdir(RUNNER_ID, target)).path).toBe(target)
-    expect(await fs.pathExists(RUNNER_ID, target)).toBe(true)
+    expect(await fs.pathExists(COMPUTER_ID, target)).toBe(false)
+    expect((await fs.mkdir(COMPUTER_ID, target)).path).toBe(target)
+    expect(await fs.pathExists(COMPUTER_ID, target)).toBe(true)
   })
 
   // The jail is the computer's, and it must survive the round trip as a REJECTION
@@ -153,7 +153,7 @@ describe('fs.* hub⇄computer round trip — browse', () => {
     mkdirSync(inner, { recursive: true })
     const fs = await adaptersFor([inner])
     if (!fs) return
-    await expect(fs.listDir(RUNNER_ID, dir)).rejects.toThrow(/allowedRoots/)
+    await expect(fs.listDir(COMPUTER_ID, dir)).rejects.toThrow(/allowedRoots/)
   })
 })
 
@@ -168,7 +168,7 @@ describe('fs.* hub⇄computer round trip — editor', () => {
   it('reads the tree with root-relative paths and gitignore flags intact', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
-    const entries = await fs.readDir(RUNNER_ID, dir, '')
+    const entries = await fs.readDir(COMPUTER_ID, dir, '')
     expect(entries.find((e) => e.name === 'src')?.path).toBe('src')
     expect(entries.find((e) => e.name === 'secret.txt')?.ignored).toBe(true)
   })
@@ -176,15 +176,15 @@ describe('fs.* hub⇄computer round trip — editor', () => {
   it('round-trips a write through the wire and lands it on real disk', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
-    await fs.writeFile(RUNNER_ID, dir, 'src/new.ts', 'const b = 2')
+    await fs.writeFile(COMPUTER_ID, dir, 'src/new.ts', 'const b = 2')
     expect(readFileSync(join(dir, 'src', 'new.ts'), 'utf-8')).toBe('const b = 2')
-    expect(await fs.readFile(RUNNER_ID, dir, 'src/new.ts')).toEqual({ content: 'const b = 2' })
+    expect(await fs.readFile(COMPUTER_ID, dir, 'src/new.ts')).toEqual({ content: 'const b = 2' })
   })
 
   it('carries search results and the truncated flag across the wire', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
-    const res = await fs.searchFiles(RUNNER_ID, dir, 'export')
+    const res = await fs.searchFiles(COMPUTER_ID, dir, 'export')
     expect(res.results.map((r) => r.path)).toEqual(['src/index.ts'])
     expect(res.truncated).toBe(false)
   })
@@ -192,7 +192,7 @@ describe('fs.* hub⇄computer round trip — editor', () => {
   it('reports git status for a non-repo root without inventing one', async () => {
     const fs = await adaptersFor([dir])
     if (!fs) return
-    expect(await fs.gitStatus(RUNNER_ID, dir)).toEqual({ files: {}, isGitRepo: false })
+    expect(await fs.gitStatus(COMPUTER_ID, dir)).toEqual({ files: {}, isGitRepo: false })
   })
 })
 
@@ -202,7 +202,7 @@ describe('fs.* hub⇄computer round trip — watch', () => {
     if (!fs) return
 
     const seen: string[] = []
-    const stop = fs.watch(RUNNER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))
+    const stop = fs.watch(COMPUTER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))
 
     // Wait for THIS file's event, not merely for any event: macOS `fs.watch`
     // recursive also fires once for the watched directory itself (relPath = the

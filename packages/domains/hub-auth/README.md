@@ -56,11 +56,11 @@ package. `bearer`, `jwt`, and `organization` still come from
   `HubAuthContext { userId, orgId, session }` from a session cookie or
   `Authorization: Bearer <session-token>`; middleware attaches it as
   `res.locals.hubAuth` (accessor: `getHubAuthContext(res)`).
-- `verifyRunnerApiKey(auth, key)` / `requireApiKey(auth)` → resolves
-  `RunnerPrincipal { computerId, keyId }` from the `x-api-key` header; only
+- `verifyComputerApiKey(auth, key)` / `requireApiKey(auth)` → resolves
+  `ComputerPrincipal { computerId, keyId }` from the `x-api-key` header; only
   accepts keys minted with computer metadata; middleware attaches it as
-  `res.locals.computer` (accessor: `getRunnerPrincipal(res)`).
-- `mintRunnerApiKey(auth, { computerId, name })` / `revokeRunnerApiKey(auth,
+  `res.locals.computer` (accessor: `getComputerPrincipal(res)`).
+- `mintComputerApiKey(auth, { computerId, name })` / `revokeComputerApiKey(auth,
   keyId)` → computer keys are owned by an internal service user
   (`computers@slayzone.internal`, created lazily) because the api-key plugin
   requires a user reference; the computer identity is stored as `{ computerId }`

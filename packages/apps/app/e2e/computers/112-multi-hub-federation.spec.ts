@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url)
 const APP_DIR = path.resolve(__dirname, '..', '..')
 const HUB_BIN = path.resolve(APP_DIR, '..', 'hub', 'dist', 'bin.cjs')
 /** Built by `ensureComputerBuilt()` in global-setup, so it exists before any spec. */
-const RUNNER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
+const COMPUTER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
 
 /**
  * The renderer test seams these specs drive from inside `page.evaluate`. Types are
@@ -290,7 +290,7 @@ async function attachComputerToHub(opts: {
   const electronPath = require('electron') as unknown as string
   // ELECTRON_RUN_AS_NODE: the computer's node-pty native addon must share the app's
   // ABI — same way the app supervisor spawns it.
-  const proc = spawn(electronPath, [RUNNER_BIN], {
+  const proc = spawn(electronPath, [COMPUTER_BIN], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',

@@ -45,7 +45,7 @@ export function isLoopbackAddress(addr: string | undefined): boolean {
 }
 
 /** The internal identity that owns computer API keys — never operator-creatable. */
-const RUNNER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
+const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
 
 /** Cheap shape check. Real validation is the hub operator's judgement; this only
  *  rejects input that could not possibly be an address. */
@@ -100,10 +100,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
       return
     }
     const email = body.email.trim()
-    if (email.toLowerCase() === RUNNER_SERVICE_USER_EMAIL) {
+    if (email.toLowerCase() === COMPUTER_SERVICE_USER_EMAIL) {
       res.status(400).json({
         ok: false,
-        error: `${RUNNER_SERVICE_USER_EMAIL} is reserved for the internal computer service identity`
+        error: `${COMPUTER_SERVICE_USER_EMAIL} is reserved for the internal computer service identity`
       })
       return
     }
@@ -162,7 +162,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
           res.status(409).json({
             ok: false,
             error:
-              `${RUNNER_SERVICE_USER_EMAIL} is the internal computer service identity — ` +
+              `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity — ` +
               `removing it would lock out every enrolled computer`
           })
           return

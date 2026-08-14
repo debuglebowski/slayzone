@@ -200,8 +200,8 @@ describe('createProcHandlers — env + cwd', () => {
     await proc.handlers[ProcMethods.procSpawn]({
       sessionId: id,
       command: 'sh',
-      args: ['-c', 'printf "%s" "$RUNNER_TEST_VAR"'],
-      env: { RUNNER_TEST_VAR: 'injected' }
+      args: ['-c', 'printf "%s" "$COMPUTER_TEST_VAR"'],
+      env: { COMPUTER_TEST_VAR: 'injected' }
     })
     await waitFor(() => exitFor(notifies, id) !== undefined)
     expect(dataFor(notifies, id, 'stdout')).toBe('injected')

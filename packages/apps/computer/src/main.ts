@@ -35,7 +35,7 @@ import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 
 /** Version advertised at enrollment; wave-1 skeleton is pre-release. */
-export const RUNNER_VERSION = '0.0.0'
+export const COMPUTER_VERSION = '0.0.0'
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
@@ -169,7 +169,7 @@ export function startComputer(
   const identity = {
     name: config.name,
     platform: `${process.platform}-${process.arch}`,
-    version: RUNNER_VERSION,
+    version: COMPUTER_VERSION,
     capabilities: config.capabilities
   } as ComputerIdentity
   let hostIdStop: (() => void) | undefined

@@ -72,7 +72,7 @@ import {
   supervisorStopQuiet
 } from '../service'
 
-const RUNNER_PACKAGE = servicePackage('computer')
+const COMPUTER_PACKAGE = servicePackage('computer')
 
 /** How long to wait for a fresh computer to reach the hub before giving up. */
 const ENROLL_TIMEOUT_MS = 30_000
@@ -183,7 +183,7 @@ function requireRegistered(name: string, backend: ServiceBackend): { root: strin
   if (backend === 'none') {
     fail(
       `This platform has no user service manager, so computers cannot be registered ` +
-        `here. Run one in the foreground instead:\n  npx ${RUNNER_PACKAGE}`
+        `here. Run one in the foreground instead:\n  npx ${COMPUTER_PACKAGE}`
     )
   }
   if (!existsSync(unitPath('computer', name, backend))) {
@@ -304,7 +304,7 @@ async function launchComputer(args: {
   // the wait can take seconds. Silence here reads as "nothing happened" while the
   // supervisor may already be crash-looping the computer.
   if (creating) console.log(`Registered ${writtenUnitPath}`)
-  console.log(`Starting computer "${name}" (${RUNNER_PACKAGE}@${bin.version})…`)
+  console.log(`Starting computer "${name}" (${COMPUTER_PACKAGE}@${bin.version})…`)
   try {
     supervisorStart('computer', backend, name, writtenUnitPath)
   } catch (e) {
@@ -331,7 +331,7 @@ async function launchComputer(args: {
             `then log out and back in, and retry. If this account is not meant to have ` +
             `one (a container, or a root-only box), run the computer under the system ` +
             `manager or in the foreground instead:\n` +
-            `  npx ${RUNNER_PACKAGE}\n`
+            `  npx ${COMPUTER_PACKAGE}\n`
           : '')
     )
   }
@@ -369,7 +369,7 @@ async function launchComputer(args: {
   console.log(`  Root:  ${shortenPath(root)}`)
   console.log(`  Logs:  ${shortenPath(logDir)}`)
   console.log(`  Unit:  ${writtenUnitPath}`)
-  console.log(`  Computer: ${RUNNER_PACKAGE}@${bin.version}`)
+  console.log(`  Computer: ${COMPUTER_PACKAGE}@${bin.version}`)
   // State exactly what the supervisor guarantees. A user agent starts at LOGIN, not
   // at boot — claiming "survives reboot" would be wrong.
   console.log('Restarts automatically if it crashes, and starts again when you log in.')
@@ -767,7 +767,7 @@ export function computerCommand(): Command {
   cmd
     .command('restart <name>')
     .description('Restart a computer')
-    .option('--upgrade', `Re-resolve ${RUNNER_PACKAGE} first (picks up a newer version)`)
+    .option('--upgrade', `Re-resolve ${COMPUTER_PACKAGE} first (picks up a newer version)`)
     .action(async (name: string, opts: { upgrade?: boolean }) => {
       const backend = resolveBackend()
       const { root } = requireRegistered(name, backend)
@@ -791,7 +791,7 @@ export function computerCommand(): Command {
           },
           backend
         )
-        console.log(`Unit updated to ${RUNNER_PACKAGE}@${bin.version}.`)
+        console.log(`Unit updated to ${COMPUTER_PACKAGE}@${bin.version}.`)
       }
       supervisorStop('computer', backend, name)
       await waitForStopped(name, backend, 15_000)

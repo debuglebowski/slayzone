@@ -46,9 +46,9 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const HUB_DIR = join(__dirname, '..') // packages/apps/hub
-const RUNNER_DIR = join(HUB_DIR, '..', 'computer') // packages/apps/computer
+const COMPUTER_DIR = join(HUB_DIR, '..', 'computer') // packages/apps/computer
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
-const RUNNER_BIN = join(RUNNER_DIR, 'dist', 'bin.cjs')
+const COMPUTER_BIN = join(COMPUTER_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
 
 let passed = 0
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
   console.log('─'.repeat(52))
 
   ensureBuilt(HUB_DIR, HUB_BIN, 'hub')
-  ensureBuilt(RUNNER_DIR, RUNNER_BIN, 'computer')
+  ensureBuilt(COMPUTER_DIR, COMPUTER_BIN, 'computer')
 
   // Snapshot the guarded real DBs BEFORE anything spawns.
   const before = GUARDED.map(fingerprint)
@@ -270,7 +270,7 @@ async function main(): Promise<void> {
       join(computerRootDir, 'computer.config.json'),
       JSON.stringify({ computerName: 'install-handshake-computer', allowedRoots: [workDir] })
     )
-    computer = spawnChild(RUNNER_BIN, {
+    computer = spawnChild(COMPUTER_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: computerRootDir,
       // Authority only — computer composes ws(s)://<addr>/computers from SLAYZONE_MODE.

@@ -7,7 +7,7 @@ store only, no tRPC router yet.
 
 ## Contracts (shared/)
 
-- `RunnerRecord`, `JoinToken`, `RunnerProjectCheckout`, `RunnerCheckoutStatus`
+- `ComputerRecord`, `JoinToken`, `DEFAULT_LOCAL_COMPUTER_NAME`
 
 ## Server (server/)
 

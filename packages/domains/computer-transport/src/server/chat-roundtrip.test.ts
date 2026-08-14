@@ -27,7 +27,7 @@ import {
 } from './exec-proxies'
 import type { ComputerGatewayEvents } from './hub-gateway'
 
-const RUNNER_ID = 'computer-1'
+const COMPUTER_ID = 'computer-1'
 
 type ProcHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
@@ -61,9 +61,9 @@ async function loadComputer(): Promise<{
       notify: (method: string, params?: unknown) => {
         const p = (params ?? {}) as Record<string, unknown>
         if (method === ComputerNotificationMethods.procData) {
-          events.emit('proc.data', { computerId: RUNNER_ID, ...p } as never)
+          events.emit('proc.data', { computerId: COMPUTER_ID, ...p } as never)
         } else if (method === ComputerNotificationMethods.procExit) {
-          events.emit('proc.exit', { computerId: RUNNER_ID, ...p } as never)
+          events.emit('proc.exit', { computerId: COMPUTER_ID, ...p } as never)
         }
         return true
       }
@@ -121,7 +121,7 @@ describe('routed chat agent', () => {
     const handle = await backend.spawn({
       sessionId: 'task-1:tab-1',
       taskId: 'task-1',
-      computerId: RUNNER_ID,
+      computerId: COMPUTER_ID,
       binaryName: 'sh',
       args: [agentPath],
       cwd: dir,

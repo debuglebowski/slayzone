@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { API_KEY_TABLE_NAME } from '@better-auth/api-key'
 import type { HubAuth } from './auth'
-import { RUNNER_SERVICE_USER_EMAIL } from './computer-keys'
+import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 
 /**
  * Operator-facing account management for a hub — the server half of
@@ -147,7 +147,7 @@ export async function createHubUser(
 /**
  * Every human account on this hub, oldest first.
  *
- * Excludes {@link RUNNER_SERVICE_USER_EMAIL} — the internal identity that owns
+ * Excludes {@link COMPUTER_SERVICE_USER_EMAIL} — the internal identity that owns
  * computer API keys (see computer-keys.ts). It is not a person, was never created by
  * an operator, and must not be presented as removable.
  */
@@ -158,7 +158,7 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
     direction: 'asc'
   })
   return users
-    .filter((u) => u.email !== RUNNER_SERVICE_USER_EMAIL)
+    .filter((u) => u.email !== COMPUTER_SERVICE_USER_EMAIL)
     .map((u) => ({
       id: u.id,
       email: u.email,
@@ -188,7 +188,7 @@ export async function removeHubUser(auth: HubAuth, email: string): Promise<Remov
   const ctx = await auth.$context
   const normalized = normalizeEmail(email)
 
-  if (normalized === RUNNER_SERVICE_USER_EMAIL) return 'protected'
+  if (normalized === COMPUTER_SERVICE_USER_EMAIL) return 'protected'
 
   const found = await ctx.internalAdapter.findUserByEmail(normalized)
   if (!found) return 'not-found'
