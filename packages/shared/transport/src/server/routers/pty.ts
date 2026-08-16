@@ -55,9 +55,16 @@ export const ptyRouter = router({
     if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
     return ops().takeKillCalls()
   }),
-  testExecutionContext: publicProcedure
-    .input(anyInput)
-    .query(({ input }) => ops().ptyTestExecutionContext(input as never)),
+  // Test-only (PLAYWRIGHT). Unlike its five siblings above, this one had NO env
+  // gate at all — it takes `anyInput` and reaches `execFile('ssh'|'docker', …)`
+  // with caller-controlled `context.target`/`context.container`
+  // (pty-manager.ts's `ptyTestExecutionContext`), so an ungated `full` (or,
+  // before scopes existed, ANY) principal could invoke arbitrary ssh/docker exec
+  // in production. Gated now, matching the pattern every sibling already follows.
+  testExecutionContext: publicProcedure.input(anyInput).query(({ input }) => {
+    if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+    return ops().ptyTestExecutionContext(input as never)
+  }),
   write: publicProcedure
     .input(z.object({ sessionId: z.string(), data: z.string() }))
     .mutation(({ input }) => ops().ptyWrite(input.sessionId, input.data)),
@@ -124,15 +131,29 @@ export const ptyRouter = router({
   // Streaming subscriptions — mirror the dual-emitted pty events (pty-manager
   // `ptyEvents`). High-frequency `onData` rides the observable's internal queue
   // for backpressure; cleanup unsubscribes on teardown.
-  onData: publicProcedure.subscription(() =>
-    observable<{ sessionId: string; data: string; seq: number }>((emit) => {
-      const handler = (sessionId: string, data: string, seq: number): void =>
-        emit.next({ sessionId, data, seq })
-      const ev = getPtyDeps().events
-      ev.on('data', handler)
-      return () => ev.off('data', handler)
-    })
-  ),
+  //
+  // `sessionIds` is an OPTIONAL server-side filter, added for the web client:
+  // this subscription is otherwise a firehose — every byte of every live
+  // session on the hub, filtered only client-side today (PtyContext.tsx). That
+  // is fine on a LAN desktop; it is a real bandwidth (and, on a scoped `read`
+  // session, a real "every terminal" exposure — see scopes.ts) problem over
+  // cellular. Omitting the field (every existing desktop caller passes
+  // `undefined`) reproduces today's unfiltered behavior EXACTLY — this is
+  // additive, not a breaking change to the subscription's shape.
+  onData: publicProcedure
+    .input(z.object({ sessionIds: z.array(z.string()).optional() }).optional())
+    .subscription(({ input }) =>
+      observable<{ sessionId: string; data: string; seq: number }>((emit) => {
+        const filter = input?.sessionIds
+        const handler = (sessionId: string, data: string, seq: number): void => {
+          if (filter && !filter.includes(sessionId)) return
+          emit.next({ sessionId, data, seq })
+        }
+        const ev = getPtyDeps().events
+        ev.on('data', handler)
+        return () => ev.off('data', handler)
+      })
+    ),
   onStateChange: publicProcedure.subscription(() =>
     observable<{ sessionId: string; newState: string; oldState: string }>((emit) => {
       const handler = (sessionId: string, newState: string, oldState: string): void =>

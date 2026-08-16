@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Key } from 'react'
-import { toast } from '@slayzone/ui'
+import { toast, safeClipboardWriteText } from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { useChatSearch } from './useChatSearch'
 import { isRenderable } from './renderers'
@@ -152,14 +152,14 @@ export function useChatDisplay({
       })
       .filter(Boolean)
       .join('\n\n')
-    void navigator.clipboard.writeText(text)
+    void safeClipboardWriteText(text)
     toast('Conversation copied')
   }, [displayedTimeline])
 
   const copyLastResponse = useCallback(() => {
     const last = [...displayedTimeline].reverse().find((it) => it.kind === 'text')
     if (last && last.kind === 'text') {
-      void navigator.clipboard.writeText(last.text)
+      void safeClipboardWriteText(last.text)
       toast('Last response copied')
     } else {
       toast('No response to copy')

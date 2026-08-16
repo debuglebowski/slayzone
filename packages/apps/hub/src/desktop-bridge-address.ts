@@ -18,6 +18,11 @@
  * Truly standalone (no desktop): the env var is unset → both return null, so the
  * capability bridge stays null (fail-loud stubs) and the REST routes fall
  * through to express + 501.
+ *
+ * `getDesktopBridgeToken()` is the per-boot bearer the desktop's `/cap` listener
+ * requires on every connection (`SLAYZONE_DESKTOP_BRIDGE_TOKEN`, `secret`-scoped
+ * in `ENV_MANIFEST`) — loopback is not a trust boundary for that listener, since
+ * the whole threat is another loopback process finding the port.
  */
 
 /** Raw bridge authority (`host:port`), or null when the desktop app isn't supervising. */
@@ -29,6 +34,11 @@ export function getDesktopBridgeAddress(): string | null {
 export function getDesktopBridgeCapUrl(): string | null {
   const address = getDesktopBridgeAddress()
   return address ? `ws://${address}/cap` : null
+}
+
+/** Bearer required on every `/cap` connection, or null when standalone. */
+export function getDesktopBridgeToken(): string | null {
+  return process.env.SLAYZONE_DESKTOP_BRIDGE_TOKEN?.trim() || null
 }
 
 /** HTTP base URL for the Electron-only REST reverse-proxy, or null when standalone. */

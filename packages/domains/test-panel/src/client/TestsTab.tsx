@@ -21,7 +21,8 @@ import {
   TooltipTrigger,
   Popover,
   PopoverContent,
-  PopoverTrigger
+  PopoverTrigger,
+  safeRandomUUID
 } from '@slayzone/ui'
 import { Plus, Trash2, Save } from 'lucide-react'
 import type { TestCategory, TestProfile, CreateTestCategoryInput } from '../shared/types'
@@ -194,7 +195,7 @@ export function TestsTab({
   const saveAsProfile = async (name: string) => {
     if (!name.trim()) return
     const profile: TestProfile = {
-      id: crypto.randomUUID(),
+      id: safeRandomUUID(),
       name: name.trim(),
       categories: categories.map((c) => ({ name: c.name, pattern: c.pattern, color: c.color }))
     }

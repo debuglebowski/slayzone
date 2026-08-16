@@ -373,6 +373,13 @@ export interface BufferChunk {
 export interface BufferSinceResult {
   chunks: BufferChunk[]
   currentSeq: number
+  /**
+   * State-resetting bytes to write BEFORE `chunks`. Non-empty only for a cold
+   * attach (`afterSeq === -1`) into a buffer that has evicted content — see
+   * `ring-buffer.ts`'s `getChunksSince`. Empty string on reattach, always safe
+   * to write unconditionally (a no-op).
+   */
+  prelude: string
 }
 
 export interface PromptInfo {

@@ -1,5 +1,7 @@
+import { safeRandomUUID } from '@slayzone/ui'
+
 export function generateTabId(): string {
-  return `tab-${crypto.randomUUID().slice(0, 8)}`
+  return `tab-${safeRandomUUID().slice(0, 8)}`
 }
 
 /**

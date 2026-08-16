@@ -208,6 +208,52 @@ describe('computer API keys (create / verify / revoke)', () => {
     expect(await revokeComputerApiKey(auth, 'no-such-key-id')).toBe(false)
   })
 
+  /**
+   * THE regression guard for computer impersonation.
+   *
+   * `POST /api/auth/api-key/create` is mounted by the apiKey plugin under
+   * `/api/auth/`, is authenticated by an ordinary user SESSION, and accepts
+   * arbitrary `metadata` because the hub sets `enableMetadata: true`. When
+   * `verifyComputerApiKey` resolved computer identity from `metadata.computerId`
+   * alone, any account holder could mint a key naming ANY computer — including
+   * another user's — and authenticate on `/computers` as that computer. Computers
+   * execute arbitrary code, so that is RCE in the victim's OS account.
+   *
+   * The fix authenticates on `referenceId` (who the key belongs to), which the
+   * plugin sets from the session for a client request and which `mintComputerApiKey`
+   * sets to the computer service user. Metadata is attacker-controlled;
+   * `referenceId` is not.
+   */
+  it('refuses a session-minted key that merely CLAIMS a computerId', async () => {
+    const legit = await mintComputerApiKey(auth, {
+      computerId: 'computer-victim',
+      name: 'victim-computer'
+    })
+    // Sanity: the real key works, so the rejection below is meaningful.
+    expect(await verifyComputerApiKey(auth, legit.key)).toEqual({
+      computerId: 'computer-victim',
+      keyId: legit.keyId
+    })
+
+    // An ordinary account holder, signed in, forging the victim's computerId.
+    const attacker = await createHubUser(auth, { email: 'attacker@example.com' })
+    if ('error' in attacker) throw new Error(`could not create attacker: ${attacker.error}`)
+    const session = await auth.api.signInEmail({
+      body: { email: attacker.email, password: attacker.password }
+    })
+    const forged = await auth.api.createApiKey({
+      headers: new Headers({ authorization: `Bearer ${session.token}` }),
+      body: { name: 'forged', metadata: { computerId: 'computer-victim' } }
+    })
+    expect(forged.key).toBeTruthy()
+
+    // The forged key is a VALID api key — better-auth is happy with it. What must
+    // not happen is it resolving to a computer principal.
+    const rawValid = await auth.api.verifyApiKey({ body: { key: forged.key } })
+    expect(rawValid.valid).toBe(true)
+    expect(await verifyComputerApiKey(auth, forged.key)).toBeNull()
+  })
+
   it('verifies the same computer key far more than 10 times (no verify rate limit)', async () => {
     // Regression: the api-key plugin rate-limits KEY VERIFICATION to 10 requests
     // per 24h by default (`rateLimit.maxRequests = 10`, `timeWindow = 86400000`),

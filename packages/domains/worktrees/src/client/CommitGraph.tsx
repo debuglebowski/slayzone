@@ -1,4 +1,4 @@
-import { cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { cn, Tooltip, TooltipTrigger, TooltipContent, safeClipboardWriteText } from '@slayzone/ui'
 import { memo, useState, useRef, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ResolvedGraph } from '../shared/types'
@@ -48,7 +48,7 @@ function useCopyHash() {
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const handleCopy = useCallback((hash: string) => {
-    navigator.clipboard.writeText(hash)
+    void safeClipboardWriteText(hash)
     setCopiedHash(hash)
     clearTimeout(copiedTimer.current)
     copiedTimer.current = setTimeout(() => setCopiedHash(null), 1500)

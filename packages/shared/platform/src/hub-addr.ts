@@ -43,6 +43,35 @@ export type { SlayzoneMode } from './slayzone-mode'
 export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1'])
 
 /**
+ * True when a SOCKET PEER ADDRESS names this machine.
+ *
+ * Distinct from {@link LOOPBACK_HOSTS} on purpose, and the distinction is
+ * load-bearing:
+ *   - `LOOPBACK_HOSTS` matches a CONFIGURED HOST STRING — a value a human typed
+ *     into `SLAYZONE_HUB_ADDRESS` or a config file — so it accepts `'localhost'`.
+ *   - This matches `req.socket.remoteAddress`, which the kernel fills in. A
+ *     socket address is an IP, never a hostname, so `'localhost'` here would only
+ *     ever be a bug or a spoof attempt and is deliberately NOT accepted.
+ *
+ * Covers the three forms node reports: IPv6 loopback, the IPv4-mapped-IPv6 form,
+ * and all of `127.0.0.0/8` (the whole block is loopback, not just `127.0.0.1`).
+ *
+ * Fails CLOSED: an absent or unparseable address is not loopback. Callers grant
+ * access on a `true` here, so "unknown" must never mean "trusted".
+ *
+ * Consolidates three previously-duplicated copies (hub `rest-auth`, the
+ * computers join-token route, and the hub users route), each of which had drifted
+ * its own docstring while claiming to be the same predicate.
+ */
+export function isLoopbackPeer(addr: string | undefined | null): boolean {
+  if (!addr) return false
+  if (addr === '::1') return true
+  // Node reports an IPv4 peer on a dual-stack socket as `::ffff:127.0.0.1`.
+  const bare = addr.startsWith('::ffff:') ? addr.slice('::ffff:'.length) : addr
+  return bare === '127.0.0.1' || bare.startsWith('127.')
+}
+
+/**
  * Build a hub URL from an authority (`host` or `host:port`, NO scheme, NO path).
  *
  * @param addr  the hub authority — `host[:port]`, exactly as carried in

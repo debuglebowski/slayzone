@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { SlayzoneDb } from '@slayzone/platform'
+import { isLoopbackPeer, type SlayzoneDb } from '@slayzone/platform'
 import {
   notifyGlobalStateListeners,
   markSessionUserInput,
@@ -52,6 +52,14 @@ type DevSqlBody = {
  */
 export function handleDevSql(db: SlayzoneDb, req: IncomingMessage, res: ServerResponse): boolean {
   if (!isDevSqlEnabled()) return false
+  // Co-located callers only, INDEPENDENT of the bearer gate. `PLAYWRIGHT=1` is an
+  // inherited environment variable, not a credential — it is not in `ENV_MANIFEST`,
+  // so nothing strips it from a spawned process, and any parent that happens to
+  // carry it turns arbitrary SQL on. The e2e harness always drives this over
+  // loopback, so requiring loopback costs it nothing and removes the network as an
+  // attack surface entirely. `startServer` additionally refuses to boot with this
+  // enabled on a non-supervised hub; this is the second layer.
+  if (!isLoopbackPeer(req.socket?.remoteAddress)) return false
   const path = (req.url ?? '').split('?')[0]
   if (req.method !== 'POST') return false
   if (

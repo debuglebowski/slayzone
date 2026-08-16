@@ -13,7 +13,14 @@ import {
 } from '@slayzone/transport/client'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
+import {
+  matchesShortcut,
+  useShortcutStore,
+  PulseGrid,
+  safeRandomUUID,
+  safeClipboardWriteText,
+  safeClipboardReadText
+} from '@slayzone/ui'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -762,10 +769,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (actualState) setPtyState(actualState)
 
           // Restore from backend ring buffer (single source of truth).
-          // Use getBufferSince with -1 to get all chunks.
+          // Use getBufferSince with -1 to get all chunks. `prelude` resets
+          // SGR/charset/scroll-region state an evicted prefix left behind —
+          // it is '' (a no-op write) unless this buffer has actually evicted,
+          // so writing it unconditionally is always correct.
           const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: -1 })
           if (signal.aborted) return
           if (result) {
+            if (result.prelude) terminal.write(result.prelude)
             for (const chunk of result.chunks) {
               terminal.write(chunk.data)
             }
@@ -793,7 +804,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             !newConversationId &&
             !existingConversationIdRef.current
           ) {
-            newConversationId = crypto.randomUUID()
+            newConversationId = safeRandomUUID()
           }
 
           // Create PTY — plain terminal mode doesn't use conversation IDs
@@ -1521,13 +1532,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         const sel = terminalRef.current?.getSelection()
-        if (sel) void navigator.clipboard.writeText(trimSelectionTrailingSpaces(sel))
+        if (sel) void safeClipboardWriteText(trimSelectionTrailingSpaces(sel))
       }
 
       if (e.code === 'KeyV') {
         e.preventDefault()
         e.stopPropagation()
-        void navigator.clipboard.readText().then((text) => {
+        void safeClipboardReadText().then((text) => {
           if (text) void trpcClient.pty.write.mutate({ sessionId, data: text })
         })
       }

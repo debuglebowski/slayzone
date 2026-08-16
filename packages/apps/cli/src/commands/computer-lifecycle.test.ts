@@ -216,7 +216,7 @@ const hubLogs: string[] = []
 const spawnedComputerPids: number[] = []
 
 /** Boot a real hub on an OS-assigned loopback port in its own throwaway root. */
-async function startHub(): Promise<{ port: number }> {
+async function startHub(): Promise<{ port: number; root: string }> {
   const root = join(TMP, 'hub-root')
   mkdirSync(root, { recursive: true })
   const secret = execFileSync(NODE_BIN, [
@@ -266,17 +266,43 @@ async function startHub(): Promise<{ port: number }> {
     30_000,
     'hub /health ok'
   )
-  return { port }
+  return { port, root }
+}
+
+/**
+ * The bootstrap owner's bearer, read from `hub.owner.json` under this hub's
+ * own root. Every standalone hub enforces auth on `/api/computers/join-token`
+ * unconditionally now (`joinTokenAuthDecision` requires a verified bearer from
+ * EVERY caller, loopback included, once auth is required) — a bare loopback
+ * `fetch` with no Authorization header gets 401, not 200, so this must be
+ * read and sent explicitly. Polled because `ensureBootstrapOwner` writes the
+ * file asynchronously after boot, not synchronously before the listen line.
+ */
+async function readOwnerToken(root: string): Promise<string> {
+  const owner = await poll(
+    async () => {
+      const raw = readFileSync(join(root, 'hub.owner.json'), 'utf-8')
+      return JSON.parse(raw) as { token?: string }
+    },
+    15_000,
+    'hub.owner.json written'
+  )
+  assert(typeof owner.token === 'string' && owner.token.length > 0, 'owner token present')
+  return owner.token!
 }
 
 /** Mint a single-use join token over the hub's loopback REST channel. */
-async function mintToken(port: number, label: string): Promise<string> {
+async function mintToken(port: number, root: string, label: string): Promise<string> {
+  const ownerToken = await readOwnerToken(root)
   // The route 503s until the /computers listener has bound, hence the poll.
   const tok = await poll(
     async () => {
       const r = await fetch(`http://127.0.0.1:${port}/api/computers/join-token`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${ownerToken}`
+        },
         body: JSON.stringify({ label })
       })
       if (r.status !== 200) return null
@@ -456,7 +482,7 @@ async function main(): Promise<void> {
     // REST one shows up as a failed enroll rather than passing unnoticed.
 
     // Wait out the listener bind once, so the mint cases below aren't racing it.
-    await mintToken(hub.port, `${NAME_PREFIX}warmup`)
+    await mintToken(hub.port, hub.root, `${NAME_PREFIX}warmup`)
 
     await test('mint --json prints a decodable token for the addressed hub', async () => {
       const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {

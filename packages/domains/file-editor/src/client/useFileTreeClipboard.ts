@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
+import { safeClipboardWriteText } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { uniqueName, duplicateName } from '../shared'
 import { useWorkspaceIsLocal, useWorkspaceTarget } from './workspace-target'
@@ -222,7 +223,7 @@ export function useFileTreeClipboard({
   const handleCopyPath = useCallback(
     (entry: DirEntry, absolute: boolean) => {
       const text = absolute ? `${projectPath}/${entry.path}` : entry.path
-      navigator.clipboard.writeText(text)
+      void safeClipboardWriteText(text)
       track('path_copied')
     },
     [projectPath]

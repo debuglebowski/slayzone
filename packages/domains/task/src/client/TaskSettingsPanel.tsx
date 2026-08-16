@@ -2,7 +2,7 @@ import type React from 'react'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { Copy, Check } from 'lucide-react'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { Tooltip, TooltipTrigger, TooltipContent, safeClipboardWriteText } from '@slayzone/ui'
 import { TaskHistoryPanel } from './TaskHistoryPanel'
 
 interface TaskSettingsPanelProps {
@@ -40,7 +40,7 @@ export function TaskSettingsPanel({
               aria-label="Copy task ID"
               className="text-muted-foreground hover:text-foreground"
               onClick={() => {
-                navigator.clipboard.writeText(taskId)
+                void safeClipboardWriteText(taskId)
                 setCopied(true)
               }}
             >

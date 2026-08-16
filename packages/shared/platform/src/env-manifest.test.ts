@@ -38,6 +38,10 @@ check('SLAYZONE_HUB_URL is retired (absent from manifest)', !('SLAYZONE_HUB_URL'
 check('SLAYZONE_HUB_ADDRESS is infra', ENV_MANIFEST.SLAYZONE_HUB_ADDRESS === 'infra')
 check('SLAYZONE_HUB_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_TOKEN === 'secret')
 check('SLAYZONE_HUB_JOIN_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_JOIN_TOKEN === 'secret')
+check(
+  'SLAYZONE_DESKTOP_BRIDGE_TOKEN is secret',
+  ENV_MANIFEST.SLAYZONE_DESKTOP_BRIDGE_TOKEN === 'secret'
+)
 // The pre-rename name is RETIRED, not aliased. It never shipped: the published
 // computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, so there is no
 // operator env anywhere carrying this name to keep working. Unmanifested → the
@@ -120,6 +124,7 @@ const base: NodeJS.ProcessEnv = {
   SLAYZONE_HUB_TOKEN: 'sekret',
   SLAYZONE_HUB_JOIN_TOKEN: 'jointoken',
   SLAYZONE_HUB_AUTH_SECRET: 'hmac',
+  SLAYZONE_DESKTOP_BRIDGE_TOKEN: 'cap-bearer',
   // infra — must be stripped
   SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
   SLAYZONE_HUB_PORT: '51100',
@@ -163,6 +168,7 @@ check(
   !('SLAYZONE_RUNNER_JOIN_TOKEN' in out)
 )
 check('strips secret SLAYZONE_HUB_AUTH_SECRET', !('SLAYZONE_HUB_AUTH_SECRET' in out))
+check('strips secret SLAYZONE_DESKTOP_BRIDGE_TOKEN', !('SLAYZONE_DESKTOP_BRIDGE_TOKEN' in out))
 
 check('strips infra SLAYZONE_HUB_ADDRESS', !('SLAYZONE_HUB_ADDRESS' in out))
 check('strips infra SLAYZONE_HUB_PORT', !('SLAYZONE_HUB_PORT' in out))

@@ -534,20 +534,40 @@ async function main(): Promise<void> {
 
     await test('hub users: public sign-up is refused on a real booted hub', async () => {
       // The security half of this feature, asserted against the actual HTTP surface
-      // rather than the auth config: the route stays gate-exempt (a token-less client
-      // must reach sign-in), so `disableSignUp` inside better-auth is what closes it.
+      // rather than the auth config.
+      //
+      // NOW REFUSED TWICE, and this asserts the OUTER layer. The bearer gate's
+      // `/api/auth/` exemption used to be a prefix, which made every route
+      // better-auth or any plugin mounts under it reachable unauthenticated — the
+      // computer-impersonation escalation came in through exactly that door. It is
+      // now an exact allowlist (`sign-in/email`, `sign-out`, `get-session`), so
+      // sign-up is rejected by the gate before better-auth ever sees it: 401, not
+      // the previous 400.
+      //
+      // The INNER layer — `emailAndPassword.disableSignUp` making the route refuse
+      // at the source even for a caller who passes the gate — is asserted
+      // in-process in hub-auth.test.ts ('refuses public sign-up'). Both matter:
+      // the gate could be widened by a future exemption, and the flag could be
+      // dropped; either alone still closes signup.
       const a = hubs.find((h) => basename(h.root) === NAME_A)!
       const res = await postJson(a.port, '/api/auth/sign-up/email', {
         email: `intruder-${process.pid}@example.com`,
         password: 'a-perfectly-valid-password',
         name: 'Intruder'
       })
-      assertEq(res.status, 400, `sign-up rejected: ${res.body}`)
-      // Assert the REASON, not just the status: a 400 from schema validation would
-      // pass a status-only check while signup was in fact wide open.
+      assertEq(res.status, 401, `sign-up rejected by the gate: ${res.body}`)
+      // Assert the REASON, not just the status — a 401 that came from anywhere
+      // else would pass a status-only check while signup was in fact reachable.
+      assert(res.body.includes('Unauthorized'), `refused by the bearer gate: ${res.body}`)
+      // And the allowlisted sign-in route is genuinely still open on the same hub,
+      // so this is proof of a narrowed exemption rather than a sealed prefix.
+      const openRoute = await postJson(a.port, '/api/auth/sign-in/email', {
+        email: 'nobody@example.com',
+        password: 'wrong'
+      })
       assert(
-        res.body.includes('EMAIL_PASSWORD_SIGN_UP_DISABLED'),
-        `refused because signup is disabled: ${res.body}`
+        openRoute.status !== 401 || !openRoute.body.includes('Unauthorized'),
+        `sign-in still reaches better-auth (got ${openRoute.status}: ${openRoute.body})`
       )
     })
 
@@ -560,13 +580,22 @@ async function main(): Promise<void> {
       const before = listed()
       assert(before.length >= 2, `earlier cases left ≥2 accounts: ${before.length}`)
 
-      const rm = slay(['--hub', NAME_A, 'hub', 'users', 'rm', before[0]!.email], { root: rootA })
+      // `before[0]` is ALWAYS the bootstrap owner — `listHubUsers` orders by
+      // `createdAt ASC` and the owner is provisioned first, at hub boot. Its
+      // token is also what THIS CLI invocation authenticates with (read from
+      // `hub.owner.json` — every non-supervised hub now requires a bearer even
+      // for `/api/hub/users`). Removing it first would invalidate the CLI's own
+      // credential mid-test and 401 every call after — target a later,
+      // test-created account for the single-removal assertion instead.
+      const target = before[1]!.email
+      const rm = slay(['--hub', NAME_A, 'hub', 'users', 'rm', target], { root: rootA })
       assertEq(rm.status, 0, `rm exited 0 (stderr: ${rm.stderr})`)
-      assert(!listed().some((u) => u.email === before[0]!.email), 'account is gone')
+      assert(!listed().some((u) => u.email === target), 'account is gone')
 
-      // Drain to exactly one, then prove the refusal: with signup closed, removing
-      // the final account would leave the hub unauthenticatable.
-      for (const u of listed().slice(1)) {
+      // Drain everyone EXCEPT the owner, down to exactly one, then prove the
+      // refusal ON the owner: with signup closed, removing the final account
+      // would leave the hub unauthenticatable.
+      for (const u of listed().filter((u) => u.email !== before[0]!.email)) {
         assertEq(
           slay(['--hub', NAME_A, 'hub', 'users', 'rm', u.email], { root: rootA }).status,
           0,
@@ -575,6 +604,7 @@ async function main(): Promise<void> {
       }
       const remaining = listed()
       assertEq(remaining.length, 1, 'one account left')
+      assertEq(remaining[0]!.email, before[0]!.email, 'the owner is the one account left')
       const refused = slay(['--hub', NAME_A, 'hub', 'users', 'rm', remaining[0]!.email], {
         root: rootA
       })

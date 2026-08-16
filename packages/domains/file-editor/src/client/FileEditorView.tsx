@@ -27,7 +27,8 @@ import {
   getThemeChrome,
   getChromeStyleOverrides,
   getThemeEditorColors,
-  useAppearance
+  useAppearance,
+  safeClipboardWriteText
 } from '@slayzone/ui'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
@@ -323,13 +324,13 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
 
     const handleCopyPath = useCallback(
       (filePath: string) => {
-        void navigator.clipboard.writeText(`${projectPath}/${filePath}`)
+        void safeClipboardWriteText(`${projectPath}/${filePath}`)
       },
       [projectPath]
     )
 
     const handleCopyRelativePath = useCallback((filePath: string) => {
-      void navigator.clipboard.writeText(filePath)
+      void safeClipboardWriteText(filePath)
     }, [])
 
     // Not routed on purpose — `showInFinder` resolves against THIS desktop, the

@@ -1,6 +1,14 @@
 export { appRouter, type AppRouter } from './router'
 export { router, publicProcedure, openProcedure, middleware, mergeRouters } from './trpc'
 export type { TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
+export {
+  SCOPE_POLICY,
+  requiredScope,
+  isPathAllowed,
+  type Scope,
+  type PrincipalScope,
+  type ProcedureScope
+} from './scopes'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
 export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
 export {
@@ -85,6 +93,7 @@ export {
 export { registerRestApi, processAgentHook } from './http/rest-api'
 export type {
   RestApiDeps,
+  RestPrincipal,
   TerminalStateBridge,
   TaskOpsBus,
   PtyAccess,

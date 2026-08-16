@@ -1,5 +1,6 @@
 // Utilities
 export { cn } from './utils'
+export { safeRandomUUID, safeClipboardWriteText, safeClipboardReadText } from './secure-context'
 export { isModalDialogOpen } from './is-modal-dialog-open'
 export { withModalGuard } from './with-modal-guard'
 export { useGuardedHotkeys } from './useGuardedHotkeys'

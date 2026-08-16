@@ -14,7 +14,8 @@ import {
   TooltipContent,
   TooltipTrigger,
   cn,
-  toast
+  toast,
+  safeRandomUUID
 } from '@slayzone/ui'
 import { api } from 'convex/_generated/api'
 
@@ -149,7 +150,7 @@ export function FeedbackDialog(): React.JSX.Element {
       const version = await trpcClient.app.meta.getVersion.query()
 
       if (composingNew || !selectedThread) {
-        const threadId = crypto.randomUUID()
+        const threadId = safeRandomUUID()
         const title = text.slice(0, 80).replace(/\n/g, ' ')
 
         const result = await submit({
@@ -163,7 +164,7 @@ export function FeedbackDialog(): React.JSX.Element {
           discord_thread_id: result.threadId ?? null
         })
         await trpcClient.feedback.addMessage.mutate({
-          id: crypto.randomUUID(),
+          id: safeRandomUUID(),
           thread_id: threadId,
           content: text
         })
@@ -186,7 +187,7 @@ export function FeedbackDialog(): React.JSX.Element {
         }
 
         await trpcClient.feedback.addMessage.mutate({
-          id: crypto.randomUUID(),
+          id: safeRandomUUID(),
           thread_id: selectedThread.id,
           content: text
         })

@@ -146,6 +146,10 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
+# WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
+# closure inside startServer; extracted so the "Origin: null is every sandboxed
+# iframe on the web" case is actually asserted.
+run_test_electron_strict_loader packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
@@ -154,6 +158,11 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/com
 # dev/prod DBs stay byte-unchanged. Auto-builds both bundles on demand (first run
 # is slower). Electron ABI → strict loader.
 run_test_electron_strict_loader packages/apps/hub/src/install-handshake.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/web-login-routing.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/web-assets-remote-gate.test.ts
+# Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
+# the credential a web login mints, distinct from a full better-auth session.
+run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -177,6 +186,7 @@ run_test packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
 # (plans/hub-lifecycle-and-discovery.md P1).
 run_test packages/apps/hub/src/health.test.ts
+run_test packages/apps/hub/src/web-assets.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
 run_test packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
@@ -260,6 +270,10 @@ run_test packages/apps/app/src/main/channel-storage-migration.test.ts
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
 # the developer's focus for the rest of that worker's specs (worker-scoped app).
 run_test packages/apps/app/src/main/present-window.test.ts
+# `/cap` bearer gate (web-access plan open question #5) — loopback alone must
+# NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
+# reject a missing/wrong/mismatched-length per-boot token.
+run_test packages/apps/app/src/main/desktop-bridge-server.test.ts
 # SLAYZONE_MODE resolver + mode/bind contradiction guard (local+exposed = fatal).
 run_test packages/shared/platform/src/slayzone-mode.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
@@ -278,6 +292,7 @@ run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-a
 # Loopback operator account routes (`slay hub users`). no_loader: the routes never
 # touch the DB (the hubUsers capability is stubbed), so no Electron-ABI harness.
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts
+run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/web-login.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
@@ -292,6 +307,8 @@ run_test_electron_strict_loader packages/domains/agent-turns/src/server/git-snap
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/agent-turns.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/chat.test.ts
+# pty.onData's server-side sessionIds filter — the web-bandwidth fix (§2.6).
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/pty.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/template.test.ts
@@ -504,6 +521,12 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/apps/app/src/main/hub-cert-pinning.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
+  packages/shared/transport/src/client/trpc.test.ts \
+  packages/apps/web-shell/src/window-api.test.ts \
+  packages/apps/web-shell/src/hub-health.test.ts \
+  packages/shared/transport/src/client/electron-bootstrap.test.ts \
+  packages/shared/editor/src/use-artifact-upload.test.tsx \
+  packages/shared/ui/src/secure-context.test.ts \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
@@ -523,7 +546,9 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
-  packages/apps/computer/src/ring-buffer.test.ts; then
+  packages/apps/computer/src/ring-buffer.test.ts \
+  packages/shared/transport/src/server/scopes.test.ts \
+  packages/shared/transport/src/server/trpc.test.ts; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))

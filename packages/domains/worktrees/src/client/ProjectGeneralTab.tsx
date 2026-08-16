@@ -11,7 +11,8 @@ import {
   PopoverTrigger,
   cn,
   toast,
-  useStablePoll
+  useStablePoll,
+  safeClipboardWriteText
 } from '@slayzone/ui'
 import type { StatusSummary, AheadBehind } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
@@ -325,7 +326,7 @@ export function ProjectGeneralTab({
             remoteUrl && (
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(remoteUrl)
+                  void safeClipboardWriteText(remoteUrl)
                   toast('Remote URL copied')
                 }}
                 className="flex items-center gap-1 group"

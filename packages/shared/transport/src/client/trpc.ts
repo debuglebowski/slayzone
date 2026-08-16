@@ -87,10 +87,20 @@ export function _setTrpcClientSingleton(client: TrpcVanillaClient | null): void 
  * boot (before React mounts / before any module-scope getTrpcClient() use), and
  * again inside TrpcProvider — the second call reuses the first, so there is one
  * WS connection shared by React and non-React callers.
+ *
+ * `opts.token` is the same bearer `createTrpcWsClient`/`getOrCreateHubClient`
+ * already accept — omitted by every existing caller (desktop's default hub is
+ * always loopback-trusted; the fork's standalone sidecar has auth off), so
+ * this is additive and byte-identical for them. The web shell is the first
+ * caller that MUST supply one: its hub enforces auth unconditionally
+ * (`hubAuthRequired = !supervised`), so its boot sequence pre-initializes this
+ * singleton with the scoped session token BEFORE `renderer-app`'s `mountApp()`
+ * makes its own (now cache-hit, since this call already won) `initTrpcClient`
+ * call.
  */
 export function initTrpcClient(
   url: string,
-  opts?: { links?: TRPCLink<AppRouter>[] }
+  opts?: { links?: TRPCLink<AppRouter>[]; token?: string }
 ): {
   client: TrpcVanillaClient
   wsClient: ReturnType<typeof createTrpcWsClient>['wsClient']
@@ -98,7 +108,7 @@ export function initTrpcClient(
   if (!vanillaClientSingleton || !wsClientSingleton) {
     // First call wins (boot, before React mounts) — it decides the link stack;
     // TrpcProvider's later initTrpcClient(url) reuses this same singleton.
-    const created = createTrpcWsClient({ url, links: opts?.links })
+    const created = createTrpcWsClient({ url, links: opts?.links, token: opts?.token })
     vanillaClientSingleton = created.client
     wsClientSingleton = created.wsClient
   }

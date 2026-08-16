@@ -5,10 +5,13 @@ matches="$(
   rg -n \
     --glob '!**/*.test.*' \
     --glob '!**/*.spec.*' \
-    --glob '!**/env.d.ts' \
+    --glob '!**/*.d.ts' \
+    --glob '!packages/shared/transport/src/client/electron-bootstrap.ts' \
+    --glob '!packages/shared/window-api-shim/**' \
     '(window\.api\.|\([^)]*window[^)]*\)\.api\.|\bapi:\s*ElectronAPI\b)' \
     packages/apps/app/src/renderer \
-    packages/domains/*/src/client || true
+    packages/domains/*/src/client \
+    packages/shared/*/src || true
 )"
 
 if [[ -n "$matches" ]]; then

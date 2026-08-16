@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@slayzone/renderer-app": "workspace:*",
+    "@slayzone/theme-css": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/window-api-shim": "workspace:*",
     "react": "^19.2.1",

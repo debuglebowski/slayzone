@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { toast, useAppearance } from '@slayzone/ui'
+import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import { useChatSession } from '@slayzone/terminal/client'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
 import { ChatViewContext } from './ChatViewContext'
@@ -161,7 +161,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const copySessionId = useCallback(() => {
       if (!state.sessionId) return
-      void navigator.clipboard.writeText(state.sessionId)
+      void safeClipboardWriteText(state.sessionId)
     }, [state.sessionId])
 
     const { resetting, restarting, displaySessionEnded, handleReset, handleRestart } =

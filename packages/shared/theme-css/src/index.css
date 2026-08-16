@@ -1,0 +1,899 @@
+/*
+ * Shared theme layer — the SlayZone Tailwind v4 design tokens, `.mk-doc`
+ * markdown typography system, and the handful of global utility classes
+ * (`.scrollbar-*`, `.tok-*` diff syntax highlighting, xterm visibility fix,
+ * asset-search highlighting) that every renderer shell needs.
+ *
+ * This used to be hand-maintained as two near-duplicate `main.css` files
+ * (the Electron app's and the Chromium fork's), at different `../` depths,
+ * with the `@source` sets already silently drifting apart (the fork scanned
+ * `domains/usage-analytics/src`; the app — which also renders that domain,
+ * lazy-loaded via `app-shell/lazy.ts` — did not). Verified this had produced
+ * no CURRENTLY visible bug (every class the domain's components use today
+ * happens to already be scanned via some other already-listed directory —
+ * confirmed by diffing a real app build with and without the line), but it
+ * was one new Tailwind-only className away from silently shipping unstyled.
+ * A third copy for the web shell was not acceptable either way, so this
+ * extraction happened first and folds the drift back into one list (the
+ * union of both) rather than carrying the gap into a third file.
+ *
+ * Tailwind's `@source` directive resolves relative to the CSS FILE it
+ * appears in, not the file that `@import`s it — so once these paths live
+ * here, in one place with one real filesystem location, they are correct
+ * for every consumer (`chromium-shell`, the Electron app, the web shell)
+ * regardless of how deep each one's own `main.css` sits in the tree.
+ *
+ * Each consumer's own `main.css` becomes:
+ *
+ *   @import "@slayzone/theme-css";
+ *   /* + anything genuinely shell-specific (e.g. the Electron app's
+ *      @xyflow/react stylesheet, its window-drag-region utilities, and its
+ *      legacy `.prose` task-list rules for the worktrees GitHub PR view) *\/
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Scan every package whose className strings render through a consumer of
+   this theme — the UNION across all three shells' surfaces, so no shell
+   silently loses Tailwind classes that only appear inside one domain. */
+@source "../../../domains/agent-panels/src";
+@source "../../../domains/ai-config/src";
+@source "../../../domains/app-shell/src";
+@source "../../../domains/feedback/src";
+@source "../../../domains/file-editor/src";
+@source "../../../domains/leaderboard/src";
+@source "../../../domains/onboarding/src";
+@source "../../../domains/projects/src";
+@source "../../../domains/search/src";
+@source "../../../domains/settings/src";
+@source "../../../domains/sidebar/src";
+@source "../../../domains/tabs/src";
+@source "../../../domains/tags/src";
+@source "../../../domains/task/src";
+@source "../../../domains/task-artifacts/src";
+@source "../../../domains/task-browser/src";
+@source "../../../domains/task-terminals/src";
+@source "../../../domains/tasks/src";
+@source "../../../domains/terminal/src";
+@source "../../../domains/usage-analytics/src";
+@source "../../../domains/worktrees/src";
+@source "../../../shared/editor/src";
+@source "../../../shared/ui/src";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-modal: var(--modal);
+  --color-tab-active: var(--tab-active);
+  --color-search-match: var(--search-match);
+  --color-search-match-foreground: var(--search-match-foreground);
+  --color-search-match-active: var(--search-match-active);
+  --color-search-match-active-foreground: var(--search-match-active-foreground);
+
+  --animate-collapsible-down: collapsible-down 0.15s ease-out;
+  --animate-collapsible-up: collapsible-up 0.15s ease-out;
+  --animate-blink: blink 0.9s step-end infinite;
+  @keyframes collapsible-down {
+    from { height: 0; opacity: 0; }
+    to { height: var(--radix-collapsible-content-height); opacity: 1; }
+  }
+  @keyframes collapsible-up {
+    from { height: var(--radix-collapsible-content-height); opacity: 1; }
+    to { height: 0; opacity: 0; }
+  }
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+}
+
+:root {
+  --radius: 6px;
+  --background: oklch(0.94 0 0);
+  --foreground: oklch(0.13 0 0);
+  --card: var(--surface-2);
+  --card-foreground: oklch(0.13 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.93 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.93 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --accent: oklch(0.91 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0 0 0 / 22%);
+  --input: oklch(0 0 0 / 25%);
+  --ring: oklch(0.55 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.13 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.95 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0 0 0 / 15%);
+  --sidebar-ring: oklch(0.55 0 0);
+  --surface-0: oklch(0.92 0 0);
+  --surface-1: oklch(0.95 0 0);
+  --surface-2: oklch(0.97 0 0);
+  --surface-3: oklch(1 0 0);
+  --tab-active: oklch(0.88 0 0);
+  --modal: oklch(1 0 0);
+  --modal-border: oklch(0 0 0 / 35%);
+  --search-match: oklch(0.9 0.14 85);
+  --search-match-foreground: oklch(0.18 0.05 85);
+  --search-match-active: oklch(0.78 0.19 55);
+  --search-match-active-foreground: oklch(0.15 0 0);
+}
+
+.dark {
+  --background: #141418;
+  --foreground: #fafafa;
+  --card: var(--surface-2);
+  --card-foreground: #fafafa;
+  --popover: var(--surface-3);
+  --popover-foreground: #fafafa;
+  --primary: #e4e4e7;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --border: rgba(255, 255, 255, 0.15);
+  --input: rgba(255, 255, 255, 0.20);
+  --ring: #52525b;
+  --chart-1: #93c5fd;
+  --chart-2: #6ee7b7;
+  --chart-3: #fcd34d;
+  --chart-4: #c4b5fd;
+  --chart-5: #f87171;
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #93c5fd;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #27272a;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.10);
+  --sidebar-ring: #52525b;
+  --surface-0: #09090b;
+  --surface-1: #141418;
+  --surface-2: #18181b;
+  --surface-3: #1e1e22;
+  --tab-active: #3f3f46;
+  --modal: #09090b;
+  --modal-border: rgba(255, 255, 255, 0.25);
+  --search-match: oklch(0.48 0.13 85);
+  --search-match-foreground: oklch(0.96 0 0);
+  --search-match-active: oklch(0.68 0.2 55);
+  --search-match-active-foreground: oklch(0.15 0 0);
+}
+
+[data-sonner-toaster][dir='ltr'] {
+  --toast-close-button-start: unset !important;
+  --toast-close-button-end: 0 !important;
+  --toast-close-button-transform: translate(35%, -35%) !important;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body {
+    @apply h-full overflow-hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--color-primary) 40%, transparent);
+    color: inherit;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-accent) 0%,
+    var(--color-accent) 40%,
+    var(--color-muted) 50%,
+    var(--color-accent) 60%,
+    var(--color-accent) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes loop-glow-active {
+  0%, 100% { box-shadow: 0 4px 20px 0 rgba(249,115,22,0.08), 0 0 15px 2px rgba(249,115,22,0.08); }
+  50% { box-shadow: 0 0 35px 5px rgba(249,115,22,0.6), 0 0 80px 10px rgba(249,115,22,0.25); }
+}
+
+/* ==========================================================================
+   Markdown document (.mk-doc)
+   Single source of truth for markdown typography across all renderers.
+   Used by Milkdown (editable) and react-markdown (read-only previews).
+
+   Architecture:
+     .mk-doc              — root: tokens, theme, layout frame, font cascade
+       .mk-doc-scroll     — scroll layer (overflow-y: auto, no padding)
+         .milkdown >      — Milkdown's wrapper (editable path)
+           .ProseMirror   — editable content (owns padding + max-width)
+         .mk-doc-body     — read-only content wrapper (read-only path)
+
+   Typography rules target .mk-doc <tag> (cascade — matches headings/paras in
+   both renderers). Only layout rules alias the content element via
+   .mk-doc .mk-doc-body, .mk-doc .ProseMirror — this is the one coupling to
+   Milkdown's class name.
+
+   Variants via [data-variant]. Theme colors via --mk-* inline CSS vars.
+   ========================================================================== */
+
+/* ---- Page variant (default) — Notion-like page feel ---- */
+.mk-doc {
+  /* Layout */
+  --mk-pad-x: 2rem;
+  --mk-pad-top: 3rem;
+  --mk-pad-bottom: 3rem;
+  /* Includes horizontal padding (2 × --mk-pad-x = 4rem), so the inner text
+     column stays ~720px wide. */
+  --mk-content-max: calc(720px + 4rem);
+
+  /* Body */
+  --mk-body-size: 16px;
+  --mk-body-line: 1.6;
+
+  /* Headings */
+  --mk-h1-size: 2.25em;
+  --mk-h1-weight: 700;
+  --mk-h1-line: 1.2;
+  --mk-h1-track: -0.02em;
+  --mk-h1-mt: 1.4em;
+  --mk-h1-mb: 0.25em;
+
+  --mk-h2-size: 1.625em;
+  --mk-h2-weight: 600;
+  --mk-h2-line: 1.3;
+  --mk-h2-track: -0.01em;
+  --mk-h2-mt: 1.6em;
+  --mk-h2-mb: 0.2em;
+
+  --mk-h3-size: 1.25em;
+  --mk-h3-weight: 600;
+  --mk-h3-line: 1.35;
+  --mk-h3-mt: 1.4em;
+  --mk-h3-mb: 0.15em;
+
+  --mk-h-stacked-mt: 0.4em;
+
+  /* Paragraph */
+  --mk-p-mt: 1.25em;
+  --mk-p-mb: 1.25em;
+
+  /* Lists */
+  --mk-list-indent: 1.75em;
+  --mk-li-mt: 0.1em;
+  --mk-li-mb: 0.1em;
+  --mk-list-mt: 0.3em;
+  --mk-list-mb: 0.3em;
+
+  /* Blocks */
+  --mk-pre-mt: 0.75em;
+  --mk-pre-mb: 0.75em;
+  --mk-quote-mt: 0.8em;
+  --mk-quote-mb: 0.8em;
+  --mk-hr-mt: 1.6em;
+  --mk-hr-mb: 1.6em;
+
+  /* Colors (theme-overridable via inline style) */
+  --mk-bg: transparent;
+  --mk-fg: inherit;
+  --mk-heading: inherit;
+  --mk-link: var(--color-primary);
+  --mk-code-fg: var(--color-primary);
+  --mk-code-bg: var(--color-muted);
+  --mk-quote-border: var(--color-border);
+  --mk-hr-color: var(--color-border);
+
+  /* Frame */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+  font-size: var(--mk-body-size);
+  line-height: var(--mk-body-line);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---- Readability — Y axis only (text density, vertical padding, vertical margins) ---- */
+.mk-doc[data-readability="compact"] {
+  --mk-pad-top: 0.5rem;
+  --mk-pad-bottom: 0.5rem;
+
+  --mk-body-size: 14px;
+  --mk-body-line: 1.5;
+
+  --mk-h1-size: 1.5em;  --mk-h1-mt: 0.5em;  --mk-h1-mb: 0.125em;
+  --mk-h2-size: 1.25em; --mk-h2-mt: 0.4em;  --mk-h2-mb: 0.125em;
+  --mk-h3-size: 1.1em;  --mk-h3-mt: 0.35em; --mk-h3-mb: 0.125em;
+
+  --mk-h-stacked-mt: 0.2em;
+
+  --mk-p-mt: 0.7em;
+  --mk-p-mb: 0.7em;
+  --mk-list-mt: 0.125em;
+  --mk-list-mb: 0.125em;
+  --mk-li-mt: 0;
+  --mk-li-mb: 0;
+}
+
+/* ---- Width — X axis only (column max-width, horizontal padding) ---- */
+/* narrow is the .mk-doc default — 720px column with 2rem pad-x */
+.mk-doc[data-width="wide"] {
+  --mk-pad-x: var(--mk-pad-top);
+  --mk-content-max: none;
+}
+
+/* ---- Variant: inline (constrained sidebar panels — tight chrome, page type) ---- */
+.mk-doc[data-variant="inline"] {
+  --mk-pad-x: 1rem;
+  --mk-pad-top: 1rem;
+  --mk-pad-bottom: 0.75rem;
+  --mk-content-max: none;
+}
+
+/* ---- Modifiers ---- */
+.mk-doc[data-font="mono"] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.mk-doc[data-themed="true"] {
+  border-radius: 0.375rem;
+}
+
+/* ---- Scroll layer: the overflow:auto container. Lives inside .mk-doc,
+   below any chrome like the editor toolbar. Has no padding — padding lives
+   on the content element so it's part of scroll content (avoids the
+   Chromium padding-bottom bug on scroll containers). */
+.mk-doc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Milkdown internal wrapper: fill the scroll layer ---- */
+.mk-doc .milkdown {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---- Content element (renderer alias): centered column, owns padding ----
+   .ProseMirror   = Milkdown's editable element (class owned by Milkdown).
+   .mk-doc-body   = read-only react-markdown wrapper (our class).
+   Padding on this element so clicks anywhere in the padding focus the editor,
+   and so the padding is part of the scroll content rather than the scroll
+   container itself (Chromium bug). */
+.mk-doc .mk-doc-body,
+.mk-doc .ProseMirror {
+  flex: 1;
+  outline: none;
+  max-width: var(--mk-content-max);
+  width: 100%;
+  margin-inline: auto;
+  padding: var(--mk-pad-top) var(--mk-pad-x) var(--mk-pad-bottom);
+  box-sizing: border-box;
+}
+
+/* First block hugs top padding — no heading/paragraph double-gap. */
+.mk-doc .mk-doc-body > *:first-child,
+.mk-doc .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+
+/* ==========================================================================
+   Typography — cascades from .mk-doc to both renderers naturally.
+   No content-class coupling for text rules; only structural layout rules
+   above need the .mk-doc-body/.ProseMirror alias.
+   ========================================================================== */
+
+/* ---- Paragraph ---- */
+.mk-doc p {
+  margin-top: var(--mk-p-mt);
+  margin-bottom: var(--mk-p-mb);
+}
+
+/* ---- Headings ---- */
+.mk-doc h1 {
+  font-size: var(--mk-h1-size);
+  font-weight: var(--mk-h1-weight);
+  line-height: var(--mk-h1-line);
+  letter-spacing: var(--mk-h1-track);
+  margin-top: var(--mk-h1-mt);
+  margin-bottom: var(--mk-h1-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h2 {
+  font-size: var(--mk-h2-size);
+  font-weight: var(--mk-h2-weight);
+  line-height: var(--mk-h2-line);
+  letter-spacing: var(--mk-h2-track);
+  margin-top: var(--mk-h2-mt);
+  margin-bottom: var(--mk-h2-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h3 {
+  font-size: var(--mk-h3-size);
+  font-weight: var(--mk-h3-weight);
+  line-height: var(--mk-h3-line);
+  margin-top: var(--mk-h3-mt);
+  margin-bottom: var(--mk-h3-mb);
+  color: var(--mk-heading);
+}
+.mk-doc h4,
+.mk-doc h5,
+.mk-doc h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 1.2em;
+  margin-bottom: 0.1em;
+  color: var(--mk-heading);
+}
+
+/* Adjacent headings collapse to --mk-h-stacked-mt (Notion title/subtitle). */
+.mk-doc h1 + h2,
+.mk-doc h1 + h3,
+.mk-doc h2 + h3,
+.mk-doc h2 + h4,
+.mk-doc h3 + h4 {
+  margin-top: var(--mk-h-stacked-mt);
+}
+
+/* ---- Lists ---- */
+.mk-doc ul,
+.mk-doc ol {
+  margin-top: var(--mk-list-mt);
+  margin-bottom: var(--mk-list-mb);
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc ul {
+  list-style: disc;
+}
+.mk-doc ol {
+  list-style: none;
+  counter-reset: ol-counter;
+}
+.mk-doc ol > li {
+  counter-increment: ol-counter;
+  position: relative;
+}
+.mk-doc ol > li::before {
+  content: counter(ol-counter) ".";
+  position: absolute;
+  left: -1.6em;
+  width: 1.4em;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mk-doc li {
+  margin-top: var(--mk-li-mt);
+  margin-bottom: var(--mk-li-mb);
+}
+.mk-doc li > p {
+  margin: 0;
+}
+
+/* ---- Inline marks ---- */
+.mk-doc strong {
+  font-weight: 700;
+  color: var(--mk-heading);
+}
+.mk-doc em {
+  font-style: italic;
+}
+.mk-doc a {
+  color: var(--mk-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mk-doc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--mk-code-fg);
+  background: var(--mk-code-bg);
+  border-radius: 3px;
+  padding: 2px 5px;
+}
+
+/* ---- Code blocks ---- */
+.mk-doc pre {
+  background: var(--mk-code-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.875em 1em;
+  margin-top: var(--mk-pre-mt);
+  margin-bottom: var(--mk-pre-mb);
+  overflow-x: auto;
+  font-size: 0.875em;
+}
+.mk-doc pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: var(--mk-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.6;
+}
+
+/* ---- Mermaid code blocks (rich-text editor only) ---- */
+.mk-doc .mk-mermaid {
+  position: relative;
+  margin-top: var(--mk-pre-mt);
+  margin-bottom: var(--mk-pre-mb);
+}
+.mk-doc .mk-mermaid-toolbar {
+  display: inline-flex;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.mk-doc .mk-mermaid:hover .mk-mermaid-toolbar,
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-toolbar {
+  opacity: 1;
+}
+.mk-doc .mk-mermaid-seg {
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  color: var(--color-foreground);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.mk-doc .mk-mermaid-seg + .mk-mermaid-seg {
+  border-left: 1px solid var(--color-border);
+}
+.mk-doc .mk-mermaid-seg[data-active="true"] {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+.mk-doc .mk-mermaid-seg:hover:not([data-active="true"]) {
+  background: var(--color-muted);
+}
+.mk-doc .mk-mermaid-preview {
+  margin: 0;
+}
+.mk-doc .mk-mermaid-preview > div {
+  margin: 0;
+}
+.mk-doc .mk-mermaid[data-mode="preview"] .mk-mermaid-source {
+  position: absolute;
+  left: -99999px;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-preview {
+  display: none;
+}
+.mk-doc .mk-mermaid-source {
+  margin: 0;
+}
+
+/* ---- Blockquote, hr ---- */
+.mk-doc blockquote {
+  margin-top: var(--mk-quote-mt);
+  margin-bottom: var(--mk-quote-mb);
+  padding-left: 1em;
+  border-left: 3px solid var(--mk-quote-border);
+  color: var(--mk-fg);
+  opacity: 0.85;
+}
+.mk-doc hr {
+  border: none;
+  border-top: 1px solid var(--mk-hr-color);
+  margin-top: var(--mk-hr-mt);
+  margin-bottom: var(--mk-hr-mb);
+}
+
+/* ---- Tables ---- */
+.mk-doc table {
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+.mk-doc[data-readability="compact"] table {
+  width: auto;
+}
+.mk-doc th,
+.mk-doc td {
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  padding: 0.45rem 0.5rem;
+}
+.mk-doc th p,
+.mk-doc td p {
+  margin: 0;
+}
+.mk-doc th:last-child,
+.mk-doc td:last-child {
+  border-right: none;
+}
+.mk-doc tr:last-child td {
+  border-bottom: none;
+}
+
+/* ==========================================================================
+   Renderer-specific content markup (task lists + editor-only pseudos)
+   ========================================================================== */
+
+/* ---- Milkdown: GFM task list ([data-item-type="task"]) ---- */
+.mk-doc .ProseMirror ul:has(> li[data-item-type="task"]) {
+  list-style: none;
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc .ProseMirror li[data-item-type="task"] {
+  position: relative;
+  list-style: none;
+}
+.mk-doc .ProseMirror li[data-item-type="task"] > input[type="checkbox"] {
+  position: absolute;
+  left: -1.6em;
+  top: 0.3em;
+  cursor: pointer;
+  accent-color: var(--mk-link);
+}
+.mk-doc .ProseMirror li[data-item-type="task"] > span > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* ---- Milkdown: empty-editor placeholder pseudo ---- */
+.mk-doc .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-muted-foreground);
+  pointer-events: none;
+  height: 0;
+}
+
+/* ---- react-markdown: remarkGfm task list (.task-list-item) ---- */
+.mk-doc .mk-doc-body ul.contains-task-list {
+  list-style: none;
+  padding-inline-start: var(--mk-list-indent);
+}
+.mk-doc .mk-doc-body li.task-list-item {
+  position: relative;
+  list-style: none;
+}
+.mk-doc .mk-doc-body li.task-list-item input[type="checkbox"] {
+  margin-right: 0.5em;
+  cursor: default;
+  accent-color: var(--mk-link);
+}
+
+/* ---- Asset link chips — inline pills for [text](asset:id) links ---- */
+.mk-doc .asset-link-chip {
+  display: inline;
+  background: color-mix(in srgb, var(--mk-link) 15%, transparent);
+  color: var(--mk-link);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.875em;
+  cursor: pointer;
+  text-decoration: none;
+}
+.mk-doc .asset-link-chip:hover {
+  background: color-mix(in srgb, var(--mk-link) 25%, transparent);
+}
+.mk-doc .asset-link-chip a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ---- Checked task highlight modifier (Milkdown only) ---- */
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > span,
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > div,
+.mk-doc[data-checked-highlight="true"] .ProseMirror li[data-item-type="task"][data-checked="true"] > p {
+  color: #4ade80;
+  text-decoration: line-through;
+  text-decoration-color: #4ade8080;
+}
+
+/* Prevent Tailwind .visible/.invisible class names from colliding with xterm's
+   identically-named scrollbar classes. Tailwind's .visible adds
+   `visibility: visible` which overrides a parent's `visibility: hidden`,
+   making xterm scrollbars punch through hidden tabs. Force inheritance so
+   scrollbar visibility always follows the container. */
+.xterm .xterm-scrollable-element > .visible,
+.xterm .xterm-scrollable-element > .invisible {
+  visibility: inherit;
+}
+
+/* Hide scrollbar but keep scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thin styled scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* ==========================================================================
+   Asset in-file search highlighting
+   Shared classes used by SearchableCodeView (CodeMirror decorations),
+   the Milkdown preview plugin, and the ReactMarkdown preview renderer.
+   Colors come from theme tokens so they follow the active theme.
+   ========================================================================== */
+.cm-artifact-search-match,
+.artifact-search-match {
+  background: var(--color-search-match);
+  color: var(--color-search-match-foreground);
+  border-radius: 2px;
+}
+.cm-artifact-search-match-active,
+.artifact-search-match-active {
+  background: var(--color-search-match-active) !important;
+  color: var(--color-search-match-active-foreground) !important;
+  outline: 1px solid var(--color-search-match-active);
+}
+
+/* Diff/code syntax highlighting (lezer classHighlighter) — light defaults, .dark overrides */
+.tok-keyword,
+.tok-controlKeyword,
+.tok-moduleKeyword,
+.tok-operatorKeyword { color: #a626a4; }
+.tok-string, .tok-string2,
+.tok-character,
+.tok-attributeValue { color: #50a14f; }
+.tok-comment, .tok-lineComment, .tok-blockComment, .tok-docComment { color: #a0a1a7; font-style: italic; }
+.tok-number, .tok-integer, .tok-float,
+.tok-bool, .tok-null, .tok-atom,
+.tok-attributeName,
+.tok-regexp { color: #986801; }
+.tok-typeName, .tok-className { color: #c18401; }
+.tok-propertyName,
+.tok-tagName,
+.tok-heading { color: #e45649; }
+.tok-variableName, .tok-local { color: #383a42; }
+.tok-function.tok-variableName,
+.tok-function.tok-propertyName,
+.tok-definition.tok-variableName,
+.tok-definition.tok-propertyName,
+.tok-link, .tok-url { color: #4078f2; }
+.tok-operator, .tok-derefOperator, .tok-arithmeticOperator, .tok-logicOperator, .tok-bitwiseOperator, .tok-compareOperator, .tok-updateOperator, .tok-definitionOperator,
+.tok-meta, .tok-processingInstruction, .tok-annotation,
+.tok-escape, .tok-special.tok-string { color: #0184bc; }
+.tok-punctuation, .tok-bracket, .tok-paren, .tok-brace, .tok-squareBracket, .tok-angleBracket, .tok-separator { color: #383a42; }
+.tok-link, .tok-url { text-decoration: underline; }
+.tok-emphasis { font-style: italic; }
+.tok-strong, .tok-heading { font-weight: 600; }
+.tok-invalid { color: #e45649; text-decoration: underline wavy; }
+
+.dark .tok-keyword,
+.dark .tok-controlKeyword,
+.dark .tok-moduleKeyword,
+.dark .tok-operatorKeyword { color: #c678dd; }
+.dark .tok-string, .dark .tok-string2,
+.dark .tok-character,
+.dark .tok-attributeValue { color: #98c379; }
+.dark .tok-comment, .dark .tok-lineComment, .dark .tok-blockComment, .dark .tok-docComment { color: #7f848e; }
+.dark .tok-number, .dark .tok-integer, .dark .tok-float,
+.dark .tok-bool, .dark .tok-null, .dark .tok-atom,
+.dark .tok-attributeName,
+.dark .tok-regexp { color: #d19a66; }
+.dark .tok-typeName, .dark .tok-className { color: #e5c07b; }
+.dark .tok-propertyName,
+.dark .tok-tagName,
+.dark .tok-heading { color: #e06c75; }
+.dark .tok-variableName, .dark .tok-local { color: #abb2bf; }
+.dark .tok-function.tok-variableName,
+.dark .tok-function.tok-propertyName,
+.dark .tok-definition.tok-variableName,
+.dark .tok-definition.tok-propertyName,
+.dark .tok-link, .dark .tok-url { color: #61afef; }
+.dark .tok-operator, .dark .tok-derefOperator, .dark .tok-arithmeticOperator, .dark .tok-logicOperator, .dark .tok-bitwiseOperator, .dark .tok-compareOperator, .dark .tok-updateOperator, .dark .tok-definitionOperator,
+.dark .tok-meta, .dark .tok-processingInstruction, .dark .tok-annotation,
+.dark .tok-escape, .dark .tok-special.tok-string { color: #56b6c2; }
+.dark .tok-punctuation, .dark .tok-bracket, .dark .tok-paren, .dark .tok-brace, .dark .tok-squareBracket, .dark .tok-angleBracket, .dark .tok-separator { color: #abb2bf; }
+.dark .tok-invalid { color: #e06c75; }

@@ -31,8 +31,11 @@ import { createServer, type Server } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
-import { restAuthAction, verifyRestBearer, withRestAuth } from './rest-auth.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
+import { restAuthAction, verifyRestBearer, withRestAuth, parseCookieHeader } from './rest-auth.js'
+import { mintWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 
 let passed = 0
 let failed = 0
@@ -71,7 +74,7 @@ function remoteWan(url: string): string {
 interface GateHarness {
   get(
     path: string,
-    authorization?: string
+    opts?: { authorization?: string; cookie?: string }
   ): Promise<{ status: number; body: string; reached: boolean }>
   close(): Promise<void>
 }
@@ -85,12 +88,14 @@ interface GateHarness {
 async function mountGate(opts: {
   required: boolean
   auth: HubAuth | null
+  db?: SlayzoneDb | null
   forceOffBox: boolean
 }): Promise<GateHarness> {
   let reached = false
   const gated = withRestAuth({
     getHubAuthRequired: () => opts.required,
     getHubAuth: () => opts.auth,
+    getDb: () => opts.db ?? null,
     next: (_req, res) => {
       reached = true
       res.writeHead(200, { 'content-type': 'text/plain' })
@@ -111,10 +116,13 @@ async function mountGate(opts: {
   if (!addr || typeof addr === 'string') throw new Error('bad address')
   const base = `http://127.0.0.1:${addr.port}`
   return {
-    async get(path, authorization) {
+    async get(path, callOpts) {
       reached = false
+      const headers: Record<string, string> = {}
+      if (callOpts?.authorization) headers.authorization = callOpts.authorization
+      if (callOpts?.cookie) headers.cookie = callOpts.cookie
       const res = await fetch(`${base}${path}`, {
-        headers: authorization ? { authorization } : undefined
+        headers: Object.keys(headers).length > 0 ? headers : undefined
       })
       const body = await res.text()
       return { status: res.status, body, reached }
@@ -183,17 +191,54 @@ async function main(): Promise<void> {
 
   // ── auth ON — the exemptions, and WHY each one must exist ─────────────────
   await test('better-auth own routes stay open (else no token can ever be obtained)', () => {
-    for (const url of [
-      '/api/auth/sign-in/email',
-      // Still GATE-exempt, and that is fine: better-auth itself now 400s this route
-      // (`emailAndPassword.disableSignUp` in hub-auth's auth.ts), so an open gate no
-      // longer means an open hub. Accounts come from the loopback-only
-      // /api/hub/users route below. The BAD_REQUEST is asserted in hub-auth.test.ts.
-      '/api/auth/sign-up/email',
-      '/api/auth/get-session',
-      '/api/auth/sign-out'
-    ]) {
+    for (const url of ['/api/auth/sign-in/email', '/api/auth/get-session', '/api/auth/sign-out']) {
       assertEq(remoteWan(url), 'allow', `bootstrap route open: ${url}`)
+    }
+  })
+
+  await test("web-login stays open too — OURS, not better-auth's, same bootstrap need", () => {
+    assertEq(remoteWan('/api/auth/web-login'), 'allow', 'web-login exempt')
+    // Prefix-confusion around it, same rigor as the other exact entries.
+    assertEq(remoteWan('/api/auth/web-login/extra'), 'verify', 'nested path is not exempt')
+    assertEq(
+      remoteWan('/api/auth/web-login?x=1'),
+      'allow',
+      'query string does not defeat the match'
+    )
+  })
+
+  /**
+   * The exemption is an EXACT ALLOWLIST, not the `/api/auth/` prefix it used to be.
+   *
+   * A prefix exemption is fail-OPEN by construction: every route better-auth or
+   * any of its plugins mounts under it — present and future — was reachable with
+   * no bearer. That is not theoretical. The `apiKey()` plugin mounts
+   * `/api/auth/api-key/create`, which accepts a session plus arbitrary metadata
+   * and was the computer-impersonation escalation (regression-tested in
+   * hub-auth.test.ts). The `organization()` and `jwt()` plugins mount member,
+   * invite, token and JWKS routes that nothing in SlayZone reads.
+   *
+   * `sign-up/email` is deliberately NOT on the list either. `disableSignUp`
+   * already refuses it at the source, so exempting it bought nothing and only
+   * turned a 401 into a 400 for an anonymous caller.
+   */
+  await test('every OTHER /api/auth route is gated (allowlist, not prefix)', () => {
+    for (const url of [
+      '/api/auth/api-key/create',
+      '/api/auth/api-key/list',
+      '/api/auth/sign-up/email',
+      '/api/auth/organization/create',
+      '/api/auth/token',
+      '/api/auth/jwks',
+      // Ours, not better-auth's — must never let an off-box caller inject an
+      // OAuth callback code into the authEvents bus.
+      '/api/auth/deep-link',
+      // Prefix-confusion around the allowlisted entries.
+      '/api/auth/sign-in/email/extra',
+      '/api/auth/get-session-x',
+      '/api/auth'
+    ]) {
+      assertEq(remoteWan(url), 'verify', `non-bootstrap /api/auth route gated: ${url}`)
     }
   })
 
@@ -282,6 +327,18 @@ async function main(): Promise<void> {
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-rest-auth-test-secret-at-least-32-chars-long'
   })
+  // A real SlayzoneDb (migrated) for the szw_ web-session path — verifyRestBearer
+  // now resolves TWO credential classes, and this is the one that isn't better-auth.
+  const harness = await createTestHarness()
+  const db: SlayzoneDb = harness.slayDb
+
+  /** `verifyRestBearer` now returns a principal, not a boolean. This mirrors the
+   *  OLD `true`/`false` shape for the tests below that only ever cared "is this
+   *  a valid FULL session" — i.e. everything before the szw_ tests further down. */
+  async function verifiesAsFull(headers: Parameters<typeof verifyRestBearer>[2]): Promise<boolean> {
+    const principal = await verifyRestBearer(auth, db, headers)
+    return principal !== null && principal.scopes.includes('full')
+  }
 
   try {
     // Public signup is closed (`disableSignUp`), so the fixture account comes from
@@ -294,28 +351,31 @@ async function main(): Promise<void> {
     const validToken = signIn.token
     assert(typeof validToken === 'string' && validToken.length > 0, 'got a real session token')
 
-    await test('a real session token in Authorization: Bearer verifies', async () => {
-      const ok = await verifyRestBearer(auth, { authorization: `Bearer ${validToken}` })
-      assertEq(ok, true, 'valid bearer → true')
+    await test('a real session token in Authorization: Bearer verifies as full', async () => {
+      assertEq(
+        await verifiesAsFull({ authorization: `Bearer ${validToken}` }),
+        true,
+        'valid bearer → full'
+      )
     })
 
     await test('the scheme is case-insensitive (bearer / BEARER)', async () => {
-      assertEq(await verifyRestBearer(auth, { authorization: `bearer ${validToken}` }), true, 'lc')
-      assertEq(await verifyRestBearer(auth, { authorization: `BEARER ${validToken}` }), true, 'uc')
+      assertEq(await verifiesAsFull({ authorization: `bearer ${validToken}` }), true, 'lc')
+      assertEq(await verifiesAsFull({ authorization: `BEARER ${validToken}` }), true, 'uc')
     })
 
     await test('a bogus / blank / absent / wrong-scheme header does NOT verify', async () => {
-      assertEq(await verifyRestBearer(auth, { authorization: 'Bearer nope' }), false, 'bogus')
-      assertEq(await verifyRestBearer(auth, { authorization: 'Bearer ' }), false, 'blank token')
-      assertEq(await verifyRestBearer(auth, { authorization: '' }), false, 'empty header')
-      assertEq(await verifyRestBearer(auth, {}), false, 'absent header')
+      assertEq(await verifiesAsFull({ authorization: 'Bearer nope' }), false, 'bogus')
+      assertEq(await verifiesAsFull({ authorization: 'Bearer ' }), false, 'blank token')
+      assertEq(await verifiesAsFull({ authorization: '' }), false, 'empty header')
+      assertEq(await verifiesAsFull({}), false, 'absent header')
       assertEq(
-        await verifyRestBearer(auth, { authorization: `Basic ${validToken}` }),
+        await verifiesAsFull({ authorization: `Basic ${validToken}` }),
         false,
         'wrong scheme'
       )
       assertEq(
-        await verifyRestBearer(auth, { authorization: validToken }),
+        await verifiesAsFull({ authorization: validToken }),
         false,
         'raw token without a scheme'
       )
@@ -325,7 +385,7 @@ async function main(): Promise<void> {
       // node collapses most dup headers, but authorization can arrive as an array;
       // an ambiguous request must fail closed rather than pick one.
       assertEq(
-        await verifyRestBearer(auth, {
+        await verifiesAsFull({
           authorization: [`Bearer ${validToken}`, 'Bearer other'] as unknown as string
         }),
         false,
@@ -334,26 +394,91 @@ async function main(): Promise<void> {
     })
 
     await test('a null hubAuth does NOT verify (fail-closed, no crash)', async () => {
-      assertEq(
-        await verifyRestBearer(null, { authorization: `Bearer ${validToken}` }),
-        false,
-        'no auth instance → false'
-      )
+      const principal = await verifyRestBearer(null, db, { authorization: `Bearer ${validToken}` })
+      assertEq(principal, null, 'no auth instance → null')
     })
 
     await test('end-to-end: WAN request to /api/tasks → verify → real token admits it', async () => {
       const action = remoteWan('/api/tasks')
       assertEq(action, 'verify', 'gate demands verification')
       assertEq(
-        await verifyRestBearer(auth, { authorization: `Bearer ${validToken}` }),
+        await verifiesAsFull({ authorization: `Bearer ${validToken}` }),
         true,
         'the CLI bearer (SLAYZONE_HUB_TOKEN / cli-hub-target.json) is now honoured'
       )
       assertEq(
-        await verifyRestBearer(auth, { authorization: 'Bearer forged' }),
+        await verifiesAsFull({ authorization: 'Bearer forged' }),
         false,
         'a forged bearer is rejected → 401'
       )
+    })
+
+    // ── the szw_ scoped-session path — bearer AND cookie ──────────────────────
+    const scopedSession = await mintWebSession(db, {
+      userId: created.id,
+      scopes: ['read', 'tasks']
+    })
+
+    await test('a szw_ bearer resolves to its OWN scopes, never full', async () => {
+      const principal = await verifyRestBearer(auth, db, {
+        authorization: `Bearer ${scopedSession.token}`
+      })
+      assert(principal !== null, 'scoped session resolves')
+      assertEq(principal!.scopes.join(','), 'read,tasks', 'carries its minted scopes')
+      assert(!principal!.scopes.includes('full'), 'never full')
+    })
+
+    await test('a szw_ token in the COOKIE also resolves (bearer absent)', async () => {
+      const principal = await verifyRestBearer(
+        auth,
+        db,
+        {},
+        { [WEB_SESSION_COOKIE_NAME]: scopedSession.token }
+      )
+      assert(principal !== null, 'cookie-carried scoped session resolves')
+      assertEq(principal!.scopes.join(','), 'read,tasks', 'same scopes via cookie')
+    })
+
+    await test('a szw_ token is checked BEFORE the better-auth path — never mistried', async () => {
+      // If a szw_ token were passed to verifySession instead, it would just fail
+      // (401) rather than resolve to its real scopes — this proves the PREFIX
+      // branch, not a fallback, is what resolves it.
+      const principal = await verifyRestBearer(auth, db, {
+        authorization: `Bearer ${scopedSession.token}`
+      })
+      assert(principal !== null, 'must resolve via the web-session branch, not fail through')
+    })
+
+    await test('a real better-auth bearer in the COOKIE does NOT verify (cookie-blind for full)', async () => {
+      // The one asymmetry the design requires: cookies are only ever consulted
+      // for the scope-limited credential class, never for a full session — a
+      // forged cross-site request carrying an ambient cookie must never be able
+      // to reach `full`.
+      const principal = await verifyRestBearer(
+        auth,
+        db,
+        {},
+        { [WEB_SESSION_COOKIE_NAME]: validToken }
+      )
+      assertEq(principal, null, 'a non-szw_ value in the cookie slot resolves to nothing')
+    })
+
+    await test('an unknown / expired / revoked szw_ token resolves to null, never throws', async () => {
+      assertEq(
+        await verifyRestBearer(auth, db, { authorization: 'Bearer szw_nonexistent' }),
+        null,
+        'unknown szw_ token'
+      )
+    })
+
+    await test('parseCookieHeader parses name=value pairs, ignores malformed entries', () => {
+      const parsed = parseCookieHeader({
+        cookie: `${WEB_SESSION_COOKIE_NAME}=abc123; other=xyz; malformed; =blank-name`
+      })
+      assertEq(parsed[WEB_SESSION_COOKIE_NAME], 'abc123', 'session cookie parsed')
+      assertEq(parsed.other, 'xyz', 'sibling cookie parsed')
+      assertEq(Object.keys(parsed).length, 2, 'malformed/blank-name entries dropped')
+      assertEq(Object.keys(parseCookieHeader({})).length, 0, 'no Cookie header → empty map')
     })
 
     // ── withRestAuth over a REAL listener ───────────────────────────────────
@@ -369,11 +494,11 @@ async function main(): Promise<void> {
         assertEq(anon.reached, false, 'the inner handler never ran')
         assert(anon.body.includes('Unauthorized'), 'json error body')
 
-        const forged = await h.get('/api/tasks', 'Bearer forged')
+        const forged = await h.get('/api/tasks', { authorization: 'Bearer forged' })
         assertEq(forged.status, 401, 'forged bearer → 401')
         assertEq(forged.reached, false, 'the inner handler never ran')
 
-        const good = await h.get('/api/tasks', `Bearer ${validToken}`)
+        const good = await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })
         assertEq(good.status, 200, 'valid bearer → 200')
         assertEq(good.reached, true, 'the inner handler ran')
       } finally {
@@ -384,7 +509,12 @@ async function main(): Promise<void> {
     await test('withRestAuth: exempt + ungated paths pass through with no bearer', async () => {
       const h = await mountGate({ required: true, auth, forceOffBox: true })
       try {
-        for (const path of ['/api/auth/sign-in/email', '/api/computers/join-token', '/whatever']) {
+        for (const path of [
+          '/api/auth/sign-in/email',
+          '/api/auth/web-login',
+          '/api/computers/join-token',
+          '/whatever'
+        ]) {
           const res = await h.get(path)
           assertEq(res.status, 200, `${path} passes through`)
           assertEq(res.reached, true, `${path} reached the inner handler`)
@@ -430,7 +560,7 @@ async function main(): Promise<void> {
       try {
         assertEq((await h.get('/api/tasks')).status, 401, 'no bearer is refused')
         assertEq(
-          (await h.get('/api/tasks', `Bearer ${validToken}`)).status,
+          (await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })).status,
           200,
           'a valid bearer is accepted'
         )
@@ -443,14 +573,48 @@ async function main(): Promise<void> {
     await test('withRestAuth: a null hubAuth 401s a guarded route (fail-closed)', async () => {
       const h = await mountGate({ required: true, auth: null, forceOffBox: true })
       try {
-        const res = await h.get('/api/tasks', `Bearer ${validToken}`)
+        const res = await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })
         assertEq(res.status, 401, 'no auth instance → 401, never open')
         assertEq(res.reached, false, 'inner handler never ran')
       } finally {
         await h.close()
       }
     })
+
+    await test('withRestAuth: a scoped web session gets 403 on the REST surface, never the inner handler', async () => {
+      // Phase 1 gives a scoped session NO REST access at all — the granular
+      // per-route scope map that would make a narrower grant safe does not
+      // exist for `/api/*` the way SCOPE_POLICY does for `/trpc`. A real,
+      // valid, unexpired scoped session must still be refused here — this is
+      // NOT the same failure as "no credential" (401), so both are asserted.
+      const h = await mountGate({ required: true, auth, db, forceOffBox: true })
+      try {
+        const viaBearer = await h.get('/api/tasks', {
+          authorization: `Bearer ${scopedSession.token}`
+        })
+        assertEq(
+          viaBearer.status,
+          403,
+          'scoped bearer → 403, not 401 (real credential, wrong class)'
+        )
+        assertEq(viaBearer.reached, false, 'inner handler never ran for a scoped session')
+
+        const viaCookie = await h.get('/api/tasks', {
+          cookie: `${WEB_SESSION_COOKIE_NAME}=${scopedSession.token}`
+        })
+        assertEq(viaCookie.status, 403, 'same result via cookie')
+        assertEq(viaCookie.reached, false, 'inner handler never ran')
+
+        // A full session on the SAME listener still gets through — the denial
+        // is about the principal's scope class, not a config toggle.
+        const viaFull = await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })
+        assertEq(viaFull.status, 200, 'a full session is unaffected')
+      } finally {
+        await h.close()
+      }
+    })
   } finally {
+    await harness.cleanup()
     rmSync(tmpDir, { recursive: true, force: true })
   }
 

@@ -1,16 +1,37 @@
-// cap-shell-2 — db.* shim. REAL reads via ProjectsHost + TasklistHost;
-// writes mirror the minimum set cap-02 exposed. Fields beyond the mojom
-// surface (path, columns_config, ccs_profile, …) default to sensible nulls
-// / zeros so the renderer's TypeScript shape is satisfied without lying —
-// consumers that rely on those fields will see empty-state. cap-shell-7
-// widens the mojom or switches to a richer GetBoardData composite.
+// cap-shell-2 — db.* shim. REAL reads/writes for four operations go through
+// the priority Mojo hosts (ProjectsHost.deleteProject, TasklistHost's
+// updateTaskStatus/updateTask/deleteTask, TagsHost.getTags) — those are
+// genuinely wired and stay untouched below.
+//
+// EVERYTHING ELSE used to route through `jsonRpcCall`, which forwards to the
+// hub's Unix-socket sidecar dispatch (`packages/apps/hub/src/sidecar-socket.ts`).
+// That dispatch is a hardcoded 3-method switch (`sidecar.hello`/`sidecar.ping`/
+// `auth:deep-link`) — every other method, including every one this file used
+// to call (`projects:get-snapshot`, `tasklist:list-all`, `tasks:create`,
+// `tasks:update-meta`, `tasks:archive*`, …), unconditionally rejects with
+// -32601. So project/task listing, creation, and most updates were DEAD CODE:
+// every call site either threw directly or threw via a tail call into
+// `listTasks`/`listProjects`, which always did. Confirmed by tracing the full
+// chain (Mojo `JsonRpcHost::Call` → `SidecarClient` → this socket) rather than
+// assumed — see the window-api-shim dead-code cleanup that also removed 9
+// wholesale-dead sibling shims (git/aiConfig/fs/assets/taskDependencies/
+// feedback/tags/integrations/files) into `STUBBED_NAMESPACES`. `db` couldn't
+// join them wholesale because the four Mojo-backed methods above are real.
+//
+// What replaces the dead ~500 lines below is a LOCAL, in-memory echo — the
+// same "never throw" contract every other not-yet-wired namespace already
+// gives the renderer (see stub-factory.ts), spelled out by hand here because
+// this file's return shapes are real `Project`/`Task` types a generic Proxy
+// stub can't synthesize. No fake persistence: a create/update returns a
+// plausible row for THIS call only; every list read is empty. Widening the
+// mojom surface (cap-shell-7) is the real fix, not this shim.
 
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
-import { jsonRpcCall, projectsRemote, tasklistRemote, tagsRemote } from '../transport/mojo'
+import { projectsRemote, tasklistRemote, tagsRemote } from '../transport/mojo'
 import { terminalModesShim } from './terminalModes'
 
 // Resolve a mode's default flags string — mirrors the Electron main-DB
@@ -45,13 +66,14 @@ const MODE_TO_FLAT_FLAGS: Record<string, string> = {
 }
 
 // Renderer-side cache for task fields the sidecar's `tasks` table does not
-// carry yet (terminal_mode, conversation IDs, flags, isTemporary). Electron's
-// main-process DB owns these columns; in the Chromium shell the mojom surface
-// only widens to title/description/priority/dueDate. Wiring each field through
-// sidecar + ALTER TABLE is a larger lift — until that lands, we cache writes
-// in-memory here so the renderer's "update then re-read" round-trips stay
-// consistent within a session. The cache is cleared on deleteTask. Reloads
-// reset it (acceptable: e2e fixtures resetApp+reload at test boundaries).
+// carry yet (terminal_mode, conversation IDs, flags, isTemporary). Now that
+// project/task listing has no live server counterpart at all (see file
+// header), this cache is the ONLY place these fields persist across calls
+// within a session — a create/update writes it, a later read (still local,
+// see synthTask below) merges it back in. Cleared on deleteTask. A reload
+// resets it (acceptable: e2e fixtures resetApp+reload at test boundaries;
+// this was already true before this cleanup, since the cache never had a
+// working server-side counterpart to reload from).
 interface TerminalRowExtras {
   terminal_mode?: Task['terminal_mode']
   claude_conversation_id?: string | null
@@ -148,50 +170,21 @@ function syncProviderAndFlatConversationIds(data: ConvSyncInput): void {
   if (provMerged) setExtras(data.id, { provider_config: provMerged })
 }
 
-// Sidecar's tasklist:get-snapshot filters by app_settings.active_project_id —
-// selection is renderer-side (tabStore) and never auto-propagates. Without
-// this sync the sidecar keeps an empty active and task fetches return [].
-// Fire-and-forget: errors (e.g. ProjectsHost not bound under Vitest) must not
-// poison the shim's happy path.
-async function syncActiveProject(projectId: string): Promise<void> {
-  if (!projectId) return
-  try {
-    await jsonRpcCall('projects:set-active', { projectId })
-  } catch {
-    // Best-effort only — missing host or offline sidecar falls back to
-    // client-side filter + empty task list (same behavior as pre-cap-shell-8).
-  }
-}
-
 const nowIso = (): string => new Date().toISOString()
 
-function parseColumnsConfig(raw: unknown): Project['columns_config'] {
-  if (!raw) return null
-  if (typeof raw !== 'string') return raw as Project['columns_config']
-  try {
-    return JSON.parse(raw) as Project['columns_config']
-  } catch {
-    return null
-  }
-}
-
-function parseExecutionContext(raw: unknown): Project['execution_context'] {
-  if (!raw) return null
-  if (typeof raw !== 'string') return raw as Project['execution_context']
-  try {
-    return JSON.parse(raw) as Project['execution_context']
-  } catch {
-    return null
-  }
+// Local-echo id generator. Not a real persisted row, so no need for anything
+// stronger than "distinct within this session" — mirrors the same-package
+// precedent in test-invoke.ts's CSS-key generator rather than pulling in a
+// UUID dependency for a value nothing durable ever reads back.
+function localId(prefix: string): string {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
 }
 
 function synthProject(entry: {
   id: string
   name: string
   color: string
-  path?: string
-  columns_config?: unknown
-  execution_context?: unknown
+  path?: string | null
 }): Project {
   return {
     id: entry.id,
@@ -205,8 +198,8 @@ function synthProject(entry: {
     worktree_submodule_init: null,
     group_id: null,
     starred: false,
-    columns_config: parseColumnsConfig(entry.columns_config),
-    execution_context: parseExecutionContext(entry.execution_context),
+    columns_config: null,
+    execution_context: null,
     selected_repo: null,
     task_automation_config: null,
     lock_config: null,
@@ -226,19 +219,14 @@ function synthTask(
     priority?: number | null
     due_date?: string | null
     archived_at?: number | string | null
-    deleted_at?: number | string | null
     worktree_path?: string | null
     worktree_parent_branch?: string | null
     merge_state?: string | null
-    provider_config?: string | Record<string, unknown> | null
     base_dir?: string | null
   },
   projectId: string,
   order: number
 ): Task {
-  // cap-shell-10 — convert sidecar's numeric archived_at (Date.now()) to an
-  // ISO string so kanban's `task.archived_at !== null` check still works and
-  // ArchivedTasksView can format via `new Date(task.archived_at)`.
   const rawArchived = entry.archived_at ?? null
   const archivedIso =
     typeof rawArchived === 'number' && rawArchived > 0
@@ -246,31 +234,7 @@ function synthTask(
       : typeof rawArchived === 'string' && rawArchived.length > 0
         ? rawArchived
         : null
-  const rawDeleted = entry.deleted_at ?? null
-  const deletedIso =
-    typeof rawDeleted === 'number' && rawDeleted > 0
-      ? new Date(rawDeleted).toISOString()
-      : typeof rawDeleted === 'string' && rawDeleted.length > 0
-        ? rawDeleted
-        : null
-  let providerConfig: Record<string, unknown> = {}
-  if (entry.provider_config && typeof entry.provider_config === 'string') {
-    try {
-      const parsed = JSON.parse(entry.provider_config)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        providerConfig = parsed as Record<string, unknown>
-      }
-    } catch {
-      // stay with empty
-    }
-  } else if (entry.provider_config && typeof entry.provider_config === 'object') {
-    providerConfig = entry.provider_config as Record<string, unknown>
-  }
   const extras = getExtras(entry.id)
-  const mergedProviderConfig =
-    extras.provider_config && typeof extras.provider_config === 'object'
-      ? { ...providerConfig, ...extras.provider_config }
-      : providerConfig
   return {
     id: entry.id,
     project_id: projectId,
@@ -285,13 +249,13 @@ function synthTask(
     due_date:
       typeof entry.due_date === 'string' && entry.due_date.length > 0 ? entry.due_date : null,
     archived_at: archivedIso,
-    deleted_at: deletedIso,
-    // Cap-shell-migrate-all-tests: terminal fields flow through the renderer-
-    // side `terminalExtras` cache defined at top of this file — sidecar's
-    // `tasks` table hasn't been widened yet. Default mode is 'claude-code' to
-    // match the Electron baseline.
+    deleted_at: null,
+    // Cap-shell-migrate-all-tests: terminal fields flow through the
+    // renderer-side `terminalExtras` cache defined at top of this file —
+    // there is no live server row to source them from at all now (see file
+    // header). Default mode is 'claude-code' to match the Electron baseline.
     terminal_mode: (extras.terminal_mode ?? 'claude-code') as Task['terminal_mode'],
-    provider_config: mergedProviderConfig as Task['provider_config'],
+    provider_config: (extras.provider_config ?? {}) as Task['provider_config'],
     terminal_shell: extras.terminal_shell ?? null,
     claude_conversation_id: extras.claude_conversation_id ?? null,
     codex_conversation_id: extras.codex_conversation_id ?? null,
@@ -346,57 +310,6 @@ function synthTag(t: { id: string; name: string; color: string }, projectId: str
   }
 }
 
-async function listProjects(): Promise<Project[]> {
-  // cap-shell-13 — sidecar projects:get-snapshot carries columns_config
-  // (JSON string) which the ProjectsHost mojom snapshot strips. Bypass
-  // mojom to surface the full row. cap-migrate-all-tests (core-windowing)
-  // extended the snapshot with execution_context for the Environment tab.
-  const snap = await jsonRpcCall<{
-    projects: {
-      id: string
-      name: string
-      color: string
-      path: string
-      columns_config: string | null
-      execution_context: string | null
-    }[]
-    activeProjectId: string
-  } | null>('projects:get-snapshot', {})
-  return (snap?.projects ?? []).map(synthProject)
-}
-
-async function listTasks(activeProjectId: string): Promise<Task[]> {
-  // Force sidecar active to whoever the caller expects. Cheap idempotent
-  // write; the alternative is a second RPC to read then compare.
-  await syncActiveProject(activeProjectId)
-  // cap-shell-12 — TasklistHost.GetSnapshot's TaskEntry mojom is locked to
-  // {id,title,status}, so priority/due_date can't ride the Mojo path.
-  // Pull the full row surface through tasklist:list-all JSON-RPC instead
-  // (same data source, sidecar reshapes). Keeps the "active project" scope
-  // via client-side filter.
-  const { tasks: allTasks } = await jsonRpcCall<{
-    tasks: {
-      id: string
-      project_id: string
-      title: string
-      status: string
-      priority: number
-      due_date: string | null
-      archived_at: number | null
-      deleted_at: number | null
-      worktree_path: string | null
-      worktree_parent_branch: string | null
-      merge_state: string | null
-      provider_config: string | null
-      base_dir: string | null
-    }[]
-  }>('tasklist:list-all', {})
-  const filtered = activeProjectId
-    ? allTasks.filter((t) => t.project_id === activeProjectId)
-    : allTasks
-  return filtered.map((t, idx) => synthTask(t, t.project_id, idx))
-}
-
 async function listTags(activeProjectId: string): Promise<Tag[]> {
   const remote = await tagsRemote()
   const { tags } = await remote.getTags()
@@ -404,71 +317,23 @@ async function listTags(activeProjectId: string): Promise<Tag[]> {
 }
 
 export const dbShim = {
-  // Projects
-  getProjects: (): Promise<Project[]> => listProjects(),
-  createProject: async (data: CreateProjectInput): Promise<Project> => {
-    // cap-migrate-all-tests (baseline-recovery) — route via JSON-RPC so
-    // `path` round-trips without tripping the mojom arity check. The
-    // ProjectsHost.CreateProject Mojom is locked to (name, color) with a
-    // {id,name,color} ProjectEntry; passing a 4th `path` arg terminates the
-    // renderer with VALIDATION_ERROR_UNEXPECTED_STRUCT_HEADER. The sidecar
-    // `projects:create` handler already accepts path, so JSON-RPC is the
-    // minimal-surface fix (no chromium/src rebuild required).
-    const res = await jsonRpcCall<{
-      ok: boolean
-      error: string
-      project: { id: string; name: string; color: string; path?: string }
-    }>('projects:create', {
-      params: [{ name: data.name, color: data.color ?? '', path: data.path ?? '' }]
-    })
-    if (!res.ok) throw new Error(res.error || 'create failed')
-    await syncActiveProject(res.project.id)
-    return synthProject(res.project)
-  },
-  updateProject: async (data: UpdateProjectInput): Promise<Project> => {
-    // cap-migrate-all-tests (baseline-recovery) — same fix as createProject:
-    // Mojom UpdateProject is (project_id, name, color); passing path as a 4th
-    // arg tears down the renderer. Route through the sidecar's `projects:update`
-    // JSON-RPC, which handles {projectId, name, color, path}.
-    const hasNameColorPath =
-      data.name !== undefined || data.color !== undefined || data.path !== undefined
-    if (hasNameColorPath) {
-      // projects:update requires name; when callers only want to update
-      // color/path, fetch current name first.
-      let nameToSend = data.name
-      if (nameToSend === undefined) {
-        const current = (await listProjects()).find((p) => p.id === data.id)
-        nameToSend = current?.name ?? ''
-      }
-      const res = await jsonRpcCall<{ ok: boolean; error: string }>('projects:update', {
-        params: [
-          {
-            projectId: data.id,
-            name: nameToSend,
-            color: data.color ?? '',
-            path: data.path
-          }
-        ]
-      })
-      if (!res.ok) throw new Error(res.error || 'update failed')
-    }
-    if (data.columnsConfig !== undefined) {
-      await jsonRpcCall('projects:update-columns', {
-        projectId: data.id,
-        columnsConfig: data.columnsConfig
-      })
-    }
-    if (data.executionContext !== undefined) {
-      await jsonRpcCall('projects:update-execution-context', {
-        projectId: data.id,
-        executionContext: data.executionContext
-      })
-    }
-    // Return the fresh row so callers that read back merged state (e.g.
-    // kanban board after column edit) see columns_config round-tripped.
-    const all = await listProjects()
-    return all.find((p) => p.id === data.id) ?? synthProject({ id: data.id, name: '', color: '' })
-  },
+  // Projects — no live server counterpart (see file header); every list is
+  // empty and every create/update is a local-only echo.
+  getProjects: async (): Promise<Project[]> => [],
+  createProject: async (data: CreateProjectInput): Promise<Project> =>
+    synthProject({
+      id: localId('project'),
+      name: data.name,
+      color: data.color ?? '',
+      path: data.path
+    }),
+  updateProject: async (data: UpdateProjectInput): Promise<Project> =>
+    synthProject({
+      id: data.id,
+      name: data.name ?? '',
+      color: data.color ?? '',
+      path: data.path
+    }),
   deleteProject: async (id: string): Promise<boolean> => {
     const remote = await projectsRemote()
     const { result } = await remote.deleteProject(id)
@@ -478,125 +343,33 @@ export const dbShim = {
     // TODO(cap-shell-7): ProjectsHost has no reorder yet — stub.
   },
   uploadProjectIcon: async (projectId: string, _sourcePath: string): Promise<Project> => {
-    // TODO(cap-shell-6): needs files shim. Stub returns current project as-is.
-    const all = await listProjects()
-    return (
-      all.find((p) => p.id === projectId) ?? synthProject({ id: projectId, name: '', color: '' })
-    )
+    // TODO(cap-shell-6): needs files shim. Stub returns a placeholder project.
+    return synthProject({ id: projectId, name: '', color: '' })
   },
 
-  // Tasks
-  getTasks: async (): Promise<Task[]> => {
-    // cap-shell-8: full cross-project list — parity with Electron's getTasks.
-    // cap-shell-10: carry archived_at through so callers can filter archived.
-    // cap-shell-12: carry priority + due_date through so priority picker /
-    // overdue pill / keyboard navigator read the sidecar's real values.
-    const { tasks } = await jsonRpcCall<{
-      tasks: {
-        id: string
-        project_id: string
-        title: string
-        status: string
-        priority: number
-        due_date: string | null
-        archived_at: number | null
-      }[]
-    }>('tasklist:list-all', {})
-    return tasks.map((t, idx) => synthTask(t, t.project_id, idx))
-  },
+  // Tasks — same story: no live listing/creation, local echo only.
+  getTasks: async (): Promise<Task[]> => [],
   loadBoardData: async (): Promise<{
     tasks: Task[]
     projects: Project[]
     tags: Tag[]
     taskTags: Record<string, string[]>
     blockedTaskIds: string[]
-  }> => {
-    // cap-shell-13 — pull projects via sidecar JSON-RPC to carry columns_config.
-    // AG mount-race fix: treat null/missing envelope as empty snapshot so boot
-    // can't crash with `Cannot read properties of null (reading 'projects')`
-    // when the sidecar transiently replies with a null result (re-registry,
-    // startup handshake window, etc.).
-    const pSnapRaw = await jsonRpcCall<{
-      projects: {
-        id: string
-        name: string
-        color: string
-        path: string
-        columns_config: string | null
-        execution_context: string | null
-      }[]
-      activeProjectId: string
-    } | null>('projects:get-snapshot', {})
-    const pSnap = pSnapRaw ?? { projects: [], activeProjectId: '' }
-    const pSnapProjects = pSnap.projects ?? []
-    const fallbackId = pSnapProjects[0]?.id ?? ''
-    // Heal sidecar drift: first boot / post-reset / tasks-before-active windows.
-    // Without this TasklistHost snapshot filters return empty even though the
-    // `tasks` table already holds rows scoped to the fallback project.
-    if (!pSnap.activeProjectId && fallbackId) {
-      await syncActiveProject(fallbackId)
-    }
-    // Fetch ALL tasks so the renderer's client-side `selectedProjectId` filter
-    // stays authoritative after sidebar switches (tasklist:list-all ignores
-    // active_project_id; see packages/sidecar/src/handlers/tasklist.ts).
-    const allTasksResult = await jsonRpcCall<{
-      tasks: {
-        id: string
-        project_id: string
-        title: string
-        status: string
-        priority: number
-        due_date: string | null
-        archived_at: number | null
-      }[]
-    }>('tasklist:list-all', {})
-    const tasks: Task[] = allTasksResult.tasks.map((t, idx) => synthTask(t, t.project_id, idx))
-    const tags = await listTags(fallbackId)
-    // cap-shell-10 — populate blockedTaskIds from the sidecar so kanban's
-    // Link2 "blocked" indicator lights up without an extra post-load fetch.
-    let blockedTaskIds: string[] = []
-    try {
-      const res = await jsonRpcCall<{ ids: string[] }>('task-dependencies:get-all-blocked-ids', {})
-      blockedTaskIds = res?.ids ?? []
-    } catch {
-      blockedTaskIds = []
-    }
-    return {
-      projects: pSnapProjects.map(synthProject),
-      tasks,
-      tags,
-      taskTags: {}, // per-task tags resolved lazily via taskTags.getTagsForTask
-      blockedTaskIds
-    }
-  },
-  getTasksByProject: async (projectId: string): Promise<Task[]> => {
-    // TasklistHost.GetSnapshot is global — filter client-side.
-    const all = await listTasks(projectId)
-    return all.filter((t) => t.project_id === projectId)
-  },
-  getTask: async (id: string): Promise<Task | null> => {
-    const all = await listTasks('')
-    return all.find((t) => t.id === id) ?? null
-  },
+  }> => ({
+    projects: [],
+    tasks: [],
+    // Tags are the one part of this composite backed by a real Mojo host —
+    // TagsHost.getTags is not scoped to a project on the wire, so an empty
+    // activeProjectId here only affects the LABEL synthTag stamps on each row.
+    tags: await listTags(''),
+    taskTags: {}, // per-task tags resolved lazily via taskTags.getTagsForTask
+    blockedTaskIds: []
+  }),
+  getTasksByProject: async (_projectId: string): Promise<Task[]> => [],
+  getTask: async (_id: string): Promise<Task | null> => null,
   getSubTasks: async (_parentId: string): Promise<Task[]> => [],
   createTask: async (data: CreateTaskInput): Promise<Task> => {
-    // cap-shell-12 — route creates through tasks:create JSON-RPC directly so
-    // priority / dueDate / description ride the wire. TasklistHost.CreateTask
-    // mojom is still (projectId, status, title) only; widening would require
-    // a Chromium rebuild.
-    const res = await jsonRpcCall<{
-      ok: boolean
-      error: string
-      task: { id: string; title: string; status: string }
-    }>('tasks:create', {
-      projectId: data.projectId,
-      columnId: data.status ?? 'todo',
-      title: data.title ?? '',
-      description: data.description ?? '',
-      priority: data.priority,
-      dueDate: data.dueDate ?? null
-    })
-    if (!res.ok) throw new Error(res.error || 'tasks:create failed')
+    const id = localId('task')
     // cap-migrate-all-tests (terminal-core batch) — carry terminal fields from
     // CreateTaskInput into the renderer-side extras cache so tests can seed
     // `isTemporary` / `terminalMode` at create time.
@@ -620,12 +393,12 @@ export const dbShim = {
       createExt.opencodeFlags ?? (await liveDefaultFlagsForMode('opencode'))
     if (createExt.terminalMode !== undefined) createExtras.terminal_mode = createExt.terminalMode
     if (createExt.isTemporary !== undefined) createExtras.is_temporary = createExt.isTemporary
-    setExtras(res.task.id, createExtras)
+    setExtras(id, createExtras)
     return synthTask(
       {
-        id: res.task.id,
-        title: res.task.title,
-        status: res.task.status,
+        id,
+        title: data.title ?? '',
+        status: data.status ?? 'todo',
         priority: data.priority ?? 3,
         due_date: data.dueDate ?? null
       },
@@ -636,8 +409,9 @@ export const dbShim = {
   updateTask: async (data: UpdateTaskInput): Promise<Task> => {
     // cap-migrate-all-tests (terminal-core batch) — terminal-related fields
     // (terminal_mode, conversation IDs, flags, is_temporary) land in the
-    // renderer-side `terminalExtras` cache before anything else so the
-    // subsequent listTasks() read reflects the write.
+    // renderer-side `terminalExtras` cache, which `synthTask` below reads
+    // back — this cache IS the storage now, not a pre-read before a network
+    // round-trip (there is none left for these fields).
     const terminalPatch: TerminalRowExtras = {}
     if (data.terminalMode !== undefined) terminalPatch.terminal_mode = data.terminalMode
     if (data.terminalShell !== undefined) terminalPatch.terminal_shell = data.terminalShell
@@ -660,20 +434,13 @@ export const dbShim = {
     if (data.panelVisibility !== undefined) terminalPatch.panel_visibility = data.panelVisibility
     // cap-migrate-all-tests (git-providers batch) — linearUrl is a renderer-cache
     // passthrough so 94-linear-indicator can seed the kanban/task-detail Linear
-    // badge without an external_links table in the sidecar. Sidecar-level
-    // external_links wiring is a larger surface (see validation doc, 94 defer
-    // note) — this shim-cache seed unblocks UI-behavior coverage.
+    // badge without an external_links table in the sidecar.
     const linearLike = data as UpdateTaskInput & { linearUrl?: string | null }
     if (linearLike.linearUrl !== undefined) terminalPatch.linear_url = linearLike.linearUrl
     if (Object.keys(terminalPatch).length > 0) setExtras(data.id, terminalPatch)
     syncProviderAndFlatConversationIds(data)
     // Mode-switch invariant: on terminalMode changes the renderer drops all
-    // other conversation IDs (Electron's main handler mirrors this). The
-    // renderer may pass a stale providerConfig whose clearAllConversationIds
-    // misses modes that only exist in our shim cache (tests seed flat fields
-    // directly and the renderer never re-reads the cache). Auto-null every
-    // mode not explicitly set in this same update so the
-    // "all *_conversation_id are null after switch" invariant holds.
+    // other conversation IDs (Electron's main handler mirrors this).
     if (data.terminalMode !== undefined) {
       const explicitFlat: Record<string, boolean> = {
         'claude-code': data.claudeConversationId !== undefined,
@@ -706,12 +473,10 @@ export const dbShim = {
           }
         })
       }
-      // Reset per-mode flag fields to their built-in defaults on any
-      // mode switch. Matches the Electron "switching back restores the
-      // mode's default flags" behavior — user-customized flags are
-      // ephemeral to the active mode session, not persistent across
-      // mode hops. Skips flags the caller explicitly set in this same
-      // update so a synchronous flag-update-with-mode-switch still wins.
+      // Reset per-mode flag fields to their built-in defaults on any mode
+      // switch. Matches the Electron "switching back restores the mode's
+      // default flags" behavior. Skips flags the caller explicitly set in
+      // this same update so a synchronous flag-update-with-mode-switch wins.
       const explicitFlags: Record<string, boolean> = {
         'claude-code': data.claudeFlags !== undefined,
         codex: data.codexFlags !== undefined,
@@ -727,6 +492,7 @@ export const dbShim = {
       }
     }
 
+    // The one part of this method with a REAL server-side effect.
     const remote = await tasklistRemote()
     if (data.status !== undefined) {
       await remote.updateTaskStatus(data.id, data.status)
@@ -734,13 +500,11 @@ export const dbShim = {
     if (data.title !== undefined || data.description !== undefined) {
       await remote.updateTask(data.id, data.title ?? '', data.description ?? '')
     }
-    // cap-shell-12 — priority / dueDate ride tasks:update-meta since mojom
-    // UpdateTask is locked to title + description.
-    // cap-migrate-all-tests (git batch) — worktree/merge/provider fields ride
-    // the same channel so the git/worktree e2e specs can round-trip state.
-    const metaPatch: Record<string, unknown> = {}
-    if (data.priority !== undefined) metaPatch.priority = data.priority
-    if (data.dueDate !== undefined) metaPatch.dueDate = data.dueDate
+
+    // cap-migrate-all-tests (git batch): sidecar-side auto-clear of every
+    // provider's conversationId on a worktree_path/base_dir/projectId move
+    // (matches Electron main handlers.ts:383-397) — mirrored here against
+    // the LOCAL cache, since that cache is the only place these fields live.
     const extended = data as UpdateTaskInput & {
       worktreePath?: string | null
       worktreeParentBranch?: string | null
@@ -749,24 +513,6 @@ export const dbShim = {
       projectId?: string
       providerConfig?: Record<string, unknown> | null
     }
-    if (extended.worktreePath !== undefined) metaPatch.worktreePath = extended.worktreePath
-    if (extended.worktreeParentBranch !== undefined)
-      metaPatch.worktreeParentBranch = extended.worktreeParentBranch
-    if (extended.mergeState !== undefined) metaPatch.mergeState = extended.mergeState
-    if (extended.baseDir !== undefined) metaPatch.baseDir = extended.baseDir
-    if (extended.projectId !== undefined) metaPatch.projectId = extended.projectId
-    if (extended.providerConfig !== undefined) metaPatch.providerConfig = extended.providerConfig
-    // cap-migrate-all-tests (git batch): sidecar `tasks:update-meta` auto-
-    // clears every provider's conversationId when worktree_path / base_dir /
-    // projectId moves without an explicit providerConfig (matches Electron
-    // main handlers.ts:383-397). The renderer-side terminalExtras cache keeps
-    // its own provider_config for fields the sidecar can't round-trip yet;
-    // mirror the clear here so getTask() doesn't merge stale ids back in.
-    //
-    // Guard on a *non-null* value change so opening a task (which may surface
-    // a synthesized baseDir/worktreePath update with the same shape) doesn't
-    // count. Only a real new/null worktreePath/baseDir or a projectId move
-    // fires the clear.
     const autoClear =
       extended.providerConfig === undefined &&
       ((typeof extended.worktreePath === 'string' && extended.worktreePath.length > 0) ||
@@ -787,7 +533,6 @@ export const dbShim = {
         }
         setExtras(data.id, { provider_config: cleared as Record<string, unknown> })
       }
-      // Flat conversationId fields too.
       setExtras(data.id, {
         claude_conversation_id: null,
         codex_conversation_id: null,
@@ -796,13 +541,24 @@ export const dbShim = {
         opencode_conversation_id: null
       })
     }
-    if (Object.keys(metaPatch).length > 0) {
-      await jsonRpcCall('tasks:update-meta', { taskId: data.id, ...metaPatch })
-    }
-    const all = await listTasks('')
-    return (
-      all.find((t) => t.id === data.id) ??
-      synthTask({ id: data.id, title: data.title ?? '', status: data.status ?? '' }, '', 0)
+
+    // Local echo of the row as updated — synthTask merges the extras cache
+    // (just written above) back in, so terminal-field round-trips still work
+    // within a session even with no server-side task table behind this.
+    return synthTask(
+      {
+        id: data.id,
+        title: data.title ?? '',
+        status: data.status ?? '',
+        priority: data.priority,
+        due_date: data.dueDate,
+        worktree_path: extended.worktreePath,
+        worktree_parent_branch: extended.worktreeParentBranch,
+        merge_state: extended.mergeState,
+        base_dir: extended.baseDir
+      },
+      extended.projectId ?? '',
+      0
     )
   },
   deleteTask: async (id: string): Promise<boolean> => {
@@ -812,36 +568,14 @@ export const dbShim = {
     return result.ok
   },
   restoreTask: async (id: string): Promise<Task> => synthTask({ id, title: '', status: '' }, '', 0),
-  archiveTask: async (id: string): Promise<Task> => {
-    await jsonRpcCall('tasks:archive', { taskId: id })
-    // Return a synthesized task with archived_at set so optimistic updates
-    // (useTasksData mapState) match the sidecar's post-write state.
-    return synthTask({ id, title: '', status: '', archived_at: Date.now() }, '', 0)
+  archiveTask: async (id: string): Promise<Task> =>
+    synthTask({ id, title: '', status: '', archived_at: Date.now() }, '', 0),
+  archiveTasks: async (_ids: string[]): Promise<void> => {
+    // Local-echo only — see file header. No-op beyond the type contract.
   },
-  archiveTasks: async (ids: string[]): Promise<void> => {
-    if (!ids || ids.length === 0) return
-    await jsonRpcCall('tasks:archive-many', { taskIds: ids })
-  },
-  unarchiveTask: async (id: string): Promise<Task> => {
-    await jsonRpcCall('tasks:unarchive', { taskId: id })
-    return synthTask({ id, title: '', status: '', archived_at: null }, '', 0)
-  },
-  getArchivedTasks: async (): Promise<Task[]> => {
-    const { tasks } = await jsonRpcCall<{
-      tasks: {
-        id: string
-        project_id: string
-        title: string
-        status: string
-        priority: number
-        due_date: string | null
-        archived_at: number | null
-      }[]
-    }>('tasklist:list-all', {})
-    return tasks
-      .filter((t) => t.archived_at !== null)
-      .map((t, idx) => synthTask(t, t.project_id, idx))
-  },
+  unarchiveTask: async (id: string): Promise<Task> =>
+    synthTask({ id, title: '', status: '', archived_at: null }, '', 0),
+  getArchivedTasks: async (): Promise<Task[]> => [],
   reorderTasks: async (_taskIds: string[]): Promise<void> => {
     // TODO(cap-shell-7): TasklistHost has no reorder yet — stub, same gap as
     // `reorderProjects` above. Board DnD reorders optimistically in the

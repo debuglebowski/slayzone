@@ -13,8 +13,11 @@
  *     replay must not begin mid-escape-sequence and must not inherit attributes,
  *     charset, or a scroll region set by output that has since been evicted.
  *
- * So resync belongs here and only here — and it is applied at READ time, leaving
- * the stored chunks immutable so `getChunksSince` still returns verbatim bytes.
+ * So resync belongs here and only here, applied at READ time. It leaves the
+ * STORED chunks immutable — `getChunksSince(afterSeq >= 0)`, the reattach
+ * path, still returns verbatim bytes. `getChunksSince(afterSeq === -1)`, the
+ * cold-attach path, gets the same repair as `toString()` (split into a
+ * `prelude` plus repaired `chunks`, so a caller can write the prelude first).
  *
  * Run with: pnpm exec tsx packages/domains/terminal/src/server/ring-buffer.test.ts
  */
@@ -65,15 +68,78 @@ test('no eviction: replay is the exact byte stream, no prelude', () => {
   eq(buf.toString(), '\x1b[32mgreen text')
 })
 
-test('getChunksSince returns stored bytes verbatim, never a prelude', () => {
+test('getChunksSince on REATTACH (afterSeq >= 0) is verbatim, no prelude — even after eviction', () => {
   // Incremental catch-up appends into an ALREADY-correct terminal; injecting a
-  // reset there would clobber live attributes mid-stream.
+  // reset there would clobber live attributes mid-stream. Eviction having
+  // occurred must not change this — only a COLD attach (afterSeq === -1) gets
+  // the repair.
   const buf = new RingBuffer(10)
   buf.append('0123456789')
-  buf.append('abc')
-  for (const c of buf.getChunksSince(-1)) {
-    ok(!c.data.includes('\x1b[0m'), `seq ${c.seq} must be verbatim, got ${JSON.stringify(c.data)}`)
-  }
+  const keptSeq = buf.append('abc') // evicts seq 0's chunk
+  const { chunks, prelude } = buf.getChunksSince(keptSeq - 1)
+  eq(prelude, '', 'reattach must not get a prelude')
+  eq(JSON.stringify(chunks), JSON.stringify([{ seq: keptSeq, data: 'abc' }]))
+})
+
+test('getChunksSince on a COLD attach (afterSeq === -1) with no eviction: empty prelude, verbatim chunks', () => {
+  const buf = new RingBuffer(1024)
+  buf.append('\x1b[32mgreen text')
+  const { chunks, prelude } = buf.getChunksSince(-1)
+  eq(prelude, '')
+  eq(chunks.map((c) => c.data).join(''), '\x1b[32mgreen text')
+})
+
+test('getChunksSince on a COLD attach after eviction: prelude + chunks matches toString() byte-for-byte', () => {
+  const buf = new RingBuffer(10)
+  buf.append('0123456789') // evicted
+  buf.append('abcdefgh')
+  const { chunks, prelude } = buf.getChunksSince(-1)
+  eq(prelude, '\x1b[0m\x1b(B\x1b[r')
+  eq(prelude + chunks.map((c) => c.data).join(''), buf.toString())
+})
+
+test('getChunksSince cold-attach repair strips an orphaned CSI head from the chunk data itself', () => {
+  // Two separate pty `data` events — one ending mid-escape, the next carrying
+  // its tail — become two ring-buffer chunks. Eviction drops the first chunk
+  // wholesale (its introducing `ESC [` with it), leaving the SURVIVING chunk
+  // starting with a bare parameter run. The garbage must be gone from
+  // `chunks` itself, not merely absent from the joined text by coincidence.
+  const buf = new RingBuffer(15)
+  buf.append('xxxxxxxxxx\x1b[') // 12 chars, will be evicted whole
+  buf.append('32mHELLO') // 8 chars — survives, but now starts mid-CSI
+  const { chunks, prelude } = buf.getChunksSince(-1)
+  eq(chunks.length, 1)
+  eq(
+    chunks[0].data,
+    'HELLO',
+    `orphaned "32m" head must be stripped from the chunk, got ${JSON.stringify(chunks[0].data)}`
+  )
+  ok(!prelude.includes('32m'), 'the orphaned head must not leak into the prelude either')
+})
+
+test('getChunksSince cold-attach repair handles an orphaned head split ACROSS a chunk boundary', () => {
+  // The torn parameter run "32m" arrives as two separate chunks: "3" then
+  // "2m…". Matching only chunks[0] in isolation ('3') would not see the CSI
+  // shape and would wrongly keep it — the repair must look at the joined text.
+  const buf = new RingBuffer(1024)
+  buf.append('x'.repeat(1024)) // fills the buffer so the next append evicts all of it
+  buf.append('3') // now the sole retained chunk: an orphaned CSI param digit
+  buf.append('2mHELLO')
+  const { chunks, prelude } = buf.getChunksSince(-1)
+  const joined = chunks.map((c) => c.data).join('')
+  eq(
+    joined,
+    'HELLO',
+    `orphaned head split across chunks must still be stripped, got ${JSON.stringify(joined)}`
+  )
+  eq(prelude, '\x1b[0m\x1b(B\x1b[r')
+})
+
+test('getChunksSince on an EMPTY buffer cold attach: no chunks, no prelude (never evicted)', () => {
+  const buf = new RingBuffer(1024)
+  const { chunks, prelude } = buf.getChunksSince(-1)
+  eq(chunks.length, 0)
+  eq(prelude, '')
 })
 
 console.log('\nreplay prelude after eviction')

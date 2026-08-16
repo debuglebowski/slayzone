@@ -37,9 +37,18 @@ export type HostBridge = {
   dispose: () => void
 }
 
-export function createHostBridge(url: string, opts: { getTrpcPort: () => number }): HostBridge {
+export function createHostBridge(
+  url: string,
+  opts: { getTrpcPort: () => number; token?: string | null }
+): HostBridge {
+  // The desktop's `/cap` listener rejects the WS upgrade itself without this —
+  // loopback alone is not trusted there (see desktop-bridge-server.ts). Appended
+  // as a query param (not `connectionParams`) because the gate runs at
+  // `verifyClient`, before any tRPC message — and before this client's context
+  // creation on the OTHER side even exists to read one.
+  const bridgeUrl = opts.token ? `${url}?token=${encodeURIComponent(opts.token)}` : url
   const wsClient = createWSClient({
-    url,
+    url: bridgeUrl,
     WebSocket: WebSocket as unknown as typeof globalThis.WebSocket
   })
   const client = createTRPCClient<CapabilityBridgeRouter>({

@@ -41,15 +41,47 @@ const REPLAY_PRELUDE = '\x1b[0m\x1b(B\x1b[r'
 const ORPHANED_SEQUENCE_HEAD = /^[0-9;:?<>]+[@-~]/
 
 /**
+ * Drop an {@link ORPHANED_SEQUENCE_HEAD} match from the very front of the
+ * concatenation of `chunks`, preserving chunk/seq boundaries for whatever
+ * survives.
+ *
+ * The match is found against the JOINED string, not just `chunks[0].data`,
+ * because a torn sequence can in principle straddle a chunk boundary (e.g. a
+ * chunk of just `'32'` followed by one starting `'m…'`) — matching only the
+ * first chunk in isolation would miss that split and leak the tail as text.
+ */
+function stripOrphanedHead(chunks: readonly BufferChunk[]): BufferChunk[] {
+  const joined = chunks.map((c) => c.data).join('')
+  const dropped = joined.length - joined.replace(ORPHANED_SEQUENCE_HEAD, '').length
+  if (dropped === 0) return [...chunks]
+
+  let remaining = dropped
+  const out: BufferChunk[] = []
+  for (const chunk of chunks) {
+    if (remaining === 0) {
+      out.push(chunk)
+    } else if (chunk.data.length <= remaining) {
+      remaining -= chunk.data.length // whole chunk consumed by the strip
+    } else {
+      out.push({ seq: chunk.seq, data: chunk.data.slice(remaining) })
+      remaining = 0
+    }
+  }
+  return out
+}
+
+/**
  * Ring buffer for terminal output with fixed maximum size.
  * Drops oldest content when capacity is exceeded.
  * Each chunk has a monotonic sequence number for ordering.
  *
- * Stored chunks are IMMUTABLE: `getChunksSince` hands back exactly the bytes that
- * were appended, because incremental catch-up is applied to an already-correct
- * terminal (and the hub↔computer contract requires a seq's bytes not to vary by
- * delivery path). Eviction resync is applied at READ time by {@link toString},
- * which is the wholesale-replay-into-a-fresh-terminal path.
+ * Stored chunks are IMMUTABLE. `getChunksSince(afterSeq >= 0)` — incremental
+ * catch-up on reattach — hands back exactly the bytes that were appended,
+ * because that path is applied to an already-correct terminal (and the
+ * hub↔computer contract requires a seq's bytes not to vary by delivery path).
+ * Eviction resync (prelude + orphaned-head strip) is applied at READ time,
+ * for the two wholesale-replay-into-a-fresh-terminal paths only:
+ * {@link toString} and `getChunksSince(afterSeq === -1)`.
  */
 export class RingBuffer {
   private chunks: BufferChunk[] = []
@@ -92,15 +124,27 @@ export class RingBuffer {
   }
 
   /**
-   * Get all chunks with sequence number > afterSeq.
-   * Returns empty array if afterSeq >= latest seq.
+   * Get all chunks with sequence number > afterSeq, plus a `prelude` to write
+   * BEFORE them.
    *
-   * Bytes are verbatim — no prelude, no rewriting. These chunks are appended to a
-   * terminal that is already in the right state, so injecting a reset here would
-   * clobber live attributes mid-stream.
+   * Reattach (`afterSeq >= 0`) is untouched — `prelude` is always `''` there,
+   * and `chunks` is exactly the verbatim array this method has always
+   * returned. Those chunks are appended to a terminal that is already in the
+   * right state, so injecting a reset would clobber live attributes
+   * mid-stream.
+   *
+   * A fresh cold attach (`afterSeq === -1`) replays into a brand-new
+   * terminal. If eviction has happened, the retained head can begin *inside*
+   * a torn escape sequence and can rely on attributes/charset/scroll-region
+   * state the evicted prefix used to establish — this applies the same
+   * repair {@link toString} does, split so the caller can write the prelude
+   * FIRST, then the (possibly head-repaired) chunks. `prelude + chunks
+   * joined` is byte-identical to `toString()` in this case.
    */
-  getChunksSince(afterSeq: number): BufferChunk[] {
-    return this.chunks.filter((c) => c.seq > afterSeq)
+  getChunksSince(afterSeq: number): { chunks: BufferChunk[]; prelude: string } {
+    const chunks = this.chunks.filter((c) => c.seq > afterSeq)
+    if (afterSeq !== -1 || !this.evicted) return { chunks, prelude: '' }
+    return { chunks: stripOrphanedHead(chunks), prelude: REPLAY_PRELUDE }
   }
 
   /**

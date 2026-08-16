@@ -3,7 +3,7 @@
  */
 import { useState, useCallback, useMemo } from 'react'
 import { GitBranch, FolderOpen, ArrowLeft, Cloud, CloudOff } from 'lucide-react'
-import { Button, toast } from '@slayzone/ui'
+import { Button, toast, safeClipboardWriteText } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { useConsolidatedGeneralData } from './useConsolidatedGeneralData'
 import {
@@ -171,7 +171,7 @@ export function GeneralTabContent({
             <button
               className="text-[11px] text-muted-foreground hover:text-foreground transition-colors truncate font-mono"
               onClick={() => {
-                navigator.clipboard.writeText(data.targetPath!)
+                void safeClipboardWriteText(data.targetPath!)
                 toast('Path copied')
               }}
               title={data.targetPath}

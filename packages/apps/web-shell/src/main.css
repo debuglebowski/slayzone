@@ -1,0 +1,10 @@
+/*
+ * Web shell theme entry. Pulls the shared token/`.mk-doc`/utility layer from
+ * @slayzone/theme-css (packages/shared/theme-css) — the same file the
+ * Electron app's main.css and the Chromium fork's main.css import. This
+ * shell has no theme rules of its own; it deliberately omits `.prose`/
+ * @tailwindcss/typography (GhMarkdown PR view) and the Electron-only
+ * `.window-drag-region` utilities, which stay local to the app that needs
+ * them instead of living here.
+ */
+@import "@slayzone/theme-css";

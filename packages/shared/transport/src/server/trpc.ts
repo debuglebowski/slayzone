@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
+import { isPathAllowed } from './scopes'
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson
@@ -30,10 +31,42 @@ const authGate = t.middleware(({ ctx, next }) => {
 })
 
 /**
- * Default procedure — auth-gated on an authed hub. All app routers use this, so
- * enforcement is automatic + fail-closed (a new procedure is gated by default).
+ * Capability scope gate — see `scopes.ts` for the full design. Chained AFTER
+ * `authGate`, so by the time this runs on an enforcing hub, `ctx.principal` is
+ * already guaranteed non-null (a null principal already 401'd above).
+ *
+ * INERT WHEN THE AUTH GATE ITSELF IS OFF — same short-circuit `authGate` uses,
+ * checked FIRST and independently of `ctx.principal`. This is what keeps a
+ * local/supervised/e2e hub byte-identical to before scopes existed: no
+ * principal, no scopes, no check, full router reachable exactly as today.
+ *
+ * A `full`-scoped principal (every existing client: desktop, CLI, a co-located
+ * `slay` using the bootstrap-owner token) is admitted for EVERY path —
+ * `isPathAllowed` short-circuits on `full` before consulting `SCOPE_POLICY` at
+ * all, so this is the second byte-identical guarantee for anything that isn't
+ * a brand-new scoped session.
+ *
+ * An UNCLASSIFIED path (not in `SCOPE_POLICY`) is refused even for a scoped
+ * principal that would otherwise qualify — `scopes.test.ts` asserts no live
+ * path is ever in that state, but the runtime fail-closed exists independently
+ * of that test passing.
  */
-export const publicProcedure = t.procedure.use(authGate)
+const scopeGate = t.middleware(({ ctx, next, path }) => {
+  if (!getAuthGate()) return next()
+  const scopes = ctx.principal?.scopes ?? []
+  if (!isPathAllowed(scopes, path)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: `insufficient scope for ${path}` })
+  }
+  return next()
+})
+
+/**
+ * Default procedure — auth-gated on an authed hub, then scope-gated. All app
+ * routers use this, so both enforcements are automatic + fail-closed (a new
+ * procedure is gated by default, and unclassified by default until someone
+ * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
+ */
+export const publicProcedure = t.procedure.use(authGate).use(scopeGate)
 
 /**
  * Ungated procedure for pre-auth discovery ONLY (`hub.describe`) — the client

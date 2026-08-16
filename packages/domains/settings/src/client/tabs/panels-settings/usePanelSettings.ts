@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { safeRandomUUID } from '@slayzone/ui'
 import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import type {
@@ -292,7 +293,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     setNewPanelProtocolError('')
 
     const newPanel: WebPanelDefinition = {
-      id: `web:${crypto.randomUUID().slice(0, 8)}`,
+      id: `web:${safeRandomUUID().slice(0, 8)}`,
       name: newPanelName.trim(),
       baseUrl: url,
       shortcut: newPanelShortcut.trim().toLowerCase() || undefined,

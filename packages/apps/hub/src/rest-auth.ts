@@ -26,6 +26,9 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
+import { isLoopbackPeer, type SlayzoneDb } from '@slayzone/platform'
+import type { RestPrincipal } from '@slayzone/transport/server'
+import { isWebSessionToken, verifyWebSessionToken, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
 /**
  * What to do with an inbound HTTP request:
@@ -35,21 +38,42 @@ import { verifySession } from '@slayzone/hub-auth/server'
 export type RestAuthAction = 'allow' | 'verify'
 
 /**
- * better-auth's OWN route prefix. Must stay open even on an enforcing hub: it is
- * how a client OBTAINS a token in the first place (sign-in/sign-up/get-session),
- * so gating it would make the hub unauthenticatable. Note this is a strict prefix
- * check WITH the trailing slash — `/api/authx/...` and a bare `/api/auth` are NOT
- * bootstrap routes and stay guarded.
+ * The EXACT better-auth routes that must stay open on an enforcing hub, because
+ * they are how a client with no token obtains one.
  *
- * Our own `/api/auth/deep-link` (registerAuthDeepLinkRoute) lives under the same
- * path prefix but is NOT better-auth's, so it is listed as a re-guarded exception
- * below — an off-box caller must not inject an OAuth callback code into the
- * authEvents bus.
+ * WAS A PREFIX, NOW AN ALLOWLIST. `/api/auth/` used to be exempted wholesale with
+ * a small denylist. That is fail-OPEN by construction: every route better-auth or
+ * any of its plugins mounts under that prefix — present and future — was
+ * unauthenticated. Concretely, the `apiKey()` plugin mounts
+ * `POST /api/auth/api-key/create`, which turned into a computer-impersonation
+ * escalation (see `verifyComputerApiKey`), and the `organization()` and `jwt()`
+ * plugins mount member/invite and token/JWKS routes that nothing in SlayZone
+ * reads. Enumerating what is genuinely needed is the only version of this that
+ * stays correct when a dependency adds a route.
+ *
+ * The four below are exactly what `hubSignIn` (CLI) and a browser session need:
+ *   - `sign-in/email`  — obtain a FULL session. Sign-UP is deliberately absent;
+ *                        `emailAndPassword.disableSignUp` also refuses it at the
+ *                        source, so this is belt-and-braces.
+ *   - `sign-out`       — revoke one, which a client must be able to do while
+ *                        holding a token the hub may already consider invalid.
+ *   - `get-session`    — probe validity. Answers "no" unauthenticated by design.
+ *   - `web-login`      — OURS, not better-auth's (registerWebLoginRoute). Obtain
+ *                        a SCOPED session instead: it calls `sign-in/email`
+ *                        server-side and discards the full session it returns,
+ *                        so a browser never holds `full` for even one request.
+ *                        See `web-sessions.ts` for why that distinction exists.
+ *
+ * Matching is EXACT, so `/api/auth/sign-in/email/extra` inherits nothing. Adding
+ * a route here is a security decision: it makes that route reachable by anyone
+ * who can reach the hub.
  */
-const AUTH_BOOTSTRAP_PREFIX = '/api/auth/'
-
-/** Paths under {@link AUTH_BOOTSTRAP_PREFIX} that are ours, not better-auth's. */
-const NOT_BOOTSTRAP = new Set<string>(['/api/auth/deep-link'])
+const AUTH_BOOTSTRAP_PATHS = new Set<string>([
+  '/api/auth/sign-in/email',
+  '/api/auth/sign-out',
+  '/api/auth/get-session',
+  '/api/auth/web-login'
+])
 
 /**
  * Routes that carry their OWN stronger guard and must not additionally require a
@@ -84,17 +108,11 @@ const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/use
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'
 
-/** True for IPv4/IPv6 loopback, incl. the IPv4-mapped-IPv6 form node reports. */
-function isLoopbackAddress(addr: string | undefined): boolean {
-  if (!addr) return false
-  return addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.')
-}
-
 export interface RestAuthActionOptions {
   /** Supervised hubs are the only ones that keep the loopback exemption — see
    *  `restAuthAction`. Absent = standalone, i.e. no exemption. */
   supervised?: boolean
-  /** Whether THIS hub enforces auth (`isRemoteMode() && hubAuth != null`). */
+  /** Whether THIS hub enforces auth (`!supervised`, see `server.ts`). */
   hubAuthRequired: boolean
   /** The raw request url (`req.url`), query string included. */
   url: string | undefined
@@ -124,42 +142,115 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   // unconditional loopback pass made the gate inert exactly where it started to
   // matter. Standalone loopback callers present a bearer like anyone else; the
   // CLI already has the plumbing for one.
-  if (opts.supervised && isLoopbackAddress(opts.remoteAddress)) return 'allow'
+  //
+  // REACHABILITY: `server.ts` derives `hubAuthRequired = !supervised`, so in
+  // production this branch is UNREACHABLE — a supervised hub already returned
+  // 'allow' on the line above. It is kept, and passed explicitly rather than
+  // re-derived, so a future supervised-but-authed hub (e.g. a multi-user desktop)
+  // keeps this exemption BY DECISION rather than by accident. Tests that pin
+  // `supervised: true` alongside `hubAuthRequired: true` exercise that
+  // hypothetical, not a shape the hub can currently be in.
+  if (opts.supervised && isLoopbackPeer(opts.remoteAddress)) return 'allow'
   // No url at all → cannot prove the route is exempt, so demand a bearer.
   if (!opts.url) return 'verify'
   const path = opts.url.split('?')[0]
   if (path !== MCP_PATH && !path.startsWith('/api/')) return 'allow'
   if (SELF_GUARDED.has(path)) return 'allow'
-  if (path.startsWith(AUTH_BOOTSTRAP_PREFIX) && !NOT_BOOTSTRAP.has(path)) return 'allow'
+  if (AUTH_BOOTSTRAP_PATHS.has(path)) return 'allow'
   return 'verify'
 }
 
+/** Extract a bearer token from `Authorization: Bearer <token>`. Null for
+ *  anything else — absent header, non-Bearer scheme, blank token, or a
+ *  DUPLICATED header (node hands back `string[]` for a repeated header, which
+ *  is rejected rather than resolved by picking one — an ambiguous credential
+ *  must not authenticate). */
+function extractBearerToken(headers: IncomingHttpHeaders): string | null {
+  const raw = headers.authorization
+  if (typeof raw !== 'string') return null
+  const match = /^Bearer[ ]+(.+)$/i.exec(raw.trim())
+  return match?.[1]?.trim() || null
+}
+
 /**
- * Verify an `Authorization: Bearer <token>` header against the hub's better-auth
- * sessions. This is the same `verifySession` authority the tRPC connection uses,
- * reached over a header instead of `connectionParams`.
+ * Parse a `Cookie` header into a name→value map. Minimal on purpose — no
+ * attribute parsing (this only ever reads the header a browser SENDS, which
+ * carries name=value pairs only, never `Set-Cookie`'s attributes).
+ */
+export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, string> {
+  const raw = headers.cookie
+  if (typeof raw !== 'string') return {}
+  const out: Record<string, string> = {}
+  for (const pair of raw.split(';')) {
+    const eq = pair.indexOf('=')
+    if (eq === -1) continue
+    const name = pair.slice(0, eq).trim()
+    if (!name) continue
+    out[name] = decodeURIComponent(pair.slice(eq + 1).trim())
+  }
+  return out
+}
+
+/**
+ * Resolve a REST-side principal from a request's credentials. This is the
+ * twin of `resolveConnectionPrincipal` (`hub-trpc-context.ts`) for `/api/*` —
+ * same two credential classes, same fail-closed/fail-quiet shape, reached over
+ * headers instead of a tRPC connect frame.
  *
- * Fail-closed + fail-quiet, so a caller can only ever get `true` for a genuinely
- * valid session: a null `auth`, an absent/blank/duplicated header, a non-Bearer
- * scheme, or a throw inside verify all yield `false`. A DUPLICATED header
- * (node hands back `string[]`) is rejected rather than resolved by picking one —
- * an ambiguous credential must not authenticate.
+ * TWO CREDENTIAL CLASSES, checked in a specific order:
+ *   1. A `szw_`-prefixed value — from EITHER the bearer header OR the
+ *      `slayzone_web_session` cookie — is looked up in `web_sessions` and
+ *      resolves to that row's OWN `scopes`. Checked FIRST and by prefix alone,
+ *      so a scoped token is never even tried against `verifySession`.
+ *   2. Anything else in the BEARER HEADER (never the cookie — see below) is
+ *      checked against `verifySession`, resolving to `['full']` on success.
+ *
+ * COOKIES ARE NEVER CONSULTED FOR THE FULL PATH. A cookie is automatically
+ * attached by the browser to every request to this origin, which is exactly
+ * the CSRF shape — an attacker's page can trigger a request that carries it,
+ * but cannot read or forge an `Authorization` header cross-origin. Restricting
+ * cookie-based auth to the ONE credential class that is scope-limited by
+ * construction (never `full`) bounds what a forged request could do even
+ * before the origin check in `ws-origin.ts` (whose REST-side counterpart is
+ * `restAuthAction`'s own path/loopback logic) is considered.
+ *
+ * Returns `null` for anything but a clean hit — absent/blank/duplicated
+ * header, unknown/expired/revoked web session, invalid better-auth session, a
+ * null `auth`, or a throw inside either verify path.
  */
 export async function verifyRestBearer(
   auth: HubAuth | null,
-  headers: IncomingHttpHeaders
-): Promise<boolean> {
-  if (!auth) return false
-  const raw = headers.authorization
-  if (typeof raw !== 'string') return false
-  const match = /^Bearer[ ]+(.+)$/i.exec(raw.trim())
-  const token = match?.[1]?.trim()
-  if (!token) return false
+  db: SlayzoneDb | null,
+  headers: IncomingHttpHeaders,
+  cookies: Record<string, string> = {}
+): Promise<RestPrincipal | null> {
+  const bearerToken = extractBearerToken(headers)
+  const cookieToken = cookies[WEB_SESSION_COOKIE_NAME]
+  const webToken =
+    bearerToken && isWebSessionToken(bearerToken)
+      ? bearerToken
+      : cookieToken && isWebSessionToken(cookieToken)
+        ? cookieToken
+        : null
+
+  if (webToken) {
+    if (!db) return null
+    try {
+      const result = await verifyWebSessionToken(db, webToken)
+      return result.ok ? { userId: result.userId, scopes: result.scopes } : null
+    } catch {
+      return null
+    }
+  }
+
+  // Not a szw_ token — the ONLY remaining path is a real better-auth bearer,
+  // and ONLY from the header (see the docstring's CSRF reasoning).
+  if (!auth || !bearerToken) return null
   try {
-    const ctx = await verifySession(auth, new Headers({ authorization: `Bearer ${token}` }))
-    return ctx != null
+    const ctx = await verifySession(auth, new Headers({ authorization: `Bearer ${bearerToken}` }))
+    return ctx ? { userId: ctx.userId, orgId: ctx.orgId, scopes: ['full'] } : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -180,12 +271,16 @@ export async function verifyRestBearer(
 export function withRestAuth(opts: {
   getHubAuthRequired: () => boolean
   getHubAuth: () => HubAuth | null
+  /** Needed to resolve a `szw_` web-session token — null on a host with no
+   *  such table available (there is none today; kept optional for callers
+   *  that genuinely have no DB, e.g. a future capability-only test double). */
+  getDb: () => SlayzoneDb | null
   next: (req: IncomingMessage, res: ServerResponse) => void
 }): (req: IncomingMessage, res: ServerResponse) => void {
-  const deny = (res: ServerResponse): void => {
+  const deny = (res: ServerResponse, code: 401 | 403, message: string): void => {
     if (res.headersSent) return
-    res.writeHead(401, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    res.writeHead(code, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: message }))
   }
   return (req, res) => {
     const action = restAuthAction({
@@ -198,8 +293,29 @@ export function withRestAuth(opts: {
       opts.next(req, res)
       return
     }
-    void verifyRestBearer(opts.getHubAuth(), req.headers)
-      .then((ok) => (ok ? opts.next(req, res) : deny(res)))
-      .catch(() => deny(res))
+    const cookies = parseCookieHeader(req.headers)
+    void verifyRestBearer(opts.getHubAuth(), opts.getDb(), req.headers, cookies)
+      .then((principal) => {
+        if (!principal) {
+          deny(res, 401, 'Unauthorized')
+          return
+        }
+        // A scoped web session is deliberately GIVEN NO REST ACCESS in Phase 1
+        // — the granular per-route scope map that would make a narrower grant
+        // safe does not exist for `/api/*` the way `SCOPE_POLICY` does for
+        // `/trpc` (see scopes.ts). Denying categorically here is the twin
+        // `rest-auth.ts`'s own docstring calls for: the SAME operation (e.g.
+        // `pty.write`) must not be reachable through REST when tRPC's scope
+        // gate would refuse it, and REST simply has no scope gate of its own
+        // yet — so `full` is the only principal class this surface accepts.
+        // 403, not 401: the credential is real, just the wrong class for this
+        // door — a distinction worth preserving for whoever reads the log.
+        if (!principal.scopes.includes('full')) {
+          deny(res, 403, 'a scoped web session cannot use the REST API — use /trpc instead')
+          return
+        }
+        opts.next(req, res)
+      })
+      .catch(() => deny(res, 401, 'Unauthorized'))
   }
 }

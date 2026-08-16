@@ -26,7 +26,7 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
-import { Button, Textarea } from '@slayzone/ui'
+import { Button, Textarea, safeClipboardWriteText } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
@@ -151,12 +151,12 @@ export function TaskContextMenu({
 
   const handleCopyTitle = async (): Promise<void> => {
     track('copy_title')
-    await navigator.clipboard.writeText(task.title)
+    await safeClipboardWriteText(task.title)
   }
 
   const handleCopyLink = async (): Promise<void> => {
     track('copy_link')
-    await navigator.clipboard.writeText(`slayzone://task/${task.id}`)
+    await safeClipboardWriteText(`slayzone://task/${task.id}`)
   }
 
   const handleArchiveConfirm = (): void => {

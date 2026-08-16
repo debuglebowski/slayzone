@@ -50,6 +50,7 @@ export {
 export {
   hubUrlFromAddr,
   isBareAuthority,
+  isLoopbackPeer,
   parseHubAddress,
   LOOPBACK_HOSTS,
   type HubBindAddress

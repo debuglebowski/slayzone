@@ -18,6 +18,7 @@
     "./device-status-queries": "./src/device-status-queries.ts",
     "./hub-addr": "./src/hub-addr.ts",
     "./hub-discovery": "./src/hub-discovery.ts",
+    "./hub-owner-file": "./src/hub-owner-file.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",

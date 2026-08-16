@@ -10,7 +10,9 @@ import {
   ContextMenuTrigger,
   useShortcutDisplay,
   useAppearance,
-  appearanceDefaults
+  appearanceDefaults,
+  safeClipboardWriteText,
+  safeClipboardReadText
 } from '@slayzone/ui'
 import {
   Copy,
@@ -85,11 +87,11 @@ export function TerminalContextMenu({
 
   const handleCopy = useCallback(() => {
     const sel = terminalRef.current?.getSelection()
-    if (sel) void navigator.clipboard.writeText(sel)
+    if (sel) void safeClipboardWriteText(sel)
   }, [terminalRef])
 
   const handlePaste = useCallback(() => {
-    void navigator.clipboard.readText().then((text) => {
+    void safeClipboardReadText().then((text) => {
       if (text) ptyWriteMutation.mutate({ sessionId, data: text })
     })
   }, [sessionId])
@@ -111,7 +113,7 @@ export function TerminalContextMenu({
   }, [terminalRef])
 
   const handleCopyConversationId = useCallback(() => {
-    if (conversationId) void navigator.clipboard.writeText(conversationId)
+    if (conversationId) void safeClipboardWriteText(conversationId)
   }, [conversationId])
 
   const updateFontSize = useCallback((size: number) => {

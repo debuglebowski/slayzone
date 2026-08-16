@@ -3,6 +3,21 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
+import type { Scope } from '../../scopes'
+
+/**
+ * A resolved REST-side principal — the twin of `ConnectionPrincipal`
+ * (`apps/hub/src/hub-trpc-context.ts`) for the `/api/*` surface. Kept as a
+ * structural duplicate rather than an import: this package has no dependency
+ * on the hub app (only the hub app depends on transport), so the shape is
+ * mirrored rather than shared. `scopes` drives the SAME `isPathAllowed`-style
+ * decision on this side (see `rest-auth.ts`'s `restAuthAction`).
+ */
+export interface RestPrincipal {
+  userId: string
+  orgId?: string | null
+  scopes: readonly Scope[]
+}
 
 /**
  * Pluggable bridge to the PTY state machine. The Electron host wires the live
@@ -219,16 +234,55 @@ export interface RestApiDeps {
    * A METHOD OBJECT for the same reason as `hubUsers`: this package has no
    * `@slayzone/hub-auth` dependency and must not gain one (`lint:server-boundary`).
    *
-   * `required()` mirrors the gate's own derived flag (`isRemoteMode() && hubAuth
-   * != null`), so it is FALSE on every local / supervised / e2e hub. An absent slot
-   * (the Electron host) reads as "no bearer authority", which collapses the
-   * consuming route to loopback-only — i.e. exactly today's behavior.
+   * `required()` mirrors the gate's own derived flag (`!supervised`), so it is
+   * FALSE on every supervised hub. An absent slot (the Electron host) reads as
+   * "no bearer authority", which collapses the consuming route to
+   * loopback-only — i.e. exactly today's behavior.
+   *
+   * `verifyBearer` returns a {@link RestPrincipal}, not a boolean — a scoped web
+   * session and a full better-auth session resolve to DIFFERENT `scopes`, and
+   * `restAuthAction` needs that to decide whether a non-`full` caller may reach
+   * `/api/*` at all (see its docstring). Checks, in order: a `szw_`-prefixed
+   * bearer or cookie against the scoped `web_sessions` table (→ its own
+   * `scopes`), else a normal bearer against `verifySession` (→ `['full']`).
+   * Never a cookie for the LATTER path — see `restAuthAction`'s CSRF note.
    */
   restAuth?: {
     /** Whether THIS hub enforces bearer auth on its HTTP surface. */
     required: () => boolean
-    /** Verify an `Authorization: Bearer …` header against the hub's sessions. */
-    verifyBearer: (headers: IncomingHttpHeaders) => Promise<boolean>
+    /** Verify `Authorization: Bearer …` (and, for a scoped web session only, the
+     *  session cookie) against the hub's credentials. Null on anything but a
+     *  clean hit — absent/blank/invalid/expired/revoked. */
+    verifyBearer: (
+      headers: IncomingHttpHeaders,
+      cookies: Record<string, string>
+    ) => Promise<RestPrincipal | null>
+  }
+  /**
+   * Scoped browser login: `POST /api/auth/web-login` calls better-auth's
+   * `signInEmail` server-side, discards the resulting FULL session, and mints a
+   * scoped `web_sessions` row instead — the browser never holds `full` for even
+   * one request. See `apps/hub/src/web-sessions.ts` for the credential itself.
+   *
+   * Absent slot (the Electron host, or hub-auth init failed) → the route 503s;
+   * a supervised hub has no meaningful login to offer since it enforces no
+   * auth in the first place.
+   */
+  webLogin?: {
+    /**
+     * `cookieName` + `maxAgeSec` travel back with the result rather than being
+     * a constant this package imports — this package has no dependency on the
+     * hub app (only the hub app depends on transport), so the route sets
+     * whatever cookie name/lifetime the capability hands it instead of
+     * knowing `WEB_SESSION_COOKIE_NAME` exists.
+     */
+    login: (
+      email: string,
+      password: string
+    ) => Promise<
+      | { ok: true; token: string; cookieName: string; maxAgeSec: number }
+      | { ok: false; error: string }
+    >
   }
 }
 

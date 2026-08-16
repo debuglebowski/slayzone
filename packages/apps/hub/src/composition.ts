@@ -8,7 +8,7 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { checkCliInstalled, isRemoteMode } from '@slayzone/platform'
+import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   setTaskDeps,
@@ -39,7 +39,7 @@ import {
   type FloatingAgentState
 } from '@slayzone/transport/server'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
-import { getDesktopBridgeCapUrl } from './desktop-bridge-address.js'
+import { getDesktopBridgeCapUrl, getDesktopBridgeToken } from './desktop-bridge-address.js'
 import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
@@ -147,6 +147,7 @@ import {
   type HubAuth
 } from '@slayzone/hub-auth/server'
 import { verifyRestBearer } from './rest-auth.js'
+import { webLogin } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
@@ -325,7 +326,10 @@ export function composeServer(opts: {
   const desktopCapUrl = getDesktopBridgeCapUrl()
   const bridge: HostBridge | null =
     supervised && desktopCapUrl
-      ? createHostBridge(desktopCapUrl, { getTrpcPort: () => boundPort })
+      ? createHostBridge(desktopCapUrl, {
+          getTrpcPort: () => boundPort,
+          token: getDesktopBridgeToken()
+        })
       : null
 
   // --- Cross-domain event buses (this process's own instances) --------------
@@ -1126,21 +1130,39 @@ export function composeServer(opts: {
       list: async () => (hubAuthRef ? listHubUsers(hubAuthRef) : []),
       remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
     },
-    // Bearer authority for routes that admit an authenticated OFF-BOX caller —
-    // today only `POST /api/computers/join-token`, so `slay computer mint` can target a
-    // hub on another machine (see that route's WHO MAY CALL IT note).
+    // Bearer authority for routes that self-guard rather than sitting behind the
+    // outer gate — `POST /api/computers/join-token` (so `slay computer mint` can
+    // target a hub on another machine) and `/api/hub/users` (so `slay hub users
+    // add|ls|rm` keeps working once loopback alone is no longer sufficient).
     //
-    // Deliberately the SAME two pieces the outer gate uses — `isRemoteMode() &&
-    // hubAuthRef != null` and `verifyRestBearer` — so a route-level decision can
-    // never disagree with the gate about whether this hub authenticates at all, or
-    // about which sessions count. Getter-shaped for the usual reason: hub-auth is
-    // built inside the async `computersReady` IIFE, long after this literal exists.
+    // Deliberately the SAME two pieces the outer gate uses — `supervised` and
+    // `verifyRestBearer` — so a route-level decision can never disagree with the
+    // gate about whether this hub authenticates at all, or about which sessions
+    // count. Getter-shaped for the usual reason: hub-auth is built inside the
+    // async `computersReady` IIFE, long after this literal exists.
     //
-    // False on every local / supervised / e2e hub, which keeps the consuming route
-    // loopback-only exactly as before.
+    // THIS USED TO READ `isRemoteMode() && hubAuthRef !== null` — stale from
+    // before auth stopped being mode-derived (`server.ts`'s `hubAuthRequired =
+    // !supervised`). That drift meant a LOCAL-mode standalone hub's outer gate
+    // enforced auth while these two routes' OWN self-guard still believed it
+    // didn't, so a loopback peer (any peer, behind a reverse proxy) minted join
+    // tokens and administered accounts with no bearer, on the single most common
+    // self-hosted deployment shape. `supervised` is captured in this closure
+    // already (composeServer's own `standalone` param), so no new plumbing.
+    //
+    // False only on a supervised hub, which keeps both routes loopback-only there
+    // exactly as before.
     restAuth: {
-      required: () => isRemoteMode() && hubAuthRef !== null,
-      verifyBearer: (headers) => verifyRestBearer(hubAuthRef, headers)
+      required: () => !supervised && hubAuthRef !== null,
+      verifyBearer: (headers, cookies) => verifyRestBearer(hubAuthRef, db, headers, cookies)
+    },
+    // Scoped browser login. Absent only when hub-auth failed to init — a
+    // supervised hub has no meaningful login to offer, but the slot itself
+    // does not depend on `supervised`: nothing stops an operator from opening
+    // the web UI against a supervised hub's loopback listener, and doing so
+    // should behave the same as any other standalone hub's login.
+    webLogin: {
+      login: (email, password) => webLogin(hubAuthRef, db, email, password)
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's

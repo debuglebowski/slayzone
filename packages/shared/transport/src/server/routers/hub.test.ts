@@ -79,9 +79,14 @@ test('auth gate ON + no principal: gated proc 401s, but open describe still work
 
 test('auth gate ON + principal present: gated proc runs', async () => {
   setAuthGate(() => true)
+  // `scopes: ['full']` — every REAL principal resolved via verifySession
+  // carries this (see hub-trpc-context.ts); a principal with no scopes at all
+  // is what a scoped web session with an empty grant would look like, which
+  // correctly gets FORBIDDEN on hub.setLabel (never-classified) rather than
+  // running. This fixture models an ordinary authenticated (desktop/CLI) call.
   const authedCaller = hubRouter.createCaller({
     db: h.slayDb,
-    principal: { userId: 'u1', orgId: null }
+    principal: { userId: 'u1', orgId: null, scopes: ['full'] }
   } as never)
   await authedCaller.setLabel({ label: 'authed-write' })
   expect((await authedCaller.describe()).label).toBe('authed-write')

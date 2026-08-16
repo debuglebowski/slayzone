@@ -65,7 +65,7 @@ import {
   canExportAsPng,
   canExportAsHtml
 } from '@slayzone/task/shared'
-import { useAppearance } from '@slayzone/ui'
+import { useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
@@ -471,7 +471,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const handleCopyPath = useCallback(
       async (artifactId: string) => {
         const fp = await getFilePath(artifactId)
-        if (fp) navigator.clipboard.writeText(fp)
+        if (fp) void safeClipboardWriteText(fp)
       },
       [getFilePath]
     )

@@ -1,21 +1,28 @@
 /**
- * REST: `/api/hub/users` contract tests — the loopback-only operator account
+ * REST: `/api/hub/users` contract tests — the operator account-management
  * surface behind `slay hub users add|ls|rm`.
  *
  * The `hubUsers` capability is a STUB here, deliberately: the real logic lives in
  * `@slayzone/hub-auth`'s users.ts (covered against real better-auth in its own
  * users.test.ts), and this package has no hub-auth dependency. Stubbing keeps the
  * test honest about that boundary and isolates what this layer actually owns —
- * status codes, body validation, and the three-step loopback/slot/ready gate.
+ * status codes, body validation, and the peer/bearer/slot/ready gate.
  *
- * The 403 is NOT reachable through the HTTP harness (it binds 127.0.0.1, so every
- * peer is loopback), which is why `isLoopbackAddress` is exported and asserted
- * directly at the bottom.
+ * WHO MAY CALL is its own axis, decided by the pure `hubUsersAuthDecision`: on a
+ * hub with NO auth (no `restAuth` slot — the Electron host's shape) loopback is
+ * the sole authority. On a hub that ENFORCES auth (every standalone hub now —
+ * `server.ts`'s `hubAuthRequired = !supervised`), a bearer is required from
+ * EVERYONE, loopback included — the route used to trust any loopback peer
+ * unconditionally, which a reverse proxy in front of a standalone hub turns into
+ * "anyone who reaches the hub can create or delete accounts", defeating
+ * `disableSignUp` entirely. The HTTP harness binds 127.0.0.1, so every peer it
+ * can produce is loopback — which is why the auth-required matrix is asserted
+ * directly against the pure function as well as through a request.
  */
 import express from 'express'
 import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
-import { isLoopbackAddress, registerHubUsersRoutes } from './users.js'
+import { hubUsersAuthDecision, isLoopbackAddress, registerHubUsersRoutes } from './users.js'
 import type { RestApiDeps } from '../types.js'
 
 const SERVICE_EMAIL = 'computers@slayzone.internal'
@@ -37,17 +44,19 @@ function stubUsers(overrides: Partial<HubUsers> = {}): HubUsers {
 }
 
 /**
- * Mount the routes with the given capability slot. `db` is irrelevant to these
- * routes (they never touch it) so a cast keeps the harness out — no Electron ABI
- * needed, unlike the sibling join-token suite.
+ * Mount the routes with the given capability slot (+ optional `restAuth`, for the
+ * auth-required matrix below). `db` is irrelevant to these routes (they never
+ * touch it) so a cast keeps the harness out — no Electron ABI needed, unlike the
+ * sibling join-token suite.
  */
-function mount(hubUsers: RestApiDeps['hubUsers']) {
+function mount(hubUsers: RestApiDeps['hubUsers'], restAuth?: RestApiDeps['restAuth']) {
   const app = express()
   app.use(express.json())
   registerHubUsersRoutes(app, {
     db: null as unknown as RestApiDeps['db'],
     notifyRenderer: () => {},
-    hubUsers
+    hubUsers,
+    ...(restAuth ? { restAuth } : {})
   })
   return mountRestApp(app)
 }
@@ -56,9 +65,10 @@ function mount(hubUsers: RestApiDeps['hubUsers']) {
 async function call<T>(
   hubUsers: RestApiDeps['hubUsers'],
   method: string,
-  body?: unknown
+  body?: unknown,
+  restAuth?: RestApiDeps['restAuth']
 ): Promise<{ status: number; body: T }> {
-  const rest = await mount(hubUsers)
+  const rest = await mount(hubUsers, restAuth)
   try {
     return await rest.request<T>(method, '/api/hub/users', body)
   } finally {
@@ -294,7 +304,120 @@ await describe('the capability gate (slot absent / not ready)', () => {
   })
 })
 
-await describe('isLoopbackAddress (the 403 decision)', () => {
+/**
+ * WHO MAY CALL — through a real request. Extends the capability-gate suite above
+ * with the peer/bearer axis: on a hub with NO `restAuth` slot, loopback still
+ * administers unconditionally (unchanged, the Electron-host shape). Once
+ * `restAuth` is present and `required()` is true, a loopback caller is no longer
+ * special — this is the regression fix (see `hubUsersAuthDecision` below).
+ */
+await describe('the peer/bearer gate (auth-required matrix, through a real request)', () => {
+  test('with no restAuth slot, loopback administers with no bearer check', async () => {
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET')
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+
+  test('loopback caller on an auth-enforcing hub MUST present a bearer (create)', async () => {
+    let verifyCalls = 0
+    const res = await call<{ ok: boolean }>(
+      stubUsers(),
+      'POST',
+      { email: 'intruder@example.com' },
+      {
+        required: () => true,
+        verifyBearer: async () => {
+          verifyCalls++
+          return null
+        }
+      }
+    )
+    expect(res.status).toBe(401)
+    expect(res.body.ok).toBe(false)
+    expect(verifyCalls).toBe(1)
+  })
+
+  test('loopback caller on an auth-enforcing hub MUST present a bearer (list)', async () => {
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
+      required: () => true,
+      verifyBearer: async () => null
+    })
+    expect(res.status).toBe(401)
+  })
+
+  test('loopback caller on an auth-enforcing hub MUST present a bearer (remove)', async () => {
+    const res = await call<{ ok: boolean }>(
+      stubUsers(),
+      'DELETE',
+      { email: 'x@example.com' },
+      { required: () => true, verifyBearer: async () => null }
+    )
+    expect(res.status).toBe(401)
+  })
+
+  test('loopback caller on an auth-enforcing hub administers WITH a valid bearer', async () => {
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u1', scopes: ['full'] })
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+
+  test('loopback caller on an auth-enforcing hub is REFUSED with a scoped (non-full) bearer', async () => {
+    // A szw_ web session must not be able to administer accounts even though
+    // it presents a genuinely valid credential — this gate checks for `full`
+    // specifically, not merely "verifyBearer resolved something".
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u2', scopes: ['read', 'tasks'] })
+    })
+    expect(res.status).toBe(401)
+  })
+})
+
+/**
+ * WHO MAY ADMINISTER — the pure decision, exhaustively. Mirrors the sibling
+ * `computers/join-token.test.ts`'s `joinTokenAuthDecision` matrix on purpose: the
+ * same reverse-proxy shape threatened both routes, fixed the same way, and they
+ * must not be allowed to diverge silently.
+ */
+await describe('hubUsersAuthDecision', () => {
+  test('auth NOT required (supervised): loopback allows, off-box is forbidden', () => {
+    expect(hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
+      'allow'
+    )
+    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
+      'forbid'
+    )
+    // Even a caller that WOULD verify gets forbidden — no sessions exist to check.
+    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
+      'forbid'
+    )
+  })
+
+  test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
+    // THE REGRESSION MATRIX — the old gate admitted any loopback peer
+    // unconditionally, regardless of `authRequired`.
+    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
+      'allow'
+    )
+    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
+    )
+  })
+
+  test('off-box on an enforcing hub: valid bearer allows, missing/invalid is 401', () => {
+    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: true })).toBe(
+      'allow'
+    )
+    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
+    )
+  })
+})
+
+await describe('isLoopbackAddress (the loopback-only decision, no restAuth slot)', () => {
   test('accepts every loopback form node reports', () => {
     for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '127.0.0.53', '127.1.2.3']) {
       expect(isLoopbackAddress(addr)).toBe(true)

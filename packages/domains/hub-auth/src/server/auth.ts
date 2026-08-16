@@ -57,7 +57,18 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       organization(),
       apiKey({
         // Computer identity travels in key metadata ({ computerId }).
+        //
+        // Attacker-controlled: `POST /api/auth/api-key/create` is session-
+        // authenticated and gate-exempt (it sits under `/api/auth/`), so any
+        // account holder can set this freely. `verifyComputerApiKey` therefore
+        // treats metadata as a HINT and authenticates on `referenceId` — see its
+        // docstring. Do not add an authorization decision that reads metadata.
         enableMetadata: true,
+        // An api-key must never BE a session. Default is already false, but
+        // written explicitly for the same reason `rateLimit` is: if this ever
+        // flips, an `x-api-key` header becomes a full user session and every
+        // computer credential silently becomes a login.
+        enableSessionForAPIKeys: false,
         defaultPrefix: COMPUTER_KEY_PREFIX,
         // Computer keys are MACHINE credentials verified once per reconnect, so the
         // plugin's default verify limit (10 requests / 24h, ON unless set) bricks

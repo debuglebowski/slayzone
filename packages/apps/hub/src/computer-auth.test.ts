@@ -229,6 +229,57 @@ async function main(): Promise<void> {
       )
     })
 
+    /**
+     * The key must be THE key this computer enrolled with, not merely A key that
+     * names it. `verifyComputerApiKey` proves a key was minted by us; this proves
+     * it was minted FOR this computer.
+     *
+     * Without the `auth_key_id` binding, a key from a PREVIOUS enroll of the same
+     * computer id keeps authenticating forever: re-enroll rotates the stored
+     * `auth_key_id` but the old apikey row is untouched, so its holder — e.g.
+     * whoever had the machine before it was re-provisioned — silently retains
+     * access to the current computer.
+     */
+    await test('a superseded key from a PRIOR enroll no longer authenticates', async () => {
+      // The LOCAL path is the one that keeps a stable computer id across enrolls
+      // (deterministic id + UPSERT), so it is where a key can outlive its own
+      // enrollment. A remote enroll mints a fresh uuid each time, so its old key
+      // points at an old row and was never the risk.
+      const localAdapters = createComputerAuthAdapters({
+        db,
+        auth,
+        localComputerName: 'rotating-local'
+      })
+      const first = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'rotating-local',
+        joinToken: await mintToken(db, 'rotate-1')
+      })
+      assert(
+        (await localAdapters.verifyApiKey(first.apiKey)) !== null,
+        'first key valid before rotate'
+      )
+
+      // A relaunch: new join token, same local name ⇒ same computer id, fresh key.
+      const second = await localAdapters.verifyEnrollment({
+        ...ENROLL_BASE,
+        name: 'rotating-local',
+        joinToken: await mintToken(db, 'rotate-2')
+      })
+      assertEq(second.computerId, first.computerId, 'same computer id across re-enroll')
+      assert(second.apiKey !== first.apiKey, 'a distinct key was issued')
+
+      assert(
+        (await localAdapters.verifyApiKey(second.apiKey)) !== null,
+        'current key authenticates'
+      )
+      assertEq(
+        await localAdapters.verifyApiKey(first.apiKey),
+        null,
+        'superseded key is refused even though it names a live computer'
+      )
+    })
+
     // --- Local-computer dedup (Wave3.5-D5) -----------------------------------
     await test('LOCAL enroll uses a deterministic id + UPSERTs one row across relaunches', async () => {
       const localAdapters = createComputerAuthAdapters({

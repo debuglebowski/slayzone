@@ -1,5 +1,9 @@
 import type { ColumnConfig } from './types'
 import { validateColumns } from './columns'
+// The narrow subpath, not the `@slayzone/ui` barrel: this file is isomorphic
+// (also imported server-side), and the barrel re-exports the whole React
+// component kit — this subpath is a handful of side-effect-free functions.
+import { safeRandomUUID } from '@slayzone/ui/secure-context'
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -45,7 +49,7 @@ export function prepareProjectCreate(input: PrepareProjectCreateInput): Prepared
   const now = new Date().toISOString()
 
   return {
-    id: crypto.randomUUID(),
+    id: safeRandomUUID(),
     name,
     color,
     path,

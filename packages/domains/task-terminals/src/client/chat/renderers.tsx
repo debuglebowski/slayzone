@@ -22,7 +22,7 @@ import {
   User,
   Bot
 } from 'lucide-react'
-import { cn } from '@slayzone/ui'
+import { cn, safeClipboardWriteText } from '@slayzone/ui'
 import { DiffView, GhMarkdown } from '@slayzone/worktrees/client'
 import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
@@ -60,7 +60,7 @@ function formatTime(ts: number): string {
 function useCopy(text: string): { copied: boolean; copy: () => void } {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
-    void navigator.clipboard.writeText(text)
+    void safeClipboardWriteText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }

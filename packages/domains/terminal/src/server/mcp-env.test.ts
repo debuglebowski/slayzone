@@ -323,4 +323,83 @@ const REMOTE: RemoteMcpEnv = {
   assert(ws === null, 'whitespace-only hubBaseUrl must resolve to null')
 }
 
+// ── SLAYZONE_HUB_TOKEN: the owner-file fallback for a standalone hub's own
+//    spawns (§0.4 — a standalone hub now requires auth from EVERY caller,
+//    including one it spawned itself) ─────────────────────────────────────────
+{
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const priorRoot = process.env.SLAYZONE_ROOT
+  const priorSupervised = process.env.SLAYZONE_SUPERVISED
+  const dataRoot = mkdtempSync(join(tmpdir(), 'mcp-env-owner-'))
+  process.env.SLAYZONE_ROOT = dataRoot
+
+  try {
+    // 13. Standalone hub, owner file present with a token → the token is injected
+    //     alongside SLAYZONE_HUB_ADDRESS, reusing the CLI's existing env channel.
+    delete process.env.SLAYZONE_SUPERVISED
+    writeFileSync(
+      join(dataRoot, 'hub.owner.json'),
+      JSON.stringify({
+        userId: 'u1',
+        email: 'owner@hub.slayzone.local',
+        password: 'unused-here',
+        token: 'szw_test_token',
+        createdAt: Date.now()
+      })
+    )
+    const env = await buildMcpEnv(null, 'task-owner-1', 'claude-code')
+    assert(
+      env.SLAYZONE_HUB_ADDRESS === `127.0.0.1:${MCP_PORT}`,
+      `still pins the hub address, got: ${env.SLAYZONE_HUB_ADDRESS}`
+    )
+    assert(
+      env.SLAYZONE_HUB_TOKEN === 'szw_test_token',
+      `owner token injected for a plain spawn, got: ${env.SLAYZONE_HUB_TOKEN}`
+    )
+
+    // 14. Same file, but a NON-hook-capable mode (a plain shell) — the token must
+    //     still be present. This is exactly the "an in-task `slay` typed by hand"
+    //     case the fallback exists for, and it is NOT gated on hook capability.
+    const plain = await buildMcpEnv(null, 'task-owner-2', 'bash' as never)
+    assert(
+      plain.SLAYZONE_HUB_TOKEN === 'szw_test_token',
+      `plain-shell spawn also gets the token, got: ${plain.SLAYZONE_HUB_TOKEN}`
+    )
+
+    // 15. Supervised hub → NEVER read the file, even if one happens to exist on
+    //     disk (e.g. a leftover from a prior standalone run at the same root).
+    //     Supervised has no auth requirement and the Electron host never
+    //     provisions this file, so this must be a hard no-op.
+    process.env.SLAYZONE_SUPERVISED = '1'
+    const supervised = await buildMcpEnv(null, 'task-owner-3', 'claude-code')
+    assert(
+      !('SLAYZONE_HUB_TOKEN' in supervised),
+      'supervised must never inject the owner token, even if the file exists'
+    )
+    delete process.env.SLAYZONE_SUPERVISED
+
+    // 16. No owner file at all (the file was never provisioned, or belongs to a
+    //     different OS user and is unreadable) → silently absent, never throws.
+    rmSync(join(dataRoot, 'hub.owner.json'))
+    const noFile = await buildMcpEnv(null, 'task-owner-4', 'claude-code')
+    assert(
+      !('SLAYZONE_HUB_TOKEN' in noFile),
+      'missing owner file degrades to no token, not a throw'
+    )
+    assert(
+      noFile.SLAYZONE_HUB_ADDRESS === `127.0.0.1:${MCP_PORT}`,
+      `hub address is still set with no owner file, got: ${noFile.SLAYZONE_HUB_ADDRESS}`
+    )
+  } finally {
+    if (priorRoot === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = priorRoot
+    if (priorSupervised === undefined) delete process.env.SLAYZONE_SUPERVISED
+    else process.env.SLAYZONE_SUPERVISED = priorSupervised
+    rmSync(dataRoot, { recursive: true, force: true })
+  }
+}
+
 console.log(`OK — buildMcpEnv / resolveRemoteMcpEnv ${pass} checks passed`)

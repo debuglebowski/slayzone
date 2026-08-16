@@ -26,7 +26,8 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  toast
+  toast,
+  safeClipboardWriteText
 } from '@slayzone/ui'
 import { ComputerRootsDialog, type RootsTarget } from './ComputerRootsDialog'
 
@@ -160,7 +161,7 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
 
   const copyToken = async (token: string): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(token)
+      await safeClipboardWriteText(token)
       toast.success('Token copied')
     } catch {
       toast.error('Could not copy to clipboard')

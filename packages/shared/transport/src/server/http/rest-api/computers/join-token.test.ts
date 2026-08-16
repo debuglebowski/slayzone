@@ -12,11 +12,15 @@
  *   - computer OFF (slot absent)    → 503 (never mints; default boot byte-identical)
  *
  * WHO MAY CALL IT is a separate axis, decided by the pure `joinTokenAuthDecision`
- * and asserted at the bottom: loopback always, off-box only on an auth-enforcing
- * hub with a verified bearer. The HTTP harness binds 127.0.0.1, so every peer it
- * can produce is loopback — which is exactly why that decision is a pure exported
- * function rather than reachable through a request (same reasoning as the sibling
- * `hub/users.ts` suite).
+ * and asserted at the bottom: on a hub with NO auth (no `restAuth` slot —
+ * supervised, the Electron host's own boot auto-enroll), loopback is the sole
+ * authority. On a hub that ENFORCES auth (every standalone hub now — see
+ * server.ts), a bearer is required from everyone, loopback included — that used
+ * to be an unconditional loopback bypass, which a reverse proxy in front of a
+ * standalone hub turns into "anyone who reaches the hub can mint". The HTTP
+ * harness binds 127.0.0.1, so every peer it can produce is loopback — which is
+ * exactly why that decision is a pure exported function rather than reachable
+ * through a request (same reasoning as the sibling `hub/users.ts` suite).
  */
 import express from 'express'
 import {
@@ -109,23 +113,66 @@ await describe('POST /api/computers/join-token', () => {
     }
   })
 
-  // A loopback caller must never be asked for a bearer, whatever the gate says —
-  // this is the Electron host's boot auto-enroll path and the on-box `slay` path.
-  test('loopback caller mints even on an auth-enforcing hub, without a bearer', async () => {
+  // NO `restAuth` slot at all (the Electron host's shape): loopback is the sole
+  // authority, no bearer is ever consulted. This is the boot auto-enroll path.
+  test('with no restAuth slot, loopback mints with no bearer check', async () => {
+    const rest = await mount(boundComputers)
+    try {
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(200)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  // THE REGRESSION FIX: a loopback caller on an auth-ENFORCING hub must present a
+  // bearer like anyone else — the old unconditional loopback bypass is exactly
+  // what a reverse proxy in front of a standalone hub turns into "anyone reaches
+  // this route". Bootstrap-owner (hub.owner.json) is what keeps an on-box caller
+  // working without operator action; this is asserted from the CLI side, not
+  // here — this test asserts the SERVER no longer trusts the peer alone.
+  test('loopback caller on an auth-enforcing hub MUST present a bearer', async () => {
     let verifyCalls = 0
     const rest = await mount(boundComputers, {
       required: () => true,
       verifyBearer: async () => {
         verifyCalls += 1
-        return false
+        return null
       }
+    })
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(401)
+      expect(verifyCalls).toBe(1)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('loopback caller on an auth-enforcing hub mints WITH a valid bearer', async () => {
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u1', scopes: ['full'] })
     })
     try {
       const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(200)
-      // Not merely "allowed": the bearer must not even be consulted, so a
-      // co-located caller can never be broken by an auth-side regression.
-      expect(verifyCalls).toBe(0)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('loopback caller on an auth-enforcing hub is REFUSED with a scoped (non-full) bearer', async () => {
+    // A szw_ web session must not be able to mint a computer join token even
+    // though it presents a genuinely valid credential — join-token.ts checks
+    // for `full` specifically, not merely "verifyBearer resolved something".
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u2', scopes: ['read', 'tasks'] })
+    })
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(401)
     } finally {
       await rest.close()
     }
@@ -135,18 +182,34 @@ await describe('POST /api/computers/join-token', () => {
 /**
  * WHO MAY MINT — the pure decision, exhaustively.
  *
- * The 403 exists because a join token is a bearer-equivalent secret. But on an
+ * The 403/401 exists because a join token is a bearer-equivalent secret. On an
  * auth-enforcing hub a valid session ALREADY grants the identical operation over
- * `/trpc` (`computers.mintJoinToken` is not loopback-gated), so refusing the same
- * caller here was a capability gap between two transports, not a boundary.
+ * `/trpc` (`computers.mintJoinToken` is not loopback-gated), so refusing an
+ * off-box session here was a capability gap between two transports, not a
+ * boundary — but an unconditional loopback bypass was a REAL boundary, and one a
+ * reverse proxy silently erases. Loopback is authoritative ONLY when there is no
+ * auth to check at all.
  */
 await describe('joinTokenAuthDecision', () => {
-  test('loopback peer: always mint (gate off or on)', () => {
+  test('auth NOT required (supervised): loopback mints, off-box is forbidden', () => {
     expect(joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
       'mint'
     )
-    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
+      'forbid'
+    )
+  })
+
+  test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
+    // THE REGRESSION MATRIX. A loopback peer on an enforcing hub gets exactly the
+    // same answer an off-box peer would: verified bearer mints, missing/invalid
+    // is 401. This is the fix — the old function returned 'mint' unconditionally
+    // for loopback regardless of `authRequired`.
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
       'mint'
+    )
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
     )
   })
 

@@ -603,9 +603,11 @@ let localComputerHandle: import('./local-computer-supervisor').LocalComputerHand
 // address in env, but that server starts on its own async path. This promise
 // lets the sidecar-spawn block await the bound port. One listener now carries
 // both the capability bridge (WS `/cap`) and the reverse-proxied Electron-only
-// REST (`/api/*`), advertised as `SLAYZONE_DESKTOP_BRIDGE_ADDRESS`.
-let resolveDesktopBridgeAddress!: (address: string) => void
-const desktopBridgeAddressPromise = new Promise<string>((r) => {
+// REST (`/api/*`), advertised as `SLAYZONE_DESKTOP_BRIDGE_ADDRESS`. `token` is
+// the per-boot bearer `/cap` requires (see desktop-bridge-server.ts) — handed
+// to the side-car as `SLAYZONE_DESKTOP_BRIDGE_TOKEN`, never inherited further.
+let resolveDesktopBridgeAddress!: (info: { address: string; token: string }) => void
+const desktopBridgeAddressPromise = new Promise<{ address: string; token: string }>((r) => {
   resolveDesktopBridgeAddress = r
 })
 // Resolves once the side-car supervisor handle exists, so `app:get-server-url`
@@ -2325,8 +2327,13 @@ app
             // either; the side-car owns `server_port` (CLI/agents/MCP).
             const bridgeServer = await startDesktopBridgeServer({})
             bridgeCleanup = () => void bridgeServer.stop()
-            resolveDesktopBridgeAddress(`127.0.0.1:${bridgeServer.port}`)
-            logBoot(`desktop bridge server started (port ${bridgeServer.port}, cap WS only)`)
+            resolveDesktopBridgeAddress({
+              address: `127.0.0.1:${bridgeServer.port}`,
+              token: bridgeServer.token
+            })
+            logBoot(
+              `desktop bridge server started (port ${bridgeServer.port}, cap WS only, token-gated)`
+            )
           })
           .catch((err) => {
             console.error('[desktop-bridge] Failed to start bridge server:', err)
@@ -2344,7 +2351,7 @@ app
       setImmediate(() => {
         logBoot('sidecar server supervisor import dispatched')
         Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
-          .then(([{ startSidecarServer }, desktopBridgeAddress]) => {
+          .then(([{ startSidecarServer }, desktopBridge]) => {
             const scriptPath = is.dev
               ? join(app.getAppPath(), '../hub/dist/bin.cjs')
               : join(process.resourcesPath, 'hub', 'bin.cjs')
@@ -2393,7 +2400,11 @@ app
                 // Electron-only calls + desktop events, WS `/cap`) AND the REST
                 // reverse-proxy target (browser-automation + export, HTTP `/api/*`).
                 // Authority only — always loopback, so the side-car derives ws/http.
-                SLAYZONE_DESKTOP_BRIDGE_ADDRESS: desktopBridgeAddress,
+                SLAYZONE_DESKTOP_BRIDGE_ADDRESS: desktopBridge.address,
+                // Per-boot bearer `/cap` requires on connect (see
+                // desktop-bridge-server.ts's `verifyClient` gate) — secret-scoped
+                // in ENV_MANIFEST so it never reaches a spawned user terminal.
+                SLAYZONE_DESKTOP_BRIDGE_TOKEN: desktopBridge.token,
                 // Packaged resolution: only bin.js is copied to Resources/hub,
                 // so createRequire's walk-up never finds node_modules. Point the
                 // resolver at the unpacked natives (better-sqlite3, node-pty) the

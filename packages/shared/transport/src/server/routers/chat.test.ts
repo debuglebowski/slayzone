@@ -67,6 +67,33 @@ await describe('chat router', () => {
     ])
   })
 
+  test('onEvent with NO tabIds is the unfiltered firehose (unchanged, every existing caller)', async () => {
+    const caller = chatRouter.createCaller(ctx)
+    const obs = await caller.onEvent(undefined)
+    const got: string[] = []
+    const sub = obs.subscribe({ next: (v) => got.push(v.tabId) })
+    events.emit('event', 'tab-a', {}, 1)
+    events.emit('event', 'tab-b', {}, 2)
+    sub.unsubscribe()
+    expect(got).toEqual(['tab-a', 'tab-b'])
+  })
+
+  test('onEvent with tabIds filters server-side — the web-bandwidth fix', async () => {
+    const caller = chatRouter.createCaller(ctx)
+    const obs = await caller.onEvent({ tabIds: ['tab-a'] })
+    const got: string[] = []
+    const sub = obs.subscribe({ next: (v) => got.push(v.tabId) })
+
+    // tab-b's event must never reach this subscriber at all — not filtered
+    // client-side, dropped before emit.next ever runs.
+    events.emit('event', 'tab-b', {}, 1)
+    events.emit('event', 'tab-a', {}, 2)
+    events.emit('event', 'tab-c', {}, 3)
+    sub.unsubscribe()
+
+    expect(got).toEqual(['tab-a'])
+  })
+
   test('onQueueChanged forwards emits + teardown removes listener (no leak)', async () => {
     const before = queueEvents.listenerCount('queue-changed')
     const caller = chatRouter.createCaller(ctx)

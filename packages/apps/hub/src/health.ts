@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { LOOPBACK_HOSTS } from '@slayzone/platform/hub-addr'
+import { isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { getServerBuildInfo } from './build-info.js'
 
 export type HealthState = {
@@ -38,9 +38,12 @@ export type HealthState = {
 function isLoopbackRequest(req: IncomingMessage): boolean {
   // `socket` is always present on a real request; optional-chained so a
   // hand-built request object can never throw INSIDE the liveness endpoint.
-  const raw = req.socket?.remoteAddress
-  if (!raw) return false
-  return LOOPBACK_HOSTS.has(raw.replace(/^::ffff:/, ''))
+  //
+  // `isLoopbackPeer`, NOT `LOOPBACK_HOSTS`: this matches a SOCKET ADDRESS, and
+  // the host-string set both accepts `'localhost'` (never a peer address) and
+  // misses the rest of `127.0.0.0/8` — so a peer on e.g. `127.0.0.53` was being
+  // classified off-box. See the two predicates' docstrings in `hub-addr.ts`.
+  return isLoopbackPeer(req.socket?.remoteAddress)
 }
 
 /**

@@ -1,4 +1,5 @@
 import { getTrpcClient } from '@slayzone/transport/client'
+import { safeRandomUUID } from '@slayzone/ui/secure-context'
 import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
 
 declare const __POSTHOG_API_KEY__: string
@@ -214,7 +215,7 @@ export async function initTelemetry(tier: TelemetryTier): Promise<void> {
     if (storedId) {
       posthog.identify(storedId)
     } else {
-      const id = crypto.randomUUID()
+      const id = safeRandomUUID()
       localStorage.setItem('slayzone_telemetry_id', id)
       posthog.identify(id)
     }

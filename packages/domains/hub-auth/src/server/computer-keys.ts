@@ -34,6 +34,23 @@ async function ensureComputerServiceUser(auth: HubAuth): Promise<string> {
 }
 
 /**
+ * The computer service user's id, or null when it does not exist yet.
+ *
+ * NON-CREATING, unlike {@link ensureComputerServiceUser} — this is the VERIFY
+ * side. `verifyComputerApiKey` uses it to require that a key was minted by
+ * {@link mintComputerApiKey} (which references this user) rather than by a
+ * human's session through better-auth's own `/api/auth/api-key/create`. A
+ * verify path must never create identity as a side effect, and a hub with no
+ * service user has necessarily minted no computer keys — so null means "no key
+ * can possibly be valid", which is the correct fail-closed answer.
+ */
+export async function findComputerServiceUserId(auth: HubAuth): Promise<string | null> {
+  const ctx = await auth.$context
+  const existing = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
+  return existing?.user.id ?? null
+}
+
+/**
  * Mint an API key for a computer. The computer identity is stored as
  * `{ computerId }` key metadata and resolved back by `verifyComputerApiKey`.
  * The key is stored hashed; the returned plaintext is shown exactly once.

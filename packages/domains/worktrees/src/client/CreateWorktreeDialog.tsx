@@ -5,7 +5,7 @@ import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, toast } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
-import { Label } from '@slayzone/ui'
+import { Label, safeRandomUUID } from '@slayzone/ui'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { CreateWorktreePhase } from '@slayzone/worktrees/shared'
 
@@ -56,7 +56,7 @@ export function CreateWorktreeDialog({
 
     // Phase progress streams over the `worktrees.onCreateWorktreePhase` tRPC
     // subscription, correlated by the requestId passed to createWorktree.
-    const requestId = crypto.randomUUID()
+    const requestId = safeRandomUUID()
     const phaseSubscription = trpcClient.worktrees.onCreateWorktreePhase.subscribe(
       { requestId },
       { onData: (event) => setPhase(event.phase) }

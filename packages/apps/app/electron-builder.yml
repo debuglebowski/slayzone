@@ -58,6 +58,15 @@ extraResources:
     to: "bin/slay"
   - from: "../hub/dist/bin.cjs"
     to: "hub/bin.cjs"
+  # server.ts's WEB_ROOT resolves as `join(__dirname, '..', 'dist', 'web')`
+  # relative to wherever bin.cjs itself runs from — an OFFSET, not a fixed
+  # path, so it resolves correctly both unpackaged (dist/bin.cjs + dist/web
+  # side by side under packages/apps/hub/) and here. bin.cjs lands at
+  # resourcesPath/hub/bin.cjs, so __dirname there is resourcesPath/hub — the
+  # SAME offset from resourcesPath/hub then requires this bundle at
+  # resourcesPath/dist/web, not resourcesPath/hub/web.
+  - from: "../hub/dist/web"
+    to: "dist/web"
 npmRebuild: true
 nativeRebuilder: sequential
 publish:

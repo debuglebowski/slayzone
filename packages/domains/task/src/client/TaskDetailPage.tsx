@@ -94,6 +94,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
+import { safeRandomUUID, safeClipboardWriteText } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { TaskStatusMenu } from './TaskStatusMenu'
 import {
@@ -1146,13 +1147,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const handleCopyHistory = useCallback(() => {
     const history = getMainHistory()
-    if (history) void navigator.clipboard.writeText(history)
+    if (history) void safeClipboardWriteText(history)
   }, [getMainHistory])
 
   const handleCopyConversationId = useCallback(() => {
     if (!task) return
     const id = getConversationIdForMode(task)
-    if (id) void navigator.clipboard.writeText(id)
+    if (id) void safeClipboardWriteText(id)
   }, [task, getConversationIdForMode])
 
   const getProviderFlagsForMode = useCallback((currentTask: Task): string => {
@@ -1547,7 +1548,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const openDevServerInBrowser = useCallback(
     (url: string) => {
       handlePanelToggle('browser', true)
-      const newTab = { id: `tab-${crypto.randomUUID().slice(0, 8)}`, url, title: url }
+      const newTab = { id: `tab-${safeRandomUUID().slice(0, 8)}`, url, title: url }
       if (browserOpenRef.current) {
         handleBrowserTabsChange({ tabs: [...browserTabs.tabs, newTab], activeTabId: newTab.id })
       } else {

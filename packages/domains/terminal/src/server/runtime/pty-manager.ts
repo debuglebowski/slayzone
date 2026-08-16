@@ -2944,9 +2944,11 @@ export function clearBuffer(sessionId: string): { success: boolean; clearedSeq: 
 export function getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult | null {
   const session = sessions.get(sessionId)
   if (!session) return null
+  const { chunks, prelude } = session.buffer.getChunksSince(afterSeq)
   return {
-    chunks: session.buffer.getChunksSince(afterSeq),
-    currentSeq: session.buffer.getCurrentSeq()
+    chunks,
+    currentSeq: session.buffer.getCurrentSeq(),
+    prelude
   }
 }
 

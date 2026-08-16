@@ -18,6 +18,7 @@
  * @module cli/hub-request
  */
 import { discoverHubs, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
+import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import { resolveHubTarget } from './hub-config'
 import { fail } from './service'
 
@@ -68,7 +69,15 @@ export async function resolveHubRequestTarget(
     )
   }
   // Discovery only reaches loopback, so the scheme is always plain http.
-  return { baseUrl: `http://127.0.0.1:${running[0]!.port}`, token: null }
+  //
+  // Same owner-file fallback as `api.ts`'s resolveTarget, and for the identical
+  // reason: a standalone hub found by discovery, with no `--hub`/env/file target
+  // configured, requires auth from this caller now — and the bootstrap owner file
+  // is the only credential a co-located `slay` can hold in that case. Absent on a
+  // supervised hub (no auth, no file), so this is additive there too.
+  const found = running[0]!
+  const ownerToken = found.supervised ? null : (await readBootstrapOwner(found.root))?.token
+  return { baseUrl: `http://127.0.0.1:${found.port}`, token: ownerToken ?? null }
 }
 
 /** Extra guidance appended to a hub's own error text, keyed by status. */

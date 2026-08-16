@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 export interface ArtifactRef {
   id: string
@@ -22,37 +23,23 @@ function extFromMime(mime: string): string {
   return m ? `.${m[1]}` : ''
 }
 
-interface ArtifactsApiNarrow {
-  uploadBlob: (data: {
-    taskId: string
-    title: string
-    bytes: Uint8Array
-    folderId?: string | null
-  }) => Promise<ArtifactRef | null>
-  getFilePath: (id: string) => Promise<string | null>
-}
-
-interface ArtifactFoldersApiNarrow {
-  getOrCreateByName: (data: { taskId: string; name: string }) => Promise<{ id: string } | null>
-}
-
-function getArtifactsApi(): ArtifactsApiNarrow {
-  return (window as unknown as { api: { artifacts: ArtifactsApiNarrow } }).api.artifacts
-}
-
-function getArtifactFoldersApi(): ArtifactFoldersApiNarrow {
-  return (window as unknown as { api: { artifactFolders: ArtifactFoldersApiNarrow } }).api
-    .artifactFolders
-}
-
 export interface UseArtifactUploadOptions {
   folderName?: string
 }
 
+// Routes through tRPC's `artifacts.*` procedures — NOT a `window`-global
+// `api.artifacts` / `api.artifactFolders` reach-through, which does not exist
+// in the `ElectronAPI` contract at all (@slayzone/types' `api.ts`) and was an
+// unguarded cast that slipped past `scripts/check-renderer-window-api.sh` (it
+// only scanned `packages/apps/app/src/renderer` + `packages/domains/*/src/
+// client`, not `packages/shared/*/src` — extended alongside this fix). It
+// threw on paste/drop an image on every host but the Electron app, since only
+// the Electron preload ever defined those namespaces.
 export function useArtifactUpload(
   taskId: string | null | undefined,
   options?: UseArtifactUploadOptions
 ): UseArtifactUploadReturn {
+  const trpcClient = useTRPCClient()
   const taskIdRef = useRef(taskId)
   useEffect(() => {
     taskIdRef.current = taskId
@@ -62,36 +49,50 @@ export function useArtifactUpload(
     folderNameRef.current = options?.folderName
   })
 
-  const uploadFiles = useCallback(async (files: File[]): Promise<ArtifactRef[]> => {
-    const tid = taskIdRef.current
-    if (!tid) return []
-    const artifacts = getArtifactsApi()
-    let folderId: string | null = null
-    const folderName = folderNameRef.current
-    if (folderName) {
-      const folder = await getArtifactFoldersApi().getOrCreateByName({
-        taskId: tid,
-        name: folderName
-      })
-      folderId = folder?.id ?? null
-    }
-    const results = await Promise.all(
-      files.map(async (file) => {
-        const buf = await file.arrayBuffer()
-        const bytes = new Uint8Array(buf)
-        const baseTitle =
-          file.name && file.name.length > 0
-            ? file.name
-            : `pasted-${tsSlug()}${extFromMime(file.type)}`
-        return artifacts.uploadBlob({ taskId: tid, title: baseTitle, bytes, folderId })
-      })
-    )
-    return results.filter((a): a is ArtifactRef => a !== null)
-  }, [])
+  const uploadFiles = useCallback(
+    async (files: File[]): Promise<ArtifactRef[]> => {
+      const tid = taskIdRef.current
+      if (!tid) return []
+      let folderId: string | null = null
+      const folderName = folderNameRef.current
+      if (folderName) {
+        const folder = await trpcClient.artifacts.foldersGetOrCreateByName.mutate({
+          taskId: tid,
+          name: folderName
+        })
+        folderId = folder?.id ?? null
+      }
+      const results = await Promise.all(
+        files.map(async (file): Promise<ArtifactRef | null> => {
+          const buf = await file.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          const baseTitle =
+            file.name && file.name.length > 0
+              ? file.name
+              : `pasted-${tsSlug()}${extFromMime(file.type)}`
+          const created = await trpcClient.artifacts.uploadBlob.mutate({
+            taskId: tid,
+            title: baseTitle,
+            bytes,
+            folderId
+          })
+          // Narrowed to this hook's own public shape — the tRPC procedure
+          // actually returns the full TaskArtifact row, but callers of this
+          // hook only ever consumed {id, title}.
+          return created ? { id: created.id, title: created.title } : null
+        })
+      )
+      return results.filter((a): a is ArtifactRef => a !== null)
+    },
+    [trpcClient]
+  )
 
-  const getFilePath = useCallback((artifactId: string): Promise<string | null> => {
-    return getArtifactsApi().getFilePath(artifactId)
-  }, [])
+  const getFilePath = useCallback(
+    (artifactId: string): Promise<string | null> => {
+      return trpcClient.artifacts.getFilePath.query({ id: artifactId })
+    },
+    [trpcClient]
+  )
 
   return { uploadFiles, getFilePath }
 }

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
+import { join } from 'node:path'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
@@ -22,7 +23,8 @@ import {
   getSlayzoneMode,
   isRemoteMode,
   assertModeHostConsistency,
-  assertLoopbackBind
+  assertLoopbackBind,
+  LOOPBACK_HOSTS
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
@@ -30,15 +32,30 @@ import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
 import { handleHealth, type HealthState } from './health.js'
+import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
 import { withRestAuth } from './rest-auth.js'
-import { handleDevSql } from './dev-sql.js'
+import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
+import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import type { ServerHandle, StartServerConfig } from './index.js'
+
+/**
+ * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
+ * `build.outDir` to exactly this path). Computed as an OFFSET from this
+ * file's own location — via `__dirname`, NOT `import.meta.url` (esbuild
+ * cannot rewrite that for a CJS bundle; it warns and silently empties it,
+ * see build.mjs's `format: 'cjs'`) — so it resolves correctly whether this
+ * module runs as raw TS source (`packages/apps/hub/src/server.ts` — dev,
+ * tests) or bundled (`packages/apps/hub/dist/bin.cjs` — production): both
+ * are exactly one level below the hub package root, `join(<that dir>, '..',
+ * 'dist', 'web')` lands on `<package root>/dist/web` either way.
+ */
+const WEB_ROOT = join(__dirname, '..', 'dist', 'web')
 
 export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHandle> {
   const host = cfg.host ?? getServerHost()
@@ -54,6 +71,26 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // a security boundary rather than a convenience flag. It must therefore be
     // unable to expose an unauthenticated hub off-box.
     assertLoopbackBind(host)
+  }
+  // `/api/dev/sql` is arbitrary SQL against the live database, enabled by an
+  // INHERITED env var (`PLAYWRIGHT=1`) that no manifest strips — so it arrives by
+  // accident, not by intent. Refuse to boot when it is on AND this listener is
+  // reachable off-box; that pairing is a remote-code-execution primitive nobody
+  // asked for.
+  //
+  // Keyed on the BIND, not on `supervised`: e2e legitimately spawns STANDALONE
+  // hubs that inherit `PLAYWRIGHT=1` (their `cleanEnv` strips only `ELECTRON_*`
+  // and `SLAYZONE_*` — see e2e/computers/112-multi-hub-federation.spec.ts), and
+  // those bind 127.0.0.1. A loopback-bound hub is not exposed, so it stays
+  // allowed; `handleDevSql` independently requires a loopback PEER, which is what
+  // actually contains it. What this rejects is the shape that cannot be
+  // defensible: arbitrary SQL on a listener the network can reach.
+  if (isDevSqlEnabled() && !LOOPBACK_HOSTS.has(host)) {
+    throw new Error(
+      `[slayzone] PLAYWRIGHT=1 enables the raw-SQL dev endpoint and this hub binds ${host}, ` +
+        'which is reachable off-box. Unset PLAYWRIGHT or bind loopback — refusing to ' +
+        'boot a hub with arbitrary SQL exposed to the network.'
+    )
   }
   if (!supervised) {
     assertModeHostConsistency(getSlayzoneMode(), host)
@@ -245,21 +282,77 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // last thing that should be reachable unauthenticated) rather than being piped
   // onward to an unauthenticated loopback listener on the desktop.
   const dispatchRequest = (req: IncomingMessage, res: ServerResponse): void => {
-    // E2E-only raw SQL. Off unless PLAYWRIGHT=1, in which case it sits ABOVE the
-    // auth gate deliberately: the e2e harness drives it on loopback with no bearer.
+    // E2E-only raw SQL. Off unless PLAYWRIGHT=1.
+    //
+    // This is `withRestAuth`'s `next`, so it runs BELOW the bearer gate — the old
+    // comment here claimed the opposite. The distinction matters: on a supervised
+    // hub the gate is off and the harness reaches this with no bearer (the case
+    // that comment was describing), while on a standalone hub `/api/dev/*` is an
+    // ordinary `/api/` path and must present one like anything else. Three
+    // independent conditions therefore have to hold before a byte of SQL runs:
+    // PLAYWRIGHT=1, a loopback bind (asserted at boot), and a loopback peer
+    // (checked inside `handleDevSql`) — plus the gate whenever it is on.
     if (handleDevSql(db, req, res)) return
     // Computer transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
     // body. Present whenever hub-auth built (always, barring init failure).
-    if (authApp && (req.url ?? '').split('?')[0].startsWith('/api/auth/')) {
+    //
+    // EXCEPT `/api/auth/web-login`: that route is OURS (`registerWebLoginRoute`),
+    // mounted on `mcpRest.app`, not better-auth's `authApp` — better-auth has no
+    // route by that name, so routing it here would 404 it against authApp and
+    // never let mcpRest.app's own registration see the request at all. This
+    // was exactly that bug: the entire scoped web-session login path was
+    // unreachable in a real running hub until this carve-out existed.
+    const authPath = (req.url ?? '').split('?')[0]
+    if (authApp && authPath.startsWith('/api/auth/') && authPath !== '/api/auth/web-login') {
+      // The apiKey plugin's CLIENT routes are never served. `mintComputerApiKey`
+      // calls `auth.api.createApiKey` in-process (the server branch), so nothing
+      // in SlayZone needs them over HTTP — while `POST /api/auth/api-key/create`
+      // accepts a session plus arbitrary metadata, which is how an ordinary
+      // account holder could mint a credential naming someone else's computer.
+      // `verifyComputerApiKey`'s `referenceId` check already refuses such a key;
+      // this closes the door rather than relying solely on the far end noticing.
+      if (authPath.startsWith('/api/auth/api-key/')) {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Not found' }))
+        return
+      }
       authApp(req, res)
       return
     }
+    // The web shell's static bundle + SPA fallback. Reachable regardless of
+    // `hubAuthRequired` — `restAuthAction` (rest-auth.ts) already resolves
+    // every non-`/api`/`/mcp` path to 'allow' unconditionally, and the shell
+    // IS the login screen, so it must load with no credential at all. Absent
+    // `dist/web/` (dev, or a build that skipped it) returns false untouched,
+    // falling through to mcpRest's own 404 exactly as before this shipped.
+    //
+    // GATED ON `remote || supervised`, deliberately: a browser session's
+    // scoped token is a real bearer credential, sent over the wire on every
+    // request (the `szw_` cookie and the tRPC `connectionParams` token
+    // alike) — serving the shell over plain `http://` would hand that
+    // credential to anyone on the same network path. `remote` is the one
+    // mode that terminates TLS with the hub identity leaf (asserted a few
+    // lines up: `remote && !hubIdentity` refuses to boot).
+    //
+    // `supervised` is included too, and this is NOT the same exception —
+    // `hubAuthRequired = !supervised`, so a supervised hub never verifies a
+    // bearer at all (see hub-trpc-context.ts / rest-auth.ts): there is no
+    // credential riding the wire for plain http to expose. `main.tsx` mirrors
+    // this by skipping `LoginScreen` and connecting with no token whenever
+    // `/health`'s `authRequired` is false — the same "just connect, no
+    // bearer" shape desktop/CLI clients already use against a supervised
+    // hub. A plain STANDALONE local hub (`SLAYZONE_MODE=local`, no
+    // `SLAYZONE_SUPERVISED`) is excluded from both: `hubAuthRequired` is true
+    // there, so a browser session WOULD carry a real bearer over plain http
+    // — exactly the case this gate exists to keep off the wire.
+    if ((remote || supervised) && handleWebAssets(WEB_ROOT, req, res)) return
     mcpRest.app(req, res)
   }
   const gatedDispatch = withRestAuth({
     getHubAuthRequired: () => hubAuthRequired,
     getHubAuth: () => hubAuth,
+    getDb: () => db,
     next: dispatchRequest
   })
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
@@ -273,32 +366,23 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       ? createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem }, handleRequest)
       : createServer(handleRequest)
 
-  // Reject cross-origin WS upgrades. The /trpc socket exposes the ENTIRE app
-  // router (browser control, shell.openExternal, file ops, the auth callback
-  // relay) — a drive-by web page (or a DNS-rebind to 127.0.0.1) must not reach
-  // it. Native clients (Electron main, node tooling/e2e, the sidecar) send no
-  // Origin; the app's own renderers run at chrome:// (fork), file:// ("null",
-  // packaged Electron) or http://localhost (vite dev). Anything else is a
-  // foreign website → 403. (Pairs with the per-flow / PKCE auth guards.)
-  const isAllowedWsOrigin = (origin: string | undefined): boolean => {
-    if (!origin) return true // no Origin header → non-browser client
-    if (origin === 'null') return true // file:// renderers serialize to "null"
-    let u: URL
-    try {
-      u = new URL(origin)
-    } catch {
-      return false
-    }
-    if (
-      u.protocol === 'chrome:' ||
-      u.protocol === 'chrome-extension:' ||
-      u.protocol === 'devtools:'
-    ) {
-      return true
-    }
-    if (u.protocol === 'file:') return true
-    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
-  }
+  // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
+  // The decision is a pure, unit-tested function; this is only the wiring.
+  //
+  // `loopbackBind` is computed from the address this hub actually bound, so the
+  // local-client allowances (file://, chrome://, "null", localhost) follow the
+  // deployment rather than a flag someone might forget to set. An internet-facing
+  // hub accepts only no-Origin (non-browser) callers plus its own configured
+  // public origin.
+  const loopbackBind = LOOPBACK_HOSTS.has(host)
+  const allowedWsOrigins = resolveAllowedWebOrigins()
+  const isAllowedWsOrigin = (origin: string | undefined): boolean =>
+    wsOriginDecision({
+      origin,
+      supervised,
+      loopbackBind,
+      allowedOrigins: allowedWsOrigins
+    }) === 'accept'
   // Both WS endpoints ride the ONE `httpServer` (plain or TLS per mode) as
   // `noServer` handlers, demuxed by path in the single `upgrade` listener below.
   // A `server`-bound WSS would destroy any socket whose path it doesn't own, so
@@ -360,6 +444,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     const principal = await resolveConnectionPrincipal({
       hubAuthRequired,
       hubAuth,
+      db,
       token: info?.connectionParams?.token
     })
     return {

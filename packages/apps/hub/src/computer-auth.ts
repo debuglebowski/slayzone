@@ -195,6 +195,21 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     const computer = await getComputer(db, principal.computerId)
     if (!computer || computer.revoked_at !== null) return null
 
+    // The key must be THE key this computer enrolled with, not merely A key that
+    // names it. Second half of the impersonation fix whose first half lives in
+    // `verifyComputerApiKey` (see its docstring): that one proves the key was
+    // minted by us, this one proves it was minted FOR this computer. Without it,
+    // a stale key from a previous enroll of the same id keeps working forever —
+    // `revokeComputerApiKey` deletes the apikey row, but a re-enroll rotates
+    // `auth_key_id` and left the old row's holder authenticated.
+    //
+    // NULL IS ALLOWED, deliberately: `auth_key_id` is nullable and rows enrolled
+    // before it was recorded carry null. Refusing those would disconnect every
+    // pre-existing computer on upgrade. Such a row is still protected by the
+    // `referenceId` check upstream; it just cannot be pinned any tighter until it
+    // re-enrolls, at which point `registerComputer` fills the column in.
+    if (computer.auth_key_id !== null && computer.auth_key_id !== principal.keyId) return null
+
     await touchComputerLastSeen(db, computer.id, now())
     // Grouping only — never allowed to fail a reconnect.
     if (context?.hostId) {

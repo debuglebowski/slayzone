@@ -69,6 +69,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
+  // Per-boot bearer the desktop's `/cap` listener requires on every connection
+  // (desktop-bridge-server.ts `verifyClient`). Loopback is NOT trusted there —
+  // the threat this closes is another loopback process finding the port — so
+  // this is a real credential, `secret`-scoped like the two above it.
+  SLAYZONE_DESKTOP_BRIDGE_TOKEN: 'secret',
   // The pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` is deliberately UNLISTED: it is
   // retired, not aliased. It never shipped (the published computer betas read
   // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to

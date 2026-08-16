@@ -19,36 +19,20 @@
  * @module hub/bootstrap-owner
  */
 
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { z } from 'zod'
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { createHubUser, listHubUsers, type HubAuth } from '@slayzone/hub-auth/server'
+import {
+  ownerFilePath,
+  readBootstrapOwner,
+  type BootstrapOwnerFile
+} from '@slayzone/platform/hub-owner-file'
 
-const ownerFileSchema = z.object({
-  userId: z.string().min(1),
-  email: z.string().min(1),
-  /** Kept so a boot after session expiry can sign in again without a human. */
-  password: z.string().min(1),
-  /** Bearer for loopback callers on this box (`slay`, the install tests). */
-  token: z.string().min(1).optional(),
-  createdAt: z.number()
-})
-export type BootstrapOwnerFile = z.infer<typeof ownerFileSchema>
-
-export function ownerFilePath(dataRoot: string): string {
-  return join(dataRoot, 'hub.owner.json')
-}
-
-export async function readBootstrapOwner(dataRoot: string): Promise<BootstrapOwnerFile | null> {
-  try {
-    const parsed = ownerFileSchema.safeParse(
-      JSON.parse(await readFile(ownerFilePath(dataRoot), 'utf-8'))
-    )
-    return parsed.success ? parsed.data : null
-  } catch {
-    return null
-  }
-}
+// Re-exported for existing consumers of this module (tests, install-handshake) —
+// the schema and reader now live in `@slayzone/platform/hub-owner-file` so the
+// CLI can read the SAME file without depending on this app package. See that
+// module's docstring for why.
+export { ownerFilePath, readBootstrapOwner, type BootstrapOwnerFile }
 
 async function writeOwnerFile(dataRoot: string, file: BootstrapOwnerFile): Promise<void> {
   const target = ownerFilePath(dataRoot)

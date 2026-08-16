@@ -24,6 +24,7 @@
     "@milkdown/transformer": "^7.19.2",
     "@milkdown/utils": "^7.19.2",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "dompurify": "^3.3.1",
     "remark-frontmatter": "^5.0.0",
@@ -35,9 +36,14 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3"
+    "jsdom": "^26.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

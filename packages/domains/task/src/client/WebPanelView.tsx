@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
-import { IconButton, Tooltip, TooltipTrigger, TooltipContent, useAppearance } from '@slayzone/ui'
+import {
+  IconButton,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  useAppearance,
+  safeClipboardWriteText
+} from '@slayzone/ui'
 import { useBrowserView } from '@slayzone/task-browser'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import {
@@ -167,7 +174,7 @@ export function WebPanelView({
                 size="icon-sm"
                 aria-label="Copy URL"
                 onClick={() => {
-                  navigator.clipboard.writeText(state.url || url)
+                  void safeClipboardWriteText(state.url || url)
                   setCopied(true)
                   setTimeout(() => setCopied(false), 1500)
                 }}

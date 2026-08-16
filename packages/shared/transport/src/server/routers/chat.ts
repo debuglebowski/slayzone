@@ -147,18 +147,27 @@ export const chatRouter = router({
   // Streaming subscriptions — replace the 4 `webContents.send` broadcasts.
   // Source emitters are dual-emitted in the terminal domain; IPC stays until
   // the renderer cuts over (slice 5).
-  onEvent: publicProcedure.subscription(() =>
-    observable<{ tabId: string; event: unknown; seq: number }>((emit) => {
-      const handler = (tabId: string, event: unknown, seq: number): void => {
-        emit.next({ tabId, event, seq })
-      }
-      const ev = getChatDeps().events
-      ev.on('event', handler)
-      return () => {
-        ev.off('event', handler)
-      }
-    })
-  ),
+  //
+  // `tabIds` is an OPTIONAL server-side filter — same reasoning as `pty.onData`
+  // (routers/pty.ts): this is otherwise every chat event on the hub, filtered
+  // only client-side. Omitted (every existing caller) reproduces today's
+  // unfiltered behavior exactly.
+  onEvent: publicProcedure
+    .input(z.object({ tabIds: z.array(z.string()).optional() }).optional())
+    .subscription(({ input }) =>
+      observable<{ tabId: string; event: unknown; seq: number }>((emit) => {
+        const filter = input?.tabIds
+        const handler = (tabId: string, event: unknown, seq: number): void => {
+          if (filter && !filter.includes(tabId)) return
+          emit.next({ tabId, event, seq })
+        }
+        const ev = getChatDeps().events
+        ev.on('event', handler)
+        return () => {
+          ev.off('event', handler)
+        }
+      })
+    ),
   onExit: publicProcedure.subscription(() =>
     observable<{ tabId: string; sessionId: string; code: number | null; signal: string | null }>(
       (emit) => {

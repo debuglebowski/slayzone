@@ -1,3 +1,4 @@
+import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import { probeFixedPort } from './local-hub'
 import { resolveHubTarget } from './hub-config'
 
@@ -40,7 +41,16 @@ async function resolveTarget(): Promise<ApiTarget> {
     console.error('SlayZone server port not found. Is the app running?')
     process.exit(1)
   }
-  return { baseUrl: `http://127.0.0.1:${probe.port}`, token: null, hub: false }
+  // A standalone hub now requires auth from every non-supervised caller — plain
+  // loopback is no longer enough (`server.ts` `hubAuthRequired = !supervised`, and
+  // `packages/apps/hub/src/server.ts`'s loopback exemption is likewise
+  // supervised-only). `probeFixedPort` found this hub with no configured target,
+  // meaning no env var and no `cli-hub-target.json` — the only remaining
+  // credential a co-located `slay` can hold is the hub's own bootstrap owner file.
+  // Reading it is additive: on a supervised hub (Electron sidecar, no auth) it is
+  // simply absent and this resolves to the pre-existing `token: null` behavior.
+  const ownerToken = probe.supervised ? null : (await readBootstrapOwner(probe.root))?.token
+  return { baseUrl: `http://127.0.0.1:${probe.port}`, token: ownerToken ?? null, hub: false }
 }
 
 function withAuth(init: RequestInit | undefined, token: string | null): RequestInit | undefined {

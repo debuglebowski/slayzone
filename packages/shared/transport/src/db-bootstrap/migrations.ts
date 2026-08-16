@@ -3757,6 +3757,49 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_computer_grants_user ON computer_grants(user_id);
       `)
     }
+  },
+  {
+    version: 166,
+    up: (db) => {
+      // A scoped browser session, distinct from a better-auth session.
+      //
+      // WHY A SEPARATE TABLE, in the APP db rather than hub-auth's own
+      // better-auth sqlite file: hub-auth's schema is better-auth's to own, and
+      // this concept — "a narrower credential than the account it was minted
+      // from" — has no equivalent there. `user_id` is a LOOSE reference to a
+      // better-auth user id, not a foreign key: this app db has no `users`
+      // table of its own (that lives in hub-auth's separate file), so nothing
+      // here can enforce referential integrity across the two databases. A row
+      // whose user was later removed via `slay hub users rm` simply verifies
+      // against nothing (the login flow re-checks the user still exists) and
+      // is harmless dead weight until it expires or is revoked.
+      //
+      // `token_hash`, never the raw token — this table is queried on every
+      // `/trpc` connect and every `/api/*` request from a browser, so the
+      // token itself must never be recoverable from a DB read the way a
+      // stolen backup or a compromised replica could produce one.
+      //
+      // `scopes_json` is a JSON array of `Scope` values (see
+      // `@slayzone/transport/server`'s scopes.ts) — TEXT, not a join table,
+      // because the vocabulary is deliberately tiny and closed; a session's
+      // scopes never need to be queried independently of the session itself.
+      //
+      // `revoked_at` gives real server-side logout: `expires_at` alone would
+      // leave a stolen token valid until it naturally expired.
+      db.exec(`
+        CREATE TABLE web_sessions (
+          id           TEXT PRIMARY KEY,
+          user_id      TEXT NOT NULL,
+          token_hash   TEXT NOT NULL UNIQUE,
+          scopes_json  TEXT NOT NULL,
+          label        TEXT,
+          created_at   INTEGER NOT NULL,
+          expires_at   INTEGER NOT NULL,
+          revoked_at   INTEGER
+        );
+        CREATE INDEX idx_web_sessions_user ON web_sessions(user_id);
+      `)
+    }
   }
 ]
 

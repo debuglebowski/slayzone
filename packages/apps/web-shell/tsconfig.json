@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client"],
+    "paths": {
+      "convex/_generated/*": ["../../../convex/_generated/*"]
+    }
+  },
+  "include": [
+    "src",
+    "../renderer-app/src/vite-env.d.ts",
+    "../../shared/types/src/txn-registry.d.ts",
+    "../../domains/file-editor/src/lezer-toml.d.ts"
+  ]
+}

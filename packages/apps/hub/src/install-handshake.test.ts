@@ -233,13 +233,27 @@ async function main(): Promise<void> {
       assert(health.dbPath.startsWith(hubStorageDir), `health db path under tmp: ${health.dbPath}`)
     })
 
+    // This hub is STANDALONE, so it requires client auth on EVERY route now —
+    // including `/api/computers/join-token`, which used to trust any loopback
+    // peer unconditionally regardless of that. The bootstrap owner file is
+    // exactly the affordance that keeps `slay computer mint` usable on a clean
+    // root with no operator action; read it here too, matching the real
+    // `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
+    // simulating an authenticated caller some other way.
+    const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
+    const ownerToken = (JSON.parse(ownerRaw) as { token?: string }).token
+    assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
+
     // --- mint a join token over the loopback REST channel --------------------
     // Poll: the route 503s until the /computers listener has bound (computer mode on).
     const tok = await poll(
       async () => {
         const r = await fetch(`http://127.0.0.1:${hubPort}/api/computers/join-token`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${ownerToken}`
+          },
           body: JSON.stringify({ label: 'install-handshake' })
         })
         if (r.status !== 200) return null
@@ -279,13 +293,9 @@ async function main(): Promise<void> {
     })
 
     // --- assert enrollment via computers.list over tRPC-WS ---------------------
-    // This hub is STANDALONE, so it requires client auth — a loopback caller no
-    // longer bypasses. The bootstrap owner file is exactly the affordance that
-    // keeps `slay hub start` usable on a clean root, so use it here too: if this
-    // read ever fails, the operator experience is broken in the same way.
-    const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
-    const ownerToken = (JSON.parse(ownerRaw) as { token?: string }).token
-    assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
+    // Same owner token read above, reused for the tRPC-WS connection — one
+    // bootstrap credential, two transports, exactly as a real operator's `slay`
+    // would present it.
     const built = createWSClient({
       url: `ws://127.0.0.1:${hubPort}/trpc`,
       connectionParams: () => ({ token: ownerToken as string })
