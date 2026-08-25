@@ -102,6 +102,30 @@ test('artifacts router: update without zoomPct leaves zoom untouched', async () 
   expect(renamed!.zoom_pct).toBe(200)
 })
 
+// Per-artifact forced HTML preview theme (v167 `html_theme_override`). NULL
+// means "no override / system", so the reset path must write NULL back
+// rather than a literal — same round-trip contract as zoomPct above.
+test('artifacts router: htmlThemeOverride round-trips and resets to null', async () => {
+  const a = await caller.create(mkArtifact('theme.html', '<html></html>'))
+  expect(a!.html_theme_override).toBeNull()
+
+  const darkened = await caller.update({ id: a!.id, htmlThemeOverride: 'dark' })
+  expect(darkened!.html_theme_override).toBe('dark')
+  expect((await caller.get({ id: a!.id }))!.html_theme_override).toBe('dark')
+
+  const reset = await caller.update({ id: a!.id, htmlThemeOverride: null })
+  expect(reset!.html_theme_override).toBeNull()
+})
+
+// An unrelated update must not disturb a stored theme override — the store
+// forwards only the keys the caller actually provided.
+test('artifacts router: update without htmlThemeOverride leaves it untouched', async () => {
+  const a = await caller.create(mkArtifact('theme-keep.html', '<html></html>'))
+  await caller.update({ id: a!.id, htmlThemeOverride: 'light' })
+  const renamed = await caller.update({ id: a!.id, title: 'theme-kept.html' })
+  expect(renamed!.html_theme_override).toBe('light')
+})
+
 test('artifacts router: delete', async () => {
   const a = await caller.create(mkArtifact('del.md', 'x'))
   expect(await caller.delete({ id: a!.id })).toBe(true)

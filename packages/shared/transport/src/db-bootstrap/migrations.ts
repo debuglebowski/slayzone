@@ -3800,6 +3800,17 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_web_sessions_user ON web_sessions(user_id);
       `)
     }
+  },
+  {
+    version: 167,
+    up: (db) => {
+      // Per-artifact forced color scheme for HTML preview. NULL = no
+      // override (follow whatever `prefers-color-scheme` resolves to inside
+      // the iframe) — same "override only when it differs from the default"
+      // shape as zoom_pct (v152) / readability_override / width_override
+      // (v109).
+      db.exec(`ALTER TABLE task_artifacts ADD COLUMN html_theme_override TEXT DEFAULT NULL;`)
+    }
   }
 ]
 

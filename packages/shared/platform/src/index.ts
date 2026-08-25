@@ -107,6 +107,7 @@ export {
   fileUrlToSlzFileUrl,
   slzFileUrlToFileUrl
 } from './slz-file-url'
+export { FORCED_HTML_THEME_CSS, type ForcedHtmlTheme } from './html-theme-css'
 export {
   withResultDedup,
   isIpcUnchangedSentinel,

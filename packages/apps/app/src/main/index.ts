@@ -221,7 +221,8 @@ import {
   getSupervisedRoot,
   SIDECAR_FIXED_PORT,
   SLZ_FILE_HOST,
-  fileUrlToSlzFileUrl
+  fileUrlToSlzFileUrl,
+  FORCED_HTML_THEME_CSS
 } from '@slayzone/platform'
 import { initStorageDir, getStorageDir } from './data-paths'
 if (process.platform === 'linux') {
@@ -2657,10 +2658,32 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
       try {
         const data = await fsp.readFile(filePath)
+        const contentType =
+          mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream'
+
+        // Per-artifact forced theme (task-artifacts HTML preview): the iframe
+        // is sandboxed cross-origin with no webContents handle to insertCSS
+        // into, so the override is injected as text here instead, gated on an
+        // explicit `theme` param only html preview requests ever send — every
+        // other slz-file:// consumer (images, PDFs, browser tabs, plain files)
+        // gets the untouched buffer below, unchanged.
+        const theme = parsed.searchParams.get('theme')
+        if (contentType === 'text/html' && (theme === 'dark' || theme === 'light')) {
+          const html = data.toString('utf-8')
+          const style = `<style>${FORCED_HTML_THEME_CSS[theme]}</style>`
+          const headClose = html.search(/<\/head\s*>/i)
+          const doctored =
+            headClose >= 0
+              ? html.slice(0, headClose) + style + html.slice(headClose)
+              : style + html
+          return new Response(doctored, {
+            headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
+          })
+        }
+
         return new Response(data, {
           headers: {
-            'content-type':
-              mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream',
+            'content-type': contentType,
             'cache-control': 'no-cache'
           }
         })

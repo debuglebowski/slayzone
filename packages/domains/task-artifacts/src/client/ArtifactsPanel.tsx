@@ -80,7 +80,10 @@ import {
   DEFAULT_SIDEBAR_WIDTH,
   DEFAULT_ZOOM_PCT,
   ZOOM_STEPS,
-  stepZoom
+  stepZoom,
+  nextHtmlTheme,
+  HTML_THEME_ICONS,
+  HTML_THEME_LABELS
 } from './ArtifactsPanel.constants'
 
 export type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
@@ -252,6 +255,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const effectiveWidth: 'narrow' | 'wide' = selectedArtifact?.width_override ?? notesWidth
     const zoomPct = selectedArtifact?.zoom_pct ?? DEFAULT_ZOOM_PCT
     const showZoom = selectedRenderMode ? hasZoomableSurface(selectedRenderMode, viewMode) : false
+    const htmlTheme = selectedArtifact?.html_theme_override ?? 'system'
+    const showHtmlTheme = selectedRenderMode === 'html-preview'
 
     // Persist as NULL at 100% so the column only ever holds a real override.
     const applyZoom = useCallback(
@@ -264,6 +269,16 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       },
       [selectedArtifact, updateArtifact]
     )
+
+    // Persist as NULL at 'system' so the column only ever holds a real override.
+    const cycleHtmlTheme = useCallback(() => {
+      if (!selectedArtifact) return
+      const next = nextHtmlTheme(htmlTheme)
+      void updateArtifact({
+        id: selectedArtifact.id,
+        htmlThemeOverride: next === 'system' ? null : next
+      })
+    }, [selectedArtifact, htmlTheme, updateArtifact])
 
     useEffect(() => {
       const artifact = artifacts.find((a) => a.id === selectedId)
@@ -828,6 +843,20 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                       </button>
                     </div>
                   )}
+                  {showHtmlTheme &&
+                    (() => {
+                      const ThemeIcon = HTML_THEME_ICONS[htmlTheme]
+                      return (
+                        <button
+                          className="flex items-center justify-center w-7 h-7 rounded-md border border-input shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          onClick={cycleHtmlTheme}
+                          title={`${HTML_THEME_LABELS[htmlTheme]} — click to cycle`}
+                          data-testid="artifact-html-theme"
+                        >
+                          <ThemeIcon className="size-3.5" />
+                        </button>
+                      )
+                    })()}
                   <Select
                     value={selectedArtifact.render_mode ?? '__auto__'}
                     onValueChange={(v) =>
@@ -1112,6 +1141,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   effectiveReadability={effectiveReadability}
                   effectiveWidth={effectiveWidth}
                   zoomPct={zoomPct}
+                  htmlTheme={htmlTheme}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

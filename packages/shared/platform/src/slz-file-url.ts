@@ -15,10 +15,22 @@
 export const SLZ_FILE_HOST = 'app'
 export const SLZ_FILE_PREFIX = `slz-file://${SLZ_FILE_HOST}`
 
-/** Build a slz-file URL from an absolute path. Pass `version` to cache-bust. */
-export function toSlzFileUrl(absolutePath: string, version?: string | number): string {
+/**
+ * Build a slz-file URL from an absolute path. Pass `version` to cache-bust.
+ * Pass `theme` ('light' | 'dark') to have the main-process handler force that
+ * color scheme onto `.html`/`.htm` responses (task-artifacts HTML preview);
+ * every other consumer omits it and gets the unmodified file, unchanged.
+ */
+export function toSlzFileUrl(
+  absolutePath: string,
+  version?: string | number,
+  theme?: 'light' | 'dark'
+): string {
   const path = absolutePath.startsWith('/') ? absolutePath : `/${absolutePath}`
-  const query = version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ''
+  const params: string[] = []
+  if (version !== undefined) params.push(`v=${encodeURIComponent(String(version))}`)
+  if (theme !== undefined) params.push(`theme=${theme}`)
+  const query = params.length > 0 ? `?${params.join('&')}` : ''
   return `${SLZ_FILE_PREFIX}${path}${query}`
 }
 

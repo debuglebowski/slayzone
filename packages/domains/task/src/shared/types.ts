@@ -671,6 +671,8 @@ export interface TaskArtifact {
   width_override: 'narrow' | 'wide' | null
   /** Document zoom as an integer percent. NULL = 100%. */
   zoom_pct: number | null
+  /** Forced color scheme for HTML preview. NULL = no override. */
+  html_theme_override: 'light' | 'dark' | null
   language: string | null
   order: number
   created_at: string
@@ -697,6 +699,8 @@ export interface UpdateArtifactInput {
   widthOverride?: 'narrow' | 'wide' | null
   /** Integer percent; null resets to the 100% default. */
   zoomPct?: number | null
+  /** Forced color scheme for HTML preview; null clears the override. */
+  htmlThemeOverride?: 'light' | 'dark' | null
   content?: string
   language?: string | null
 }

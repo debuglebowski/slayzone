@@ -144,6 +144,7 @@ export interface UpdateArtifactTxnParams {
   readabilityOverride?: 'compact' | 'normal' | null
   widthOverride?: 'narrow' | 'wide' | null
   zoomPct?: number | null
+  htmlThemeOverride?: 'light' | 'dark' | null
   language?: string | null
   content?: string
   // Mirrors `'x' in data` checks so we know which optional keys were provided.
@@ -364,6 +365,10 @@ export const artifactsTxns = {
     if (has('zoomPct')) {
       sets.push('zoom_pct = ?')
       values.push(p.zoomPct)
+    }
+    if (has('htmlThemeOverride')) {
+      sets.push('html_theme_override = ?')
+      values.push(p.htmlThemeOverride)
     }
     if (has('language')) {
       sets.push('language = ?')

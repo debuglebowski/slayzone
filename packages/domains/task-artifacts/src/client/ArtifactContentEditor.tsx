@@ -20,6 +20,7 @@ import {
 import { EditorToc } from '@slayzone/file-editor/client/EditorToc'
 import { type MarkdownHeading } from '@slayzone/file-editor/client/markdown-headings'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
+import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
 
 // --- Image viewer ---
 
@@ -129,6 +130,7 @@ export function ArtifactContentEditor({
   effectiveReadability,
   effectiveWidth,
   zoomPct,
+  htmlTheme,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -143,6 +145,7 @@ export function ArtifactContentEditor({
   effectiveReadability: 'compact' | 'normal'
   effectiveWidth: 'narrow' | 'wide'
   zoomPct: number
+  htmlTheme: HtmlArtifactTheme
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -475,6 +478,7 @@ export function ArtifactContentEditor({
             contentVersion={previewVersion}
             getFilePath={getFilePath}
             zoom={zoom}
+            htmlTheme={htmlTheme}
           />
         </div>
       )
@@ -507,6 +511,7 @@ export function ArtifactContentEditor({
               contentVersion={previewVersion}
               getFilePath={getFilePath}
               zoom={zoom}
+              htmlTheme={htmlTheme}
             />
           </div>
         </div>
@@ -576,7 +581,8 @@ function ArtifactPreview({
   artifactId,
   contentVersion,
   getFilePath,
-  zoom
+  zoom,
+  htmlTheme
 }: {
   renderMode: RenderMode
   content: string
@@ -584,19 +590,22 @@ function ArtifactPreview({
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
+  htmlTheme: HtmlArtifactTheme
 }) {
   if (renderMode === 'html-preview')
     return (
-      // Keyed on the identity of what is being previewed, so switching artifacts
-      // (or saving a new version) REMOUNTS the frame with fresh state instead of
-      // the effect having to reset it — which is both the idiomatic reset and what
-      // keeps a previous artifact's resolved path or error off the new one.
+      // Keyed on the identity of what is being previewed (theme included), so
+      // switching artifacts, saving a new version, or toggling the theme
+      // REMOUNTS the frame with fresh state instead of the effect having to
+      // reset it — which is both the idiomatic reset and what keeps a
+      // previous artifact's resolved path or error off the new one.
       <HtmlPreviewFrame
-        key={`${artifactId}:${contentVersion}`}
+        key={`${artifactId}:${contentVersion}:${htmlTheme}`}
         artifactId={artifactId}
         contentVersion={contentVersion}
         getFilePath={getFilePath}
         zoom={zoom}
+        htmlTheme={htmlTheme}
       />
     )
   if (renderMode === 'svg-preview')
@@ -616,6 +625,12 @@ function ArtifactPreview({
 // slz-file gets its own origin and bypasses CSP so user HTML runs unmodified.
 // `contentVersion` cache-busts on each save so the iframe reloads after edits.
 //
+// `htmlTheme` rides the same URL as a `?theme=` param (see `toSlzFileUrl`):
+// the sandbox (no `allow-same-origin`) also means the parent can't reach
+// `contentDocument` to force a color scheme at runtime, so a forced theme is
+// injected as CSS into the response body by the main-process slz-file
+// handler instead, before the bytes ever reach this frame.
+//
 // Zoom cannot go through CSS `zoom` here the way it does for the DOM panes: the
 // frame is a separate document on its own origin behind `sandbox`, so the parent
 // can neither restyle it nor rely on a layout-scale crossing the frame boundary.
@@ -626,12 +641,14 @@ function HtmlPreviewFrame({
   artifactId,
   contentVersion,
   getFilePath,
-  zoom
+  zoom,
+  htmlTheme
 }: {
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
+  htmlTheme: HtmlArtifactTheme
 }) {
   const [src, setSrc] = useState<string | null>(null)
   // `null` while in flight or resolved; a string once the path could not be
@@ -652,7 +669,8 @@ function HtmlPreviewFrame({
     getFilePath(artifactId)
       .then((p) => {
         if (cancelled) return
-        if (p) setSrc(toSlzFileUrl(p, contentVersion))
+        if (p)
+          setSrc(toSlzFileUrl(p, contentVersion, htmlTheme === 'system' ? undefined : htmlTheme))
         else setError('This artifact has no file on disk yet.')
       })
       .catch((e: unknown) => {
@@ -662,7 +680,7 @@ function HtmlPreviewFrame({
     return () => {
       cancelled = true
     }
-  }, [artifactId, contentVersion, getFilePath, attempt])
+  }, [artifactId, contentVersion, getFilePath, htmlTheme, attempt])
 
   if (error)
     return (

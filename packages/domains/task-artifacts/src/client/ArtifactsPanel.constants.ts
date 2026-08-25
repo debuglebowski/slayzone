@@ -1,4 +1,4 @@
-import { FileText, Code, Globe, Image, GitBranch } from 'lucide-react'
+import { FileText, Code, Globe, Image, GitBranch, Monitor, Moon, Sun } from 'lucide-react'
 import type { RenderMode } from '@slayzone/task/shared'
 
 export const INDENT_PX = 20
@@ -19,6 +19,32 @@ export function stepZoom(pct: number, dir: 1 | -1): number {
   const next =
     dir === 1 ? ZOOM_STEPS.find((s) => s > pct) : [...ZOOM_STEPS].reverse().find((s) => s < pct)
   return next ?? (dir === 1 ? ZOOM_STEPS[ZOOM_STEPS.length - 1] : ZOOM_STEPS[0])
+}
+
+/**
+ * Forced color-scheme cycle for the HTML preview header toggle, mirroring
+ * task-browser's per-tab `THEME_CYCLE`. 'system' = no override (persists as
+ * NULL on `html_theme_override`, same "override only when it differs from
+ * the default" shape as zoom).
+ */
+export type HtmlArtifactTheme = 'system' | 'dark' | 'light'
+export const HTML_THEME_CYCLE: HtmlArtifactTheme[] = ['system', 'dark', 'light']
+
+/** Next state in the cycle after `current`. */
+export function nextHtmlTheme(current: HtmlArtifactTheme): HtmlArtifactTheme {
+  return HTML_THEME_CYCLE[(HTML_THEME_CYCLE.indexOf(current) + 1) % HTML_THEME_CYCLE.length]
+}
+
+export const HTML_THEME_ICONS: Record<HtmlArtifactTheme, typeof Monitor> = {
+  system: Monitor,
+  dark: Moon,
+  light: Sun
+}
+
+export const HTML_THEME_LABELS: Record<HtmlArtifactTheme, string> = {
+  system: 'System theme',
+  dark: 'Dark (forced)',
+  light: 'Light (forced)'
 }
 
 export const RENDER_MODE_ICONS: Record<RenderMode, typeof FileText> = {

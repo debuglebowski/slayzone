@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./ipc": "./src/ipc-dedup.ts",
     "./slz-file-url": "./src/slz-file-url.ts",
+    "./html-theme-css": "./src/html-theme-css.ts",
     "./events": "./src/typed-emitter.ts",
     "./slayzone-config": "./src/slayzone-config.ts",
     "./client-settings": "./src/client-settings.ts",
