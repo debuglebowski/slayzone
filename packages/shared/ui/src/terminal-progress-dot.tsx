@@ -63,11 +63,14 @@ export function TerminalProgressDot({
 
   // Wrapper footprint is the constant max of size/activeSize, so the row layout
   // never shifts when a terminal goes active. The indicator renders at `size`
-  // normally and `activeSize` only while running — a mere progress value does
-  // not enlarge it. Always <= footprint, so it sits inside the wrapper (no
-  // flex-shrink, no clipping). Blob and ring stay even-sized; with an even
-  // footprint the free space splits to whole pixels — pixel-perfect concentric.
-  const renderSize = isRunning ? activeSize : size
+  // normally and `activeSize` while running OR while background subagents are
+  // still working — background only differs by speed/opacity (see above), not
+  // size, else its spinner reads as a rendering glitch next to a full-size one.
+  // A mere progress value does not enlarge it. Always <= footprint, so it sits
+  // inside the wrapper (no flex-shrink, no clipping). Blob and ring stay
+  // even-sized; with an even footprint the free space splits to whole pixels —
+  // pixel-perfect concentric.
+  const renderSize = isRunning || isBackground ? activeSize : size
   const footprint = Math.max(size, activeSize)
   const innerSize = Math.round((renderSize * 0.85) / 2) * 2
   // Progress ring is sized off `size`, not `renderSize`, so its radius stays
