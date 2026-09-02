@@ -298,7 +298,7 @@ export interface LocalLeaderboardStats {
   days: LocalLeaderboardDay[]
 }
 
-export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
+export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 
 export interface ProcessStats {
   cpu: number // % of one core

@@ -5,7 +5,7 @@ import { createStatsPoller } from './pid-stats'
 import { createDbProcessPersistence } from './process-persistence'
 import type { ProcessPersistence } from './process-persistence'
 import { getProcessBackend } from './process-backend'
-import type { ProcHandle } from './process-backend'
+import type { ProcessBackend, ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal/shared'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 import { TypedEmitter } from '@slayzone/platform/events'
@@ -18,7 +18,7 @@ export type ProcessBroadcastWindow = {
   webContents: { send: (channel: string, ...args: unknown[]) => void }
 }
 
-export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
+export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 
 export interface ProcessInfo {
   id: string
@@ -208,20 +208,29 @@ function handleProcessData(proc: ManagedProcess, str: string): void {
  * `killByPid` targets the whole process *group* (same numeric id as the
  * leader's own pid at spawn time), so it reaches surviving descendants even
  * though the leader itself is already gone — safe to call unconditionally,
- * since it's a silent no-op if nothing is left. Runs synchronously (not via
- * `execFile`'s callback) so it completes before `doSpawn`'s own
- * auto-restart timer could fire and race it onto the same port.
+ * since it's a silent no-op if nothing is left. The sweep below (`reapGroup`)
+ * is awaited by `doSpawn`'s `onExit` before it decides anything — including
+ * scheduling an auto-restart's respawn timer — so a fresh spawn never races
+ * a still-being-killed survivor onto the same port.
  *
  * The `pgrep -g` snapshot is pure diagnostics: taken *before* the sweep so
  * a recurrence is logged with actual evidence (what survived, and its
  * pids) instead of requiring another manual investigation.
+ *
+ * Returns whether the group was confirmed empty after the sweep (see
+ * `reapGroup` below) — a single unverified `SIGTERM` used to be fired and
+ * forgotten here, which let a descendant that outlived it (or ignored it)
+ * survive indefinitely while this process's own record was still marked
+ * `completed`/`error` as if nothing were left running. Callers must not
+ * treat the leader's own exit as "the command finished" without checking
+ * this.
  */
-function reapSurvivorsAfterUnplannedExit(
+async function reapSurvivorsAfterUnplannedExit(
   proc: ManagedProcess,
   leaderPid: number,
   code: number | null,
   signal: string | null
-): void {
+): Promise<boolean> {
   if (process.platform !== 'win32') {
     try {
       const stdout = execFileSync('pgrep', ['-g', String(leaderPid)], {
@@ -243,7 +252,7 @@ function reapSurvivorsAfterUnplannedExit(
       // pgrep exits non-zero when nothing matches the group — nothing survived, nothing to log.
     }
   }
-  getProcessBackend().killByPid(leaderPid, 'SIGTERM')
+  return reapGroup(leaderPid, getProcessBackend())
 }
 
 function doSpawn(proc: ManagedProcess): void {
@@ -277,7 +286,7 @@ function doSpawn(proc: ManagedProcess): void {
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
 
-  handle.onExit(({ code, signal }) => {
+  handle.onExit(async ({ code, signal }) => {
     if (proc.handle !== handle) return // stale exit from restarted process
     stopTitlePolling(proc)
     const exitedPid = proc.pid
@@ -293,8 +302,14 @@ function doSpawn(proc: ManagedProcess): void {
     // null proc.handle before calling handle.kill(), so a manager-initiated
     // exit never reaches this guard. See reapSurvivorsAfterUnplannedExit's
     // doc comment for why a leader exiting alone can still leave orphans.
-    if (exitedPid != null) reapSurvivorsAfterUnplannedExit(proc, exitedPid, code, signal)
-    if (proc.autoRestart && processes.has(proc.id)) {
+    const groupEmpty = exitedPid != null ? await reapSurvivorsAfterUnplannedExit(proc, exitedPid, code, signal) : true
+
+    // The sweep above can take up to ~2s (poll + SIGKILL escalation). A
+    // manager-initiated restart/kill may have already moved this record on
+    // in the meantime — don't clobber whatever it did.
+    if (!processes.has(proc.id) || proc.handle !== null) return
+
+    if (proc.autoRestart) {
       proc.restartCount++
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
       setStatus(proc, 'running')
@@ -302,8 +317,21 @@ function doSpawn(proc: ManagedProcess): void {
         if (isShuttingDown) return
         if (processes.has(proc.id)) doSpawn(proc)
       }, 1000)
-    } else {
+    } else if (groupEmpty) {
+      pushLog(proc, `[exited with code ${code ?? '?'}]`)
       setStatus(proc, code === 0 ? 'completed' : 'error')
+    } else {
+      // The leader exited but a descendant survived the sweep — this is not
+      // a clean completion. Keep the (dead) leader pid as an identifier so
+      // "Start" (restartProcess → reapStaleIfNeeded) can find and finish the
+      // sweep on retry instead of silently abandoning the orphan.
+      proc.pid = exitedPid
+      void persistence?.updatePid(proc.id, exitedPid)
+      pushLog(
+        proc,
+        `[exited with code ${code ?? '?'}, but a spawned process is still running under pid ${exitedPid} — marked orphaned]`
+      )
+      setStatus(proc, 'orphaned')
     }
   })
 }
@@ -324,6 +352,56 @@ function commandsLikelyMatch(persisted: string, live: string): boolean {
 const REAP_POLL_INTERVAL_MS = 200
 const REAP_POLL_TIMEOUT_MS = 2000
 
+/** True if any process is still alive in the POSIX process group led by
+ *  `pid` (== the group id, since every tracked leader is spawned with
+ *  `detached: true`, i.e. `setsid()` — see `process-backend.ts`). Local
+ *  `pgrep` only, mirroring the diagnostic call in
+ *  `reapSurvivorsAfterUnplannedExit` above — not routed through
+ *  `ProcessBackend` (background processes aren't computer-resolved yet, see
+ *  `doSpawn`'s note below). Always false on win32, matching this file's
+ *  other POSIX-only reaping (`getCommandLine`, the pgrep diagnostic). */
+function groupHasLiveMembers(pid: number): boolean {
+  if (process.platform === 'win32') return false
+  try {
+    execFileSync('pgrep', ['-g', String(pid)], { timeout: 2000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Sends `SIGTERM` to the process group led by `pid`, polls for it to
+ * actually empty out, escalates once to `SIGKILL` if it doesn't, and reports
+ * whether the group ended up empty. Shared by both reap paths in this file
+ * so neither can declare victory on a single unverified signal — that was
+ * the root of the bug this fixes: a lone `SIGTERM` used to be fired and
+ * forgotten, so a descendant that outlived it (or was never reachable
+ * because the leader itself was already dead) was silently left running,
+ * orphaned to PID 1, while the process record was reported as a clean exit.
+ *
+ * On win32 there's no liveness primitive to poll (mirrors `getCommandLine`'s
+ * `null` return there) — `killPidTree` already force-kills unconditionally
+ * (`taskkill /T /F`), so this just fires it and trusts the same level the
+ * rest of this file already does on that platform.
+ */
+async function reapGroup(pid: number, backend: ProcessBackend): Promise<boolean> {
+  if (process.platform === 'win32') {
+    backend.killByPid(pid, 'SIGTERM')
+    return true
+  }
+  backend.killByPid(pid, 'SIGTERM')
+  const deadline = Date.now() + REAP_POLL_TIMEOUT_MS
+  while (Date.now() < deadline && groupHasLiveMembers(pid)) {
+    await sleep(REAP_POLL_INTERVAL_MS)
+  }
+  if (groupHasLiveMembers(pid)) {
+    backend.killByPid(pid, 'SIGKILL')
+    await sleep(REAP_POLL_INTERVAL_MS)
+  }
+  return !groupHasLiveMembers(pid)
+}
+
 /**
  * If `proc` still carries a pid from a previous, uncleanly-terminated run (the
  * app/sidecar exited without ever reaching stopProcess/doSpawn's exit handler,
@@ -334,34 +412,49 @@ const REAP_POLL_TIMEOUT_MS = 2000
  * A pid that's alive but no longer matches (reused by an unrelated process
  * since the last run) is deliberately left alone — killing an unverified
  * process is worse than leaving a stale one for the new spawn to collide with.
+ *
+ * The stale pid itself can also be *dead* while its old process group is
+ * still populated — the same "leader exited, descendant survived" shape
+ * `reapSurvivorsAfterUnplannedExit` handles for a live session, but observed
+ * here on the next boot/restart instead. `getCommandLine(stalePid)` alone
+ * can't see that (it only ever asked about the exact leader pid), so this
+ * falls back to a group-membership check before giving up on it.
  */
 async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
   const stalePid = proc.pid
   if (proc.handle || stalePid == null) return
   const backend = getProcessBackend()
   const liveCommand = await backend.getCommandLine(stalePid)
-  if (!liveCommand || !commandsLikelyMatch(proc.command, liveCommand)) {
-    if (liveCommand) {
+
+  if (!liveCommand) {
+    // The leader pid itself is gone. A collision between a fresh
+    // `detached: true` group id and an unrelated pre-existing group at that
+    // exact pid, right after our own prior spawn, isn't a realistic risk —
+    // so a still-populated group here is trusted as our own orphaned leftover.
+    if (groupHasLiveMembers(stalePid)) {
       pushLog(
         proc,
-        `[pid ${stalePid} from a previous run no longer matches this command — leaving it running]`
+        `[leader pid ${stalePid} from a previous run is gone, but a spawned process from its group is still alive — sweeping it]`
       )
+      await reapGroup(stalePid, backend)
     }
     proc.pid = null
     void persistence?.updatePid(proc.id, null)
     return
   }
 
+  if (!commandsLikelyMatch(proc.command, liveCommand)) {
+    pushLog(
+      proc,
+      `[pid ${stalePid} from a previous run no longer matches this command — leaving it running]`
+    )
+    proc.pid = null
+    void persistence?.updatePid(proc.id, null)
+    return
+  }
+
   pushLog(proc, `[reaping leftover process from a previous run: pid ${stalePid}]`)
-  backend.killByPid(stalePid, 'SIGTERM')
-  const deadline = Date.now() + REAP_POLL_TIMEOUT_MS
-  while (Date.now() < deadline && (await backend.getCommandLine(stalePid))) {
-    await sleep(REAP_POLL_INTERVAL_MS)
-  }
-  if (await backend.getCommandLine(stalePid)) {
-    backend.killByPid(stalePid, 'SIGKILL')
-    await sleep(REAP_POLL_INTERVAL_MS)
-  }
+  await reapGroup(stalePid, backend)
   proc.pid = null
   void persistence?.updatePid(proc.id, null)
 }
@@ -467,11 +560,15 @@ export function stopProcess(id: string): boolean {
   // Set handle to null before kill so the exit handler's `proc.handle !== handle`
   // guard bails out (prevents auto-restart from firing)
   const handle = proc.handle
+  const orphanedPid = handle ? null : proc.pid // e.g. an 'orphaned' row's dead leader pid
   proc.handle = null
   proc.pid = null
   void persistence?.updatePid(proc.id, null)
   proc.spawnedAt = null
   if (handle) handle.kill()
+  // Best-effort only (fire-and-forget, matching handle.kill() above) — no
+  // live handle means no poll/escalate loop to wait on here.
+  else if (orphanedPid != null) getProcessBackend().killByPid(orphanedPid, 'SIGTERM')
   setStatus(proc, 'stopped')
   return true
 }
@@ -481,7 +578,13 @@ export function killProcess(id: string): boolean {
   if (!proc) return false
   stopTitlePolling(proc)
   proc.autoRestart = false
-  if (proc.handle) proc.handle.kill()
+  if (proc.handle) {
+    proc.handle.kill()
+  } else if (proc.pid != null) {
+    // e.g. deleting an 'orphaned' row — best-effort sweep of its dead
+    // leader's process group rather than abandoning it untracked.
+    getProcessBackend().killByPid(proc.pid, 'SIGTERM')
+  }
   proc.handle = null
   processes.delete(id)
   void persistence?.remove(id)

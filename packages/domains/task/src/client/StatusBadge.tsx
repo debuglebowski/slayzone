@@ -21,6 +21,11 @@ const STATUS_CONFIG: Record<ProcessStatus, { label: string; dot: string; badge: 
     label: 'Failed',
     dot: 'bg-red-500',
     badge: 'text-red-500 bg-red-500/10 border-red-500/20'
+  },
+  orphaned: {
+    label: 'Orphaned',
+    dot: 'bg-amber-500',
+    badge: 'text-amber-500 bg-amber-500/10 border-amber-500/20'
   }
 }
 

@@ -27,7 +27,13 @@ processEvents.on('status', (id, status) => statuses.push({ id, status }))
 
 // --- Controllable fake backend: hands back a handle the test drives directly. ---
 type DataCb = (chunk: string, stream: 'stdout' | 'stderr') => void
-type ExitCb = (e: { code: number | null; signal: string | null }) => void
+// The real onExit callback (doSpawn's) is async now — it awaits a group-verify
+// sweep before deciding the final status, even when that sweep resolves with
+// no real waiting (pid 4242 here is never a live group). `await`ing anything,
+// including an already-resolved promise, still costs a microtask tick, so
+// `emitExit` must be awaited by callers that then assert on the resulting
+// status/log — a synchronous fire-and-check would race that tick.
+type ExitCb = (e: { code: number | null; signal: string | null }) => void | Promise<void>
 
 class FakeHandle implements ProcHandle {
   readonly pid: number | undefined = 4242
@@ -49,8 +55,8 @@ class FakeHandle implements ProcHandle {
   emitData(chunk: string, stream: 'stdout' | 'stderr'): void {
     for (const cb of [...this.dataSubs]) cb(chunk, stream)
   }
-  emitExit(code: number | null, signal: string | null = null): void {
-    for (const cb of [...this.exitSubs]) cb({ code, signal })
+  async emitExit(code: number | null, signal: string | null = null): Promise<void> {
+    await Promise.all([...this.exitSubs].map((cb) => cb({ code, signal })))
   }
 }
 
@@ -116,7 +122,7 @@ async function main(): Promise<void> {
 
   // --- exit → completed / error (no autoRestart) ---
   const idB = await spawnProcess('proj', 'task', 'B', 'echo b', '/tmp', false)
-  spawned[spawned.length - 1].emitExit(0)
+  await spawned[spawned.length - 1].emitExit(0)
   assert(
     statuses.some((s) => s.id === idB && s.status === 'completed'),
     'exit code 0 (no autoRestart) → completed'
@@ -124,7 +130,7 @@ async function main(): Promise<void> {
   killProcess(idB)
 
   const idC = await spawnProcess('proj', 'task', 'C', 'false', '/tmp', false)
-  spawned[spawned.length - 1].emitExit(1)
+  await spawned[spawned.length - 1].emitExit(1)
   assert(
     statuses.some((s) => s.id === idC && s.status === 'error'),
     'exit code 1 (no autoRestart) → error'
@@ -134,7 +140,7 @@ async function main(): Promise<void> {
   // --- exit → autoRestart: restart signals synchronously, re-spawn after timer ---
   const idD = await spawnProcess('proj', 'task', 'D', 'echo d', '/tmp', true)
   const beforeRestart = spawned.length
-  spawned[beforeRestart - 1].emitExit(1)
+  await spawned[beforeRestart - 1].emitExit(1)
   assert(
     logs.some((l) => l.id === idD && l.line.includes('restarting')),
     'autoRestart exit pushes a "restarting" log line'

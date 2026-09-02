@@ -1,4 +1,4 @@
-export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
+export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 
 export interface ProcessEntry {
   id: string
