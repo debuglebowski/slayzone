@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createStatsPoller } from './pid-stats'
@@ -186,6 +186,66 @@ function handleProcessData(proc: ManagedProcess, str: string): void {
   }
 }
 
+/**
+ * Best-effort cleanup after a tracked process's leader exits *without this
+ * app having asked it to* (see the `onExit` wiring in `doSpawn` below — a
+ * manager-initiated stop/kill/restart nulls `proc.handle` before calling
+ * `handle.kill()`, so that path never reaches here; this only runs for a
+ * genuine surprise exit).
+ *
+ * A `bun run <script>` command can be several process hops deep (e.g. a
+ * root script that runs a package's own `dev` script, which itself runs
+ * `bun run <file>` — each hop is a real child process, not an exec
+ * replacement). The pid `spawn()` hands back, and that this app persists,
+ * is the *leader* of that detached group, not necessarily the long-running
+ * work itself. If the leader dies on its own while a descendant is still
+ * alive in the same group, nothing else here signals it: `reapStaleIfNeeded`
+ * only runs on the *next* spawn attempt, and only checks whether the leader
+ * pid itself is still alive — a live descendant under an already-dead
+ * leader is invisible to that check, so a fresh spawn collides with the
+ * orphan (e.g. "port already in use") instead of replacing it.
+ *
+ * `killByPid` targets the whole process *group* (same numeric id as the
+ * leader's own pid at spawn time), so it reaches surviving descendants even
+ * though the leader itself is already gone — safe to call unconditionally,
+ * since it's a silent no-op if nothing is left. Runs synchronously (not via
+ * `execFile`'s callback) so it completes before `doSpawn`'s own
+ * auto-restart timer could fire and race it onto the same port.
+ *
+ * The `pgrep -g` snapshot is pure diagnostics: taken *before* the sweep so
+ * a recurrence is logged with actual evidence (what survived, and its
+ * pids) instead of requiring another manual investigation.
+ */
+function reapSurvivorsAfterUnplannedExit(
+  proc: ManagedProcess,
+  leaderPid: number,
+  code: number | null,
+  signal: string | null
+): void {
+  if (process.platform !== 'win32') {
+    try {
+      const stdout = execFileSync('pgrep', ['-g', String(leaderPid)], {
+        timeout: 2000
+      }).toString()
+      const survivors = stdout
+        .trim()
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      if (survivors.length > 0) {
+        pushLog(
+          proc,
+          `[leader pid ${leaderPid} exited unexpectedly (code=${code ?? '?'}, signal=${signal ?? 'none'}) ` +
+            `but ${survivors.length} process(es) from its group are still alive (pids: ${survivors.join(', ')}) — sweeping them]`
+        )
+      }
+    } catch {
+      // pgrep exits non-zero when nothing matches the group — nothing survived, nothing to log.
+    }
+  }
+  getProcessBackend().killByPid(leaderPid, 'SIGTERM')
+}
+
 function doSpawn(proc: ManagedProcess): void {
   if (isShuttingDown) return
   proc.spawnedAt = new Date().toISOString()
@@ -217,9 +277,10 @@ function doSpawn(proc: ManagedProcess): void {
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
 
-  handle.onExit(({ code }) => {
+  handle.onExit(({ code, signal }) => {
     if (proc.handle !== handle) return // stale exit from restarted process
     stopTitlePolling(proc)
+    const exitedPid = proc.pid
     proc.pid = null
     void persistence?.updatePid(proc.id, null)
     proc.handle = null
@@ -228,6 +289,11 @@ function doSpawn(proc: ManagedProcess): void {
     proc.oscTitleSet = false
     win?.webContents.send('processes:title', proc.id, null)
     processEvents.emit('title', proc.id, null)
+    // Always an *unplanned* exit here — stopProcess/killProcess/restartProcess
+    // null proc.handle before calling handle.kill(), so a manager-initiated
+    // exit never reaches this guard. See reapSurvivorsAfterUnplannedExit's
+    // doc comment for why a leader exiting alone can still leave orphans.
+    if (exitedPid != null) reapSurvivorsAfterUnplannedExit(proc, exitedPid, code, signal)
     if (proc.autoRestart && processes.has(proc.id)) {
       proc.restartCount++
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
