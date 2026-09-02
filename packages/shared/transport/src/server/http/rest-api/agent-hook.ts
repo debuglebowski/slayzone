@@ -40,10 +40,27 @@ export type { TerminalStateBridge } from './types'
  * Lives here rather than on the PTY session because this route is already the
  * single authority for hook → state (shared by the Express route AND the hub's
  * ws-relay consumer), so there is exactly one writer and no bridge surface to
- * keep in sync. Evicted on `SessionEnd`; bounded in the same spirit as
- * `poolSessionTaskIdCache` above (one small record per PTY session).
+ * keep in sync. Evicted on `SessionEnd`, and also via `evictAgentTree` below on
+ * PTY exit — bounded in the same spirit as `poolSessionTaskIdCache` above (one
+ * small record per PTY session).
  */
 const agentTrees = new Map<string, AgentTree>()
+
+/**
+ * Drop a session's agent tree outside the `SessionEnd` hook path — call this on
+ * PTY exit (kill/respawn/crash/mode-switch/tab-close: `finalizeSessionExit` in
+ * pty-manager.ts is the single funnel for all of them).
+ *
+ * Without this, a session whose PTY was killed rather than cleanly exited
+ * (SIGKILL doesn't let claude fire its own `SessionEnd` hook) leaves its tree
+ * behind forever. If that tree still held a subagent id from a `SubagentStop`
+ * that never arrived, `resolveState` is permanently stuck returning
+ * `'background'` — the spinner never clears even though nothing is running,
+ * and a respawn reusing the same session id inherits the same poisoned tree.
+ */
+export function evictAgentTree(sessionId: string): void {
+  agentTrees.delete(sessionId)
+}
 
 function treeFor(sessionId: string): AgentTree {
   let tree = agentTrees.get(sessionId)
@@ -91,8 +108,10 @@ function claudeCodeHookToTerminalState(
     subagentId: subagentIdOf(raw)
   })
   // Session over — drop the tree so a long-lived app doesn't accumulate one per
-  // session. A respawn reusing the same id simply starts from a fresh tree.
-  if (hookEvent === 'SessionEnd') agentTrees.delete(sessionId)
+  // session. Routed through the same `evictAgentTree` the pty-exit paths use
+  // (rather than an inline delete) so there is exactly one place that can ever
+  // diverge in what "evict" means.
+  if (hookEvent === 'SessionEnd') evictAgentTree(sessionId)
   return state
 }
 

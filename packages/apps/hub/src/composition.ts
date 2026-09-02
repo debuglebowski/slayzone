@@ -28,6 +28,7 @@ import {
   setComputersDeps,
   setWorkspaceDeps,
   requestGithubSignInStart,
+  evictAgentTree,
   type AppDeps,
   type NotifyEventMap,
   type AutomationsEventMap,
@@ -1064,6 +1065,37 @@ export function composeServer(opts: {
     noteConversationId: noteSessionConversationId,
     noteAwaitingInput: setSessionAwaitingInput
   }
+
+  // Drop the session's agent-tree (subagent-liveness tracker) so a killed PTY
+  // can't leave a stale subagent id behind forever — without this, a session
+  // killed mid-turn (rather than exited cleanly; SIGKILL doesn't let claude
+  // fire its own `SessionEnd` hook) permanently sticks resolveState on
+  // 'background': spinner never clears though nothing is running.
+  //
+  // Two listeners, not because `exit` needs an id-reuse guard (it doesn't —
+  // see below) but because `exit` is unreliable for the replace/respawn case
+  // specifically:
+  //  - `exit` fires unconditionally and is ALWAYS safe to act on: both the
+  //    natural onExit path (`session.pty !== target` guard) and the kill
+  //    watchdog (`sessions.get(sessionId) === session` guard) in pty-manager.ts
+  //    only ever invoke the finalizer for the CURRENTLY-registered generation
+  //    at that session id — so `exit` can never fire for a generation that has
+  //    already been replaced. (Do NOT re-add a `!hasPty` check here: the id is
+  //    deliberately still present when `exit` fires — `sessions.delete` is
+  //    deferred ~100ms past the emit to let trailing onData drain — so such a
+  //    guard is always-false and makes eviction unreachable for every plain
+  //    kill, which is the common case this fix targets.)
+  //  - The flip side is that `exit` NEVER fires for the OUTGOING generation of
+  //    a replace: `createPty`'s replace-existing-session branch calls
+  //    `killPty` and immediately spawns the new session on the same id
+  //    (without awaiting the old process's actual death), so by the time the
+  //    old process's onExit/watchdog would otherwise run, the identity guards
+  //    above see the new session and skip the old finalizer entirely — the old
+  //    tree would never be evicted through this path. `replacing` fires
+  //    SYNCHRONOUSLY at the moment of replacement, strictly before the new
+  //    session exists, to cover exactly that gap.
+  ptyEvents.on('replacing', (sessionId) => evictAgentTree(sessionId))
+  ptyEvents.on('exit', (sessionId) => evictAgentTree(sessionId))
 
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {

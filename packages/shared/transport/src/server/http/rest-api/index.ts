@@ -5,7 +5,7 @@ import { registerAgentHookRoute } from './agent-hook'
 // Re-exported so the hub composition root can feed a computer-RELAYED agent-hook
 // envelope (arriving over the ws `event` channel) through the SAME authority as
 // the loopback HTTP route.
-export { processAgentHook } from './agent-hook'
+export { processAgentHook, evictAgentTree } from './agent-hook'
 import { registerAuthDeepLinkRoute } from './auth-deep-link'
 import { registerProcessesListRoute } from './processes/list'
 import { registerProcessesLogsRoute } from './processes/logs'

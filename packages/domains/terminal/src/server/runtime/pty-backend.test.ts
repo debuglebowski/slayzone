@@ -203,6 +203,105 @@ await test('fake backend: killPty reaches the handle', async () => {
   setPtyBackend(null)
 })
 
+await test("createPty replacing a live session id fires `replacing` synchronously, before the outgoing handle is killed — and before the outgoing handle's own (possibly delayed) `exit` can land", async () => {
+  const handle1 = makeFakeHandle()
+  const handle2 = makeFakeHandle()
+  let nextHandle = handle1
+  setPtyBackend({ spawn: () => nextHandle })
+  const sid = 'fakeReplaceTask:fakeReplaceTask'
+
+  const replacingEvents: string[] = []
+  const rh = (s: string): void => {
+    if (s === sid) replacingEvents.push(s)
+  }
+  ptyEvents.on('replacing', rh)
+
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
+  expect(replacingEvents.length === 0, 'first spawn on a fresh id must not fire replacing')
+  expect(handle1.killed.length === 0, 'first spawn must not kill anything')
+
+  // Reuse the SAME session id — this is the createPty "Kill existing if any"
+  // branch: it must emit `replacing` before calling killPty (source order), so
+  // a listener resetting per-session state (e.g. the agent-hook route's
+  // subagent tracker) sees it ahead of the outgoing process's own exit.
+  nextHandle = handle2
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
+
+  expect(
+    replacingEvents.length === 1,
+    `expected exactly one replacing event for the reused id, got ${replacingEvents.length}`
+  )
+  expect(handle1.killed.length >= 1, 'outgoing handle must be killed on replace')
+  expect(handle2.killed.length === 0, 'incoming handle must not be killed')
+
+  // The outgoing process's exit landing LATE — after the replacement is
+  // already live — must NOT surface as a ptyEvents 'exit' for this id at all:
+  // the onExit identity guard (`session.pty !== target`, pty-manager.ts) sees
+  // that `sessions.get(sid)` now holds handle2's session, not handle1's, and
+  // drops the callback before it ever reaches finalizeSessionExit. This is
+  // *why* a plain `ptyEvents.on('exit', evictAgentTree)` listener (composition
+  // .ts, no extra id-reuse guard needed) is safe: 'exit' structurally cannot
+  // fire for an already-replaced generation. Proven, not assumed:
+  const staleExitEvents: Array<number | null> = []
+  const seh = (s: string, code: number | null): void => {
+    if (s === sid) staleExitEvents.push(code)
+  }
+  ptyEvents.on('exit', seh)
+  handle1.emitExit(-2)
+  expect(
+    staleExitEvents.length === 0,
+    `outgoing generation's late exit must not surface as ptyEvents 'exit', got ${JSON.stringify(staleExitEvents)}`
+  )
+  ptyEvents.off('exit', seh)
+
+  ptyEvents.off('replacing', rh)
+  handle2.emitExit(0)
+  setPtyBackend(null)
+})
+
+await test('a PLAIN kill (no replace) fires ptyEvents "exit" and an unconditional listener must act on it — regression test for the always-false `!hasPty` guard bug', async () => {
+  // Mirrors composition.ts's real wiring: an in-memory tracker standing in for
+  // agent-hook.ts's `agentTrees`, evicted by BOTH `replacing` and `exit` with
+  // no extra guard on either. This is the common case the whole fix targets —
+  // task delete, the standalone kill route, a user-initiated stop — none of
+  // which go through createPty's replace branch, so `replacing` never fires
+  // and `exit` is the ONLY signal. A `!hasPty(sessionId)` guard on this
+  // listener is always false here: `finalizeSessionExit` defers
+  // `sessions.delete` ~100ms past the synchronous `exit` emit (to let trailing
+  // onData drain), so the id is still registered at the instant this listener
+  // runs — such a guard would make eviction unreachable for exactly this case.
+  const fakeAgentTrees = new Set<string>()
+  const evict = (sessionId: string): void => {
+    fakeAgentTrees.delete(sessionId)
+  }
+  ptyEvents.on('replacing', evict)
+  ptyEvents.on('exit', evict)
+
+  const handle = makeFakeHandle()
+  setPtyBackend({ spawn: () => handle })
+  const sid = 'fakePlainKillTask:fakePlainKillTask'
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
+
+  // Simulate a stale subagent id left behind mid-turn (the exact shape of the
+  // original bug: a SubagentStop that never arrived).
+  fakeAgentTrees.add(sid)
+  expect(fakeAgentTrees.has(sid), 'setup: tracker must hold the id before kill')
+
+  killPty(sid)
+  expect(handle.killed.length >= 1, 'killPty must reach the handle')
+  handle.emitExit(-2) // no replacement anywhere in this test — a plain kill
+
+  expect(
+    !fakeAgentTrees.has(sid),
+    'a plain kill must evict the tracked id via the exit listener alone — ' +
+      'if this fails, the exit listener is guarded by something that never fires'
+  )
+
+  ptyEvents.off('replacing', evict)
+  ptyEvents.off('exit', evict)
+  setPtyBackend(null)
+})
+
 await test('localPtyBackend: real echo shell output reaches ptyEvents with monotonic seq', async () => {
   setPtyBackend(null) // default in-process backend
   const sid = 'localEchoTask:localEchoTask'

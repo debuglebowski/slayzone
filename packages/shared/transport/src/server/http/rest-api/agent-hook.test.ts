@@ -1,7 +1,7 @@
 import express from 'express'
 import http from 'http'
 import { describe, test, expect, vi, beforeEach } from 'vitest'
-import { registerAgentHookRoute } from './agent-hook'
+import { registerAgentHookRoute, evictAgentTree } from './agent-hook'
 
 // Lifecycle spy — captures every event the route emits on deps.agentLifecycle
 // (the host bridges that emitter to the renderer; legacyBroadcast is unused
@@ -646,6 +646,53 @@ describe('POST /api/agent-hook', () => {
         taskId: 'task-se'
       })
       expect(transitionSpy).toHaveBeenCalledWith('task-se', 'idle', 'SessionEnd')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('evictAgentTree drops a stale subagent so the NEXT session on the same id does not inherit its stuck background state', async () => {
+    findSessionSpy.mockReturnValue('task-evict')
+    const srv = await startServer()
+    try {
+      // Main loop starts, a background subagent starts, main loop ends first —
+      // subagent's SubagentStop never arrives (the bug: e.g. the pty was killed
+      // mid-subagent-run rather than exiting cleanly).
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-evict'
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-evict',
+        raw: { agent_id: 'sub-orphan', tool_name: 'Bash' }
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Stop',
+        taskId: 'task-evict'
+      })
+      expect(transitionSpy).toHaveBeenLastCalledWith('task-evict', 'background', 'Stop')
+
+      // Without eviction, a brand-new turn on the SAME session id would still
+      // resolve to 'background' on its own Stop — the orphaned 'sub-orphan' id
+      // never left the tree. Simulate the pty-exit funnel calling it directly
+      // (composition.ts wires `ptyEvents.on('exit', evictAgentTree)` for this).
+      evictAgentTree('task-evict')
+
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-evict'
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Stop',
+        taskId: 'task-evict'
+      })
+      expect(transitionSpy).toHaveBeenLastCalledWith('task-evict', 'idle', 'Stop')
     } finally {
       await srv.close()
     }

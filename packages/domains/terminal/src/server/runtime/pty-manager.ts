@@ -80,6 +80,18 @@ export type PtyEventMap = {
   'state-change': [sessionId: string, newState: TerminalState, oldState: TerminalState]
   'title-change': [sessionId: string, title: string]
   exit: [sessionId: string, exitCode: number | null, errorCode: string | null]
+  // Fired SYNCHRONOUSLY the instant `createPty` decides to replace a live
+  // session at this id (respawn/mode-switch/warm-pool adopt) — strictly
+  // BEFORE `killPty` and before the new session is registered. `exit` for the
+  // outgoing process is NOT a substitute: `killPty` only SIGKILLs, it does not
+  // await `finalizeSessionExit` (real onExit, or the watchdog fallback), so
+  // that `exit` can land well after the new session already has live hook
+  // state. A listener that must reset per-session state on id reuse (e.g. the
+  // agent-hook route's subagent tracker) needs THIS event, not `exit`, or it
+  // either inherits the outgoing session's stale state (too late) or wipes the
+  // incoming session's fresh state (too late the other way, once `exit`
+  // finally arrives).
+  replacing: [sessionId: string]
   prompt: [sessionId: string, prompt: unknown]
   'session-detected': [sessionId: string, conversationId: string]
   'dev-server-detected': [sessionId: string, url: string]
@@ -1332,6 +1344,24 @@ export async function createPty(
       sessionId,
       taskId
     })
+    // Emit BEFORE killPty (see `replacing` doc on PtyEventMap): this is the one
+    // deterministic point where we know the id is being reused, ahead of the
+    // outgoing process's own (unawaited, possibly delayed) exit. Guarded: a
+    // throwing listener must not be able to abort the replace and leak the
+    // outgoing process (TypedEmitter is a bare EventEmitter — a listener
+    // exception propagates straight out of `emit`).
+    try {
+      ptyEvents.emit('replacing', sessionId)
+    } catch (err) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.replacing_listener_error',
+        sessionId,
+        taskId,
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
     killPty(sessionId)
   }
 
