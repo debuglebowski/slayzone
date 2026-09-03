@@ -23,6 +23,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@slayzone/workflow": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
     "fzf": "^0.5.2",

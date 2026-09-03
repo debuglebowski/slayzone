@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { isTerminalStatus, parseColumnsConfig } from '@slayzone/workflow'
 
 /**
  * Mark a tab's subprocess liveness in DB. Called by pty-manager + chat-transport
@@ -55,16 +56,25 @@ export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]
  * `wasSpawned` prop on `TerminalStarter` then resumes each one without
  * triggering inference. `mode != 'terminal'` mirrors the `shouldGate`
  * condition in `TerminalSplitGroup` — plain shell tabs always eager-spawn.
+ *
+ * Also excludes tasks whose current status is terminal (done/canceled): a
+ * task can reach a terminal status while its agent session is still live (or
+ * while an exit went undetected, leaving `was_spawned` stuck at 1 — see
+ * `processes` exit-detection fixes), and reopening a finished task's tab on
+ * every boot is never the intent of "auto-restore".
  */
 export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> {
   const rows = (await db
     .prepare(
-      `SELECT tt.task_id FROM terminal_tabs tt
+      `SELECT tt.task_id, t.status, p.columns_config FROM terminal_tabs tt
        JOIN tasks t ON t.id = tt.task_id
+       LEFT JOIN projects p ON p.id = t.project_id
        WHERE tt.is_main = 1 AND tt.mode != 'terminal'
          AND tt.was_spawned = 1 AND tt.hibernated = 0
          AND t.deleted_at IS NULL`
     )
-    .all()) as Array<{ task_id: string }>
-  return rows.map((r) => r.task_id)
+    .all()) as Array<{ task_id: string; status: string; columns_config: string | null }>
+  return rows
+    .filter((r) => !isTerminalStatus(r.status, parseColumnsConfig(r.columns_config)))
+    .map((r) => r.task_id)
 }

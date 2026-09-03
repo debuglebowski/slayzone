@@ -108,10 +108,18 @@ test('task-terminals router: listAutoRestoreTasks — spawned+non-hibernated onl
   await caller.ensureMain({ taskId: deleted, mode: 'claude-code' })
   setTab(deleted, true, false)
 
+  // Regression: a task reaching 'done' with `was_spawned` stuck at 1 (e.g. an
+  // undetected agent exit) must not keep reopening as a background tab forever.
+  const done = mkTask('done')
+  h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', done)
+  await caller.ensureMain({ taskId: done, mode: 'claude-code' })
+  setTab(done, true, false)
+
   const ids = await caller.listAutoRestoreTasks()
   expect(ids).toContain(active)
   expect(ids).not.toContain(hibernated)
   expect(ids).not.toContain(neverSpawned)
   expect(ids).not.toContain(plainShell)
   expect(ids).not.toContain(deleted)
+  expect(ids).not.toContain(done)
 })

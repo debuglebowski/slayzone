@@ -1965,6 +1965,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/workflow':
+        specifier: workspace:*
+        version: link:../../shared/workflow
       '@slayzone/worktrees':
         specifier: workspace:*
         version: link:../worktrees
