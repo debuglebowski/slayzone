@@ -126,6 +126,10 @@ export async function initProcessManagerWith(p: ProcessPersistence): Promise<voi
       oscTitleSet: false
     })
   }
+  // Fire-and-forget, off the boot critical path — an orphan left by a row
+  // that's never manually restarted again this session would otherwise stay
+  // unreachable even across a full app restart (see reapKnownHistory).
+  void sweepAllHistoryOnBoot()
 }
 
 function pushLog(proc: ManagedProcess, line: string): void {
@@ -282,6 +286,10 @@ function doSpawn(proc: ManagedProcess): void {
   proc.processTitle = null
   proc.oscTitleSet = false
   void persistence?.updatePid(proc.id, proc.pid)
+  // Recorded in ADDITION to updatePid's single overwritable column, never
+  // instead of it — see reapKnownHistory below for why the overwrite alone
+  // let an older spawn attempt's orphan become permanently unreachable.
+  if (proc.pid != null) void persistence?.recordPid(proc.id, proc.pid)
   startTitlePolling(proc)
 
   handle.onData((chunk) => handleProcessData(proc, chunk))
@@ -403,60 +411,94 @@ async function reapGroup(pid: number, backend: ProcessBackend): Promise<boolean>
 }
 
 /**
- * If `proc` still carries a pid from a previous, uncleanly-terminated run (the
- * app/sidecar exited without ever reaching stopProcess/doSpawn's exit handler,
- * so nothing sent it a kill signal and nothing cleared the persisted pid),
- * verify it's still alive and still looks like the same command, then reap it
- * before the caller spawns a fresh one against the same port.
+ * Verifies `candidatePid` is still plausibly this proc's own leftover — alive
+ * and command-matching, or already dead but its old process group still
+ * populated (the same "leader exited, descendant survived" shape
+ * `reapSurvivorsAfterUnplannedExit` handles for a live session, observed here
+ * instead on the next boot/restart/history sweep) — then reaps its group if
+ * populated.
  *
  * A pid that's alive but no longer matches (reused by an unrelated process
- * since the last run) is deliberately left alone — killing an unverified
- * process is worse than leaving a stale one for the new spawn to collide with.
+ * since we last saw it) is deliberately left alone — killing an unverified
+ * process is worse than leaving a stale one for a new spawn to collide with.
  *
- * The stale pid itself can also be *dead* while its old process group is
- * still populated — the same "leader exited, descendant survived" shape
- * `reapSurvivorsAfterUnplannedExit` handles for a live session, but observed
- * here on the next boot/restart instead. `getCommandLine(stalePid)` alone
- * can't see that (it only ever asked about the exact leader pid), so this
- * falls back to a group-membership check before giving up on it.
+ * Always returns true: every branch (reaped, confirmed already-dead, or
+ * confirmed no longer ours) is safe for the caller to stop tracking.
  */
-async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
-  const stalePid = proc.pid
-  if (proc.handle || stalePid == null) return
-  const backend = getProcessBackend()
-  const liveCommand = await backend.getCommandLine(stalePid)
+async function reapCandidatePid(
+  proc: ManagedProcess,
+  candidatePid: number,
+  backend: ProcessBackend
+): Promise<boolean> {
+  const liveCommand = await backend.getCommandLine(candidatePid)
 
   if (!liveCommand) {
     // The leader pid itself is gone. A collision between a fresh
     // `detached: true` group id and an unrelated pre-existing group at that
     // exact pid, right after our own prior spawn, isn't a realistic risk —
     // so a still-populated group here is trusted as our own orphaned leftover.
-    if (groupHasLiveMembers(stalePid)) {
+    if (groupHasLiveMembers(candidatePid)) {
       pushLog(
         proc,
-        `[leader pid ${stalePid} from a previous run is gone, but a spawned process from its group is still alive — sweeping it]`
+        `[leader pid ${candidatePid} from a previous run is gone, but a spawned process from its group is still alive — sweeping it]`
       )
-      await reapGroup(stalePid, backend)
+      await reapGroup(candidatePid, backend)
     }
-    proc.pid = null
-    void persistence?.updatePid(proc.id, null)
-    return
+    return true
   }
 
   if (!commandsLikelyMatch(proc.command, liveCommand)) {
     pushLog(
       proc,
-      `[pid ${stalePid} from a previous run no longer matches this command — leaving it running]`
+      `[pid ${candidatePid} from a previous run no longer matches this command — leaving it running]`
     )
-    proc.pid = null
-    void persistence?.updatePid(proc.id, null)
-    return
+    return true
   }
 
-  pushLog(proc, `[reaping leftover process from a previous run: pid ${stalePid}]`)
-  await reapGroup(stalePid, backend)
+  pushLog(proc, `[reaping leftover process from a previous run: pid ${candidatePid}]`)
+  await reapGroup(candidatePid, backend)
+  return true
+}
+
+/**
+ * If `proc` still carries a pid from a previous, uncleanly-terminated run (the
+ * app/sidecar exited without ever reaching stopProcess/doSpawn's exit handler,
+ * so nothing sent it a kill signal and nothing cleared the persisted pid),
+ * verify and reap it before the caller spawns a fresh one against the same port.
+ */
+async function reapStaleIfNeeded(proc: ManagedProcess): Promise<void> {
+  const stalePid = proc.pid
+  if (proc.handle || stalePid == null) return
+  await reapCandidatePid(proc, stalePid, getProcessBackend())
   proc.pid = null
   void persistence?.updatePid(proc.id, null)
+}
+
+/**
+ * Sweeps every OLDER history entry for `proc` besides its current pid (which
+ * `reapStaleIfNeeded` already owns) — recovers an orphan left by a spawn
+ * attempt that was superseded before it was ever reaped, whose pid was
+ * clobbered out of the single `processes.pid` column by a later restart and
+ * so became permanently unreachable to `reapStaleIfNeeded` alone. Every
+ * visited entry is pruned regardless of outcome — `reapCandidatePid`'s only
+ * return value means "safe to forget."
+ */
+async function reapKnownHistory(proc: ManagedProcess): Promise<void> {
+  if (!persistence) return
+  const backend = getProcessBackend()
+  const history = await persistence.listPidHistory(proc.id)
+  for (const entry of history) {
+    if (entry.pid === proc.pid) continue
+    await reapCandidatePid(proc, entry.pid, backend)
+    void persistence.removePidHistory(proc.id, entry.pid)
+  }
+}
+
+/** One-time sweep of every tracked row's pid history at app boot — catches an
+ *  orphan left by a row that was never manually restarted again this session
+ *  (restarting the whole app alone wasn't enough to recover it before this). */
+async function sweepAllHistoryOnBoot(): Promise<void> {
+  await Promise.allSettled(Array.from(processes.values()).map((p) => reapKnownHistory(p)))
 }
 
 export function createProcess(
@@ -525,9 +567,11 @@ export async function spawnProcess(
   }
   processes.set(id, proc)
   void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
-  // proc.pid is always null here (id is freshly minted) — a no-op today, kept for
-  // symmetry with restartProcess in case a future caller ever reuses an id.
+  // proc.pid is always null and history always empty here (id is freshly
+  // minted) — a no-op today, kept for symmetry with restartProcess in case a
+  // future caller ever reuses an id.
   await reapStaleIfNeeded(proc)
+  await reapKnownHistory(proc)
   doSpawn(proc)
   return id
 }
@@ -608,6 +652,10 @@ export async function restartProcess(id: string): Promise<boolean> {
   proc.logBuffer.push('[restarting...]')
   setStatus(proc, 'running')
   if (!hadLiveHandle) await reapStaleIfNeeded(proc)
+  // Unconditional (not gated by hadLiveHandle): even a normal live restart
+  // can have older, already-superseded history from earlier this session
+  // that reapStaleIfNeeded — keyed only to the current pid — never sees.
+  await reapKnownHistory(proc)
   setTimeout(() => doSpawn(proc), 500)
   return true
 }

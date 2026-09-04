@@ -84,7 +84,10 @@ const fake: ProcessPersistence = {
   },
   updatePid: async (id, pid) => {
     pidUpdates.push({ id, pid })
-  }
+  },
+  recordPid: async () => {},
+  listPidHistory: async () => [],
+  removePidHistory: async () => {}
 }
 
 // Controllable fake backend for the reap scenarios: getCommandLine is driven
@@ -294,21 +297,48 @@ async function testDbAdapter(): Promise<void> {
 
   await persistenceOverDb.remove('the-id')
   assert(
-    calls[3].sql === 'DELETE FROM processes WHERE id = ?' &&
+    calls[3].sql === 'DELETE FROM process_pids WHERE process_id = ?' &&
       JSON.stringify(calls[3].params) === JSON.stringify(['the-id']),
-    'remove runs the exact pre-seam DELETE'
+    'remove deletes pid history first (no FK cascade to rely on)'
+  )
+  assert(
+    calls[4].sql === 'DELETE FROM processes WHERE id = ?' &&
+      JSON.stringify(calls[4].params) === JSON.stringify(['the-id']),
+    'remove then runs the exact pre-seam DELETE on processes'
   )
 
   await persistenceOverDb.updatePid('the-id', 4242)
   assert(
-    calls[4].sql.replace(/\s+/g, ' ').trim() === 'UPDATE processes SET pid = ? WHERE id = ?' &&
-      JSON.stringify(calls[4].params) === JSON.stringify([4242, 'the-id']),
+    calls[5].sql.replace(/\s+/g, ' ').trim() === 'UPDATE processes SET pid = ? WHERE id = ?' &&
+      JSON.stringify(calls[5].params) === JSON.stringify([4242, 'the-id']),
     'updatePid runs a minimal UPDATE, pid then id'
   )
   await persistenceOverDb.updatePid('the-id', null)
   assert(
-    JSON.stringify(calls[5].params) === JSON.stringify([null, 'the-id']),
+    JSON.stringify(calls[6].params) === JSON.stringify([null, 'the-id']),
     'updatePid accepts null to clear the pid'
+  )
+
+  await persistenceOverDb.recordPid('the-id', 7777)
+  assert(
+    calls[7].sql === 'INSERT OR REPLACE INTO process_pids (process_id, pid) VALUES (?, ?)' &&
+      JSON.stringify(calls[7].params) === JSON.stringify(['the-id', 7777]),
+    'recordPid inserts-or-replaces a history row, never overwriting a different pid'
+  )
+
+  await persistenceOverDb.listPidHistory('the-id')
+  assert(
+    calls[8].sql ===
+      'SELECT pid, spawned_at as spawnedAt FROM process_pids WHERE process_id = ? ORDER BY spawned_at' &&
+      JSON.stringify(calls[8].params) === JSON.stringify(['the-id']),
+    'listPidHistory selects every recorded pid for this row, oldest first'
+  )
+
+  await persistenceOverDb.removePidHistory('the-id', 7777)
+  assert(
+    calls[9].sql === 'DELETE FROM process_pids WHERE process_id = ? AND pid = ?' &&
+      JSON.stringify(calls[9].params) === JSON.stringify(['the-id', 7777]),
+    'removePidHistory deletes exactly the one entry, not the whole row'
   )
 
   // Sync-throw parity: pre-seam code called db.prepare() synchronously, so a

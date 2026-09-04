@@ -255,7 +255,10 @@ async function main(): Promise<void> {
       insert: async () => {},
       update: async () => {},
       remove: async () => {},
-      updatePid: async () => {}
+      updatePid: async () => {},
+      recordPid: async () => {},
+      listPidHistory: async () => [],
+      removePidHistory: async () => {}
     }
     await initProcessManagerWith(fakePersistence)
 
@@ -289,6 +292,191 @@ async function main(): Promise<void> {
     await testSleep(700)
     killProcess(staleId)
     staleSurvivor.kill('SIGKILL')
+    setProcessBackend(null)
+  }
+
+  // --- reapKnownHistory: a *normal-looking* restart (hadLiveHandle=true,
+  //     never surfaces 'orphaned', reapStaleIfNeeded is skipped entirely for
+  //     this kind of transition by design) can still silently leak a
+  //     descendant if its own kill() never actually reached it — e.g. an
+  //     intermediate hop in a multi-process script chain that escaped the
+  //     group signal. Before this fix, nothing ever looked back at that
+  //     generation once a *later* restart's spawn overwrote proc.pid — it
+  //     sat forever, invisible to reapStaleIfNeeded (which only ever
+  //     inspects the current pid). A history-backed sweep must catch it on
+  //     the NEXT restart, however many generations later. ---
+  {
+    const genA = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const genAPid = genA.pid
+    assert(genAPid !== undefined, 'test setup: generation A has a pid')
+
+    const historyByProcessId = new Map<string, Array<{ pid: number; spawnedAt: string }>>()
+    const historyPersistence: ProcessPersistence = {
+      loadAll: async () => [],
+      insert: async () => {},
+      update: async () => {},
+      remove: async () => {},
+      updatePid: async () => {},
+      recordPid: async (id, pid) => {
+        historyByProcessId.set(id, [
+          ...(historyByProcessId.get(id) ?? []),
+          { pid, spawnedAt: new Date().toISOString() }
+        ])
+      },
+      listPidHistory: async (id) => historyByProcessId.get(id) ?? [],
+      removePidHistory: async (id, pid) => {
+        historyByProcessId.set(
+          id,
+          (historyByProcessId.get(id) ?? []).filter((e) => e.pid !== pid)
+        )
+      }
+    }
+    await initProcessManagerWith(historyPersistence)
+
+    const FAKE_GEN_B_PID = 987654321 // arbitrary — generation B is never actually spawned for real
+    const genAHandle: ProcHandle = {
+      pid: genAPid,
+      onData: () => ({ dispose() {} }),
+      onExit: () => ({ dispose() {} }),
+      kill: () => {} // deliberately doesn't reach genA — simulates a kill that never lands
+    }
+    const genBHandle: ProcHandle = {
+      pid: FAKE_GEN_B_PID,
+      onData: () => ({ dispose() {} }),
+      onExit: () => ({ dispose() {} }),
+      kill: () => {}
+    }
+    let spawnCalls = 0
+    const multiGenKillCalls: Array<{ pid: number; sig?: string }> = []
+    setProcessBackend({
+      spawn: () => (spawnCalls++ === 0 ? genAHandle : genBHandle),
+      getCommandLine: async () => null,
+      killByPid: (pid, sig) => {
+        multiGenKillCalls.push({ pid, sig })
+        if (pid === genAPid && sig === 'SIGKILL') genA.kill('SIGKILL')
+      }
+    })
+
+    const multiGenId = await spawnProcess(null, null, 'multigen', 'echo multigen', '/tmp', false)
+    assert(
+      (await historyPersistence.listPidHistory(multiGenId)).some((e) => e.pid === genAPid),
+      "generation A's pid is recorded in history on spawn"
+    )
+
+    // Restart #1: hadLiveHandle=true (genA looks perfectly healthy) — its own
+    // kill() never actually reaches genA (real process, stays alive).
+    // reapStaleIfNeeded is skipped for this transition; reapKnownHistory
+    // correctly defers on genA too, since it's still the CURRENT pid here.
+    await restartProcess(multiGenId)
+    await testSleep(700) // let the scheduled doSpawn land, assigning generation B
+    assert(
+      !multiGenKillCalls.some((c) => c.pid === genAPid),
+      'a restart never touches the still-current generation via history (that is reapStaleIfNeeded’s job)'
+    )
+    assert(
+      (await historyPersistence.listPidHistory(multiGenId)).some((e) => e.pid === genAPid),
+      "generation A is still in history — its leak hasn't been discovered yet"
+    )
+
+    // Restart #2: generation B is now current; generation A is a superseded,
+    // already-forgotten-by-the-single-pid-column leak. Only reapKnownHistory
+    // can find it now.
+    await restartProcess(multiGenId)
+    assert(
+      multiGenKillCalls.some((c) => c.pid === genAPid && c.sig === 'SIGTERM') &&
+        multiGenKillCalls.some((c) => c.pid === genAPid && c.sig === 'SIGKILL'),
+      'reapKnownHistory sweeps a generation left behind by an earlier, clean-looking restart'
+    )
+    assert(
+      !(await historyPersistence.listPidHistory(multiGenId)).some((e) => e.pid === genAPid),
+      'the swept generation is pruned from history once resolved'
+    )
+
+    await testSleep(700)
+    killProcess(multiGenId)
+    genA.kill('SIGKILL')
+    setProcessBackend(null)
+  }
+
+  // --- sweepAllHistoryOnBoot: initProcessManagerWith must sweep every row's
+  //     older history entries too, not just whatever reapStaleIfNeeded checks
+  //     on next explicit restart — this is what recovers an orphan across a
+  //     full app restart even for a row nobody manually restarts again. Also
+  //     covers pruning: a fully-dead history entry must be forgotten without
+  //     ever being sent a signal, and the row's CURRENT pid must be left
+  //     alone (that one is reapStaleIfNeeded's domain, not touched at boot). ---
+  {
+    const bootOrphan = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const bootOrphanPid = bootOrphan.pid
+    assert(bootOrphanPid !== undefined, 'test setup: boot-sweep orphan has a pid')
+
+    const bootRowId = 'boot-sweep-test-id'
+    const currentPid = 555555 // the row's "current" pid — must be left alone
+    const deadPid = 8888887 // answers to nothing — must be pruned, never signaled
+    const bootHistoryPersistence: ProcessPersistence = {
+      loadAll: async () => [
+        {
+          id: bootRowId,
+          task_id: null,
+          project_id: null,
+          label: 'boot',
+          command: 'echo boot',
+          cwd: '/tmp',
+          auto_restart: 0,
+          pid: currentPid
+        }
+      ],
+      insert: async () => {},
+      update: async () => {},
+      remove: async () => {},
+      updatePid: async () => {},
+      recordPid: async () => {},
+      listPidHistory: async (id) =>
+        id === bootRowId
+          ? [
+              { pid: bootOrphanPid!, spawnedAt: '' },
+              { pid: deadPid, spawnedAt: '' },
+              { pid: currentPid, spawnedAt: '' }
+            ]
+          : [],
+      removePidHistory: async () => {}
+    }
+
+    const bootKillCalls: Array<{ pid: number; sig?: string }> = []
+    setProcessBackend({
+      spawn: () => ({
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: () => {}
+      }),
+      getCommandLine: async () => null,
+      killByPid: (pid, sig) => {
+        bootKillCalls.push({ pid, sig })
+        if (pid === bootOrphanPid && sig === 'SIGKILL') bootOrphan.kill('SIGKILL')
+      }
+    })
+
+    await initProcessManagerWith(bootHistoryPersistence) // fires sweepAllHistoryOnBoot internally
+    // sweepAllHistoryOnBoot is fire-and-forget inside initProcessManagerWith —
+    // give its reap (SIGTERM -> 2s poll -> SIGKILL) time to complete.
+    await testSleep(2500)
+
+    assert(
+      bootKillCalls.some((c) => c.pid === bootOrphanPid),
+      'a boot-time sweep reaps a stale history entry even though the row was never restarted this session'
+    )
+    assert(
+      !bootKillCalls.some((c) => c.pid === deadPid),
+      'a fully-dead history entry is pruned silently, never sent a signal'
+    )
+    assert(
+      !bootKillCalls.some((c) => c.pid === currentPid),
+      "the row's current pid is left alone by the boot sweep"
+    )
+
+    bootOrphan.kill('SIGKILL')
+    killProcess(bootRowId)
     setProcessBackend(null)
   }
 

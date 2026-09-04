@@ -23,6 +23,12 @@ export interface PersistedProcess {
   autoRestart: boolean
 }
 
+/** One leader pid this app has itself observed spawning for a process row. */
+export interface PidHistoryEntry {
+  pid: number
+  spawnedAt: string
+}
+
 /**
  * Persistence seam for the process manager. The manager never touches the DB
  * directly; it talks to this interface. The default impl
@@ -40,6 +46,16 @@ export interface ProcessPersistence {
    *  config edits, and is read back on the next boot to reap a leftover process that
    *  survived an uncontrolled app exit. */
   updatePid(id: string, pid: number | null): Promise<void>
+  /** Durably records `pid` as a leader this row has spawned, in addition to (never
+   *  instead of) `updatePid`'s single current-value column — see process_pids (v168).
+   *  Never overwrites a previous entry, so an older spawn attempt's pid survives being
+   *  superseded by a newer one and can still be found and reaped later. */
+  recordPid(processId: string, pid: number): Promise<void>
+  /** Every leader pid ever recorded for this row that hasn't been pruned yet. */
+  listPidHistory(processId: string): Promise<PidHistoryEntry[]>
+  /** Drops one history entry once it's confirmed safe to forget (reaped, already dead,
+   *  or confirmed no longer this app's own process). */
+  removePidHistory(processId: string, pid: number): Promise<void>
 }
 
 /**
@@ -77,15 +93,39 @@ export function createDbProcessPersistence(db: SlayzoneDb): ProcessPersistence {
         .then(() => undefined)
     },
     remove(id: string): Promise<void> {
+      // Explicit history cleanup rather than an FK CASCADE — `PRAGMA foreign_keys`
+      // is toggled on/off per-connection elsewhere in this codebase (see
+      // reset-for-test-txn.ts, export-import-txns.ts), so a cascade can't be
+      // relied on to actually fire here.
       return db
-        .prepare('DELETE FROM processes WHERE id = ?')
+        .prepare('DELETE FROM process_pids WHERE process_id = ?')
         .run(id)
+        .then(() => db.prepare('DELETE FROM processes WHERE id = ?').run(id))
         .then(() => undefined)
     },
     updatePid(id: string, pid: number | null): Promise<void> {
       return db
         .prepare('UPDATE processes SET pid = ? WHERE id = ?')
         .run(pid, id)
+        .then(() => undefined)
+    },
+    recordPid(processId: string, pid: number): Promise<void> {
+      return db
+        .prepare('INSERT OR REPLACE INTO process_pids (process_id, pid) VALUES (?, ?)')
+        .run(processId, pid)
+        .then(() => undefined)
+    },
+    listPidHistory(processId: string): Promise<PidHistoryEntry[]> {
+      return db
+        .prepare(
+          'SELECT pid, spawned_at as spawnedAt FROM process_pids WHERE process_id = ? ORDER BY spawned_at'
+        )
+        .all<PidHistoryEntry>(processId)
+    },
+    removePidHistory(processId: string, pid: number): Promise<void> {
+      return db
+        .prepare('DELETE FROM process_pids WHERE process_id = ? AND pid = ?')
+        .run(processId, pid)
         .then(() => undefined)
     }
   }

@@ -3811,6 +3811,33 @@ export const migrations: Migration[] = [
       // (v109).
       db.exec(`ALTER TABLE task_artifacts ADD COLUMN html_theme_override TEXT DEFAULT NULL;`)
     }
+  },
+  {
+    version: 168,
+    up: (db) => {
+      // Every leader pid ever spawned for a process row, not just the newest
+      // (processes.pid, v154, overwrites on every restart). A restart from an
+      // orphaned row only ever verified/reaped that single overwritable
+      // value, so a descendant left behind by an OLDER, already-superseded
+      // spawn attempt became permanently unreachable the moment a later
+      // restart clobbered the column — it sat holding its port forever, and
+      // no amount of restarting (the row, or the whole app) could recover
+      // it. A table, not a JSON column on processes: entries need row-level
+      // lookup-by-process_id and individual delete-on-prune without a
+      // read-modify-write JSON cycle. No FK/CASCADE — `PRAGMA foreign_keys`
+      // is toggled on/off per-connection elsewhere in this codebase, so
+      // cascade delete can't be relied on; process-persistence.ts's remove()
+      // deletes matching rows here explicitly instead.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS process_pids (
+          process_id TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          spawned_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (process_id, pid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_process_pids_process ON process_pids(process_id);
+      `)
+    }
   }
 ]
 
