@@ -56,7 +56,34 @@ async function checkProjectPathMissing(
   }
 }
 
-export { fetchTaskDetail }
+/**
+ * How long a task-detail fetch may run before it is treated as hung and
+ * rejected. Nothing below this bounds a stall AFTER the hub socket is already
+ * open (a locked DB row, an unresponsive routed computer, ...) — without it,
+ * `fetchTaskDetail`'s promise (and therefore the Suspense cache entry backing
+ * the task tab) can sit unsettled forever, which is what leaves a task tab
+ * permanently showing the `TaskShell` loading skeleton with no error and no
+ * retry. Well above `HUB_CONNECT_DEADLINE_MS` (15s, connectDeadlineLink) so the
+ * ordinary "hub not connected yet" case still resolves through its own path
+ * first — this is the backstop for everything that path doesn't cover.
+ */
+export const TASK_DETAIL_FETCH_TIMEOUT_MS = 20_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
 
 /**
  * Multi-hub: resolve the tRPC client for the hub that owns this task. `hubId`
@@ -65,7 +92,21 @@ export { fetchTaskDetail }
  * byte-identical. The cache keys this fetcher by (taskId, hubId), so the same
  * task id on two hubs occupies distinct cache slots.
  */
-async function fetchTaskDetail(taskId: string, hubId?: string): Promise<TaskDetailData | null> {
+export async function fetchTaskDetail(
+  taskId: string,
+  hubId?: string
+): Promise<TaskDetailData | null> {
+  return withTimeout(
+    fetchTaskDetailUncapped(taskId, hubId),
+    TASK_DETAIL_FETCH_TIMEOUT_MS,
+    `Loading task ${taskId} timed out after ${String(TASK_DETAIL_FETCH_TIMEOUT_MS)}ms`
+  )
+}
+
+async function fetchTaskDetailUncapped(
+  taskId: string,
+  hubId?: string
+): Promise<TaskDetailData | null> {
   const trpc = (hubId ? getHubClient(hubId)?.client : null) ?? getTrpcClient()
   // Task fetch is critical — let it throw. Secondary data uses defaults on failure.
   const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([

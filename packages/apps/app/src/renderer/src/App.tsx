@@ -77,6 +77,8 @@ import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
+import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel } from '@slayzone/home/client'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
@@ -1681,42 +1683,52 @@ function App(): React.JSX.Element {
                                   panelAutomationsShortcut={panelAutomationsShortcut}
                                 />
                               ) : (
-                                <Suspense fallback={<TaskShell />}>
-                                  <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
-                                    <TaskDetailDataLoader
-                                      taskId={tab.taskId}
-                                      task={tasksMap.get(tab.taskId) ?? null}
-                                      project={
-                                        projectsMap.get(
-                                          tasksMap.get(tab.taskId)?.project_id ?? ''
-                                        ) ?? null
-                                      }
-                                      isActive={explodeMode || isViewActive}
-                                      hasShortcutFocus={
-                                        explodeMode
-                                          ? focusedExplodeTaskId === tab.taskId
-                                          : isViewActive
-                                      }
-                                      compact={explodeMode}
-                                      zenMode={zenMode}
-                                      onBack={goBack}
-                                      onTaskUpdated={updateTask}
-                                      onArchiveTask={archiveTask}
-                                      onDeleteTask={deleteTask}
-                                      onNavigateToTask={openTask}
-                                      onConvertTask={handleConvertTask}
-                                      onCloseTab={closeTabByTaskId}
-                                      settingsRevision={settingsRevision}
-                                      terminalFocusRequestId={
-                                        terminalFocusRequests[tab.taskId] ?? 0
-                                      }
-                                      onTerminalFocusRequestHandled={
-                                        handleTerminalFocusRequestHandled
-                                      }
-                                      isSidePanelResizing={isSidePanelResizing}
-                                    />
-                                  </div>
-                                </Suspense>
+                                <ErrorBoundary
+                                  onReset={() =>
+                                    taskDetailCache.invalidate(
+                                      'taskDetail',
+                                      tab.taskId,
+                                      hubIdByTask.get(tab.taskId) ?? defaultHubId
+                                    )
+                                  }
+                                >
+                                  <Suspense fallback={<TaskShell />}>
+                                    <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
+                                      <TaskDetailDataLoader
+                                        taskId={tab.taskId}
+                                        task={tasksMap.get(tab.taskId) ?? null}
+                                        project={
+                                          projectsMap.get(
+                                            tasksMap.get(tab.taskId)?.project_id ?? ''
+                                          ) ?? null
+                                        }
+                                        isActive={explodeMode || isViewActive}
+                                        hasShortcutFocus={
+                                          explodeMode
+                                            ? focusedExplodeTaskId === tab.taskId
+                                            : isViewActive
+                                        }
+                                        compact={explodeMode}
+                                        zenMode={zenMode}
+                                        onBack={goBack}
+                                        onTaskUpdated={updateTask}
+                                        onArchiveTask={archiveTask}
+                                        onDeleteTask={deleteTask}
+                                        onNavigateToTask={openTask}
+                                        onConvertTask={handleConvertTask}
+                                        onCloseTab={closeTabByTaskId}
+                                        settingsRevision={settingsRevision}
+                                        terminalFocusRequestId={
+                                          terminalFocusRequests[tab.taskId] ?? 0
+                                        }
+                                        onTerminalFocusRequestHandled={
+                                          handleTerminalFocusRequestHandled
+                                        }
+                                        isSidePanelResizing={isSidePanelResizing}
+                                      />
+                                    </div>
+                                  </Suspense>
+                                </ErrorBoundary>
                               )}
                             </HubScope>
                           </div>

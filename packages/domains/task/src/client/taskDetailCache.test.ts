@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Minimal Task factory — only fields fetchTaskDetail uses
 function makeTask(overrides: Record<string, unknown> = {}) {
@@ -73,7 +73,7 @@ vi.mock('@slayzone/transport/client', () => ({
     id === 'remote-b' ? { id, url: '', client: remoteHubClientMock, wsClient: {} } : null
 }))
 
-const { fetchTaskDetail } = await import('./taskDetailCache')
+const { fetchTaskDetail, TASK_DETAIL_FETCH_TIMEOUT_MS } = await import('./taskDetailCache')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -250,5 +250,35 @@ describe('fetchTaskDetail', () => {
   it('falls back to the default hub when the hubId is unknown', async () => {
     await fetchTaskDetail('task-1', 'ghost-hub')
     expect(trpcClientMock.task.get.query).toHaveBeenCalledWith({ id: 'task-1' })
+  })
+})
+
+// A hung trpc call (server-side stall — DB lock, unresponsive routed computer,
+// etc.) used to leave fetchTaskDetail's promise unsettled forever: the Suspense
+// cache entry never became `settled`, so the task tab's `use()` call suspended
+// forever and the TaskShell skeleton was shown permanently — with no error, no
+// retry, nothing. This is what "task stuck in loading state" actually was.
+describe('fetchTaskDetail — hang timeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('rejects instead of hanging forever when task.get never settles', async () => {
+    trpcClientMock.task.get.query.mockReturnValue(new Promise(() => {}))
+
+    const result = fetchTaskDetail('task-1')
+    const assertion = expect(result).rejects.toThrow()
+
+    await vi.advanceTimersByTimeAsync(TASK_DETAIL_FETCH_TIMEOUT_MS)
+    await assertion
+  })
+
+  it('does not wait the full timeout when the fetch settles quickly', async () => {
+    const result = await fetchTaskDetail('task-1')
+    expect(result!.task.id).toBe('task-1')
   })
 })
