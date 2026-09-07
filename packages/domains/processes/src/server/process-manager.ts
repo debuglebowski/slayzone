@@ -18,6 +18,18 @@ export type ProcessBroadcastWindow = {
   webContents: { send: (channel: string, ...args: unknown[]) => void }
 }
 
+/** Resolves a project's CURRENT path, so a project-scoped process (never a
+ *  task-scoped one — a task can run in its own worktree, independent of
+ *  project.path) always spawns against where the project actually lives now,
+ *  not wherever it lived when the process row was created. Unset (or a
+ *  `null` return, e.g. a deleted project) falls back to the stored `cwd` —
+ *  same graceful-default shape as `resolveComputer` in `app-deps.ts`. */
+export type ProjectCwdResolver = (projectId: string) => Promise<string | null>
+let projectCwdResolver: ProjectCwdResolver | null = null
+export function setProjectCwdResolver(resolver: ProjectCwdResolver | null): void {
+  projectCwdResolver = resolver
+}
+
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 
 export interface ProcessInfo {
@@ -259,18 +271,38 @@ async function reapSurvivorsAfterUnplannedExit(
   return reapGroup(leaderPid, getProcessBackend())
 }
 
-function doSpawn(proc: ManagedProcess): void {
+async function doSpawn(proc: ManagedProcess): Promise<void> {
   if (isShuttingDown) return
+  // Project-scoped only (never task-scoped — a task's cwd may be its own
+  // worktree, which isn't derivable from project.path): re-resolve the
+  // project's CURRENT path so a renamed/moved project folder can't leave this
+  // row spawning against a stale, possibly-deleted directory forever. A
+  // corrected value is persisted immediately so the DB row self-heals.
+  if (proc.taskId === null && proc.projectId != null && projectCwdResolver) {
+    const liveCwd = await projectCwdResolver(proc.projectId)
+    if (liveCwd != null && liveCwd !== proc.cwd) {
+      proc.cwd = liveCwd
+      void persistence?.update({
+        id: proc.id,
+        taskId: proc.taskId,
+        projectId: proc.projectId,
+        label: proc.label,
+        command: proc.command,
+        cwd: proc.cwd,
+        autoRestart: proc.autoRestart
+      })
+    }
+  }
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
   // Spawn via the pluggable backend. The default (local) backend keeps the exact
   // shell/env/detached semantics this used to run inline; a computer backend can
   // remote the exec. `computerId: null` = run in-process.
   //
-  // NOT computer-resolved: `doSpawn` is sync (also driven by restart timers), so it
-  // cannot resolve a computer the way the pty/chat spawn paths do. Routing background
-  // processes needs an async doSpawn — see the plan's phase C (they are
-  // project-level dev servers, not agents, so they are low priority).
+  // NOT computer-resolved: routing background processes to a remote computer
+  // needs more than the cwd-resolution await added above — see the plan's
+  // phase C (they are project-level dev servers, not agents, so they are low
+  // priority).
   const handle = getProcessBackend().spawn({
     id: proc.id,
     taskId: proc.taskId,
@@ -323,7 +355,7 @@ function doSpawn(proc: ManagedProcess): void {
       setStatus(proc, 'running')
       setTimeout(() => {
         if (isShuttingDown) return
-        if (processes.has(proc.id)) doSpawn(proc)
+        if (processes.has(proc.id)) void doSpawn(proc)
       }, 1000)
     } else if (groupEmpty) {
       pushLog(proc, `[exited with code ${code ?? '?'}]`)
@@ -572,7 +604,7 @@ export async function spawnProcess(
   // future caller ever reuses an id.
   await reapStaleIfNeeded(proc)
   await reapKnownHistory(proc)
-  doSpawn(proc)
+  await doSpawn(proc)
   return id
 }
 
@@ -656,7 +688,7 @@ export async function restartProcess(id: string): Promise<boolean> {
   // can have older, already-superseded history from earlier this session
   // that reapStaleIfNeeded — keyed only to the current pid — never sees.
   await reapKnownHistory(proc)
-  setTimeout(() => doSpawn(proc), 500)
+  setTimeout(() => void doSpawn(proc), 500)
   return true
 }
 

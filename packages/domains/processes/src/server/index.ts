@@ -14,13 +14,15 @@ export {
   listForTask,
   listAllProcesses,
   killAllProcesses,
-  shutdownAllProcesses
+  shutdownAllProcesses,
+  setProjectCwdResolver
 } from './process-manager'
 export type {
   ProcessStatus,
   ProcessInfo,
   ProcessShutdownOptions,
-  ProcessShutdownResult
+  ProcessShutdownResult,
+  ProjectCwdResolver
 } from './process-manager'
 export { createDbProcessPersistence } from './process-persistence'
 export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'

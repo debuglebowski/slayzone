@@ -6,6 +6,7 @@ import {
   listAllProcesses,
   listForTask,
   restartProcess,
+  setProjectCwdResolver,
   spawnProcess,
   stopProcess
 } from './process-manager'
@@ -477,6 +478,111 @@ async function main(): Promise<void> {
 
     bootOrphan.kill('SIGKILL')
     killProcess(bootRowId)
+    setProcessBackend(null)
+  }
+
+  // --- setProjectCwdResolver: a project-scoped process must spawn using the
+  //     resolver's live path when one is wired, self-healing its stored cwd
+  //     in the process — this is exactly the "renamed project folder" bug: a
+  //     cwd snapshotted at creation time must never be trusted forever. A
+  //     task-scoped process (which may run in its own worktree) must never
+  //     consult the resolver at all. A resolver that doesn't know a project
+  //     (returns null) must fall back to the stored cwd, not throw or spawn
+  //     into an empty path. ---
+  {
+    const spawnedCwds: string[] = []
+    setProcessBackend({
+      spawn: (spec) => {
+        spawnedCwds.push(spec.cwd)
+        return {
+          pid: 555111,
+          onData: () => ({ dispose() {} }),
+          onExit: () => ({ dispose() {} }),
+          kill: () => {}
+        }
+      },
+      getCommandLine: async () => null,
+      killByPid: () => {}
+    })
+
+    const projectPaths = new Map<string, string>([['proj-moved', '/new/live/path']])
+    setProjectCwdResolver(async (projectId) => projectPaths.get(projectId) ?? null)
+
+    const movedId = await spawnProcess(
+      'proj-moved',
+      null,
+      'moved dev',
+      'echo moved',
+      '/old/stale/path',
+      false
+    )
+    assert(
+      spawnedCwds.at(-1) === '/new/live/path',
+      "a project-scoped process spawns using the resolver's live cwd, not the stale stored one"
+    )
+    assert(
+      listAllProcesses().find((p) => p.id === movedId)?.cwd === '/new/live/path',
+      'the resolved cwd self-heals the in-memory record'
+    )
+    killProcess(movedId)
+
+    const taskScopedId = await spawnProcess(
+      'proj-moved',
+      'task-in-moved-proj',
+      'worktree dev',
+      'echo worktree',
+      '/task/own/worktree',
+      false
+    )
+    assert(
+      spawnedCwds.at(-1) === '/task/own/worktree',
+      'a task-scoped process ignores the resolver and keeps its own (worktree) cwd'
+    )
+    killProcess(taskScopedId)
+
+    const unresolvedId = await spawnProcess(
+      'proj-unknown',
+      null,
+      'unresolved dev',
+      'echo unresolved',
+      '/still/stored/path',
+      false
+    )
+    assert(
+      spawnedCwds.at(-1) === '/still/stored/path',
+      'a resolver returning null (e.g. a deleted project) falls back to the stored cwd'
+    )
+    killProcess(unresolvedId)
+
+    // restartProcess must also re-resolve — the realistic bug scenario is a
+    // project renamed sometime AFTER a process was first created, discovered
+    // only on a later restart rather than at the original spawn.
+    const restartId = await spawnProcess(
+      'proj-restart',
+      null,
+      'restart dev',
+      'echo restart',
+      '/old/before/rename',
+      false
+    )
+    assert(
+      spawnedCwds.at(-1) === '/old/before/rename',
+      'initial spawn before the project is renamed uses the stored cwd (resolver has nothing yet)'
+    )
+    projectPaths.set('proj-restart', '/new/after/rename')
+    await restartProcess(restartId)
+    await testSleep(700) // let restartProcess's scheduled doSpawn land
+    assert(
+      spawnedCwds.at(-1) === '/new/after/rename',
+      'restartProcess re-resolves a project-scoped cwd too, not just a fresh spawnProcess'
+    )
+    assert(
+      listAllProcesses().find((p) => p.id === restartId)?.cwd === '/new/after/rename',
+      'the restart-time resolution also self-heals the stored record'
+    )
+    killProcess(restartId)
+
+    setProjectCwdResolver(null)
     setProcessBackend(null)
   }
 

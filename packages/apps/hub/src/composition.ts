@@ -118,7 +118,8 @@ import {
   killTaskProcesses,
   listForTask,
   listAllProcesses,
-  subscribeToProcessLogs
+  subscribeToProcessLogs,
+  setProjectCwdResolver
 } from '@slayzone/processes/server'
 import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
 import { runGhLocally, setGhExecutor } from '@slayzone/worktrees/server'
@@ -746,6 +747,17 @@ export function composeServer(opts: {
   // ops here (supervised) and standalone owns its own. The Electron host no
   // longer inits it in local mode (would double-spawn auto-restart processes).
   bootBestEffort('process-manager-init', () => initProcessManager(db))
+  // Project-scoped processes re-resolve their cwd from the project's CURRENT
+  // path at every spawn/restart (see doSpawn) instead of trusting whatever
+  // was snapshotted into the row at creation — a renamed/moved project
+  // folder used to leave every process created before the move permanently
+  // pointed at a stale, possibly-deleted directory.
+  setProjectCwdResolver(async (projectId) => {
+    const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [
+      projectId
+    ])
+    return row?.path ?? null
+  })
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,
