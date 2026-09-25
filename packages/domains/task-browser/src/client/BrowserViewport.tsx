@@ -51,6 +51,7 @@ export function BrowserViewport({
           offScreen={isActive === false}
           isResizing={isResizing}
           locked={!!tab.locked}
+          themeMode={tab.themeMode}
           className="absolute inset-0"
           onStateChange={tab.id === tabs.activeTabId ? setActiveViewState : undefined}
           onOverlayChange={tab.id === tabs.activeTabId ? setHiddenByOverlay : undefined}

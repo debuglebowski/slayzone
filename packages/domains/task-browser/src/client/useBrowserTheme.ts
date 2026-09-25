@@ -1,44 +1,30 @@
-import { useCallback, useRef } from 'react'
-import type { BrowserTab, BrowserTabTheme } from '../shared'
-import { THEME_CSS, THEME_CYCLE } from './BrowserPanel.constants'
-import type { BrowserTabPlaceholderHandle } from './BrowserTabPlaceholder'
+import { useCallback } from 'react'
+import type { BrowserTab } from '../shared'
+import { THEME_CYCLE } from './BrowserPanel.constants'
 
 interface UseBrowserThemeParams {
-  activeActions: BrowserTabPlaceholderHandle['actions'] | undefined
   activeTab: BrowserTab | null
   updateActiveTab: (patch: Partial<BrowserTab>) => void
 }
 
-export function useBrowserTheme({
-  activeActions,
-  activeTab,
-  updateActiveTab
-}: UseBrowserThemeParams) {
-  const darkModeCSSKeyRef = useRef<string | null>(null)
-
-  const applyThemeCss = useCallback(
-    (mode: BrowserTabTheme) => {
-      if (!activeActions) return
-      void (async () => {
-        const key = darkModeCSSKeyRef.current
-        if (key) {
-          darkModeCSSKeyRef.current = null
-          activeActions.removeCss(key)
-        }
-        const css = mode === 'system' ? null : THEME_CSS[mode]
-        if (css) darkModeCSSKeyRef.current = (await activeActions.insertCss(css)) || null
-      })()
-    },
-    [activeActions]
-  )
-
+/**
+ * Owns the toggle only. Applying the theme belongs to the main process, keyed
+ * by viewId — `BrowserTabPlaceholder` declares `themeMode` and the manager
+ * re-applies it across navigation, reload and crash.
+ *
+ * It used to be applied from here, via a single `insertCss` at the moment of
+ * the click. Two bugs came out of that: the CSS was never re-applied, so a tab
+ * persisted as dark reloaded unstyled; and the returned key lived in one ref
+ * for the whole panel rather than per tab, so toggling on one tab tried to
+ * remove another tab's stylesheet and leaked the original for good.
+ */
+export function useBrowserTheme({ activeTab, updateActiveTab }: UseBrowserThemeParams) {
   const cycleTheme = useCallback(() => {
     if (!activeTab) return
     const current = activeTab.themeMode ?? 'system'
     const next = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length]
     updateActiveTab({ themeMode: next })
-    applyThemeCss(next)
-  }, [activeTab, updateActiveTab, applyThemeCss])
+  }, [activeTab, updateActiveTab])
 
-  return { applyThemeCss, cycleTheme }
+  return { cycleTheme }
 }

@@ -222,7 +222,7 @@ import {
   SIDECAR_FIXED_PORT,
   SLZ_FILE_HOST,
   fileUrlToSlzFileUrl,
-  FORCED_HTML_THEME_CSS
+  injectForcedHtmlTheme
 } from '@slayzone/platform'
 import { initStorageDir, getStorageDir } from './data-paths'
 if (process.platform === 'linux') {
@@ -2227,6 +2227,7 @@ app
                 stop: (viewId) => browserViewManager.stop(viewId),
                 executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
                 insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
+                setForcedTheme: (viewId, theme) => browserViewManager.setForcedTheme(viewId, theme),
                 removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
                 setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
                 focus: (viewId) => browserViewManager.focus(viewId),
@@ -2658,24 +2659,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
       try {
         const data = await fsp.readFile(filePath)
-        const contentType =
-          mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream'
+        const contentType = mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream'
 
         // Per-artifact forced theme (task-artifacts HTML preview): the iframe
         // is sandboxed cross-origin with no webContents handle to insertCSS
         // into, so the override is injected as text here instead, gated on an
         // explicit `theme` param only html preview requests ever send — every
         // other slz-file:// consumer (images, PDFs, browser tabs, plain files)
-        // gets the untouched buffer below, unchanged.
+        // gets the untouched buffer below, unchanged. Doing it at parse time
+        // also means the document is never painted in the wrong scheme first.
         const theme = parsed.searchParams.get('theme')
         if (contentType === 'text/html' && (theme === 'dark' || theme === 'light')) {
-          const html = data.toString('utf-8')
-          const style = `<style>${FORCED_HTML_THEME_CSS[theme]}</style>`
-          const headClose = html.search(/<\/head\s*>/i)
-          const doctored =
-            headClose >= 0
-              ? html.slice(0, headClose) + style + html.slice(headClose)
-              : style + html
+          const doctored = injectForcedHtmlTheme(data.toString('utf-8'), theme)
           return new Response(doctored, {
             headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
           })
@@ -3527,6 +3522,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       )
       ipcMain.handle('browser:remove-css', (_, viewId: string, key: string) =>
         browserViewManager.removeCss(viewId, key)
+      )
+      ipcMain.handle(
+        'browser:set-forced-theme',
+        (_, viewId: string, theme: 'light' | 'dark' | null) =>
+          browserViewManager.setForcedTheme(viewId, theme)
+      )
+      ipcMain.handle('browser:get-forced-theme', (_, viewId: string) =>
+        browserViewManager.getForcedTheme(viewId)
       )
       ipcMain.handle('browser:set-zoom', (_, viewId: string, factor: number) =>
         browserViewManager.setZoom(viewId, factor)

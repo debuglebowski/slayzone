@@ -619,6 +619,7 @@ export type AppDeps = {
     stop: (viewId: string) => unknown
     executeJs: (viewId: string, code: string) => unknown
     insertCss: (viewId: string, css: string) => unknown
+    setForcedTheme: (viewId: string, theme: 'light' | 'dark' | null) => unknown
     removeCss: (viewId: string, key: string) => unknown
     setZoom: (viewId: string, factor: number) => unknown
     focus: (viewId: string) => unknown

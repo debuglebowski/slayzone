@@ -1,5 +1,5 @@
 import { Monitor, Smartphone, Tablet } from 'lucide-react'
-import { FORCED_HTML_THEME_CSS } from '@slayzone/platform/html-theme-css'
+import { HTML_THEME_CYCLE } from '@slayzone/platform/forced-html-theme'
 import type { BrowserTabTheme, DeviceSlot } from '../shared'
 
 export const SLOT_BUTTONS: { slot: DeviceSlot; icon: typeof Monitor; label: string }[] = [
@@ -8,9 +8,7 @@ export const SLOT_BUTTONS: { slot: DeviceSlot; icon: typeof Monitor; label: stri
   { slot: 'mobile', icon: Smartphone, label: 'Mobile' }
 ]
 
-// Shared with task-artifacts' HTML preview theme override — single source of
-// truth for the "force a color scheme onto content you don't control" CSS.
-export const THEME_CSS = FORCED_HTML_THEME_CSS
-
-export const THEME_CYCLE: BrowserTabTheme[] = ['system', 'dark', 'light']
+// Shared with task-artifacts' HTML preview theme override, so the two toggles
+// cannot drift apart.
+export const THEME_CYCLE = HTML_THEME_CYCLE as readonly BrowserTabTheme[]
 export const EXTENSIONS_MANAGER_ENABLED = false

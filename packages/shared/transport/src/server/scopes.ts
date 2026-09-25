@@ -262,6 +262,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.browser.hideAll': 'never',
   'app.browser.importExtension': 'never',
   'app.browser.insertCss': 'never',
+  'app.browser.setForcedTheme': 'never',
   'app.browser.isAllHidden': 'never',
   'app.browser.isDevToolsOpen': 'never',
   'app.browser.isFocused': 'never',

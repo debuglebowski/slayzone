@@ -25,7 +25,14 @@ export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'create-task-from-link', listener: (intent: unknown) => void): EventEmitter
   off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
-import { fileUrlToSlzFileUrl, slzFileUrlToFileUrl } from '@slayzone/platform'
+import {
+  buildEmulatedMediaParams,
+  buildForcedHtmlThemeScript,
+  fileUrlToSlzFileUrl,
+  slzFileUrlToFileUrl,
+  type ForcedHtmlTheme
+} from '@slayzone/platform'
+import { DebuggerHolders, type DebuggerHolder } from './debugger-holders'
 import { touchTaskMainSession } from '@slayzone/terminal/electron'
 import { isEngagementInputType, shouldReportEngagement } from '@slayzone/terminal/server'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
@@ -96,8 +103,10 @@ interface ViewEntry {
   currentWindow: BrowserWindow | null
   /** Agent-lock: drop OS-origin input via CDP Input.setIgnoreInputEvents while true. */
   locked: boolean
-  /** True if the lock attached the debugger itself (so unlock must detach). */
-  debuggerAttachedByLock: boolean
+  /** Which features are holding the CDP session open. See `debugger-holders`. */
+  debuggerHolders: DebuggerHolders
+  /** Forced color scheme for this view, or null to follow the OS. */
+  forcedTheme: ForcedHtmlTheme | null
   /** Nav-state mirror for `state-snapshot` replay — late `onEvent` subscribers
    * (createView's loadURL races the WS round-trip) resync from these instead of
    * missing did-navigate/dom-ready and stranding the loading overlay. */
@@ -224,7 +233,8 @@ export class BrowserViewManager {
       desktopHandoffPolicy: initialPolicy,
       currentWindow: null,
       locked: false,
-      debuggerAttachedByLock: false,
+      debuggerHolders: new DebuggerHolders(),
+      forcedTheme: null,
       domReady: false,
       hasLoadedRealPage: false,
       favicon: null,
@@ -373,6 +383,65 @@ export class BrowserViewManager {
     await this.syncLockState(entry)
   }
 
+  /**
+   * Attach the CDP session on behalf of `holder` if nothing holds it yet.
+   * Returns false when no session could be had — DevTools owns it, or the
+   * attach threw — so callers fall back rather than assume an override landed.
+   */
+  private acquireDebugger(entry: ViewEntry, holder: DebuggerHolder): boolean {
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return false
+    if (wc.isDevToolsOpened()) return false
+    try {
+      if (entry.debuggerHolders.acquire(holder, wc.debugger.isAttached())) {
+        wc.debugger.attach('1.3')
+      }
+      return wc.debugger.isAttached()
+    } catch (err) {
+      console.warn('[browser-view-manager] acquireDebugger failed:', err)
+      entry.debuggerHolders.reset()
+      return false
+    }
+  }
+
+  /** Drop `holder`'s claim, detaching only once nothing else wants the session. */
+  private releaseDebugger(entry: ViewEntry, holder: DebuggerHolder): void {
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return
+    try {
+      if (entry.debuggerHolders.release(holder) && wc.debugger.isAttached()) {
+        wc.debugger.detach()
+      }
+    } catch {
+      /* the session is already gone; nothing to detach */
+    }
+  }
+
+  /**
+   * Re-send every override this view still wants. CDP overrides are bound to
+   * the session, so anything that drops it — a re-attach, a crash, DevTools
+   * closing — needs all of them replayed, not just the one being changed.
+   * Idempotent, so over-calling it from nav listeners is free.
+   */
+  private async reapplyDebuggerState(entry: ViewEntry): Promise<void> {
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return
+    if (!wc.debugger.isAttached()) return
+    try {
+      if (entry.locked) {
+        await wc.debugger.sendCommand('Input.setIgnoreInputEvents', { ignore: true })
+      }
+      if (entry.forcedTheme) {
+        await wc.debugger.sendCommand(
+          'Emulation.setEmulatedMedia',
+          buildEmulatedMediaParams(entry.forcedTheme)
+        )
+      }
+    } catch (err) {
+      console.warn('[browser-view-manager] reapplyDebuggerState failed:', err)
+    }
+  }
+
   /** Re-apply the current lock state to CDP. Idempotent; called by setLocked + nav listeners. */
   private async syncLockState(entry: ViewEntry): Promise<void> {
     const wc = entry.view.webContents
@@ -380,10 +449,7 @@ export class BrowserViewManager {
 
     try {
       if (entry.locked) {
-        if (!wc.debugger.isAttached()) {
-          wc.debugger.attach('1.3')
-          entry.debuggerAttachedByLock = true
-        }
+        if (!this.acquireDebugger(entry, 'lock')) return
         await wc.debugger.sendCommand('Input.setIgnoreInputEvents', { ignore: true })
       } else {
         if (wc.debugger.isAttached()) {
@@ -393,26 +459,72 @@ export class BrowserViewManager {
             /* ignore */
           }
         }
-        if (entry.debuggerAttachedByLock && wc.debugger.isAttached()) {
-          try {
-            wc.debugger.detach()
-          } catch {
-            /* ignore */
-          }
-        }
-        entry.debuggerAttachedByLock = false
+        this.releaseDebugger(entry, 'lock')
       }
     } catch (err) {
       console.warn('[browser-view-manager] syncLockState failed:', err)
-      if (entry.debuggerAttachedByLock && wc.debugger.isAttached()) {
+      this.releaseDebugger(entry, 'lock')
+    }
+  }
+
+  /**
+   * Force a color scheme on this view, or pass null to follow the OS again.
+   *
+   * Three layers, because no single one is both complete and self-sufficient:
+   * `Emulation.setEmulatedMedia` is the only thing that changes what the
+   * engine reports — so runtime-injected CSS obeys it too — but it needs a
+   * debugger session, which DevTools can take. The injected script's
+   * `color-scheme` and `data-theme` need no session, so a view being
+   * inspected degrades instead of snapping back.
+   */
+  async setForcedTheme(viewId: string, theme: ForcedHtmlTheme | null): Promise<void> {
+    const entry = this.views.get(viewId)
+    if (!entry) return
+    entry.forcedTheme = theme
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return
+
+    if (theme) {
+      if (this.acquireDebugger(entry, 'theme')) {
         try {
-          wc.debugger.detach()
+          await wc.debugger.sendCommand(
+            'Emulation.setEmulatedMedia',
+            buildEmulatedMediaParams(theme)
+          )
+        } catch (err) {
+          console.warn('[browser-view-manager] setForcedTheme emulation failed:', err)
+        }
+      }
+    } else {
+      if (wc.debugger.isAttached()) {
+        try {
+          await wc.debugger.sendCommand(
+            'Emulation.setEmulatedMedia',
+            buildEmulatedMediaParams(null)
+          )
         } catch {
           /* ignore */
         }
       }
-      entry.debuggerAttachedByLock = false
+      this.releaseDebugger(entry, 'theme')
     }
+
+    await this.applyForcedThemeScript(entry)
+  }
+
+  /** Layers 2 and 3 — the parts that survive without a debugger session. */
+  private async applyForcedThemeScript(entry: ViewEntry): Promise<void> {
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return
+    try {
+      await wc.mainFrame.executeJavaScript(buildForcedHtmlThemeScript(entry.forcedTheme))
+    } catch {
+      /* no document yet; dom-ready will re-run it */
+    }
+  }
+
+  getForcedTheme(viewId: string): ForcedHtmlTheme | null {
+    return this.views.get(viewId)?.forcedTheme ?? null
   }
 
   isLocked(viewId: string): boolean {
@@ -1322,6 +1434,13 @@ export class BrowserViewManager {
       // Cross-process navigation drops the CDP session and the ignore flag —
       // re-apply lock so OS-origin input stays blocked.
       if (entry.locked) void this.syncLockState(entry)
+      // Same for a forced theme: without this the override survives only until
+      // the first navigation, which is how the old per-tab theme silently
+      // stopped applying after a reload.
+      if (entry.forcedTheme) {
+        this.acquireDebugger(entry, 'theme')
+        void this.reapplyDebuggerState(entry)
+      }
     })
 
     wc.on('did-navigate-in-page', (_e, url) => {
@@ -1366,6 +1485,10 @@ export class BrowserViewManager {
         // Rejects if the document is torn down mid-injection. The before-input-event
         // fallback still covers modified clicks until the next dom-ready reinstalls.
       })
+      // Restamp color-scheme / data-theme on the new document. Cheap and
+      // idempotent, and it is the only layer that works while DevTools holds
+      // the CDP session.
+      if (entry.forcedTheme) void this.applyForcedThemeScript(entry)
     })
 
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -1387,11 +1510,27 @@ export class BrowserViewManager {
     })
 
     wc.on('render-process-gone', () => {
-      // The CDP session died with the renderer; mark the bookkeeping flag so a
-      // future syncLockState re-attaches cleanly when the process recovers.
-      entry.debuggerAttachedByLock = false
+      // The CDP session died with the renderer; clear the holders so the next
+      // acquire re-attaches cleanly when the process recovers.
+      entry.debuggerHolders.reset()
       entry.lastError = { code: -1, description: 'Renderer process crashed', url: '' }
       send({ viewId, type: 'crashed' })
+    })
+
+    // DevTools and a debugger session contend for the same agent host. If we
+    // lose the session, drop the holders and keep the injected color-scheme /
+    // data-theme layer doing the work until DevTools closes.
+    wc.debugger.on('detach', () => {
+      entry.debuggerHolders.reset()
+    })
+
+    wc.on('devtools-closed', () => {
+      if (!entry.forcedTheme && !entry.locked) return
+      if (entry.forcedTheme && this.acquireDebugger(entry, 'theme')) {
+        void this.reapplyDebuggerState(entry)
+      } else if (entry.locked) {
+        void this.syncLockState(entry)
+      }
     })
 
     wc.on('found-in-page', (_e, result) => {

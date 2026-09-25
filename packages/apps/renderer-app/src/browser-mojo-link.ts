@@ -56,6 +56,7 @@ const PROCS: Record<string, Handler> = {
   stop: (h, i) => h.stop?.(i.viewId),
   executeJs: (h, i) => h.executeJs?.(i.viewId, i.code),
   insertCss: (h, i) => h.insertCss?.(i.viewId, i.css),
+  setForcedTheme: (h, i) => h.setForcedTheme?.(i.viewId, i.theme),
   removeCss: (h, i) => h.removeCss?.(i.viewId, i.key),
   setZoom: (h, i) => h.setZoom?.(i.viewId, i.factor),
   focus: (h, i) => h.focus?.(i.viewId),

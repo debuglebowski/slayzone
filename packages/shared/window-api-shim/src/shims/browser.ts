@@ -352,6 +352,7 @@ const noopSub = (): (() => void) => noopUnsub
 
 // STUB list (renderer surface that isn't covered by this cap; safe noops so
 // mount paths don't throw): setHandoffPolicy/executeJs/insertCss/removeCss/
+// setForcedTheme/
 // setZoom/findInPage/stopFindInPage/setKeyboardPassthrough/sendInputEvent/
 // onBrowserViewShortcut/onCreateTaskFromLink/extensions surfaces.
 // Registry-backed synthesis (AD batch 3): getWebContentsId/getPartition/
@@ -407,6 +408,11 @@ export const browserShim = {
     if (r === null || isCdpError(r)) return undefined
     return r
   },
+  // Forcing a color scheme needs `Emulation.setEmulatedMedia` on the view's own
+  // CDP session, which this cap has no handle for. Noop rather than half-apply:
+  // the attribute-only fallback would theme some pages and silently miss the
+  // ones that key off the media query, which is worse than not offering it.
+  setForcedTheme: async (): Promise<void> => undefined,
   insertCss: async (_viewId: string, css: string): Promise<string> => {
     const key = 'slay-css-' + Math.random().toString(36).slice(2, 10)
     const expr =

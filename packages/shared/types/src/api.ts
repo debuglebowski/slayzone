@@ -1587,6 +1587,7 @@ export interface _LegacyElectronAPI {
     // Content
     executeJs: (viewId: string, code: string) => Promise<unknown>
     insertCss: (viewId: string, css: string) => Promise<string>
+    setForcedTheme: (viewId: string, theme: 'light' | 'dark' | null) => Promise<void>
     removeCss: (viewId: string, key: string) => Promise<void>
     setZoom: (viewId: string, factor: number) => Promise<void>
     focus: (viewId: string) => Promise<void>

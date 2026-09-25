@@ -974,6 +974,7 @@ export function composeServer(opts: {
         stop: stub('browser.stop'),
         executeJs: stub('browser.executeJs'),
         insertCss: stub('browser.insertCss'),
+        setForcedTheme: stub('browser.setForcedTheme'),
         removeCss: stub('browser.removeCss'),
         setZoom: stub('browser.setZoom'),
         focus: stub('browser.focus'),

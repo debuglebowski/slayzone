@@ -184,7 +184,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     switchToPrevTab
   } = useBrowserTabs({ tabs, onTabsChange, onRequestHide, browserDefaultUrl })
 
-  const { cycleTheme } = useBrowserTheme({ activeActions, activeTab, updateActiveTab })
+  const { cycleTheme } = useBrowserTheme({ activeTab, updateActiveTab })
 
   const { activeLocked, toggleActiveLock } = useBrowserLock({
     taskId,

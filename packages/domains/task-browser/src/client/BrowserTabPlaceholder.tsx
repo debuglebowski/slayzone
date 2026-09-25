@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, forwardRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
+import type { BrowserTabTheme } from '../shared'
 
 export interface BrowserTabPlaceholderHandle {
   viewId: string | null
@@ -33,6 +34,8 @@ interface BrowserTabPlaceholderProps {
   offScreen?: boolean
   /** Agent lock: when true, OS-origin input is silenced for this WCV. */
   locked?: boolean
+  /** Forced color scheme, or 'system'/undefined to follow the OS. */
+  themeMode?: BrowserTabTheme
   className?: string
   onStateChange?: (state: BrowserViewState) => void
   onOverlayChange?: (hidden: boolean) => void
@@ -52,6 +55,7 @@ export const BrowserTabPlaceholder = forwardRef<
     isResizing,
     offScreen,
     locked,
+    themeMode,
     className,
     onStateChange,
     onOverlayChange
@@ -63,6 +67,7 @@ export const BrowserTabPlaceholder = forwardRef<
   const registerTab = useMutation(trpc.app.webview.registerBrowserTab.mutationOptions()).mutateAsync
   const unregisterTab = useMutation(trpc.app.webview.unregisterBrowserTab.mutationOptions()).mutate
   const setViewLocked = useMutation(trpc.app.browser.setLocked.mutationOptions()).mutate
+  const setViewForcedTheme = useMutation(trpc.app.browser.setForcedTheme.mutationOptions()).mutate
 
   const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
     tabId,
@@ -113,6 +118,15 @@ export const BrowserTabPlaceholder = forwardRef<
     if (!viewId) return
     setViewLocked({ viewId, locked: !!locked })
   }, [viewId, locked, setViewLocked])
+
+  // Declare the desired theme; the main process owns applying and re-applying
+  // it. `viewId` is a dependency on purpose — a re-created view (remount, LRU
+  // eviction, crash recovery) re-declares itself rather than coming back
+  // unthemed.
+  useEffect(() => {
+    if (!viewId) return
+    setViewForcedTheme({ viewId, theme: !themeMode || themeMode === 'system' ? null : themeMode })
+  }, [viewId, themeMode, setViewForcedTheme])
 
   return (
     <div

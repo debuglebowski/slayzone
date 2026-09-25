@@ -107,7 +107,18 @@ export {
   fileUrlToSlzFileUrl,
   slzFileUrlToFileUrl
 } from './slz-file-url'
-export { FORCED_HTML_THEME_CSS, type ForcedHtmlTheme } from './html-theme-css'
+export {
+  buildEmulatedMediaParams,
+  buildForcedHtmlThemeCss,
+  buildForcedHtmlThemeScript,
+  FORCED_HTML_THEME_ATTR,
+  FORCED_HTML_THEME_STYLE_ID,
+  HTML_THEME_CYCLE,
+  injectForcedHtmlTheme,
+  nextHtmlTheme,
+  type ForcedHtmlTheme,
+  type HtmlThemeMode
+} from './forced-html-theme'
 export {
   withResultDedup,
   isIpcUnchangedSentinel,

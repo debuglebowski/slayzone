@@ -321,6 +321,9 @@ export const appLevelRouter = router({
     removeCss: publicProcedure
       .input(z.object({ viewId: z.string(), key: z.string() }))
       .mutation(({ input }) => getAppDeps().browser.removeCss(input.viewId, input.key)),
+    setForcedTheme: publicProcedure
+      .input(z.object({ viewId: z.string(), theme: z.enum(['light', 'dark']).nullable() }))
+      .mutation(({ input }) => getAppDeps().browser.setForcedTheme(input.viewId, input.theme)),
     setZoom: publicProcedure
       .input(z.object({ viewId: z.string(), factor: z.number() }))
       .mutation(({ input }) => getAppDeps().browser.setZoom(input.viewId, input.factor)),
