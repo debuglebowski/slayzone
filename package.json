@@ -53,6 +53,7 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "test:unit": "bash packages/shared/test-utils/run-all.sh",
+    "test:hosted": "bash scripts/ci/test-hosted.sh",
     "test:chat:perf": "npx tsx packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts",
     "test:e2e": "pnpm --filter @slayzone/app test:e2e",
     "test:e2e:browser-modified-link": "npx playwright test --config packages/apps/app/playwright.config.ts packages/apps/app/e2e/24-browser-panel.spec.ts -g \"prefilled task draft\" --repeat-each=5",

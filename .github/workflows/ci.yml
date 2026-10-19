@@ -60,6 +60,31 @@ jobs:
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
 
+  # The tests that prove hosted mode, hub auth and per-user ownership. Strict:
+  # scripts/ci/test-hosted.sh exits non-zero if any suite fails. Node 24 because the
+  # hub-auth suites use node:sqlite flag-free. No CI_SKIP_POSTINSTALL: the root
+  # postinstall rebuilds better-sqlite3 + node-pty for Electron's ABI, which the
+  # Electron-run suites load.
+  hosted-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test hosted mode, auth and ownership
+        run: pnpm test:hosted
+
   # Windows job: the cross-platform shell + agent-hook path code (issue #88) is
   # only meaningfully exercised on a real Windows runner — Git Bash is
   # preinstalled here, so the hook-execution test reproduces the bug end-to-end.
