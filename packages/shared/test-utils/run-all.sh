@@ -1,74 +1,12 @@
 #!/bin/bash
 # Run all IPC handler contract tests
 # Usage: bash packages/shared/test-utils/run-all.sh
+# Exits non-zero if any suite fails. The hub/hosted-mode subset is gated in CI by
+# scripts/ci/test-hosted.sh (same runners, from runners.sh).
 
 set -e
-# Node 24 removed the bare `--loader` flag; `--experimental-loader` is the working
-# equivalent (eventual replacement: `--import` + `module.register()`). Registers the
-# electron/dep mock loader for both the npx-tsx and Electron computers below.
-LOADER="--experimental-loader ./packages/shared/test-utils/loader.ts"
-TSX="npx tsx"
-PASS=0
-FAIL=0
-
-run_test() {
-  echo ""
-  echo "=== $1 ==="
-  if ( set -o pipefail; $TSX $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-# Strict + custom loader. pipefail makes a real non-zero test exit propagate
-# through the grep filter, so a failure counts as FAIL (the lenient run_test
-# above counts PASS as long as any output prints). Uses Electron's node so
-# better-sqlite3's native ABI matches. Prefer this for new tests.
-run_test_electron_strict_loader() {
-  echo ""
-  echo "=== $1 (electron+loader, strict) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-# Moved up from mid-script: `set -e` aborts on an undefined function, and each
-# of these was CALLED above its old definition — so the run died at the first
-# such call and every test after it silently never ran. Definitions belong
-# with the other helpers, above all call sites.
-
-run_test_no_loader() {
-  echo ""
-  echo "=== $1 (integration) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-run_test_electron_loader() {
-  echo ""
-  echo "=== $1 (electron+loader) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
-
-run_test_electron_strict() {
-  echo ""
-  echo "=== $1 (electron, strict) ==="
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-  fi
-}
+# shellcheck source=packages/shared/test-utils/runners.sh
+source "$(dirname "${BASH_SOURCE[0]}")/runners.sh"
 
 # Domain handler contract tests touch the harness better-sqlite3 DB, so they need
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
@@ -401,10 +339,6 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cre
 
 
 
-# Strict: pipefail makes a non-zero test exit code propagate through the grep
-# filter, so a real failure counts as FAIL (the lenient computers above count
-# PASS as long as any output is produced).
-
 # Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE).
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
@@ -512,9 +446,7 @@ fi
 # which the tsx/electron computers above don't provide. (Their own
 # `pnpm --filter @slayzone/hub-auth test` also covers them; listing them here is
 # what puts them in the aggregate run.)
-echo ""
-echo "=== vitest (jsdom client suites) ==="
-if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
+run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
@@ -549,11 +481,7 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
-  packages/shared/transport/src/server/trpc.test.ts; then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1))
-fi
+  packages/shared/transport/src/server/trpc.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
@@ -561,36 +489,19 @@ fi
 # to run the package directly. Listing the files under the app's jsdom config is
 # not a substitute: `fs.watch({recursive:true})` never delivers there, at any
 # timeout. Run each package's own suite instead.
-echo ""
-echo "=== packages/apps/computer (own vitest config) ==="
-if ( set -o pipefail; pnpm --filter @slayzone/computer test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1))
-fi
+run_package_tests packages/apps/computer @slayzone/computer
 
 # Same reason: the hub⇄computer fs round trip loads the real computer handlers.
-echo ""
-echo "=== packages/domains/computer-transport (own vitest config) ==="
-if ( set -o pipefail; pnpm --filter @slayzone/computer-transport test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1))
-fi
+run_package_tests packages/domains/computer-transport @slayzone/computer-transport
 
 # The computers DOMAIN suite (store, join-tokens, migration) was never registered
 # here, so three files' worth of assertions had gone stale unnoticed — the
 # migration test was asserting a column list two migrations out of date. Its
 # vitest.config.ts excludes `project-paths.test.ts`, which is an ipc-harness
 # suite run above by the strict loader.
-echo ""
-echo "=== packages/domains/computers (own vitest config) ==="
-if ( set -o pipefail; pnpm --filter @slayzone/computers test 2>&1 | grep -v 'npm warn\|ExperimentalWarning' ); then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1))
-fi
+run_package_tests packages/domains/computers @slayzone/computers
 
-echo ""
-echo "=== Summary ==="
-echo "Suites: $PASS passed, $FAIL failed"
+print_summary
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
