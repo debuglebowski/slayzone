@@ -247,7 +247,9 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       if (!existsSync(src)) continue
       try {
         await mkdir(dirname(dest), { recursive: true })
-        await cp(src, dest, { recursive: true })
+        // verbatimSymlinks: else relative links (pnpm node_modules) become
+        // absolute ones pointing back into the source repo.
+        await cp(src, dest, { recursive: true, verbatimSymlinks: true })
         copied += 1
       } catch (err) {
         ctx.log('copyIgnoredFiles copy failed', { rel, error: String(err) })
