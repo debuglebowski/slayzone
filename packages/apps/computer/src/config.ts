@@ -20,7 +20,7 @@ import {
   loadComputerConfigFile,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
-import { LOOPBACK_HOSTS, hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { hubUrlFromAddr, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
 
 export const computerConfigSchema = z.object({
@@ -284,23 +284,18 @@ export function loadComputerConfig(
   // so a non-loopback hub is always a `wss://` url. The env channel can never
   // produce the bad shape (hubUrlFromAddr picks `wss` for a non-loopback host), so
   // this only trips on a full url supplied via computer.config.json / a join token.
-  const protocol = urlProtocol(result.data.hubUrl)
-  if (protocol === 'ws:' && !isLoopbackUrl(result.data.hubUrl)) {
-    throw new Error(
-      `plaintext ws:// is only allowed for a hub on this machine; got '${result.data.hubUrl}'. ` +
-        `A hub other machines reach is served over TLS by its front end — use a wss:// url.`
-    )
+  // EVERY hub this computer dials is checked, not only `hubUrl`: `hubUrls` wins over
+  // it at dial time (`effectiveHubUrls`), so guarding one field alone leaves the
+  // others free to carry the bad shape.
+  for (const url of effectiveHubUrls(result.data)) {
+    if (urlProtocol(url) === 'ws:' && !isLoopbackComputerUrl(url)) {
+      throw new Error(
+        `plaintext ws:// is only allowed for a hub on this machine; got '${url}'. ` +
+          `A hub other machines reach is served over TLS by its front end — use a wss:// url.`
+      )
+    }
   }
   return result.data
-}
-
-/** True when the url's host is loopback (`127.0.0.1` / `localhost` / `::1`). Malformed → false. */
-function isLoopbackUrl(url: string): boolean {
-  try {
-    return LOOPBACK_HOSTS.has(new URL(url).hostname.replace(/^\[|\]$/g, ''))
-  } catch {
-    return false
-  }
 }
 
 /** Parse a url's protocol (`ws:` / `wss:` / …), or `null` if malformed. */
