@@ -82,6 +82,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # web-assets-remote-gate.test.ts serves the built shell (hub dist/web).
+      - name: Build web shell
+        run: pnpm --filter @slayzone/web-shell build
+
       - name: Test hosted mode, auth and ownership
         run: pnpm test:hosted
 
