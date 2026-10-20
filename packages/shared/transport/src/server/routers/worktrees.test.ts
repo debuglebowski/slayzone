@@ -128,6 +128,9 @@ await describe('init', () => {
 fs.writeFileSync(path.join(repoPath, 'README.md'), '# Test')
 git('git add -A')
 git('git commit -m "initial"')
+// Tests below check out `main`; `caller.init` follows the machine's
+// init.defaultBranch, which is `master` on CI runners.
+git('git branch -M main')
 
 // --- isGitRepo ---
 
