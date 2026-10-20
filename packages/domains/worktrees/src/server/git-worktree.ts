@@ -611,7 +611,9 @@ async function clonefileCopy(src: string, dst: string, isDir: boolean): Promise<
     })
     if (code === 0) return
   }
-  await cp(src, dst, { recursive: isDir, force: true })
+  // verbatimSymlinks: fs.cp otherwise rewrites relative links to absolute ones
+  // pointing back into the SOURCE repo (pnpm's node_modules/<pkg> -> .pnpm/...).
+  await cp(src, dst, { recursive: isDir, force: true, verbatimSymlinks: true })
 }
 
 /**
