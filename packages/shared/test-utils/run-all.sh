@@ -197,6 +197,7 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/agent
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex-flags-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts

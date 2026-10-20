@@ -3816,8 +3816,29 @@ export const migrations: Migration[] = [
 
 export const LATEST_MIGRATION_VERSION = migrations[migrations.length - 1].version
 
+/**
+ * Thrown when the DB was migrated by a NEWER build than this one. Migrations are
+ * forward-only (there is no `down`), so an older binary would run its queries
+ * against a schema it was never written for — refuse instead of corrupting data.
+ */
+export class SchemaTooNewError extends Error {
+  constructor(
+    readonly dbVersion: number,
+    readonly latestVersion: number
+  ) {
+    super(
+      `Database schema v${dbVersion} is newer than this build supports (v${latestVersion}). ` +
+        'Install the newer build again, or restore a backup taken before the upgrade.'
+    )
+    this.name = 'SchemaTooNewError'
+  }
+}
+
 export function runMigrations(db: Database.Database): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number
+  if (currentVersion > LATEST_MIGRATION_VERSION) {
+    throw new SchemaTooNewError(currentVersion, LATEST_MIGRATION_VERSION)
+  }
 
   for (const migration of migrations) {
     if (migration.version > currentVersion) {

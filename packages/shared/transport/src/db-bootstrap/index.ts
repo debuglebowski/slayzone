@@ -10,7 +10,12 @@ import { normalizeProjectStatusData } from './status-normalization'
  * slice 6 so the server package can run migrations without Electron.
  */
 
-export { migrations, LATEST_MIGRATION_VERSION, runMigrations } from './migrations'
+export {
+  migrations,
+  LATEST_MIGRATION_VERSION,
+  runMigrations,
+  SchemaTooNewError
+} from './migrations'
 export { createPreMigrationBackup } from './pre-migration-backup'
 export { normalizeProjectStatusData } from './status-normalization'
 
