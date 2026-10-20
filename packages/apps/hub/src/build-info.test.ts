@@ -81,6 +81,7 @@ function healthState(overrides: Partial<HealthState>): HealthState {
       enableProcesses: true,
       enableIntegrations: true
     },
+    reachable: false,
     computersConnected: () => 0,
     ...overrides
   }
