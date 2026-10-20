@@ -33,6 +33,13 @@ import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+// CI runners have no git identity; every commit below (ours and the router's,
+// which inherit this env) would fail with "Author identity unknown".
+process.env.GIT_AUTHOR_NAME ??= 'test'
+process.env.GIT_AUTHOR_EMAIL ??= 'test@example.invalid'
+process.env.GIT_COMMITTER_NAME ??= 'test'
+process.env.GIT_COMMITTER_EMAIL ??= 'test@example.invalid'
+
 // ── Async-rejection helper (toThrow() is sync-only) ──────────────────────────
 const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
   try {
