@@ -202,7 +202,10 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
       throw new Error(
         `[slayzone] ${HUB_ADDRESS_ENV.authSecret} is required in the environment: other machines ` +
           `can reach this hub (${why}), and it must not generate its signing key onto ` +
-          `its own disk. Provide a long random value (e.g. \`openssl rand -hex 32\`).`
+          `its own disk. If this hub already has data, set it to the existing ` +
+          `computerTransportSecret in <ROOT>/hub.state.json — a different value invalidates ` +
+          `every session and every enrolled computer's credential. Only for a NEW hub, ` +
+          `generate a long random value (e.g. \`openssl rand -hex 32\`).`
       )
     }
   }

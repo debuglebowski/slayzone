@@ -107,7 +107,7 @@ function warnIfLoopbackHub(hubUrl: string): void {
     `Note: ${hubUrl} is a loopback address, so this token only works for a computer on the\n` +
       `hub's OWN machine. On any other machine it would dial that machine's loopback and\n` +
       `never connect. For a hub other machines can reach, recreate it with\n` +
-      `\`slay hub create <name> --public-address <host:port>\`.`
+      `\`slay hub create <name> --public-address <host:port> --bind <host[:port]>\`.`
   )
 }
 
@@ -434,7 +434,7 @@ export function computerCommand(): Command {
           403:
             `This hub only mints join tokens for callers on its own machine.\n` +
             `Run \`slay computer mint\` there, or turn login on for the hub ` +
-            `(\`slay hub create --public-address <host:port>\`) so it can authenticate you.`
+            `(\`slay hub create --public-address <host:port> --bind <host[:port]>\`) so it can authenticate you.`
         }
       })
 

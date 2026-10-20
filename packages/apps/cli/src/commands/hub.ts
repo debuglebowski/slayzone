@@ -646,7 +646,9 @@ export function hubCommand(): Command {
     )
     .option(
       '--bind <host[:port]>',
-      'Address to listen on (default: loopback, or 0.0.0.0 with --public-address)'
+      'Address to listen on (default: loopback). Required with --public-address: the hub ' +
+        'serves plain http, so say whether it listens on loopback behind a same-box TLS ' +
+        'front end (127.0.0.1) or on an interface the front end reaches (e.g. 10.0.0.4).'
     )
     .action(
       async (
@@ -699,13 +701,22 @@ export function hubCommand(): Command {
               `Give just one — \`--bind\` can carry the port itself.`
           )
         }
-        // An explicit --bind always wins: a public address + a loopback bind is a
-        // legitimate and common shape (the hub sits behind a reverse proxy / tunnel
-        // that terminates TLS for the public address). Only when the operator said
-        // nothing do we widen — a reachable hub bound to loopback with nothing in
-        // front of it would be unreachable.
-        const address =
-          bind ?? (publicAddress !== undefined ? (port ? `0.0.0.0:${port}` : '0.0.0.0') : undefined)
+        // A public address says who reaches the hub, not on which interface it listens,
+        // and the hub serves plain http: guessing a wildcard bind would put it on every
+        // interface of the machine without anyone having said so. A loopback bind behind
+        // a same-box reverse proxy / tunnel is just as legitimate, so the operator
+        // chooses.
+        if (publicAddress !== undefined && bind === undefined) {
+          fail(
+            `--public-address ${publicAddress} needs an explicit --bind <host[:port]>: the hub ` +
+              `serves plain http, so say where it listens.\n` +
+              `  behind a TLS front end on this machine:  --bind 127.0.0.1${port ? `:${port}` : ''}\n` +
+              `  behind one on another host:              --bind <this machine's private address>` +
+              `${port ? `:${port}` : ''}\n` +
+              `Avoid 0.0.0.0 unless the machine's firewall only lets the front end in.`
+          )
+        }
+        const address = bind
 
         // A hub that listens off-loopback is reachable from other machines, and is
         // refused at boot unless it publishes a public address (rule B3) — so say so
@@ -732,9 +743,12 @@ export function hubCommand(): Command {
             `A hub other machines can reach needs SLAYZONE_HUB_AUTH_SECRET in its environment ` +
               `— it never generates its signing key onto its own disk, and it would refuse to ` +
               `boot without one.\n` +
-              `Provide one for this command:\n` +
+              `Existing hub root (it already has sessions and enrolled computers): reuse its ` +
+              `computerTransportSecret from ${join(root, 'hub.state.json')} — a new value ` +
+              `invalidates every session and computer credential.\n` +
+              `New hub: generate one for this command:\n` +
               `  SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slay hub create ${name} ` +
-              `--public-address ${publicAddress}\n` +
+              `--public-address ${publicAddress} --bind <host[:port]>\n` +
               `It is written into the hub's service unit (owner-only, 0600) so the hub keeps ` +
               `it across restarts.`
           )
