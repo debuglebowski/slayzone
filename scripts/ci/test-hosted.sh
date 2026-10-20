@@ -147,12 +147,13 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-c
 skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context) and run-all.sh never registered it. TODO(T-01): fix the test, then register it above"
 
-# Hub switches and their config file, env scoping, hub address derivation.
+# Hub switches and their config file, env scoping, hub address derivation and discovery.
 run_test_electron_strict_loader packages/domains/computers/src/server/project-paths.test.ts
 run_test packages/shared/platform/src/hub-switches.test.ts
 run_test packages/shared/platform/src/hub-config-file.test.ts
 run_test packages/shared/platform/src/env-manifest.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
+run_test packages/shared/platform/src/hub-discovery.test.ts
 
 # Node-environment vitest suites: scopes + trpc (the principal/scope gate), agent-hook.
 # Under the app's vitest config, like run-all.sh.
