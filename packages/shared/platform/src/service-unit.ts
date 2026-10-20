@@ -47,6 +47,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
@@ -493,11 +494,28 @@ export function writeUnit(
   const path = unitPath(spec.kind, spec.name, backend, unitDir)
   mkdirSync(unitDir, { recursive: true })
   const content = backend === 'launchd' ? renderLaunchdPlist(spec) : renderSystemdUnit(spec)
-  // A unit that pins a secret in its environment must not be world-readable.
-  writeFileSync(path, content, { mode: unitHoldsSecret(spec) ? 0o600 : 0o644 })
-  // writeFileSync applies `mode` only when it CREATES the file; a rewrite over an
-  // older world-readable unit must tighten it too.
-  if (unitHoldsSecret(spec)) chmodSync(path, 0o600)
+  if (!unitHoldsSecret(spec)) {
+    writeFileSync(path, content, { mode: 0o644 })
+    return path
+  }
+  // A unit that pins a secret in its environment must never be readable by anyone
+  // else, not even for the instant between writing it and tightening it: writing
+  // over an existing 0644 unit and chmod-ing afterwards would leave the new secret
+  // world-readable in between (`mode` only applies when a file is CREATED). So the
+  // content goes into a fresh owner-only temp file, which then replaces the unit
+  // atomically — the old inode, with its old permissions, is never written to.
+  const tmp = `${path}.${process.pid}.tmp`
+  rmSync(tmp, { force: true })
+  try {
+    writeFileSync(tmp, content, { mode: 0o600, flag: 'wx' })
+    // The temp file is brand new, so `mode` applied — but a restrictive-looking umask
+    // is not a guarantee, so say it again before the secret is renamed into place.
+    chmodSync(tmp, 0o600)
+    renameSync(tmp, path)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
   return path
 }
 

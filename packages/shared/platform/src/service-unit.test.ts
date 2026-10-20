@@ -22,7 +22,16 @@
  *
  * Run with: npx tsx packages/shared/platform/src/service-unit.test.ts
  */
-import { mkdtempSync, readFileSync, rmSync, existsSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -591,6 +600,38 @@ for (const be of ['launchd', 'systemd'] as const) {
       assertEq(statSync(path).mode & 0o777, 0o644, 'starts 0644')
       writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 's3cret' } }, be, dir)
       assertEq(statSync(path).mode & 0o777, 0o600, 'tightened on rewrite')
+    })
+  })
+
+  test(`${be}: the secret is never written into the old world-readable file`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const path = writeUnit(SPEC, be, dir)
+      // A second name for the OLD inode: if the rewrite wrote through the existing
+      // 0644 file (then chmod-ed), the secret would be readable here for the moment
+      // between the two and would still be in this inode afterwards.
+      const oldInode = join(dir, 'old-inode.copy')
+      linkSync(path, oldInode)
+      writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 'never-in-0644' } }, be, dir)
+      assert(readFileSync(path, 'utf8').includes('never-in-0644'), 'the unit carries the secret')
+      assertEq(statSync(path).mode & 0o777, 0o600, 'owner-only')
+      assert(
+        !readFileSync(oldInode, 'utf8').includes('never-in-0644'),
+        'the previous (0644) inode never saw the secret'
+      )
+    })
+  })
+
+  test(`${be}: writing a secret unit leaves no temp file behind, even after a stale one`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const path = unitPath(SPEC.kind, SPEC.name, be, dir)
+      // A leftover from a crashed earlier write of the same unit (same pid is the
+      // worst case: the 'wx' create must not trip over it).
+      writeFileSync(`${path}.${process.pid}.tmp`, 'stale')
+      writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 's3cret' } }, be, dir)
+      const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp'))
+      assertEq(leftovers.length, 0, `no temp files left: ${leftovers.join(',')}`)
     })
   })
 
