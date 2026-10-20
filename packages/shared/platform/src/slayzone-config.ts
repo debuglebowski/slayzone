@@ -2,7 +2,10 @@
  * Per-role SlayZone config/state files at the root of a hub or computer install.
  * Each role's own settings split into two files by write frequency:
  *
- *   `<ROOT>/hub.config.json`    — operator-set: address, publicAddress, mode, hubName
+ *   `<ROOT>/hub.config.json`    — operator-set: listenAddress, publicAddress, hubName,
+ *                                 and the per-hub switches (requireLogin, enablePassword,
+ *                                 enableSso, ssoTenantId, ssoClientId, enableProcesses,
+ *                                 enableIntegrations — booleans; secrets are env only)
  *   `<ROOT>/hub.state.json`     — system-generated: computerTransportSecret (the hub-auth
  *                                 secret; auto-generated on first boot, never typed in)
  *   `<ROOT>/computer.config.json` — operator-set: joinToken, computerName, hubUrl,
@@ -24,9 +27,7 @@
  * `config.json` exists, the relevant keys are coerced from it instead — read-only,
  * indefinite, never auto-upgraded (no write ever targets `config.json`). Without
  * this, every existing standalone deployment would lose its hub-auth secret or
- * join credentials the moment it upgrades. Mirrors this module's existing
- * tolerance for legacy *keys* (`port`, `publicUrl`), just one level up, for a
- * legacy *file*.
+ * join credentials the moment it upgrades.
  *
  * Precedence everywhere: env var > file > generated/default. The file is the
  * BASE — env can still override it (e.g. CI). Only keys that are actually set
@@ -60,18 +61,50 @@ export { getSlayzoneHomeDir } from './dirs'
 
 /** `<ROOT>/hub.config.json` — operator-set hub keys. Every key optional, a fresh install has no file. */
 export interface HubConfig {
-  /** The address the hub BINDS for ALL transport — `host[:port]`, no scheme. */
-  address?: string
-  /** The hub's EXTERNAL address, `host[:port]`, no scheme. Needed only when it differs from `address`. */
+  /** The address the hub LISTENS on for ALL transport — `host[:port]`, no scheme. */
+  listenAddress?: string
+  /** How OTHER machines reach the hub, `host[:port]`, no scheme. Set it whenever the hub is reachable off-box (rule B3). */
   publicAddress?: string
-  /** `remote` enforces client auth + TLS + `wss://` join tokens; `local` (default when unset) is the loopback/dev shape. */
-  mode?: 'local' | 'remote'
   /** Operator-facing hub name. Defaults to the ROOT directory's basename when unset. */
   hubName?: string
-  /** @deprecated Legacy bind port, superseded by `address`. Still READ; never written fresh. */
-  port?: number
-  /** @deprecated Legacy full public URL, superseded by `publicAddress`. Still READ; never written fresh. */
-  publicUrl?: string
+  /** Every client must sign in. Default off (the desktop app's hub). */
+  requireLogin?: boolean
+  /** Email + password sign-in. Default on. */
+  enablePassword?: boolean
+  /** Entra OIDC sign-in. Default off; needs `ssoTenantId`, `ssoClientId` and the env-only client secret. */
+  enableSso?: boolean
+  /** Entra tenant id. */
+  ssoTenantId?: string
+  /** Entra app registration (client) id. */
+  ssoClientId?: string
+  /** Hub-local processes + automation commands. Default on. */
+  enableProcesses?: boolean
+  /** Linear / GitHub connect + sync. Default on. */
+  enableIntegrations?: boolean
+}
+
+/** The boolean switch keys of {@link HubConfig}, in file order. */
+export const HUB_CONFIG_SWITCH_KEYS = [
+  'requireLogin',
+  'enablePassword',
+  'enableSso',
+  'enableProcesses',
+  'enableIntegrations'
+] as const satisfies ReadonlyArray<keyof HubConfig>
+
+/** Old `hub.config.json` keys that no longer mean anything — boot refuses them (rule B5). */
+const RENAMED_HUB_CONFIG_KEYS: Record<string, string> = {
+  address: 'listenAddress',
+  port: 'listenAddress (host:port)',
+  publicUrl: 'publicAddress (host[:port], no scheme)'
+}
+
+/** A problem found in a `hub.config.json` that must stop a hub from booting. */
+export interface HubConfigProblem {
+  /** The offending key. */
+  key: string
+  /** Human-readable, names the key and what to do. */
+  message: string
 }
 
 /** `<ROOT>/hub.state.json` — system-generated hub state. */
@@ -153,17 +186,52 @@ function legacyConfigFilePathFor(newFilePath: string): string {
 
 function coerceHubConfig(raw: Record<string, unknown>): HubConfig {
   const cfg: HubConfig = {}
-  if (typeof raw.address === 'string' && raw.address.length > 0) cfg.address = raw.address
+  if (typeof raw.listenAddress === 'string' && raw.listenAddress.length > 0)
+    cfg.listenAddress = raw.listenAddress
   if (typeof raw.publicAddress === 'string' && raw.publicAddress.length > 0)
     cfg.publicAddress = raw.publicAddress
-  // Exact literals only — a near-miss must read as unset, not half-applied.
-  if (raw.mode === 'local' || raw.mode === 'remote') cfg.mode = raw.mode
   if (typeof raw.hubName === 'string' && raw.hubName.trim().length > 0)
     cfg.hubName = raw.hubName.trim()
-  // Legacy keys, still read so an existing file keeps booting.
-  if (typeof raw.port === 'number' && Number.isInteger(raw.port)) cfg.port = raw.port
-  if (typeof raw.publicUrl === 'string' && raw.publicUrl.length > 0) cfg.publicUrl = raw.publicUrl
+  // Booleans only: a near-miss ("true", 1) is reported by diagnoseHubConfig and
+  // refuses boot — it must never read as unset, because a switch that silently
+  // fell back to its default would fail open.
+  for (const key of HUB_CONFIG_SWITCH_KEYS) {
+    if (typeof raw[key] === 'boolean') cfg[key] = raw[key]
+  }
+  if (typeof raw.ssoTenantId === 'string' && raw.ssoTenantId.trim().length > 0)
+    cfg.ssoTenantId = raw.ssoTenantId.trim()
+  if (typeof raw.ssoClientId === 'string' && raw.ssoClientId.trim().length > 0)
+    cfg.ssoClientId = raw.ssoClientId.trim()
+  // `mode` (the retired SLAYZONE_MODE key) is deliberately NOT read: it is ignored.
   return cfg
+}
+
+/**
+ * Everything in a raw `hub.config.json` that must refuse boot:
+ *   - the renamed keys `address`, `port`, `publicUrl` (rule B5) — honoring them
+ *     silently would leave the hub listening somewhere the operator did not intend,
+ *   - a switch key holding anything but a boolean (rule B4).
+ * `mode` is not a problem; it is ignored.
+ */
+export function diagnoseHubConfig(raw: Record<string, unknown>): HubConfigProblem[] {
+  const problems: HubConfigProblem[] = []
+  for (const [oldKey, newKey] of Object.entries(RENAMED_HUB_CONFIG_KEYS)) {
+    if (raw[oldKey] !== undefined) {
+      problems.push({
+        key: oldKey,
+        message: `'${oldKey}' was renamed to '${newKey}'`
+      })
+    }
+  }
+  for (const key of HUB_CONFIG_SWITCH_KEYS) {
+    if (raw[key] !== undefined && typeof raw[key] !== 'boolean') {
+      problems.push({
+        key,
+        message: `'${key}' must be true or false, got ${JSON.stringify(raw[key])}`
+      })
+    }
+  }
+  return problems
 }
 
 function coerceHubState(raw: Record<string, unknown>): HubState {
@@ -237,15 +305,27 @@ export function writeJsonAtomic(path: string, data: unknown): void {
   }
 }
 
+/** The raw object backing the hub config: the new file, else the legacy shared `config.json`. */
+function readHubConfigRaw(path: string): Record<string, unknown> | null {
+  return readJsonObject(path) ?? readJsonObject(legacyConfigFilePathFor(path))
+}
+
 /**
  * Load `hub.config.json`. Falls back to coercing hub keys out of a sibling
  * legacy `config.json` when the new file is absent (see module doc).
  */
 export function loadHubConfigFile(path: string = getHubConfigFilePath()): HubConfig {
-  const raw = readJsonObject(path)
-  if (raw) return coerceHubConfig(raw)
-  const legacy = readJsonObject(legacyConfigFilePathFor(path))
-  return legacy ? coerceHubConfig(legacy) : {}
+  const raw = readHubConfigRaw(path)
+  return raw ? coerceHubConfig(raw) : {}
+}
+
+/**
+ * The problems in the hub config that must refuse boot (see {@link diagnoseHubConfig}),
+ * read from the same file {@link loadHubConfigFile} reads. Empty when there is no file.
+ */
+export function loadHubConfigProblems(path: string = getHubConfigFilePath()): HubConfigProblem[] {
+  const raw = readHubConfigRaw(path)
+  return raw ? diagnoseHubConfig(raw) : []
 }
 
 export function saveHubConfigFile(cfg: HubConfig, path: string = getHubConfigFilePath()): void {

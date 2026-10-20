@@ -5,9 +5,10 @@
  * WHY THIS EXISTS: `setAuthGate` gates the tRPC router, but the SAME muxed
  * listener also serves the entire REST surface the `slay` CLI drives (tasks,
  * artifacts, pty write/submit, browser eval, automations) plus the `/mcp` tool
- * endpoint, and `createMcpRestApp` mounts nothing but `express.json()`. Under
- * `SLAYZONE_MODE=remote` that listener IS the internet-facing https one, so those
- * routes were reachable unauthenticated — while the CLI was already sending an
+ * endpoint, and `createMcpRestApp` mounts nothing but `express.json()`. On a hub
+ * that requires login (`SLAYZONE_HUB_REQUIRE_LOGIN=1`) that listener is the one
+ * clients reach through the front end, so those routes were reachable
+ * unauthenticated — while the CLI was already sending an
  * `Authorization: Bearer` header (from `SLAYZONE_HUB_TOKEN` or `cli-hub-target.json`) that
  * no one verified. This module makes that header load-bearing.
  *
@@ -16,17 +17,18 @@
  * boot (composeServer → better-auth migrations → two listeners). `server.ts`
  * keeps only the wiring.
  *
- * INERT WHEN AUTH IS OFF: `hubAuthRequired` is the same derived flag the tRPC
- * gate uses (`isRemoteMode() && hubAuth != null`). Local / supervised / e2e hubs
- * leave it false → every request short-circuits to `allow` with no verify call,
- * byte-identical to the trusted-loopback path.
+ * INERT WHEN LOGIN IS NOT REQUIRED: `hubAuthRequired` is the same flag the tRPC
+ * gate uses (the `REQUIRE_LOGIN` switch). The desktop app's hub and any other hub
+ * with login off leave it false → every request short-circuits to `allow` with no
+ * verify call, byte-identical to the trusted-loopback path. Boot rule B1 is what
+ * keeps such a hub from being reachable off-box.
  *
  * @module server/rest-auth
  */
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
-import { isLoopbackPeer, type SlayzoneDb } from '@slayzone/platform'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestPrincipal } from '@slayzone/transport/server'
 import { isWebSessionToken, verifyWebSessionToken, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
@@ -109,25 +111,24 @@ const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/use
 const MCP_PATH = '/mcp'
 
 export interface RestAuthActionOptions {
-  /** Supervised hubs are the only ones that keep the loopback exemption — see
-   *  `restAuthAction`. Absent = standalone, i.e. no exemption. */
-  supervised?: boolean
-  /** Whether THIS hub enforces auth (`!supervised`, see `server.ts`). */
+  /** Whether THIS hub requires login (`SLAYZONE_HUB_REQUIRE_LOGIN`, see `server.ts`). */
   hubAuthRequired: boolean
   /** The raw request url (`req.url`), query string included. */
   url: string | undefined
-  /** The peer address (`req.socket.remoteAddress`). Unknown → treated as off-box. */
-  remoteAddress: string | undefined
 }
 
 /**
  * Decide whether a request must present a verified bearer.
  *
- * Fail-CLOSED by default once the hub enforces auth: an unparseable/absent url or
+ * Fail-CLOSED by default once the hub requires login: an unparseable/absent url or
  * an unknown peer address resolves to `verify`, never `allow`. The only openings
- * are the three deliberate ones — the gate being off, a loopback peer (a
- * co-located process: the Electron host, the supervised computer, a task terminal's
- * `slay`), and the exempt paths documented above.
+ * are the two deliberate ones — the gate being off, and the exempt paths documented
+ * above. There is NO loopback exemption: a co-located caller (the Electron host's
+ * helpers, a task terminal's `slay`) presents a bearer like anyone else — the CLI
+ * has the plumbing for one, and a reverse proxy on the same box makes every
+ * off-box request arrive as a loopback peer, so a peer-address pass would make the
+ * gate inert exactly where login matters. (A hub with login off never gets here:
+ * it returned `allow` above.)
  *
  * Only `/api/*` and `/mcp` are gated at all. `/health` is answered pre-express
  * and `/trpc` is a WS upgrade that never reaches this handler; any other path
@@ -135,22 +136,6 @@ export interface RestAuthActionOptions {
  */
 export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   if (!opts.hubAuthRequired) return 'allow'
-  // A co-located caller is inside the trust boundary the loopback bind already
-  // established — but ONLY on a supervised hub, where that bind is asserted and
-  // the Electron host owns the process. On a standalone hub this exemption was
-  // the real fail-open: with auth now required on every non-supervised hub, an
-  // unconditional loopback pass made the gate inert exactly where it started to
-  // matter. Standalone loopback callers present a bearer like anyone else; the
-  // CLI already has the plumbing for one.
-  //
-  // REACHABILITY: `server.ts` derives `hubAuthRequired = !supervised`, so in
-  // production this branch is UNREACHABLE — a supervised hub already returned
-  // 'allow' on the line above. It is kept, and passed explicitly rather than
-  // re-derived, so a future supervised-but-authed hub (e.g. a multi-user desktop)
-  // keeps this exemption BY DECISION rather than by accident. Tests that pin
-  // `supervised: true` alongside `hubAuthRequired: true` exercise that
-  // hypothetical, not a shape the hub can currently be in.
-  if (opts.supervised && isLoopbackPeer(opts.remoteAddress)) return 'allow'
   // No url at all → cannot prove the route is exempt, so demand a bearer.
   if (!opts.url) return 'verify'
   const path = opts.url.split('?')[0]
@@ -284,10 +269,8 @@ export function withRestAuth(opts: {
   }
   return (req, res) => {
     const action = restAuthAction({
-      supervised: process.env.SLAYZONE_SUPERVISED === '1',
       hubAuthRequired: opts.getHubAuthRequired(),
-      url: req.url,
-      remoteAddress: req.socket.remoteAddress ?? undefined
+      url: req.url
     })
     if (action === 'allow') {
       opts.next(req, res)

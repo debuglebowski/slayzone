@@ -6,8 +6,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 /**
  * Sign in is offered only when a hub ACTUALLY gates its client API.
  *
- * A hub enforces bearer auth only in remote mode (`hubAuthRequired` in
- * apps/hub/src/server.ts); a loopback/LAN hub accepts an untokened connection, so
+ * A hub enforces bearer auth only when it requires login (`hubAuthRequired` in
+ * apps/hub/src/server.ts); one that does not accepts an untokened connection, so
  * a Sign in button there is a prompt to do something pointless. The hub reports
  * the bit on `/health` (public, answered before the auth gate), which the tab
  * probes per remote row.

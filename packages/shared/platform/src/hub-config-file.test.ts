@@ -15,6 +15,7 @@ import {
   getHubConfigFilePath,
   getHubStateFilePath,
   loadHubConfigFile,
+  loadHubConfigProblems,
   loadHubStateFile,
   saveHubConfigFile,
   saveHubStateFile,
@@ -107,75 +108,189 @@ test('valid config parses all known keys, drops wrong types', () => {
   writeFileSync(
     p,
     JSON.stringify({
-      address: '0.0.0.0:8080',
+      listenAddress: '0.0.0.0:8080',
       publicAddress: 'hub.example:8443',
       hubName: 'my-hub',
-      // legacy bind/public keys — still READ so an existing file keeps booting
-      port: 8080,
-      publicUrl: 'https://hub.example',
-      // wrong-typed / unknown → dropped
-      port2: 'nope',
+      requireLogin: true,
+      enablePassword: false,
+      enableSso: true,
+      ssoTenantId: 'tenant-1',
+      ssoClientId: 'client-1',
+      enableProcesses: false,
+      enableIntegrations: false,
+      // unknown → dropped
       extra: { nested: 1 }
     })
   )
   const cfg = loadHubConfigFile(p)
-  assertEq(cfg.address, '0.0.0.0:8080', 'address')
+  assertEq(cfg.listenAddress, '0.0.0.0:8080', 'listenAddress')
   assertEq(cfg.publicAddress, 'hub.example:8443', 'publicAddress')
   assertEq(cfg.hubName, 'my-hub', 'hubName')
-  assertEq(cfg.port, 8080, 'legacy port')
-  assertEq(cfg.publicUrl, 'https://hub.example', 'legacy publicUrl')
+  assertEq(cfg.requireLogin, true, 'requireLogin')
+  assertEq(cfg.enablePassword, false, 'enablePassword')
+  assertEq(cfg.enableSso, true, 'enableSso')
+  assertEq(cfg.ssoTenantId, 'tenant-1', 'ssoTenantId')
+  assertEq(cfg.ssoClientId, 'client-1', 'ssoClientId')
+  assertEq(cfg.enableProcesses, false, 'enableProcesses')
+  assertEq(cfg.enableIntegrations, false, 'enableIntegrations')
   assert(!('extra' in cfg), 'unknown key dropped')
+  assertEq(loadHubConfigProblems(p).length, 0, 'a clean file has no boot problems')
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('wrong-typed values are dropped (port as string, empty address/publicUrl)', () => {
+test('wrong-typed values are dropped (empty listenAddress, numeric publicAddress, string switch)', () => {
   const dir = tmp()
   const p = join(dir, 'hub.config.json')
-  writeFileSync(p, JSON.stringify({ port: '8080', address: '', publicAddress: 42, publicUrl: '' }))
+  writeFileSync(
+    p,
+    JSON.stringify({ listenAddress: '', publicAddress: 42, requireLogin: 'yes', ssoTenantId: '  ' })
+  )
   const cfg = loadHubConfigFile(p)
-  assert(cfg.port === undefined, 'string port dropped')
-  assert(cfg.address === undefined, 'empty address dropped')
+  assert(cfg.listenAddress === undefined, 'empty listenAddress dropped')
   assert(cfg.publicAddress === undefined, 'non-string publicAddress dropped')
-  assert(cfg.publicUrl === undefined, 'empty publicUrl dropped')
+  assert(cfg.requireLogin === undefined, 'non-boolean switch dropped from the config object')
+  assert(cfg.ssoTenantId === undefined, 'blank ssoTenantId dropped')
   rmSync(dir, { recursive: true, force: true })
 })
 
-// `mode` is the FILE channel for SLAYZONE_MODE — the hardening lever that decides
-// whether a hub authenticates clients, terminates TLS, and mints `wss://` join
-// tokens. It lives here so `slay hub create --public-address` can persist an
-// operator's intent once, next to the address it belongs with, rather than needing
-// a second home in the service unit (which `restart --upgrade` rewrites).
-test('mode: only the two known literals survive', () => {
+// The secret never lives in the file: there is no HubConfig key for it, so even a
+// hand-written `ssoClientSecret` is not carried anywhere.
+test('ssoClientSecret in the file is not read (secrets are env only)', () => {
   const dir = tmp()
-  const remote = join(dir, 'remote.json')
-  writeFileSync(remote, JSON.stringify({ mode: 'remote' }))
-  assertEq(loadHubConfigFile(remote).mode, 'remote', 'remote parses')
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ ssoClientSecret: 'nope', ssoClientId: 'c' }))
+  const cfg = loadHubConfigFile(p)
+  assert(!('ssoClientSecret' in cfg), 'secret key not loaded')
+  assertEq(cfg.ssoClientId, 'c', 'its sibling still loads')
+  rmSync(dir, { recursive: true, force: true })
+})
 
-  const local = join(dir, 'local.json')
-  writeFileSync(local, JSON.stringify({ mode: 'local' }))
-  assertEq(loadHubConfigFile(local).mode, 'local', 'local parses')
+// `mode` was the FILE channel for SLAYZONE_MODE. The mode is gone: the key is
+// ignored — it is neither read nor a boot problem.
+test('mode is ignored: not read, not a problem', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ mode: 'remote', hubName: 'h' }))
+  const cfg = loadHubConfigFile(p)
+  assert(!('mode' in cfg), 'mode not carried')
+  assertEq(cfg.hubName, 'h', 'rest of the file loads')
+  assertEq(loadHubConfigProblems(p).length, 0, 'a leftover mode key is NOT a boot problem')
+  rmSync(dir, { recursive: true, force: true })
+})
 
-  // Anything else is DROPPED rather than passed through: an unrecognized value
-  // reaching SLAYZONE_MODE would silently resolve to `local` (getSlayzoneMode's
-  // safe default), so a typo like `Remote` must read as "unset" — which lets the
-  // env channel or the default answer instead of half-applying.
-  for (const bad of ['Remote', 'REMOTE', 'prod', '', 42, null, { mode: 'remote' }]) {
+console.log('\nhub-config-file: boot problems (B4, B5)')
+console.log('─'.repeat(40))
+
+test('B5: the old `address` key is a boot problem naming listenAddress', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ address: '0.0.0.0:8080' }))
+  const problems = loadHubConfigProblems(p)
+  assertEq(problems.length, 1, 'one problem')
+  assertEq(problems[0]!.key, 'address', 'names the key')
+  assert(/renamed to 'listenAddress'/.test(problems[0]!.message), problems[0]!.message)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('B5: the old `port` key is a boot problem naming listenAddress', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ port: 8080 }))
+  const problems = loadHubConfigProblems(p)
+  assertEq(problems.length, 1, 'one problem')
+  assertEq(problems[0]!.key, 'port', 'names the key')
+  assert(/renamed to 'listenAddress/.test(problems[0]!.message), problems[0]!.message)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('B5: the old `publicUrl` key is a boot problem naming publicAddress', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ publicUrl: 'https://hub.example' }))
+  const problems = loadHubConfigProblems(p)
+  assertEq(problems.length, 1, 'one problem')
+  assertEq(problems[0]!.key, 'publicUrl', 'names the key')
+  assert(/renamed to 'publicAddress/.test(problems[0]!.message), problems[0]!.message)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('B5: every renamed key present is reported, not just the first', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ address: 'a:1', port: 2, publicUrl: 'https://x' }))
+  const keys = loadHubConfigProblems(p)
+    .map((x) => x.key)
+    .sort()
+  assertEq(keys.join(','), 'address,port,publicUrl', 'all three reported')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('B4: a switch key that is not a boolean is a boot problem (never silently unset)', () => {
+  const dir = tmp()
+  for (const bad of ['true', 'yes', 1, 0, null, {}, []]) {
     const p = join(dir, 'bad.json')
-    writeFileSync(p, JSON.stringify({ mode: bad }))
-    assert(loadHubConfigFile(p).mode === undefined, `dropped: ${JSON.stringify(bad)}`)
+    writeFileSync(p, JSON.stringify({ requireLogin: bad }))
+    const problems = loadHubConfigProblems(p)
+    assertEq(problems.length, 1, `reported: ${JSON.stringify(bad)}`)
+    assertEq(problems[0]!.key, 'requireLogin', 'names the key')
+    assert(/true or false/.test(problems[0]!.message), problems[0]!.message)
   }
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('mode round-trips through update without clobbering the address keys', () => {
+test('B4: each of the five switch keys is checked', () => {
+  const dir = tmp()
+  for (const key of [
+    'requireLogin',
+    'enablePassword',
+    'enableSso',
+    'enableProcesses',
+    'enableIntegrations'
+  ]) {
+    const p = join(dir, `${key}.json`)
+    writeFileSync(p, JSON.stringify({ [key]: 'x' }))
+    assertEq(loadHubConfigProblems(p)[0]?.key, key, `${key} validated`)
+  }
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('problems come from the legacy config.json too when hub.config.json is absent', () => {
+  const dir = tmp()
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ address: '0.0.0.0:9' }))
+  assertEq(
+    loadHubConfigProblems(join(dir, 'hub.config.json'))[0]?.key,
+    'address',
+    'legacy file checked'
+  )
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('no file ⇒ no problems', () => {
+  const dir = tmp()
+  assertEq(loadHubConfigProblems(join(dir, 'nope.json')).length, 0, 'no file, no problems')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('switches round-trip through update without clobbering the address keys', () => {
   const dir = tmp()
   const p = join(dir, 'hub.config.json')
-  saveHubConfigFile({ address: '0.0.0.0:8443', publicAddress: 'hub.example:8443' }, p)
-  updateHubConfigFile({ mode: 'remote' }, p)
+  saveHubConfigFile({ listenAddress: '0.0.0.0:8443', publicAddress: 'hub.example:8443' }, p)
+  updateHubConfigFile({ requireLogin: true, enableProcesses: false }, p)
   const back = loadHubConfigFile(p)
-  assertEq(back.mode, 'remote', 'mode written')
-  assertEq(back.address, '0.0.0.0:8443', 'address preserved')
+  assertEq(back.requireLogin, true, 'requireLogin written')
+  assertEq(back.enableProcesses, false, 'enableProcesses written (false survives the merge)')
+  assertEq(back.listenAddress, '0.0.0.0:8443', 'listenAddress preserved')
   assertEq(back.publicAddress, 'hub.example:8443', 'publicAddress preserved')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('an update drops the renamed keys it rewrites over (no stale address survives)', () => {
+  const dir = tmp()
+  const p = join(dir, 'hub.config.json')
+  writeFileSync(p, JSON.stringify({ address: 'old:1', hubName: 'h' }))
+  updateHubConfigFile({ requireLogin: true }, p)
+  assertEq(loadHubConfigProblems(p).length, 0, 'rewritten file no longer carries `address`')
+  assertEq(loadHubConfigFile(p).hubName, 'h', 'other keys kept')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -185,9 +300,9 @@ console.log('─'.repeat(40))
 test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
   const dir = tmp()
   const p = join(dir, 'sub', 'hub.config.json')
-  saveHubConfigFile({ address: '127.0.0.1:8443', publicAddress: 'hub.example' }, p)
+  saveHubConfigFile({ listenAddress: '127.0.0.1:8443', publicAddress: 'hub.example' }, p)
   const back = loadHubConfigFile(p)
-  assertEq(back.address, '127.0.0.1:8443', 'address round-trip')
+  assertEq(back.listenAddress, '127.0.0.1:8443', 'listenAddress round-trip')
   assertEq(back.publicAddress, 'hub.example', 'publicAddress round-trip')
   if (process.platform !== 'win32') {
     assertEq(statSync(p).mode & 0o777, 0o600, 'file mode 0600')
@@ -199,14 +314,14 @@ test('save then load round-trips + file is 0600, dir 0700 (POSIX)', () => {
 test('updateHubConfigFile merges over on-disk base (no clobber of other keys)', () => {
   const dir = tmp()
   const p = join(dir, 'hub.config.json')
-  saveHubConfigFile({ port: 9, hubName: 'first' }, p)
-  const merged = updateHubConfigFile({ address: '0.0.0.0:8443' }, p)
-  assertEq(merged.port, 9, 'kept port')
+  saveHubConfigFile({ publicAddress: 'hub.example:9', hubName: 'first' }, p)
+  const merged = updateHubConfigFile({ listenAddress: '0.0.0.0:8443' }, p)
+  assertEq(merged.publicAddress, 'hub.example:9', 'kept publicAddress')
   assertEq(merged.hubName, 'first', 'kept hubName')
-  assertEq(merged.address, '0.0.0.0:8443', 'added address')
+  assertEq(merged.listenAddress, '0.0.0.0:8443', 'added listenAddress')
   const onDisk = loadHubConfigFile(p)
-  assertEq(onDisk.address, '0.0.0.0:8443', 'persisted')
-  assertEq(onDisk.port, 9, 'persisted port')
+  assertEq(onDisk.listenAddress, '0.0.0.0:8443', 'persisted')
+  assertEq(onDisk.publicAddress, 'hub.example:9', 'persisted publicAddress')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -214,9 +329,9 @@ test('update ignores undefined patch values (does not erase)', () => {
   const dir = tmp()
   const p = join(dir, 'hub.config.json')
   saveHubConfigFile({ hubName: 'keepme' }, p)
-  const merged = updateHubConfigFile({ hubName: undefined, port: 5 }, p)
+  const merged = updateHubConfigFile({ hubName: undefined, listenAddress: '127.0.0.1:5' }, p)
   assertEq(merged.hubName, 'keepme', 'undefined did not erase hubName')
-  assertEq(merged.port, 5, 'added port')
+  assertEq(merged.listenAddress, '127.0.0.1:5', 'added listenAddress')
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -285,10 +400,14 @@ test('getHubConfigFilePath / getHubStateFilePath resolve under SLAYZONE_ROOT', (
       'config path under root override'
     )
     assertEq(getHubStateFilePath(), join(dir, 'hub.state.json'), 'state path under root override')
-    saveHubConfigFile({ port: 1234 })
+    saveHubConfigFile({ listenAddress: '127.0.0.1:1234' })
     const raw = readFileSync(join(dir, 'hub.config.json'), 'utf8')
     assert(/1234/.test(raw), 'wrote to the overridden root dir')
-    assertEq(loadHubConfigFile().port, 1234, 'default-path load reads the override')
+    assertEq(
+      loadHubConfigFile().listenAddress,
+      '127.0.0.1:1234',
+      'default-path load reads the override'
+    )
   } finally {
     if (prev === undefined) delete process.env.SLAYZONE_ROOT
     else process.env.SLAYZONE_ROOT = prev
@@ -302,10 +421,13 @@ console.log('─'.repeat(40))
 test('hub.config.json absent, legacy config.json present ⇒ hub keys coerced from it', () => {
   const dir = tmp()
   const legacyPath = join(dir, 'config.json')
-  writeFileSync(legacyPath, JSON.stringify({ address: '0.0.0.0:9000', hubName: 'legacy-hub' }))
+  writeFileSync(
+    legacyPath,
+    JSON.stringify({ listenAddress: '0.0.0.0:9000', hubName: 'legacy-hub' })
+  )
   const cfgPath = join(dir, 'hub.config.json')
   const cfg = loadHubConfigFile(cfgPath)
-  assertEq(cfg.address, '0.0.0.0:9000', 'address from legacy file')
+  assertEq(cfg.listenAddress, '0.0.0.0:9000', 'listenAddress from legacy file')
   assertEq(cfg.hubName, 'legacy-hub', 'hubName from legacy file')
   assert(!existsSync(cfgPath), 'never auto-upgrades — hub.config.json not created by a read')
   rmSync(dir, { recursive: true, force: true })
@@ -334,10 +456,10 @@ test('ensureHubAuthSecret reuses a legacy secret rather than generating a new on
 
 test('new file present takes priority over the legacy file even if both exist', () => {
   const dir = tmp()
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ address: 'from-legacy:1' }))
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ listenAddress: 'from-legacy:1' }))
   const cfgPath = join(dir, 'hub.config.json')
-  saveHubConfigFile({ address: 'from-new:2' }, cfgPath)
-  assertEq(loadHubConfigFile(cfgPath).address, 'from-new:2', 'new file wins once it exists')
+  saveHubConfigFile({ listenAddress: 'from-new:2' }, cfgPath)
+  assertEq(loadHubConfigFile(cfgPath).listenAddress, 'from-new:2', 'new file wins once it exists')
   rmSync(dir, { recursive: true, force: true })
 })
 

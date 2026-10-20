@@ -231,7 +231,9 @@ async function startHub(): Promise<{ port: number; root: string }> {
       SLAYZONE_ROOT: root,
       // `:0` — the OS picks the port, so this hub is outside the block a developer's
       // real hubs live in and can never be confused with one.
-      SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
+      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+      // Login on: the mint cases below go through the bootstrap-owner bearer.
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1',
       SLAYZONE_HUB_AUTH_SECRET: secret
     },
     stdio: ['pipe', 'pipe', 'pipe']
@@ -504,7 +506,7 @@ async function main(): Promise<void> {
         root: rejectRoot
       })
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
-      // A local-mode hub always embeds loopback. Silence here is how an operator
+      // A hub with no public address always embeds loopback. Silence here is how an operator
       // carries a dead token to another machine and gets no explanation.
       assert(
         /loopback address/.test(res.stdout) && /public-address/.test(res.stdout),

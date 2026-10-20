@@ -649,7 +649,7 @@ function revealSidecarLogInFinder(): void {
  * split, Wave3.5-D3). Retries while the computer listener is still binding — the
  * sidecar reports "ready" (health) as soon as its shared http server listens,
  * but the SEPARATE /computers wss listener binds a beat later + only THEN feeds its
- * url/fingerprint to the computers registry (server.ts), so `/api/computers/join-token`
+ * url to the computers registry (server.ts), so `/api/computers/join-token`
  * 503s until then. Returns the token + wss url, or null once the budget is spent.
  */
 async function mintLocalComputerJoinToken(
@@ -771,12 +771,13 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
       // above (the seed only fires when unset), but the flag still drives the
       // supervised defaults for enroll name + path-jail.
       SLAYZONE_SUPERVISED: '1',
-      // Auto-enroll: the freshly minted token embeds the cert fingerprint the
-      // computer pins. The env channel carries the hub AUTHORITY only
-      // (host[:port]) — the computer re-derives ws(s):// from SLAYZONE_MODE and
-      // appends /computers (see computer config.ts). Extract the authority from the
-      // mint's full ws(s)://host[:port]/computers url. OVERRIDES any inherited
-      // value so the local computer always dials THIS boot's hub.
+      // Auto-enroll: the freshly minted token carries the hub's dial url and NO
+      // certificate pin (the hub presents no certificate of its own). The env channel
+      // carries the hub AUTHORITY only (host[:port]) — the computer re-derives ws(s)://
+      // from the host (this hub is loopback, so `ws://`) and appends /computers (see
+      // computer config.ts). Extract the authority from the mint's full
+      // ws(s)://host[:port]/computers url. OVERRIDES any inherited value so the local
+      // computer always dials THIS boot's hub.
       SLAYZONE_HUB_ADDRESS: new URL(minted.hubUrl).host,
       // No SLAYZONE_COMPUTER_NAME / SLAYZONE_COMPUTER_ALLOWED_ROOTS handoff: under
       // SLAYZONE_SUPERVISED=1 (above) the computer defaults its enroll name to

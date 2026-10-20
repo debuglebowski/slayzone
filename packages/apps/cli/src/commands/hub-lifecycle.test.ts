@@ -162,8 +162,12 @@ let TMP = ''
 
 /**
  * Boot a real hub in its own root, letting it pick a port from the hub block (no
- * SLAYZONE_HUB_ADDRESS) — that is the path `hub start` uses and the only one the
- * discovery sweep can find. The chosen port is read back from its boot line.
+ * SLAYZONE_HUB_LISTEN_ADDRESS) — that is the path `hub start` uses and the only one
+ * the discovery sweep can find. The chosen port is read back from its boot line.
+ *
+ * Login is required (SLAYZONE_HUB_REQUIRE_LOGIN=1): the `hub users` and `--hub`
+ * cases below depend on a hub that provisions a bootstrap owner and demands a
+ * bearer. A hub with no setting would be the desktop app's shape — login off.
  */
 async function startHub(name: string): Promise<Hub> {
   const root = join(TMP, name)
@@ -175,7 +179,8 @@ async function startHub(name: string): Promise<Hub> {
       ...scrubbedEnv(),
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_ROOT: root,
-      SLAYZONE_HUB_NAME: name
+      SLAYZONE_HUB_NAME: name,
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -583,8 +588,8 @@ async function main(): Promise<void> {
       // `before[0]` is ALWAYS the bootstrap owner — `listHubUsers` orders by
       // `createdAt ASC` and the owner is provisioned first, at hub boot. Its
       // token is also what THIS CLI invocation authenticates with (read from
-      // `hub.owner.json` — every non-supervised hub now requires a bearer even
-      // for `/api/hub/users`). Removing it first would invalidate the CLI's own
+      // `hub.owner.json` — a hub that requires login wants a bearer even for
+      // `/api/hub/users`). Removing it first would invalidate the CLI's own
       // credential mid-test and 401 every call after — target a later,
       // test-created account for the single-removal assertion instead.
       const target = before[1]!.email
@@ -772,22 +777,25 @@ async function main(): Promise<void> {
       )
     })
 
-    // --- remote hub setup ---------------------------------------------------
+    // --- reachable hub setup ------------------------------------------------
     //
     // A hub with no public address mints `ws://127.0.0.1:<port>/computers` tokens, which
     // no other machine can use — and mint SUCCEEDS, so the failure is silent.
-    // `--public-address` is what makes a reachable deployment; these cases assert the
-    // config it persists (the boot itself needs TLS + public DNS, so it is not booted
-    // here — the mode/address plumbing is unit-covered in standalone-config.test.ts).
+    // `--public-address` is what makes a reachable deployment. A hub other machines can
+    // reach is refused at boot without login and without SLAYZONE_HUB_AUTH_SECRET in its
+    // environment, so `create` writes the shape to hub.config.json and demands the
+    // secret from the caller.
+    //
+    // None of these cases may leave a REAL reachable hub running: the spawned hub is
+    // either bound to a throwaway loopback port the sweep cannot find (`--bind
+    // 127.0.0.1:0`, so `create` gives up and kills it) or made to refuse at boot
+    // (login on with password and SSO both off — rule B2). hub.config.json is written
+    // BEFORE launch, so the boot outcome is irrelevant to what is asserted.
+    const SECRET = { SLAYZONE_HUB_AUTH_SECRET: 'test-only-secret-not-used-anywhere-else' }
 
-    await test('create --public-address persists remote mode + addresses to hub.config.json', async () => {
+    await test('create --public-address persists the reachable shape to hub.config.json', async () => {
       const remoteRoot = join(TMP, 'remote-cfg')
       mkdirSync(remoteRoot, { recursive: true })
-      // `--bind 127.0.0.1:0` keeps this from binding a real interface: the point is
-      // the FILE it writes, and a remote+loopback bind is a legitimate shape anyway
-      // (a hub behind a reverse proxy). It will fail to come up (remote mode needs a
-      // real cert chain), which is fine — hub.config.json is written BEFORE launch, so
-      // the boot outcome is irrelevant to what we assert.
       slay(
         [
           'hub',
@@ -800,22 +808,57 @@ async function main(): Promise<void> {
           '--bind',
           '127.0.0.1:0'
         ],
-        { root: remoteRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+        { root: remoteRoot, env: { SLZ_FORCE_NO_SERVICE: '1', ...SECRET } }
       )
       const cfg = JSON.parse(readFileSync(join(remoteRoot, 'hub.config.json'), 'utf8')) as Record<
         string,
         unknown
       >
-      // mode is the lever: without it the hub boots local and mints loopback tokens
-      // no matter what public address is on file.
-      assertEq(cfg.mode, 'remote', 'mode persisted')
+      // login is the lever: a hub other machines can reach is refused at boot without it.
+      assertEq(cfg.requireLogin, true, 'login required persisted')
       assertEq(cfg.publicAddress, 'hub.example.com:8443', 'public address persisted')
-      assertEq(cfg.address, '127.0.0.1:0', 'explicit --bind persisted verbatim')
+      assertEq(cfg.listenAddress, '127.0.0.1:0', 'explicit --bind persisted verbatim')
+      for (const retired of ['mode', 'address', 'port', 'publicUrl']) {
+        assert(!(retired in cfg), `no retired key '${retired}' written`)
+      }
+      // The secret is env only: it is never written into the config file.
+      assert(
+        !JSON.stringify(cfg).includes(SECRET.SLAYZONE_HUB_AUTH_SECRET),
+        'the auth secret is not in hub.config.json'
+      )
     })
 
-    await test('create --public-address defaults the bind to 0.0.0.0 (reachable)', async () => {
+    await test('create --public-address REFUSES without SLAYZONE_HUB_AUTH_SECRET, writing nothing', async () => {
+      const noSecretRoot = join(TMP, 'remote-nosecret')
+      mkdirSync(noSecretRoot, { recursive: true })
+      const res = slay(
+        [
+          'hub',
+          'create',
+          `${NAME_PREFIX}nosecret`,
+          '--root',
+          noSecretRoot,
+          '--public-address',
+          'hub.example.com:8443',
+          '--bind',
+          '127.0.0.1:0'
+        ],
+        { root: noSecretRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      assert(res.status !== 0, 'refused')
+      assert(/SLAYZONE_HUB_AUTH_SECRET/.test(res.stderr), `names the variable: ${res.stderr}`)
+      assert(/openssl rand/.test(res.stderr), `says how to provide one: ${res.stderr}`)
+      assert(
+        !existsSync(join(noSecretRoot, 'hub.config.json')),
+        'failing fast wrote no half-configured hub root'
+      )
+    })
+
+    await test('create --public-address defaults the listen address to 0.0.0.0 (reachable)', async () => {
       const wideRoot = join(TMP, 'remote-wide')
       mkdirSync(wideRoot, { recursive: true })
+      // ENABLE_PASSWORD=0 with no SSO makes the spawned hub refuse at boot (B2), so
+      // this does not leave a hub listening on every interface.
       slay(
         [
           'hub',
@@ -828,18 +871,21 @@ async function main(): Promise<void> {
           '--port',
           '51987'
         ],
-        { root: wideRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+        {
+          root: wideRoot,
+          env: { SLZ_FORCE_NO_SERVICE: '1', SLAYZONE_HUB_ENABLE_PASSWORD: '0', ...SECRET }
+        }
       )
       const cfg = JSON.parse(readFileSync(join(wideRoot, 'hub.config.json'), 'utf8')) as Record<
         string,
         unknown
       >
-      // A remote hub bound to loopback with nothing in front of it is unreachable, so
+      // A reachable hub bound to loopback with nothing in front of it is unreachable, so
       // the default has to widen — while --bind above still overrides it.
-      assertEq(cfg.address, '0.0.0.0:51987', 'widened to the wildcard, keeping --port')
+      assertEq(cfg.listenAddress, '0.0.0.0:51987', 'widened to the wildcard, keeping --port')
     })
 
-    await test('create tells the operator to make the first account on a remote hub', async () => {
+    await test('create tells the operator to make the first account on a reachable hub', async () => {
       const acctRoot = join(TMP, 'remote-acct')
       mkdirSync(acctRoot, { recursive: true })
       const res = slay(
@@ -854,14 +900,25 @@ async function main(): Promise<void> {
           '--bind',
           '127.0.0.1:0'
         ],
-        { root: acctRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+        { root: acctRoot, env: { SLZ_FORCE_NO_SERVICE: '1', ...SECRET } }
       )
-      // Remote mode enforces auth AND closes public signup, so a hub with no account
-      // is permanently unauthenticatable. This instruction is the difference between
-      // a working deployment and a dead one, so it must be unconditional.
+      // A hub that requires login AND closes public signup with no account is
+      // permanently unauthenticatable. This instruction is the difference between a
+      // working deployment and a dead one, so it must be unconditional.
       const out = res.stdout + res.stderr
       assert(/hub users add/.test(out), `names the account step: ${out}`)
-      assert(/remote/.test(out), `states the mode: ${out}`)
+      assert(/login required/i.test(out), `states that login is required: ${out}`)
+      // Join tokens point at the public address, https/wss because the host is not
+      // loopback — the scheme comes from the host, not from a mode.
+      assert(
+        out.includes('wss://hub.example.com:8443/computers'),
+        `says where tokens will point: ${out}`
+      )
+      assert(
+        out.includes('slay hub login https://hub.example.com:8443'),
+        `login hint uses https for a public host: ${out}`
+      )
+      assert(/TLS front end/.test(out), `says the hub itself serves plain http: ${out}`)
     })
 
     await test('create rejects a public address carrying a scheme or path', async () => {
@@ -880,6 +937,32 @@ async function main(): Promise<void> {
           `no hub.config.json written for ${bad}`
         )
       }
+    })
+
+    await test('create refuses an off-loopback --bind without --public-address, writing nothing', async () => {
+      const openRoot = join(TMP, 'remote-open')
+      mkdirSync(openRoot, { recursive: true })
+      const res = slay(
+        ['hub', 'create', `${NAME_PREFIX}open`, '--root', openRoot, '--bind', '0.0.0.0:51988'],
+        { root: openRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      assert(res.status !== 0, 'refused')
+      assert(/--public-address/.test(res.stderr), `names the missing flag: ${res.stderr}`)
+      assert(/refuse to boot/.test(res.stderr), `says why: ${res.stderr}`)
+      assert(!existsSync(join(openRoot, 'hub.config.json')), 'nothing written')
+    })
+
+    await test('create accepts a loopback --bind with no public address', async () => {
+      // The refusal above must not catch the ordinary local shape. `:0` keeps the hub
+      // out of the discovery block, so `create` gives up and kills it — exit status is
+      // not the point; the absence of the off-loopback refusal is.
+      const loopRoot = join(TMP, 'remote-loop')
+      mkdirSync(loopRoot, { recursive: true })
+      const res = slay(
+        ['hub', 'create', `${NAME_PREFIX}loop`, '--root', loopRoot, '--bind', '127.0.0.1:0'],
+        { root: loopRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      )
+      assert(!/--public-address/.test(res.stderr), `not asked for a public address: ${res.stderr}`)
     })
 
     await test('create refuses a --bind and --port that disagree', async () => {

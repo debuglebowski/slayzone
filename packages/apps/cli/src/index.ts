@@ -72,13 +72,15 @@ async function applyHubOverride(nameOrPort: string): Promise<void> {
   // to whichever hub `hub use`/`hub login` targeted, which need not be this one.
   //
   // Falls back to the bootstrap owner file when SLAYZONE_HUB_TOKEN is unset — the
-  // same fallback `api.ts`/`hub-request.ts` apply for their own no-token paths.
-  // `--hub` names a hub BY DISCOVERY (this machine only), so `hub.root` is always
-  // that hub's real dataRoot; on a supervised hub the file never exists and this
-  // silently no-ops, same as the other two call sites.
+  // same fallback `api.ts`/`hub-request.ts` apply for their own no-token paths, and
+  // keyed the same way: on whether the hub REQUIRES login (`/health`'s
+  // `authRequired`), not on what started it. `--hub` names a hub BY DISCOVERY (this
+  // machine only), so `hub.root` is always that hub's real dataRoot; on a hub with
+  // login off the file never exists and this is skipped, same as the other two call
+  // sites.
   const envToken = process.env.SLAYZONE_HUB_TOKEN
   let token = envToken || null
-  if (!token && !hub.supervised) {
+  if (!token && hub.authRequired) {
     token = (await readBootstrapOwner(hub.root))?.token ?? null
   }
   setHubOverride({ baseUrl: `http://127.0.0.1:${hub.port}`, token })

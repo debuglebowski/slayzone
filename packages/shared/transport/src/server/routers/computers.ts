@@ -31,7 +31,7 @@ import {
  *    against the v149 computer tables. These never need the live gateway, so they
  *    work regardless of computer-init timing.
  *  - Live-computer operations (`list` connection-status merge, `mintJoinToken`)
- *    read the injected `ComputersDeps` (the gateway + hub URL + cert fingerprint).
+ *    read the injected `ComputersDeps` (the gateway + hub URL).
  *    `list` degrades gracefully when the gateway isn't wired (store rows with a
  *    `connected: false` status); `mintJoinToken` REQUIRES it and throws a clear
  *    error before the listener has bound — minting a token for a hub that isn't
@@ -114,8 +114,9 @@ export const computersRouter = router({
 
   /**
    * Mint a single-use enrollment token. The token embeds the hub's computer WS URL
-   * and TLS cert fingerprint (both sourced from the injected deps), so it can
-   * only be minted once the hub listener has bound.
+   * (sourced from the injected deps), so it can only be minted once the hub
+   * listener has bound. It carries no certificate pin: the hub does not terminate
+   * TLS, so a computer verifies the front end's certificate the normal way.
    *
    * `hubUrl` is returned alongside the token so a client can tell whether the
    * token is usable off-box (see `isLoopbackComputerUrl`) WITHOUT decoding it —
@@ -133,15 +134,11 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const deps = getComputersDeps()
       const hubUrl = deps.getHubUrl()
-      const certFingerprint = deps.getCertFingerprint()
-      if (!hubUrl || !certFingerprint) {
-        throw new Error(
-          'cannot mint join token — the computer listener has not bound its URL / hub identity yet'
-        )
+      if (!hubUrl) {
+        throw new Error('cannot mint join token — the computer listener has not bound its URL yet')
       }
       const minted = await storeMintJoinToken(ctx.db, {
         hubUrl,
-        certFingerprint,
         ttlMs: input.ttlMs ?? DEFAULT_JOIN_TOKEN_TTL_MS,
         label: input.label,
         // Carries this user onto the computer that redeems the token. Null on an

@@ -1,5 +1,9 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { getSlayzoneReleaseChannel, getSlayzoneHomeDir } from '@slayzone/platform'
+import {
+  getSlayzoneReleaseChannel,
+  getSlayzoneHomeDir,
+  isHubLoginRequired
+} from '@slayzone/platform'
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
 
@@ -218,23 +222,23 @@ export async function buildMcpEnv(
     // hook-capable agents: `slay` is run by hand in a terminal far more often than
     // by an agent, and an unpinned `slay` is precisely the one that goes probing.
     // Authority only (host:port), per the env naming rules — the scheme derives
-    // from SLAYZONE_MODE, and this hub is loopback.
+    // from the host (loopback → http), and this one is loopback.
     env.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${serverPort}`
 
-    // A standalone hub requires auth from every caller now, including one on this
-    // same box (`hubAuthRequired = !supervised` in server.ts) — so an in-task
-    // `slay`, or the CLI a hook-capable agent shells out to, needs a bearer to do
-    // anything. The hub's own bootstrap-owner file is that credential: it is a
-    // real user session, provisioned specifically so a co-located caller is never
-    // locked out (see bootstrap-owner.ts). Reusing SLAYZONE_HUB_TOKEN means the
-    // CLI's EXISTING env-var resolution (hub-config.ts, checked before discovery)
-    // picks it up with no new code path — and the var is already tagged `secret`
-    // in ENV_MANIFEST, so sanitizeSpawnEnv strips any inherited copy first.
+    // A hub that requires login (`SLAYZONE_HUB_REQUIRE_LOGIN=1`) requires it from
+    // every caller, including one on this same box — so an in-task `slay`, or the
+    // CLI a hook-capable agent shells out to, needs a bearer to do anything. The
+    // hub's own bootstrap-owner file is that credential: it is a real user session,
+    // provisioned specifically so a co-located caller is never locked out (see
+    // bootstrap-owner.ts). Reusing SLAYZONE_HUB_TOKEN means the CLI's EXISTING
+    // env-var resolution (hub-config.ts, checked before discovery) picks it up with
+    // no new code path — and the var is already tagged `secret` in ENV_MANIFEST, so
+    // sanitizeSpawnEnv strips any inherited copy first.
     //
-    // Absent on a supervised hub: no auth is required there, and there is no
-    // owner file to read (ensureBootstrapOwner never runs for one) — so this
-    // block is a no-op and every existing supervised spawn is unchanged.
-    if (process.env.SLAYZONE_SUPERVISED !== '1') {
+    // Absent when login is off (the desktop app's hub): no auth is required there,
+    // and there is no owner file to read (ensureBootstrapOwner never runs) — so this
+    // block is a no-op and every such spawn is unchanged.
+    if (isHubLoginRequired()) {
       const owner = await readBootstrapOwner(getSlayzoneHomeDir())
       if (owner?.token) env.SLAYZONE_HUB_TOKEN = owner.token
     }

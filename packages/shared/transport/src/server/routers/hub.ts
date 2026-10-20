@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
 import { SettingsService } from '@slayzone/settings/server'
 import { router, publicProcedure, openProcedure } from '../trpc'
 import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
@@ -13,8 +14,8 @@ import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
  * registry (detect a hub swapped behind a reused URL) and render a name.
  *
  * `describe` degrades gracefully so it works with multi_hub OFF and on the plain
- * local sidecar (no cert, no auth): the identity deps (`HubDescribeDeps`) are
- * optional and both fields fall back to a safe default when unwired. The label
+ * local sidecar (no auth): the identity deps (`HubDescribeDeps`) are optional and
+ * their fields fall back to a safe default when unwired. The label
  * is stored as a plain settings k/v (`hub_label`) — no migration — and defaults
  * to the app version's product name is left to the client; the hub only reports
  * a stored override.
@@ -27,10 +28,15 @@ const HUB_LABEL_KEY = 'hub_label'
 
 export const hubRouter = router({
   /**
-   * Intrinsic identity of THIS hub, for a connecting client. `fingerprint` is
-   * the hub's own TLS leaf sha256 (null on the plain local sidecar);
-   * `authRequired` reports whether `/trpc` enforces bearer auth (Phase 6; false
-   * today). `label` is the stored display-name override or null.
+   * Intrinsic identity of THIS hub, for a connecting client. `authRequired`
+   * reports whether `/trpc` enforces bearer auth (the `REQUIRE_LOGIN` switch);
+   * `switches` reports every per-hub switch (login, password, SSO, processes,
+   * integrations). `label` is the stored display-name override or null.
+   *
+   * `fingerprint` is always null: the hub no longer terminates TLS or presents a
+   * certificate of its own (a front end does), so there is nothing to pin. The
+   * field stays in the shape until the pin code in the clients is removed, so an
+   * older client that reads it sees "not pinned" instead of `undefined`.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -38,8 +44,9 @@ export const hubRouter = router({
     return {
       label,
       version: getAppDeps().appGetVersion(),
-      fingerprint: deps?.getFingerprint() ?? null,
-      authRequired: deps?.getAuthRequired() ?? false
+      fingerprint: null as string | null,
+      authRequired: deps?.getAuthRequired() ?? false,
+      switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS }
     }
   }),
 

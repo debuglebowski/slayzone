@@ -14,7 +14,7 @@ import { MachineLabel } from './MachineLabel'
  * A hub, as a card that owns its computers.
  *
  * WHY NESTED. A computer belongs to exactly ONE hub, and which hub is decided when
- * the token is MINTED — the token embeds that hub's dial URL and TLS fingerprint.
+ * the token is MINTED — the token embeds that hub's dial URL.
  * Listing computers inside their hub makes that containment the shape of the UI, so
  * the enrollment affordance's POSITION is the hub choice: no picker, and no way to
  * mint a token against a hub the operator didn't mean.
@@ -674,7 +674,7 @@ export function HubCard({
                           Mint a one-time enrollment token for{' '}
                           <span className="text-foreground">{hubLabel || 'this hub'}</span> and
                           paste it into the computer machine&apos;s config. The token embeds that
-                          hub&apos;s address and TLS fingerprint, and expires after 15 minutes.
+                          hub&apos;s address, and expires after 15 minutes.
                         </p>
                       </>
                     ) : (

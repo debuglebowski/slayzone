@@ -312,15 +312,25 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         bootDeadline = Date.now() + healthBootTimeoutMs
 
         // stdin is 'pipe' so the child detects parent death via stdin close.
+        const childEnv: NodeJS.ProcessEnv = {
+          ...opts.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          SLAYZONE_SUPERVISED: '1',
+          // Where the sidecar hub LISTENS: one var, `host:port`, no scheme. This is
+          // the hub's own name for it — `SLAYZONE_HUB_ADDRESS` is the DIAL-side name
+          // (computer, `slay`) and a hub refuses to boot when it still sees it.
+          SLAYZONE_HUB_LISTEN_ADDRESS: `${opts.host}:${freePort}`,
+          // The desktop app's own hub has no login: the app already carries the user.
+          // Set explicitly (it is also the default) so this does not depend on
+          // whatever the app was launched with. Boot rule B1 is what keeps such a hub
+          // on loopback.
+          SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+        }
+        // An inherited dial-side address (this app launched from a task terminal)
+        // would trip the hub's rename guard (B5) — it is not meant for the hub.
+        delete childEnv.SLAYZONE_HUB_ADDRESS
         const proc = spawn(opts.execPath, [opts.scriptPath], {
-          env: {
-            ...opts.env,
-            ELECTRON_RUN_AS_NODE: '1',
-            SLAYZONE_SUPERVISED: '1',
-            // The address the sidecar hub BINDS. One var, `host:port` — the
-            // scheme is never carried here (SLAYZONE_MODE decides it).
-            SLAYZONE_HUB_ADDRESS: `${opts.host}:${freePort}`
-          },
+          env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe']
         })
         child = proc

@@ -132,7 +132,7 @@ function runCli(
       ...(process.env as Record<string, string>),
       SLAYZONE_ROOT: hubRoot,
       SLAYZONE_DEV: '1',
-      // Authority only (host:port) — the http scheme derives from SLAYZONE_MODE.
+      // Authority only (host:port) — the http scheme derives from the host (loopback).
       SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`
     }
     for (const [k, v] of Object.entries(opts.env ?? {})) {

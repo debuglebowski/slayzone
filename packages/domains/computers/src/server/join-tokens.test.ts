@@ -48,6 +48,17 @@ describe('mintJoinToken', () => {
     expect(minted.expires_at).toBe(NOW + TTL)
   })
 
+  it('carries an EMPTY certFingerprint when none is given (the hub has no cert to pin)', async () => {
+    const minted = await mint({ certFingerprint: undefined })
+    const payload = decodeJoinToken(minted.token)
+    expect(payload).not.toBeNull()
+    expect(payload!.hubUrl).toBe('https://hub.example:8443')
+    expect(payload!.certFingerprint).toBe('')
+    // Still a well-formed, redeemable token: the empty field decodes as a string.
+    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+    expect(verified.ok).toBe(true)
+  })
+
   it('mints unique tokens (fresh secret each time)', async () => {
     const a = await mint()
     const b = await mint({ label: 'second' })

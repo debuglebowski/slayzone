@@ -1,37 +1,35 @@
 /**
- * The hub-address grammar: parse, validate and compose `SLAYZONE_HUB_ADDRESS`.
+ * The hub-address grammar: parse, validate and compose hub addresses.
  *
- * ONE CONCEPT, TWO ROLES. `SLAYZONE_HUB_ADDRESS` means "the hub's address" —
- * `host[:port]`, no scheme, no path. Its VALUE differs by which app holds it:
- *   - the hub        BINDS it       → {@link parseHubAddress} (host + port)
- *   - computer / `slay` CONNECT to it → {@link hubUrlFromAddr} (full URL)
- * Different processes holding different values under one name is intended, not a
- * collision: `sanitizeSpawnEnv` strips the var at every terminal-spawn boundary,
- * so a value can never bleed from one role into the other.
+ * AN ADDRESS IS ALWAYS `host[:port]` — no scheme, no path. Three env vars use it:
+ *   - `SLAYZONE_HUB_LISTEN_ADDRESS`  the hub BINDS it       → {@link parseHubAddress}
+ *   - `SLAYZONE_HUB_PUBLIC_ADDRESS`  how others reach the hub → {@link hubUrlFromAddr}
+ *   - `SLAYZONE_HUB_ADDRESS`         computer / `slay` CONNECT to it → {@link hubUrlFromAddr}
+ * The hub-side name used to be `SLAYZONE_HUB_ADDRESS` too; it was renamed so one
+ * variable never means "where I listen" in one process and "where I dial" in
+ * another. `sanitizeSpawnEnv` still strips all of them at every terminal-spawn
+ * boundary.
  *
- * WHY NO SCHEME IN THE ENV CHANNEL: the two dial-side consumers need different
+ * WHY NO SCHEME IN THE ENV CHANNEL: the dial-side consumers need different
  * schemes (the computer `ws(s)://…/computers`, the CLI `http(s)://…`), so a stored
  * scheme meant one of them was always reading the wrong shape — the retired
  * `SLAYZONE_HUB_URL` bug (a computer-hosted `slay` inheriting a `ws://` url and
- * hard-exiting). Both now DERIVE the scheme from the single `SLAYZONE_MODE`
- * lever, which makes the mismatch unrepresentable rather than merely unlikely.
+ * hard-exiting). Every reader now DERIVES the scheme from the host itself
+ * ({@link hubUrlFromAddr}, rule A1): a loopback host is plaintext (`http`/`ws`),
+ * any other host is secure (`https`/`wss`) — the hub never terminates TLS, the
+ * front end in front of a reachable hub does. That makes a scheme/reader mismatch
+ * unrepresentable rather than merely unlikely, with no mode flag to forget.
  *
- * PORT GRAMMAR: a bare host means "port unspecified". Bind side → the OS assigns
- * a free port (`port === undefined`, callers default to 0); an explicit `:0` says
- * the same outright. Dial side → the scheme's default port stays implicit (the
- * normal published-DNS / reverse-proxy shape for a remote hub).
+ * PORT GRAMMAR: a bare host means "port unspecified". Bind side → the hub walks
+ * its port block (`port === undefined`); an explicit `:0` asks the OS for a free
+ * port. Dial side → the scheme's default port stays implicit (the normal
+ * published-DNS / reverse-proxy shape for a reachable hub).
  *
- * Lean leaf (only ./slayzone-mode + node builtins) so the computer bundle can
- * import it via `@slayzone/platform/hub-addr` WITHOUT the platform barrel.
+ * Lean leaf (node builtins only) so the computer bundle can import it via
+ * `@slayzone/platform/hub-addr` WITHOUT the platform barrel.
  *
  * @module platform/hub-addr
  */
-
-import { getSlayzoneMode, type SlayzoneMode } from './slayzone-mode'
-
-// Re-exported so a consumer importing this lean subpath can name the mode type
-// without also depending on a separate slayzone-mode subpath export.
-export type { SlayzoneMode } from './slayzone-mode'
 
 /**
  * Host literals that name THIS machine. Single source of truth for both readers
@@ -48,7 +46,7 @@ export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localh
  * Distinct from {@link LOOPBACK_HOSTS} on purpose, and the distinction is
  * load-bearing:
  *   - `LOOPBACK_HOSTS` matches a CONFIGURED HOST STRING — a value a human typed
- *     into `SLAYZONE_HUB_ADDRESS` or a config file — so it accepts `'localhost'`.
+ *     into `SLAYZONE_HUB_LISTEN_ADDRESS` or a config file — so it accepts `'localhost'`.
  *   - This matches `req.socket.remoteAddress`, which the kernel fills in. A
  *     socket address is an IP, never a hostname, so `'localhost'` here would only
  *     ever be a bug or a spoof attempt and is deliberately NOT accepted.
@@ -72,28 +70,39 @@ export function isLoopbackPeer(addr: string | undefined | null): boolean {
 }
 
 /**
+ * True when the HOST of an authority (`host` or `host:port`, no scheme) names this
+ * machine — `127.0.0.1`, `localhost` or `::1` ({@link LOOPBACK_HOSTS}).
+ *
+ * Fails CLOSED: an unparseable authority is not loopback, so the scheme rule below
+ * picks the secure scheme for it rather than plaintext.
+ */
+export function isLoopbackAuthority(addr: string): boolean {
+  try {
+    const host = new URL(`http://${addr}`).hostname.replace(/^\[|\]$/g, '')
+    return LOOPBACK_HOSTS.has(host)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Build a hub URL from an authority (`host` or `host:port`, NO scheme, NO path).
  *
- * @param addr  the hub authority — `host[:port]`, exactly as carried in
- *              `SLAYZONE_HUB_ADDRESS`. Used verbatim; a host-only value keeps the
- *              scheme's default port implicit (the normal published-DNS / reverse
- *              proxy shape for a remote hub).
+ * THE SCHEME RULE (A1), the same everywhere a hub is dialled — hub, computer and
+ * `slay`: a loopback host (127.0.0.1, localhost, ::1) → `http` / `ws`; any other
+ * host → `https` / `wss`. Nothing carries a scheme and nothing can disagree about
+ * one.
+ *
+ * @param addr  the hub authority — `host[:port]`. Used verbatim; a host-only value
+ *              keeps the scheme's default port implicit (the normal published-DNS /
+ *              reverse proxy shape for a reachable hub).
  * @param kind  `'ws'` for the computer transport (ws/wss) or `'http'` for the CLI
  *              REST base (http/https).
  * @param path  optional path to append (e.g. `'/computers'`). Empty by default.
- * @param mode  the deployment mode. Defaults to `getSlayzoneMode()` (reads
- *              `process.env`); pass an explicit mode to stay hermetic under a
- *              test that supplies its own env (e.g. `loadComputerConfig(customEnv)`).
- * @returns     `<scheme>://<addr><path>`, where scheme is secure (`wss`/`https`)
- *              in `remote` mode and plaintext (`ws`/`http`) otherwise.
+ * @returns     `<scheme>://<addr><path>`
  */
-export function hubUrlFromAddr(
-  addr: string,
-  kind: 'ws' | 'http',
-  path = '',
-  mode: SlayzoneMode = getSlayzoneMode()
-): string {
-  const secure = mode === 'remote'
+export function hubUrlFromAddr(addr: string, kind: 'ws' | 'http', path = ''): string {
+  const secure = !isLoopbackAuthority(addr)
   const scheme = kind === 'ws' ? (secure ? 'wss' : 'ws') : secure ? 'https' : 'http'
   return `${scheme}://${addr}${path}`
 }
@@ -103,8 +112,8 @@ export function hubUrlFromAddr(
  * scheme (`://`), NO path (`/`), no userinfo and no whitespace.
  *
  * This is the env-channel guard: it is what keeps a scheme or a path from
- * sneaking into `SLAYZONE_HUB_ADDRESS` / `SLAYZONE_HUB_PUBLIC_ADDRESS` (carrying
- * authority only is the entire point). Verifies by composing a throwaway URL
+ * sneaking into any hub address env var (`SLAYZONE_HUB_ADDRESS`, `_LISTEN_ADDRESS`,
+ * `_PUBLIC_ADDRESS`) — carrying authority only is the entire point. Verifies by composing a throwaway URL
  * whose `host` must round-trip back to the input — which also rejects embedded
  * userinfo and stray characters, and (unlike a plain URL parse) catches a
  * double-scheme like `http://http://x`.
@@ -133,9 +142,9 @@ export function isBareAuthority(addr: string): boolean {
  * True when a `ws(s)://…/computers` URL names THIS machine — so a join token
  * carrying it is only usable by a computer on the SAME box.
  *
- * WHY THIS EXISTS: a hub in local mode derives its computer URL as
- * `ws://<loopback>:<hubPort>/computers` unconditionally (see the hub's
- * `deriveComputerHubUrl`). That is right for the co-located computer the desktop app
+ * WHY THIS EXISTS: a hub with no public address derives its computer URL as
+ * `ws://<loopback>:<hubPort>/computers` (see the hub's `deriveComputerHubUrl`).
+ * That is right for the co-located computer the desktop app
  * auto-enrolls, and useless for any other machine — an off-box computer handed such
  * a token dials its own loopback and silently never connects. Minting cannot
  * refuse (the loopback case is legitimate and common), so the surfaces that hand a
@@ -195,4 +204,23 @@ export function parseHubAddress(addr: string | undefined): HubBindAddress | null
   const port = u.port === '' ? undefined : Number(u.port)
   // hostname drops IPv6 brackets; unlike `host` it never carries the port.
   return { host: u.hostname.replace(/^\[|\]$/g, ''), port }
+}
+
+/**
+ * Refuse to bind a supervised hub anywhere but loopback (rule B9).
+ *
+ * `SLAYZONE_SUPERVISED=1` means "the desktop app started me": no prompts, no
+ * config file, and login off. That is only safe on this machine's loopback — the
+ * flag is just an env var, so without this a stray one would expose a hub meant
+ * for one user on a real interface. The desktop app already binds loopback; this
+ * makes that non-regressible.
+ */
+export function assertLoopbackBind(host: string): void {
+  if (!LOOPBACK_HOSTS.has(host)) {
+    throw new Error(
+      `[slayzone] SLAYZONE_SUPERVISED=1 marks a hub started by the desktop app, so it ` +
+        `must listen on loopback — got '${host}'. Unset SLAYZONE_SUPERVISED for a hub ` +
+        `that other machines should reach.`
+    )
+  }
 }

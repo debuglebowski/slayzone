@@ -52,8 +52,7 @@ const fakeDeps: ComputersDeps = {
     listComputers: () => asDescriptors(liveComputerIds),
     listUsableComputers: () => asDescriptors(usableComputerIds ?? liveComputerIds)
   }),
-  getHubUrl: () => 'ws://127.0.0.1:8788/computers',
-  getCertFingerprint: () => 'abcdef0123456789'
+  getHubUrl: () => 'ws://127.0.0.1:8788/computers'
 }
 setComputersDeps(fakeDeps)
 
@@ -81,14 +80,15 @@ test('computers.list: returns store rows merged with live connection status', as
   expect(linuxRow.connectedAt).toBeNull()
 })
 
-test('computers.mintJoinToken: returns a decodable szjt1 token embedding hub URL + cert', async () => {
+test('computers.mintJoinToken: returns a decodable szjt1 token embedding the hub URL, with no pin', async () => {
   const minted = await caller.mintJoinToken({ label: 'office-mac' })
   expect(minted.label).toBe('office-mac')
   expect(typeof minted.token).toBe('string')
   const payload = decodeJoinToken(minted.token)
   expect(payload).not.toBeNull()
   expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/computers')
-  expect(payload!.certFingerprint).toBe('abcdef0123456789')
+  // The hub presents no certificate of its own, so there is nothing to pin.
+  expect(payload!.certFingerprint).toBe('')
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
   // The dial target is returned ALONGSIDE the token so a client can tell whether
   // the token is usable off-box without decoding it — `decodeJoinToken` needs
@@ -142,8 +142,7 @@ test('computers: list degrades + mintJoinToken throws when the gateway is unwire
   // but exercised here by resetting the deps to a null-gateway shape.
   setComputersDeps({
     getGateway: () => null,
-    getHubUrl: () => null,
-    getCertFingerprint: () => null
+    getHubUrl: () => null
   })
 
   const rows = await caller.list()

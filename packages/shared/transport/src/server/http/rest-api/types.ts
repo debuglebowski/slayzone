@@ -182,10 +182,8 @@ export interface RestApiDeps {
    * default boot is byte-identical.
    */
   computers?: {
-    /** `wss://host:port/computers` URL the join token embeds. Null until bound. */
+    /** `ws(s)://host:port/computers` URL the join token embeds. Null until bound. */
     getHubUrl: () => string | null
-    /** Hub TLS leaf sha256 (lowercase hex) the token pins. Null until loaded. */
-    getCertFingerprint: () => string | null
     /**
      * The live computer gateway, for `GET /api/computers` connection status. Null until
      * the async computer init resolves, and permanently null if it failed — that route

@@ -4,8 +4,9 @@
  *
  * Covers the graceful-degrade contract: `describe` must work with NO
  * HubDescribeDeps wired (plain local sidecar — multi_hub off), reporting
- * fingerprint:null + authRequired:false, and must reflect the wired deps +
- * the stored `hub_label` k/v when present.
+ * authRequired:false + the default switches (and a fingerprint that is always
+ * null: the hub holds no certificate), and must reflect the wired deps + the
+ * stored `hub_label` k/v when present.
  *
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
@@ -25,6 +26,15 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
   expect(d.version).toBe('9.9.9-test')
   expect(d.fingerprint).toBeNull()
   expect(d.authRequired).toBe(false)
+  // Unwired → the desktop app's defaults, so `describe` never lies about a hub that
+  // never told it anything.
+  expect(d.switches).toEqual({
+    requireLogin: false,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: true,
+    enableIntegrations: true
+  })
   expect(d.label).toBeNull()
 })
 
@@ -34,16 +44,32 @@ test('hub.setLabel persists a label that describe then reports', async () => {
   expect(d.label).toBe('Prod EU') // trimmed on write
 })
 
-test('hub.describe reflects wired identity deps (fingerprint + authRequired)', async () => {
-  setHubDescribeDeps({
-    getFingerprint: () => 'ab12cd',
-    getAuthRequired: () => true
-  })
+test('hub.describe reflects the wired deps (authRequired + every switch); never a fingerprint', async () => {
+  const switches = {
+    requireLogin: true,
+    enablePassword: false,
+    enableSso: true,
+    enableProcesses: false,
+    enableIntegrations: false
+  }
+  setHubDescribeDeps({ getAuthRequired: () => true, getSwitches: () => switches })
   const d = await caller.describe()
-  expect(d.fingerprint).toBe('ab12cd')
   expect(d.authRequired).toBe(true)
+  expect(d.switches).toEqual(switches)
+  // The hub no longer terminates TLS, so it has no certificate to report. The key
+  // stays (older clients read it) but is always null.
+  expect(d.fingerprint).toBeNull()
   // Reset so the unwired-default is not leaked into other suites in-process.
-  setHubDescribeDeps({ getFingerprint: () => null, getAuthRequired: () => false })
+  setHubDescribeDeps({
+    getAuthRequired: () => false,
+    getSwitches: () => ({
+      requireLogin: false,
+      enablePassword: true,
+      enableSso: false,
+      enableProcesses: true,
+      enableIntegrations: true
+    })
+  })
 })
 
 // ── Auth gate (Phase 6 enforcement) ──────────────────────────────────────────

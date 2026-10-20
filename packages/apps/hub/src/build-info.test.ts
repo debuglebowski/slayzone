@@ -72,9 +72,15 @@ function healthState(overrides: Partial<HealthState>): HealthState {
     name: 'test-hub',
     root: '/tmp/test-root',
     pid: process.pid,
-    mode: 'local',
     supervised: false,
     authRequired: false,
+    switches: {
+      requireLogin: false,
+      enablePassword: true,
+      enableSso: false,
+      enableProcesses: true,
+      enableIntegrations: true
+    },
     computersConnected: () => 0,
     ...overrides
   }

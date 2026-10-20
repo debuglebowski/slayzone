@@ -333,13 +333,16 @@ const REMOTE: RemoteMcpEnv = {
 
   const priorRoot = process.env.SLAYZONE_ROOT
   const priorSupervised = process.env.SLAYZONE_SUPERVISED
+  const priorLogin = process.env.SLAYZONE_HUB_REQUIRE_LOGIN
   const dataRoot = mkdtempSync(join(tmpdir(), 'mcp-env-owner-'))
   process.env.SLAYZONE_ROOT = dataRoot
 
   try {
-    // 13. Standalone hub, owner file present with a token → the token is injected
-    //     alongside SLAYZONE_HUB_ADDRESS, reusing the CLI's existing env channel.
+    // 13. A hub that requires login (SLAYZONE_HUB_REQUIRE_LOGIN=1), owner file present
+    //     with a token → the token is injected alongside SLAYZONE_HUB_ADDRESS,
+    //     reusing the CLI's existing env channel.
     delete process.env.SLAYZONE_SUPERVISED
+    process.env.SLAYZONE_HUB_REQUIRE_LOGIN = '1'
     writeFileSync(
       join(dataRoot, 'hub.owner.json'),
       JSON.stringify({
@@ -369,20 +372,37 @@ const REMOTE: RemoteMcpEnv = {
       `plain-shell spawn also gets the token, got: ${plain.SLAYZONE_HUB_TOKEN}`
     )
 
-    // 15. Supervised hub → NEVER read the file, even if one happens to exist on
-    //     disk (e.g. a leftover from a prior standalone run at the same root).
-    //     Supervised has no auth requirement and the Electron host never
-    //     provisions this file, so this must be a hard no-op.
-    process.env.SLAYZONE_SUPERVISED = '1'
-    const supervised = await buildMcpEnv(null, 'task-owner-3', 'claude-code')
+    // 15. Login NOT required (the default; what the desktop app sets explicitly) →
+    //     NEVER read the file, even if one happens to exist on disk (e.g. a leftover
+    //     from a prior login-required run at the same root). That hub has no auth
+    //     requirement and never provisions this file, so this must be a hard no-op.
+    process.env.SLAYZONE_HUB_REQUIRE_LOGIN = '0'
+    const loginOff = await buildMcpEnv(null, 'task-owner-3', 'claude-code')
     assert(
-      !('SLAYZONE_HUB_TOKEN' in supervised),
-      'supervised must never inject the owner token, even if the file exists'
+      !('SLAYZONE_HUB_TOKEN' in loginOff),
+      'a hub with login off must never inject the owner token, even if the file exists'
+    )
+    delete process.env.SLAYZONE_HUB_REQUIRE_LOGIN
+    const loginUnset = await buildMcpEnv(null, 'task-owner-3b', 'claude-code')
+    assert(
+      !('SLAYZONE_HUB_TOKEN' in loginUnset),
+      'login switch unset (default off) must not inject the owner token either'
+    )
+
+    // 15b. SUPERVISED no longer decides this: it only means "started by the desktop
+    //      app". A supervised hub that DID require login would need the bearer.
+    process.env.SLAYZONE_SUPERVISED = '1'
+    process.env.SLAYZONE_HUB_REQUIRE_LOGIN = '1'
+    const supervisedLogin = await buildMcpEnv(null, 'task-owner-3c', 'claude-code')
+    assert(
+      supervisedLogin.SLAYZONE_HUB_TOKEN === 'szw_test_token',
+      'the login switch, not SLAYZONE_SUPERVISED, decides whether the owner token is injected'
     )
     delete process.env.SLAYZONE_SUPERVISED
 
     // 16. No owner file at all (the file was never provisioned, or belongs to a
     //     different OS user and is unreadable) → silently absent, never throws.
+    process.env.SLAYZONE_HUB_REQUIRE_LOGIN = '1'
     rmSync(join(dataRoot, 'hub.owner.json'))
     const noFile = await buildMcpEnv(null, 'task-owner-4', 'claude-code')
     assert(
@@ -398,6 +418,8 @@ const REMOTE: RemoteMcpEnv = {
     else process.env.SLAYZONE_ROOT = priorRoot
     if (priorSupervised === undefined) delete process.env.SLAYZONE_SUPERVISED
     else process.env.SLAYZONE_SUPERVISED = priorSupervised
+    if (priorLogin === undefined) delete process.env.SLAYZONE_HUB_REQUIRE_LOGIN
+    else process.env.SLAYZONE_HUB_REQUIRE_LOGIN = priorLogin
     rmSync(dataRoot, { recursive: true, force: true })
   }
 }

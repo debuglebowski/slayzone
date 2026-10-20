@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
 import net from 'net'
 import os from 'os'
-import https from 'https'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
@@ -13,23 +12,19 @@ import { chromium, test, expect, type Browser, type BrowserContext } from '@play
  * rather than extending the hub specs, because it drives a genuinely
  * different client: a plain Playwright BROWSER context (not the Electron
  * fixture every other spec in this suite uses) against a REAL standalone hub
- * booted in `SLAYZONE_MODE=remote`.
+ * booted with `SLAYZONE_HUB_REQUIRE_LOGIN=1`.
  *
- * `remote` is not incidental here — it's the one thing this group exists to
- * prove end to end: `handleWebAssets` only serves `dist/web` under `remote`
- * (see `web-assets-remote-gate.test.ts` for the unit-level negative case),
- * and `remote` is TLS-or-refuses-to-boot (`loadOrCreateHubIdentity` mints a
- * self-signed leaf on first boot — no manual cert step, see
- * hub-identity.ts). So a real browser reaching a real `https://` origin,
- * completing the actual `/api/auth/web-login` flow, and mounting the actual
- * `renderer-app` bundle is the one path no unit test can stand in for.
+ * Login being required is the point: it is what makes the shell show its login
+ * screen and what makes `/api/auth/web-login` mint a scoped session. The hub
+ * serves plain http — it never terminates TLS (a front end does in a real
+ * deployment) — so this spec reaches it at `http://127.0.0.1:<port>`, a loopback
+ * origin browsers treat as secure. A real browser completing the actual
+ * `/api/auth/web-login` flow and mounting the actual `renderer-app` bundle is the
+ * one path no unit test can stand in for.
  *
  * Scope deliberately stops at "the web shell's own plumbing works" — it does
  * not re-derive coverage the Electron suite already owns (board rendering,
- * task CRUD, etc.). `ignoreHTTPSErrors: true` accepts the hub's self-signed
- * leaf the same way a real deployment would pin its fingerprint or front it
- * with a CA-issued cert; this test cares that TLS terminates and the shell
- * answers, not that the leaf chains to a public root.
+ * task CRUD, etc.).
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -64,44 +59,20 @@ function scrubbedEnv(): Record<string, string> {
   return out
 }
 
-/** GET a `https://127.0.0.1:<port>` path, trusting the hub's self-signed
- *  leaf explicitly (Node's `fetch` has no per-call TLS override, so this
- *  uses `node:https` directly rather than a process-wide
- *  `NODE_TLS_REJECT_UNAUTHORIZED=0`, which would also weaken every other
- *  TLS check this worker process makes). */
-function httpsGetJson(port: number, urlPath: string): Promise<{ status: number; body: unknown }> {
-  return new Promise((resolve, reject) => {
-    const req = https.get(
-      { hostname: '127.0.0.1', port, path: urlPath, rejectUnauthorized: false },
-      (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c) => chunks.push(c))
-        res.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8')
-          try {
-            resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) })
-          } catch {
-            resolve({ status: res.statusCode ?? 0, body: text })
-          }
-        })
-      }
-    )
-    req.on('error', reject)
-  })
-}
-
-async function waitForRemoteHubHealth(port: number, timeoutMs = 30_000): Promise<void> {
+async function waitForHubHealth(port: number, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const { status, body } = await httpsGetJson(port, '/health')
-      if (status === 200 && (body as { ok?: boolean } | null)?.ok) return
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(1_000)
+      })
+      if (res.status === 200 && ((await res.json()) as { ok?: boolean } | null)?.ok) return
     } catch {
-      /* TLS/listener not up yet */
+      /* listener not up yet */
     }
     await new Promise((r) => setTimeout(r, 300))
   }
-  throw new Error(`remote hub /health not ready on :${port} within ${timeoutMs}ms`)
+  throw new Error(`hub /health not ready on :${port} within ${timeoutMs}ms`)
 }
 
 interface OwnerCreds {
@@ -129,21 +100,16 @@ async function readOwner(root: string, timeoutMs = 30_000): Promise<OwnerCreds> 
   throw new Error(`hub owner file not usable within ${timeoutMs}ms: ${file}`)
 }
 
-interface RemoteHub {
+interface LoginHub {
   port: number
   root: string
   owner: OwnerCreds
   stop: () => Promise<void>
 }
 
-/** Spawn the hub bundle standalone, in `SLAYZONE_MODE=remote` — TLS terminated
- *  with a freshly-minted self-signed identity, `dist/web` served, auth
- *  unconditionally required (every non-supervised hub). Bound to loopback:
- *  `assertModeHostConsistency` only restricts `local` mode's bind, and remote
- *  + loopback-bind + a same-host public address is exactly the shape a
- *  reverse-proxied deployment has (see server.ts's own comments) — this test
- *  just collapses proxy and hub onto one box. */
-async function spawnRemoteHub(): Promise<RemoteHub> {
+/** Spawn the hub bundle standalone with login required: `dist/web` served, a bootstrap
+ *  owner provisioned, plain http on loopback. */
+async function spawnLoginHub(): Promise<LoginHub> {
   if (!fs.existsSync(HUB_BIN)) {
     throw new Error(`hub bin missing: ${HUB_BIN} (run pnpm build)`)
   }
@@ -161,9 +127,8 @@ async function spawnRemoteHub(): Promise<RemoteHub> {
       ...scrubbedEnv(),
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_ROOT: root,
-      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}`,
-      SLAYZONE_MODE: 'remote',
-      SLAYZONE_HUB_PUBLIC_ADDRESS: `127.0.0.1:${port}`
+      SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -193,7 +158,7 @@ async function spawnRemoteHub(): Promise<RemoteHub> {
     })
 
   try {
-    await waitForRemoteHubHealth(port)
+    await waitForHubHealth(port)
     const owner = await readOwner(root)
     return { port, root, owner, stop }
   } catch (err) {
@@ -202,12 +167,12 @@ async function spawnRemoteHub(): Promise<RemoteHub> {
   }
 }
 
-test.describe('web shell — real remote-mode hub, real TLS, real browser', () => {
-  let hub: RemoteHub
+test.describe('web shell — real login-required hub, real browser', () => {
+  let hub: LoginHub
   let browser: Browser
 
   test.beforeAll(async () => {
-    hub = await spawnRemoteHub()
+    hub = await spawnLoginHub()
     browser = await chromium.launch()
   })
 
@@ -223,23 +188,21 @@ test.describe('web shell — real remote-mode hub, real TLS, real browser', () =
     await context?.close()
   })
 
-  test('unauthenticated GET / over TLS renders the login screen (never the app)', async () => {
-    context = await browser.newContext({ ignoreHTTPSErrors: true })
+  test('unauthenticated GET / renders the login screen (never the app)', async () => {
+    context = await browser.newContext()
     const page = await context.newPage()
-    await page.goto(`https://127.0.0.1:${hub.port}/`)
+    await page.goto(`http://127.0.0.1:${hub.port}/`)
     await expect(page.getByTestId('web-login-screen')).toBeVisible({ timeout: 15_000 })
-    // The regression this whole group exists to guard: local mode used to
-    // (and per web-assets-remote-gate.test.ts, still would if the gate broke)
-    // serve nothing meaningful at all. Confirming the LOGIN screen (not a 404,
-    // not a blank page) proves the static bundle + SPA fallback + remote gate
-    // all composed correctly for an unauthenticated request.
+    // Confirming the LOGIN screen (not a 404, not a blank page) proves the static
+    // bundle + SPA fallback + the `authRequired` boot branch all composed
+    // correctly for an unauthenticated request.
     await expect(page.locator('#root')).not.toBeEmpty()
   })
 
   test('wrong password is rejected; login screen stays; no session token stored', async () => {
-    context = await browser.newContext({ ignoreHTTPSErrors: true })
+    context = await browser.newContext()
     const page = await context.newPage()
-    await page.goto(`https://127.0.0.1:${hub.port}/`)
+    await page.goto(`http://127.0.0.1:${hub.port}/`)
     await page.getByTestId('web-login-email').fill(hub.owner.email)
     await page.getByTestId('web-login-password').fill('definitely-not-the-password')
     await page.getByTestId('web-login-submit').click()
@@ -252,9 +215,9 @@ test.describe('web shell — real remote-mode hub, real TLS, real browser', () =
   })
 
   test('correct sign-in reaches /api/auth/web-login, stores a scoped token, and mounts the real app', async () => {
-    context = await browser.newContext({ ignoreHTTPSErrors: true })
+    context = await browser.newContext()
     const page = await context.newPage()
-    await page.goto(`https://127.0.0.1:${hub.port}/`)
+    await page.goto(`http://127.0.0.1:${hub.port}/`)
     await page.getByTestId('web-login-email').fill(hub.owner.email)
     await page.getByTestId('web-login-password').fill(hub.owner.password)
 
@@ -270,7 +233,7 @@ test.describe('web shell — real remote-mode hub, real TLS, real browser', () =
     // `useTasksData`'s mount effect wires this bridge unconditionally, on
     // every renderer-app consumer, the instant HomeView mounts — reaching it
     // means the reloaded page found its stored token, `initTrpcClient`
-    // connected authed over `wss://`, and the real app (not the login
+    // connected authed over the websocket, and the real app (not the login
     // screen, not a crash boundary) rendered.
     await page.waitForFunction(
       () =>
@@ -290,7 +253,7 @@ test.describe('web shell — real remote-mode hub, real TLS, real browser', () =
     // response also sets an HttpOnly `slayzone_web_session` cookie for `/api/*`
     // REST, distinct from the token this page just read out of localStorage
     // for `/trpc` (see web-login.ts / web-sessions.ts's WEB_SESSION_COOKIE_NAME).
-    const cookies = await context.cookies(`https://127.0.0.1:${hub.port}`)
+    const cookies = await context.cookies()
     const sessionCookie = cookies.find((c) => c.name === 'slayzone_web_session')
     expect(sessionCookie?.value).toMatch(/^szw_/)
     expect(sessionCookie?.httpOnly).toBe(true)

@@ -6,7 +6,8 @@
  *   slayzone-computer
  *
  * SLAYZONE_HUB_ADDRESS carries the hub AUTHORITY only (host[:port]); the dial
- * scheme (ws/wss) is derived from SLAYZONE_MODE, and `/computers` is appended.
+ * scheme (ws/wss) is derived from the host (loopback → ws, else wss), and
+ * `/computers` is appended.
  *
  * On an interactive terminal a fresh computer (no join token AND no stored
  * credentials) is prompted for its join token + path-jail + name, then offered
@@ -59,7 +60,7 @@ async function maybeInteractiveSetup(): Promise<{
 
   // Already enrolled? A stored credential for the known hub host means we can
   // reconnect without a token. Skip the prompt in that case. The env channel
-  // carries authority only, so compose it into a url (scheme from MODE) before
+  // carries authority only, so compose it into a url (scheme from the host) before
   // deriving the credential-store host key; computer.config.json still carries a full url.
   const envAddress = process.env[ENV_VARS.hubAddress]
   const hubUrl =

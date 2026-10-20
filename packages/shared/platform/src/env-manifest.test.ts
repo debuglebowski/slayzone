@@ -36,6 +36,25 @@ check(
 )
 check('SLAYZONE_HUB_URL is retired (absent from manifest)', !('SLAYZONE_HUB_URL' in ENV_MANIFEST))
 check('SLAYZONE_HUB_ADDRESS is infra', ENV_MANIFEST.SLAYZONE_HUB_ADDRESS === 'infra')
+check('SLAYZONE_HUB_LISTEN_ADDRESS is infra', ENV_MANIFEST.SLAYZONE_HUB_LISTEN_ADDRESS === 'infra')
+// SLAYZONE_MODE is gone (replaced by the per-hub switches). A leftover value is
+// ignored by the hub and stripped here by the fail-closed unmanifested default.
+check('SLAYZONE_MODE is retired (absent from manifest)', !('SLAYZONE_MODE' in ENV_MANIFEST))
+for (const sw of [
+  'SLAYZONE_HUB_REQUIRE_LOGIN',
+  'SLAYZONE_HUB_ENABLE_PASSWORD',
+  'SLAYZONE_HUB_ENABLE_SSO',
+  'SLAYZONE_HUB_ENABLE_PROCESSES',
+  'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
+  'SLAYZONE_HUB_SSO_TENANT_ID',
+  'SLAYZONE_HUB_SSO_CLIENT_ID'
+]) {
+  check(`${sw} is infra`, ENV_MANIFEST[sw] === 'infra')
+}
+check(
+  'SLAYZONE_HUB_SSO_CLIENT_SECRET is secret',
+  ENV_MANIFEST.SLAYZONE_HUB_SSO_CLIENT_SECRET === 'secret'
+)
 check('SLAYZONE_HUB_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_TOKEN === 'secret')
 check('SLAYZONE_HUB_JOIN_TOKEN is secret', ENV_MANIFEST.SLAYZONE_HUB_JOIN_TOKEN === 'secret')
 check(
@@ -65,10 +84,10 @@ check('PLAYWRIGHT in NON_PREFIXED_INFRA', NON_PREFIXED_INFRA.has('PLAYWRIGHT'))
 
 // ── `_URL` carve-out (CLAUDE.md § Env Var Naming rule 6) ─────────────────────
 // Rule 5: a var carries AUTHORITY (`host[:port]`), never a full URL, so the
-// scheme derives from SLAYZONE_MODE and a ws-vs-http reader mismatch (the
+// scheme derives from the host and a ws-vs-http reader mismatch (the
 // retired SLAYZONE_HUB_URL bug) is unrepresentable. Rule 6 is the ONE carve-out:
 // a loopback-only target has an invariant `http` scheme, so there is no
-// MODE-derived scheme to get wrong and rule 5 protects nothing.
+// host-derived scheme to get wrong and rule 5 protects nothing.
 //
 // SLAYZONE_AGENT_HOOK_URL is that case — local = sidecar loopback, remote = the
 // COMPUTER's own loopback (it relays to the hub over its authed ws), never a
@@ -124,10 +143,16 @@ const base: NodeJS.ProcessEnv = {
   SLAYZONE_HUB_TOKEN: 'sekret',
   SLAYZONE_HUB_JOIN_TOKEN: 'jointoken',
   SLAYZONE_HUB_AUTH_SECRET: 'hmac',
+  SLAYZONE_HUB_SSO_CLIENT_SECRET: 'entra-secret',
   SLAYZONE_DESKTOP_BRIDGE_TOKEN: 'cap-bearer',
   // infra — must be stripped
   SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
+  SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:51100',
+  SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+  SLAYZONE_HUB_ENABLE_SSO: '1',
+  SLAYZONE_HUB_SSO_TENANT_ID: 'tenant',
   SLAYZONE_HUB_PORT: '51100',
+  // retired SLAYZONE_MODE — unmanifested, so stripped by the fail-closed default
   SLAYZONE_MODE: 'remote',
   SLAYZONE_SUPERVISED: '1',
   // identity — must be stripped from the inherited base (overlay re-adds)
@@ -171,8 +196,13 @@ check('strips secret SLAYZONE_HUB_AUTH_SECRET', !('SLAYZONE_HUB_AUTH_SECRET' in 
 check('strips secret SLAYZONE_DESKTOP_BRIDGE_TOKEN', !('SLAYZONE_DESKTOP_BRIDGE_TOKEN' in out))
 
 check('strips infra SLAYZONE_HUB_ADDRESS', !('SLAYZONE_HUB_ADDRESS' in out))
+check('strips infra SLAYZONE_HUB_LISTEN_ADDRESS', !('SLAYZONE_HUB_LISTEN_ADDRESS' in out))
+check('strips infra SLAYZONE_HUB_REQUIRE_LOGIN', !('SLAYZONE_HUB_REQUIRE_LOGIN' in out))
+check('strips infra SLAYZONE_HUB_ENABLE_SSO', !('SLAYZONE_HUB_ENABLE_SSO' in out))
+check('strips infra SLAYZONE_HUB_SSO_TENANT_ID', !('SLAYZONE_HUB_SSO_TENANT_ID' in out))
+check('strips secret SLAYZONE_HUB_SSO_CLIENT_SECRET', !('SLAYZONE_HUB_SSO_CLIENT_SECRET' in out))
 check('strips infra SLAYZONE_HUB_PORT', !('SLAYZONE_HUB_PORT' in out))
-check('strips infra SLAYZONE_MODE', !('SLAYZONE_MODE' in out))
+check('strips leftover SLAYZONE_MODE (fail closed)', !('SLAYZONE_MODE' in out))
 check('strips infra SLAYZONE_SUPERVISED', !('SLAYZONE_SUPERVISED' in out))
 
 check('strips identity SLAYZONE_TASK_ID', !('SLAYZONE_TASK_ID' in out))

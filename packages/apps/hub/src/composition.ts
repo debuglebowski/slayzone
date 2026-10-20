@@ -222,12 +222,11 @@ export type ServerComposition = {
    *  A later unit awaits this before reading the two fields above / mounting the
    *  gateway. */
   computersReady: Promise<void>
-  /** Feed the computer listener's bound WS URL + the hub identity's TLS cert
-   *  fingerprint back into the computers registry (`mintJoinToken` embeds both in
-   *  a join token). The server host resolves these only after it binds the computer
-   *  port + loads `loadOrCreateHubIdentity`, which happens AFTER composeServer
-   *  returns — so it's a late-bound setter, not a constructor arg. */
-  setComputerListenerInfo: (info: { hubUrl: string; certFingerprint: string }) => void
+  /** Feed the computer listener's bound WS URL back into the computers registry
+   *  (`mintJoinToken` embeds it in a join token). The server host resolves it only
+   *  after it binds its port, which happens AFTER composeServer returns — so it's a
+   *  late-bound setter, not a constructor arg. */
+  setComputerListenerInfo: (info: { hubUrl: string }) => void
 }
 
 export function composeServer(opts: {
@@ -236,6 +235,10 @@ export function composeServer(opts: {
   /** Standalone (non-supervised) boot: hydrate the process registry and ensure
    *  aux schemas. Supervised (dark, Electron-owned DB): skip — the host did. */
   standalone: boolean
+  /** `SLAYZONE_HUB_REQUIRE_LOGIN`: every client must sign in. Decides whether the
+   *  REST routes that self-guard (join-token, hub users) demand a bearer, so they
+   *  can never disagree with the outer gate about whether this hub authenticates. */
+  requireLogin: boolean
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -284,11 +287,10 @@ export function composeServer(opts: {
   let hubAuthRef: HubAuth | null = null
   let computersReady: Promise<void> = Promise.resolve()
   // Computer listener info the computers router bakes into a join token — bound late
-  // by the server host (setComputerListenerInfo) once it knows its own computer URL +
-  // cert fingerprint. Null until then, so `mintJoinToken` fails cleanly if
-  // called before the listener is up.
+  // by the server host (setComputerListenerInfo) once it knows its own computer URL.
+  // Null until then, so `mintJoinToken` fails cleanly if called before the listener
+  // is up.
   let computerHubUrl: string | null = null
-  let computerCertFingerprint: string | null = null
 
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
@@ -1131,7 +1133,6 @@ export function composeServer(opts: {
     // (setComputerListenerInfo feeds them once the /computers listener binds).
     computers: {
       getHubUrl: () => computerHubUrl,
-      getCertFingerprint: () => computerCertFingerprint,
       // Same late-bound ref the tRPC `computers.list` reads, so the REST twin
       // (`GET /api/computers`, what `slay computer ls` calls) can never report a
       // different connection status than the app's Computers tab.
@@ -1167,32 +1168,27 @@ export function composeServer(opts: {
     // target a hub on another machine) and `/api/hub/users` (so `slay hub users
     // add|ls|rm` keeps working once loopback alone is no longer sufficient).
     //
-    // Deliberately the SAME two pieces the outer gate uses — `supervised` and
+    // Deliberately the SAME two pieces the outer gate uses — the login switch and
     // `verifyRestBearer` — so a route-level decision can never disagree with the
     // gate about whether this hub authenticates at all, or about which sessions
     // count. Getter-shaped for the usual reason: hub-auth is built inside the
     // async `computersReady` IIFE, long after this literal exists.
     //
-    // THIS USED TO READ `isRemoteMode() && hubAuthRef !== null` — stale from
-    // before auth stopped being mode-derived (`server.ts`'s `hubAuthRequired =
-    // !supervised`). That drift meant a LOCAL-mode standalone hub's outer gate
-    // enforced auth while these two routes' OWN self-guard still believed it
-    // didn't, so a loopback peer (any peer, behind a reverse proxy) minted join
-    // tokens and administered accounts with no bearer, on the single most common
-    // self-hosted deployment shape. `supervised` is captured in this closure
-    // already (composeServer's own `standalone` param), so no new plumbing.
-    //
-    // False only on a supervised hub, which keeps both routes loopback-only there
-    // exactly as before.
+    // Keyed on the switch, not on `supervised` and not on a deployment mode: an
+    // earlier version derived this from the mode and `hubAuthRef !== null`, which
+    // drifted from the outer gate and let a loopback peer (any peer, behind a reverse
+    // proxy) mint join tokens and administer accounts with no bearer. False when
+    // login is off (the desktop app's hub), which keeps both routes loopback-only
+    // there exactly as before.
     restAuth: {
-      required: () => !supervised && hubAuthRef !== null,
+      required: () => opts.requireLogin && hubAuthRef !== null,
       verifyBearer: (headers, cookies) => verifyRestBearer(hubAuthRef, db, headers, cookies)
     },
-    // Scoped browser login. Absent only when hub-auth failed to init — a
-    // supervised hub has no meaningful login to offer, but the slot itself
-    // does not depend on `supervised`: nothing stops an operator from opening
-    // the web UI against a supervised hub's loopback listener, and doing so
-    // should behave the same as any other standalone hub's login.
+    // Scoped browser login. Absent only when hub-auth failed to init — a hub with
+    // login off has no meaningful login to offer, but the slot itself does not
+    // depend on the switch: nothing stops an operator from opening the web UI
+    // against such a hub's loopback listener, and doing so should behave the same
+    // as any other hub's login.
     webLogin: {
       login: (email, password) => webLogin(hubAuthRef, db, email, password)
     },
@@ -1284,11 +1280,10 @@ export function composeServer(opts: {
   // Populate the computers registry synchronously (the router may be called before
   // the async gateway init below resolves). The getters read the late-bound refs,
   // so `list` sees the gateway once it exists and `mintJoinToken` sees the
-  // URL/fingerprint once the server host feeds them via setComputerListenerInfo.
+  // URL once the server host feeds it via setComputerListenerInfo.
   setComputersDeps({
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
-    getCertFingerprint: () => computerCertFingerprint,
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -1607,7 +1602,6 @@ export function composeServer(opts: {
     computersReady,
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
-      computerCertFingerprint = info.certFingerprint
     }
   }
 }

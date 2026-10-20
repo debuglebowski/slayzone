@@ -1,15 +1,23 @@
 /**
- * hubUrlFromAddr — compose a full hub URL from an authority-only
- * `SLAYZONE_HUB_ADDRESS` (`host[:port]`, no scheme, no path) + the scheme derived
- * from SLAYZONE_MODE. This is what makes the old ws-vs-http `SLAYZONE_HUB_URL`
- * collision unrepresentable: the env channel never carries a scheme, so a computer
- * (ws) and the CLI (http) reading the SAME var can never disagree.
+ * hubUrlFromAddr — compose a full hub URL from an authority-only address
+ * (`host[:port]`, no scheme, no path), with the scheme derived from the HOST
+ * (rule A1): loopback (127.0.0.1, localhost, ::1) → http/ws, any other host →
+ * https/wss. This is what makes the old ws-vs-http `SLAYZONE_HUB_URL` collision
+ * unrepresentable: the env channel never carries a scheme, so a computer (ws) and
+ * the CLI (http) reading the SAME var can never disagree. There is no mode flag.
  *
  * Pure Node → runs under plain `npx tsx`.
  *
  * Run with: npx tsx packages/shared/platform/src/hub-addr.test.ts
  */
-import { hubUrlFromAddr, isBareAuthority, isLoopbackComputerUrl, parseHubAddress } from './hub-addr'
+import {
+  assertLoopbackBind,
+  hubUrlFromAddr,
+  isBareAuthority,
+  isLoopbackAuthority,
+  isLoopbackComputerUrl,
+  parseHubAddress
+} from './hub-addr'
 
 let passed = 0
 let failed = 0
@@ -31,46 +39,125 @@ function deepEq(
   return actual !== null && actual.host === expected.host && actual.port === expected.port
 }
 
-const prev = process.env.SLAYZONE_MODE
-try {
-  // --- local mode → plaintext schemes ---
-  delete process.env.SLAYZONE_MODE
-  check(
-    'local: ws family → ws:// + path',
-    hubUrlFromAddr('127.0.0.1:8788', 'ws', '/computers') === 'ws://127.0.0.1:8788/computers'
-  )
-  check(
-    'local: http family → http:// (no path)',
-    hubUrlFromAddr('127.0.0.1:51100', 'http') === 'http://127.0.0.1:51100'
-  )
-  check('local: default (unset MODE) is plaintext', hubUrlFromAddr('h:1', 'http') === 'http://h:1')
+// --- A1: loopback host → plaintext schemes ---
+check(
+  'loopback ip: ws family → ws:// + path',
+  hubUrlFromAddr('127.0.0.1:8788', 'ws', '/computers') === 'ws://127.0.0.1:8788/computers'
+)
+check(
+  'loopback ip: http family → http:// (no path)',
+  hubUrlFromAddr('127.0.0.1:51100', 'http') === 'http://127.0.0.1:51100'
+)
+check(
+  'loopback name: localhost → http',
+  hubUrlFromAddr('localhost:8443', 'http') === 'http://localhost:8443'
+)
+check('loopback name: localhost → ws', hubUrlFromAddr('localhost', 'ws') === 'ws://localhost')
+check('loopback ipv6: [::1] → http', hubUrlFromAddr('[::1]:8080', 'http') === 'http://[::1]:8080')
+check(
+  'loopback ipv6: [::1] → ws',
+  hubUrlFromAddr('[::1]', 'ws', '/computers') === 'ws://[::1]/computers'
+)
+check(
+  'loopback is case-insensitive (LOCALHOST)',
+  hubUrlFromAddr('LOCALHOST:1', 'http') === 'http://LOCALHOST:1'
+)
 
-  process.env.SLAYZONE_MODE = 'garbage'
-  check('unknown MODE falls back to local/plaintext', hubUrlFromAddr('h:1', 'ws') === 'ws://h:1')
-
-  // --- remote mode → secure schemes ---
+// --- A1: any other host → secure schemes ---
+check(
+  'other host: ws family → wss:// + path',
+  hubUrlFromAddr('hub.example.com', 'ws', '/computers') === 'wss://hub.example.com/computers'
+)
+check(
+  'other host: http family → https://',
+  hubUrlFromAddr('hub.example.com', 'http') === 'https://hub.example.com'
+)
+check(
+  'other host with port keeps the port',
+  hubUrlFromAddr('hub.example.com:8443', 'http') === 'https://hub.example.com:8443'
+)
+check(
+  'LAN ip is NOT loopback → https',
+  hubUrlFromAddr('10.0.0.5:51100', 'http') === 'https://10.0.0.5:51100'
+)
+check(
+  'wildcard 0.0.0.0 is NOT loopback → https',
+  hubUrlFromAddr('0.0.0.0:1', 'http') === 'https://0.0.0.0:1'
+)
+check(
+  'other 127.x is NOT in the set → https',
+  hubUrlFromAddr('127.0.0.2:1', 'http') === 'https://127.0.0.2:1'
+)
+check(
+  'bracketed non-loopback ipv6 → https',
+  hubUrlFromAddr('[2001:db8::1]:8443', 'http') === 'https://[2001:db8::1]:8443'
+)
+check(
+  'a host that merely starts with localhost is not loopback',
+  hubUrlFromAddr('localhost.example.com', 'http') === 'https://localhost.example.com'
+)
+check(
+  'empty path default appends nothing',
+  hubUrlFromAddr('h.example:2', 'http') === 'https://h.example:2'
+)
+// Fails closed: an unparseable authority gets the SECURE scheme, never plaintext.
+check(
+  'unparseable authority → secure scheme',
+  hubUrlFromAddr('not a host', 'http').startsWith('https://')
+)
+// SLAYZONE_MODE is not consulted any more: a leftover value must change nothing.
+{
+  const prev = process.env.SLAYZONE_MODE
   process.env.SLAYZONE_MODE = 'remote'
   check(
-    'remote: ws family → wss:// + path',
-    hubUrlFromAddr('hub.example.com', 'ws', '/computers') === 'wss://hub.example.com/computers'
+    'a leftover SLAYZONE_MODE=remote does not secure a loopback address',
+    hubUrlFromAddr('127.0.0.1:1', 'http') === 'http://127.0.0.1:1'
   )
+  process.env.SLAYZONE_MODE = 'local'
   check(
-    'remote: http family → https://',
+    'a leftover SLAYZONE_MODE=local does not weaken a public address',
     hubUrlFromAddr('hub.example.com', 'http') === 'https://hub.example.com'
   )
-  process.env.SLAYZONE_MODE = 'REMOTE'
-  check('remote is case-insensitive', hubUrlFromAddr('h', 'http') === 'https://h')
-
-  // --- authority preserved verbatim (host + optional port) ---
-  process.env.SLAYZONE_MODE = 'remote'
-  check(
-    'host-only authority (implicit 443)',
-    hubUrlFromAddr('hub.example.com', 'ws', '/computers') === 'wss://hub.example.com/computers'
-  )
-  check('empty path default appends nothing', hubUrlFromAddr('h:2', 'http') === 'https://h:2')
-} finally {
   if (prev === undefined) delete process.env.SLAYZONE_MODE
   else process.env.SLAYZONE_MODE = prev
+}
+
+// --- isLoopbackAuthority ---
+check('isLoopbackAuthority: 127.0.0.1:1', isLoopbackAuthority('127.0.0.1:1'))
+check('isLoopbackAuthority: localhost', isLoopbackAuthority('localhost'))
+check('isLoopbackAuthority: [::1]:9', isLoopbackAuthority('[::1]:9'))
+check('isLoopbackAuthority: public name', !isLoopbackAuthority('hub.example.com:443'))
+check('isLoopbackAuthority: garbage → false', !isLoopbackAuthority('not a host'))
+
+// --- B9: assertLoopbackBind ---
+{
+  let threw = ''
+  try {
+    assertLoopbackBind('0.0.0.0')
+  } catch (e) {
+    threw = e instanceof Error ? e.message : String(e)
+  }
+  check(
+    'assertLoopbackBind refuses 0.0.0.0',
+    /SLAYZONE_SUPERVISED/.test(threw) && /0\.0\.0\.0/.test(threw),
+    threw
+  )
+  let threwWildcard6 = false
+  try {
+    assertLoopbackBind('::')
+  } catch {
+    threwWildcard6 = true
+  }
+  check('assertLoopbackBind refuses the ipv6 wildcard ::', threwWildcard6)
+  let ok = true
+  for (const h of ['127.0.0.1', 'localhost', '::1']) {
+    try {
+      assertLoopbackBind(h)
+    } catch {
+      ok = false
+    }
+  }
+  check('assertLoopbackBind accepts 127.0.0.1 / localhost / ::1', ok)
 }
 
 // --- isBareAuthority: the env-channel guard (no scheme, no path) ---
@@ -135,7 +222,7 @@ check('parse: reject empty', parseHubAddress('') === null)
 check('parse: reject undefined', parseHubAddress(undefined) === null)
 
 // --- isLoopbackComputerUrl: is a minted join token usable OFF the hub's box? ---
-// A hub in local mode always derives `ws://<loopback>:<port>/computers` for the URL
+// A hub with no public address derives `ws://<loopback>:<port>/computers` for the URL
 // it embeds in join tokens. That is correct for a co-located computer and useless
 // for any other machine — the computer would dial its OWN loopback. This predicate
 // is what lets the UI and the CLI say so instead of handing over a dead token.

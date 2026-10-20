@@ -41,7 +41,15 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -71,8 +79,10 @@ export interface ServiceUnitSpec {
    *
    * Supersedes {@link port}, which can only ever mean loopback. A REMOTE hub has to
    * bind wider than `127.0.0.1` to be reachable at all, and that is not
-   * expressible as a port number. Emitted verbatim as `SLAYZONE_HUB_ADDRESS`, so
-   * the value is exactly what the operator asked for. Wins when both are set.
+   * expressible as a port number. Emitted verbatim as `SLAYZONE_HUB_LISTEN_ADDRESS`
+   * (the hub's name for where it listens; `SLAYZONE_HUB_ADDRESS` is the DIAL-side
+   * name and a hub refuses to boot with it), so the value is exactly what the
+   * operator asked for. Wins when both are set.
    */
   address?: string
   /**
@@ -335,6 +345,24 @@ function xmlEscape(value: string): string {
 }
 
 /**
+ * Env keys of a unit that carry a SECRET, and so (a) make the unit file owner-only
+ * and (b) must survive a unit rewrite (`start`, `restart --upgrade`), which
+ * otherwise re-renders the unit from scratch.
+ *
+ * A hub that other machines can reach must be given `SLAYZONE_HUB_AUTH_SECRET` in
+ * its environment and never generates one onto its own disk, so for a hub run under
+ * a user service the unit IS where that environment lives.
+ */
+export const UNIT_SECRET_ENV_KEYS: readonly string[] = [
+  'SLAYZONE_HUB_AUTH_SECRET',
+  'SLAYZONE_HUB_SSO_CLIENT_SECRET'
+]
+
+function unitHoldsSecret(spec: ServiceUnitSpec): boolean {
+  return Object.keys(spec.env ?? {}).some((k) => UNIT_SECRET_ENV_KEYS.includes(k))
+}
+
+/**
  * The environment a supervised process needs. launchd hands an agent a nearly empty
  * env, so anything the process must see is pinned here rather than inherited.
  *
@@ -354,8 +382,8 @@ function unitEnv(spec: ServiceUnitSpec): Array<[string, string]> {
     // `address` wins over `port`: it is the only one that can name a non-loopback
     // bind, so letting `port` win would silently pin a remote hub to loopback and
     // make it unreachable. `port` keeps rendering the historical loopback form.
-    if (spec.address !== undefined) merged.SLAYZONE_HUB_ADDRESS = spec.address
-    else if (spec.port !== undefined) merged.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${spec.port}`
+    if (spec.address !== undefined) merged.SLAYZONE_HUB_LISTEN_ADDRESS = spec.address
+    else if (spec.port !== undefined) merged.SLAYZONE_HUB_LISTEN_ADDRESS = `127.0.0.1:${spec.port}`
   }
   // Caller-supplied last so it can set interpreter-level vars (ELECTRON_RUN_AS_NODE)
   // and, deliberately, override a default if it must.
@@ -465,7 +493,11 @@ export function writeUnit(
   const path = unitPath(spec.kind, spec.name, backend, unitDir)
   mkdirSync(unitDir, { recursive: true })
   const content = backend === 'launchd' ? renderLaunchdPlist(spec) : renderSystemdUnit(spec)
-  writeFileSync(path, content, { mode: 0o644 })
+  // A unit that pins a secret in its environment must not be world-readable.
+  writeFileSync(path, content, { mode: unitHoldsSecret(spec) ? 0o600 : 0o644 })
+  // writeFileSync applies `mode` only when it CREATES the file; a rewrite over an
+  // older world-readable unit must tighten it too.
+  if (unitHoldsSecret(spec)) chmodSync(path, 0o600)
   return path
 }
 
@@ -570,4 +602,56 @@ export function systemdUnitName(kind: ServiceKind, name: string): string {
 export function launchdLabel(kind: ServiceKind, name: string): string {
   assertValidServiceName(kind, name)
   return `${KINDS[kind].labelPrefix}${name}`
+}
+
+/**
+ * The environment pinned in an existing unit, as written by {@link writeUnit}.
+ * Empty when there is no unit or it cannot be read.
+ *
+ * Exists so a rewrite of a unit (`slay hub start`, `slay hub restart --upgrade`) can
+ * carry over the {@link UNIT_SECRET_ENV_KEYS} it pinned at `create` — a hub that other
+ * machines reach cannot boot without its auth secret, so dropping it on a restart
+ * would turn an upgrade into an outage.
+ */
+export function readUnitEnv(
+  kind: ServiceKind,
+  name: string,
+  backend: Exclude<ServiceBackend, 'none'>,
+  unitDir: string = defaultUnitDir(backend)
+): Record<string, string> {
+  let text: string
+  try {
+    text = readFileSync(unitPath(kind, name, backend, unitDir), 'utf8')
+  } catch {
+    return {}
+  }
+  const out: Record<string, string> = {}
+  if (backend === 'launchd') {
+    const re = /<key>([A-Za-z0-9_]+)<\/key>\s*<string>([^<]*)<\/string>/g
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      const value = m[2]!
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+      out[m[1]!] = value
+    }
+    return out
+  }
+  const re = /^Environment=([A-Za-z0-9_]+)=(.*)$/gm
+  for (let m = re.exec(text); m; m = re.exec(text)) out[m[1]!] = m[2]!
+  return out
+}
+
+/** The secret entries of {@link readUnitEnv} — what a rewrite must carry over. */
+export function readUnitSecrets(
+  kind: ServiceKind,
+  name: string,
+  backend: Exclude<ServiceBackend, 'none'>,
+  unitDir: string = defaultUnitDir(backend)
+): Record<string, string> {
+  const env = readUnitEnv(kind, name, backend, unitDir)
+  const out: Record<string, string> = {}
+  for (const key of UNIT_SECRET_ENV_KEYS) if (env[key] !== undefined) out[key] = env[key]
+  return out
 }

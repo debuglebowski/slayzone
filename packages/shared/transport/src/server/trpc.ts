@@ -14,9 +14,9 @@ export const mergeRouters = t.mergeRouters
 
 /**
  * Multi-hub auth gate. On a hub that enforces auth (`getAuthGate()` true — set
- * when the hub runs in remote mode, `SLAYZONE_MODE=remote`), a connection with no
- * verified principal is rejected UNAUTHORIZED. When the gate is off (local loopback /
- * non-authed remote — the default), this is a straight pass-through, so every
+ * when the hub requires login, `SLAYZONE_HUB_REQUIRE_LOGIN=1`), a connection with no
+ * verified principal is rejected UNAUTHORIZED. When the gate is off (login not
+ * required — the default, and the desktop app's hub), this is a straight pass-through, so every
  * existing procedure is byte-identical to the pre-auth server.
  *
  * The connection is still ACCEPTED at the socket level (see createContext) so

@@ -27,7 +27,6 @@ import { notifyApp } from '../src/db'
 
 const ENV_KEYS = [
   'SLAYZONE_HUB_ADDRESS',
-  'SLAYZONE_MODE',
   'SLAYZONE_HUB_TOKEN',
   'SLAYZONE_ROOT',
   'SLAYZONE_DEV'
@@ -149,26 +148,36 @@ await describe('resolveHubTarget precedence', () => {
     const dir = freshStateDir()
     setEnv({ SLAYZONE_ROOT: dir })
     writeHubConfig('http://file.example.com:1234', 'file-token')
-    // Authority only; local mode (default) composes http://.
+    // Authority only; the scheme follows the host (A1): not loopback → https://.
     setEnv({
       SLAYZONE_ROOT: dir,
       SLAYZONE_HUB_ADDRESS: 'env.example.com:9999'
     })
     const target = resolveHubTarget()
-    expect(target?.baseUrl).toBe('http://env.example.com:9999')
+    expect(target?.baseUrl).toBe('https://env.example.com:9999')
     expect(target?.token).toBeNull()
   })
 
-  test('env ADDRESS composes https:// in remote mode + env token', () => {
+  test('env ADDRESS composes https:// for a public host + env token, with no mode involved', () => {
     setEnv({
       SLAYZONE_ROOT: freshStateDir(),
       SLAYZONE_HUB_ADDRESS: 'env.example.com',
-      SLAYZONE_MODE: 'remote',
       SLAYZONE_HUB_TOKEN: 'env-token'
     })
     const target = resolveHubTarget()
     expect(target?.baseUrl).toBe('https://env.example.com')
     expect(target?.token).toBe('env-token')
+  })
+
+  test('env ADDRESS composes http:// for a loopback host (127.0.0.1, localhost, ::1)', () => {
+    for (const [addr, base] of [
+      ['127.0.0.1:51101', 'http://127.0.0.1:51101'],
+      ['localhost:51101', 'http://localhost:51101'],
+      ['[::1]:51101', 'http://[::1]:51101']
+    ] as const) {
+      setEnv({ SLAYZONE_ROOT: freshStateDir(), SLAYZONE_HUB_ADDRESS: addr })
+      expect(resolveHubTarget()?.baseUrl).toBe(base)
+    }
   })
 
   test('file used when env URL unset; file token applies', () => {

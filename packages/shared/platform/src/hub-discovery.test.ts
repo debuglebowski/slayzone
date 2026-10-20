@@ -106,7 +106,14 @@ const HUB_A = {
   root: '/tmp/hubs/alpha',
   dbPath: '/tmp/hubs/alpha/storage/slayzone.sqlite',
   pid: 111,
-  mode: 'local',
+  authRequired: true,
+  switches: {
+    requireLogin: true,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: false,
+    enableIntegrations: false
+  },
   supervised: false,
   computersConnected: 2,
   uptimeMs: 90_000,
@@ -129,11 +136,28 @@ async function main(): Promise<void> {
       assertEq(h.root, '/tmp/hubs/alpha', 'root')
       assertEq(h.dbPath, HUB_A.dbPath, 'dbPath')
       assertEq(h.pid, 111, 'pid')
-      assertEq(h.mode, 'local', 'mode')
+      assertEq(h.authRequired, true, 'authRequired')
+      assertEq(h.switches?.requireLogin, true, 'switch requireLogin')
+      assertEq(h.switches?.enableProcesses, false, 'switch enableProcesses')
+      assertEq(h.switches?.enablePassword, true, 'switch enablePassword')
       assertEq(h.supervised, false, 'supervised')
       assertEq(h.computersConnected, 2, 'computersConnected')
       assertEq(h.uptimeMs, 90_000, 'uptimeMs')
       assertEq(h.buildId, HUB_A.buildId, 'buildId')
+    })
+
+    await test('an older hub without authRequired/switches reads as login-off, switches unknown', async () => {
+      const { authRequired: _a, switches: _s, ...older } = HUB_A
+      const port = await fakeHub(older)
+      const hubs = await discoverHubs({ range: { start: port, end: port } })
+      assertEq(hubs[0]?.authRequired, false, 'absent authRequired → false')
+      assertEq(hubs[0]?.switches, null, 'absent switches → null, not invented defaults')
+    })
+
+    await test('a malformed switches object reads as unknown', async () => {
+      const port = await fakeHub({ ...HUB_A, switches: { requireLogin: 'yes' } })
+      const hubs = await discoverHubs({ range: { start: port, end: port } })
+      assertEq(hubs[0]?.switches, null, 'non-boolean switch → null')
     })
 
     await test('reports the port it PROBED, ignoring a body that claims another', async () => {

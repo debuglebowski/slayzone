@@ -15,9 +15,10 @@ import {
  * same `__db` shape and forwards each call here — the specs stay byte-identical
  * and the host still holds no connection.
  *
- * GATING IS THE WHOLE DESIGN. This is arbitrary SQL on a loopback port that, in
- * remote mode, is an internet-facing listener. It is registered only when
- * `PLAYWRIGHT=1`, and `isDevSqlEnabled()` is exported so a test can assert the
+ * GATING IS THE WHOLE DESIGN. This is arbitrary SQL on a loopback port that, on a hub
+ * other machines can reach, is a network-facing listener. It is registered only when
+ * `PLAYWRIGHT=1` — and the hub refuses to boot with `PLAYWRIGHT=1` when it is
+ * reachable (rule B10) — and `isDevSqlEnabled()` is exported so a test can assert the
  * route is ABSENT in a normal boot — a gate nobody checks is a gate that
  * eventually stops working.
  */
