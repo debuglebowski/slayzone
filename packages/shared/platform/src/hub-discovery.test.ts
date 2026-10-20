@@ -43,6 +43,17 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 type Closer = () => Promise<void>
 const cleanups: Closer[] = []
 
+/**
+ * Close every fake hub opened so far. A test that SWEEPS a port range between two
+ * fresh ephemeral ports would otherwise also find the hubs earlier tests left
+ * listening (they close at the very end), and count them: the OS picks ephemeral
+ * ports in no promised order, so on Linux the range between two new ports can span
+ * old ones.
+ */
+async function closeLeftovers(): Promise<void> {
+  for (const c of cleanups.splice(0)) await c()
+}
+
 /** A hub-shaped /health responder on an OS-assigned port. */
 async function fakeHub(body: Record<string, unknown>): Promise<number> {
   const srv = http.createServer((req, res) => {
@@ -170,6 +181,7 @@ async function main(): Promise<void> {
     })
 
     await test('finds several hubs at once and sorts them stably', async () => {
+      await closeLeftovers()
       const p1 = await fakeHub({ ...HUB_A, name: 'zulu' })
       const p2 = await fakeHub({ ...HUB_A, name: 'bravo' })
       const lo = Math.min(p1, p2)
@@ -188,6 +200,7 @@ async function main(): Promise<void> {
     })
 
     await test('ignores a non-SlayZone service on a hub port', async () => {
+      await closeLeftovers()
       const html = await fakeNonHub((res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end('<html>not a hub</html>')
