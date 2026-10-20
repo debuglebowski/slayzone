@@ -22,6 +22,7 @@
  */
 
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { HUB_ALLOWED_WEB_ORIGINS_ENV } from '@slayzone/platform/hub-switches'
 
 /** Origins that only ever belong to a local, first-party client. */
 const LOCAL_CLIENT_PROTOCOLS = new Set(['chrome:', 'chrome-extension:', 'devtools:', 'file:'])
@@ -155,7 +156,7 @@ export function resolveAllowedWebOrigins(env: NodeJS.ProcessEnv = process.env): 
     if (derived) origins.add(derived)
   }
 
-  for (const raw of (env.SLAYZONE_HUB_ALLOWED_WEB_ORIGINS ?? '').split(',')) {
+  for (const raw of (env[HUB_ALLOWED_WEB_ORIGINS_ENV] ?? '').split(',')) {
     const normalized = normalizeOrigin(raw.trim())
     if (normalized) origins.add(normalized)
   }

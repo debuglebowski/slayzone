@@ -32,6 +32,8 @@ export {
   HUB_SSO_ENV,
   HUB_ADDRESS_ENV,
   LEGACY_HUB_LISTEN_ENV,
+  HUB_ALLOWED_WEB_ORIGINS_ENV,
+  HUB_PROCESS_ENV,
   HubSwitchValueError,
   parseSwitchValue,
   resolveHubSwitches,

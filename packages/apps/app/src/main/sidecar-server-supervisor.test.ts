@@ -26,6 +26,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
 import {
   startSidecarServer,
   type SidecarServerHandle,
@@ -313,6 +314,60 @@ test('the child gets the hub env: its LISTEN address, login off, never the dial-
   }
 })
 
+test('hub-side config the app inherited never reaches the child hub', async () => {
+  const dir = mkTmp()
+  const dump = path.join(dir, 'child-env.json')
+  // Every variable that configures a hub process, set to something that would break
+  // the desktop's hub if it got through: a public address makes a login-off hub
+  // "reachable" (B1 refuses), a non-0/1 switch is B4, the old listen name is B5, and
+  // an inherited auth secret / SSO secret / origin list silently change who gets in.
+  const inheritedHubConfig: Record<string, string> = {
+    SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+    SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:9',
+    SLAYZONE_HUB_ADDRESS: 'hub.example.com:443',
+    SLAYZONE_HUB_REQUIRE_LOGIN: 'sometimes',
+    SLAYZONE_HUB_ENABLE_PASSWORD: 'yes',
+    SLAYZONE_HUB_ENABLE_SSO: '1',
+    SLAYZONE_HUB_ENABLE_PROCESSES: 'maybe',
+    SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'true',
+    SLAYZONE_HUB_SSO_TENANT_ID: 'inherited-tenant',
+    SLAYZONE_HUB_SSO_CLIENT_ID: 'inherited-client',
+    SLAYZONE_HUB_SSO_CLIENT_SECRET: 'inherited-sso-secret',
+    SLAYZONE_HUB_AUTH_SECRET: 'inherited-auth-secret',
+    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com'
+  }
+  // The list under test must be the WHOLE hub-side surface, not what this test
+  // remembers: a hub variable added to the platform list without a case here is a
+  // variable this test no longer proves is stripped.
+  for (const name of HUB_PROCESS_ENV) {
+    assert(name in inheritedHubConfig, `${name} is in HUB_PROCESS_ENV but not exercised here`)
+  }
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_ENV_DUMP_FILE: dump, ...inheritedHubConfig },
+    { healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    const env = JSON.parse(fs.readFileSync(dump, 'utf8')) as Record<string, string | undefined>
+    for (const name of HUB_PROCESS_ENV) {
+      if (name === 'SLAYZONE_HUB_LISTEN_ADDRESS' || name === 'SLAYZONE_HUB_REQUIRE_LOGIN') continue
+      assertEq(env[name], undefined, `inherited ${name} was stripped`)
+    }
+    // The two the app sets itself are its own values, not what was inherited.
+    assertEq(
+      env.SLAYZONE_HUB_LISTEN_ADDRESS,
+      `127.0.0.1:${handle.getPort()}`,
+      'listen address is the app’s own'
+    )
+    assertEq(env.SLAYZONE_HUB_REQUIRE_LOGIN, '0', 'login switch is the app’s own')
+    // Unrelated environment still flows through.
+    assertEq(env.SLAYZONE_SUPERVISED, '1', 'still marked as started by the desktop app')
+  } finally {
+    await handle.stop()
+  }
+})
+
 test('repeated crash → exponential-backoff restart → permanent failure', async () => {
   const dir = mkTmp()
   const backoffMs = [300, 600, 1000, 1500, 2000]
@@ -532,18 +587,20 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     }, 15_000)
     seeder.on('exit', () => clearTimeout(to))
   })
-  // A task terminal's dial-side SLAYZONE_HUB_ADDRESS must not reach a hub (B5).
+  // What this process inherited about ANOTHER hub (a dial-side SLAYZONE_HUB_ADDRESS
+  // from a task terminal, a stray switch) must not reach this one — the supervisor
+  // strips the same list.
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     SLAYZONE_SUPERVISED: '1',
-    SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
-    SLAYZONE_HUB_REQUIRE_LOGIN: '0',
     // DB path DERIVES from ROOT (there is no path handoff var); the seeder
     // above bootstrapped <dir>/storage/slayzone.sqlite, which this child opens.
     SLAYZONE_ROOT: dir
   }
-  delete childEnv.SLAYZONE_HUB_ADDRESS
+  for (const name of HUB_PROCESS_ENV) delete childEnv[name]
+  childEnv.SLAYZONE_HUB_LISTEN_ADDRESS = '127.0.0.1:0'
+  childEnv.SLAYZONE_HUB_REQUIRE_LOGIN = '0'
   const child = spawn(process.execPath, [binJs], {
     env: childEnv,
     stdio: ['pipe', 'pipe', 'pipe']
