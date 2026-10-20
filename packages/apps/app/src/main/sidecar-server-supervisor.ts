@@ -3,6 +3,7 @@ import http from 'node:http'
 import net from 'node:net'
 import { readFileSync, watchFile, unwatchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
 
 /**
  * Supervises the @slayzone/hub side-car subprocess.
@@ -311,9 +312,17 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         port = freePort
         bootDeadline = Date.now() + healthBootTimeoutMs
 
+        // Start from a hub-clean env: whatever hub-side config this app inherited
+        // (launched from a task terminal, a shell profile) describes ANOTHER hub, and a
+        // stray public address / switch / auth secret / dial-side address would make
+        // this one refuse to boot (B1, B4, B5) or change who can sign in. The app's own
+        // values are set below, after the strip.
+        const inherited: NodeJS.ProcessEnv = { ...opts.env }
+        for (const name of HUB_PROCESS_ENV) delete inherited[name]
+
         // stdin is 'pipe' so the child detects parent death via stdin close.
         const childEnv: NodeJS.ProcessEnv = {
-          ...opts.env,
+          ...inherited,
           ELECTRON_RUN_AS_NODE: '1',
           SLAYZONE_SUPERVISED: '1',
           // Where the sidecar hub LISTENS: one var, `host:port`, no scheme. This is
@@ -326,9 +335,6 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           // on loopback.
           SLAYZONE_HUB_REQUIRE_LOGIN: '0'
         }
-        // An inherited dial-side address (this app launched from a task terminal)
-        // would trip the hub's rename guard (B5) — it is not meant for the hub.
-        delete childEnv.SLAYZONE_HUB_ADDRESS
         const proc = spawn(opts.execPath, [opts.scriptPath], {
           env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe']

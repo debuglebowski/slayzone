@@ -71,6 +71,28 @@ export const HUB_ADDRESS_ENV = {
 /** The old hub-side name of {@link HUB_ADDRESS_ENV.listen}. */
 export const LEGACY_HUB_LISTEN_ENV = 'SLAYZONE_HUB_ADDRESS'
 
+/** Extra browser origins the hub accepts on its websocket (comma-separated). */
+export const HUB_ALLOWED_WEB_ORIGINS_ENV = 'SLAYZONE_HUB_ALLOWED_WEB_ORIGINS'
+
+/**
+ * Every variable that configures a hub PROCESS. A parent that spawns a hub with its
+ * own values (the desktop app's sidecar) must clear all of these first: whatever it
+ * inherited from wherever IT was launched (a task terminal, a shell profile, a CI
+ * job) would otherwise reach the hub, and a stray one is not harmless — an inherited
+ * public address makes the hub "reachable" with login off (B1 refuses), an inherited
+ * non-0/1 switch trips B4, an inherited auth secret silently changes who can sign in.
+ *
+ * Includes {@link LEGACY_HUB_LISTEN_ENV}: on a hub it is the retired listen name (B5),
+ * while its dial-side meaning belongs to a computer / `slay`, never to a hub.
+ */
+export const HUB_PROCESS_ENV: readonly string[] = [
+  ...Object.values(HUB_SWITCH_ENV),
+  ...Object.values(HUB_SSO_ENV),
+  ...Object.values(HUB_ADDRESS_ENV),
+  LEGACY_HUB_LISTEN_ENV,
+  HUB_ALLOWED_WEB_ORIGINS_ENV
+]
+
 /** Thrown for a malformed switch value (rule B4). */
 export class HubSwitchValueError extends Error {
   constructor(

@@ -4,7 +4,10 @@
  *
  * Run with: npx tsx packages/shared/platform/src/hub-switches.test.ts
  */
+import { ENV_MANIFEST } from './env-manifest'
 import {
+  HUB_ALLOWED_WEB_ORIGINS_ENV,
+  HUB_PROCESS_ENV,
   HUB_SWITCH_DEFAULTS,
   HUB_SWITCH_ENV,
   HubSwitchValueError,
@@ -147,6 +150,48 @@ check(
   check(
     'sso: all three read',
     full.tenantId === 't' && full.clientId === 'c' && full.clientSecret === 's'
+  )
+}
+
+// --- HUB_PROCESS_ENV: everything a parent must clear before spawning a hub ---
+{
+  const list = new Set(HUB_PROCESS_ENV)
+  check('process env: no duplicates', list.size === HUB_PROCESS_ENV.length)
+  check(
+    'process env: every switch, SSO var and address var',
+    [
+      ...Object.values(HUB_SWITCH_ENV),
+      'SLAYZONE_HUB_SSO_TENANT_ID',
+      'SLAYZONE_HUB_SSO_CLIENT_ID',
+      'SLAYZONE_HUB_SSO_CLIENT_SECRET',
+      'SLAYZONE_HUB_LISTEN_ADDRESS',
+      'SLAYZONE_HUB_PUBLIC_ADDRESS',
+      'SLAYZONE_HUB_AUTH_SECRET'
+    ].every((n) => list.has(n))
+  )
+  check(
+    'process env: the retired/dial-side address and the web-origin list',
+    list.has('SLAYZONE_HUB_ADDRESS') && list.has(HUB_ALLOWED_WEB_ORIGINS_ENV)
+  )
+  // Drift guard: a hub-side SLAYZONE_HUB_* var added to the manifest but not to the
+  // list would slip past every parent that strips with it. The few that are NOT hub
+  // process config are named here, with the reason.
+  const NOT_HUB_PROCESS_CONFIG: Record<string, string> = {
+    SLAYZONE_HUB_TOKEN: 'a bearer a client PRESENTS to a hub, not config of the hub',
+    SLAYZONE_HUB_JOIN_TOKEN: 'a computer redeems it; the hub only mints it',
+    SLAYZONE_HUB_NAME: 'identifies the hub to operators; set per service unit'
+  }
+  const missing = Object.keys(ENV_MANIFEST).filter(
+    (k) => k.startsWith('SLAYZONE_HUB_') && !list.has(k) && !(k in NOT_HUB_PROCESS_CONFIG)
+  )
+  check(
+    'process env: every manifested SLAYZONE_HUB_* var is in the list or named as an exception',
+    missing.length === 0,
+    `missing: ${missing.join(', ')}`
+  )
+  check(
+    'process env: the exceptions really are in the manifest (no stale allowance)',
+    Object.keys(NOT_HUB_PROCESS_CONFIG).every((k) => k in ENV_MANIFEST)
   )
 }
 
