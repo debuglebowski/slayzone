@@ -61,18 +61,21 @@ mkdir -p "$RUNTIME_DIR"
 
 SIDECAR_PID=""
 if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
-  # Force the bind address the renderer's baked-in default expects (window-api-shim
+  # Force the listen address the renderer's baked-in default expects (window-api-shim
   # server-url.ts → ws://127.0.0.1:8766/trpc). We deliberately do NOT honor an
-  # inherited SLAYZONE_HUB_ADDRESS: the renderer hardcodes the URL and has no
-  # override channel yet, so the sidecar MUST match it. A leaked value — e.g. from
-  # inside a running supervised SlayZone process, which sets its own sidecar's
-  # address — would otherwise make this bind the wrong port (and collide:
-  # EADDRINUSE), leaving the renderer with nothing to connect to.
+  # inherited address: the renderer hardcodes the URL and has no override channel
+  # yet, so the sidecar MUST match it. A leaked value — e.g. from inside a running
+  # supervised SlayZone process, which sets its own sidecar's address — would
+  # otherwise make this bind the wrong port (and collide: EADDRINUSE), leaving the
+  # renderer with nothing to connect to.
+  # The hub reads SLAYZONE_HUB_LISTEN_ADDRESS. SLAYZONE_HUB_ADDRESS is the DIAL-side
+  # name (a task terminal exports it), and a hub refuses to boot when it sees one, so
+  # it is unset for the sidecar below.
   # Relax once the --slayzone-server-url flag is wired through the C++ shell.
   HUB_HOST=127.0.0.1
   HUB_PORT=8766
-  SLAYZONE_HUB_ADDRESS="$HUB_HOST:$HUB_PORT"
-  export SLAYZONE_HUB_ADDRESS
+  SLAYZONE_HUB_LISTEN_ADDRESS="$HUB_HOST:$HUB_PORT"
+  export SLAYZONE_HUB_LISTEN_ADDRESS
   SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
   ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
   SERVER_BIN="$REPO_ROOT/packages/apps/hub/dist/bin.cjs"
@@ -90,7 +93,7 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   # the same DB.
   (
     cd "$REPO_ROOT"
-    exec env -u SLAYZONE_SUPERVISED ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" "$SERVER_BIN"
+    exec env -u SLAYZONE_SUPERVISED -u SLAYZONE_HUB_ADDRESS ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" "$SERVER_BIN"
   ) </dev/null >"$SIDECAR_LOG" 2>&1 &
   SIDECAR_PID=$!
   trap 'kill '"$SIDECAR_PID"' 2>/dev/null || true' EXIT
