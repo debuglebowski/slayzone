@@ -241,6 +241,31 @@ describe('loadComputerConfig', () => {
     expect(() => loadComputerConfig({ [ENV_VARS.joinToken]: token })).toThrow(/wss:\/\//)
   })
 
+  it('rejects a plaintext ws:// url in ANY hubUrls entry, not only hubUrl', () => {
+    // `hubUrls` wins over `hubUrl` at dial time, so the loopback `hubUrl` here would
+    // otherwise let the off-box ws:// entry through.
+    expect(() =>
+      loadComputerConfig(
+        {},
+        {
+          hubUrl: 'ws://127.0.0.1:9000/computers',
+          hubUrls: ['wss://hub.example/computers', 'ws://10.0.0.5:51100/computers']
+        }
+      )
+    ).toThrow(/only allowed for a hub on this machine.*10\.0\.0\.5/)
+  })
+
+  it('allows hubUrls mixing wss:// with loopback ws://', () => {
+    const config = loadComputerConfig(
+      {},
+      {
+        hubUrl: 'wss://hub.example/computers',
+        hubUrls: ['wss://hub.example/computers', 'ws://localhost:9000/computers']
+      }
+    )
+    expect(config.hubUrls).toEqual(['wss://hub.example/computers', 'ws://localhost:9000/computers'])
+  })
+
   it('allows ws:// on loopback hosts (127.0.0.1, localhost, ::1)', () => {
     for (const host of ['127.0.0.1:9000', 'localhost:9000', '[::1]:9000']) {
       const config = loadComputerConfig({}, { hubUrl: `ws://${host}/computers` })
@@ -467,9 +492,9 @@ describe('effectiveHubUrls', () => {
   it('uses the list when set, de-duplicated', () => {
     const config = loadComputerConfig(
       { SLAYZONE_HUB_ADDRESS: '127.0.0.1:8788', SLAYZONE_HUB_JOIN_TOKEN: 't' },
-      { hubUrls: ['ws://a/computers', 'ws://b/computers', 'ws://a/computers'] }
+      { hubUrls: ['wss://a/computers', 'wss://b/computers', 'wss://a/computers'] }
     )
     // Two dialers for one hub would race over a single credential entry.
-    expect(effectiveHubUrls(config)).toEqual(['ws://a/computers', 'ws://b/computers'])
+    expect(effectiveHubUrls(config)).toEqual(['wss://a/computers', 'wss://b/computers'])
   })
 })
