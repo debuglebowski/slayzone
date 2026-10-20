@@ -4,9 +4,9 @@
  * THE GAP THIS CLOSES: `setAuthGate` gated the tRPC router, but the SAME muxed
  * listener also serves `/api/*` (the whole `slay` CLI surface: tasks, artifacts,
  * pty write/submit, browser eval) and `/mcp` — and `createMcpRestApp` mounts
- * nothing but `express.json()`. Under `SLAYZONE_MODE=remote` that listener is the
- * internet-facing https one, so every REST route was reachable unauthenticated
- * while the `slay` CLI was already sending an `Authorization: Bearer` header
+ * nothing but `express.json()`. On a hub that requires login that listener is the
+ * one clients reach through the front end, so every REST route was reachable
+ * unauthenticated while the `slay` CLI was already sending an `Authorization: Bearer` header
  * (from `SLAYZONE_HUB_TOKEN` / `cli-hub-target.json`) that nobody verified.
  *
  * Decisions under test (extracted from `startServer` for the same reason
@@ -68,7 +68,7 @@ const WAN = '203.0.113.7'
 
 /** `restAuthAction` for an ENFORCING hub, reached from the public internet. */
 function remoteWan(url: string): string {
-  return restAuthAction({ hubAuthRequired: true, url, remoteAddress: WAN })
+  return restAuthAction({ hubAuthRequired: true, url })
 }
 
 interface GateHarness {
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   console.log('\nhub REST/MCP bearer gate')
   console.log('─'.repeat(48))
 
-  // ── auth OFF (local / supervised / default) — must be TOTALLY inert ────────
+  // ── login NOT required (the default / the desktop app's hub) — must be TOTALLY inert ────────
   await test('auth OFF: every path allows, even the full-power ones', () => {
     for (const url of [
       '/api/tasks',
@@ -144,11 +144,7 @@ async function main(): Promise<void> {
       '/mcp',
       '/api/artifacts/t1/export/pdf'
     ]) {
-      assertEq(
-        restAuthAction({ hubAuthRequired: false, url, remoteAddress: WAN }),
-        'allow',
-        `gate off → allow ${url}`
-      )
+      assertEq(restAuthAction({ hubAuthRequired: false, url }), 'allow', `gate off → allow ${url}`)
     }
   })
 
@@ -260,36 +256,22 @@ async function main(): Promise<void> {
     assertEq(remoteWan('/api/hub/users?x=1'), 'allow', 'query string does not defeat the match')
   })
 
-  // SUPERVISED-ONLY. On a supervised hub the bind is asserted loopback and the
-  // Electron host owns the process, so a co-located caller sits inside a boundary
-  // the OS already drew — that path stays byte-identical. On a standalone hub this
-  // was the real fail-open: with auth required on every non-supervised hub, an
-  // unconditional loopback pass made the gate inert exactly where it began to matter.
-  await test('loopback callers bypass the gate ONLY on a supervised hub', () => {
-    for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '127.0.0.53']) {
-      assertEq(
-        restAuthAction({
-          supervised: true,
-          hubAuthRequired: true,
-          url: '/api/tasks',
-          remoteAddress: addr
-        }),
-        'allow',
-        `loopback ${addr} bypasses when supervised`
-      )
-      assertEq(
-        restAuthAction({ hubAuthRequired: true, url: '/api/tasks', remoteAddress: addr }),
-        'verify',
-        `loopback ${addr} must present a bearer on a standalone hub`
-      )
-    }
-  })
-
-  await test('an UNKNOWN peer address fails CLOSED (verify, not allow)', () => {
+  // NO loopback exemption. The gate used to wave through a loopback peer on a
+  // supervised hub, but that branch was unreachable (a supervised hub has login off,
+  // so it returned 'allow' before getting there) — and a peer-address pass is wrong
+  // exactly where login matters: a same-box reverse proxy makes every off-box
+  // request arrive from 127.0.0.1. A caller on this machine presents a bearer.
+  await test('there is no loopback exemption: the decision depends only on the hub and the url', () => {
+    // restAuthAction takes no peer address at all, so none can influence it.
     assertEq(
-      restAuthAction({ hubAuthRequired: true, url: '/api/tasks', remoteAddress: undefined }),
+      restAuthAction({ hubAuthRequired: true, url: '/api/tasks' }),
       'verify',
-      'no remoteAddress → treated as off-box'
+      'a login-required hub verifies a guarded route whoever is calling'
+    )
+    assertEq(
+      restAuthAction({ hubAuthRequired: false, url: '/api/tasks' }),
+      'allow',
+      'a login-off hub never verifies'
     )
   })
 
@@ -314,7 +296,7 @@ async function main(): Promise<void> {
 
   await test('a missing url fails closed', () => {
     assertEq(
-      restAuthAction({ hubAuthRequired: true, url: undefined, remoteAddress: WAN }),
+      restAuthAction({ hubAuthRequired: true, url: undefined }),
       'verify',
       'undefined url → verify'
     )
@@ -535,30 +517,14 @@ async function main(): Promise<void> {
       }
     })
 
-    await test('withRestAuth: a real loopback peer is allowed with no bearer when supervised', async () => {
-      // The peer address is genuinely 127.0.0.1. Supervised, so the bypass
-      // applies — this is the path the desktop host, the supervised computer and
-      // in-task `slay` take, and it must stay byte-identical for them.
+    await test('withRestAuth: a real loopback peer must authenticate on a login-required hub', async () => {
+      // The peer address is genuinely 127.0.0.1. SLAYZONE_SUPERVISED must not matter:
+      // only the login switch (here, `required`) decides.
       const prev = process.env.SLAYZONE_SUPERVISED
       process.env.SLAYZONE_SUPERVISED = '1'
       const h = await mountGate({ required: true, auth, forceOffBox: false })
       try {
-        const res = await h.get('/api/tasks')
-        assertEq(res.status, 200, 'supervised loopback bypasses the gate')
-        assertEq(res.reached, true, 'inner handler ran')
-      } finally {
-        await h.close()
-        if (prev === undefined) delete process.env.SLAYZONE_SUPERVISED
-        else process.env.SLAYZONE_SUPERVISED = prev
-      }
-    })
-
-    await test('withRestAuth: a real loopback peer on a STANDALONE hub must authenticate', async () => {
-      const prev = process.env.SLAYZONE_SUPERVISED
-      delete process.env.SLAYZONE_SUPERVISED
-      const h = await mountGate({ required: true, auth, forceOffBox: false })
-      try {
-        assertEq((await h.get('/api/tasks')).status, 401, 'no bearer is refused')
+        assertEq((await h.get('/api/tasks')).status, 401, 'no bearer is refused, supervised or not')
         assertEq(
           (await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })).status,
           200,
@@ -566,7 +532,8 @@ async function main(): Promise<void> {
         )
       } finally {
         await h.close()
-        if (prev !== undefined) process.env.SLAYZONE_SUPERVISED = prev
+        if (prev === undefined) delete process.env.SLAYZONE_SUPERVISED
+        else process.env.SLAYZONE_SUPERVISED = prev
       }
     })
 

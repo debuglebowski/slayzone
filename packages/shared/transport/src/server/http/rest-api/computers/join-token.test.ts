@@ -40,10 +40,9 @@ import type { RestApiDeps } from '../types.js'
 
 const h = await createTestHarness()
 
-/** A bound computer listener (computer ON, url + fingerprint present). */
+/** A bound computer listener (computer ON, url present). */
 const boundComputers = {
-  getHubUrl: () => 'wss://127.0.0.1:54321/computers',
-  getCertFingerprint: () => 'abcdef0123456789'
+  getHubUrl: () => 'wss://127.0.0.1:54321/computers'
 }
 
 function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['restAuth']) {
@@ -72,14 +71,15 @@ await describe('POST /api/computers/join-token', () => {
       const payload = decodeJoinToken(res.body.token)
       expect(payload).not.toBeNull()
       expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/computers')
-      expect(payload!.certFingerprint).toBe('abcdef0123456789')
+      // The hub presents no certificate of its own, so the token carries no pin.
+      expect(payload!.certFingerprint).toBe('')
     } finally {
       await rest.close()
     }
   })
 
   test('computer ON but listener not yet bound (null url): 503', async () => {
-    const rest = await mount({ getHubUrl: () => null, getCertFingerprint: () => null })
+    const rest = await mount({ getHubUrl: () => null })
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(503)

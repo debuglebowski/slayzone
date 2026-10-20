@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createServer as createHttpsServer } from 'node:https'
 import { join } from 'node:path'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
@@ -13,21 +12,16 @@ import {
 } from '@slayzone/transport/server'
 import { beginTerminalShutdown } from '@slayzone/terminal/server'
 import { createAuthExpressApp } from '@slayzone/hub-auth/server'
-import { loadOrCreateHubIdentity } from '@slayzone/hub-identity/server'
 import {
   bindInHubPortBlock,
   ensureDataRoot,
   getServerHost,
   getSlayzoneHomeDir,
-  getTrpcPort,
-  getSlayzoneMode,
-  isRemoteMode,
-  assertModeHostConsistency,
-  assertLoopbackBind,
-  LOOPBACK_HOSTS
+  getTrpcPort
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
+import { assertAuthLoaded, assertHubBootRules } from './boot-rules.js'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
@@ -59,58 +53,33 @@ const WEB_ROOT = join(__dirname, '..', 'dist', 'web')
 
 export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHandle> {
   const host = cfg.host ?? getServerHost()
+  const supervised = process.env.SLAYZONE_SUPERVISED === '1'
+
+  // Every rule that refuses to start the hub runs HERE, before it creates its data
+  // directory, opens its database or binds a port — see boot-rules.ts for the
+  // rules (B1–B14) and the reasoning behind each. A refusal throws a message that
+  // names the variable to change.
+  //
+  // `SLAYZONE_SUPERVISED` keeps only the meaning "started by the desktop app" (hub
+  // name, restore allowed, no prompts, no config file, listens on loopback). It no
+  // longer decides anything about login: that is `SLAYZONE_HUB_REQUIRE_LOGIN`, which
+  // the desktop app sets to 0 for its own hub.
+  const boot = assertHubBootRules({
+    env: process.env,
+    host,
+    supervised,
+    devSqlEnabled: isDevSqlEnabled()
+  })
+  const { switches } = boot
+
   const dataRoot = cfg.storeDir ?? ensureDataRoot()
   const log = createLogger(dataRoot)
 
-  const supervised = process.env.SLAYZONE_SUPERVISED === '1'
-  // SLAYZONE_MODE hardening. Supervised is always local/loopback (the Electron
-  // host owns it), so the mode/bind guard applies to standalone only: refuse to
-  // boot an exposed-but-unhardened hub (mode=local + non-loopback bind).
-  if (supervised) {
-    // Supervised is now the only thing that turns client auth off, which makes it
-    // a security boundary rather than a convenience flag. It must therefore be
-    // unable to expose an unauthenticated hub off-box.
-    assertLoopbackBind(host)
-  }
-  // `/api/dev/sql` is arbitrary SQL against the live database, enabled by an
-  // INHERITED env var (`PLAYWRIGHT=1`) that no manifest strips — so it arrives by
-  // accident, not by intent. Refuse to boot when it is on AND this listener is
-  // reachable off-box; that pairing is a remote-code-execution primitive nobody
-  // asked for.
-  //
-  // Keyed on the BIND, not on `supervised`: e2e legitimately spawns STANDALONE
-  // hubs that inherit `PLAYWRIGHT=1` (their `cleanEnv` strips only `ELECTRON_*`
-  // and `SLAYZONE_*` — see e2e/computers/112-multi-hub-federation.spec.ts), and
-  // those bind 127.0.0.1. A loopback-bound hub is not exposed, so it stays
-  // allowed; `handleDevSql` independently requires a loopback PEER, which is what
-  // actually contains it. What this rejects is the shape that cannot be
-  // defensible: arbitrary SQL on a listener the network can reach.
-  if (isDevSqlEnabled() && !LOOPBACK_HOSTS.has(host)) {
-    throw new Error(
-      `[slayzone] PLAYWRIGHT=1 enables the raw-SQL dev endpoint and this hub binds ${host}, ` +
-        'which is reachable off-box. Unset PLAYWRIGHT or bind loopback — refusing to ' +
-        'boot a hub with arbitrary SQL exposed to the network.'
-    )
-  }
-  if (!supervised) {
-    assertModeHostConsistency(getSlayzoneMode(), host)
-    // Remote computers reach this hub's MCP/hook callbacks via
-    // SLAYZONE_HUB_PUBLIC_ADDRESS; it can't be auto-derived (the hub can't know its
-    // own external address, which in a proxy/NAT deployment differs from the address
-    // it binds). In remote mode a missing/blank value would silently degrade every
-    // remote agent to an unreachable loopback target — fail loud at boot instead.
-    if (isRemoteMode() && !process.env.SLAYZONE_HUB_PUBLIC_ADDRESS?.trim()) {
-      throw new Error(
-        '[slayzone] SLAYZONE_MODE=remote requires SLAYZONE_HUB_PUBLIC_ADDRESS ' +
-          '(the externally-reachable hub address, host[:port], for remote computers) — ' +
-          'set it or use SLAYZONE_MODE=local.'
-      )
-    }
-  }
   const dbPath = getDatabasePathFromEnv()
-  // The hub owns the schema in EVERY mode. `supervised` still gates the sidecar
-  // socket and the mode/bind hardening above — but not this: a second migrator in
-  // the Electron host is exactly the two-writers-one-file split being removed.
+  // The hub owns the schema however it was started. `supervised` still gates the
+  // sidecar socket and the loopback-bind rule above — but not this: a second
+  // migrator in the Electron host is exactly the two-writers-one-file split being
+  // removed.
   // Migrations are user_version-gated and individually atomic, so this is a no-op
   // against an already-current store.
   const db = cfg.db ?? (await openServerDatabase())
@@ -124,7 +93,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Populate every transport registry BEFORE accepting connections, so the
   // first procedure call can't hit an uninitialized dep.
-  const composition = composeServer({ db, dataRoot, standalone: !supervised, diagnosticsDb })
+  const composition = composeServer({
+    db,
+    dataRoot,
+    standalone: !supervised,
+    requireLogin: switches.requireLogin,
+    diagnosticsDb
+  })
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
 
@@ -142,57 +117,36 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
-  // Hub TLS identity (creates <dataRoot>/identity/ on first run). Its
-  // `fingerprintSha256Hex` is fed to the computers registry so `mintJoinToken` can
-  // pin it in a join token, AND its key/cert terminate TLS on the SEPARATE https
-  // `/computers` listener stood up below. Cert-pinning is enforced end-to-end: the
-  // hub presents this leaf, the computer pins its fingerprint (from the join token)
-  // before sending any computer frame (see hub-dialer verifyPinnedCert). Loaded
-  // whenever the gateway came up (i.e. always, barring an init failure).
-  //
-  // The /computers listener is its OWN https server on its OWN port — the shared HTTP
-  // server (/trpc + /health + /mcp + /api + REST-proxy) stays plain http, so the
-  // renderer / CLI / e2e loopback assumptions are unchanged; isolating the computer
-  // link onto a second listener keeps the shared server plain.
-  const hubIdentity = computerGateway ? await loadOrCreateHubIdentity(dataRoot) : null
-  if (computerGateway) log('computer transport ready (gateway + hub-auth + identity loaded)')
+  if (computerGateway) log('computer transport ready (gateway + hub-auth loaded)')
 
-  // Multi-hub: wire the client-facing `hub.describe` identity deps so a
-  // connecting client learns this hub's cert fingerprint + whether it enforces
-  // auth. Auth-required is now DERIVED from SLAYZONE_MODE (remote ⇒ on) rather
-  // than a separate flag — an internet-facing hub gates client /trpc; a loopback
-  // (local/supervised) hub does not. Still requires hubAuth to have loaded.
-  // Auth is no longer mode-derived. EVERY non-supervised hub requires a user
-  // identity, loopback or not: ownership of a computer is meaningless without one,
-  // and `owner_user_id` being nullable is exactly the hole a private-by-default
-  // model cannot cover. SLAYZONE_MODE still gates TLS, cert pinning and scheme —
-  // only auth stops depending on it.
+  // Multi-hub: wire the client-facing `hub.describe` deps so a connecting client
+  // learns whether this hub enforces auth and which switches it runs with.
   //
-  // Supervised is the SOLE exemption, and it is a real one: the Electron host owns
-  // that hub, it is loopback-only (asserted above), and the app already carries the
-  // user. See `assertLoopbackBind`.
-  const hubAuthRequired = !supervised
-  // Fail CLOSED. Previously `&& hubAuth != null` meant a hub whose auth failed to
-  // initialize silently served every client unauthenticated — on an internet-facing
-  // box. Computers already fail closed here (a broken auth DB makes enroll
-  // unavailable rather than unauthenticated); clients now do too.
-  if (hubAuthRequired && !hubAuth) {
-    throw new Error(
-      '[slayzone] hub auth failed to initialize — refusing to boot a hub that cannot ' +
-        'authenticate its clients. Computers already fail closed here; clients now do too.'
-    )
-  }
+  // Whether clients must sign in is the `SLAYZONE_HUB_REQUIRE_LOGIN` switch — the
+  // ONE thing that decides it. It is not derived from how the hub was started
+  // (`supervised`), from whether it is loopback, or from any mode. (Boot rule B1
+  // is what keeps a login-less hub from being reachable off-box.) Ownership of a
+  // computer is meaningless without a user identity, so a hub other machines can
+  // reach always requires one.
+  const hubAuthRequired = switches.requireLogin
+  // Fail CLOSED (B11). A hub whose auth failed to initialize must not fall back to
+  // serving every client unauthenticated. Computers already fail closed here (a
+  // broken auth DB makes enroll unavailable rather than unauthenticated); clients
+  // do too.
+  assertAuthLoaded(hubAuthRequired, hubAuth)
   setHubDescribeDeps({
-    getFingerprint: () => hubIdentity?.fingerprintSha256Hex ?? null,
-    getAuthRequired: () => hubAuthRequired
+    getAuthRequired: () => hubAuthRequired,
+    getSwitches: () => switches
   })
   // Gate all (non-open) tRPC procedures on a verified principal when this hub
   // enforces auth. Off → inert pass-through (byte-identical).
   setAuthGate(() => hubAuthRequired)
 
-  // A standalone hub that requires auth must not come up unusable by the operator
-  // who just started it. Creates the first user on first boot only, prints the
-  // credentials once, and leaves them in a 0600 file `slay` reads on this box.
+  // A hub that requires login must not come up unusable by the operator who just
+  // started it. Creates the first user on first boot only, prints the credentials
+  // once, and leaves them in a 0600 file `slay` reads on this box. (A generated
+  // password is a password sign-in; skipping this when `ENABLE_PASSWORD=0` belongs
+  // to the work that enforces that switch.)
   if (hubAuthRequired && hubAuth) {
     try {
       await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
@@ -234,11 +188,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     name: resolveHubName(),
     root: getSlayzoneHomeDir(),
     pid: process.pid,
-    mode: getSlayzoneMode(),
     supervised,
     // Same bit `hub.describe` reports over /trpc — mirrored on /health so a
-    // client can learn "this hub needs a sign-in" without opening a socket.
+    // client can learn "this hub needs a sign-in" without opening a socket. This
+    // is where `slay` reads it; `supervised` says nothing about login.
     authRequired: hubAuthRequired,
+    // Every switch, for the same reason (and for `slay hub ls`).
+    switches,
     // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
     // single authority for "can this computer do work right now?" and warns that the
     // raw map means only "socket is open", including a computer that has stopped
@@ -250,25 +206,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     computersConnected: () => computerGateway?.listUsableComputers().length ?? 0
   }
 
-  // SLAYZONE_MODE is the SINGLE lever for the whole hub's transport: `local`
-  // (default) serves plain http/ws on loopback (dev, e2e, supervised); `remote`
-  // serves https/wss terminated with the hub identity leaf. There is no separate
-  // TLS port and no separate computer port — `/trpc` (clients) and `/computers`
-  // (computers) ride the ONE listener below, demuxed by path. Protocol is never a
-  // knob; it is implied by mode. Both axes present the same identity leaf in
-  // remote, so a computer's pinned fingerprint is unchanged from the old split.
-  const remote = isRemoteMode()
-  // Remote REQUIRES the hub identity leaf to terminate TLS. Fail loud rather than
-  // serve an unhardened (plaintext, unauthenticated) internet-facing hub. The
-  // identity is loaded whenever the computer gateway came up (i.e. always, barring
-  // an init failure); a remote hub whose gateway failed to init has no leaf and
-  // must not boot.
-  if (remote && !hubIdentity) {
-    throw new Error(
-      '[slayzone] SLAYZONE_MODE=remote but the hub identity could not be loaded ' +
-        '(computer gateway init failed) — refusing to boot an unhardened remote hub.'
-    )
-  }
+  // The hub always listens plain http/ws. It never terminates TLS: a hub that other
+  // machines reach sits behind a front end that does (Azure's, Caddy, nginx), and
+  // clients dial that front end's public address with https/wss (rule A1). `/trpc`
+  // (clients) and `/computers` (computers) ride the ONE listener below, demuxed by
+  // path.
 
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
@@ -327,26 +269,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // `dist/web/` (dev, or a build that skipped it) returns false untouched,
     // falling through to mcpRest's own 404 exactly as before this shipped.
     //
-    // GATED ON `remote || supervised`, deliberately: a browser session's
-    // scoped token is a real bearer credential, sent over the wire on every
-    // request (the `szw_` cookie and the tRPC `connectionParams` token
-    // alike) — serving the shell over plain `http://` would hand that
-    // credential to anyone on the same network path. `remote` is the one
-    // mode that terminates TLS with the hub identity leaf (asserted a few
-    // lines up: `remote && !hubIdentity` refuses to boot).
-    //
-    // `supervised` is included too, and this is NOT the same exception —
-    // `hubAuthRequired = !supervised`, so a supervised hub never verifies a
-    // bearer at all (see hub-trpc-context.ts / rest-auth.ts): there is no
-    // credential riding the wire for plain http to expose. `main.tsx` mirrors
-    // this by skipping `LoginScreen` and connecting with no token whenever
-    // `/health`'s `authRequired` is false — the same "just connect, no
-    // bearer" shape desktop/CLI clients already use against a supervised
-    // hub. A plain STANDALONE local hub (`SLAYZONE_MODE=local`, no
-    // `SLAYZONE_SUPERVISED`) is excluded from both: `hubAuthRequired` is true
-    // there, so a browser session WOULD carry a real bearer over plain http
-    // — exactly the case this gate exists to keep off the wire.
-    if ((remote || supervised) && handleWebAssets(WEB_ROOT, req, res)) return
+    // Served on every hub. It used to be gated on `remote || supervised` so a
+    // browser session's scoped token — a real bearer, sent on every request — never
+    // rode plain `http://` over a network. That worry is now answered where it
+    // belongs: a hub that other machines can reach is refused at boot unless it has
+    // a public address (B3), which clients dial with `https://` through the front
+    // end that terminates TLS (A1); a hub nobody else can reach is on loopback.
+    // `main.tsx` skips `LoginScreen` and connects with no token whenever `/health`
+    // reports `authRequired: false`, the same "just connect" shape desktop/CLI
+    // clients use against a login-less hub.
+    if (handleWebAssets(WEB_ROOT, req, res)) return
     mcpRest.app(req, res)
   }
   const gatedDispatch = withRestAuth({
@@ -361,46 +293,38 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (handleHealth(state, req, res)) return
     gatedDispatch(req, res)
   }
-  const httpServer =
-    remote && hubIdentity
-      ? createHttpsServer({ key: hubIdentity.keyPem, cert: hubIdentity.certPem }, handleRequest)
-      : createServer(handleRequest)
+  const httpServer = createServer(handleRequest)
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
   // The decision is a pure, unit-tested function; this is only the wiring.
   //
-  // `loopbackBind` is computed from the address this hub actually bound, so the
-  // local-client allowances (file://, chrome://, "null", localhost) follow the
-  // deployment rather than a flag someone might forget to set. An internet-facing
-  // hub accepts only no-Origin (non-browser) callers plus its own configured
-  // public origin.
-  const loopbackBind = LOOPBACK_HOSTS.has(host)
+  // `loopbackBind` means "reachable ONLY from this machine": it listens on loopback
+  // AND publishes no public address. The second half matters — a loopback hub behind
+  // a same-box reverse proxy is the internet's browser, and must not be handed the
+  // local-client allowances (file://, chrome://, "null", localhost). A hub that
+  // other machines can reach accepts only no-Origin (non-browser) callers plus its
+  // own configured public origin.
+  const loopbackBind = !boot.reachable
   const allowedWsOrigins = resolveAllowedWebOrigins()
   const isAllowedWsOrigin = (origin: string | undefined): boolean =>
     wsOriginDecision({
       origin,
-      supervised,
+      requireLogin: switches.requireLogin,
       loopbackBind,
       allowedOrigins: allowedWsOrigins
     }) === 'accept'
-  // Both WS endpoints ride the ONE `httpServer` (plain or TLS per mode) as
-  // `noServer` handlers, demuxed by path in the single `upgrade` listener below.
-  // A `server`-bound WSS would destroy any socket whose path it doesn't own, so
-  // two endpoints on one server MUST both be `noServer` + hand-demuxed. `noServer`
-  // also means `verifyClient` is never invoked — the `/trpc` origin guard is
-  // applied inline in the demux instead (see below).
+  // Both WS endpoints ride the ONE `httpServer` as `noServer` handlers, demuxed by
+  // path in the single `upgrade` listener below. A `server`-bound WSS would destroy
+  // any socket whose path it doesn't own, so two endpoints on one server MUST both
+  // be `noServer` + hand-demuxed. `noServer` also means `verifyClient` is never
+  // invoked — the `/trpc` origin guard is applied inline in the demux instead (see
+  // below).
   //
-  //   /trpc    — clients (renderer / federated hubs), origin-guarded. In remote
-  //              mode the leaf terminates TLS so clients dial `wss://…/trpc` and
-  //              pin the cert (renderer pins in main via setCertificateVerifyProc).
+  //   /trpc      — clients (renderer / federated hubs), origin-guarded.
   //   /computers — computers (non-browser), NO origin allowlist (authenticated by the
-  //              computer protocol: enroll/hello frames + join token). In remote mode
-  //              the SAME leaf terminates TLS, so the computer's pinned fingerprint
-  //              (carried in its join token) is enforced end-to-end, unchanged from
-  //              the old separate-listener design.
+  //                computer protocol: enroll/hello frames + join token).
   const wss = new WebSocketServer({ noServer: true })
-  const computerWss =
-    computerGateway && hubIdentity ? new WebSocketServer({ noServer: true }) : null
+  const computerWss = computerGateway ? new WebSocketServer({ noServer: true }) : null
   httpServer.on('upgrade', (req, socket, head) => {
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
@@ -421,7 +345,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     }
   })
   // createContext verifies the bearer only when this hub enforces auth
-  // (`hubAuthRequired`, defined above). Local loopback hubs leave it off →
+  // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
   // principal stays null, no verify → byte-identical to trusted loopback.
   const createTrpcContext = async ({
     req,
@@ -458,12 +382,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
 
-  // PORT RESOLUTION. An explicit port (cfg / SLAYZONE_HUB_ADDRESS) binds verbatim
+  // PORT RESOLUTION. An explicit port (cfg / SLAYZONE_HUB_LISTEN_ADDRESS) binds verbatim
   // and fails loud on collision — that loudness is the point of the fixed
   // supervised ports. With NO port named, walk the hub port block instead of
   // taking an OS-assigned ephemeral one: `slay hub ls` discovers hubs by probing
   // that block, so an out-of-block hub is invisible to it. An explicit `:0` still
-  // means "OS-assigned" per the SLAYZONE_HUB_ADDRESS grammar (hub-addr.ts) and is
+  // means "OS-assigned" per the hub address grammar (hub-addr.ts) and is
   // honored — such a hub is deliberately un-discoverable.
   const requestedPort = cfg.port ?? getTrpcPort()
   let actualPort: number
@@ -489,36 +413,29 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   composition.setBoundPort(actualPort)
 
   // Computer `/computers` rides the SAME listener as `/trpc` (bound above) — no
-  // separate port to claim, no separate bind to fail. Feed the computers registry
-  // the `ws(s)://…/computers` URL + cert fingerprint so `mintJoinToken`
-  // embeds them. Scheme follows mode: local → `ws://` loopback (dev/supervised);
-  // remote → `wss://` derived from SLAYZONE_HUB_PUBLIC_ADDRESS (the hub's
-  // external address, needed alongside its bind address whenever the two differ —
-  // reverse proxy / NAT). The fingerprint is the real hub
-  // leaf — in remote the one listener terminates TLS with it, so the computer's
-  // join-token pin is enforced end-to-end, exactly as under the old split listener.
+  // separate port to claim, no separate bind to fail. Feed the computers registry the
+  // `ws(s)://…/computers` URL so `mintJoinToken` embeds it (A2): the public address
+  // when one is set (a front end terminates TLS there, so `wss://` for any non-loopback
+  // host), else the loopback address the hub is bound to. No certificate fingerprint
+  // goes into the token — the hub presents no certificate of its own, so there is
+  // nothing for a computer to pin.
   //
   // The computer URL's port is the hub port (stable via claimServerPort /
   // SIDECAR_FIXED_PORT), so the computer credential key (hubHostFromUrl → host_port)
-  // stays stable across reboots WITHOUT a dedicated computer-port persistence layer —
-  // that layer existed ONLY to pin a separate OS-assigned port, now gone.
-  if (computerGateway && hubIdentity) {
+  // stays stable across reboots WITHOUT a dedicated computer-port persistence layer.
+  if (computerGateway) {
     const computerHubUrl = deriveComputerHubUrl({
-      remote,
       host,
       port: actualPort,
-      publicAddress: process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
+      publicAddress: boot.publicAddress
     })
     if (computerHubUrl) {
-      composition.setComputerListenerInfo({
-        hubUrl: computerHubUrl,
-        certFingerprint: hubIdentity.fingerprintSha256Hex
-      })
+      composition.setComputerListenerInfo({ hubUrl: computerHubUrl })
       log(`computer transport ready on ${computerHubUrl}`)
     } else {
-      // Only reachable if SLAYZONE_HUB_PUBLIC_ADDRESS is malformed in remote mode
-      // (an unset value already fails loud at boot). `mintJoinToken` then throws a
-      // clear "hub url unset" until fixed — the /trpc path is unaffected.
+      // Defensive: boot rule B8 already refuses a malformed public address.
+      // `mintJoinToken` then throws a clear "hub url unset" until fixed — the
+      // /trpc path is unaffected.
       recordDiagnosticEvent({
         level: 'error',
         source: 'server',
@@ -556,7 +473,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       pid: process.pid,
       port: actualPort,
       dbPath,
-      supervised
+      supervised,
+      switches
     }
   })
   // Force the batch out now: the boot canary is `info` (not the error level that
@@ -602,8 +520,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         /* ignore */
       }
       // Terminate every computer connection + reject in-flight requests,
-      // then close the computer WSS + its https listener. No-op if the computer init failed
-      // (all null).
+      // then close the computer WSS. No-op if the computer init failed (all null).
       if (computerGateway) {
         try {
           computerGateway.close()
@@ -612,7 +529,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         }
       }
       // `/computers` shares the one httpServer as a noServer WSS — close it to drop
-      // the gateway sockets; there is no separate computer/TLS listener to close.
+      // the gateway sockets; there is no separate computer listener to close.
       if (computerWss) {
         try {
           computerWss.close()

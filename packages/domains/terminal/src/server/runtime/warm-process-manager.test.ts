@@ -446,7 +446,7 @@ await test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identi
   const inject: Record<string, string> = {
     SLAYZONE_HUB_TOKEN: 'host-secret', // secret
     SLAYZONE_HUB_ADDRESS: 'hub.example:8443', // infra
-    SLAYZONE_MODE: 'remote', // infra
+    SLAYZONE_HUB_REQUIRE_LOGIN: '1', // infra
     SLAYZONE_TASK_ID: 'host-task', // identity (mcpEnv re-adds correct)
     SLAYZONE_FUTURE_UNLISTED: 'fail-closed', // unmanifested → fail closed
     SLAYZONE_RELEASE_CHANNEL: 'dev' // global → kept
@@ -459,7 +459,7 @@ await test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identi
     const env = buildBaseEnv()
     expect('SLAYZONE_HUB_TOKEN' in env).toBe(false)
     expect('SLAYZONE_HUB_ADDRESS' in env).toBe(false)
-    expect('SLAYZONE_MODE' in env).toBe(false)
+    expect('SLAYZONE_HUB_REQUIRE_LOGIN' in env).toBe(false)
     expect('SLAYZONE_TASK_ID' in env).toBe(false)
     expect('SLAYZONE_FUTURE_UNLISTED' in env).toBe(false)
     expect(env.SLAYZONE_RELEASE_CHANNEL).toBe('dev')

@@ -3,7 +3,7 @@
  * Phase 1).
  *
  * `/health` is the sole discovery channel for `slay hub ls` — it must carry
- * enough identity to name a hub (name/root/pid/mode/supervised/computers) without
+ * enough identity to name a hub (name/root/pid/supervised/computers) without
  * any shared state. And because a hub may bind wider than loopback, the fields
  * that describe the FILESYSTEM (root, dbPath) or the process (pid) must be
  * withheld from non-loopback callers: today `dbPath` is served to anyone who can
@@ -49,9 +49,15 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
   name: 'test-hub',
   root: '/tmp/slz-test-root',
   pid: 4321,
-  mode: 'local',
   supervised: false,
   authRequired: false,
+  switches: {
+    requireLogin: false,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: true,
+    enableIntegrations: true
+  },
   computersConnected: () => 2
 }
 
@@ -134,7 +140,7 @@ async function main(): Promise<void> {
       assertEq(body.name, 'test-hub', 'name')
       assertEq(body.root, '/tmp/slz-test-root', 'root')
       assertEq(body.pid, 4321, 'pid')
-      assertEq(body.mode, 'local', 'mode')
+      assert(!('mode' in body), 'SLAYZONE_MODE is gone: /health no longer reports a mode')
       assertEq(body.supervised, false, 'supervised')
       assertEq(body.computersConnected, 2, 'computersConnected resolved from the getter')
       assertEq(body.dbPath, BASE_STATE.dbPath, 'dbPath')
@@ -213,6 +219,45 @@ async function main(): Promise<void> {
         (await getHealth(wide.port, external)).body.authRequired,
         true,
         'off-box caller sees it too'
+      )
+    } finally {
+      await wide.close()
+    }
+  })
+
+  // O1: every switch is reported, to any caller — a client needs to know what the
+  // hub offers (password? SSO?) before it has signed in. Booleans only.
+  await test('every switch is reported, to loopback and non-loopback callers alike', async () => {
+    const switches = {
+      requireLogin: true,
+      enablePassword: false,
+      enableSso: true,
+      enableProcesses: false,
+      enableIntegrations: false
+    }
+    const srv = await startHealthServer({ authRequired: true, switches })
+    try {
+      const body = (await getHealth(srv.port)).body
+      assertEq(
+        JSON.stringify(body.switches),
+        JSON.stringify(switches),
+        'loopback sees the switches'
+      )
+      assert(!JSON.stringify(body).includes('ecret'), 'no secret anywhere in the payload')
+    } finally {
+      await srv.close()
+    }
+    const external = await nonLoopbackAddress()
+    if (!external) {
+      console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
+      return
+    }
+    const wide = await startHealthServer({ authRequired: true, switches }, '0.0.0.0')
+    try {
+      assertEq(
+        JSON.stringify((await getHealth(wide.port, external)).body.switches),
+        JSON.stringify(switches),
+        'off-box caller sees them too'
       )
     } finally {
       await wide.close()

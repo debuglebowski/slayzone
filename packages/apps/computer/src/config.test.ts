@@ -21,14 +21,15 @@ afterEach(() => {
 })
 
 describe('loadComputerConfig', () => {
-  it('builds a config from env with sensible defaults (ADDRESS → ws:// in local mode)', () => {
-    // Env carries authority only; local mode (default) composes ws://…/computers.
+  it('builds a config from env with sensible defaults (ADDRESS → wss:// for a non-loopback host)', () => {
+    // Env carries authority only; the scheme follows the host (A1): any host that
+    // is not loopback composes wss://…/computers.
     const config = loadComputerConfig({
       [ENV_VARS.hubAddress]: 'hub.example:8443',
       [ENV_VARS.joinToken]: 'jt-1'
     })
     expect(config).toEqual({
-      hubUrl: 'ws://hub.example:8443/computers',
+      hubUrl: 'wss://hub.example:8443/computers',
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
@@ -36,11 +37,8 @@ describe('loadComputerConfig', () => {
     })
   })
 
-  it('ADDRESS composes wss://…/computers in remote mode', () => {
-    const config = loadComputerConfig({
-      [ENV_VARS.hubAddress]: 'hub.example.com',
-      SLAYZONE_MODE: 'remote'
-    })
+  it('ADDRESS composes wss://…/computers for a public host, with no mode needed', () => {
+    const config = loadComputerConfig({ [ENV_VARS.hubAddress]: 'hub.example.com' })
     expect(config.hubUrl).toBe('wss://hub.example.com/computers')
   })
 
@@ -110,8 +108,8 @@ describe('loadComputerConfig', () => {
       { [ENV_VARS.hubAddress]: 'from-env.example' },
       { hubUrl: 'wss://from-config.example/computers' }
     )
-    // Env authority (local mode) composes ws://…/computers and beats config.json.
-    expect(config.hubUrl).toBe('ws://from-env.example/computers')
+    // Env authority composes wss://…/computers (non-loopback host) and beats config.json.
+    expect(config.hubUrl).toBe('wss://from-env.example/computers')
   })
 
   it('fails with a readable error when hub address is missing', () => {
@@ -138,12 +136,11 @@ describe('loadComputerConfig', () => {
     })
     // hub address overrides via env; the pin has no env channel — config.json is
     // its explicit override path and still beats the token-decoded fingerprint.
-    // remote mode so the env authority composes wss:// (matches the token's TLS).
+    // A non-loopback env authority composes wss:// (matches the token's TLS).
     const config = loadComputerConfig(
       {
         [ENV_VARS.joinToken]: token,
-        [ENV_VARS.hubAddress]: 'override.example',
-        SLAYZONE_MODE: 'remote'
+        [ENV_VARS.hubAddress]: 'override.example'
       },
       { pinnedCertSha256: 'b'.repeat(64) }
     )
@@ -182,32 +179,94 @@ describe('loadComputerConfig', () => {
 
   it('accepts an explicit config.json pin on a wss:// hub url', () => {
     const config = loadComputerConfig(
-      { [ENV_VARS.hubAddress]: 'hub.example', SLAYZONE_MODE: 'remote' },
+      { [ENV_VARS.hubAddress]: 'hub.example' },
       { pinnedCertSha256: 'a'.repeat(64) }
     )
     expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
-  // --- SLAYZONE_MODE=remote hardening: plaintext ws:// hub is a hard error ------
-  // NOTE: an env SLAYZONE_HUB_ADDRESS can no longer PRODUCE ws:// in remote mode
-  // (hubUrlFromAddr forces wss:// there — the whole point of the redesign). The
-  // guard now only catches a full ws:// url supplied via config.json / join token,
-  // so drive it through the shared config.
-  it('rejects a plaintext ws:// hub url (from config.json) in remote mode', () => {
-    expect(() =>
-      loadComputerConfig({ SLAYZONE_MODE: 'remote' }, { hubUrl: 'ws://hub.example/computers' })
-    ).toThrow(/wss:\/\//)
+  // --- pin-less join tokens (the hub no longer presents a certificate) -----------
+  // A token minted by the current hub carries an EMPTY certFingerprint. The computer
+  // must accept it: no pin, normal CA verification of the front end's certificate.
+  it('accepts a pin-less join token (empty fingerprint) — no pin, no schema failure', () => {
+    const token = mintToken({
+      hubUrl: 'wss://hub.example.com/computers',
+      certFingerprint: '',
+      secret: 's'
+    })
+    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
+    expect(config.hubUrl).toBe('wss://hub.example.com/computers')
+    expect(config.pinnedCertSha256).toBeUndefined()
+    expect(config.joinToken).toBe(token)
   })
 
-  it('ADDRESS in remote mode composes wss:// (never ws://)', () => {
-    const config = loadComputerConfig({
-      [ENV_VARS.hubAddress]: 'hub.example',
+  it('accepts a pin-less join token for a loopback ws:// hub', () => {
+    const token = mintToken({
+      hubUrl: 'ws://127.0.0.1:51100/computers',
+      certFingerprint: '',
+      secret: 's'
+    })
+    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
+    expect(config.hubUrl).toBe('ws://127.0.0.1:51100/computers')
+    expect(config.pinnedCertSha256).toBeUndefined()
+  })
+
+  it('a pinned token from an OLDER hub still carries its pin', () => {
+    const token = mintToken({
+      hubUrl: 'wss://old-hub.example/computers',
+      certFingerprint: 'c'.repeat(64),
+      secret: 's'
+    })
+    expect(loadComputerConfig({ [ENV_VARS.joinToken]: token }).pinnedCertSha256).toBe(
+      'c'.repeat(64)
+    )
+  })
+
+  // --- plaintext ws:// is for this machine only (A1) ----------------------------
+  // The env channel cannot PRODUCE ws:// for a non-loopback host (hubUrlFromAddr picks
+  // wss://), so the guard only catches a full ws:// url supplied via config.json /
+  // a join token — drive it through the shared config.
+  it('rejects a plaintext ws:// hub url (from config.json) on a non-loopback host', () => {
+    expect(() => loadComputerConfig({}, { hubUrl: 'ws://hub.example/computers' })).toThrow(
+      /only allowed for a hub on this machine/
+    )
+  })
+
+  it('rejects a plaintext ws:// hub url from a join token on a non-loopback host', () => {
+    const token = mintToken({
+      hubUrl: 'ws://10.0.0.5:51100/computers',
+      certFingerprint: '',
+      secret: 's'
+    })
+    expect(() => loadComputerConfig({ [ENV_VARS.joinToken]: token })).toThrow(/wss:\/\//)
+  })
+
+  it('allows ws:// on loopback hosts (127.0.0.1, localhost, ::1)', () => {
+    for (const host of ['127.0.0.1:9000', 'localhost:9000', '[::1]:9000']) {
+      const config = loadComputerConfig({}, { hubUrl: `ws://${host}/computers` })
+      expect(config.hubUrl).toBe(`ws://${host}/computers`)
+    }
+  })
+
+  it('a leftover SLAYZONE_MODE changes nothing (the mode is gone)', () => {
+    const remote = loadComputerConfig({
+      [ENV_VARS.hubAddress]: '127.0.0.1:9000',
       SLAYZONE_MODE: 'remote'
     })
+    expect(remote.hubUrl).toBe('ws://127.0.0.1:9000/computers')
+    const local = loadComputerConfig({
+      [ENV_VARS.hubAddress]: 'hub.example',
+      SLAYZONE_MODE: 'local'
+    })
+    expect(local.hubUrl).toBe('wss://hub.example/computers')
+  })
+
+  it('ADDRESS composes wss:// for a non-loopback host (never ws://)', () => {
+    const config = loadComputerConfig({ [ENV_VARS.hubAddress]: 'hub.example' })
     expect(config.hubUrl).toBe('wss://hub.example/computers')
   })
 
-  it('still composes ws:// in local mode (dev/loopback)', () => {
+  it('still composes ws:// for a loopback host (dev)', () => {
     const config = loadComputerConfig({ [ENV_VARS.hubAddress]: '127.0.0.1:9000' })
     expect(config.hubUrl).toBe('ws://127.0.0.1:9000/computers')
   })
@@ -232,8 +291,8 @@ describe('loadComputerConfig', () => {
       { [ENV_VARS.hubAddress]: 'from-env.example' },
       { hubUrl: 'wss://shared.example/computers', computerName: 'shared-computer' }
     )
-    // Env authority (local mode) composes ws://…/computers and beats config.json.
-    expect(config.hubUrl).toBe('ws://from-env.example/computers')
+    // Env authority composes wss://…/computers (non-loopback host) and beats config.json.
+    expect(config.hubUrl).toBe('wss://from-env.example/computers')
     expect(config.name).toBe('shared-computer') // shared name survives (no env override)
   })
 

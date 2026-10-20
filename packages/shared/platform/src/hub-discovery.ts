@@ -28,6 +28,7 @@
 
 import http from 'node:http'
 import { HUB_PORT_BLOCK } from './paths'
+import { HUB_SWITCH_DEFAULTS, HUB_SWITCH_ENV, type HubSwitches } from './hub-switches'
 
 /** Default per-port probe budget. Matches port-claim.ts's liveness check: a
  *  loopback hub answers in single-digit ms, so 300ms is generous. */
@@ -50,8 +51,12 @@ export interface DiscoveredHub {
   /** SLAYZONE_ROOT anchor — config, storage and logs all derive from it. */
   root: string
   dbPath: string
-  /** SLAYZONE_MODE: `local` or `remote`. */
-  mode: string
+  /** Whether the hub gates its client API on a signed-in user — the bit a `slay`
+   *  talking to it needs ("do I need a credential?"). Read from `/health`, which
+   *  serves it to any caller. An older hub that does not report it reads as false. */
+  authRequired: boolean
+  /** Every per-hub switch the hub reports; `null` for an older hub that predates them. */
+  switches: HubSwitches | null
   /** True for the desktop app's sidecar. `slay hub stop` refuses these — the app
    *  owns its own lifecycle. */
   supervised: boolean
@@ -160,7 +165,8 @@ function parseHub(body: string, port: number): DiscoveredHub | null {
     pid: b.pid,
     root: b.root,
     dbPath: typeof b.dbPath === 'string' ? b.dbPath : '',
-    mode: typeof b.mode === 'string' ? b.mode : 'local',
+    authRequired: b.authRequired === true,
+    switches: parseSwitches(b.switches),
     supervised: b.supervised === true,
     computersConnected: typeof b.computersConnected === 'number' ? b.computersConnected : 0,
     uptimeMs: typeof b.uptimeMs === 'number' ? b.uptimeMs : 0,
@@ -168,6 +174,18 @@ function parseHub(body: string, port: number): DiscoveredHub | null {
     builtAt: typeof b.builtAt === 'string' ? b.builtAt : 'unknown',
     buildId: typeof b.buildId === 'string' ? b.buildId : 'unknown'
   }
+}
+
+/** The `switches` object of a `/health` body, or null when absent/malformed. Every key must be a boolean. */
+function parseSwitches(raw: unknown): HubSwitches | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  const out: HubSwitches = { ...HUB_SWITCH_DEFAULTS }
+  for (const key of Object.keys(HUB_SWITCH_ENV) as Array<keyof HubSwitches>) {
+    if (typeof o[key] !== 'boolean') return null
+    out[key] = o[key]
+  }
+  return out
 }
 
 /**

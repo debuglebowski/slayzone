@@ -71,12 +71,12 @@ export async function resolveHubRequestTarget(
   // Discovery only reaches loopback, so the scheme is always plain http.
   //
   // Same owner-file fallback as `api.ts`'s resolveTarget, and for the identical
-  // reason: a standalone hub found by discovery, with no `--hub`/env/file target
-  // configured, requires auth from this caller now — and the bootstrap owner file
-  // is the only credential a co-located `slay` can hold in that case. Absent on a
-  // supervised hub (no auth, no file), so this is additive there too.
+  // reason: a hub found by discovery, with no `--hub`/env/file target configured,
+  // that requires login (`/health` reports `authRequired`) wants a bearer from this
+  // caller — and the bootstrap owner file is the only credential a co-located `slay`
+  // can hold in that case. A hub with login off has none, so this is additive there.
   const found = running[0]!
-  const ownerToken = found.supervised ? null : (await readBootstrapOwner(found.root))?.token
+  const ownerToken = found.authRequired ? (await readBootstrapOwner(found.root))?.token : null
   return { baseUrl: `http://127.0.0.1:${found.port}`, token: ownerToken ?? null }
 }
 

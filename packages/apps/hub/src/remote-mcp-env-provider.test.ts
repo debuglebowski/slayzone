@@ -20,15 +20,15 @@ function assert(cond: boolean, msg: string): void {
   pass++
 }
 
-// Isolate SLAYZONE_HUB_PUBLIC_ADDRESS (+ the MODE that decides the scheme) per
-// case — the provider reads both live.
-function withPublicAddress<T>(value: string | undefined, fn: () => T, mode?: string): T {
+// Isolate SLAYZONE_HUB_PUBLIC_ADDRESS per case — the provider reads it live. (A
+// leftover SLAYZONE_MODE must change nothing; `leftoverMode` proves it below.)
+function withPublicAddress<T>(value: string | undefined, fn: () => T, leftoverMode?: string): T {
   const prev = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
   const prevMode = process.env.SLAYZONE_MODE
   if (value === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
   else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = value
-  if (mode === undefined) delete process.env.SLAYZONE_MODE
-  else process.env.SLAYZONE_MODE = mode
+  if (leftoverMode === undefined) delete process.env.SLAYZONE_MODE
+  else process.env.SLAYZONE_MODE = leftoverMode
   try {
     return fn()
   } finally {
@@ -56,8 +56,32 @@ withPublicAddress(undefined, () => {
   )
 })
 
-// 2. SLAYZONE_HUB_PUBLIC_ADDRESS wins over loopback; scheme comes from MODE
-//    (remote → https), never from the value.
+// 2. SLAYZONE_HUB_PUBLIC_ADDRESS wins over loopback; the scheme comes from the HOST
+//    (A1: a non-loopback host is https), never from the value.
+withPublicAddress('hub.example:8443', () => {
+  const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
+  const env = provider({ taskId: 'task-3', computerId: 'r' })
+  assert(
+    env!.hubBaseUrl === 'https://hub.example:8443',
+    `public address wins, https from the host, got ${env!.hubBaseUrl}`
+  )
+})
+
+// 2a. A LOOPBACK public address (a same-box proxy under test) → http. Proves the
+//     scheme tracks the host alone, so it can never disagree with the computer's
+//     ws(s) reading of the same hub. A leftover SLAYZONE_MODE moves nothing either way.
+withPublicAddress(
+  'localhost:8443',
+  () => {
+    const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
+    const env = provider({ taskId: 'task-3', computerId: 'r' })
+    assert(
+      env!.hubBaseUrl === 'http://localhost:8443',
+      `loopback host → http even with a leftover MODE=remote, got ${env!.hubBaseUrl}`
+    )
+  },
+  'remote'
+)
 withPublicAddress(
   'hub.example:8443',
   () => {
@@ -65,22 +89,7 @@ withPublicAddress(
     const env = provider({ taskId: 'task-3', computerId: 'r' })
     assert(
       env!.hubBaseUrl === 'https://hub.example:8443',
-      `public address wins, https from remote MODE, got ${env!.hubBaseUrl}`
-    )
-  },
-  'remote'
-)
-
-// 2a. Same address in local MODE → http. Proves the scheme tracks MODE alone, so
-//     it can never disagree with the computer's ws(s) reading of the same hub.
-withPublicAddress(
-  'hub.example:8443',
-  () => {
-    const provider = createRemoteMcpEnvProvider({ getBoundPort: () => 4141 })
-    const env = provider({ taskId: 'task-3', computerId: 'r' })
-    assert(
-      env!.hubBaseUrl === 'http://hub.example:8443',
-      `local MODE → http, got ${env!.hubBaseUrl}`
+      `public host → https even with a leftover MODE=local, got ${env!.hubBaseUrl}`
     )
   },
   'local'

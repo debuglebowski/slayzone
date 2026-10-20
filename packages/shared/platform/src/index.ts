@@ -24,14 +24,23 @@ export {
   HUB_DYNAMIC_PORT_RANGE,
   SIDECAR_FIXED_PORT
 } from './paths'
+// The per-hub switches that replaced SLAYZONE_MODE. Also the lean
+// `@slayzone/platform/hub-switches` subpath.
 export {
-  getSlayzoneMode,
-  isRemoteMode,
-  isLoopbackHost,
-  assertModeHostConsistency,
-  assertLoopbackBind,
-  type SlayzoneMode
-} from './slayzone-mode'
+  HUB_SWITCH_ENV,
+  HUB_SWITCH_DEFAULTS,
+  HUB_SSO_ENV,
+  HUB_ADDRESS_ENV,
+  LEGACY_HUB_LISTEN_ENV,
+  HubSwitchValueError,
+  parseSwitchValue,
+  resolveHubSwitches,
+  resolveHubSso,
+  isHubLoginRequired,
+  type HubSwitchKey,
+  type HubSwitches,
+  type HubSsoSettings
+} from './hub-switches'
 // Multi-hub discovery. Also available as the lean `@slayzone/platform/hub-discovery`
 // subpath — prefer that from a bundle that must not pull this barrel.
 export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from './hub-discovery'
@@ -48,8 +57,10 @@ export {
   type DeviceStatusQueryStripper
 } from './device-status-queries'
 export {
+  assertLoopbackBind,
   hubUrlFromAddr,
   isBareAuthority,
+  isLoopbackAuthority,
   isLoopbackPeer,
   parseHubAddress,
   LOOPBACK_HOSTS,

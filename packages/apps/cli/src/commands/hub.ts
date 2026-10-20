@@ -22,12 +22,18 @@ import { existsSync, openSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
-import { isBareAuthority, parseHubAddress } from '@slayzone/platform/hub-addr'
+import {
+  LOOPBACK_HOSTS,
+  hubUrlFromAddr,
+  isBareAuthority,
+  parseHubAddress
+} from '@slayzone/platform/hub-addr'
 import { updateHubConfigFile } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
   listRegisteredUnits,
   readUnitRoot,
+  readUnitSecrets,
   removeUnit,
   unitPath,
   writeUnit,
@@ -185,17 +191,41 @@ async function terminateChild(child: ChildProcess, graceMs: number): Promise<voi
   })
 }
 
+/**
+ * The environment a hub spawned without a service manager inherits from THIS shell.
+ *
+ * `SLAYZONE_HUB_ADDRESS` is stripped: in a SlayZone task terminal it holds the
+ * DIAL-side address of the app (`127.0.0.1:<port>`), and a hub that inherited it would
+ * refuse to boot (rule B5 — the hub's own name for where it listens is
+ * `SLAYZONE_HUB_LISTEN_ADDRESS`).
+ */
+function inheritedEnvForHub(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  delete env.SLAYZONE_HUB_ADDRESS
+  return env
+}
+
 async function launchHub(args: {
   name: string
   root: string
   port?: number
-  /** Full bind authority (`host[:port]`), from `--bind` / a remote `create`. Wins
+  /** Full listen authority (`host[:port]`), from `--bind` / a reachable `create`. Wins
    *  over `port`, which can only ever mean loopback. */
   address?: string
+  /** Secrets to pin in the unit's environment (a hub other machines can reach needs
+   *  `SLAYZONE_HUB_AUTH_SECRET` there). Merged OVER whatever an existing unit already
+   *  pins, so a `start` of a hub that was created with one never loses it. */
+  secrets?: Record<string, string>
   backend: ServiceBackend
   creating: boolean
 }): Promise<void> {
   const { name, root, port, address, backend, creating } = args
+  // A rewrite of an existing unit would otherwise drop the secrets `create` pinned:
+  // the hub could then no longer boot (rule B14), turning a restart into an outage.
+  const secrets: Record<string, string> =
+    backend === 'none' || creating
+      ? { ...(args.secrets ?? {}) }
+      : { ...readUnitSecrets('hub', name, backend), ...(args.secrets ?? {}) }
   const bin = resolveServiceBin('hub')
   const logDir = ensureLogDir('hub', root)
   const logs = serviceLogPaths('hub', root)
@@ -216,16 +246,19 @@ async function launchHub(args: {
       detached: true,
       stdio: ['ignore', out, out],
       env: {
-        ...process.env,
+        ...inheritedEnvForHub(),
         SLAYZONE_ROOT: root,
         SLAYZONE_HUB_NAME: name,
         // Same precedence as the unit path (see unitEnv): an explicit authority
-        // wins, else the legacy loopback-from-port form.
+        // wins, else the legacy loopback-from-port form. The hub's name for where it
+        // LISTENS — `SLAYZONE_HUB_ADDRESS` is the dial-side name and a hub refuses to
+        // boot with it.
         ...(address !== undefined
-          ? { SLAYZONE_HUB_ADDRESS: address }
+          ? { SLAYZONE_HUB_LISTEN_ADDRESS: address }
           : port === undefined
             ? {}
-            : { SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}` }),
+            : { SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}` }),
+        ...secrets,
         // Same interpreter requirement as the unit path: a dev-tree hub needs
         // ELECTRON_RUN_AS_NODE or its Electron-ABI natives fail to load.
         ...(bin.env ?? {})
@@ -263,7 +296,9 @@ async function launchHub(args: {
       logDir,
       ...(port ? { port } : {}),
       ...(address !== undefined ? { address } : {}),
-      ...(bin.env ? { env: bin.env } : {})
+      ...(bin.env || Object.keys(secrets).length > 0
+        ? { env: { ...secrets, ...(bin.env ?? {}) } }
+        : {})
     },
     backend
   )
@@ -327,13 +362,15 @@ async function launchHub(args: {
   // State exactly what the supervisor guarantees. A user agent starts at LOGIN, not
   // at boot — claiming "survives reboot" would be wrong.
   console.log('Restarts automatically if it crashes, and starts again when you log in.')
-  // A brand-new hub has NO accounts, and public signup is closed — so on a remote
-  // deployment nobody can sign in until the operator creates one here, on the box.
-  // A loopback-only hub needs no account at all, hence "if this hub is reachable
-  // from other machines" rather than an unconditional instruction.
+  // A brand-new hub has NO accounts, and public signup is closed — so on a hub that
+  // requires login nobody can sign in until the operator creates one here, on the box.
+  // A hub that is reachable from other machines always requires login; a loopback-only
+  // one needs no account at all, hence the conditional rather than an unconditional
+  // instruction.
   if (creating) {
     console.log('')
-    console.log('If this hub is reachable from other machines, create an account for it:')
+    console.log('If this hub requires login (it does once other machines can reach it), create')
+    console.log('an account for it:')
     console.log(`  slay hub users add <email> --hub ${name}`)
   }
 }
@@ -507,8 +544,8 @@ function hubUsersCommand(): Command {
         return
       }
       if (rows.length === 0) {
-        // An accountless remote hub is unusable, so name the fix rather than
-        // printing a bare "none".
+        // An accountless hub that requires login is unusable, so name the fix rather
+        // than printing a bare "none".
         console.log('No accounts yet. Create one with `slay hub users add <email>`.')
         return
       }
@@ -603,9 +640,14 @@ export function hubCommand(): Command {
     .option('--port <port>', 'Bind a specific port (default: first free hub port)')
     .option(
       '--public-address <host[:port]>',
-      'Externally-reachable address of this hub — makes it a REMOTE hub (auth + TLS + wss join tokens)'
+      'Address other machines reach this hub at — makes it reachable: login required, ' +
+        'join tokens point at it (the hub does not do TLS; put a TLS front end in front). ' +
+        'Needs SLAYZONE_HUB_AUTH_SECRET in the environment of this command.'
     )
-    .option('--bind <host[:port]>', 'Address to bind (default: loopback, or 0.0.0.0 when remote)')
+    .option(
+      '--bind <host[:port]>',
+      'Address to listen on (default: loopback, or 0.0.0.0 with --public-address)'
+    )
     .action(
       async (
         name: string,
@@ -622,22 +664,24 @@ export function hubCommand(): Command {
           fail(`Invalid --port ${opts.port} — expected an integer 1-65535.`)
         }
 
-        // --- remote-hub setup ---------------------------------------------------
+        // --- reachable-hub setup ------------------------------------------------
         //
-        // WHY THIS EXISTS. Without a public address a hub boots in LOCAL mode, and
-        // `deriveComputerHubUrl` then embeds `ws://127.0.0.1:<port>/computers` in every
-        // join token it mints. Minting still succeeds — so the failure is silent: a
-        // computer on another machine dials its OWN loopback and never connects.
-        // `--public-address` is what turns that into a usable deployment.
+        // WHY THIS EXISTS. Without a public address a hub only tells computers about
+        // `ws://127.0.0.1:<port>/computers` (`deriveComputerHubUrl`). Minting still
+        // succeeds — so the failure is silent: a computer on another machine dials its
+        // OWN loopback and never connects. `--public-address` is what turns that into a
+        // usable deployment.
         //
-        // Both values are bare AUTHORITIES (`host[:port]`, no scheme): the scheme
-        // follows SLAYZONE_MODE, so carrying one here would let the two disagree.
+        // Both values are bare AUTHORITIES (`host[:port]`, no scheme): the scheme is
+        // derived from the host (loopback → http/ws, any other host → https/wss), so
+        // carrying one here would let the two disagree.
         const publicAddress = opts.publicAddress?.trim()
         if (publicAddress !== undefined && !isBareAuthority(publicAddress)) {
           fail(
             `Invalid --public-address "${opts.publicAddress}" — expected host[:port] with no ` +
-              `scheme and no path (e.g. hub.example.com:8443). The scheme is decided by the ` +
-              `hub's mode, not by this value. IPv6 must be bracketed: [2001:db8::1]:8443`
+              `scheme and no path (e.g. hub.example.com:8443). The scheme is derived from the ` +
+              `host (loopback is http/ws, any other host is https/wss). IPv6 must be ` +
+              `bracketed: [2001:db8::1]:8443`
           )
         }
         const bind = opts.bind?.trim()
@@ -655,13 +699,46 @@ export function hubCommand(): Command {
               `Give just one — \`--bind\` can carry the port itself.`
           )
         }
-        // An explicit --bind always wins: `remote` + a loopback bind is a legitimate
-        // and common shape (the hub sits behind a reverse proxy / tunnel that
-        // terminates the public address), and assertModeHostConsistency permits it.
-        // Only when the operator said nothing do we widen — a remote hub bound to
-        // loopback with nothing in front of it would be unreachable.
+        // An explicit --bind always wins: a public address + a loopback bind is a
+        // legitimate and common shape (the hub sits behind a reverse proxy / tunnel
+        // that terminates TLS for the public address). Only when the operator said
+        // nothing do we widen — a reachable hub bound to loopback with nothing in
+        // front of it would be unreachable.
         const address =
           bind ?? (publicAddress !== undefined ? (port ? `0.0.0.0:${port}` : '0.0.0.0') : undefined)
+
+        // A hub that listens off-loopback is reachable from other machines, and is
+        // refused at boot unless it publishes a public address (rule B3) — so say so
+        // here, before registering a unit that would only crash-loop.
+        if (publicAddress === undefined && address !== undefined) {
+          const bindHost = parseHubAddress(address)?.host
+          if (bindHost !== undefined && !LOOPBACK_HOSTS.has(bindHost)) {
+            fail(
+              `--bind ${address} listens on ${bindHost}, which other machines can reach, so the hub ` +
+                `needs --public-address <host[:port]> (the address clients use, behind your TLS ` +
+                `front end) and would refuse to boot without it. For a hub only this machine ` +
+                `uses, bind loopback: --bind 127.0.0.1[:port].`
+            )
+          }
+        }
+
+        // A hub other machines can reach (a public address is set) is refused at boot
+        // unless it gets SLAYZONE_HUB_AUTH_SECRET in its ENVIRONMENT: it never generates
+        // its signing key onto its own disk. Check up front, so the operator learns it
+        // here and not from a crash-looping unit.
+        const authSecret = process.env.SLAYZONE_HUB_AUTH_SECRET?.trim()
+        if (publicAddress !== undefined && !authSecret) {
+          fail(
+            `A hub other machines can reach needs SLAYZONE_HUB_AUTH_SECRET in its environment ` +
+              `— it never generates its signing key onto its own disk, and it would refuse to ` +
+              `boot without one.\n` +
+              `Provide one for this command:\n` +
+              `  SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slay hub create ${name} ` +
+              `--public-address ${publicAddress}\n` +
+              `It is written into the hub's service unit (owner-only, 0600) so the hub keeps ` +
+              `it across restarts.`
+          )
+        }
 
         const backend = resolveBackend()
 
@@ -699,34 +776,41 @@ export function hubCommand(): Command {
 
         // Persist the deployment shape BEFORE launching, so the very first boot reads
         // it. `<ROOT>/hub.config.json` is the single channel for these (the unit carries
-        // only the bind address) — a `mode` env var pinned in the unit would be a
-        // second home for the same value that `hub restart --upgrade` then rewrites
-        // away. Merges + 0600, so an existing config in this root keeps its keys.
+        // the secret and the rest of the environment, not the shape) — a switch pinned
+        // in the unit would be a second home for the same value that
+        // `hub restart --upgrade` then rewrites away. Merges + 0600, so an existing
+        // config in this root keeps its keys.
         if (publicAddress !== undefined) {
           updateHubConfigFile(
             {
-              mode: 'remote',
+              // Reachable from other machines ⇒ login is required (boot rule B1).
+              requireLogin: true,
               publicAddress,
-              ...(address !== undefined ? { address } : {})
+              ...(address !== undefined ? { listenAddress: address } : {})
             },
             join(root, 'hub.config.json')
           )
-          console.log('Mode:   remote (client auth + TLS enforced)')
-          console.log(`Bind:   ${address ?? '(hub block default)'}`)
-          console.log(`Public: ${publicAddress}`)
-          console.log(`Join tokens will point computers at wss://${publicAddress}/computers.`)
-          // Printed BEFORE the boot wait, not after: remote mode enforces auth AND
-          // closes public signup, so a hub with no account is permanently
-          // unauthenticatable — and a first boot that fails (a missing cert chain, a
-          // taken port) must not swallow the one step that makes the deployment
-          // usable. The config is already on disk at this point, so the instruction
-          // is valid whether or not the hub comes up.
+          console.log('Reachable: login required (SLAYZONE_HUB_REQUIRE_LOGIN=1)')
+          console.log(`Listen:    ${address ?? '(hub block default)'}`)
+          console.log(`Public:    ${publicAddress}`)
+          console.log(
+            `Join tokens will point computers at ${hubUrlFromAddr(publicAddress, 'ws', '/computers')}.`
+          )
+          console.log(
+            'The hub serves plain http: put a TLS front end (Caddy, nginx, a cloud load balancer) ' +
+              'in front of it.'
+          )
+          // Printed BEFORE the boot wait, not after: this hub requires login AND closes
+          // public signup, so a hub with no account is permanently unauthenticatable —
+          // and a first boot that fails (a taken port) must not swallow the one step
+          // that makes the deployment usable. The config is already on disk at this
+          // point, so the instruction is valid whether or not the hub comes up.
           console.log('')
           console.log('This hub requires sign-in and public signup is closed, so create the')
           console.log('first account on THIS machine — there is no other way in:')
           console.log(`  slay hub users add <email> --hub ${name}`)
           console.log('Then, from another machine:')
-          console.log(`  slay hub login https://${publicAddress} --email <email>`)
+          console.log(`  slay hub login ${hubUrlFromAddr(publicAddress, 'http')} --email <email>`)
           console.log('')
         }
 
@@ -735,6 +819,9 @@ export function hubCommand(): Command {
           root,
           port,
           ...(address !== undefined ? { address } : {}),
+          ...(publicAddress !== undefined && authSecret
+            ? { secrets: { SLAYZONE_HUB_AUTH_SECRET: authSecret } }
+            : {}),
           backend,
           creating: true
         })
@@ -881,6 +968,11 @@ export function hubCommand(): Command {
       // without it the existing unit is reused verbatim.
       if (opts.upgrade) {
         const bin = resolveServiceBin('hub')
+        // And the secrets the unit already pins: a hub other machines can reach cannot
+        // boot without SLAYZONE_HUB_AUTH_SECRET (rule B14), so rewriting the unit
+        // without it would turn an upgrade into an outage.
+        const pinned = readUnitSecrets('hub', name, backend)
+        const unitEnv = { ...pinned, ...(bin.env ?? {}) }
         writeUnit(
           {
             kind: 'hub',
@@ -891,7 +983,7 @@ export function hubCommand(): Command {
             logDir,
             // Must carry the interpreter env: dropping it here would rewrite a
             // working unit into one that crash-loops on Electron-ABI natives.
-            ...(bin.env ? { env: bin.env } : {})
+            ...(Object.keys(unitEnv).length > 0 ? { env: unitEnv } : {})
           },
           backend
         )

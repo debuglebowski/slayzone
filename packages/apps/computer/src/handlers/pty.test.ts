@@ -374,7 +374,7 @@ describe('createPtyHandlers', () => {
     const inject: Record<string, string> = {
       SLAYZONE_HUB_ADDRESS: 'hub.example:8443', // infra
       SLAYZONE_HUB_TOKEN: 'inherited-secret', // secret
-      SLAYZONE_MODE: 'remote', // infra
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1', // infra
       SLAYZONE_TASK_ID: 'inherited-task', // identity (overlay would re-add correct)
       SLAYZONE_FUTURE_UNLISTED: 'fail-closed', // unmanifested → fail closed
       ELECTRON_RUN_AS_NODE: '1' // non-prefixed infra
@@ -399,7 +399,7 @@ describe('createPtyHandlers', () => {
         args: [
           '-c',
           'echo ADDR=[$SLAYZONE_HUB_ADDRESS]; echo TOK=[$SLAYZONE_HUB_TOKEN]; ' +
-            'echo MODE=[$SLAYZONE_MODE]; echo TASK=[$SLAYZONE_TASK_ID]; ' +
+            'echo LOGIN=[$SLAYZONE_HUB_REQUIRE_LOGIN]; echo TASK=[$SLAYZONE_TASK_ID]; ' +
             'echo FUT=[$SLAYZONE_FUTURE_UNLISTED]; echo ERAN=[$ELECTRON_RUN_AS_NODE]; ' +
             'echo PATHSET=[${PATH:+yes}]'
         ],
@@ -409,7 +409,7 @@ describe('createPtyHandlers', () => {
       await waitFor(() => out.includes('PATHSET='))
       expect(out).toContain('ADDR=[]')
       expect(out).toContain('TOK=[]')
-      expect(out).toContain('MODE=[]')
+      expect(out).toContain('LOGIN=[]')
       expect(out).toContain('TASK=[]')
       expect(out).toContain('FUT=[]')
       expect(out).toContain('ERAN=[]')

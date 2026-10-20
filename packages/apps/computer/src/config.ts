@@ -20,7 +20,7 @@ import {
   loadComputerConfigFile,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
-import { hubUrlFromAddr, type SlayzoneMode } from '@slayzone/platform/hub-addr'
+import { LOOPBACK_HOSTS, hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
 
 export const computerConfigSchema = z.object({
@@ -59,7 +59,8 @@ export type ComputerConfig = z.infer<typeof computerConfigSchema>
 
 export const ENV_VARS = {
   // Authority ONLY — `host[:port]`, no scheme, no path. The dial scheme
-  // (ws/wss) is derived from SLAYZONE_MODE via hubUrlFromAddr, and `/computers` is
+  // (ws/wss) is derived from the host via hubUrlFromAddr (loopback → ws, any other
+  // host → wss), and `/computers` is
   // appended here, so this env channel can never carry a scheme the CLI would
   // reinterpret (the retired `SLAYZONE_HUB_URL` ws-vs-http collision). computer.config.json
   // `hubUrl` + the join token still carry a FULL url (they're not env-inherited
@@ -216,14 +217,12 @@ export function loadComputerConfig(
   const fromToken = joinToken ? decodeJoinToken(joinToken) : null
 
   // The env channel carries only the hub AUTHORITY (host[:port]); compose the
-  // full `ws(s)://<addr>/computers` dial url here, scheme from SLAYZONE_MODE (read
-  // from the passed `env` so tests stay hermetic). computer.config.json / join-token
+  // full `ws(s)://<addr>/computers` dial url here, scheme from the host (rule A1:
+  // loopback → ws, any other host → wss). computer.config.json / join-token
   // fallbacks below still supply a full url directly.
-  const mode: SlayzoneMode =
-    env.SLAYZONE_MODE?.trim().toLowerCase() === 'remote' ? 'remote' : 'local'
   const envAddress = env[ENV_VARS.hubAddress]
   const hubUrlFromEnv =
-    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/computers', mode) : undefined
+    envAddress !== undefined ? hubUrlFromAddr(envAddress, 'ws', '/computers') : undefined
 
   const merged = {
     // Supervised local computer → the shared const so the hub's dedup collapses it
@@ -236,7 +235,19 @@ export function loadComputerConfig(
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
-    ...(fromToken ? { hubUrl: fromToken.hubUrl, pinnedCertSha256: fromToken.certFingerprint } : {}),
+    ...(fromToken
+      ? {
+          hubUrl: fromToken.hubUrl,
+          // A token minted by the current hub carries an EMPTY fingerprint: the hub
+          // no longer presents a certificate of its own, so there is nothing to pin
+          // and the front end's certificate is verified the normal way. An empty
+          // string must read as "no pin", never reach the schema (min(1)) and fail
+          // the whole config. A token from an older hub still carries a real pin.
+          ...(fromToken.certFingerprint !== ''
+            ? { pinnedCertSha256: fromToken.certFingerprint }
+            : {})
+        }
+      : {}),
     // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
@@ -267,20 +278,29 @@ export function loadComputerConfig(
     )
   }
 
-  // SLAYZONE_MODE=remote hardening: a remote computer MUST dial the hub over TLS.
-  // A plaintext ws:// hub on the open internet is a hard error (credentials +
-  // command stream would be unencrypted). This can now only trip on a full ws://
-  // url supplied via computer.config.json / join token — an env SLAYZONE_HUB_ADDRESS is
-  // authority-only and hubUrlFromAddr forces wss:// in remote mode, so the env
-  // path is unrepresentable-as-ws here (the whole point of the ADDRESS redesign).
-  // The guard stays to catch the file/token paths. `mode` derived above.
-  if (mode === 'remote' && urlProtocol(result.data.hubUrl) === 'ws:') {
+  // Plaintext `ws://` is for a hub on THIS machine only. Credentials and the
+  // command stream would cross the network unencrypted otherwise, and the hub does
+  // not terminate TLS itself — a reachable hub sits behind a front end that does,
+  // so a non-loopback hub is always a `wss://` url. The env channel can never
+  // produce the bad shape (hubUrlFromAddr picks `wss` for a non-loopback host), so
+  // this only trips on a full url supplied via computer.config.json / a join token.
+  const protocol = urlProtocol(result.data.hubUrl)
+  if (protocol === 'ws:' && !isLoopbackUrl(result.data.hubUrl)) {
     throw new Error(
-      `SLAYZONE_MODE=remote requires a wss:// hub url; got '${result.data.hubUrl}'. ` +
-        `A remote computer must use TLS — use a wss:// url (or SLAYZONE_MODE=local for loopback/dev).`
+      `plaintext ws:// is only allowed for a hub on this machine; got '${result.data.hubUrl}'. ` +
+        `A hub other machines reach is served over TLS by its front end — use a wss:// url.`
     )
   }
   return result.data
+}
+
+/** True when the url's host is loopback (`127.0.0.1` / `localhost` / `::1`). Malformed → false. */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(url).hostname.replace(/^\[|\]$/g, ''))
+  } catch {
+    return false
+  }
 }
 
 /** Parse a url's protocol (`ws:` / `wss:` / …), or `null` if malformed. */

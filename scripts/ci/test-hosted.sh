@@ -1,5 +1,5 @@
 #!/bin/bash
-# Strict CI gate for the suites that prove hosted mode, hub auth and per-user
+# Strict CI gate for the suites that prove the hub switches, hub auth and per-user
 # ownership (todo T-01). Same runners and flags as run-all.sh (they live in
 # packages/shared/test-utils/runners.sh), but scoped to the hub and what it serves,
 # and it exits non-zero if ANY suite fails, is skipped without a reason, or is a test
@@ -30,7 +30,7 @@ ELECTRON_NODE=$(ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -p 'process.
 }
 echo "node $(node -v); electron's node $ELECTRON_NODE"
 
-# Hub app: boot, auth gates, TLS listener, enrollment, backup, web login.
+# Hub app: boot rules, auth gates, computer URL + pin seam, enrollment, backup, web login.
 run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/local-computer-roots.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/seed-computer-project-paths.test.ts
@@ -45,7 +45,8 @@ run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/ws-origin.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/install-handshake.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/web-login-routing.test.ts
-run_test_electron_strict_loader packages/apps/hub/src/web-assets-remote-gate.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
 run_test packages/apps/hub/src/build-info.test.ts
 run_test packages/apps/hub/src/health.test.ts
@@ -54,6 +55,7 @@ run_test packages/apps/hub/src/port-claim.test.ts
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
 run_test packages/apps/hub/src/computer-tls-listener.test.ts
 run_test packages/apps/hub/src/standalone-config.test.ts
+run_test packages/apps/hub/src/boot-rules.test.ts
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/computer-restart-survival.test.ts
 skip_suite packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
@@ -145,11 +147,13 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-c
 skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context) and run-all.sh never registered it. TODO(T-01): fix the test, then register it above"
 
-# Mode resolution, env scoping, hub address derivation.
+# Hub switches and their config file, env scoping, hub address derivation and discovery.
 run_test_electron_strict_loader packages/domains/computers/src/server/project-paths.test.ts
-run_test packages/shared/platform/src/slayzone-mode.test.ts
+run_test packages/shared/platform/src/hub-switches.test.ts
+run_test packages/shared/platform/src/hub-config-file.test.ts
 run_test packages/shared/platform/src/env-manifest.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
+run_test packages/shared/platform/src/hub-discovery.test.ts
 
 # Node-environment vitest suites: scopes + trpc (the principal/scope gate), agent-hook.
 # Under the app's vitest config, like run-all.sh.

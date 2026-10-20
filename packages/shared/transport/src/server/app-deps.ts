@@ -10,7 +10,7 @@
 
 import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { CliInstallResult } from '@slayzone/platform'
+import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import type { AgentLifecycleEvent } from '@slayzone/terminal/shared'
 import type {
@@ -827,11 +827,10 @@ export function getProcessesDeps(): ProcessesDeps {
 
 // Computers / computer deps — the hub/computer-split surface the `computersRouter` needs
 // that transport cannot own itself: the live computer gateway (computer-WS connection
-// status) plus the two values `mintJoinToken` bakes into a join token (the computer
-// WS URL a computer dials + the hub TLS cert fingerprint it pins). All three are
-// exposed as GETTERS, not snapshots: the gateway is built asynchronously (auth
-// migrations) and the URL/fingerprint are only known after the server binds its
-// port + loads its identity, so the registry must read the live refs each call.
+// status) plus the value `mintJoinToken` bakes into a join token (the computer WS URL
+// a computer dials). Both are exposed as GETTERS, not snapshots: the gateway is built
+// asynchronously (auth migrations) and the URL is only known after the server binds
+// its port, so the registry must read the live refs each call.
 //
 // Populated once composeServer + the server host wire it (always, barring init failure); when
 // the computer init failed it is not set and `getComputersDeps()` throws — the router's
@@ -881,9 +880,6 @@ export type ComputersDeps = {
   /** ws(s)://host:port/computers URL a join token embeds for the computer to dial.
    *  Null until the computer listener's port is bound. */
   getHubUrl: () => string | null
-  /** Hub TLS leaf-cert sha256 (lowercase hex) a join token pins. Null until the
-   *  hub identity has been loaded. */
-  getCertFingerprint: () => string | null
 }
 
 let computersDeps: ComputersDeps | null = null
@@ -907,22 +903,20 @@ export function getComputersDepsOrNull(): ComputersDeps | null {
 }
 
 /**
- * Multi-hub federation: the intrinsic identity facts a hub reports to a
- * connecting client via `hub.describe`. Both getters degrade to a safe default
- * (no identity loaded / no auth) so the `hub.describe` query works with
- * multi-hub OFF — the co-located local sidecar has no cert + no auth. Wired by
- * the server composition only when a hub identity is loaded (multi_hub/computers) or
- * auth is enforced (Phase 6). Deliberately separate from `ComputersDeps` (the
- * computer-facing `/computers` axis) — this is the client-facing `/trpc` axis.
+ * Multi-hub federation: the intrinsic facts a hub reports to a connecting client
+ * via `hub.describe`. Both getters degrade to a safe default (login not required,
+ * the desktop app's default switches) so the `hub.describe` query works with
+ * multi-hub OFF. Deliberately separate from `ComputersDeps` (the computer-facing
+ * `/computers` axis) — this is the client-facing `/trpc` axis.
  */
 export type HubDescribeDeps = {
-  /** The hub's own TLS leaf-cert sha256 (lowercase hex), or null when no hub
-   *  identity is loaded (plain local mode). The client uses this to reconcile a
-   *  pinned remote hub; it is ignored for the local sentinel hub. */
-  getFingerprint: () => string | null
-  /** Whether this hub enforces bearer auth on `/trpc` connections (Phase 6).
-   *  Always false today — local is trusted loopback. */
+  /** Whether this hub enforces bearer auth on `/trpc` connections — the
+   *  `SLAYZONE_HUB_REQUIRE_LOGIN` switch. */
   getAuthRequired: () => boolean
+  /** Every per-hub switch (`REQUIRE_LOGIN`, `ENABLE_PASSWORD`, `ENABLE_SSO`,
+   *  `ENABLE_PROCESSES`, `ENABLE_INTEGRATIONS`), so a client can show or hide what
+   *  this hub does not offer. */
+  getSwitches: () => HubSwitches
 }
 
 let hubDescribeDeps: HubDescribeDeps | null = null
@@ -940,8 +934,8 @@ export function getHubDescribeDepsOrNull(): HubDescribeDeps | null {
  * Multi-hub auth gate. Returns whether THIS hub enforces bearer auth on tRPC
  * procedures. Default `false` (trusted loopback / non-authed remote) → the auth
  * middleware is inert, byte-identical to the pre-auth server. The hub sets a
- * real predicate (`() => hubAuthRequired`) at boot when it runs in remote mode
- * (`SLAYZONE_MODE=remote`).
+ * real predicate (`() => hubAuthRequired`) at boot — true when
+ * `SLAYZONE_HUB_REQUIRE_LOGIN=1`.
  */
 let authGate: () => boolean = () => false
 
