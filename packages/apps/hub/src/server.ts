@@ -195,6 +195,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     authRequired: hubAuthRequired,
     // Every switch, for the same reason (and for `slay hub ls`).
     switches,
+    // B13 — gates the host-describing fields behind "no proxy in the path".
+    reachable: boot.reachable,
     // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
     // single authority for "can this computer do work right now?" and warns that the
     // raw map means only "socket is open", including a computer that has stopped
