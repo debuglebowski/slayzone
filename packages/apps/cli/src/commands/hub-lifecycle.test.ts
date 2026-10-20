@@ -848,13 +848,54 @@ async function main(): Promise<void> {
       assert(res.status !== 0, 'refused')
       assert(/SLAYZONE_HUB_AUTH_SECRET/.test(res.stderr), `names the variable: ${res.stderr}`)
       assert(/openssl rand/.test(res.stderr), `says how to provide one: ${res.stderr}`)
+      // An existing hub already has sessions and enrolled computers keyed to its secret;
+      // "generate a new one" would sign them all out, so the message must lead them to
+      // the existing value first.
+      assert(
+        /computerTransportSecret/.test(res.stderr) && /hub\.state\.json/.test(res.stderr),
+        `says to reuse the existing secret of an existing hub: ${res.stderr}`
+      )
+      assert(/New hub/.test(res.stderr), `limits generating to a new hub: ${res.stderr}`)
       assert(
         !existsSync(join(noSecretRoot, 'hub.config.json')),
         'failing fast wrote no half-configured hub root'
       )
     })
 
-    await test('create --public-address defaults the listen address to 0.0.0.0 (reachable)', async () => {
+    await test('create --public-address REFUSES without --bind, writing nothing', async () => {
+      const noBindRoot = join(TMP, 'remote-nobind')
+      mkdirSync(noBindRoot, { recursive: true })
+      // The hub serves plain http, so a public address must not silently widen it to
+      // every interface. SECRET is set so the only thing wrong is the missing --bind.
+      for (const extra of [[], ['--port', '51987']]) {
+        const res = slay(
+          [
+            'hub',
+            'create',
+            `${NAME_PREFIX}nobind`,
+            '--root',
+            noBindRoot,
+            '--public-address',
+            'hub.example.com:8443',
+            ...extra
+          ],
+          { root: noBindRoot, env: { SLZ_FORCE_NO_SERVICE: '1', ...SECRET } }
+        )
+        const label = extra.length > 0 ? 'with --port' : 'bare'
+        assert(res.status !== 0, `${label}: refused`)
+        assert(
+          /--public-address/.test(res.stderr) && /--bind/.test(res.stderr),
+          `${label}: names both options: ${res.stderr}`
+        )
+        assert(/plain http/.test(res.stderr), `${label}: says why: ${res.stderr}`)
+        assert(
+          !existsSync(join(noBindRoot, 'hub.config.json')),
+          `${label}: failing fast wrote no hub.config.json`
+        )
+      }
+    })
+
+    await test('create --public-address with an explicit wildcard --bind persists it as given', async () => {
       const wideRoot = join(TMP, 'remote-wide')
       mkdirSync(wideRoot, { recursive: true })
       // ENABLE_PASSWORD=0 with no SSO makes the spawned hub refuse at boot (B2), so
@@ -868,8 +909,8 @@ async function main(): Promise<void> {
           wideRoot,
           '--public-address',
           'hub.example.com:8443',
-          '--port',
-          '51987'
+          '--bind',
+          '0.0.0.0:51987'
         ],
         {
           root: wideRoot,
@@ -880,9 +921,8 @@ async function main(): Promise<void> {
         string,
         unknown
       >
-      // A reachable hub bound to loopback with nothing in front of it is unreachable, so
-      // the default has to widen — while --bind above still overrides it.
-      assertEq(cfg.listenAddress, '0.0.0.0:51987', 'widened to the wildcard, keeping --port')
+      // Still possible — but only because the operator said so.
+      assertEq(cfg.listenAddress, '0.0.0.0:51987', 'the explicit bind, verbatim')
     })
 
     await test('create tells the operator to make the first account on a reachable hub', async () => {

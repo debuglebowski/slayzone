@@ -381,7 +381,16 @@ console.log('─'.repeat(40))
 
 test('B14: a reachable hub with no SLAYZONE_HUB_AUTH_SECRET refuses boot', () => {
   const { SLAYZONE_HUB_AUTH_SECRET: _drop, ...noSecret } = REACHABLE
-  assertRefuses({ host: OFF_LOOPBACK, env: noSecret }, 'SLAYZONE_HUB_AUTH_SECRET', 'environment')
+  // The fix an operator reaches for must not be "generate a new one" on a hub that
+  // already has sessions and enrolled computers: that signs everyone out.
+  assertRefuses(
+    { host: OFF_LOOPBACK, env: noSecret },
+    'SLAYZONE_HUB_AUTH_SECRET',
+    'environment',
+    'computerTransportSecret',
+    'hub.state.json',
+    'NEW hub'
+  )
 })
 
 test('B14: a blank secret counts as missing', () => {
