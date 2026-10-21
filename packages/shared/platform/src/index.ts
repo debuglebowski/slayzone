@@ -102,6 +102,7 @@ export {
   getManualInstallHint,
   type CliInstallResult
 } from './cli-install'
+export { refreshInstalledCliSync, type CliRefreshResult } from './cli-refresh'
 export { adoptRenamedDatabase, type AdoptRenamedDbResult } from './adopt-renamed-db'
 export {
   DB_PRAGMAS,

@@ -141,13 +141,31 @@ function installUnix(cliSrcPath: string, target: string, binDir: string): CliIns
   return { ok: true, path: target, pathNotInPATH: notInPath || undefined }
 }
 
+/** The `.cmd` shim: detects the Node version for --experimental-sqlite.
+ *  TODO: remove --experimental-sqlite when Node 22 is no longer supported */
+export const WINDOWS_SHIM = [
+  '@echo off',
+  'for /f "tokens=1 delims=." %%v in (\'node -e "process.stdout.write(process.versions.node)"\') do set NODE_MAJOR=%%v',
+  'if %NODE_MAJOR% LEQ 22 (',
+  '  node --experimental-sqlite --no-warnings "%~dp0slay.js" %*',
+  ') else (',
+  '  node --no-warnings "%~dp0slay.js" %*',
+  ')',
+  ''
+].join('\r\n')
+
+/** `<bundle>/slay` → `<bundle>/slay.js`: the file Windows copies next to the shim. */
+export function windowsCliJsSource(cliSrcPath: string): string {
+  return cliSrcPath.replace(/[/\\]slay$/, path.sep + 'slay.js')
+}
+
 function installWindows(cliSrcPath: string, binDir: string, target: string): CliInstallResult {
   if (!fs.existsSync(cliSrcPath)) {
     return { ok: false, error: `CLI source not found: ${cliSrcPath}` }
   }
   // Copy slay.js next to the .cmd shim
   // TODO: In dev mode, slay.js is at ../cli/dist/slay.js, not ../cli/bin/slay.js — shim won't work in dev on Windows
-  const srcJs = cliSrcPath.replace(/[/\\]slay$/, path.sep + 'slay.js')
+  const srcJs = windowsCliJsSource(cliSrcPath)
   const destJs = path.join(binDir, 'slay.js')
   if (fs.existsSync(srcJs)) {
     fs.copyFileSync(srcJs, destJs)
@@ -155,19 +173,7 @@ function installWindows(cliSrcPath: string, binDir: string, target: string): Cli
     return { ok: false, error: `CLI JS source not found: ${srcJs}` }
   }
 
-  // Write .cmd shim that detects Node version for --experimental-sqlite
-  // TODO: remove --experimental-sqlite when Node 22 is no longer supported
-  const shimContent = [
-    '@echo off',
-    'for /f "tokens=1 delims=." %%v in (\'node -e "process.stdout.write(process.versions.node)"\') do set NODE_MAJOR=%%v',
-    'if %NODE_MAJOR% LEQ 22 (',
-    '  node --experimental-sqlite --no-warnings "%~dp0slay.js" %*',
-    ') else (',
-    '  node --no-warnings "%~dp0slay.js" %*',
-    ')',
-    ''
-  ].join('\r\n')
-  fs.writeFileSync(target, shimContent)
+  fs.writeFileSync(target, WINDOWS_SHIM)
 
   // Add to user PATH via registry if not already present
   const notInPath = !isBinDirInPath(binDir)

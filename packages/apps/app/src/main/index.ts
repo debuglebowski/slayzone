@@ -216,6 +216,7 @@ import {
   getStateDir,
   installCli,
   checkCliInstalled,
+  refreshInstalledCliSync,
   getCliBinTarget,
   getManualInstallHint,
   getSupervisedRoot,
@@ -1706,6 +1707,14 @@ app
 
     registerProcessDiagnostics(app)
     logBoot('process diagnostics registered')
+
+    // Windows copies slay.js (macOS/Linux symlink into the bundle), so an upgrade left the
+    // v0.35.0 copy in place — and that one writes straight into the abandoned database.
+    // Refresh an existing install to the bundled CLI; never installs, never edits PATH.
+    const cliRefresh = refreshInstalledCliSync(getCliSrc())
+    if (cliRefresh.status === 'refreshed') logBoot('slay CLI refreshed to the bundled version')
+    else if (cliRefresh.status === 'failed')
+      console.error(`[slay-cli] refresh failed, will retry next launch: ${cliRefresh.error}`)
 
     // Migrate CLI symlink from /usr/local/bin to ~/.local/bin on Linux
     if (process.platform === 'linux') {
