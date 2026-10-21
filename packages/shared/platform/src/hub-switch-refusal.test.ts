@@ -1,5 +1,5 @@
 /**
- * Switch refusals (T-04, T-05, T-07): one audit line + one error shape per refusal,
+ * Switch refusals (T-04, T-05, T-06, T-07): one audit line + one error shape per refusal,
  * nothing at all with the switches at their defaults.
  * Pure Node → runs under plain `npx tsx`.
  *
@@ -8,6 +8,7 @@
 import {
   HubSwitchedOffError,
   assertHubIntegrationsEnabled,
+  assertHubLocalExecEnabled,
   assertHubProcessesEnabled,
   hubIntegrationsEnabled,
   hubProcessesEnabled,
@@ -54,6 +55,10 @@ check(
   'default: integration assert passes',
   caught(() => assertHubIntegrationsEnabled({ op: 'connect' })) === null
 )
+check(
+  'default: local exec assert passes',
+  caught(() => assertHubLocalExecEnabled({ op: 'git' })) === null
+)
 check('default: no audit line', lines.length === 0)
 check('explicit 1 = enabled', hubProcessesEnabled({ [PROCESSES]: '1' }) === true)
 
@@ -97,6 +102,38 @@ check(
   'automation refusal: event automation.run_command',
   lines[0]?.event === 'automation.run_command'
 )
+// --- T-06: hub-local exec off with processes ---
+lines = []
+const execErr = runWithSecurityContext(
+  { actor: 'user-2', ip: '203.0.113.8', route: 'trpc worktrees.getCurrentBranch' },
+  () => caught(() => assertHubLocalExecEnabled({ op: 'git', detail: { command: 'git' } }))
+)
+check('local exec off: throws HubSwitchedOffError', execErr instanceof HubSwitchedOffError)
+const xe = execErr as HubSwitchedOffError
+check('local exec off: code NO_COMPUTER_CONNECTED', xe.code === 'NO_COMPUTER_CONNECTED')
+check('local exec off: variable is the processes switch', xe.variable === PROCESSES)
+check(
+  'local exec off: message says connect a computer and names the switch',
+  xe.message.startsWith('Connect a computer') && xe.message.includes(`${PROCESSES}=0`),
+  xe.message
+)
+check('local exec off: recognized structurally', isHubSwitchedOffError(execErr))
+check('local exec off: one audit line', lines.length === 1)
+const xl = lines[0] ?? {}
+check(
+  'local exec off: event hub.local_exec, denied, from context',
+  xl.event === 'hub.local_exec' &&
+    xl.outcome === 'denied' &&
+    xl.actor === 'user-2' &&
+    xl.route === 'trpc worktrees.getCurrentBranch'
+)
+const xd = (xl.detail ?? {}) as Record<string, unknown>
+check(
+  'local exec off: detail carries op, code, caller detail',
+  xd.op === 'git' && xd.code === 'NO_COMPUTER_CONNECTED' && xd.command === 'git',
+  JSON.stringify(xd)
+)
+
 check(
   'processes off leaves integrations on',
   caught(() => assertHubIntegrationsEnabled({ op: 'connect' })) === null
@@ -125,6 +162,10 @@ check(
 check(
   'integrations off leaves processes on',
   caught(() => assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn' })) === null
+)
+check(
+  'integrations off leaves local exec on',
+  caught(() => assertHubLocalExecEnabled({ op: 'git' })) === null
 )
 delete process.env[INTEGRATIONS]
 

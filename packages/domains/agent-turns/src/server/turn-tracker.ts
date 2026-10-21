@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { AgentEvent } from '@slayzone/terminal/shared'
 import { snapshotWorktree, deleteTurnRef, diffIsEmptyCached, diffIsEmpty } from './git-snapshot'
 import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
@@ -71,6 +72,10 @@ export async function recordTurnBoundary(
   tabId: string,
   promptText: string
 ): Promise<void> {
+  // A hub with processes switched off runs no git (T-06): the snapshot would be
+  // refused anyway. Skipped quietly here — this fires on every agent turn, so a
+  // refusal + audit line per turn would only be noise.
+  if (!hubProcessesEnabled()) return
   const ctx = await resolveTabContext(db, tabId)
   if (!ctx) return
   const id = randomUUID()

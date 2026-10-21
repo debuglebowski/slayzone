@@ -94,7 +94,7 @@ import type {
   MergePrInput,
   EditPrCommentInput
 } from '@slayzone/worktrees/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 import { getAppDeps, getWorkspaceDeps } from '../app-deps'
 
 const u = z.unknown()
@@ -102,16 +102,25 @@ const s = z.string()
 const sn = z.string().nullable()
 const obj = z.object
 
+/**
+ * Most of this router runs git, `gh` probes and file reads on the HUB's own disk —
+ * there is no computer route for them yet — so those procedures are
+ * `hubLocalProcedure`: refused with `NO_COMPUTER_CONNECTED` on a hub with
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06), unchanged everywhere else. Still
+ * `publicProcedure`: the routed ones (repo discovery through the workspace fs, the
+ * `gh` calls behind the routed executor), DB reads, event subscriptions and
+ * `watchStop`, which only releases a watcher.
+ */
 export const worktreesRouter = router({
   // Watch / unwatch (refcounted)
-  watchStart: publicProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
+  watchStart: hubLocalProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
     getGitWatcher().subscribe(input.worktreePath)
   }),
   watchStop: publicProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
     getGitWatcher().unsubscribe(input.worktreePath)
   }),
 
-  isGitRepo: publicProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
+  isGitRepo: hubLocalProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
   // Repo discovery runs on the machine that owns the directory — it decides the
   // terminal cwd, the editor root, and the git panel, so a hub-local walk pointed
   // all three at the wrong filesystem for any project living on a computer.
@@ -132,10 +141,10 @@ export const worktreesRouter = router({
       const computerId = await resolveComputer(input)
       return detectChildRepos(fs, computerId, input.projectPath)
     }),
-  detectWorktrees: publicProcedure
+  detectWorktrees: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => detectWorktreesWithColors(input.repoPath)),
-  createWorktree: publicProcedure.input(u).mutation(({ ctx, input }) => {
+  createWorktree: hubLocalProcedure.input(u).mutation(({ ctx, input }) => {
     const opts = input as CreateWorktreeOpts
     const { requestId } = opts
     const onPhase = requestId
@@ -157,183 +166,183 @@ export const worktreesRouter = router({
       }
     })
   ),
-  removeWorktree: publicProcedure
+  removeWorktree: hubLocalProcedure
     .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
     .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),
-  init: publicProcedure.input(obj({ path: s })).mutation(({ input }) => initRepo(input.path)),
-  getCurrentBranch: publicProcedure
+  init: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => initRepo(input.path)),
+  getCurrentBranch: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => getCurrentBranch(input.path)),
-  listBranches: publicProcedure
+  listBranches: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => listBranches(input.path)),
-  checkoutBranch: publicProcedure
+  checkoutBranch: hubLocalProcedure
     .input(obj({ path: s, branch: s }))
     .mutation(({ input }) => checkoutBranch(input.path, input.branch)),
-  createBranch: publicProcedure
+  createBranch: hubLocalProcedure
     .input(obj({ path: s, branch: s }))
     .mutation(({ input }) => createBranch(input.path, input.branch)),
-  hasUncommittedChanges: publicProcedure
+  hasUncommittedChanges: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => hasUncommittedChanges(input.path)),
-  mergeIntoParent: publicProcedure
+  mergeIntoParent: hubLocalProcedure
     .input(obj({ projectPath: s, parentBranch: s, sourceBranch: s }))
     .mutation(({ input }) =>
       mergeIntoParent(input.projectPath, input.parentBranch, input.sourceBranch)
     ),
-  abortMerge: publicProcedure
+  abortMerge: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => abortMerge(input.path)),
-  mergeWithAI: publicProcedure
+  mergeWithAI: hubLocalProcedure
     .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
     .mutation(({ input }) => mergeWithAI(input)),
-  isMergeInProgress: publicProcedure
+  isMergeInProgress: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => isMergeInProgress(input.path)),
-  getConflictedFiles: publicProcedure
+  getConflictedFiles: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => getConflictedFiles(input.path)),
-  getWorkingDiff: publicProcedure
+  getWorkingDiff: hubLocalProcedure
     .input(obj({ path: s, opts: u.optional() }))
     .query(({ input }) => getWorkingDiff(input.path, input.opts as never)),
-  stageFile: publicProcedure
+  stageFile: hubLocalProcedure
     .input(obj({ path: s, filePath: s }))
     .mutation(({ input }) => stageFile(input.path, input.filePath)),
-  unstageFile: publicProcedure
+  unstageFile: hubLocalProcedure
     .input(obj({ path: s, filePath: s }))
     .mutation(({ input }) => unstageFile(input.path, input.filePath)),
-  discardFile: publicProcedure
+  discardFile: hubLocalProcedure
     .input(obj({ path: s, filePath: s, untracked: z.boolean().optional() }))
     .mutation(({ input }) => discardFile(input.path, input.filePath, input.untracked)),
-  stageAll: publicProcedure.input(obj({ path: s })).mutation(({ input }) => stageAll(input.path)),
-  unstageAll: publicProcedure
+  stageAll: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => stageAll(input.path)),
+  unstageAll: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => unstageAll(input.path)),
-  getFileDiff: publicProcedure
+  getFileDiff: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s, staged: z.boolean(), opts: u.optional() }))
     .query(({ input }) =>
       getFileDiff(input.repoPath, input.filePath, input.staged, input.opts as never)
     ),
-  getUntrackedFileDiff: publicProcedure
+  getUntrackedFileDiff: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s }))
     .query(({ input }) => getUntrackedFileDiff(input.repoPath, input.filePath)),
-  getConflictContent: publicProcedure
+  getConflictContent: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s }))
     .query(({ input }) => getConflictContent(input.repoPath, input.filePath)),
-  writeResolvedFile: publicProcedure
+  writeResolvedFile: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s, content: s }))
     .mutation(({ input }) => writeResolvedFile(input.repoPath, input.filePath, input.content)),
-  commitFiles: publicProcedure
+  commitFiles: hubLocalProcedure
     .input(obj({ repoPath: s, message: s }))
     .mutation(({ input }) => commitFiles(input.repoPath, input.message)),
-  analyzeConflict: publicProcedure
+  analyzeConflict: hubLocalProcedure
     .input(obj({ mode: s, filePath: s, base: sn, ours: sn, theirs: sn }))
     .mutation(({ input }) =>
       analyzeConflict(input.mode, input.filePath, input.base, input.ours, input.theirs)
     ),
 
   // Rebase
-  isRebaseInProgress: publicProcedure
+  isRebaseInProgress: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => isRebaseInProgress(input.path)),
-  getRebaseProgress: publicProcedure
+  getRebaseProgress: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => getRebaseProgress(input.repoPath)),
-  abortRebase: publicProcedure
+  abortRebase: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => abortRebase(input.path)),
-  continueRebase: publicProcedure
+  continueRebase: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => continueRebase(input.path)),
-  skipRebaseCommit: publicProcedure
+  skipRebaseCommit: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => skipRebaseCommit(input.path)),
-  getMergeContext: publicProcedure
+  getMergeContext: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => getMergeContext(input.repoPath)),
 
-  getRecentCommits: publicProcedure
+  getRecentCommits: hubLocalProcedure
     .input(obj({ repoPath: s, count: z.number().optional() }))
     .query(({ input }) => getRecentCommits(input.repoPath, input.count)),
-  getAheadBehind: publicProcedure
+  getAheadBehind: hubLocalProcedure
     .input(obj({ repoPath: s, branch: s, upstream: s }))
     .query(({ input }) => getAheadBehind(input.repoPath, input.branch, input.upstream)),
-  getStatusSummary: publicProcedure
+  getStatusSummary: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => getStatusSummary(input.repoPath)),
   // Electron shell op (host-only) — forwarded over the capability bridge so it
   // runs in the Electron host when the renderer talks to the side-car.
-  revealInFinder: publicProcedure
+  revealInFinder: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => getAppDeps().shellOpenPath(input.path)),
-  isDirty: publicProcedure.input(obj({ path: s })).query(async ({ input }) => {
+  isDirty: hubLocalProcedure.input(obj({ path: s })).query(async ({ input }) => {
     const summary = await getStatusSummary(input.path)
     return summary.staged + summary.unstaged + summary.untracked > 0
   }),
-  getRemoteUrl: publicProcedure
+  getRemoteUrl: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => getRemoteUrl(input.path)),
-  getAheadBehindUpstream: publicProcedure
+  getAheadBehindUpstream: hubLocalProcedure
     .input(obj({ path: s, branch: s }))
     .query(({ input }) => getAheadBehindUpstream(input.path, input.branch)),
-  fetch: publicProcedure.input(obj({ path: s })).mutation(({ input }) => gitFetch(input.path)),
-  push: publicProcedure
+  fetch: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitFetch(input.path)),
+  push: hubLocalProcedure
     .input(obj({ path: s, branch: s.optional(), force: z.boolean().optional() }))
     .mutation(({ input }) => gitPush(input.path, input.branch, input.force)),
-  pull: publicProcedure.input(obj({ path: s })).mutation(({ input }) => gitPull(input.path)),
+  pull: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitPull(input.path)),
 
   // Branch tab
-  getDefaultBranch: publicProcedure
+  getDefaultBranch: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => getDefaultBranch(input.path)),
-  listBranchesDetailed: publicProcedure
+  listBranchesDetailed: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => listBranchesDetailed(input.path)),
-  listRemoteBranches: publicProcedure
+  listRemoteBranches: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => listRemoteBranches(input.path)),
-  getMergeBase: publicProcedure
+  getMergeBase: hubLocalProcedure
     .input(obj({ path: s, branch1: s, branch2: s }))
     .query(({ input }) => getMergeBase(input.path, input.branch1, input.branch2)),
-  getCommitsSince: publicProcedure
+  getCommitsSince: hubLocalProcedure
     .input(obj({ path: s, sinceRef: s, branch: s }))
     .query(({ input }) => getCommitsSince(input.path, input.sinceRef, input.branch)),
-  getCommitsBeforeRef: publicProcedure
+  getCommitsBeforeRef: hubLocalProcedure
     .input(obj({ path: s, ref: s, count: z.number().optional() }))
     .query(({ input }) => getCommitsBeforeRef(input.path, input.ref, input.count)),
-  deleteBranch: publicProcedure
+  deleteBranch: hubLocalProcedure
     .input(obj({ path: s, branch: s, force: z.boolean().optional() }))
     .mutation(({ input }) => deleteBranch(input.path, input.branch, input.force)),
-  pruneRemote: publicProcedure
+  pruneRemote: hubLocalProcedure
     .input(obj({ path: s }))
     .mutation(({ input }) => pruneRemote(input.path)),
 
   // Worktree tab
-  rebaseOnto: publicProcedure
+  rebaseOnto: hubLocalProcedure
     .input(obj({ path: s, ontoBranch: s }))
     .mutation(({ input }) => rebaseOnto(input.path, input.ontoBranch)),
-  mergeFrom: publicProcedure
+  mergeFrom: hubLocalProcedure
     .input(obj({ path: s, branch: s }))
     .mutation(({ input }) => mergeFrom(input.path, input.branch)),
-  getDiffStats: publicProcedure
+  getDiffStats: hubLocalProcedure
     .input(obj({ path: s, ref: s }))
     .query(({ input }) => getDiffStats(input.path, input.ref)),
-  getWorktreeMetadata: publicProcedure
+  getWorktreeMetadata: hubLocalProcedure
     .input(obj({ path: s }))
     .query(({ input }) => getWorktreeMetadata(input.path)),
-  getCommitDag: publicProcedure
+  getCommitDag: hubLocalProcedure
     .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional() }))
     .query(({ input }) => getCommitDag(input.path, input.limit, input.branches)),
-  resolveChildBranches: publicProcedure
+  resolveChildBranches: hubLocalProcedure
     .input(obj({ path: s, baseBranch: s }))
     .query(({ input }) => resolveChildBranches(input.path, input.baseBranch)),
   resolveCopyBehavior: publicProcedure
     .input(obj({ projectId: s.optional() }))
     .query(({ ctx, input }) => resolveCopyBehavior(ctx.db, input.projectId)),
-  getIgnoredFileTree: publicProcedure
+  getIgnoredFileTree: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => getIgnoredFileTree(input.repoPath)),
-  copyIgnoredFiles: publicProcedure
+  copyIgnoredFiles: hubLocalProcedure
     .input(
       obj({
         repoPath: s,
@@ -351,12 +360,12 @@ export const worktreesRouter = router({
       )
     ),
 
-  getResolvedCommitDag: publicProcedure
+  getResolvedCommitDag: hubLocalProcedure
     .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional(), baseBranch: s }))
     .query(({ input }) =>
       getResolvedCommitDag(input.path, input.limit, input.branches, input.baseBranch)
     ),
-  getResolvedForkGraph: publicProcedure
+  getResolvedForkGraph: hubLocalProcedure
     .input(
       obj({
         targetPath: s,
@@ -377,41 +386,41 @@ export const worktreesRouter = router({
         input.compareBranchLabel
       )
     ),
-  getResolvedUpstreamGraph: publicProcedure
+  getResolvedUpstreamGraph: hubLocalProcedure
     .input(obj({ repoPath: s, branch: s }))
     .query(({ input }) => getResolvedUpstreamGraph(input.repoPath, input.branch)),
-  getResolvedRecentCommits: publicProcedure
+  getResolvedRecentCommits: hubLocalProcedure
     .input(obj({ path: s, count: z.number(), branchName: s }))
     .query(({ input }) => getResolvedRecentCommits(input.path, input.count, input.branchName)),
 
   // Stashes
-  listStashes: publicProcedure
+  listStashes: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => listStashes(input.repoPath)),
-  createStash: publicProcedure
+  createStash: hubLocalProcedure
     .input(obj({ repoPath: s, message: s, includeUntracked: z.boolean(), keepIndex: z.boolean() }))
     .mutation(({ input }) =>
       createStash(input.repoPath, input.message, input.includeUntracked, input.keepIndex)
     ),
-  applyStash: publicProcedure
+  applyStash: hubLocalProcedure
     .input(obj({ repoPath: s, index: z.number() }))
     .mutation(({ input }) => applyStash(input.repoPath, input.index)),
-  popStash: publicProcedure
+  popStash: hubLocalProcedure
     .input(obj({ repoPath: s, index: z.number() }))
     .mutation(({ input }) => popStash(input.repoPath, input.index)),
-  dropStash: publicProcedure
+  dropStash: hubLocalProcedure
     .input(obj({ repoPath: s, index: z.number() }))
     .mutation(({ input }) => dropStash(input.repoPath, input.index)),
-  branchFromStash: publicProcedure
+  branchFromStash: hubLocalProcedure
     .input(obj({ repoPath: s, index: z.number(), branchName: s }))
     .mutation(({ input }) => branchFromStash(input.repoPath, input.index, input.branchName)),
-  getStashDiff: publicProcedure
+  getStashDiff: hubLocalProcedure
     .input(obj({ repoPath: s, index: z.number() }))
     .query(({ input }) => getStashDiff(input.repoPath, input.index)),
 
   // GitHub CLI
-  checkGhInstalled: publicProcedure.query(() => checkGhInstalled()),
-  hasGithubRemote: publicProcedure
+  checkGhInstalled: hubLocalProcedure.query(() => checkGhInstalled()),
+  hasGithubRemote: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => hasGithubRemote(input.repoPath)),
   listOpenPrs: publicProcedure
@@ -420,7 +429,7 @@ export const worktreesRouter = router({
   getPrByUrl: publicProcedure
     .input(obj({ repoPath: s, url: s }))
     .query(({ input }) => getPrByUrl(input.repoPath, input.url)),
-  createPr: publicProcedure
+  createPr: hubLocalProcedure
     .input(z.unknown() as unknown as z.ZodType<CreatePrInput>)
     .mutation(({ input }) => createPr(input)),
   getPrComments: publicProcedure

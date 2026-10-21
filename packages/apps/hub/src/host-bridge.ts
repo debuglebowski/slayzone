@@ -4,6 +4,7 @@ import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { settingsEvents } from '@slayzone/settings/server'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type {
   AppDeps,
   CapabilityBridgeRouter,
@@ -36,6 +37,15 @@ export type HostBridge = {
   connect: () => void
   dispose: () => void
 }
+
+/** Bridged `AppDeps` members that open, reveal, probe or install on the host machine. */
+const HOST_LOCAL_EXEC = new Set([
+  'shellOpenExternal',
+  'shellOpenPath',
+  'shellShowItemInFolder',
+  'filesPathExists',
+  'appInstallCli'
+])
 
 export function createHostBridge(
   url: string,
@@ -163,6 +173,15 @@ export function createHostBridge(
     {
       get(_t, prop: string | symbol) {
         if (typeof prop !== 'string') return undefined
+        // Host capabilities that exec or probe on this machine (the desktop runs
+        // them for us, but it is still the hub's machine): refused first on a hub
+        // with processes switched off (T-06), exactly like the native ones.
+        if (HOST_LOCAL_EXEC.has(prop)) {
+          return (...args: unknown[]) => {
+            assertHubLocalExecEnabled({ op: `host.${prop}` })
+            return invoke(prop, ...args)
+          }
+        }
         switch (prop) {
           case 'browser':
             return browserProxy

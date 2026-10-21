@@ -8,6 +8,7 @@ import {
   shellExists,
   getShellOverride
 } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { ValidationResult } from './adapters/types'
 
 const execFileAsync = promisify(execFile)
@@ -40,6 +41,9 @@ export {
  */
 let cachedEnrichedPath: string | null | undefined
 export function getEnrichedPath(): string | null {
+  // Probes THIS machine's login shell: refused on a hub with processes switched
+  // off (T-06), where nothing should run here to need the PATH anyway.
+  assertHubLocalExecEnabled({ op: 'shell.path' })
   if (cachedEnrichedPath !== undefined) return cachedEnrichedPath
   cachedEnrichedPath = resolveEnrichedPath()
   return cachedEnrichedPath
@@ -141,6 +145,8 @@ export function validateShellEnv(): ValidationResult {
  * Returns the resolved path or null if not found.
  */
 export async function whichBinary(name: string): Promise<string | null> {
+  // A login shell on THIS machine: refused on a hub with processes switched off (T-06).
+  assertHubLocalExecEnabled({ op: 'shell.which', detail: { binary: name } })
   if (platform() === 'win32') {
     try {
       const { stdout } = await execFileAsync('where', [name], { timeout: 3000 })

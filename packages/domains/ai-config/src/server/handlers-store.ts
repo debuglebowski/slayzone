@@ -4,6 +4,7 @@ import * as path from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { buildShellInvocation, quoteForShell } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   AiConfigItem,
@@ -2640,6 +2641,9 @@ export function createAiConfigOps(db: SlayzoneDb) {
       return false
     },
     setupSlay: (projectPath: string, projectId?: string): { ok: boolean; error?: string } => {
+      // Runs `slay init` in a project directory on THIS machine: refused on a hub with
+      // processes switched off (T-06), outside the try so it is not just `ok: false`.
+      assertHubLocalExecEnabled({ op: 'slay.init' })
       try {
         const cwd = path.resolve(projectPath)
         const devFlag = process.env.NODE_ENV === 'development' ? ' --dev' : ''

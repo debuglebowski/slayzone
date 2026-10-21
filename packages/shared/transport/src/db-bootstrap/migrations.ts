@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
+import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'
 import {
   parseSkillFrontmatter,
@@ -2274,6 +2275,9 @@ export const migrations: Migration[] = [
       // poisoning surface). Backfill via git for existing rows; rows whose
       // repo can't be reached stay NULL → filter treats as stale (drops).
       db.exec(`ALTER TABLE agent_turns ADD COLUMN head_sha_at_snap TEXT`)
+      // A hub with processes switched off runs no git (T-06): rows stay NULL, which
+      // the list-time filter already treats as stale.
+      if (!hubProcessesEnabled()) return
       const rows = db
         .prepare(`SELECT id, worktree_path, snapshot_sha FROM agent_turns`)
         .all() as Array<{ id: string; worktree_path: string; snapshot_sha: string }>

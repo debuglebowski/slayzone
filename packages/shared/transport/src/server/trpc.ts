@@ -1,7 +1,10 @@
 import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
 import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
-import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import {
+  assertHubLocalExecEnabled,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
@@ -126,6 +129,20 @@ export const publicProcedure = t.procedure
   .use(authGate)
   .use(scopeGate)
   .use(switchRefusal)
+
+/**
+ * A procedure that works on the hub's OWN disk — git, `gh` probes, the OS opener,
+ * project files — with no computer route (the git panel today). Refused up front,
+ * with the same FORBIDDEN + `NO_COMPUTER_CONNECTED` a refusal deeper down gets, when
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06): such a hub never touches project data.
+ * Up front because several of these helpers swallow errors into a default (`false`,
+ * `[]`), which would hide the refusal from the client. The exec seams refuse too, so
+ * a caller that skips this gate still spawns nothing.
+ */
+export const hubLocalProcedure = publicProcedure.use(({ next, path }) => {
+  assertHubLocalExecEnabled({ op: path })
+  return next()
+})
 
 /**
  * Ungated procedure for pre-auth discovery ONLY (`hub.describe`) — the client

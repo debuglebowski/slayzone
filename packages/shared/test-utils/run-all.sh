@@ -94,6 +94,8 @@ run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.ts
 # Processes / integrations switched off (T-04, T-05, T-07), end to end over tRPC.
 run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
+# Hub-local exec and project files refused with processes switched off (T-06).
+run_test_electron_strict_loader packages/apps/hub/src/local-exec-refusals.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts

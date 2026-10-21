@@ -1,6 +1,31 @@
-import { spawn } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
+import { basename } from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { DiagnosticSource } from '@slayzone/diagnostics/shared'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+
+/**
+ * The ONE place this package starts a process. Everything here runs on the hub's
+ * own machine (git, `gh`, setup scripts, the AI merge CLI), so on a hub with
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` each call is refused before anything spawns
+ * (T-06, `NO_COMPUTER_CONNECTED`). Inside a `new Promise` executor the refusal
+ * becomes a rejection; a sync caller gets the throw.
+ */
+function refuseOnSwitchedOffHub(command: string): void {
+  assertHubLocalExecEnabled({ op: 'exec', detail: { command: basename(command) } })
+}
+
+/** `spawn`, refused first on a hub with processes switched off. */
+export const hubSpawn = ((command: string, ...rest: unknown[]): ChildProcess => {
+  refuseOnSwitchedOffHub(command)
+  return (spawn as (...a: unknown[]) => ChildProcess)(command, ...rest)
+}) as typeof spawn
+
+/** `spawnSync`, refused first on a hub with processes switched off. */
+export const hubSpawnSync = ((command: string, ...rest: unknown[]) => {
+  refuseOnSwitchedOffHub(command)
+  return (spawnSync as (...a: unknown[]) => unknown)(command, ...rest)
+}) as typeof spawnSync
 
 export function trimOutput(value: unknown, maxLength = 1200): string | null {
   if (typeof value !== 'string') return null
@@ -26,7 +51,7 @@ export function execAsync(
     const label = `${command} ${args.join(' ')}`
     const source = opts.source ?? 'git'
     const startedAt = Date.now()
-    const child = spawn(command, args, {
+    const child = hubSpawn(command, args, {
       cwd: opts.cwd,
       stdio: ['pipe', 'pipe', 'pipe']
     })
