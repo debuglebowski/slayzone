@@ -134,7 +134,7 @@ async function call(
       dataRoot: '/tmp',
       automationEngine: engine,
       req: { socket: { remoteAddress: '198.51.100.9' } } as never,
-      principal: { userId: 'user-7', scopes: ['full'] as const }
+      principal: { userId: 'user-7', role: 'user' as const, scopes: ['full'] as const }
     })
   })
   const body = (await res.json()) as {
