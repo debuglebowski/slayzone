@@ -88,8 +88,20 @@ test('NEVER CLOBBERS a value already set on this device', async () => {
   const dir = clientDir('d')
   // Device already has a theme (e.g. a crash between write and sentinel, then the
   // user changed it before the retry).
-  fs.writeFileSync(path.join(dir, 'client-settings.json'), JSON.stringify({ theme: 'light' }))
+  fs.writeFileSync(path.join(dir, 'client.config.json'), JSON.stringify({ theme: 'light' }))
   await migrateClientSettings({ clientRoot: dir, dbPath })
+  expect(readClientSettings(dir).theme).toBe('light')
+})
+
+test('beta.14–18 user (old file name, sentinel already set) keeps their settings after the rename', async () => {
+  // The sentinel blocks any re-read of the DB, so the only thing that can carry
+  // these settings across the rename is the old-name adoption in the store.
+  const dbPath = makeDb('g', { theme: 'dark' })
+  const dir = clientDir('g')
+  fs.writeFileSync(path.join(dir, 'client-settings.json'), JSON.stringify({ theme: 'light' }))
+  fs.writeFileSync(sentinelOf(dir), 'done')
+  const res = await migrateClientSettings({ clientRoot: dir, dbPath })
+  expect(res.status).toBe('already-migrated')
   expect(readClientSettings(dir).theme).toBe('light')
 })
 

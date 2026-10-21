@@ -80,3 +80,65 @@ test('concurrent updates serialize — no lost write', async () => {
   expect(got.labs?.loopMode).toBe(true)
   expect(got.cli?.migrationDialogShown).toBe(true)
 })
+
+// --- rename: client-settings.json → client.config.json -----------------------------
+// beta.14–18 wrote `client-settings.json`. The rename must carry those users' theme,
+// shortcuts and labs across — and because the DB→file migration is sentinel-gated,
+// nothing else would ever restore them if the new name simply started empty.
+function freshDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-config-'))
+}
+
+test('file is named client.config.json (the <role>.config.json convention)', () => {
+  expect(path.basename(clientSettingsPath(dir))).toBe('client.config.json')
+})
+
+test('beta client-settings.json is adopted on read; the old file is left byte-identical', () => {
+  const d = freshDir()
+  const legacy = path.join(d, 'client-settings.json')
+  const bytes = JSON.stringify({ theme: 'light', labs: { loopMode: true }, fromFuture: { keep: 1 } })
+  fs.writeFileSync(legacy, bytes)
+  const got = readClientSettings(d)
+  expect(got.theme).toBe('light')
+  expect(got.labs?.loopMode).toBe(true)
+  expect(fs.existsSync(clientSettingsPath(d))).toBe(true)
+  expect(JSON.parse(fs.readFileSync(clientSettingsPath(d), 'utf8')).fromFuture.keep).toBe(1)
+  expect(fs.readFileSync(legacy, 'utf8')).toBe(bytes)
+  expect((fs.statSync(clientSettingsPath(d)).mode & 0o777).toString(8)).toBe('600')
+})
+
+test('an update on a legacy-only dir merges over the beta values and leaves the old file alone', async () => {
+  const d = freshDir()
+  const legacy = path.join(d, 'client-settings.json')
+  const bytes = JSON.stringify({ theme: 'dark', labs: { testsPanel: true } })
+  fs.writeFileSync(legacy, bytes)
+  await updateClientSettings({ cli: { migrationDialogShown: true } }, d)
+  const got = readClientSettings(d)
+  expect(got.theme).toBe('dark')
+  expect(got.labs?.testsPanel).toBe(true)
+  expect(got.cli?.migrationDialogShown).toBe(true)
+  expect(fs.readFileSync(legacy, 'utf8')).toBe(bytes)
+})
+
+test('when both files exist the new one wins and the old is ignored', () => {
+  const d = freshDir()
+  fs.writeFileSync(path.join(d, 'client-settings.json'), JSON.stringify({ theme: 'light' }))
+  fs.writeFileSync(clientSettingsPath(d), JSON.stringify({ theme: 'dark' }))
+  expect(readClientSettings(d).theme).toBe('dark')
+})
+
+test('an unparseable beta file is not adopted, renamed or deleted', () => {
+  const d = freshDir()
+  const legacy = path.join(d, 'client-settings.json')
+  fs.writeFileSync(legacy, '{ nope')
+  expect(Object.keys(readClientSettings(d)).length).toBe(0)
+  expect(fs.existsSync(clientSettingsPath(d))).toBe(false)
+  expect(fs.readFileSync(legacy, 'utf8')).toBe('{ nope')
+  expect(fs.readdirSync(d).filter((f) => f.includes('.corrupt-')).length).toBe(0)
+})
+
+test('nothing on disk: a read creates nothing', () => {
+  const d = freshDir()
+  readClientSettings(d)
+  expect(fs.readdirSync(d).length).toBe(0)
+})

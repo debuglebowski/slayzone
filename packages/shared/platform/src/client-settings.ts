@@ -47,10 +47,44 @@ export type ClientSettings = {
   cli?: { migrationDialogShown?: boolean }
 }
 
-const FILE_NAME = 'client-settings.json'
+// `<role>.config.json`, like `hub.config.json` / `computer.config.json`: user-set
+// values. (Also holds a little app-written state — panel geometry, a dialog-shown
+// flag — not worth a second `client.state.json`.)
+const FILE_NAME = 'client.config.json'
+
+/** The name beta.14–18 wrote. Only ever a read-only source of a one-time copy. */
+const LEGACY_FILE_NAME = 'client-settings.json'
 
 export function clientSettingsPath(dir: string = getClientRoot()): string {
   return join(dir, FILE_NAME)
+}
+
+/**
+ * One-time COPY of a beta-era `client-settings.json` to the new name. Lives here,
+ * not in a boot-time migration, because the DB→file migration is sentinel-gated and
+ * beta users already carry that sentinel: nothing else would ever restore their
+ * theme/shortcuts/labs if the new name simply started empty. Every reader and writer
+ * goes through `readClientSettings`/`updateClientSettings`, so this runs before any
+ * of them regardless of call order.
+ *
+ * Same rules as the other migrations: COPY-ONLY (the old file is never modified,
+ * renamed or deleted — a downgrade to a beta still finds it), and the new file always
+ * wins. Parsed and re-written rather than byte-copied so it reuses the atomic 0600
+ * writer; unknown fields survive because the whole raw object is kept. An unparseable
+ * old file is left alone untouched, not adopted.
+ */
+function adoptLegacyFile(dir: string): void {
+  const next = clientSettingsPath(dir)
+  if (existsSync(next)) return
+  const legacy = join(dir, LEGACY_FILE_NAME)
+  if (!existsSync(legacy)) return
+  const raw = readJsonObject(legacy)
+  if (raw === null) return
+  try {
+    writeJsonAtomic(next, raw)
+  } catch {
+    /* best-effort — retried on the next read/update, never blocks boot */
+  }
 }
 
 /**
@@ -136,6 +170,7 @@ function coerce(raw: Record<string, unknown>): ClientSettings {
  * visible and the bytes are recoverable.
  */
 export function readClientSettings(dir: string = getClientRoot()): ClientSettings {
+  adoptLegacyFile(dir)
   const path = clientSettingsPath(dir)
   const raw = readJsonObject(path)
   if (raw === null) {
@@ -173,6 +208,7 @@ export function updateClientSettings(
   dir: string = getClientRoot()
 ): Promise<ClientSettings> {
   const run = writeChain.then(() => {
+    adoptLegacyFile(dir)
     const path = clientSettingsPath(dir)
     const raw = readJsonObject(path) ?? {}
     const next = { ...raw, ...patch }
