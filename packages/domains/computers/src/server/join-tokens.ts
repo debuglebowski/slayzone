@@ -1,15 +1,21 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { securityEvent } from '@slayzone/platform/security-log'
 import type { JoinToken } from '../shared/types'
 
 /**
  * Single-use computer enrollment tokens.
  *
  * Token format: `szjt1.<base64url(JSON payload)>` where the payload embeds the
- * hub URL, the hub's TLS cert fingerprint (so the computer can pin it before
- * trusting the hub) and a 256-bit random secret. The DB stores ONLY
- * `sha256(token)` — the plaintext token is returned once from `mintJoinToken`
+ * hub URL, a `certFingerprint` field and a 256-bit random secret. The DB stores
+ * ONLY `sha256(token)` — the plaintext token is returned once from `mintJoinToken`
  * and can never be recovered from the hub afterwards.
+ *
+ * `certFingerprint` is ALWAYS EMPTY in a freshly minted token: the hub no longer
+ * terminates TLS or presents a certificate of its own (a front end does), so there
+ * is nothing to pin and a computer verifies the front end's certificate the normal
+ * way. The field stays in the grammar — and in both decoders — only so a token
+ * minted by an older hub still decodes; removing it is a later change.
  */
 
 export const JOIN_TOKEN_PREFIX = 'szjt1'
@@ -24,7 +30,10 @@ export interface JoinTokenPayload {
 
 export interface MintJoinTokenInput {
   hubUrl: string
-  certFingerprint: string
+  /** Leave unset: the hub has no certificate to pin, so the token carries an empty
+   *  fingerprint (see the module note). Kept optional for a caller that still
+   *  passes one. */
+  certFingerprint?: string
   ttlMs: number
   label: string
   /**
@@ -102,7 +111,7 @@ export async function mintJoinToken(
   const now = input.now ?? Date.now()
   const payload: JoinTokenPayload = {
     hubUrl: input.hubUrl,
-    certFingerprint: input.certFingerprint,
+    certFingerprint: input.certFingerprint ?? '',
     secret: randomBytes(32).toString('base64url')
   }
   const token = `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`
@@ -114,7 +123,31 @@ export async function mintJoinToken(
      VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
     [id, hashJoinToken(token), input.label, now, expiresAt, input.mintedByUserId ?? null]
   )
+  // Every mint path (tRPC, REST, the desktop's loopback auto-enroll) lands here. The
+  // id names the row, never the token; ip/route come from the request context.
+  securityEvent({
+    event: 'computer.join_token.mint',
+    outcome: 'success',
+    actor: input.mintedByUserId ?? undefined,
+    targetKind: 'join_token',
+    targetId: id,
+    detail: { label: input.label, ttlMs: input.ttlMs }
+  })
   return { id, token, label: input.label, created_at: now, expires_at: expiresAt }
+}
+
+/** Audit line for a redeem attempt (T-03): the row id when one matched, never the token. */
+function auditRedeem(
+  tokenId: string | null,
+  result: { ok: true; mintedByUserId: string | null } | { ok: false; reason: string }
+): void {
+  securityEvent({
+    event: 'computer.join_token.redeem',
+    outcome: result.ok ? 'success' : 'failure',
+    targetKind: 'join_token',
+    targetId: tokenId,
+    detail: result.ok ? { mintedBy: result.mintedByUserId } : { reason: result.reason }
+  })
 }
 
 /**
@@ -127,27 +160,37 @@ export async function verifyJoinToken(
   token: string,
   now: number = Date.now()
 ): Promise<VerifyJoinTokenResult> {
+  const refuse = (
+    reason: 'malformed' | 'unknown' | 'used' | 'expired',
+    tokenId: string | null
+  ): VerifyJoinTokenResult => {
+    const result = { ok: false as const, reason }
+    auditRedeem(tokenId, result)
+    return result
+  }
   const payload = decodeJoinToken(token)
-  if (!payload) return { ok: false, reason: 'malformed' }
+  if (!payload) return refuse('malformed', null)
 
   const row = await db.get<JoinToken>(`SELECT * FROM join_tokens WHERE token_hash = ?`, [
     hashJoinToken(token)
   ])
-  if (!row) return { ok: false, reason: 'unknown' }
-  if (row.used_at !== null) return { ok: false, reason: 'used' }
-  if (row.expires_at <= now) return { ok: false, reason: 'expired' }
+  if (!row) return refuse('unknown', null)
+  if (row.used_at !== null) return refuse('used', row.id)
+  if (row.expires_at <= now) return refuse('expired', row.id)
 
   const res = await db.run(
     `UPDATE join_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?`,
     [now, row.id, now]
   )
-  if (res.changes === 0) return { ok: false, reason: 'used' }
+  if (res.changes === 0) return refuse('used', row.id)
 
-  return {
+  const result: VerifyJoinTokenResult = {
     ok: true,
     tokenId: row.id,
     label: row.label,
     payload,
     mintedByUserId: row.minted_by_user_id ?? null
   }
+  auditRedeem(row.id, result)
+  return result
 }

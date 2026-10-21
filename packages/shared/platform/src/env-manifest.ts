@@ -17,7 +17,7 @@
  * strips it (safe default). The only way to leak a var into a terminal is the
  * deliberate `global` tag.
  *
- * Lean leaf (node builtins only, like slayzone-mode.ts) so the computer bundle can
+ * Lean leaf (node builtins only, like hub-addr.ts) so the computer bundle can
  * import it via the `@slayzone/platform/env-manifest` subpath WITHOUT pulling the
  * platform barrel (which references better-sqlite3 + the shell/cli-install graph).
  *
@@ -44,7 +44,8 @@ export type EnvScope = 'global' | 'infra' | 'secret' | 'identity'
  * forms — SLAYZONE_PROFILE/CHROMIUM_PROD/REACT_DEV read only at build config
  * time), JS const names, script-only comment markers (SLAYZONE_NOTIFY_VERSION),
  * and retired/inert/test-only vars (SLAYZONE_HUB_URL, HUB_HOST, HUB_PORT,
- * HUB_PUBLIC_URL — all folded into HUB_ADDRESS/HUB_PUBLIC_ADDRESS; STORE_DIR,
+ * HUB_PUBLIC_URL — all folded into HUB_ADDRESS/HUB_PUBLIC_ADDRESS; MODE — replaced
+ * by the per-hub switches below, a leftover value is ignored; STORE_DIR,
  * DB_DIR, DB_PATH — the DB file DERIVES from SLAYZONE_ROOT + SLAYZONE_DEV and is
  * not overridable; ALLOW_PLAINTEXT_CREDENTIALS — plaintext fallback now DERIVES
  * from cipher availability, see integrations/server/credentials.ts; AGENT_MODE,
@@ -69,6 +70,9 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
+  // Entra OIDC client secret (SSO). Env only — never read from hub.config.json,
+  // never logged, never in a terminal.
+  SLAYZONE_HUB_SSO_CLIENT_SECRET: 'secret',
   // Per-boot bearer the desktop's `/cap` listener requires on every connection
   // (desktop-bridge-server.ts `verifyClient`). Loopback is NOT trusted there —
   // the threat this closes is another loopback process finding the port — so
@@ -81,18 +85,30 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // other retired name in this rename sweep.
 
   // --- infra: SlayZone wiring a terminal must not reinterpret ---
-  // The hub's address, host[:port], scheme from MODE. ONE concept whose value
-  // depends on the app: the hub BINDS it, the computer/CLI CONNECT to it. Stripping
-  // it here is what keeps those two values from ever bleeding into each other.
+  // The hub to CONNECT to, host[:port] (computer, `slay`); the scheme derives from
+  // the host (loopback → http/ws, else https/wss). A hub no longer reads this name:
+  // it LISTENS on SLAYZONE_HUB_LISTEN_ADDRESS, and a hub that still gets the old
+  // name refuses to boot. Stripping both here keeps a terminal's dial address from
+  // ever being mistaken for another process's listen address.
   SLAYZONE_HUB_ADDRESS: 'infra',
-  SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; written into join tokens
+  SLAYZONE_HUB_LISTEN_ADDRESS: 'infra', // hub-only; where the hub listens
+  SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; how other machines reach it, written into join tokens
+  // Per-hub switches (0|1) replacing SLAYZONE_MODE. Infra: they describe THIS hub
+  // process, so a task terminal must not inherit them (a hub started from one would
+  // otherwise pick up its parent's switches by accident).
+  SLAYZONE_HUB_REQUIRE_LOGIN: 'infra',
+  SLAYZONE_HUB_ENABLE_PASSWORD: 'infra',
+  SLAYZONE_HUB_ENABLE_SSO: 'infra',
+  SLAYZONE_HUB_ENABLE_PROCESSES: 'infra',
+  SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'infra',
+  SLAYZONE_HUB_SSO_TENANT_ID: 'infra',
+  SLAYZONE_HUB_SSO_CLIENT_ID: 'infra',
   // Operator-facing hub name (`slay hub ls`/`stop` address a hub by it). Infra,
   // not global: it identifies THIS hub process, so inheriting it into a task
   // terminal — which may target a different hub entirely — would mislabel.
   SLAYZONE_HUB_NAME: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
-  SLAYZONE_MODE: 'infra', // local vs remote hardening lever
-  SLAYZONE_SUPERVISED: 'infra', // "the Electron host owns me" flag
+  SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect
   SLAYZONE_SIDECAR_HOT_RESTART: 'infra',
   SLAYZONE_BOOT_LOG_PATH: 'infra',

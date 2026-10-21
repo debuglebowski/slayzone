@@ -1,6 +1,8 @@
 import type { Express } from 'express'
 import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import { isLoopbackPeer } from '@slayzone/platform'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { auditRouteRefusal } from '../route-audit'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -17,32 +19,32 @@ import type { RestApiDeps } from '../types'
  *
  * Gating (mirrors the computers router's `mintJoinToken`): only functional under
  * `deps.computers` is wired by the composition (always, barring init failure),
- * and its getters return the computer listener's bound `wss://…/computers` URL + hub
- * cert fingerprint — both null until the listener has bound. So:
+ * and its getter returns the computer listener's bound `ws(s)://…/computers` URL —
+ * null until the listener has bound. So:
  *   - computer OFF (`deps.computers` absent)              → 503 (never mints)
  *   - computer ON but listener not yet bound (null url) → 503 (caller retries)
  *   - computer ON + listener bound                      → 200 `{ token, hubUrl }`
  *
  * WHO MAY CALL IT — a bearer, from everyone, once this hub enforces auth; on a
- * hub with NO auth (supervised) loopback is the sole authority, because there are
- * no sessions to check.
+ * hub with NO login required loopback is the sole authority, because there are no
+ * sessions to check.
  *
  * A join token is a bearer-equivalent secret, so being on the box was ORIGINALLY
  * the sole authority regardless of auth state (the shared HTTP server binds
  * loopback anyway; the check was defense-in-depth against an accidental
- * non-loopback `SLAYZONE_HUB_ADDRESS`). THAT WAS THE BUG: every non-supervised hub
- * now enforces auth (`server.ts`: `hubAuthRequired = !supervised`), and a reverse
- * proxy in front of one makes every request arrive as a loopback peer — so
+ * non-loopback `SLAYZONE_HUB_LISTEN_ADDRESS`). THAT WAS THE BUG: a hub that requires
+ * login (`SLAYZONE_HUB_REQUIRE_LOGIN=1`) can sit behind a reverse proxy, which makes
+ * every request arrive as a loopback peer — so
  * unconditional loopback trust collapsed to "anyone who can reach the hub can mint
  * a computer enrollment secret", exactly the shape `computers/server/visibility.ts`
  * exists to prevent. See {@link joinTokenAuthDecision} for the exact matrix.
  *
  * WHY THE ELECTRON HOST'S BOOT AUTO-ENROLL STILL WORKS WITH NO BEARER: it only
- * ever calls its OWN co-located sidecar, which is supervised — `authRequired` is
- * false there, so loopback alone still admits it, unchanged.
+ * ever calls its OWN co-located sidecar, which the app starts with login off —
+ * `authRequired` is false there, so loopback alone still admits it, unchanged.
  *
  * WHY ON-BOX `slay computer mint` STILL WORKS WITH NO OPERATOR ACTION, on a
- * standalone hub that now DOES require a bearer: `ensureBootstrapOwner`
+ * standalone hub that requires login: `ensureBootstrapOwner`
  * (bootstrap-owner.ts) provisions a real session on first boot for exactly this,
  * and the CLI reads it automatically (api.ts, hub-request.ts) when nothing else is
  * configured — so a co-located caller presents a genuine bearer instead of relying
@@ -115,11 +117,13 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
     const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk })
+    if (decision !== 'mint') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({
         error:
           'computer join-token is loopback-only on this hub — run `slay computer mint` on the ' +
-          'hub machine, or put the hub in remote mode so it can authenticate you'
+          'hub machine, or turn login on for the hub (SLAYZONE_HUB_REQUIRE_LOGIN=1) so it can ' +
+          'authenticate you'
       })
       return
     }
@@ -134,9 +138,8 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
       return
     }
     const hubUrl = deps.computers.getHubUrl()
-    const certFingerprint = deps.computers.getCertFingerprint()
-    if (!hubUrl || !certFingerprint) {
-      res.status(503).json({ error: 'computer listener has not bound its URL / hub identity yet' })
+    if (!hubUrl) {
+      res.status(503).json({ error: 'computer listener has not bound its URL yet' })
       return
     }
 
@@ -149,15 +152,16 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
         : DEFAULT_JOIN_TOKEN_TTL_MS
 
     try {
-      const minted = await storeMintJoinToken(deps.db, {
-        hubUrl,
-        certFingerprint,
-        ttlMs,
-        label
-      })
-      // Return the token + the wss computer URL the computer should dial. The cert
-      // fingerprint is embedded IN the token (decoded computer-side) — never sent
-      // as a separate field.
+      // As the verified caller, so the mint's audit line names them. Ownership is
+      // unchanged: this path still mints with no `mintedByUserId` (T-19).
+      const minted = await runAsSecurityActor(principal?.userId ?? null, () =>
+        storeMintJoinToken(deps.db, {
+          hubUrl,
+          ttlMs,
+          label
+        })
+      )
+      // Return the token + the computer URL the computer should dial.
       res.json({ token: minted.token, hubUrl })
     } catch (err) {
       res.status(500).json({

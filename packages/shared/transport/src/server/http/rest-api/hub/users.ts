@@ -1,6 +1,8 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { auditRouteRefusal } from '../route-audit'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -125,6 +127,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
     const decision = hubUsersAuthDecision({ loopback, authRequired, bearerOk })
+    if (decision !== 'allow') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({ ok: false, error: 'hub user management is loopback-only' })
       return null
@@ -153,7 +156,13 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
       })
       return null
     }
-    return users
+    // The account commands run as the verified caller, so their audit lines name them.
+    const actor = principal?.userId ?? null
+    return {
+      ...users,
+      create: (input) => runAsSecurityActor(actor, () => users.create(input)),
+      remove: (email) => runAsSecurityActor(actor, () => users.remove(email))
+    }
   }
 
   // Create an account. Returns the generated password ONCE — it is not recoverable.

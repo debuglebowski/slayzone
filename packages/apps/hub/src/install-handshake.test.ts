@@ -206,8 +206,10 @@ async function main(): Promise<void> {
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: hubRootDir,
-      // Bind side of the ONE address var. `:0` = let the OS assign the port.
-      SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
+      // Where the hub LISTENS. `:0` = let the OS assign the port.
+      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+      // Login on, so the bootstrap owner file and the bearer paths below are real.
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1',
       SLAYZONE_HUB_AUTH_SECRET: secret
     })
 
@@ -238,11 +240,11 @@ async function main(): Promise<void> {
       assert(health.dbPath.startsWith(hubStorageDir), `health db path under tmp: ${health.dbPath}`)
     })
 
-    // This hub is STANDALONE, so it requires client auth on EVERY route now —
-    // including `/api/computers/join-token`, which used to trust any loopback
-    // peer unconditionally regardless of that. The bootstrap owner file is
-    // exactly the affordance that keeps `slay computer mint` usable on a clean
-    // root with no operator action; read it here too, matching the real
+    // This hub runs with SLAYZONE_HUB_REQUIRE_LOGIN=1, so it requires client auth
+    // on EVERY route — including `/api/computers/join-token`, which used to trust
+    // any loopback peer unconditionally regardless of that. The bootstrap owner
+    // file is exactly the affordance that keeps `slay computer mint` usable on a
+    // clean root with no operator action; read it here too, matching the real
     // `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
     // simulating an authenticated caller some other way.
     const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
@@ -267,18 +269,43 @@ async function main(): Promise<void> {
       20_000,
       'join-token mint (listener bound)'
     )
-    // Scheme follows SLAYZONE_MODE (deriveComputerHubUrl): this hub boots WITHOUT
-    // SLAYZONE_MODE, i.e. LOCAL, so the computer url written into the token is
-    // `ws://` loopback on the hub's own port — no TLS, no cert pin (hub-dialer
-    // pins only on `wss:`).
-    // The remote `wss://`-from-SLAYZONE_HUB_PUBLIC_ADDRESS derivation is unit-covered in
+    // This hub sets no SLAYZONE_HUB_PUBLIC_ADDRESS, so the computer url written into
+    // the token is `ws://` loopback on the hub's own port (deriveComputerHubUrl). The
+    // `wss://`-from-public-address derivation is unit-covered in
     // computer-tls-listener.test.ts; asserting wss here would contradict the boot.
-    await test('POST /api/computers/join-token mints a pinned szjt1 token + local ws computer url', async () => {
+    await test('POST /api/computers/join-token mints a pin-less szjt1 token + local ws computer url', async () => {
       assert(typeof tok.token === 'string' && tok.token.startsWith('szjt1.'), 'szjt1 token')
       assert(
         tok.hubUrl === `ws://127.0.0.1:${hubPort}/computers`,
         `local computer url is ws:// on the hub port, got: ${tok.hubUrl}`
       )
+      // The hub presents no certificate of its own any more, so the token carries
+      // NO pin: an empty fingerprint field (the grammar keeps the field until the
+      // client pin code is removed).
+      const payload = JSON.parse(
+        Buffer.from(tok.token.slice('szjt1.'.length), 'base64url').toString('utf8')
+      ) as { hubUrl: string; certFingerprint: string }
+      assert(payload.certFingerprint === '', `pin-less token, got: ${payload.certFingerprint}`)
+      assert(payload.hubUrl === tok.hubUrl, 'the token embeds the same url')
+    })
+
+    await test('the hub created no identity/ directory (it holds no certificate)', async () => {
+      assert(!existsSync(join(hubRootDir, 'identity')), 'no <ROOT>/identity')
+    })
+
+    await test('/health reports every switch and authRequired, and no mode', async () => {
+      const body = (await (await fetch(`http://127.0.0.1:${hubPort}/health`)).json()) as {
+        authRequired?: boolean
+        switches?: Record<string, boolean>
+        mode?: unknown
+      }
+      assert(body.authRequired === true, 'login is required on this hub')
+      assert(body.switches?.requireLogin === true, 'requireLogin reported')
+      assert(body.switches?.enablePassword === true, 'enablePassword default reported')
+      assert(body.switches?.enableSso === false, 'enableSso default reported')
+      assert(body.switches?.enableProcesses === true, 'enableProcesses default reported')
+      assert(body.switches?.enableIntegrations === true, 'enableIntegrations default reported')
+      assert(!('mode' in body), 'no mode in /health')
     })
 
     // --- spawn the computer, isolated, pointed at the minted token -------------
@@ -292,7 +319,8 @@ async function main(): Promise<void> {
     computer = spawnChild(COMPUTER_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: computerRootDir,
-      // Authority only — computer composes ws(s)://<addr>/computers from SLAYZONE_MODE.
+      // Authority only — the computer composes ws(s)://<addr>/computers, the scheme
+      // coming from the host (loopback → ws).
       SLAYZONE_HUB_ADDRESS: new URL(tok.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: tok.token
     })
@@ -312,7 +340,7 @@ async function main(): Promise<void> {
       computers: { list: { query: () => Promise<Array<{ name: string; connected: boolean }>> } }
     }
 
-    await test('the computer enrolls and reports connected in computers.list', async () => {
+    await test('the computer enrolls with the PIN-LESS token and reports connected in computers.list', async () => {
       const row = await poll(
         async () => {
           const rows = await trpc.computers.list.query()

@@ -13,6 +13,7 @@ import {
   expect,
   describe
 } from '../../../shared/test-utils/ipc-harness.js'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   mintWebSession,
   verifyWebSessionToken,
@@ -154,6 +155,48 @@ await describe('listWebSessions / revokeAllWebSessions', () => {
     expect(revokedCount).toBe(2)
     expect(await listWebSessions(h.slayDb, 'u9')).toEqual([])
     expect((await verifyWebSessionToken(h.slayDb, other.token)).ok).toBe(true) // untouched
+  })
+})
+
+await describe('audit (T-03)', () => {
+  test('mint, revoke and revoke-all write auth.web_session lines, never the token', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    try {
+      const minted = await mintWebSession(h.slayDb, { userId: 'u-audit', scopes: ['read'] })
+      await revokeWebSession(h.slayDb, minted.id)
+      await revokeWebSession(h.slayDb, minted.id) // already revoked: nothing happened
+      await mintWebSession(h.slayDb, { userId: 'u-audit', scopes: ['read'] })
+      await revokeAllWebSessions(h.slayDb, 'u-audit')
+      expect(audit.map((l) => [l.event, l.outcome])).toEqual([
+        ['auth.web_session.create', 'success'],
+        ['auth.web_session.revoke', 'success'],
+        ['auth.web_session.revoke', 'failure'],
+        ['auth.web_session.create', 'success'],
+        ['auth.web_session.revoke', 'success']
+      ])
+      const pick = (l: Record<string, unknown>) => ({
+        actor: l.actor,
+        targetKind: l.targetKind,
+        targetId: l.targetId,
+        detail: l.detail
+      })
+      expect(pick(audit[0]!)).toEqual({
+        actor: 'u-audit',
+        targetKind: 'web_session',
+        targetId: minted.id,
+        detail: { scopes: ['read'] }
+      })
+      expect(pick(audit[4]!)).toEqual({
+        actor: null,
+        targetKind: 'user',
+        targetId: 'u-audit',
+        detail: { count: 1 }
+      })
+      expect(JSON.stringify(audit)).not.toContain(minted.token)
+    } finally {
+      setSecurityLogSink()
+    }
   })
 })
 

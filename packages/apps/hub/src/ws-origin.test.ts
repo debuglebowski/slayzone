@@ -33,9 +33,13 @@ function assertEq<T>(actual: T, expected: T, msg: string): void {
 }
 
 /** The three deployment shapes, named once so each case reads as a scenario. */
-const SUPERVISED = { supervised: true, loopbackBind: true } as const
-const STANDALONE_LOOPBACK = { supervised: false, loopbackBind: true } as const
-const INTERNET_FACING = { supervised: false, loopbackBind: false } as const
+/** The desktop app's hub: login off, so by rule B1 it is reachable only from this machine. */
+const DESKTOP_APP = { requireLogin: false, loopbackBind: true } as const
+/** A login-required hub that only this machine can reach (dev, the Chromium fork's backend). */
+const STANDALONE_LOOPBACK = { requireLogin: true, loopbackBind: true } as const
+/** Reachable from other machines: it listens off-loopback, OR a public address is set
+ *  (a same-box reverse proxy) — the server computes `loopbackBind` false for both. */
+const INTERNET_FACING = { requireLogin: true, loopbackBind: false } as const
 
 console.log('\n/trpc WebSocket origin guard')
 console.log('─'.repeat(52))
@@ -46,7 +50,7 @@ test('an ABSENT Origin is accepted everywhere (non-browser clients)', () => {
   // main, node tooling, e2e, the sidecar or `slay`. They cannot be confused
   // deputies and are bearer-gated afterwards. Rejecting them would break every
   // native client on an enforcing hub.
-  for (const shape of [SUPERVISED, STANDALONE_LOOPBACK, INTERNET_FACING]) {
+  for (const shape of [DESKTOP_APP, STANDALONE_LOOPBACK, INTERNET_FACING]) {
     assertEq(
       wsOriginDecision({ origin: undefined, ...shape }),
       'accept',
@@ -60,7 +64,7 @@ test('Origin: null is accepted LOCALLY but rejected on an internet-facing hub', 
   // `null` is what file:// serializes to — and what ANY sandboxed iframe sends.
   // Any website can embed `<iframe sandbox>` without allow-same-origin, so
   // blanket-accepting it meant "accept every website" on a reachable hub.
-  assertEq(wsOriginDecision({ origin: 'null', ...SUPERVISED }), 'accept', 'packaged Electron')
+  assertEq(wsOriginDecision({ origin: 'null', ...DESKTOP_APP }), 'accept', 'packaged Electron')
   assertEq(wsOriginDecision({ origin: 'null', ...STANDALONE_LOOPBACK }), 'accept', 'local dev')
   assertEq(
     wsOriginDecision({ origin: 'null', ...INTERNET_FACING }),
@@ -76,7 +80,7 @@ test('first-party renderer protocols follow the same rule as null', () => {
     'devtools://devtools',
     'file:///Applications/SlayZone.app/index.html'
   ]) {
-    assertEq(wsOriginDecision({ origin, ...SUPERVISED }), 'accept', `${origin} local`)
+    assertEq(wsOriginDecision({ origin, ...DESKTOP_APP }), 'accept', `${origin} local`)
     assertEq(
       wsOriginDecision({ origin, ...STANDALONE_LOOPBACK }),
       'accept',
@@ -89,8 +93,8 @@ test('first-party renderer protocols follow the same rule as null', () => {
 // ── localhost ─────────────────────────────────────────────────────────────────
 test('localhost origins are accepted whenever the hub binds loopback', () => {
   // The fork dev server (51734) and the web dev server (51735) both live here, on
-  // a hub that is standalone and therefore auth-enforcing — so this must NOT be
-  // gated on `supervised`, or `pnpm dev:chromium` stops connecting.
+  // a hub that requires login — so this must NOT be
+  // gated on the desktop app, or `pnpm dev:chromium` stops connecting.
   for (const origin of [
     'http://localhost:51734',
     'http://localhost:51735',
@@ -118,7 +122,7 @@ test('localhost is REJECTED once the hub binds off-box', () => {
 
 // ── foreign origins ───────────────────────────────────────────────────────────
 test('a foreign website is rejected in every deployment shape', () => {
-  for (const shape of [SUPERVISED, STANDALONE_LOOPBACK, INTERNET_FACING]) {
+  for (const shape of [DESKTOP_APP, STANDALONE_LOOPBACK, INTERNET_FACING]) {
     assertEq(
       wsOriginDecision({ origin: 'https://evil.example', ...shape }),
       'reject',
@@ -169,25 +173,47 @@ test('allowlisting compares the FULL origin — no suffix, port or scheme confus
 })
 
 // ── deriving the allowlist ────────────────────────────────────────────────────
-test('the public origin is DERIVED from the address a remote hub must already set', () => {
-  // A remote hub cannot boot without SLAYZONE_HUB_PUBLIC_ADDRESS, so deriving the
-  // browser origin from it means a web-serving hub needs no new configuration and
-  // the two values cannot drift.
+test('the public origin is DERIVED from the address a reachable hub must already set', () => {
+  // A hub other machines can reach cannot boot without SLAYZONE_HUB_PUBLIC_ADDRESS,
+  // so deriving the browser origin from it means a web-serving hub needs no new
+  // configuration and the two values cannot drift. The scheme follows the HOST
+  // (rule A1): a front end serves TLS for anything that is not loopback.
   assertEq(
-    resolveAllowedWebOrigins({
-      SLAYZONE_MODE: 'remote',
-      SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com'
-    }).join(','),
+    resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com' }).join(','),
     'https://hub.example.com',
-    'remote ⇒ https'
+    'public host ⇒ https'
   )
+  assertEq(
+    resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'box.local:8765' }).join(','),
+    'https://box.local:8765',
+    'any non-loopback host ⇒ https, port preserved'
+  )
+  assertEq(
+    resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'localhost:8443' }).join(','),
+    'http://localhost:8443',
+    'a loopback public address (same-box proxy under test) ⇒ http'
+  )
+  // The retired SLAYZONE_MODE must not change the answer in either direction.
   assertEq(
     resolveAllowedWebOrigins({
       SLAYZONE_MODE: 'local',
-      SLAYZONE_HUB_PUBLIC_ADDRESS: 'box.local:8765'
+      SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com'
     }).join(','),
-    'http://box.local:8765',
-    'local ⇒ http, port preserved'
+    'https://hub.example.com',
+    'a leftover SLAYZONE_MODE=local does not downgrade the scheme'
+  )
+})
+
+test('a login-off hub trusts local-client origins; turning login on closes them to a reachable hub', () => {
+  assertEq(
+    wsOriginDecision({ origin: 'null', requireLogin: false, loopbackBind: false }),
+    'accept',
+    'login off ⇒ (by B1) reachable only from this machine ⇒ first-party clients'
+  )
+  assertEq(
+    wsOriginDecision({ origin: 'null', requireLogin: true, loopbackBind: false }),
+    'reject',
+    'login on and reachable ⇒ a sandboxed iframe must not open /trpc'
   )
 })
 

@@ -1,25 +1,24 @@
 /**
- * Computer `/computers` cert-pinning seam + URL derivation (single-listener model).
+ * Computer `/computers` URL derivation + the cert-pin seam that remains.
  *
- * `/computers` no longer has its own listener — it rides the ONE hub listener,
- * demuxed by path (server.ts). In remote mode that listener terminates TLS with
- * the hub identity leaf (loadOrCreateHubIdentity), so a computer still pins the
- * leaf's sha256 fingerprint (carried in its join token) on the ws 'upgrade' event
- * before sending any computer frame (hub-dialer verifyPinnedCert). This test proves
- * the pin seam still holds on the SHARED listener, and that `deriveComputerHubUrl`
- * emits the right `ws(s)://…/computers` URL per mode.
+ * `/computers` has no listener of its own — it rides the ONE hub listener, demuxed
+ * by path (server.ts), and that listener is always plain http: the hub never
+ * terminates TLS. A hub other machines reach sits behind a front end that does, and
+ * the join token carries `wss://<public address>/computers` (rule A2) with NO pin.
+ *
+ * What this exercises:
+ *   1. `deriveComputerHubUrl`: no public address → `ws://` loopback on the hub port;
+ *      public address → `<ws|wss>://<public-address>/computers` with the scheme from
+ *      the HOST (A1), never from a mode; missing/malformed → null.
+ *   2. The computer dialer's pin seam, which STAYS until the client-side pin code is
+ *      removed: a token minted by an OLDER hub still carries a fingerprint, and a
+ *      computer given one must still refuse a certificate that does not match. The
+ *      served leaf comes from `@slayzone/hub-identity`, the same helper the old hub
+ *      listener used (the hub itself no longer loads it).
  *
  * Pure Node (real https + ws + @peculiar/x509 via hub-identity; no better-sqlite3,
- * so plain `npx tsx`):
- *   1. The REAL identity cert TLS-terminates the shared listener AND presents a
- *      leaf whose fingerprint equals `identity.fingerprintSha256Hex` — the pin the
- *      computer extracts from the token matches the leaf the hub actually serves.
- *   2. A mismatched pin does not match the served leaf.
- *   3. `deriveComputerHubUrl`: local → `ws://` loopback; remote → `wss://` from the
- *      public URL; missing/malformed remote public URL → null.
- *
- * The full through-`startServer` boot (composeServer → better-auth migrations) is
- * covered by the e2e specs, not here.
+ * so plain `npx tsx`). The full through-`startServer` boot (composeServer →
+ * better-auth migrations) is covered by the e2e specs and hub-boot.test.ts.
  *
  * Run with: npx tsx packages/apps/hub/src/computer-tls-listener.test.ts
  */
@@ -63,9 +62,9 @@ interface TlsComputerHub {
   close: () => Promise<void>
 }
 
-/** Stand up the SHARED-listener shape server.ts uses in remote mode: one https
- *  server (hub identity leaf) whose `/trpc` + `/computers` upgrades are demuxed to
- *  noServer WSS handlers — here we only wire `/computers` (the pin seam under test). */
+/** Stand up a TLS `/computers` endpoint presenting a self-signed identity leaf — what
+ *  an older hub served and what a pinned token still guards against. Only
+ *  `/computers` is wired (the pin seam under test). */
 async function startTlsComputerHub(dir: string): Promise<TlsComputerHub> {
   const identity = await loadOrCreateHubIdentity(dir)
   const https = createHttpsServer({ key: identity.keyPem, cert: identity.certPem })
@@ -84,10 +83,7 @@ async function startTlsComputerHub(dir: string): Promise<TlsComputerHub> {
   const port = (https.address() as AddressInfo).port
   return {
     https,
-    url: deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port })!.replace(
-      'ws://',
-      'wss://'
-    ),
+    url: deriveComputerHubUrl({ host: '127.0.0.1', port })!.replace('ws://', 'wss://'),
     fingerprint: identity.fingerprintSha256Hex,
     close: async () => {
       wss.close()
@@ -126,9 +122,9 @@ function dialAndCaptureLeaf(url: string): Promise<{ der: Uint8Array | null; open
 }
 
 async function main(): Promise<void> {
-  console.log('computer /computers cert-pin seam (shared listener) + URL derivation')
+  console.log('computer /computers URL derivation + the remaining cert-pin seam')
 
-  await test('hub identity cert TLS-terminates the shared listener and its fingerprint is the pinned leaf', async () => {
+  await test('a pinned token from an older hub: the served identity leaf matches its fingerprint', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'computer-tls-listener-'))
     const hub = await startTlsComputerHub(dir)
     try {
@@ -169,24 +165,26 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('deriveComputerHubUrl: local → ws:// loopback on the hub port', async () => {
+  await test('deriveComputerHubUrl: no public address → ws:// loopback on the hub port', async () => {
     assert(
-      deriveComputerHubUrl({ remote: false, host: '127.0.0.1', port: 51101 }) ===
-        'ws://127.0.0.1:51101/computers',
-      'local loopback ws url'
+      deriveComputerHubUrl({ host: '127.0.0.1', port: 51101 }) === 'ws://127.0.0.1:51101/computers',
+      'loopback ws url'
     )
     // A wildcard bind host goes into the token as a dialable loopback, never 0.0.0.0.
     assert(
-      deriveComputerHubUrl({ remote: false, host: '0.0.0.0', port: 51101 }) ===
-        'ws://127.0.0.1:51101/computers',
+      deriveComputerHubUrl({ host: '0.0.0.0', port: 51101 }) === 'ws://127.0.0.1:51101/computers',
       'wildcard bind → loopback in the token'
+    )
+    assert(
+      deriveComputerHubUrl({ host: '127.0.0.1', port: 51101, publicAddress: '   ' }) ===
+        'ws://127.0.0.1:51101/computers',
+      'a blank public address is the same as none'
     )
   })
 
-  await test('deriveComputerHubUrl: remote → wss:// from the public ADDRESS (authority only)', async () => {
+  await test('deriveComputerHubUrl: public address → wss:// for a non-loopback host (A1/A2)', async () => {
     assert(
       deriveComputerHubUrl({
-        remote: true,
         host: '0.0.0.0',
         port: 51101,
         publicAddress: 'hub.example:8443'
@@ -194,54 +192,60 @@ async function main(): Promise<void> {
       'explicit port preserved'
     )
     assert(
-      deriveComputerHubUrl({
-        remote: true,
-        host: '0.0.0.0',
-        port: 51101,
-        publicAddress: 'hub.example'
-      }) === 'wss://hub.example/computers',
+      deriveComputerHubUrl({ host: '0.0.0.0', port: 51101, publicAddress: 'hub.example' }) ===
+        'wss://hub.example/computers',
       'bare host keeps the implicit TLS port (443)'
     )
     assert(
       deriveComputerHubUrl({
-        remote: true,
         host: '0.0.0.0',
         port: 51101,
         publicAddress: '[2001:db8::1]:9000'
       }) === 'wss://[2001:db8::1]:9000/computers',
       'bracketed IPv6 authority'
     )
+    // The public address is what the token carries even when the hub itself binds
+    // loopback behind a same-box reverse proxy (B13).
+    assert(
+      deriveComputerHubUrl({ host: '127.0.0.1', port: 51101, publicAddress: 'hub.example' }) ===
+        'wss://hub.example/computers',
+      'loopback bind + public address → the public address wins'
+    )
   })
 
-  await test('deriveComputerHubUrl: remote with missing/non-authority public address → null', async () => {
+  await test('deriveComputerHubUrl: a loopback PUBLIC address is ws:// — the scheme follows the host', async () => {
     assert(
-      deriveComputerHubUrl({
-        remote: true,
-        host: '0.0.0.0',
-        port: 51101,
-        publicAddress: undefined
-      }) === null,
-      'unset public address → null'
+      deriveComputerHubUrl({ host: '127.0.0.1', port: 51101, publicAddress: 'localhost:8443' }) ===
+        'ws://localhost:8443/computers',
+      'same-box proxy under test is plaintext'
     )
+  })
+
+  await test('deriveComputerHubUrl: a leftover SLAYZONE_MODE changes nothing', async () => {
+    const prev = process.env.SLAYZONE_MODE
+    process.env.SLAYZONE_MODE = 'remote'
+    try {
+      assert(
+        deriveComputerHubUrl({ host: '127.0.0.1', port: 51101 }) ===
+          'ws://127.0.0.1:51101/computers',
+        'remote does not secure a loopback hub'
+      )
+    } finally {
+      if (prev === undefined) delete process.env.SLAYZONE_MODE
+      else process.env.SLAYZONE_MODE = prev
+    }
+  })
+
+  await test('deriveComputerHubUrl: a non-authority public address → null', async () => {
     assert(
-      deriveComputerHubUrl({ remote: true, host: '0.0.0.0', port: 51101, publicAddress: '   ' }) ===
+      deriveComputerHubUrl({ host: '0.0.0.0', port: 51101, publicAddress: 'not an address' }) ===
         null,
-      'blank public address → null'
-    )
-    assert(
-      deriveComputerHubUrl({
-        remote: true,
-        host: '0.0.0.0',
-        port: 51101,
-        publicAddress: 'not an address'
-      }) === null,
       'malformed public address → null'
     )
-    // The whole point of the authority-only channel: a scheme is NOT accepted, so
-    // no reader can ever disagree with the one derived from SLAYZONE_MODE.
+    // The whole point of the authority-only channel: a scheme is NOT accepted, so no
+    // reader can ever disagree with the scheme derived from the host.
     assert(
       deriveComputerHubUrl({
-        remote: true,
         host: '0.0.0.0',
         port: 51101,
         publicAddress: 'https://hub.example'
@@ -250,7 +254,6 @@ async function main(): Promise<void> {
     )
     assert(
       deriveComputerHubUrl({
-        remote: true,
         host: '0.0.0.0',
         port: 51101,
         publicAddress: 'hub.example/computers'

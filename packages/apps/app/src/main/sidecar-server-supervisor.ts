@@ -3,6 +3,7 @@ import http from 'node:http'
 import net from 'node:net'
 import { readFileSync, watchFile, unwatchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
 
 /**
  * Supervises the @slayzone/hub side-car subprocess.
@@ -311,16 +312,31 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         port = freePort
         bootDeadline = Date.now() + healthBootTimeoutMs
 
+        // Start from a hub-clean env: whatever hub-side config this app inherited
+        // (launched from a task terminal, a shell profile) describes ANOTHER hub, and a
+        // stray public address / switch / auth secret / dial-side address would make
+        // this one refuse to boot (B1, B4, B5) or change who can sign in. The app's own
+        // values are set below, after the strip.
+        const inherited: NodeJS.ProcessEnv = { ...opts.env }
+        for (const name of HUB_PROCESS_ENV) delete inherited[name]
+
         // stdin is 'pipe' so the child detects parent death via stdin close.
+        const childEnv: NodeJS.ProcessEnv = {
+          ...inherited,
+          ELECTRON_RUN_AS_NODE: '1',
+          SLAYZONE_SUPERVISED: '1',
+          // Where the sidecar hub LISTENS: one var, `host:port`, no scheme. This is
+          // the hub's own name for it — `SLAYZONE_HUB_ADDRESS` is the DIAL-side name
+          // (computer, `slay`) and a hub refuses to boot when it still sees it.
+          SLAYZONE_HUB_LISTEN_ADDRESS: `${opts.host}:${freePort}`,
+          // The desktop app's own hub has no login: the app already carries the user.
+          // Set explicitly (it is also the default) so this does not depend on
+          // whatever the app was launched with. Boot rule B1 is what keeps such a hub
+          // on loopback.
+          SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+        }
         const proc = spawn(opts.execPath, [opts.scriptPath], {
-          env: {
-            ...opts.env,
-            ELECTRON_RUN_AS_NODE: '1',
-            SLAYZONE_SUPERVISED: '1',
-            // The address the sidecar hub BINDS. One var, `host:port` — the
-            // scheme is never carried here (SLAYZONE_MODE decides it).
-            SLAYZONE_HUB_ADDRESS: `${opts.host}:${freePort}`
-          },
+          env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe']
         })
         child = proc

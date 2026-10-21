@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isLoopbackPeer } from '@slayzone/platform/hub-addr'
+import type { HubSwitches } from '@slayzone/platform/hub-switches'
 import { getServerBuildInfo } from './build-info.js'
 
 export type HealthState = {
@@ -14,14 +15,22 @@ export type HealthState = {
   /** This process's pid, so a discovering CLI can signal the REAL hub (not an
    *  `npx` wrapper) without any pidfile. */
   pid: number
-  /** SLAYZONE_MODE — `local` or `remote`. */
-  mode: string
-  /** True when running under the Electron host supervisor. `slay hub stop`
-   *  refuses these: the desktop app owns its own sidecar's lifecycle. */
+  /** True when started by the desktop app. `slay hub stop` refuses these: the app
+   *  owns its own sidecar's lifecycle. Says nothing about login — read
+   *  `authRequired` for that. */
   supervised: boolean
-  /** Whether this hub gates its client API (`/trpc` + REST) on a bearer token.
-   *  Derived from SLAYZONE_MODE — see `hubAuthRequired` in server.ts. */
+  /** Whether this hub gates its client API (`/trpc` + REST) on a bearer token —
+   *  the `SLAYZONE_HUB_REQUIRE_LOGIN` switch. This is where `slay` learns whether
+   *  it needs a credential. */
   authRequired: boolean
+  /** Every per-hub switch (login, password, SSO, processes, integrations), so a
+   *  client can tell what this hub offers before it signs in. */
+  switches: HubSwitches
+  /** Boot rule B13: other machines can reach this hub (it listens off-loopback or
+   *  has a public address). A reverse proxy on THIS machine delivers every remote
+   *  request from a loopback socket, so on such a hub "the peer is loopback" no
+   *  longer means "the caller is on this machine" — see {@link handleHealth}. */
+  reachable: boolean
   /** Live count of connected computers. A GETTER, not a number — the value must
    *  reflect the gateway at request time, not a boot-time snapshot. */
   computersConnected: () => number
@@ -47,6 +56,51 @@ function isLoopbackRequest(req: IncomingMessage): boolean {
 }
 
 /**
+ * Headers a reverse proxy / tunnel / load balancer adds when it forwards a request.
+ * A client dialling the hub directly on this machine (`slay`, the desktop app, a
+ * health probe) sends none of them.
+ */
+const FORWARDING_HEADERS = [
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'forwarded',
+  'x-real-ip',
+  'via',
+  'cf-connecting-ip',
+  'true-client-ip',
+  'x-azure-clientip'
+] as const
+
+function looksForwarded(req: IncomingMessage): boolean {
+  return FORWARDING_HEADERS.some((h) => req.headers?.[h] !== undefined)
+}
+
+/**
+ * May this caller see the host-describing fields (name, root, dbPath, pid,
+ * supervised, computersConnected)?
+ *
+ *   - hub only this machine reaches: any loopback peer — nobody else can connect.
+ *   - hub other machines reach (B13): a same-box reverse proxy hands us every remote
+ *     request from 127.0.0.1, so the peer address alone proves nothing. A loopback
+ *     peer counts only when the request carries none of the headers a proxy adds.
+ *
+ * That second test is a heuristic, not a boundary: a proxy that strips or never sets
+ * forwarding headers (a raw TCP tunnel) still looks local. It stays this way because
+ * `slay hub ls/stop/restart/users add` find a hub by what it says here
+ * (`hub-discovery.ts` refuses a row without name/root/pid), so withholding the
+ * fields from every caller of a reachable hub would make the deployment this change
+ * exists for unmanageable. What leaks past a header-less proxy is a hub name, its
+ * root and db paths, a pid and a computer count — no credential and nothing a
+ * client can act on.
+ */
+function mayReadHostFields(state: HealthState, req: IncomingMessage): boolean {
+  if (!isLoopbackRequest(req)) return false
+  return !(state.reachable && looksForwarded(req))
+}
+
+/**
  * Handles `GET /health`. Returns true when the request was a health request
  * (so the caller stops processing it), false otherwise.
  *
@@ -54,18 +108,18 @@ function isLoopbackRequest(req: IncomingMessage): boolean {
  * how a load balancer, the supervisor, and `slay hub ls` all check liveness), and
  * a hub may bind wider than loopback — so the response is split:
  *
- *   - PUBLIC (any caller): liveness + the running build + `authRequired`. Enough
- *     to answer "is this up, which code is it running, and must I sign in first".
- *     `authRequired` is deliberately public: a client has to learn it needs a
- *     token BEFORE it has one, the open `hub.describe` already advertises the
- *     same bit to any /trpc caller, and an unauthenticated request learns it
- *     anyway from the 401.
- *   - LOOPBACK ONLY: everything that describes the host — the hub name, its
- *     SLAYZONE_ROOT, the db path, the pid, and the computer count. These exist for
- *     local discovery (`slay hub ls` probes 127.0.0.1), so restricting them to
- *     loopback costs discovery nothing while keeping absolute filesystem paths
- *     and a signalable pid off the public surface. `dbPath` was previously served
- *     to every caller; it is now in this group.
+ *   - PUBLIC (any caller): liveness + the running build + `authRequired` + the
+ *     switches. Enough to answer "is this up, which code is it running, must I
+ *     sign in first, and how". `authRequired` is deliberately public: a client has
+ *     to learn it needs a token BEFORE it has one, the open `hub.describe` already
+ *     advertises the same bit (and the switches) to any /trpc caller, and an
+ *     unauthenticated request learns it anyway from the 401. The switches are
+ *     booleans only — never the SSO tenant, client id or secret.
+ *   - LOCAL ONLY ({@link mayReadHostFields}): everything that describes the host —
+ *     the hub name, its SLAYZONE_ROOT, the db path, the pid, the supervised flag and
+ *     the computer count. These exist for local discovery (`slay hub ls` probes
+ *     127.0.0.1), so restricting them to this machine costs discovery nothing while
+ *     keeping absolute filesystem paths and a signalable pid off the public surface.
  */
 export function handleHealth(
   state: HealthState,
@@ -88,14 +142,14 @@ export function handleHealth(
     commit: build.commit,
     builtAt: build.builtAt,
     buildId: build.buildId,
-    authRequired: state.authRequired
+    authRequired: state.authRequired,
+    switches: state.switches
   }
-  if (isLoopbackRequest(req)) {
+  if (mayReadHostFields(state, req)) {
     payload.name = state.name
     payload.root = state.root
     payload.dbPath = state.dbPath
     payload.pid = state.pid
-    payload.mode = state.mode
     payload.supervised = state.supervised
     // Resolved per-request on purpose (see the field's note). A throwing getter
     // must not take /health down — liveness is the one thing this endpoint owes

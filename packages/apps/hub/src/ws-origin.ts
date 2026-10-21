@@ -21,6 +21,9 @@
  * @module hub/ws-origin
  */
 
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { HUB_ALLOWED_WEB_ORIGINS_ENV } from '@slayzone/platform/hub-switches'
+
 /** Origins that only ever belong to a local, first-party client. */
 const LOCAL_CLIENT_PROTOCOLS = new Set(['chrome:', 'chrome-extension:', 'devtools:', 'file:'])
 
@@ -41,14 +44,19 @@ export interface WsOriginOptions {
   /** The `Origin` header, if the client sent one. */
   origin: string | undefined
   /**
-   * Whether the Electron host owns this hub. Supervised hubs are loopback-bound
-   * by assertion and serve renderers at `file://` / `chrome://` / `null`.
+   * Whether this hub requires login (`SLAYZONE_HUB_REQUIRE_LOGIN`). A hub that does
+   * NOT is, by boot rule B1, reachable only from this machine — the desktop app's
+   * hub is the case — so its clients are first-party and serve renderers at
+   * `file://` / `chrome://` / `null`.
    */
-  supervised: boolean
+  requireLogin: boolean
   /**
-   * Whether this hub binds a loopback address. A loopback-bound standalone hub is
-   * the normal dev shape (the Chromium fork's backend, `pnpm dev`, the web dev
-   * server) and its clients legitimately live at `http://localhost:<port>`.
+   * Whether this hub is reachable ONLY from this machine: it binds a loopback
+   * address AND publishes no public address. A loopback hub is the normal dev
+   * shape (the Chromium fork's backend, `pnpm dev`, the web dev server) and its
+   * clients legitimately live at `http://localhost:<port>`. A loopback hub behind a
+   * same-box reverse proxy (a public address is set) is NOT local: the proxy makes
+   * the internet its browser.
    */
   loopbackBind: boolean
   /**
@@ -76,7 +84,7 @@ export interface WsOriginOptions {
  *     but SO DOES ANY SANDBOXED IFRAME — `<iframe sandbox>` without
  *     `allow-same-origin` — which any website on the internet can embed. Blanket-
  *     accepting `null` therefore meant "accept every website" on an internet-facing
- *     hub. Gating these on `supervised || loopbackBind` keeps the fork, the
+ *     hub. Gating these on `!requireLogin || loopbackBind` keeps the fork, the
  *     packaged app and dev loops working while closing that door for a hub anyone
  *     can reach.
  *
@@ -89,8 +97,8 @@ export interface WsOriginOptions {
  * Unparseable input is rejected — fail closed.
  */
 export function wsOriginDecision(opts: WsOriginOptions): WsOriginDecision {
-  const { origin, supervised, loopbackBind } = opts
-  const local = supervised || loopbackBind
+  const { origin, requireLogin, loopbackBind } = opts
+  const local = !requireLogin || loopbackBind
 
   // (1) Non-browser client.
   if (!origin) return 'accept'
@@ -121,7 +129,7 @@ export function wsOriginDecision(opts: WsOriginOptions): WsOriginDecision {
 /**
  * The exact origins this hub accepts beyond the local-client ones.
  *
- * DERIVED FIRST, configured second. A remote hub already MUST declare
+ * DERIVED FIRST, configured second. A hub other machines can reach MUST declare
  * `SLAYZONE_HUB_PUBLIC_ADDRESS` (`startServer` refuses to boot otherwise) — that
  * is, by definition, the address a browser reaches it at. Deriving the origin
  * from it means a hub that serves a web UI needs no new configuration and cannot
@@ -141,14 +149,14 @@ export function resolveAllowedWebOrigins(env: NodeJS.ProcessEnv = process.env): 
 
   const publicAddress = env.SLAYZONE_HUB_PUBLIC_ADDRESS?.trim()
   if (publicAddress) {
-    // Authority-only by grammar (host[:port], no scheme — see hub-addr.ts), and
-    // the scheme follows the mode: a remote hub serves TLS.
-    const scheme = env.SLAYZONE_MODE === 'remote' ? 'https' : 'http'
-    const derived = normalizeOrigin(`${scheme}://${publicAddress}`)
+    // Authority-only by grammar (host[:port], no scheme — see hub-addr.ts); the
+    // scheme follows the host (A1): a front end serves TLS for anything that is not
+    // loopback.
+    const derived = normalizeOrigin(hubUrlFromAddr(publicAddress, 'http'))
     if (derived) origins.add(derived)
   }
 
-  for (const raw of (env.SLAYZONE_HUB_ALLOWED_WEB_ORIGINS ?? '').split(',')) {
+  for (const raw of (env[HUB_ALLOWED_WEB_ORIGINS_ENV] ?? '').split(',')) {
     const normalized = normalizeOrigin(raw.trim())
     if (normalized) origins.add(normalized)
   }

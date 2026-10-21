@@ -67,9 +67,9 @@ function expectedRoot(): string | null {
 /** Outcome of probing this channel's fixed port. */
 export type FixedPortProbe =
   /** A hub answered and it is ours (or we had no expectation to check). `root` +
-   *  `supervised` let a caller decide whether to fall back to the on-box owner
-   *  credential (`hub.owner.json`) — only meaningful for a standalone hub. */
-  | { kind: 'found'; port: number; root: string; supervised: boolean }
+   *  `authRequired` let a caller decide whether to fall back to the on-box owner
+   *  credential (`hub.owner.json`) — only meaningful for a hub that requires login. */
+  | { kind: 'found'; port: number; root: string; authRequired: boolean }
   /** Nothing hub-shaped answered. */
   | { kind: 'absent' }
   /** A hub answered, but it serves a different root — refuse, never downgrade. */
@@ -99,7 +99,7 @@ export async function probeFixedPort(): Promise<FixedPortProbe> {
   if (expected && path.resolve(hub.root) !== expected) {
     return { kind: 'foreign', port: hub.port, root: hub.root, expected }
   }
-  return { kind: 'found', port: hub.port, root: hub.root, supervised: hub.supervised }
+  return { kind: 'found', port: hub.port, root: hub.root, authRequired: hub.authRequired }
 }
 
 /**

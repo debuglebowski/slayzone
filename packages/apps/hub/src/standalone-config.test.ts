@@ -9,7 +9,7 @@
  *
  * Run with: npx tsx packages/apps/hub/src/standalone-config.test.ts
  */
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
@@ -50,8 +50,17 @@ const ENV_KEYS = [
   'SLAYZONE_ROOT',
   'SLAYZONE_HUB_AUTH_SECRET',
   'SLAYZONE_HUB_ADDRESS',
+  'SLAYZONE_HUB_LISTEN_ADDRESS',
   'SLAYZONE_HUB_PUBLIC_ADDRESS',
   'SLAYZONE_HUB_NAME',
+  'SLAYZONE_HUB_REQUIRE_LOGIN',
+  'SLAYZONE_HUB_ENABLE_PASSWORD',
+  'SLAYZONE_HUB_ENABLE_SSO',
+  'SLAYZONE_HUB_ENABLE_PROCESSES',
+  'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
+  'SLAYZONE_HUB_SSO_TENANT_ID',
+  'SLAYZONE_HUB_SSO_CLIENT_ID',
+  'SLAYZONE_HUB_SSO_CLIENT_SECRET',
   'SLAYZONE_MODE'
 ] as const
 
@@ -79,86 +88,180 @@ function withIsolatedEnv(seed: Record<string, string>, fn: (home: string) => voi
 console.log('\nstandalone-config: env > file > default')
 console.log('─'.repeat(40))
 
-test('hub.config.json fills unset env (address, publicAddress)', () => {
-  withIsolatedEnv({}, () => {
+test('hub.config.json fills unset env (listenAddress, publicAddress)', () => {
+  // A hub with a public address is reachable (B13), so it also needs login and the
+  // secret in env — the file alone would be refused.
+  withIsolatedEnv({ SLAYZONE_HUB_AUTH_SECRET: 'env-secret' }, () => {
     saveHubConfigFile({
-      address: '0.0.0.0:8080',
-      publicAddress: 'hub.example:8443'
+      listenAddress: '0.0.0.0:8080',
+      publicAddress: 'hub.example:8443',
+      requireLogin: true
     })
     applyStandaloneHubConfig()
     // No DB path is seeded anywhere in this chain: it DERIVES from SLAYZONE_ROOT
     // (<ROOT>, flat) via platform.getStorageDir() and is not overridable.
-    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '0.0.0.0:8080', 'address')
+    assertEq(process.env.SLAYZONE_HUB_LISTEN_ADDRESS, '0.0.0.0:8080', 'listenAddress')
     assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example:8443', 'publicAddress')
-  })
-})
-
-test('legacy port/publicUrl keys still boot (authority extracted, scheme dropped)', () => {
-  withIsolatedEnv({}, () => {
-    // An existing hub.config.json written by an older build must keep working —
-    // the legacy keys are READ (never written back).
-    saveHubConfigFile({ port: 8080, publicUrl: 'https://hub.example:8443/' })
-    applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '127.0.0.1:8080', 'legacy port → loopback address')
-    assertEq(
-      process.env.SLAYZONE_HUB_PUBLIC_ADDRESS,
-      'hub.example:8443',
-      'legacy publicUrl → authority only (https:// discarded, SLAYZONE_MODE owns the scheme)'
+    assert(
+      process.env.SLAYZONE_HUB_ADDRESS === undefined,
+      'the dial-side name is never seeded onto a hub'
     )
   })
 })
 
-test('new address key WINS over the legacy port key', () => {
-  withIsolatedEnv({}, () => {
-    saveHubConfigFile({ address: '0.0.0.0:7000', port: 8080 })
-    applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '0.0.0.0:7000', 'address wins')
-  })
-})
-
 test('env WINS over hub.config.json (does not overwrite a set env)', () => {
-  withIsolatedEnv({ SLAYZONE_HUB_ADDRESS: '127.0.0.1:9999' }, () => {
-    saveHubConfigFile({ address: '0.0.0.0:8080' })
+  withIsolatedEnv({ SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:9999' }, () => {
+    saveHubConfigFile({ listenAddress: '0.0.0.0:8080' })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_HUB_ADDRESS, '127.0.0.1:9999', 'env address kept')
+    assertEq(process.env.SLAYZONE_HUB_LISTEN_ADDRESS, '127.0.0.1:9999', 'env address kept')
   })
 })
 
-// `mode` is what makes `slay hub create --public-address` actually work: without it
-// the hub boots local, and `deriveComputerHubUrl` hands out `ws://127.0.0.1:<port>`
-// tokens no other machine can use.
-test('hub.config.json mode seeds SLAYZONE_MODE', () => {
+// ── the switches: file booleans become the 0|1 env channel ───────────────────
+test('hub.config.json switches seed the env as 0|1', () => {
+  // SSO on needs its client secret, which only env can supply (B7).
+  withIsolatedEnv({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 'sso-secret' }, () => {
+    saveHubConfigFile({
+      requireLogin: true,
+      enablePassword: false,
+      enableSso: true,
+      ssoTenantId: 'tenant-1',
+      ssoClientId: 'client-1',
+      enableProcesses: false,
+      enableIntegrations: false
+    })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_HUB_REQUIRE_LOGIN, '1', 'requireLogin true → 1')
+    assertEq(process.env.SLAYZONE_HUB_ENABLE_PASSWORD, '0', 'enablePassword false → 0')
+    assertEq(process.env.SLAYZONE_HUB_ENABLE_SSO, '1', 'enableSso true → 1')
+    assertEq(process.env.SLAYZONE_HUB_ENABLE_PROCESSES, '0', 'enableProcesses false → 0')
+    assertEq(process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS, '0', 'enableIntegrations false → 0')
+    assertEq(process.env.SLAYZONE_HUB_SSO_TENANT_ID, 'tenant-1', 'ssoTenantId')
+    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, 'client-1', 'ssoClientId')
+  })
+})
+
+test('an ABSENT switch key leaves the env unset (the default applies, not an invented value)', () => {
   withIsolatedEnv({}, () => {
-    saveHubConfigFile({ mode: 'remote', publicAddress: 'hub.example:8443' })
+    saveHubConfigFile({ requireLogin: true })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_MODE, 'remote', 'mode seeded from config')
+    assertEq(process.env.SLAYZONE_HUB_REQUIRE_LOGIN, '1', 'the key that is there')
+    assert(process.env.SLAYZONE_HUB_ENABLE_PASSWORD === undefined, 'enablePassword not seeded')
+    assert(process.env.SLAYZONE_HUB_ENABLE_SSO === undefined, 'enableSso not seeded')
+    assert(process.env.SLAYZONE_HUB_ENABLE_PROCESSES === undefined, 'enableProcesses not seeded')
+    assert(
+      process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS === undefined,
+      'enableIntegrations not seeded'
+    )
   })
 })
 
-test('env SLAYZONE_MODE wins over hub.config.json mode', () => {
-  withIsolatedEnv({ SLAYZONE_MODE: 'local' }, () => {
-    saveHubConfigFile({ mode: 'remote' })
+test('env switches WIN over the file (false in the file, 1 in env → 1)', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_PROCESSES: '0' }, () => {
+    saveHubConfigFile({ requireLogin: false, enableProcesses: true })
     applyStandaloneHubConfig()
-    assertEq(process.env.SLAYZONE_MODE, 'local', 'env mode kept')
+    assertEq(process.env.SLAYZONE_HUB_REQUIRE_LOGIN, '1', 'env requireLogin kept')
+    assertEq(process.env.SLAYZONE_HUB_ENABLE_PROCESSES, '0', 'env enableProcesses kept')
   })
 })
 
-test('no mode key leaves SLAYZONE_MODE unset (getSlayzoneMode defaults to local)', () => {
-  withIsolatedEnv({}, () => {
-    saveHubConfigFile({ address: '127.0.0.1:8080' })
+test('the SSO client secret has NO file channel: it is never seeded, even if written there', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(
+      join(home, 'hub.config.json'),
+      JSON.stringify({ ssoClientSecret: 'from-file', ssoClientSecretEnv: 'x', ssoClientId: 'c' })
+    )
     applyStandaloneHubConfig()
-    // Deliberately UNSET rather than an explicit 'local': every existing standalone
-    // boot must stay byte-identical, and the default already lives in
-    // getSlayzoneMode().
-    assert(process.env.SLAYZONE_MODE === undefined, 'not seeded when absent')
+    assert(process.env.SLAYZONE_HUB_SSO_CLIENT_SECRET === undefined, 'secret is env only')
+    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, 'c', 'the non-secret id is seeded')
+  })
+})
+
+// ── B5: renamed keys refuse boot ─────────────────────────────────────────────
+function throwsFrom(fn: () => void): string | null {
+  try {
+    fn()
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+}
+
+test('B5: the old `address` key refuses boot with a "renamed to listenAddress" message', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(join(home, 'hub.config.json'), JSON.stringify({ address: '0.0.0.0:8080' }))
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null, 'boot refused')
+    assert(/'address' was renamed to 'listenAddress'/.test(msg), msg)
+    assert(msg.includes(join(home, 'hub.config.json')), `names the file: ${msg}`)
+    assert(process.env.SLAYZONE_HUB_LISTEN_ADDRESS === undefined, 'nothing seeded before refusing')
+  })
+})
+
+test('B5: the old `port` key refuses boot, naming listenAddress', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(join(home, 'hub.config.json'), JSON.stringify({ port: 8080 }))
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /'port' was renamed to 'listenAddress/.test(msg), String(msg))
+  })
+})
+
+// Decision (T-02): `publicUrl` REFUSES, like `address`. Ignoring it silently would
+// leave the hub with no public address, so join tokens and links would point at
+// 127.0.0.1 — a deployment that boots and then does not work.
+test('B5: the old `publicUrl` key refuses boot, naming publicAddress', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(
+      join(home, 'hub.config.json'),
+      JSON.stringify({ publicUrl: 'https://hub.example:8443/' })
+    )
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /'publicUrl' was renamed to 'publicAddress/.test(msg), String(msg))
+  })
+})
+
+test('B5 applies to the legacy shared config.json fallback too', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ address: '0.0.0.0:8080' }))
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /renamed/.test(msg), String(msg))
+  })
+})
+
+test('B4: a non-boolean switch in the file refuses boot, naming the key', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(join(home, 'hub.config.json'), JSON.stringify({ requireLogin: 'true' }))
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /'requireLogin' must be true or false/.test(msg), String(msg))
+  })
+})
+
+test('a leftover `mode` key in the file is IGNORED — not seeded, not a refusal', () => {
+  withIsolatedEnv({}, (home) => {
+    writeFileSync(
+      join(home, 'hub.config.json'),
+      JSON.stringify({ mode: 'remote', hubName: 'from-file' })
+    )
+    applyStandaloneHubConfig()
+    assert(process.env.SLAYZONE_MODE === undefined, 'SLAYZONE_MODE is never seeded any more')
+    assertEq(process.env.SLAYZONE_HUB_NAME, 'from-file', 'rest of the file loads')
+  })
+})
+
+test('a leftover SLAYZONE_MODE in env is ignored too (left exactly as it was)', () => {
+  withIsolatedEnv({ SLAYZONE_MODE: 'remote' }, () => {
+    saveHubConfigFile({ listenAddress: '127.0.0.1:8080' })
+    applyStandaloneHubConfig()
+    assertEq(process.env.SLAYZONE_MODE, 'remote', 'untouched, unread')
+    assert(!!process.env.SLAYZONE_HUB_AUTH_SECRET, 'and it does not change the secret handling')
   })
 })
 
 test('no config + no env ⇒ only the generated hub-auth secret is set (defaults elsewhere)', () => {
   withIsolatedEnv({}, () => {
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'no address default here')
-    assert(!!process.env.SLAYZONE_HUB_AUTH_SECRET, 'hub-auth secret always resolved')
+    assert(process.env.SLAYZONE_HUB_LISTEN_ADDRESS === undefined, 'no address default here')
+    assert(!!process.env.SLAYZONE_HUB_AUTH_SECRET, 'hub-auth secret resolved on a local-only hub')
   })
 })
 
@@ -216,6 +319,81 @@ test('EMPTY env SLAYZONE_HUB_AUTH_SECRET counts as absent ⇒ generates (no misl
   })
 })
 
+// ── B14: a hub other machines can reach gets no generated secret ─────────────
+const REACH_OK = { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com' }
+
+test('B13/B14: a reachable hub with no secret in env is REFUSED — and writes no state file', () => {
+  withIsolatedEnv({ ...REACH_OK, SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:8080' }, () => {
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /SLAYZONE_HUB_AUTH_SECRET is required/.test(msg), String(msg))
+    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'nothing generated into env')
+    assert(!existsSync(getHubStateFilePath()), 'hub.state.json not written')
+  })
+})
+
+test('B13/B14: a loopback hub WITH a public address (same-box proxy) is refused the same way', () => {
+  withIsolatedEnv(REACH_OK, () => {
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /SLAYZONE_HUB_AUTH_SECRET is required/.test(msg), String(msg))
+    assert(!existsSync(getHubStateFilePath()), 'hub.state.json not written')
+  })
+})
+
+test('B13/B14: reachability that comes from the FILE is honored the same way', () => {
+  withIsolatedEnv({}, () => {
+    saveHubConfigFile({
+      listenAddress: '0.0.0.0:8080',
+      publicAddress: 'hub.example.com',
+      requireLogin: true
+    })
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /SLAYZONE_HUB_AUTH_SECRET is required/.test(msg), String(msg))
+    assert(!existsSync(getHubStateFilePath()), 'hub.state.json not written')
+  })
+})
+
+test('B14: a reachable hub with the secret in env keeps it, and still writes nothing', () => {
+  withIsolatedEnv(
+    {
+      ...REACH_OK,
+      SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:8080',
+      SLAYZONE_HUB_AUTH_SECRET: 'from-env'
+    },
+    () => {
+      applyStandaloneHubConfig()
+      assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, 'from-env', 'env secret kept')
+      assert(!existsSync(getHubStateFilePath()), 'hub.state.json not written')
+    }
+  )
+})
+
+test('a reachable hub does NOT read a persisted state-file secret either: env or refuse', () => {
+  withIsolatedEnv(REACH_OK, () => {
+    saveHubStateFile({ computerTransportSecret: 'from-state-file' })
+    const msg = throwsFrom(() => applyStandaloneHubConfig())
+    assert(msg !== null && /SLAYZONE_HUB_AUTH_SECRET is required/.test(msg), String(msg))
+    assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'the state file is not a source')
+  })
+})
+
+// ── the boot rules run here too, so a refused hub leaves nothing behind ──────
+test('a refused hub writes NO hub.state.json (the rules run before the secret is generated)', () => {
+  const cases: Array<Record<string, string>> = [
+    { SLAYZONE_HUB_REQUIRE_LOGIN: 'true' }, // B4
+    { SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' }, // B5
+    { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_PASSWORD: '0' }, // B2
+    { SLAYZONE_HUB_PUBLIC_ADDRESS: 'https://hub.example.com' } // B8
+  ]
+  for (const env of cases) {
+    withIsolatedEnv(env, () => {
+      const msg = throwsFrom(() => applyStandaloneHubConfig())
+      assert(msg !== null, `refused: ${JSON.stringify(env)}`)
+      assert(!existsSync(getHubStateFilePath()), `no state file for ${JSON.stringify(env)}`)
+      assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'no secret generated')
+    })
+  }
+})
+
 console.log('\nstandalone-config: hub name (env > config > basename(ROOT))')
 console.log('─'.repeat(40))
 
@@ -263,10 +441,11 @@ test('supervised does NOT read or write hub.config.json/hub.state.json (no file 
 
 test('supervised IGNORES an existing hub.config.json/hub.state.json entirely', () => {
   withIsolatedEnv({ SLAYZONE_SUPERVISED: '1' }, () => {
-    saveHubConfigFile({ address: '0.0.0.0:8080' })
+    saveHubConfigFile({ listenAddress: '0.0.0.0:8080', requireLogin: true })
     saveHubStateFile({ computerTransportSecret: 'should-be-ignored' })
     applyStandaloneHubConfig()
-    assert(process.env.SLAYZONE_HUB_ADDRESS === undefined, 'ignored address')
+    assert(process.env.SLAYZONE_HUB_LISTEN_ADDRESS === undefined, 'ignored address')
+    assert(process.env.SLAYZONE_HUB_REQUIRE_LOGIN === undefined, 'ignored switches')
     assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'ignored computerTransportSecret')
   })
 })

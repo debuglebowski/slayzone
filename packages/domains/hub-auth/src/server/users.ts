@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { API_KEY_TABLE_NAME } from '@better-auth/api-key'
+import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 
@@ -68,6 +69,23 @@ const LIST_USERS_LIMIT = 1000
  */
 const MEMBER_TABLE_NAME = 'member'
 
+/** Audit line for an account command (T-03). Ids and a reason code only — never the
+ *  email or the generated password. The acting operator comes from the request context. */
+function auditUser(
+  event: 'user.create' | 'user.remove',
+  outcome: SecurityOutcome,
+  userId: string | null,
+  reason?: string
+): void {
+  securityEvent({
+    event,
+    outcome,
+    targetKind: 'user',
+    targetId: userId,
+    detail: reason ? { reason } : undefined
+  })
+}
+
 /**
  * Generate a password for an operator-created account.
  *
@@ -107,7 +125,10 @@ export async function createHubUser(
   const email = normalizeEmail(input.email)
 
   const existing = await ctx.internalAdapter.findUserByEmail(email)
-  if (existing) return { error: 'exists' }
+  if (existing) {
+    auditUser('user.create', 'failure', null, 'exists')
+    return { error: 'exists' }
+  }
 
   const password = generatePassword()
   // Fail LOUD if the generated length ever falls outside better-auth's configured
@@ -141,6 +162,7 @@ export async function createHubUser(
     password: hash
   })
 
+  auditUser('user.create', 'success', created.id)
   return { id: created.id, email: created.email, name: created.name, password }
 }
 
@@ -188,16 +210,25 @@ export async function removeHubUser(auth: HubAuth, email: string): Promise<Remov
   const ctx = await auth.$context
   const normalized = normalizeEmail(email)
 
-  if (normalized === COMPUTER_SERVICE_USER_EMAIL) return 'protected'
+  if (normalized === COMPUTER_SERVICE_USER_EMAIL) {
+    auditUser('user.remove', 'denied', null, 'protected')
+    return 'protected'
+  }
 
   const found = await ctx.internalAdapter.findUserByEmail(normalized)
-  if (!found) return 'not-found'
+  if (!found) {
+    auditUser('user.remove', 'failure', null, 'not_found')
+    return 'not-found'
+  }
 
   // Count HUMANS, not rows: the service user exists as a user row but is not an
   // account anyone can sign in as, so including it would let the operator delete
   // the true last human and lock the hub.
   const humans = await listHubUsers(auth)
-  if (humans.length <= 1) return 'last-user'
+  if (humans.length <= 1) {
+    auditUser('user.remove', 'denied', found.user.id, 'last_user')
+    return 'last-user'
+  }
 
   const userId = found.user.id
 
@@ -218,5 +249,6 @@ export async function removeHubUser(auth: HubAuth, email: string): Promise<Remov
   await ctx.internalAdapter.deleteAccounts(userId)
   await ctx.internalAdapter.deleteUser(userId)
 
+  auditUser('user.remove', 'success', userId)
   return 'ok'
 }

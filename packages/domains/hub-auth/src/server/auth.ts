@@ -5,6 +5,7 @@ import { apiKey } from '@better-auth/api-key'
 import { betterAuth } from 'better-auth'
 import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
+import { auditAuthResponse, auditDatabaseHooks } from './audit'
 
 export interface HubAuthConfig {
   /**
@@ -51,6 +52,10 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },
+    // Security audit lines on stdout (T-03): sign-in, sign-out, sessions, password
+    // change. See ./audit.ts.
+    hooks: { after: auditAuthResponse },
+    databaseHooks: auditDatabaseHooks,
     plugins: [
       bearer(),
       jwt(),

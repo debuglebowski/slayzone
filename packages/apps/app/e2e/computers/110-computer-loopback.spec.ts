@@ -12,10 +12,10 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  * Validates the WHOLE hub/computer chain over a real computer link, in-process:
  *   1. Boot a fully isolated app with boot-config `{ server_mode:'local' }`. A hub
  *      always accepts computers, so the sidecar comes up with the gateway + hub-auth
- *      + identity live, and binds the TLS `/computers` wss listener on its own port
- *      (separate https server from the shared http /trpc; see server.ts).
+ *      live, and serves `/computers` on the ONE plain-http listener, demuxed from
+ *      `/trpc` by path (see server.ts; the hub never does TLS itself).
  *   2. Mint a real join token via the `computers.mintJoinToken` tRPC mutation
- *      (embeds the hub's bound `wss://…/computers` URL + cert fingerprint to pin).
+ *      (embeds the hub's bound `ws(s)://…/computers` URL; no certificate pin).
  *   3. Spawn the bundled @slayzone/computer as a loopback child process, pointed
  *      at that token → it dials the hub, enrolls, and appears connected in
  *      `computers.list`.
@@ -130,8 +130,8 @@ function spawnLoopbackComputer(opts: {
       // <ROOT>/computer.config.json (it skips the shared file when SUPERVISED=1).
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: opts.rootDir,
-      // Authority only — the computer composes ws(s)://<addr>/computers from
-      // SLAYZONE_MODE (local here → ws, matching the loopback hub).
+      // Authority only — the computer composes ws(s)://<addr>/computers, the scheme
+      // from the host (a loopback host → ws, matching the loopback hub).
       SLAYZONE_HUB_ADDRESS: new URL(opts.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: opts.joinToken,
       SLAYZONE_COMPUTER_CREDENTIALS_DIR: opts.credentialsDir
@@ -221,7 +221,7 @@ base.describe('Computer loopback (computer ON)', () => {
 
       // The sidecar's computer init (createHubAuth migrations) + listener bind are
       // async and happen after boot. mintJoinToken throws until the listener has
-      // fed its URL/fingerprint into the computers registry, so poll it.
+      // fed its URL into the computers registry, so poll it.
       let minted: { token: string } | null = null
       await expect
         .poll(
@@ -247,9 +247,10 @@ base.describe('Computer loopback (computer ON)', () => {
       const token = minted!.token
       const hubUrl = decodeHubUrl(token)
       // `/computers` rides the ONE hub listener, demuxed by path, and its scheme
-      // follows SLAYZONE_MODE: local (this test) → plaintext `ws://` loopback on the
-      // hub's own port; only remote terminates TLS and mints `wss://` (from
-      // SLAYZONE_HUB_PUBLIC_ADDRESS). The computer extracts this url from the token.
+      // follows the host: with no public address (this test) the token carries
+      // plaintext `ws://` loopback on the hub's own port; a hub with a public address
+      // mints `wss://<public address>` instead (the hub never does TLS itself, a front
+      // end does). The computer extracts this url from the token.
       expect(hubUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/computers$/)
 
       // Spawn the loopback computer against the freshly minted token. Its creds +

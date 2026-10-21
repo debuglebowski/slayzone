@@ -21,6 +21,7 @@ import {
   resolveTaskComputerId
 } from '@slayzone/computers/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-computers-')) }
@@ -52,8 +53,7 @@ const fakeDeps: ComputersDeps = {
     listComputers: () => asDescriptors(liveComputerIds),
     listUsableComputers: () => asDescriptors(usableComputerIds ?? liveComputerIds)
   }),
-  getHubUrl: () => 'ws://127.0.0.1:8788/computers',
-  getCertFingerprint: () => 'abcdef0123456789'
+  getHubUrl: () => 'ws://127.0.0.1:8788/computers'
 }
 setComputersDeps(fakeDeps)
 
@@ -81,14 +81,15 @@ test('computers.list: returns store rows merged with live connection status', as
   expect(linuxRow.connectedAt).toBeNull()
 })
 
-test('computers.mintJoinToken: returns a decodable szjt1 token embedding hub URL + cert', async () => {
+test('computers.mintJoinToken: returns a decodable szjt1 token embedding the hub URL, with no pin', async () => {
   const minted = await caller.mintJoinToken({ label: 'office-mac' })
   expect(minted.label).toBe('office-mac')
   expect(typeof minted.token).toBe('string')
   const payload = decodeJoinToken(minted.token)
   expect(payload).not.toBeNull()
   expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/computers')
-  expect(payload!.certFingerprint).toBe('abcdef0123456789')
+  // The hub presents no certificate of its own, so there is nothing to pin.
+  expect(payload!.certFingerprint).toBe('')
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
   // The dial target is returned ALONGSIDE the token so a client can tell whether
   // the token is usable off-box without decoding it — `decodeJoinToken` needs
@@ -135,6 +136,46 @@ test('computers.revokeComputer: drops the computer from the active list', async 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
 })
 
+test('computers: revoke, unrevoke, delete, claim and visibility write audit lines naming the user (T-03)', async () => {
+  const audit: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+  try {
+    const asUser = computersRouter.createCaller({
+      ...ctx,
+      principal: { userId: 'user-9', scopes: ['full'] },
+      req: { socket: { remoteAddress: '198.51.100.4' } } as never
+    })
+    const r = await registerComputer(h.slayDb, {
+      name: 'audited',
+      platform: 'linux-x64',
+      version: '0.35.0'
+    })
+    await asUser.claim({ computerId: r.id })
+    await asUser.setVisibility({ computerId: r.id, visibility: 'private' })
+    await asUser.revokeComputer({ computerId: r.id })
+    await asUser.unrevoke({ computerId: r.id })
+    await asUser.delete({ computerId: r.id })
+    expect(audit.map((l) => l.event)).toEqual([
+      'computer.claim',
+      'computer.visibility.set',
+      'computer.revoke',
+      'computer.unrevoke',
+      'computer.delete'
+    ])
+    for (const l of audit) {
+      expect(l.outcome).toBe('success')
+      expect(l.actor).toBe('user-9')
+      expect(l.ip).toBe('198.51.100.4')
+      expect(l.targetKind).toBe('computer')
+      expect(l.targetId).toBe(r.id)
+    }
+    expect((audit[1]!.detail as { visibility: string }).visibility).toBe('private')
+    expect(audit[2]!.route).toBe('trpc revokeComputer')
+  } finally {
+    setSecurityLogSink()
+  }
+})
+
 // Contract: with the gateway absent (init not yet resolved), `list` still returns store
 // rows (all disconnected) and `mintJoinToken` fails cleanly instead of crashing.
 test('computers: list degrades + mintJoinToken throws when the gateway is unwired', async () => {
@@ -142,8 +183,7 @@ test('computers: list degrades + mintJoinToken throws when the gateway is unwire
   // but exercised here by resetting the deps to a null-gateway shape.
   setComputersDeps({
     getGateway: () => null,
-    getHubUrl: () => null,
-    getCertFingerprint: () => null
+    getHubUrl: () => null
   })
 
   const rows = await caller.list()

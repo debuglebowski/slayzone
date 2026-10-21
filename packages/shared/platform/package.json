@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/platform",
-  "version": "0.36.0-beta.17",
+  "version": "0.36.0-beta.18",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -19,10 +19,12 @@
     "./device-status-queries": "./src/device-status-queries.ts",
     "./hub-addr": "./src/hub-addr.ts",
     "./hub-discovery": "./src/hub-discovery.ts",
+    "./hub-switches": "./src/hub-switches.ts",
     "./hub-owner-file": "./src/hub-owner-file.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
+    "./security-log": "./src/security-log.ts",
     "./agent-hooks": "./src/agent-hooks/index.ts"
   },
   "scripts": {

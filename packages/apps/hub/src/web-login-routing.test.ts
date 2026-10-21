@@ -134,7 +134,10 @@ async function main(): Promise<void> {
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
       SLAYZONE_ROOT: root,
-      SLAYZONE_HUB_ADDRESS: '127.0.0.1:0'
+      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+      // Login on: the bootstrap owner (and the web login route's whole point)
+      // exist only on a hub that requires sign-in.
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
     })
 
     const listen = await poll(

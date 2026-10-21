@@ -113,13 +113,11 @@ interface BootResult {
  *  token embedding it, then run the computer's authenticate logic. */
 async function simulateBoot(deps: BootDeps): Promise<BootResult> {
   const hubUrl = deriveComputerHubUrl({
-    remote: false,
     host: HOST,
     port: deps.hubPort ?? HUB_PORT
   })!
   const minted = await mintJoinToken(deps.db, {
     hubUrl,
-    certFingerprint: 'sha256:deadbeef',
     ttlMs: 60_000,
     label: LOCAL_NAME
   })
@@ -202,8 +200,8 @@ async function main(): Promise<void> {
       const { close } = createMigratedDb()
       const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-portchange-'))
       try {
-        const url1 = deriveComputerHubUrl({ remote: false, host: HOST, port: 60000 })!
-        const url2 = deriveComputerHubUrl({ remote: false, host: HOST, port: 60001 })!
+        const url1 = deriveComputerHubUrl({ host: HOST, port: 60000 })!
+        const url2 = deriveComputerHubUrl({ host: HOST, port: 60001 })!
         const store1 = createFileCredentialStore(hubHostFromUrl(url1), { baseDir: credsBaseDir })
         const store2 = createFileCredentialStore(hubHostFromUrl(url2), { baseDir: credsBaseDir })
         await store1.save({ computerId: 'x', apiKey: 'k' })

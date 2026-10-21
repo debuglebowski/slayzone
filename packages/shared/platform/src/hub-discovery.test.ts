@@ -43,6 +43,17 @@ function assertEq(actual: unknown, expected: unknown, msg: string): void {
 type Closer = () => Promise<void>
 const cleanups: Closer[] = []
 
+/**
+ * Close every fake hub opened so far. A test that SWEEPS a port range between two
+ * fresh ephemeral ports would otherwise also find the hubs earlier tests left
+ * listening (they close at the very end), and count them: the OS picks ephemeral
+ * ports in no promised order, so on Linux the range between two new ports can span
+ * old ones.
+ */
+async function closeLeftovers(): Promise<void> {
+  for (const c of cleanups.splice(0)) await c()
+}
+
 /** A hub-shaped /health responder on an OS-assigned port. */
 async function fakeHub(body: Record<string, unknown>): Promise<number> {
   const srv = http.createServer((req, res) => {
@@ -106,7 +117,14 @@ const HUB_A = {
   root: '/tmp/hubs/alpha',
   dbPath: '/tmp/hubs/alpha/storage/slayzone.sqlite',
   pid: 111,
-  mode: 'local',
+  authRequired: true,
+  switches: {
+    requireLogin: true,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: false,
+    enableIntegrations: false
+  },
   supervised: false,
   computersConnected: 2,
   uptimeMs: 90_000,
@@ -129,11 +147,28 @@ async function main(): Promise<void> {
       assertEq(h.root, '/tmp/hubs/alpha', 'root')
       assertEq(h.dbPath, HUB_A.dbPath, 'dbPath')
       assertEq(h.pid, 111, 'pid')
-      assertEq(h.mode, 'local', 'mode')
+      assertEq(h.authRequired, true, 'authRequired')
+      assertEq(h.switches?.requireLogin, true, 'switch requireLogin')
+      assertEq(h.switches?.enableProcesses, false, 'switch enableProcesses')
+      assertEq(h.switches?.enablePassword, true, 'switch enablePassword')
       assertEq(h.supervised, false, 'supervised')
       assertEq(h.computersConnected, 2, 'computersConnected')
       assertEq(h.uptimeMs, 90_000, 'uptimeMs')
       assertEq(h.buildId, HUB_A.buildId, 'buildId')
+    })
+
+    await test('an older hub without authRequired/switches reads as login-off, switches unknown', async () => {
+      const { authRequired: _a, switches: _s, ...older } = HUB_A
+      const port = await fakeHub(older)
+      const hubs = await discoverHubs({ range: { start: port, end: port } })
+      assertEq(hubs[0]?.authRequired, false, 'absent authRequired → false')
+      assertEq(hubs[0]?.switches, null, 'absent switches → null, not invented defaults')
+    })
+
+    await test('a malformed switches object reads as unknown', async () => {
+      const port = await fakeHub({ ...HUB_A, switches: { requireLogin: 'yes' } })
+      const hubs = await discoverHubs({ range: { start: port, end: port } })
+      assertEq(hubs[0]?.switches, null, 'non-boolean switch → null')
     })
 
     await test('reports the port it PROBED, ignoring a body that claims another', async () => {
@@ -146,6 +181,7 @@ async function main(): Promise<void> {
     })
 
     await test('finds several hubs at once and sorts them stably', async () => {
+      await closeLeftovers()
       const p1 = await fakeHub({ ...HUB_A, name: 'zulu' })
       const p2 = await fakeHub({ ...HUB_A, name: 'bravo' })
       const lo = Math.min(p1, p2)
@@ -164,6 +200,7 @@ async function main(): Promise<void> {
     })
 
     await test('ignores a non-SlayZone service on a hub port', async () => {
+      await closeLeftovers()
       const html = await fakeNonHub((res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end('<html>not a hub</html>')

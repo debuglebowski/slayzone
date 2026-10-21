@@ -27,10 +27,10 @@
 #   - Decide the version below (VERSION=...). npm versions are near-permanent;
 #     to iterate, bump the patch and publish again.
 #
-# SECURITY NOTE baked into the published READMEs: the hub's client-facing /trpc
-# socket is UNAUTHENTICATED and binds 127.0.0.1 by default. Only expose it
-# (a non-loopback host in SLAYZONE_HUB_ADDRESS) on a trusted network until
-# user-auth on /trpc lands.
+# SECURITY NOTE baked into the published READMEs: the hub listens on 127.0.0.1 with
+# no login by default, and serves plain http. A hub that other machines can reach
+# refuses to start unless it requires login, publishes a public address (the TLS
+# front end that terminates TLS) and has SLAYZONE_HUB_AUTH_SECRET in its env.
 
 set -euo pipefail
 
@@ -110,29 +110,54 @@ computer gateway that computers dial into.
     SLAYZONE_ROOT=~/slayzone-hub \
       SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32) slayzone-hub
 
-`SLAYZONE_ROOT` is the install anchor: all state (DB, artifacts, identity, logs)
+`SLAYZONE_ROOT` is the install anchor: all state (DB, artifacts, logs)
 lives under `<ROOT>/storage`, and the DB filename is derived — not overridable.
 Omit it and the hub anchors to its launch directory.
 
-## ⚠️ Security
+## Reaching it from other machines
 
-The client-facing `/trpc` socket is **unauthenticated** and binds `127.0.0.1`
-by default. Do **not** point `SLAYZONE_HUB_ADDRESS` at a non-loopback host to
-expose it beyond loopback except on a fully trusted network — user
-authentication on `/trpc` is not yet implemented. Computer traffic (`/computers`) is TLS + cert-pinned and safe to expose.
+By default the hub listens on `127.0.0.1` and requires no login — the same hub the
+desktop app runs. The hub itself serves plain http and never does TLS: to let other
+machines in, put a TLS front end (Caddy, nginx, a cloud load balancer) in front of it
+and tell the hub both addresses (`host[:port]`, no scheme):
+
+    SLAYZONE_HUB_LISTEN_ADDRESS=0.0.0.0:8788      # where the hub listens
+    SLAYZONE_HUB_PUBLIC_ADDRESS=hub.example.com   # how clients and computers reach it
+    SLAYZONE_HUB_REQUIRE_LOGIN=1
+    SLAYZONE_HUB_AUTH_SECRET=$(openssl rand -hex 32)
+
+A hub that other machines can reach (a listen address that is not loopback, or a public
+address) **refuses to start** unless it requires login, has a public address and has
+`SLAYZONE_HUB_AUTH_SECRET` in its environment — it never generates that key onto its own
+disk. Clients dial the public address with `https://` / `wss://` (any host that is not
+loopback); loopback is plain `http://` / `ws://`.
+
+Switches (`0` or `1`; anything else refuses to start), each also a boolean in
+`<ROOT>/hub.config.json` (env wins):
+
+| Variable | Default | |
+| --- | --- | --- |
+| `SLAYZONE_HUB_REQUIRE_LOGIN` | `0` | every client must sign in |
+| `SLAYZONE_HUB_ENABLE_PASSWORD` | `1` | email + password sign-in |
+| `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CLIENT_SECRET`) |
+| `SLAYZONE_HUB_ENABLE_PROCESSES` | `1` | hub-local processes |
+| `SLAYZONE_HUB_ENABLE_INTEGRATIONS` | `1` | Linear / GitHub |
+
+Today the hub validates and reports every switch (`/health`) and enforces
+`REQUIRE_LOGIN`; enforcing the others follows.
 
 GPL-3.0-only. Source: https://github.com/debuglebowski/slayzone
 EOF
 cat > packages/apps/computer/README.md <<'EOF'
 # @slayzone/computer (SlayZone computer)
 
-A SlayZone execution node. Dials OUT to a hub over pinned `wss://` using a join
-token (mint one on the hub), then runs terminals/agents/git on this machine.
+A SlayZone execution node. Dials OUT to a hub using a join token (mint one on the
+hub; `wss://` for any hub that is not on this machine), then runs terminals/agents/git
+on this machine.
 
     SLAYZONE_HUB_JOIN_TOKEN=<token from the hub> slayzone-computer
 
-The join token embeds the hub URL + cert fingerprint, so nothing else is
-required.
+The join token embeds the hub URL, so nothing else is required.
 
 This runs the computer in the FOREGROUND: it will not come back after a crash or a
 logout. To install it as a supervised service instead, use the CLI:
@@ -175,8 +200,7 @@ and git there. Mint a join token on the hub, then:
     slay computer start <name>    # bring a stopped computer back
     slay computer rm <name>       # stop it and remove its registration
 
-The token embeds the hub URL and its cert fingerprint, so `--token` is the only
-configuration needed. It is stored in `<root>/config.json` (owner-only) — never in
+The token embeds the hub URL, so `--token` is the only configuration needed. It is stored in `<root>/config.json` (owner-only) — never in
 the service unit. `--root <dir>` picks where the computer's config, credentials and
 logs live (default: the current directory), and `--allow <dir>` (repeatable) sets
 the filesystem roots it may touch. One computer per root.
@@ -249,9 +273,11 @@ SMOKE_SECRET="$(openssl rand -hex 32)"
 # child — which would (a) skip schema bootstrap (supervised ⇒ "no such table:
 # tasks") giving a FALSE failure, and (b) risk touching the real store. Scrub the
 # full set via `-u`; ports are 0 (OS-assigned) so nothing collides with a running
-# app. HUB_ROOT anchors the hub's config + identity + auth DB in the tmp tree.
+# app. HUB_ROOT anchors the hub's config + auth DB in the tmp tree.
 SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
-       -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
+       -u SLAYZONE_HUB_ADDRESS -u SLAYZONE_HUB_LISTEN_ADDRESS -u SLAYZONE_HUB_PUBLIC_ADDRESS
+       -u SLAYZONE_HUB_REQUIRE_LOGIN -u SLAYZONE_HUB_ENABLE_PASSWORD -u SLAYZONE_HUB_ENABLE_SSO
+       -u SLAYZONE_HUB_ENABLE_PROCESSES -u SLAYZONE_HUB_ENABLE_INTEGRATIONS
        -u SLAYZONE_HUB_AUTH_SECRET
        -u SLAYZONE_HUB_JOIN_TOKEN
        -u SLAYZONE_COMPUTER_CREDENTIALS_DIR
@@ -262,7 +288,7 @@ SCRUB=(-u SLAYZONE_SUPERVISED -u SLAYZONE_ROOT
 # this same port; there is no separate computer port to set.
 HUB_PORT=47811
 env "${SCRUB[@]}" \
-  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_ADDRESS="127.0.0.1:$HUB_PORT" \
+  SLAYZONE_ROOT="$HUB_ROOT" SLAYZONE_HUB_LISTEN_ADDRESS="127.0.0.1:$HUB_PORT" \
   SLAYZONE_HUB_AUTH_SECRET="$SMOKE_SECRET" \
   "$SMOKE/hub/node_modules/.bin/slayzone-hub" > "$SMOKE/hub.log" 2>&1 &
 HPID=$!
@@ -302,10 +328,9 @@ echo "   ✓ minted join token (hub computer url: $HUB_WSS)"
 
 # Boot the computer from ITS tarball (proves node-pty rebuilt for the consumer ABI)
 # and point it at the minted token — which is self-sufficient: it embeds the hub's
-# `wss://…/computers` url AND the cert fingerprint to pin, so no address env is
-# needed (and none would do: SLAYZONE_HUB_ADDRESS is authority-only, and in the
-# default local mode it composes plaintext `ws://` — wrong for the TLS /computers
-# listener). The FS path-jail has no env channel either — it comes from
+# `/computers` url (plain `ws://` here, the hub being on loopback with no public
+# address; it carries no certificate pin), so no address env is needed. The FS
+# path-jail has no env channel either — it comes from
 # <ROOT>/config.json `allowedRoots` (or the SLAYZONE_ROOT default in bin.ts).
 echo '{"allowedRoots":["'"$RUN_WORK"'"]}' > "$RUN_ROOT/config.json"
 env "${SCRUB[@]}" \
@@ -316,7 +341,7 @@ RPID=$!
 
 # Assert enrollment via the COMPUTER's stdout: on a fresh computer the dialer logs
 # `connected to hub {…,"mode":"enroll"}` — the hub accepted the join token, minted
-# credentials over the pinned wss link, and the handshake completed. (The hub's own
+# credentials over the link, and the handshake completed. (The hub's own
 # "computer enrolled" line goes to <dataRoot>/logs/sidecar.log, NOT stdout — see
 # hub/src/log.ts — so we assert on the computer's captured stdout, and specifically
 # on mode=enroll: a fresh credential-less computer must ENROLL, not hello-reconnect.)
@@ -326,7 +351,7 @@ for i in $(seq 1 20); do
   [ "$i" = "20" ] && smoke_fail "computer did not enroll within 20s"
   sleep 1
 done
-echo "   ✓ computer enrolled into the hub over the pinned wss link"
+echo "   ✓ computer enrolled into the hub with the pin-less join token"
 
 # --- CLI smoke: the published `slay` must DISCOVER the running hub and STOP it.
 # Discovery probes the hub port block, but this smoke hub binds a fixed loopback

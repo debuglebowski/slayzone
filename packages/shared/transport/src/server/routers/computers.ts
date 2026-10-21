@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
+import {
+  securityEvent,
+  type SecurityEventName,
+  type SecurityOutcome
+} from '@slayzone/platform/security-log'
 import { router, publicProcedure } from '../trpc'
 import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import {
@@ -21,6 +26,19 @@ import {
 } from '@slayzone/computers/server'
 
 /**
+ * Audit line for a change to who can use a computer (T-03). The acting user, peer
+ * address and procedure come from the request context `publicProcedure` sets.
+ */
+function auditComputer(
+  event: SecurityEventName,
+  computerId: string,
+  outcome: SecurityOutcome = 'success',
+  detail?: Record<string, unknown>
+): void {
+  securityEvent({ event, outcome, targetKind: 'computer', targetId: computerId, detail })
+}
+
+/**
  * Computers router — the tRPC surface over the hub/computer-split computer (hub side).
  *
  * Two dependency classes, deliberately separated so the router keeps working
@@ -31,7 +49,7 @@ import {
  *    against the v149 computer tables. These never need the live gateway, so they
  *    work regardless of computer-init timing.
  *  - Live-computer operations (`list` connection-status merge, `mintJoinToken`)
- *    read the injected `ComputersDeps` (the gateway + hub URL + cert fingerprint).
+ *    read the injected `ComputersDeps` (the gateway + hub URL).
  *    `list` degrades gracefully when the gateway isn't wired (store rows with a
  *    `connected: false` status); `mintJoinToken` REQUIRES it and throws a clear
  *    error before the listener has bound — minting a token for a hub that isn't
@@ -114,8 +132,9 @@ export const computersRouter = router({
 
   /**
    * Mint a single-use enrollment token. The token embeds the hub's computer WS URL
-   * and TLS cert fingerprint (both sourced from the injected deps), so it can
-   * only be minted once the hub listener has bound.
+   * (sourced from the injected deps), so it can only be minted once the hub
+   * listener has bound. It carries no certificate pin: the hub does not terminate
+   * TLS, so a computer verifies the front end's certificate the normal way.
    *
    * `hubUrl` is returned alongside the token so a client can tell whether the
    * token is usable off-box (see `isLoopbackComputerUrl`) WITHOUT decoding it —
@@ -133,15 +152,11 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const deps = getComputersDeps()
       const hubUrl = deps.getHubUrl()
-      const certFingerprint = deps.getCertFingerprint()
-      if (!hubUrl || !certFingerprint) {
-        throw new Error(
-          'cannot mint join token — the computer listener has not bound its URL / hub identity yet'
-        )
+      if (!hubUrl) {
+        throw new Error('cannot mint join token — the computer listener has not bound its URL yet')
       }
       const minted = await storeMintJoinToken(ctx.db, {
         hubUrl,
-        certFingerprint,
         ttlMs: input.ttlMs ?? DEFAULT_JOIN_TOKEN_TTL_MS,
         label: input.label,
         // Carries this user onto the computer that redeems the token. Null on an
@@ -213,7 +228,10 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.principal?.userId
       if (!userId) throw new Error('sign in to claim a computer')
-      return { claimed: await storeClaimComputer(ctx.db, input.computerId, userId) }
+      const claimed = await storeClaimComputer(ctx.db, input.computerId, userId)
+      // Not claimed = it already has an owner, and claiming never reassigns one.
+      auditComputer('computer.claim', input.computerId, claimed ? 'success' : 'denied')
+      return { claimed }
     }),
 
   /** Private (owner + grants), or visible to everyone on this hub. */
@@ -222,6 +240,9 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
+      auditComputer('computer.visibility.set', input.computerId, 'success', {
+        visibility: input.visibility
+      })
       return { ok: true as const }
     }),
 
@@ -237,6 +258,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeUnrevokeComputer(ctx.db, input.computerId)
+      auditComputer('computer.unrevoke', input.computerId)
       return { ok: true as const }
     }),
 
@@ -253,6 +275,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeDeleteComputer(ctx.db, input.computerId)
+      auditComputer('computer.delete', input.computerId)
       return { ok: true as const }
     }),
 
@@ -288,6 +311,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeRevokeComputer(ctx.db, input.computerId)
+      auditComputer('computer.revoke', input.computerId)
       return { ok: true as const }
     })
 })

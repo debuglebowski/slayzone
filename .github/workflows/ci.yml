@@ -60,7 +60,7 @@ jobs:
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
 
-  # The tests that prove hosted mode, hub auth and per-user ownership. Strict:
+  # The tests that prove the hub switches, hub auth and per-user ownership. Strict:
   # scripts/ci/test-hosted.sh exits non-zero if any suite fails. Node 24 because the
   # hub-auth suites use node:sqlite flag-free. No CI_SKIP_POSTINSTALL: the root
   # postinstall rebuilds better-sqlite3 + node-pty for Electron's ABI, which the
@@ -82,7 +82,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test hosted mode, auth and ownership
+      # web-assets-served.test.ts serves the built shell (hub dist/web).
+      - name: Build web shell
+        run: pnpm --filter @slayzone/web-shell build
+
+      - name: Test hub switches, auth and ownership
         run: pnpm test:hosted
 
   # Windows job: the cross-platform shell + agent-hook path code (issue #88) is

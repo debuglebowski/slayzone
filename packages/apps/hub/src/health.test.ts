@@ -3,7 +3,7 @@
  * Phase 1).
  *
  * `/health` is the sole discovery channel for `slay hub ls` — it must carry
- * enough identity to name a hub (name/root/pid/mode/supervised/computers) without
+ * enough identity to name a hub (name/root/pid/supervised/computers) without
  * any shared state. And because a hub may bind wider than loopback, the fields
  * that describe the FILESYSTEM (root, dbPath) or the process (pid) must be
  * withheld from non-loopback callers: today `dbPath` is served to anyone who can
@@ -49,9 +49,16 @@ const BASE_STATE: Omit<HealthState, 'ready'> = {
   name: 'test-hub',
   root: '/tmp/slz-test-root',
   pid: 4321,
-  mode: 'local',
   supervised: false,
   authRequired: false,
+  switches: {
+    requireLogin: false,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: true,
+    enableIntegrations: true
+  },
+  reachable: false,
   computersConnected: () => 2
 }
 
@@ -80,9 +87,10 @@ async function startHealthServer(
 
 async function getHealth(
   port: number,
-  host = '127.0.0.1'
+  host = '127.0.0.1',
+  headers: Record<string, string> = {}
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const res = await fetch(`http://${host}:${port}/health`)
+  const res = await fetch(`http://${host}:${port}/health`, { headers })
   const text = await res.text()
   let body: Record<string, unknown> = {}
   try {
@@ -134,7 +142,7 @@ async function main(): Promise<void> {
       assertEq(body.name, 'test-hub', 'name')
       assertEq(body.root, '/tmp/slz-test-root', 'root')
       assertEq(body.pid, 4321, 'pid')
-      assertEq(body.mode, 'local', 'mode')
+      assert(!('mode' in body), 'SLAYZONE_MODE is gone: /health no longer reports a mode')
       assertEq(body.supervised, false, 'supervised')
       assertEq(body.computersConnected, 2, 'computersConnected resolved from the getter')
       assertEq(body.dbPath, BASE_STATE.dbPath, 'dbPath')
@@ -192,6 +200,61 @@ async function main(): Promise<void> {
     }
   })
 
+  // A reverse proxy on this machine delivers every remote request from a loopback
+  // socket. On a hub other machines reach, a loopback peer that carries the headers a
+  // proxy adds is therefore NOT a local caller.
+  await test('reachable hub: a loopback peer with proxy headers gets no host fields', async () => {
+    const srv = await startHealthServer({ reachable: true })
+    try {
+      const proxied: Array<Record<string, string>> = [
+        { 'X-Forwarded-For': '203.0.113.9' },
+        { Forwarded: 'for=203.0.113.9;proto=https' },
+        { 'X-Real-IP': '203.0.113.9' },
+        { Via: '1.1 front-end' }
+      ]
+      for (const headers of proxied) {
+        const { status, body } = await getHealth(srv.port, '127.0.0.1', headers)
+        const which = Object.keys(headers)[0]
+        assertEq(status, 200, `${which}: liveness is still public`)
+        assertEq(body.ok, true, `${which}: ok=true`)
+        assertEq(body.authRequired, false, `${which}: authRequired stays public`)
+        assert('switches' in body, `${which}: switches stay public`)
+        for (const field of ['name', 'root', 'dbPath', 'pid', 'supervised', 'computersConnected']) {
+          assert(!(field in body), `${which}: ${field} withheld from a forwarded request`)
+        }
+      }
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // `slay hub ls/stop/restart/users add` find a hub by these fields, so a reachable
+  // hub must keep serving them to a direct local caller.
+  await test('reachable hub: a direct loopback caller (no proxy headers) still gets them', async () => {
+    const srv = await startHealthServer({ reachable: true })
+    try {
+      const { body } = await getHealth(srv.port)
+      assertEq(body.name, 'test-hub', 'name')
+      assertEq(body.root, '/tmp/slz-test-root', 'root')
+      assertEq(body.pid, 4321, 'pid')
+      assertEq(body.computersConnected, 2, 'computersConnected')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  await test('hub only this machine reaches: proxy headers do not hide the fields', async () => {
+    // Nobody but this machine can connect, so there is no remote caller to hide from.
+    const srv = await startHealthServer({ reachable: false })
+    try {
+      const { body } = await getHealth(srv.port, '127.0.0.1', { 'X-Forwarded-For': '10.0.0.1' })
+      assertEq(body.name, 'test-hub', 'name still served')
+      assertEq(body.pid, 4321, 'pid still served')
+    } finally {
+      await srv.close()
+    }
+  })
+
   // The desktop client decides whether to OFFER a sign-in from this bit, and it
   // has to do so before it holds a token — so it must survive the loopback gate
   // (an off-box hub is exactly the one that gates).
@@ -213,6 +276,45 @@ async function main(): Promise<void> {
         (await getHealth(wide.port, external)).body.authRequired,
         true,
         'off-box caller sees it too'
+      )
+    } finally {
+      await wide.close()
+    }
+  })
+
+  // O1: every switch is reported, to any caller — a client needs to know what the
+  // hub offers (password? SSO?) before it has signed in. Booleans only.
+  await test('every switch is reported, to loopback and non-loopback callers alike', async () => {
+    const switches = {
+      requireLogin: true,
+      enablePassword: false,
+      enableSso: true,
+      enableProcesses: false,
+      enableIntegrations: false
+    }
+    const srv = await startHealthServer({ authRequired: true, switches })
+    try {
+      const body = (await getHealth(srv.port)).body
+      assertEq(
+        JSON.stringify(body.switches),
+        JSON.stringify(switches),
+        'loopback sees the switches'
+      )
+      assert(!JSON.stringify(body).includes('ecret'), 'no secret anywhere in the payload')
+    } finally {
+      await srv.close()
+    }
+    const external = await nonLoopbackAddress()
+    if (!external) {
+      console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
+      return
+    }
+    const wide = await startHealthServer({ authRequired: true, switches }, '0.0.0.0')
+    try {
+      assertEq(
+        JSON.stringify((await getHealth(wide.port, external)).body.switches),
+        JSON.stringify(switches),
+        'off-box caller sees them too'
       )
     } finally {
       await wide.close()

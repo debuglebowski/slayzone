@@ -140,8 +140,11 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
     env: {
       ...cleanEnv,
       ELECTRON_RUN_AS_NODE: '1',
-      // The bind address of this second hub: one var, `host:port`.
-      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${port}`,
+      // Where this second hub LISTENS: one var, `host:port` (the hub's own name for
+      // it — SLAYZONE_HUB_ADDRESS is the dial-side name and would refuse boot).
+      SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
+      // Login on: the spec's callers authenticate with the hub's bootstrap owner.
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1',
       SLAYZONE_ROOT: storeDir
     },
     stdio: ['pipe', 'pipe', 'pipe']
@@ -149,9 +152,9 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   proc.stdout?.on('data', () => undefined)
   proc.stderr?.on('data', () => undefined)
   const url = `ws://127.0.0.1:${port}/trpc`
-  // A standalone hub gates its client API on a bearer (supervised is the only
-  // exemption), so every caller below — this spec's raw clients AND the app —
-  // has to carry one. The hub provisions its own first user on first boot
+  // This hub runs with SLAYZONE_HUB_REQUIRE_LOGIN=1, so it gates its client API on
+  // a bearer: every caller below — this spec's raw clients AND the app — has to
+  // carry one. The hub provisions its own first user on first boot
   // precisely so this needs no human; that file is the credential.
   const owner = await readOwner(storeDir)
   hubTokens.set(url, owner.token)
@@ -751,7 +754,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     base.setTimeout(180_000)
 
     // A computer belongs to exactly ONE hub, and which hub is decided when the token is
-    // MINTED (it embeds that hub's dial url + cert fingerprint). Listing computers
+    // MINTED (it embeds that hub's dial url). Listing computers
     // inside their hub makes the enrollment control's POSITION the hub choice, so a
     // federated client can enroll against a remote hub with no picker to get wrong —
     // which is what this asserts end-to-end.

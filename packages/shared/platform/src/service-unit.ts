@@ -41,7 +41,16 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -71,8 +80,10 @@ export interface ServiceUnitSpec {
    *
    * Supersedes {@link port}, which can only ever mean loopback. A REMOTE hub has to
    * bind wider than `127.0.0.1` to be reachable at all, and that is not
-   * expressible as a port number. Emitted verbatim as `SLAYZONE_HUB_ADDRESS`, so
-   * the value is exactly what the operator asked for. Wins when both are set.
+   * expressible as a port number. Emitted verbatim as `SLAYZONE_HUB_LISTEN_ADDRESS`
+   * (the hub's name for where it listens; `SLAYZONE_HUB_ADDRESS` is the DIAL-side
+   * name and a hub refuses to boot with it), so the value is exactly what the
+   * operator asked for. Wins when both are set.
    */
   address?: string
   /**
@@ -335,6 +346,24 @@ function xmlEscape(value: string): string {
 }
 
 /**
+ * Env keys of a unit that carry a SECRET, and so (a) make the unit file owner-only
+ * and (b) must survive a unit rewrite (`start`, `restart --upgrade`), which
+ * otherwise re-renders the unit from scratch.
+ *
+ * A hub that other machines can reach must be given `SLAYZONE_HUB_AUTH_SECRET` in
+ * its environment and never generates one onto its own disk, so for a hub run under
+ * a user service the unit IS where that environment lives.
+ */
+export const UNIT_SECRET_ENV_KEYS: readonly string[] = [
+  'SLAYZONE_HUB_AUTH_SECRET',
+  'SLAYZONE_HUB_SSO_CLIENT_SECRET'
+]
+
+function unitHoldsSecret(spec: ServiceUnitSpec): boolean {
+  return Object.keys(spec.env ?? {}).some((k) => UNIT_SECRET_ENV_KEYS.includes(k))
+}
+
+/**
  * The environment a supervised process needs. launchd hands an agent a nearly empty
  * env, so anything the process must see is pinned here rather than inherited.
  *
@@ -354,8 +383,8 @@ function unitEnv(spec: ServiceUnitSpec): Array<[string, string]> {
     // `address` wins over `port`: it is the only one that can name a non-loopback
     // bind, so letting `port` win would silently pin a remote hub to loopback and
     // make it unreachable. `port` keeps rendering the historical loopback form.
-    if (spec.address !== undefined) merged.SLAYZONE_HUB_ADDRESS = spec.address
-    else if (spec.port !== undefined) merged.SLAYZONE_HUB_ADDRESS = `127.0.0.1:${spec.port}`
+    if (spec.address !== undefined) merged.SLAYZONE_HUB_LISTEN_ADDRESS = spec.address
+    else if (spec.port !== undefined) merged.SLAYZONE_HUB_LISTEN_ADDRESS = `127.0.0.1:${spec.port}`
   }
   // Caller-supplied last so it can set interpreter-level vars (ELECTRON_RUN_AS_NODE)
   // and, deliberately, override a default if it must.
@@ -465,7 +494,28 @@ export function writeUnit(
   const path = unitPath(spec.kind, spec.name, backend, unitDir)
   mkdirSync(unitDir, { recursive: true })
   const content = backend === 'launchd' ? renderLaunchdPlist(spec) : renderSystemdUnit(spec)
-  writeFileSync(path, content, { mode: 0o644 })
+  if (!unitHoldsSecret(spec)) {
+    writeFileSync(path, content, { mode: 0o644 })
+    return path
+  }
+  // A unit that pins a secret in its environment must never be readable by anyone
+  // else, not even for the instant between writing it and tightening it: writing
+  // over an existing 0644 unit and chmod-ing afterwards would leave the new secret
+  // world-readable in between (`mode` only applies when a file is CREATED). So the
+  // content goes into a fresh owner-only temp file, which then replaces the unit
+  // atomically — the old inode, with its old permissions, is never written to.
+  const tmp = `${path}.${process.pid}.tmp`
+  rmSync(tmp, { force: true })
+  try {
+    writeFileSync(tmp, content, { mode: 0o600, flag: 'wx' })
+    // The temp file is brand new, so `mode` applied — but a restrictive-looking umask
+    // is not a guarantee, so say it again before the secret is renamed into place.
+    chmodSync(tmp, 0o600)
+    renameSync(tmp, path)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
   return path
 }
 
@@ -570,4 +620,56 @@ export function systemdUnitName(kind: ServiceKind, name: string): string {
 export function launchdLabel(kind: ServiceKind, name: string): string {
   assertValidServiceName(kind, name)
   return `${KINDS[kind].labelPrefix}${name}`
+}
+
+/**
+ * The environment pinned in an existing unit, as written by {@link writeUnit}.
+ * Empty when there is no unit or it cannot be read.
+ *
+ * Exists so a rewrite of a unit (`slay hub start`, `slay hub restart --upgrade`) can
+ * carry over the {@link UNIT_SECRET_ENV_KEYS} it pinned at `create` — a hub that other
+ * machines reach cannot boot without its auth secret, so dropping it on a restart
+ * would turn an upgrade into an outage.
+ */
+export function readUnitEnv(
+  kind: ServiceKind,
+  name: string,
+  backend: Exclude<ServiceBackend, 'none'>,
+  unitDir: string = defaultUnitDir(backend)
+): Record<string, string> {
+  let text: string
+  try {
+    text = readFileSync(unitPath(kind, name, backend, unitDir), 'utf8')
+  } catch {
+    return {}
+  }
+  const out: Record<string, string> = {}
+  if (backend === 'launchd') {
+    const re = /<key>([A-Za-z0-9_]+)<\/key>\s*<string>([^<]*)<\/string>/g
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      const value = m[2]!
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+      out[m[1]!] = value
+    }
+    return out
+  }
+  const re = /^Environment=([A-Za-z0-9_]+)=(.*)$/gm
+  for (let m = re.exec(text); m; m = re.exec(text)) out[m[1]!] = m[2]!
+  return out
+}
+
+/** The secret entries of {@link readUnitEnv} — what a rewrite must carry over. */
+export function readUnitSecrets(
+  kind: ServiceKind,
+  name: string,
+  backend: Exclude<ServiceBackend, 'none'>,
+  unitDir: string = defaultUnitDir(backend)
+): Record<string, string> {
+  const env = readUnitEnv(kind, name, backend, unitDir)
+  const out: Record<string, string> = {}
+  for (const key of UNIT_SECRET_ENV_KEYS) if (env[key] !== undefined) out[key] = env[key]
+  return out
 }

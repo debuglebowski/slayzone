@@ -81,7 +81,7 @@ run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
-# HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, loopback bypass,
+# HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
@@ -97,7 +97,12 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/com
 # is slower). Electron ABI → strict loader.
 run_test_electron_strict_loader packages/apps/hub/src/install-handshake.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/web-login-routing.test.ts
-run_test_electron_strict_loader packages/apps/hub/src/web-assets-remote-gate.test.ts
+# Web shell served by every hub (login off / on / desktop app); builds dist/web if absent.
+run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
+# Boot rules B1-B5, B7-B11, B13, B14 driven through the REAL built hub: each refusal exits
+# non-zero before the hub touches its data dir; the defaults boot on loopback; a reachable
+# hub behind a public address boots with login + secret and mints a pin-less wss token.
+run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
 # Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
 # the credential a web login mints, distinct from a full better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
@@ -153,8 +158,11 @@ run_test packages/apps/cli/src/local-hub.test.ts
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
-# Wave-3.5 computer TLS listener — separate https/wss server, cert pinning, bind-fail degrade.
+# Computer /computers URL derivation (public address → wss, loopback → ws) + the cert-pin
+# seam that remains for tokens minted by an older hub.
 run_test packages/apps/hub/src/computer-tls-listener.test.ts
+# The hub's boot rules as a pure function — one case per refusal (B1-B5, B7-B11, B13, B14).
+run_test packages/apps/hub/src/boot-rules.test.ts
 # Per-role hub.config.json/hub.state.json + computer.config.json (env>file>default,
 # auto-gen secret, race-safe, legacy shared config.json fallback).
 run_test packages/shared/platform/src/hub-config-file.test.ts
@@ -197,6 +205,7 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/agent
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex-flags-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
@@ -222,15 +231,17 @@ run_test packages/apps/app/src/main/present-window.test.ts
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
 run_test packages/apps/app/src/main/desktop-bridge-server.test.ts
-# SLAYZONE_MODE resolver + mode/bind contradiction guard (local+exposed = fatal).
-run_test packages/shared/platform/src/slayzone-mode.test.ts
+# The per-hub switches that replaced SLAYZONE_MODE: 0|1 only, defaults = the desktop app's hub.
+run_test packages/shared/platform/src/hub-switches.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
 run_test packages/shared/platform/src/env-manifest.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_test packages/shared/platform/src/device-status-queries.test.ts
-# hubUrlFromAddr — authority-only SLAYZONE_HUB_ADDRESS + scheme from SLAYZONE_MODE.
+# hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_test packages/shared/platform/src/hub-addr.test.ts
+# Security audit events on stdout (T-03).
+run_test packages/shared/platform/src/security-log.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
@@ -488,6 +499,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/hub/src/auth-db.test.ts \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
+  packages/domains/hub-auth/src/server/audit.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \

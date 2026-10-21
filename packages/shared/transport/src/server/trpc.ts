@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
+import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
@@ -13,18 +14,43 @@ export const middleware = t.middleware
 export const mergeRouters = t.mergeRouters
 
 /**
+ * Who is calling, for the audit lines this call writes (T-03). Runs first, so the
+ * gate refusals below and every hub → computer call the procedure makes further
+ * down (`computer.pty.spawn`, …) carry the caller's user id, peer address and
+ * procedure path. A no-op for behavior: it only sets the async context.
+ */
+const securityContext = t.middleware(({ ctx, next, path }) =>
+  runWithSecurityContext(
+    { actor: ctx.principal?.userId ?? null, ip: peerAddress(ctx.req), route: `trpc ${path}` },
+    () => next()
+  )
+)
+
+/** One `authz.denied` line for a gate refusal; actor/ip/route come from the context. */
+function auditDenied(path: string, detail: Record<string, unknown>): void {
+  securityEvent({
+    event: 'authz.denied',
+    outcome: 'denied',
+    targetKind: 'procedure',
+    targetId: path,
+    detail
+  })
+}
+
+/**
  * Multi-hub auth gate. On a hub that enforces auth (`getAuthGate()` true — set
- * when the hub runs in remote mode, `SLAYZONE_MODE=remote`), a connection with no
- * verified principal is rejected UNAUTHORIZED. When the gate is off (local loopback /
- * non-authed remote — the default), this is a straight pass-through, so every
+ * when the hub requires login, `SLAYZONE_HUB_REQUIRE_LOGIN=1`), a connection with no
+ * verified principal is rejected UNAUTHORIZED. When the gate is off (login not
+ * required — the default, and the desktop app's hub), this is a straight pass-through, so every
  * existing procedure is byte-identical to the pre-auth server.
  *
  * The connection is still ACCEPTED at the socket level (see createContext) so
  * the client can reach the open `hub.describe` to discover that login is
  * required; only gated procedures 401.
  */
-const authGate = t.middleware(({ ctx, next }) => {
+const authGate = t.middleware(({ ctx, next, path }) => {
   if (getAuthGate() && !ctx.principal) {
+    auditDenied(path, { reason: 'unauthenticated' })
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'hub requires authentication' })
   }
   return next()
@@ -55,6 +81,7 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
   if (!getAuthGate()) return next()
   const scopes = ctx.principal?.scopes ?? []
   if (!isPathAllowed(scopes, path)) {
+    auditDenied(path, { reason: 'scope', scopes })
     throw new TRPCError({ code: 'FORBIDDEN', message: `insufficient scope for ${path}` })
   }
   return next()
@@ -66,7 +93,7 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
  * procedure is gated by default, and unclassified by default until someone
  * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
  */
-export const publicProcedure = t.procedure.use(authGate).use(scopeGate)
+export const publicProcedure = t.procedure.use(securityContext).use(authGate).use(scopeGate)
 
 /**
  * Ungated procedure for pre-auth discovery ONLY (`hub.describe`) — the client
@@ -74,4 +101,4 @@ export const publicProcedure = t.procedure.use(authGate).use(scopeGate)
  * sparingly; anything reachable here is exposed on an authed hub without a
  * principal.
  */
-export const openProcedure = t.procedure
+export const openProcedure = t.procedure.use(securityContext)

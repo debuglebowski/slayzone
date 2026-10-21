@@ -46,7 +46,7 @@ on:
           - publish
 
 concurrency:
-  group: publish-hub-computer-${{ github.event_name == 'push' && github.ref_name || github.run_id }}
+  group: publish-npm-${{ github.event_name == 'push' && github.ref_name || github.run_id }}
   cancel-in-progress: false
 
 permissions:

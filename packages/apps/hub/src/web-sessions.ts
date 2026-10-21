@@ -21,6 +21,7 @@
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { securityEvent } from '@slayzone/platform/security-log'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import type { Scope } from '@slayzone/transport/server'
 
@@ -115,6 +116,14 @@ export async function mintWebSession(
       expiresAt
     ]
   )
+  securityEvent({
+    event: 'auth.web_session.create',
+    outcome: 'success',
+    actor: input.userId,
+    targetKind: 'web_session',
+    targetId: id,
+    detail: { scopes: input.scopes }
+  })
   return { id, token, expiresAt }
 }
 
@@ -181,6 +190,14 @@ export async function revokeWebSession(
     `UPDATE web_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
     [now, id]
   )
+  // Who revoked it comes from the request context.
+  securityEvent({
+    event: 'auth.web_session.revoke',
+    outcome: result.changes > 0 ? 'success' : 'failure',
+    targetKind: 'web_session',
+    targetId: id,
+    detail: result.changes > 0 ? undefined : { reason: 'not_found' }
+  })
   return result.changes > 0
 }
 
@@ -194,6 +211,13 @@ export async function revokeAllWebSessions(
     `UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
     [now, userId]
   )
+  securityEvent({
+    event: 'auth.web_session.revoke',
+    outcome: 'success',
+    targetKind: 'user',
+    targetId: userId,
+    detail: { count: result.changes }
+  })
   return result.changes
 }
 

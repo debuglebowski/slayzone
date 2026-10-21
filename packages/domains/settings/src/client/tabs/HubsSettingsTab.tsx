@@ -130,9 +130,10 @@ export function HubsSettingsTab() {
 
   // Whether each remote hub GATES its client API on a bearer token, keyed by hub
   // id — the hub's own answer (`/health` → `authRequired`), never a guess. A hub
-  // enforces auth only when it runs in remote mode; a loopback/LAN hub accepts an
-  // untokened connection, so offering "Sign in" there is noise. Absent key = not
-  // asked yet. See `authNeedFromProbe` for why 'unknown' is a distinct state.
+  // enforces auth only when it was started with SLAYZONE_HUB_REQUIRE_LOGIN=1; one
+  // without accepts an untokened connection, so offering "Sign in" there is noise.
+  // Absent key = not asked yet. See `authNeedFromProbe` for why 'unknown' is a
+  // distinct state.
   const [authNeeds, setAuthNeeds] = useState<Record<string, AuthNeed>>({})
 
   // Sign-in modal (per remote hub bearer auth). `signInHubId` non-empty = open;

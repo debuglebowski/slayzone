@@ -22,7 +22,16 @@
  *
  * Run with: npx tsx packages/shared/platform/src/service-unit.test.ts
  */
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -30,7 +39,9 @@ import {
   explainNoBackend,
   launchdLabel,
   listRegisteredUnits,
+  readUnitEnv,
   readUnitRoot,
+  readUnitSecrets,
   removeUnit,
   renderLaunchdPlist,
   renderSystemdUnit,
@@ -272,17 +283,32 @@ test('unit sets the hub name env so /health reports the same label', () => {
   assert(unit.includes('Environment=SLAYZONE_HUB_NAME=staging'), 'pins the name')
 })
 
-test('an explicit port reaches the unit as SLAYZONE_HUB_ADDRESS', () => {
+test('an explicit port reaches the unit as SLAYZONE_HUB_LISTEN_ADDRESS', () => {
   const unit = renderSystemdUnit({ ...SPEC, port: 51234 })
   assert(unit.includes('51234'), 'port present')
-  assert(unit.includes('SLAYZONE_HUB_ADDRESS'), 'passed via the address var, not a bare port')
+  assert(
+    unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS'),
+    'passed via the address var, not a bare port'
+  )
   const plist = renderLaunchdPlist({ ...SPEC, port: 51234 })
-  assert(plist.includes('51234') && plist.includes('SLAYZONE_HUB_ADDRESS'), 'same in the plist')
+  assert(
+    plist.includes('51234') && plist.includes('SLAYZONE_HUB_LISTEN_ADDRESS'),
+    'same in the plist'
+  )
+})
+
+test('a hub unit NEVER carries the dial-side SLAYZONE_HUB_ADDRESS (a hub refuses to boot with it)', () => {
+  for (const spec of [SPEC, { ...SPEC, port: 51234 }, { ...SPEC, address: '0.0.0.0:51234' }]) {
+    const unit = renderSystemdUnit(spec)
+    assert(!/SLAYZONE_HUB_ADDRESS\b/.test(unit), `systemd: ${unit}`)
+    const plist = renderLaunchdPlist(spec)
+    assert(!/SLAYZONE_HUB_ADDRESS\b/.test(plist), 'plist')
+  }
 })
 
 test('no port ⇒ no address var (hub picks a free block port itself)', () => {
   const unit = renderSystemdUnit(SPEC)
-  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'absent when unspecified')
+  assert(!unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS'), 'absent when unspecified')
 })
 
 // `address` carries a full authority so a REMOTE hub can bind wider than loopback.
@@ -292,7 +318,7 @@ test('no port ⇒ no address var (hub picks a free block port itself)', () => {
 test('an explicit address reaches the unit verbatim (a remote hub binds wider)', () => {
   const unit = renderSystemdUnit({ ...SPEC, address: '0.0.0.0:51234' })
   assert(
-    unit.includes('Environment=SLAYZONE_HUB_ADDRESS=0.0.0.0:51234'),
+    unit.includes('Environment=SLAYZONE_HUB_LISTEN_ADDRESS=0.0.0.0:51234'),
     `wildcard bind preserved: ${unit}`
   )
   const plist = renderLaunchdPlist({ ...SPEC, address: '0.0.0.0:51234' })
@@ -304,13 +330,13 @@ test('address WINS over the legacy port (no silent loopback downgrade)', () => {
   // `port` won, a remote hub would bind loopback and be unreachable — the exact bug
   // the address field exists to prevent.
   const unit = renderSystemdUnit({ ...SPEC, port: 51234, address: '0.0.0.0:51234' })
-  assert(unit.includes('SLAYZONE_HUB_ADDRESS=0.0.0.0:51234'), `address used: ${unit}`)
+  assert(unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS=0.0.0.0:51234'), `address used: ${unit}`)
   assert(!unit.includes('127.0.0.1'), 'no loopback address emitted')
 })
 
 test('a computer spec ignores address too (a computer binds nothing)', () => {
   const unit = renderSystemdUnit({ ...COMPUTER_SPEC, address: '0.0.0.0:51234' })
-  assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var for a computer')
+  assert(!unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS'), 'no address var for a computer')
   assert(!unit.includes('0.0.0.0'), 'address not emitted')
 })
 
@@ -366,6 +392,7 @@ test('a computer unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
   assert(unit.includes('Environment=SLAYZONE_ROOT=/srv/computers/builder'), 'root pinned')
   assert(!unit.includes('SLAYZONE_HUB_NAME'), 'no hub name var')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no hub address var')
+  assert(!unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS'), 'no hub listen address var')
   assert(!unit.includes('SLAYZONE_HUB_JOIN_TOKEN'), 'never a join token in a 0644 unit')
   const envLines = unit.split('\n').filter((l) => l.startsWith('Environment='))
   assertEq(envLines.length, 1, `exactly one env line, got ${envLines.join(' | ')}`)
@@ -375,6 +402,7 @@ test('a computer spec ignores port (only a hub binds one)', () => {
   const unit = renderSystemdUnit({ ...COMPUTER_SPEC, port: 51234 })
   assert(!unit.includes('51234'), 'port not emitted for a computer')
   assert(!unit.includes('SLAYZONE_HUB_ADDRESS'), 'no address var')
+  assert(!unit.includes('SLAYZONE_HUB_LISTEN_ADDRESS'), 'no listen address var')
 })
 
 test('spec.env reaches a computer unit too — node-pty is Electron-ABI in a dev tree', () => {
@@ -546,6 +574,114 @@ test('listing ignores unrelated files in the unit dir', () => {
     )
   })
 })
+
+console.log('\nservice-unit: secrets in a unit (a hub other machines reach needs its auth secret)')
+console.log('─'.repeat(40))
+
+for (const be of ['launchd', 'systemd'] as const) {
+  test(`${be}: a unit that pins a secret is owner-only (0600); one that does not stays 0644`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const plain = writeUnit(SPEC, be, dir)
+      assertEq(statSync(plain).mode & 0o777, 0o644, 'no secret → 0644')
+      const secret = writeUnit(
+        { ...SPEC, name: 'reach', env: { SLAYZONE_HUB_AUTH_SECRET: 's3cret' } },
+        be,
+        dir
+      )
+      assertEq(statSync(secret).mode & 0o777, 0o600, 'secret → 0600')
+    })
+  })
+
+  test(`${be}: rewriting an older world-readable unit with a secret tightens it`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const path = writeUnit(SPEC, be, dir)
+      assertEq(statSync(path).mode & 0o777, 0o644, 'starts 0644')
+      writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 's3cret' } }, be, dir)
+      assertEq(statSync(path).mode & 0o777, 0o600, 'tightened on rewrite')
+    })
+  })
+
+  test(`${be}: the secret is never written into the old world-readable file`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const path = writeUnit(SPEC, be, dir)
+      // A second name for the OLD inode: if the rewrite wrote through the existing
+      // 0644 file (then chmod-ed), the secret would be readable here for the moment
+      // between the two and would still be in this inode afterwards.
+      const oldInode = join(dir, 'old-inode.copy')
+      linkSync(path, oldInode)
+      writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 'never-in-0644' } }, be, dir)
+      assert(readFileSync(path, 'utf8').includes('never-in-0644'), 'the unit carries the secret')
+      assertEq(statSync(path).mode & 0o777, 0o600, 'owner-only')
+      assert(
+        !readFileSync(oldInode, 'utf8').includes('never-in-0644'),
+        'the previous (0644) inode never saw the secret'
+      )
+    })
+  })
+
+  test(`${be}: writing a secret unit leaves no temp file behind, even after a stale one`, () => {
+    if (process.platform === 'win32') return
+    withTempDir((dir) => {
+      const path = unitPath(SPEC.kind, SPEC.name, be, dir)
+      // A leftover from a crashed earlier write of the same unit (same pid is the
+      // worst case: the 'wx' create must not trip over it).
+      writeFileSync(`${path}.${process.pid}.tmp`, 'stale')
+      writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 's3cret' } }, be, dir)
+      const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp'))
+      assertEq(leftovers.length, 0, `no temp files left: ${leftovers.join(',')}`)
+    })
+  })
+
+  test(`${be}: readUnitEnv reads back every pinned var, unescaped`, () => {
+    withTempDir((dir) => {
+      writeUnit(
+        { ...SPEC, address: '0.0.0.0:51234', env: { SLAYZONE_HUB_AUTH_SECRET: 'a&b<c>"d' } },
+        be,
+        dir
+      )
+      const env = readUnitEnv('hub', 'staging', be, dir)
+      assertEq(env.SLAYZONE_ROOT, SPEC.root, 'root')
+      assertEq(env.SLAYZONE_HUB_NAME, 'staging', 'name')
+      assertEq(env.SLAYZONE_HUB_LISTEN_ADDRESS, '0.0.0.0:51234', 'listen address')
+      if (be === 'launchd') assertEq(env.SLAYZONE_HUB_AUTH_SECRET, 'a&b<c>"d', 'xml unescaped')
+    })
+  })
+
+  test(`${be}: readUnitSecrets returns ONLY the secret keys (what a rewrite must carry over)`, () => {
+    withTempDir((dir) => {
+      writeUnit(
+        {
+          ...SPEC,
+          env: {
+            SLAYZONE_HUB_AUTH_SECRET: 'abc',
+            SLAYZONE_HUB_SSO_CLIENT_SECRET: 'def',
+            ELECTRON_RUN_AS_NODE: '1'
+          }
+        },
+        be,
+        dir
+      )
+      const secrets = readUnitSecrets('hub', 'staging', be, dir)
+      assertEq(
+        Object.keys(secrets).sort().join(','),
+        'SLAYZONE_HUB_AUTH_SECRET,SLAYZONE_HUB_SSO_CLIENT_SECRET',
+        'only the secrets'
+      )
+      assertEq(secrets.SLAYZONE_HUB_AUTH_SECRET, 'abc', 'auth secret')
+      assertEq(secrets.SLAYZONE_HUB_SSO_CLIENT_SECRET, 'def', 'sso secret')
+    })
+  })
+
+  test(`${be}: a missing unit reads as empty env, never throws`, () => {
+    withTempDir((dir) => {
+      assertEq(Object.keys(readUnitEnv('hub', 'nope', be, dir)).length, 0, 'empty')
+      assertEq(Object.keys(readUnitSecrets('hub', 'nope', be, dir)).length, 0, 'empty secrets')
+    })
+  })
+}
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

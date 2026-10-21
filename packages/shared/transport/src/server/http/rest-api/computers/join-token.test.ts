@@ -31,6 +31,7 @@ import {
 } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { decodeJoinToken } from '@slayzone/computers/server'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   isLoopbackAddress,
   joinTokenAuthDecision,
@@ -40,10 +41,9 @@ import type { RestApiDeps } from '../types.js'
 
 const h = await createTestHarness()
 
-/** A bound computer listener (computer ON, url + fingerprint present). */
+/** A bound computer listener (computer ON, url present). */
 const boundComputers = {
-  getHubUrl: () => 'wss://127.0.0.1:54321/computers',
-  getCertFingerprint: () => 'abcdef0123456789'
+  getHubUrl: () => 'wss://127.0.0.1:54321/computers'
 }
 
 function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['restAuth']) {
@@ -72,14 +72,15 @@ await describe('POST /api/computers/join-token', () => {
       const payload = decodeJoinToken(res.body.token)
       expect(payload).not.toBeNull()
       expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/computers')
-      expect(payload!.certFingerprint).toBe('abcdef0123456789')
+      // The hub presents no certificate of its own, so the token carries no pin.
+      expect(payload!.certFingerprint).toBe('')
     } finally {
       await rest.close()
     }
   })
 
   test('computer ON but listener not yet bound (null url): 503', async () => {
-    const rest = await mount({ getHubUrl: () => null, getCertFingerprint: () => null })
+    const rest = await mount({ getHubUrl: () => null })
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(503)
@@ -174,6 +175,40 @@ await describe('POST /api/computers/join-token', () => {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(401)
     } finally {
+      await rest.close()
+    }
+  })
+})
+
+await describe('audit (T-03)', () => {
+  test('a refusal writes authz.denied; a mint is written as the verified caller', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    let principal: { userId: string; scopes: Array<'full' | 'read' | 'tasks'> } | null = null
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => principal
+    })
+    try {
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
+      principal = { userId: 'u-scoped', scopes: ['read', 'tasks'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
+      principal = { userId: 'u-full', scopes: ['full'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(200)
+      expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
+        'authz.denied:denied:null',
+        'authz.denied:denied:u-scoped',
+        'computer.join_token.mint:success:u-full'
+      ])
+      expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
+        'unauthenticated',
+        'scoped_session',
+        undefined
+      ])
+      expect(audit[0]!.route).toBe('POST /api/computers/join-token')
+      expect(audit[0]!.ip).toBe('127.0.0.1')
+    } finally {
+      setSecurityLogSink()
       await rest.close()
     }
   })

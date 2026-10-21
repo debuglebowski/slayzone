@@ -11,10 +11,10 @@
  *      `SLAYZONE_HUB_TOKEN` if set — never `cli-hub-target.json`'s token, which belongs to
  *      whichever hub `hub use`/`hub login` targeted and need not be this one.
  *   1. `SLAYZONE_HUB_ADDRESS` (+ `SLAYZONE_HUB_TOKEN`) environment variables —
- *      authority only (`host[:port]`); the http(s) scheme is DERIVED from
- *      SLAYZONE_MODE (local → http, remote → https). The env channel never
- *      carries a scheme, so it can't collide with the computer's ws(s):// reading
- *      of the same deployment (the retired `SLAYZONE_HUB_URL` bug).
+ *      authority only (`host[:port]`); the http(s) scheme is DERIVED from the host
+ *      (loopback → http, any other host → https). The env channel never carries a
+ *      scheme, so it can't collide with the computer's ws(s):// reading of the same
+ *      deployment (the retired `SLAYZONE_HUB_URL` bug).
  *   2. `hub-target[.dev].json` in the CLI's own state dir, `~/.slayzone/cli`
  *      (written by `slay hub use` / `slay hub login`; pre-move locations are still
  *      READ — see cli-state.ts) — a FULL http(s) url (an operator pointing at an external hub gives
