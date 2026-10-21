@@ -90,6 +90,34 @@ function main(): void {
     assertEq(missingRootsForProjects(['/app'], ['/home/kalle']), [], 'no root grant')
   })
 
+  // The computer's jail compares REAL paths. A project at ~/dev/proj where ~/dev is a
+  // symlink to another disk lives, as far as the jail can tell, under /Volumes/Disk/dev —
+  // outside [homedir()] — so its parent looked covered here (lexically it is) and the
+  // project was then refused on every fs/git call after the upgrade.
+  test('asks for the REAL parent of a project reached through a symlink', () => {
+    const real = (p: string): string =>
+      p === '/home/kalle/dev/proj' ? '/Volumes/Disk/dev/proj' : p
+    assertEq(
+      missingRootsForProjects(['/home/kalle/dev/proj'], ['/home/kalle'], real),
+      ['/Volumes/Disk/dev'],
+      'real parent added although the lexical parent is already covered'
+    )
+  })
+
+  test('a symlinked project whose real location is already covered adds nothing', () => {
+    const real = (p: string): string => (p === '/home/kalle/proj' ? '/home/kalle/other/proj' : p)
+    assertEq(missingRootsForProjects(['/home/kalle/proj'], ['/home/kalle'], real), [], 'covered')
+  })
+
+  test('still asks for the lexical parent too when it is not covered either', () => {
+    const real = (p: string): string => (p === '/mnt/x/proj' ? '/data/x/proj' : p)
+    assertEq(
+      missingRootsForProjects(['/mnt/x/proj'], ['/home/kalle'], real),
+      ['/mnt/x', '/data/x'],
+      'both'
+    )
+  })
+
   console.log(`\n${passed} passed, ${failed} failed\n`)
   if (failed > 0) process.exit(1)
 }

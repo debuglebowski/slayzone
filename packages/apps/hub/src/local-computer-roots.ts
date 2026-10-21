@@ -24,6 +24,7 @@
  * @module hub/local-computer-roots
  */
 
+import { realpathSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 
 /** True when `candidate` is inside (or equal to) any of `roots`. */
@@ -35,30 +36,51 @@ export function isCoveredByRoots(candidate: string, roots: readonly string[]): b
   })
 }
 
+/** Real path of an existing path, or the path itself when it cannot be resolved. */
+function realpathOrSelf(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
 /**
  * Which parent directories are missing from `currentRoots` for these projects.
  *
- * Pure so the policy is testable without a computer: the caller supplies the
- * project paths and the jail, and gets back only the additions.
+ * Pure apart from `realpath` (injectable), so the policy is testable without a
+ * computer: the caller supplies the project paths and the jail, and gets back only the
+ * additions.
+ *
+ * Each project contributes TWO candidates: its lexical parent and the parent of its
+ * REAL path. The computer's jail compares real paths, so a project reached through a
+ * symlink (`~/dev/proj` with `~/dev` on another disk) is judged by where it actually
+ * lives. The lexical parent alone looked covered here and the project was then refused on
+ * every call. This runs on the same machine as the local computer, so the real path
+ * resolved here is the one its jail will see.
  */
 export function missingRootsForProjects(
   projectPaths: readonly (string | null)[],
-  currentRoots: readonly string[]
+  currentRoots: readonly string[],
+  realpath: (p: string) => string = realpathOrSelf
 ): string[] {
   const additions: string[] = []
   for (const path of projectPaths) {
     if (!path) continue
-    const parent = dirname(resolve(path))
-    // `dirname('/')` is `/` — a project at the filesystem root would ask for
-    // the whole disk. Refuse to infer that; it can only be a bad path row.
-    if (parent === resolve(parent, '..')) continue
-    if (isCoveredByRoots(parent, currentRoots)) continue
-    if (additions.some((a) => isCoveredByRoots(parent, [a]))) continue
-    // A new addition can subsume earlier ones (…/a/b then …/a).
-    for (let i = additions.length - 1; i >= 0; i--) {
-      if (isCoveredByRoots(additions[i], [parent])) additions.splice(i, 1)
+    const lexical = resolve(path)
+    const parents = new Set([dirname(lexical), dirname(realpath(lexical))])
+    for (const parent of parents) {
+      // `dirname('/')` is `/` — a project at the filesystem root would ask for
+      // the whole disk. Refuse to infer that; it can only be a bad path row.
+      if (parent === resolve(parent, '..')) continue
+      if (isCoveredByRoots(parent, currentRoots)) continue
+      if (additions.some((a) => isCoveredByRoots(parent, [a]))) continue
+      // A new addition can subsume earlier ones (…/a/b then …/a).
+      for (let i = additions.length - 1; i >= 0; i--) {
+        if (isCoveredByRoots(additions[i], [parent])) additions.splice(i, 1)
+      }
+      additions.push(parent)
     }
-    additions.push(parent)
   }
   return additions
 }
