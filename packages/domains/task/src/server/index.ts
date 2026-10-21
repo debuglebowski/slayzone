@@ -84,6 +84,7 @@ export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
 export {
   configureTaskRuntimeAdapters,
   updateTask,
+  InvalidTaskUpdateError,
   defaultWorktreeExecAdapters
 } from './ops/shared'
 export type { WorktreeExecAdapters } from './ops/shared'

@@ -7,6 +7,7 @@ import {
   recordConversation,
   isHonoredConversation,
   deleteSession,
+  InvalidTaskUpdateError,
   type TaskEventMap
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
@@ -30,6 +31,19 @@ const ops = (): ReturnType<typeof getTaskOps> => getTaskOps()
 // renderer-refresh signal the legacy IPC handlers emit. A given renderer call uses
 // one transport (tRPC OR IPC), so this fires exactly once per mutation.
 const deps = (): { onMutation?: () => void } => ({ onMutation: getTaskOnMutation() })
+
+// An update that breaks a task invariant (unknown status, bad priority) is the
+// caller's fault — surface it as BAD_REQUEST, not INTERNAL_SERVER_ERROR.
+const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof InvalidTaskUpdateError) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err })
+    }
+    throw err
+  }
+}
 
 export const taskRouter = router({
   // --- Task CRUD ---
@@ -93,7 +107,7 @@ export const taskRouter = router({
     .query(({ ctx, input }) => ops().getSubTasksOp(ctx.db, input.parentId)),
 
   update: publicProcedure.input(updateInput).mutation(async ({ ctx, input }) => {
-    const r = await ops().updateTaskOp(ctx.db, input, deps())
+    const r = await asBadRequest(() => ops().updateTaskOp(ctx.db, input, deps()))
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
     return r
   }),
@@ -187,7 +201,9 @@ export const taskRouter = router({
 
   updateMany: publicProcedure
     .input(z.unknown())
-    .mutation(({ ctx, input }) => ops().updateManyTasksOp(ctx.db, input as never, deps())),
+    .mutation(({ ctx, input }) =>
+      asBadRequest(() => ops().updateManyTasksOp(ctx.db, input as never, deps()))
+    ),
 
   delete: publicProcedure
     .input(z.object({ id: z.string() }))

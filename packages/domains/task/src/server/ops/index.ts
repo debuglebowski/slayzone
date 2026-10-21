@@ -4,6 +4,7 @@ export {
   cleanupTaskFull,
   cleanupTaskImmediate,
   updateTask,
+  InvalidTaskUpdateError,
   parseTask,
   parseTasks,
   parseAndColorTask,

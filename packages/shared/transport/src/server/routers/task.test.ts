@@ -264,26 +264,113 @@ test('update: updates status', async () => {
   expect(updated.status).toBe('done')
 })
 
-test('update: normalizes unknown update status to the project default', async () => {
+// An explicit status the task's project doesn't have is a caller bug. It used to
+// be silently coerced to the project's default column — which is how a stray
+// `status: ''` from the task settings panel dropped tasks into Inbox.
+test('update: rejects an unknown status (BAD_REQUEST) and leaves the task unchanged', async () => {
   const customProjectId = crypto.randomUUID()
   h.db
     .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
     .run(
       customProjectId,
-      'UpdateStatusNormalize',
+      'UpdateStatusReject',
       '#888',
-      '/tmp/update-status-normalize',
+      '/tmp/update-status-reject',
       JSON.stringify([
         { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
-        { id: 'closed', label: 'Closed', color: 'green', position: 1, category: 'completed' }
+        { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
+        { id: 'closed', label: 'Closed', color: 'green', position: 2, category: 'completed' }
       ])
     )
   const t = (await caller.create({
     projectId: customProjectId,
-    title: 'Unknown status update'
+    title: 'Unknown status update',
+    status: 'doing'
   } as unknown as CreateTaskInput)) as Task
-  const updated = await up({ id: t.id, status: 'ghost' })
-  expect(updated.status).toBe('queued')
+  expect(await errCode(() => up({ id: t.id, status: 'ghost' }))).toBe('BAD_REQUEST')
+  expect((await caller.get({ id: t.id }))?.status).toBe('doing')
+})
+
+test('update: rejects an empty status (BAD_REQUEST) and leaves the task unchanged', async () => {
+  const t = await createTask('EmptyStatus')
+  await up({ id: t.id, status: 'done' })
+  expect(await errCode(() => up({ id: t.id, status: '' }))).toBe('BAD_REQUEST')
+  expect((await caller.get({ id: t.id }))?.status).toBe('done')
+})
+
+test('update: rejects a priority outside 1-5 (BAD_REQUEST) and leaves the task unchanged', async () => {
+  const t = await createTask('BadPriority', { priority: 2 })
+  for (const priority of [0, 6, 2.5, Number.NaN]) {
+    expect(await errCode(() => up({ id: t.id, priority }))).toBe('BAD_REQUEST')
+  }
+  expect((await caller.get({ id: t.id }))?.priority).toBe(2)
+})
+
+test('update: an explicit status unknown in the target project still re-homes on a project move', async () => {
+  const sourceProjectId = crypto.randomUUID()
+  const targetProjectId = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(
+      sourceProjectId,
+      'MoveExplicitSource',
+      '#444',
+      '/tmp/move-explicit-source',
+      JSON.stringify([
+        { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
+        { id: 'shipped', label: 'Shipped', color: 'green', position: 2, category: 'completed' }
+      ])
+    )
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(
+      targetProjectId,
+      'MoveExplicitTarget',
+      '#555',
+      '/tmp/move-explicit-target',
+      JSON.stringify([
+        { id: 'triage', label: 'Triage', color: 'gray', position: 0, category: 'triage' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' }
+      ])
+    )
+  const t = (await caller.create({
+    projectId: sourceProjectId,
+    title: 'Move me explicitly',
+    status: 'doing'
+  } as unknown as CreateTaskInput)) as Task
+  const updated = await up({ id: t.id, projectId: targetProjectId, status: 'doing' })
+  expect(updated.project_id).toBe(targetProjectId)
+  expect(updated.status).toBe('triage')
+})
+
+test('updateMany: an unknown status for ANY task rejects the batch and writes none', async () => {
+  const otherProjectId = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(
+      otherProjectId,
+      'UpdateManyReject',
+      '#666',
+      '/tmp/update-many-reject',
+      JSON.stringify([
+        { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
+        { id: 'closed', label: 'Closed', color: 'green', position: 2, category: 'completed' }
+      ])
+    )
+  const knows = await createTask('Knows done')
+  const lacks = (await caller.create({
+    projectId: otherProjectId,
+    title: 'Lacks done',
+    status: 'doing'
+  } as unknown as CreateTaskInput)) as Task
+  const code = await errCode(() =>
+    caller.updateMany({ ids: [knows.id, lacks.id], updates: { status: 'done' } })
+  )
+  expect(code).toBe('BAD_REQUEST')
+  expect((await caller.get({ id: knows.id }))?.status).toBe(knows.status)
+  expect((await caller.get({ id: lacks.id }))?.status).toBe('doing')
 })
 
 test('update: updates to custom terminal status id', async () => {

@@ -3,7 +3,7 @@ import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { RecordActivityEventInput } from '@slayzone/history/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
-import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
+import { colorOne, parseTask, updateTask, validateTaskUpdate, type OpDeps } from './shared.js'
 
 export interface UpdateManyTasksInput {
   ids: string[]
@@ -18,6 +18,10 @@ export async function updateManyTasksOp(
   const { ipcMain, onMutation } = deps
   const { ids, updates } = data
   if (ids.length === 0) return []
+
+  // All-or-nothing: an update invalid for ANY task (e.g. a status one task's
+  // project lacks) rejects the batch before a single row is written.
+  for (const id of ids) await validateTaskUpdate(db, { ...updates, id } as UpdateTaskInput)
 
   // `updateTask` is a conditional read-modify-write with runtime side effects, so
   // each update runs as its own awaited call rather than inside a worker named-txn.

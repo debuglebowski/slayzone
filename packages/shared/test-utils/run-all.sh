@@ -501,6 +501,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/ui/src/secure-context.test.ts \
+  packages/shared/ui/src/select.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \

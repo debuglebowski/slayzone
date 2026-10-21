@@ -1,6 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
-import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
+import {
+  prioritySchema,
+  validateReparent,
+  reparentErrorMessage,
+  type ReparentTaskRow
+} from '@slayzone/task/shared'
 import { recordConversation } from './task-conversations.js'
 // The resume predicate is DEFINED in agent-sessions.ts and interpolated here, so
 // the renderer's hint and the spawn-time resolver cannot answer the same question
@@ -736,7 +741,22 @@ async function createWorktreeForTask(
   )
 }
 
-export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
+/**
+ * An update that breaks a task invariant (unknown status, out-of-range priority).
+ * A caller bug, not a server fault — transports map it to "bad request".
+ */
+export class InvalidTaskUpdateError extends Error {
+  override name = 'InvalidTaskUpdateError'
+}
+
+interface UpdateTarget {
+  existing: { project_id: string; status: string; is_temporary: number } | undefined
+  targetProjectId: string | undefined
+  targetColumns: ColumnConfig[] | null
+  projectChanged: boolean
+}
+
+async function readUpdateTarget(db: SlayzoneDb, data: UpdateTaskInput): Promise<UpdateTarget> {
   const existing = await db.get<{ project_id: string; status: string; is_temporary: number }>(
     'SELECT project_id, status, is_temporary FROM tasks WHERE id = ?',
     [data.id]
@@ -744,6 +764,43 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   const targetProjectId = data.projectId ?? existing?.project_id
   const targetColumns = targetProjectId ? await getProjectColumns(db, targetProjectId) : null
   const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
+  return { existing, targetProjectId, targetColumns, projectChanged }
+}
+
+/**
+ * Rejects an update that would write an invalid status or priority. An explicit
+ * status must be a column of the task's project — it is NOT coerced to the
+ * default column, because that silently hid caller bugs (a stray `status: ''`
+ * from the settings panel dropped tasks into Inbox). The one exception is a
+ * project move, which re-homes a status the target project lacks (`updateTask`).
+ * A missing task is left to the caller's not-found path.
+ */
+function assertValidTaskUpdate(data: UpdateTaskInput, target: UpdateTarget): void {
+  if (!target.existing) return
+  if (data.status !== undefined) {
+    const unknownHere = !isKnownStatus(data.status, target.targetColumns)
+    if (data.status === '' || (unknownHere && !target.projectChanged)) {
+      throw new InvalidTaskUpdateError(
+        `Unknown status ${JSON.stringify(data.status)} for this task's project.`
+      )
+    }
+  }
+  if (data.priority !== undefined && !prioritySchema.safeParse(data.priority).success) {
+    throw new InvalidTaskUpdateError(
+      `Invalid priority ${JSON.stringify(data.priority)}: must be an integer 1-5.`
+    )
+  }
+}
+
+/** `updateTask`'s invariant check on its own, for validating a batch before writing any of it. */
+export async function validateTaskUpdate(db: SlayzoneDb, data: UpdateTaskInput): Promise<void> {
+  assertValidTaskUpdate(data, await readUpdateTarget(db, data))
+}
+
+export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
+  const target = await readUpdateTarget(db, data)
+  assertValidTaskUpdate(data, target)
+  const { existing, targetProjectId, targetColumns, projectChanged } = target
 
   // Auto-promote a temporary task when its title is renamed. Mirrors "Turn into task" behavior:
   // clears is_temporary and moves status into the `started` category. Caller can opt out by
@@ -753,6 +810,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   let normalizedStatusForWrite: string | undefined
   if (data.status !== undefined) {
+    // Unknown here only on a project move (assertValidTaskUpdate) — re-home it.
     normalizedStatusForWrite = isKnownStatus(data.status, targetColumns)
       ? data.status
       : getDefaultStatus(targetColumns)
@@ -784,18 +842,16 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       normalizedStatusForWrite !== existing.status &&
       categoryRank(existing.status) > categoryRank(normalizedStatusForWrite)
     if (isDemotionToDefault) {
-      const coerced = data.status !== undefined && !isKnownStatus(data.status, targetColumns)
       recordDiagnosticEvent({
         level: 'error',
         source: 'task',
         event: 'task.status_regression',
         taskId: data.id,
-        message: `${existing.status} -> ${normalizedStatusForWrite}${coerced ? ' (COERCED from ' + JSON.stringify(data.status) + ')' : ''}`,
+        message: `${existing.status} -> ${normalizedStatusForWrite}`,
         payload: {
           incoming: data.status ?? null,
           existing: existing.status,
           resolved: normalizedStatusForWrite,
-          coerced,
           shouldPromoteFromTemp,
           stack: new Error('status-regression-stack').stack
         }
