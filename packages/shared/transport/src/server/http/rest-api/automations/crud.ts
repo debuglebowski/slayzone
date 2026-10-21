@@ -14,6 +14,7 @@ import type {
 } from '@slayzone/automations/shared'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix, resolveProjectRef } from '../resolve'
+import { respondSwitchRefusal } from '../switch-refusal'
 
 /**
  * Automation CRUD. Mirrors `slay automations` (cli/src/commands/automations.ts),
@@ -142,6 +143,8 @@ export function registerAutomationsCrudRoutes(app: Express, deps: RestApiDeps): 
       deps.notifyRenderer()
       res.json({ ok: true, data: automation })
     } catch (err) {
+      // A rule that would run a process on a hub with processes switched off.
+      if (respondSwitchRefusal(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -200,6 +203,8 @@ export function registerAutomationsCrudRoutes(app: Express, deps: RestApiDeps): 
       deps.notifyRenderer()
       res.json({ ok: true, data: automation })
     } catch (err) {
+      // A rule that would run a process on a hub with processes switched off.
+      if (respondSwitchRefusal(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

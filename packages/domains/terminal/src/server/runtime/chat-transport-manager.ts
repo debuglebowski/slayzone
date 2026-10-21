@@ -14,6 +14,7 @@ import { whichBinary as realWhichBinary } from '../shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import type { BufferedEvent } from '../chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
@@ -1122,7 +1123,13 @@ async function spawnSubprocess(session: Session): Promise<void> {
     // handle behind that the watchdog would then probe as if it were ours.
     session.rawChild = null
   } else {
-    // In-process path, unchanged: resolve on this machine's PATH and spawn.
+    // In-process path, unchanged: resolve on this machine's PATH and spawn. Refused
+    // first on a hub with processes switched off — `whichBinary` itself already runs
+    // a login shell here.
+    assertHubProcessesEnabled('hub.process.spawn', {
+      op: 'chat.spawn',
+      detail: { taskId: session.taskId, tabId: session.tabId }
+    })
     const binary = await deps.whichBinary(backend.binaryName)
     if (!binary) {
       throw new ChatTransportError(

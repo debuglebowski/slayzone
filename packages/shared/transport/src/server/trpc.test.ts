@@ -25,6 +25,7 @@
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
+import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { publicProcedure, openProcedure, router } from './trpc'
 import { setAuthGate } from './app-deps'
 import type { TrpcContext } from './context'
@@ -49,6 +50,15 @@ const testRouter = router({
   // procedure added tomorrow that nobody has classified yet".
   brandNewRouter: router({
     brandNewProcedure: publicProcedure.query(() => 'unclassified-ok')
+  }),
+  // A domain chokepoint refusing deep inside a procedure, and an ordinary failure.
+  switched: router({
+    off: publicProcedure.mutation(() => {
+      throw new HubSwitchedOffError('HUB_PROCESSES_DISABLED')
+    }),
+    broken: publicProcedure.mutation(() => {
+      throw new Error('boom')
+    })
   })
 })
 
@@ -182,6 +192,25 @@ describe('trpc auth + scope gate', () => {
       const caller = testRouter.createCaller(ctx(null))
       await expect(caller.pty.create()).resolves.toBe('create-ok')
       expect(audit).toHaveLength(0)
+    })
+  })
+
+  describe('hub-switch refusal (T-04/T-05/T-07)', () => {
+    test('a HubSwitchedOffError from inside a procedure surfaces as FORBIDDEN', async () => {
+      const caller = testRouter.createCaller(ctx(null))
+      const err = await caller.switched.off().catch((e: unknown) => e)
+      expect(err).toMatchObject({
+        code: 'FORBIDDEN',
+        message: expect.stringContaining('SLAYZONE_HUB_ENABLE_PROCESSES=0')
+      })
+      expect((err as { cause?: unknown }).cause).toBeInstanceOf(HubSwitchedOffError)
+    })
+
+    test('any other error keeps its code', async () => {
+      const caller = testRouter.createCaller(ctx(null))
+      await expect(caller.switched.broken()).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR'
+      })
     })
   })
 })

@@ -15,6 +15,7 @@ import {
 } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/server'
 import { exec } from 'child_process'
+import { assertAutomationActionsAllowed } from './hub-exec-actions'
 
 const MAX_DEPTH = 5
 const ACTION_TIMEOUT_MS = 30_000
@@ -352,6 +353,9 @@ export class AutomationEngine {
       this.currentDepth = depth + 1
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
+        // Before anything is resolved or exec'd: a rule saved before the switch was
+        // turned off, or written straight into the database, is refused here.
+        assertAutomationActionsAllowed([action], { op: 'run', automationId: automation.id })
         const resolved = await this.resolveAction(action, ctx)
         const actionRunId = await this.db.namedTxn('automations:start-action-run', {
           input: {
@@ -615,6 +619,9 @@ export class AutomationEngine {
     ])
     if (!row) throw new Error('Automation not found')
     const automation = parseAutomationRow(row)
+    // A manual run is a request: refuse it to the caller rather than recording a
+    // failed run.
+    assertAutomationActionsAllowed(automation.actions, { op: 'run', automationId: automation.id })
 
     const event: AutomationEvent = {
       type: 'manual',

@@ -22,6 +22,7 @@
 
 import { spawn as realSpawn, type ChildProcess } from 'node:child_process'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 /** Unsubscribe token (mirrors node-pty's `IDisposable`). */
 export interface ChatDisposable {
@@ -191,6 +192,11 @@ export function createLocalChatBackend(deps: {
   const spawnFn = deps.spawn ?? realSpawn
   return {
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
+      // In-process spawn: refused on a hub with processes switched off.
+      assertHubProcessesEnabled('hub.process.spawn', {
+        op: 'chat.spawn',
+        detail: { sessionId: spec.sessionId, taskId: spec.taskId }
+      })
       const binary = await deps.whichBinary(spec.binaryName)
       if (!binary) {
         throw new Error(

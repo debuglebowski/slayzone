@@ -43,6 +43,18 @@ export {
   type HubSwitches,
   type HubSsoSettings
 } from './hub-switches'
+// Refusals for work a switch turned off. Also the lean
+// `@slayzone/platform/hub-switch-refusal` subpath — prefer that from a domain package.
+export {
+  HubSwitchedOffError,
+  isHubSwitchedOffError,
+  hubProcessesEnabled,
+  hubIntegrationsEnabled,
+  assertHubProcessesEnabled,
+  assertHubIntegrationsEnabled,
+  type HubSwitchedOffCode,
+  type HubRefusal
+} from './hub-switch-refusal'
 // Multi-hub discovery. Also available as the lean `@slayzone/platform/hub-discovery`
 // subpath — prefer that from a bundle that must not pull this barrel.
 export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from './hub-discovery'

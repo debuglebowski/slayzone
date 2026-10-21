@@ -88,14 +88,15 @@ export const SECURITY_EVENTS = [
   'computer.shutdown',
   /** A boot rule refused to start the hub (hub `boot-rules.ts`). */
   'hub.boot',
-  // Reserved for later work — named now so those call sites cannot invent names.
-  /** T-04: a hub-local process refused (`SLAYZONE_HUB_ENABLE_PROCESSES=0`). */
+  // Switch refusals (`hub-switch-refusal.ts`); `detail.op` names what was refused.
+  /** T-04: a hub-local process, terminal or agent refused (`SLAYZONE_HUB_ENABLE_PROCESSES=0`). */
   'hub.process.spawn',
-  /** T-05: an automation `run_command` refused, at save or at run. */
+  /** T-05: an automation action that execs on the hub (`run_command`, `ai`) refused, at save or at run. */
   'automation.run_command',
+  // Reserved for later work — named now so those call sites cannot invent names.
   /** T-06: hub-local file/git/exec refused ("connect a computer"). */
   'hub.local_exec',
-  /** T-07: an integration connect or sign-in start refused. */
+  /** T-07: an integration connect, provider call or sign-in start refused. */
   'integration.connect',
   /** T-23: the retention sweep ran; `detail` carries the row counts. */
   'hub.retention.sweep'

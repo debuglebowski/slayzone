@@ -1,9 +1,11 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
+import { refusedHubProcesses } from '../switch-refusal'
 
 export function registerProcessesDeleteRoute(app: Express, deps: RestApiDeps): void {
   app.delete('/api/processes/:id', async (req, res) => {
+    if (refusedHubProcesses(res, 'kill')) return
     if (!deps.processes) {
       res.status(501).json({ error: NOT_AVAILABLE_STANDALONE })
       return

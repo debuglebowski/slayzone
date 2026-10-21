@@ -16,9 +16,9 @@
  * other than `0` / `1` is a boot refusal (rule B4): a switch that silently fell back
  * to its default on a typo (`REQUIRE_LOGIN=true`) would fail OPEN.
  *
- * This task only parses, validates and reports the switches and wires
- * `REQUIRE_LOGIN`; enforcement of password / SSO / processes / integrations off
- * lives in later work.
+ * This module only parses, validates and reports the switches. Processes and
+ * integrations off are enforced through `hub-switch-refusal.ts`; password / SSO off
+ * live in later work.
  *
  * Lean leaf (no imports) so the CLI and computer bundles can use it without the
  * platform barrel.

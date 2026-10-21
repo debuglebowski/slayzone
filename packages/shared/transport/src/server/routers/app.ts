@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
+import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
@@ -244,9 +245,12 @@ export const appLevelRouter = router({
 
   // Auth
   auth: router({
-    githubSystemSignIn: publicProcedure
-      .input(anyInput)
-      .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never)),
+    // Refused with integrations switched off: the hub would POST to Convex and open
+    // GitHub's authorize page itself.
+    githubSystemSignIn: publicProcedure.input(anyInput).mutation(({ input }) => {
+      assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
+      return getAppDeps().authGithubSystemSignIn(input as never)
+    }),
     // Chromium-fork OAuth callback relay. The C++ shell forwards the
     // `slayzone://auth/callback` deep-link to the sidecar (auth:deep-link), the
     // sidecar's socket server emits it on `authEvents`, and this subscription
