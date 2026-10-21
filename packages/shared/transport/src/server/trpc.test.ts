@@ -25,6 +25,7 @@
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
+import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { publicProcedure, openProcedure, router } from './trpc'
 import { setAuthGate } from './app-deps'
 import type { TrpcContext } from './context'
@@ -49,6 +50,15 @@ const testRouter = router({
   // procedure added tomorrow that nobody has classified yet".
   brandNewRouter: router({
     brandNewProcedure: publicProcedure.query(() => 'unclassified-ok')
+  }),
+  // A domain chokepoint refusing deep inside a procedure, and an ordinary failure.
+  switched: router({
+    off: publicProcedure.mutation(() => {
+      throw new HubSwitchedOffError('HUB_PROCESSES_DISABLED')
+    }),
+    broken: publicProcedure.mutation(() => {
+      throw new Error('boom')
+    })
   })
 })
 
@@ -95,26 +105,28 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('full reaches every path, including one classified never', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       await expect(caller.pty.create()).resolves.toBe('create-ok') // never-classified, full bypasses it
       await expect(caller.brandNewRouter.brandNewProcedure()).resolves.toBe('unclassified-ok')
     })
 
     test('agent scope reaches pty.write but is FORBIDDEN on pty.create', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u2', scopes: ['agent'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u2', role: 'user', scopes: ['agent'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       await expect(caller.pty.create()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     test('read+tasks does NOT reach an agent-only path', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u3', scopes: ['read', 'tasks'] }))
+      const caller = testRouter.createCaller(
+        ctx({ userId: 'u3', role: 'user', scopes: ['read', 'tasks'] })
+      )
       await expect(caller.pty.write()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     test('an UNCLASSIFIED path is FORBIDDEN even for a scope that would otherwise qualify', async () => {
       const caller = testRouter.createCaller(
-        ctx({ userId: 'u4', scopes: ['read', 'tasks', 'agent'] })
+        ctx({ userId: 'u4', role: 'user', scopes: ['read', 'tasks', 'agent'] })
       )
       await expect(caller.brandNewRouter.brandNewProcedure()).rejects.toMatchObject({
         code: 'FORBIDDEN'
@@ -149,7 +161,7 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('a scope refusal writes authz.denied with the actor and the scopes held', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u2', scopes: ['agent'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u2', role: 'user', scopes: ['agent'] }))
       await expect(caller.pty.create()).rejects.toMatchObject({ code: 'FORBIDDEN' })
       expect(audit).toHaveLength(1)
       expect(audit[0]).toMatchObject({
@@ -161,13 +173,13 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('an allowed call writes nothing', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       expect(audit).toHaveLength(0)
     })
 
     test('a procedure runs with the caller as the acting user', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.whoami()).resolves.toEqual({
         actor: 'u1',
         ip: '203.0.113.7',
@@ -180,6 +192,25 @@ describe('trpc auth + scope gate', () => {
       const caller = testRouter.createCaller(ctx(null))
       await expect(caller.pty.create()).resolves.toBe('create-ok')
       expect(audit).toHaveLength(0)
+    })
+  })
+
+  describe('hub-switch refusal (T-04/T-05/T-07)', () => {
+    test('a HubSwitchedOffError from inside a procedure surfaces as FORBIDDEN', async () => {
+      const caller = testRouter.createCaller(ctx(null))
+      const err = await caller.switched.off().catch((e: unknown) => e)
+      expect(err).toMatchObject({
+        code: 'FORBIDDEN',
+        message: expect.stringContaining('SLAYZONE_HUB_ENABLE_PROCESSES=0')
+      })
+      expect((err as { cause?: unknown }).cause).toBeInstanceOf(HubSwitchedOffError)
+    })
+
+    test('any other error keeps its code', async () => {
+      const caller = testRouter.createCaller(ctx(null))
+      await expect(caller.switched.broken()).rejects.toMatchObject({
+        code: 'INTERNAL_SERVER_ERROR'
+      })
     })
   })
 })

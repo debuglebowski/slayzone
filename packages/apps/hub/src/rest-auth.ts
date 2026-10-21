@@ -36,7 +36,7 @@ import {
   securityEvent
 } from '@slayzone/platform/security-log'
 import type { RestPrincipal } from '@slayzone/transport/server'
-import { isWebSessionToken, verifyWebSessionToken, WEB_SESSION_COOKIE_NAME } from './web-sessions'
+import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
 /**
  * What to do with an inbound HTTP request:
@@ -98,7 +98,7 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
  * here would 401 an off-box request before it could report the 503 (listener not
  * yet bound) or the 403 that says "wrong machine" rather than "no credential".
  *
- * `/api/hub/users`: backs `slay hub users add|ls|rm`, which an operator runs ON the
+ * `/api/hub/users`: backs `slay hub users …`, which an operator runs ON the
  * hub box (typically over SSH) and which holds no session. Requiring a bearer would
  * make it impossible to create the FIRST account on a remote hub — and since
  * `emailAndPassword.disableSignUp` closes public signup, that hub would be
@@ -207,7 +207,8 @@ export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, 
  *
  * Returns `null` for anything but a clean hit — absent/blank/duplicated
  * header, unknown/expired/revoked web session, invalid better-auth session, a
- * null `auth`, or a throw inside either verify path.
+ * disabled account (either class), a null `auth`, or a throw inside either
+ * verify path. The principal carries the account's `role`.
  */
 export async function verifyRestBearer(
   auth: HubAuth | null,
@@ -227,8 +228,7 @@ export async function verifyRestBearer(
   if (webToken) {
     if (!db) return null
     try {
-      const result = await verifyWebSessionToken(db, webToken)
-      return result.ok ? { userId: result.userId, scopes: result.scopes } : null
+      return await resolveWebSession(auth, db, webToken)
     } catch {
       return null
     }
@@ -239,7 +239,7 @@ export async function verifyRestBearer(
   if (!auth || !bearerToken) return null
   try {
     const ctx = await verifySession(auth, new Headers({ authorization: `Bearer ${bearerToken}` }))
-    return ctx ? { userId: ctx.userId, orgId: ctx.orgId, scopes: ['full'] } : null
+    return ctx ? { userId: ctx.userId, role: ctx.role, orgId: ctx.orgId, scopes: ['full'] } : null
   } catch {
     return null
   }

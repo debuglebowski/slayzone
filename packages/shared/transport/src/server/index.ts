@@ -1,6 +1,6 @@
 export { appRouter, type AppRouter } from './router'
 export { router, publicProcedure, openProcedure, middleware, mergeRouters } from './trpc'
-export type { TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
+export type { PrincipalRole, TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
 export {
   SCOPE_POLICY,
   requiredScope,

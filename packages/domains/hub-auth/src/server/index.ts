@@ -18,10 +18,17 @@ export {
 } from './computer-keys'
 export {
   createHubUser,
+  disableHubUser,
+  enableHubUser,
+  ensureFirstAdmin,
   listHubUsers,
-  removeHubUser,
+  setHubUserRole,
   type CreatedHubUser,
   type CreateHubUserInput,
+  type DisableHubUserOptions,
+  type DisableHubUserResult,
+  type EnableHubUserResult,
   type HubUserRow,
-  type RemoveHubUserResult
+  type SetHubUserRoleResult
 } from './users'
+export { ACCOUNT_DISABLED_CODE, findHubAccount, type HubAccount } from './account'

@@ -8,6 +8,7 @@ import {
   listProjectIssues as listGitHubProjectIssues,
   updateIssue as updateGitHubIssue
 } from './github-client'
+import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { deleteCredential, readCredential, storeCredential } from './credentials'
 import type {
   ConnectGithubInput,
@@ -1079,7 +1080,10 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
   }
 
   return {
+    // Each connect refuses before its provider round-trip when integrations are
+    // switched off (`storeCredential` would refuse too, but only after it).
     connectGithub: async (input: ConnectGithubInput): Promise<IntegrationConnectionPublic> => {
+      assertHubIntegrationsEnabled({ op: 'connect', detail: { provider: 'github' } })
       const token = input.token.trim()
       if (!token) throw new Error('Token required')
 
@@ -1134,6 +1138,7 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
     },
 
     connectLinear: async (input: ConnectLinearInput): Promise<IntegrationConnectionPublic> => {
+      assertHubIntegrationsEnabled({ op: 'connect', detail: { provider: 'linear' } })
       const apiKey = input.apiKey.trim()
       if (!apiKey) throw new Error('API key required')
 
@@ -1188,6 +1193,7 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
     },
 
     connectJira: async (input: ConnectJiraInput): Promise<IntegrationConnectionPublic> => {
+      assertHubIntegrationsEnabled({ op: 'connect', detail: { provider: 'jira' } })
       const domain = input.cloudDomain.trim()
       const email = input.email.trim()
       const apiToken = input.apiToken.trim()
@@ -1262,6 +1268,10 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
     updateConnection: async (
       input: UpdateIntegrationConnectionInput
     ): Promise<IntegrationConnectionPublic> => {
+      assertHubIntegrationsEnabled({
+        op: 'connect',
+        detail: { connectionId: input.connectionId, update: true }
+      })
       const connection = await getConnection(db, input.connectionId)
       const credential = input.credential.trim()
       if (!credential) throw new Error('Credential is required')

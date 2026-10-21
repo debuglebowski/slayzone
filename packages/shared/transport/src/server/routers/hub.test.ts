@@ -112,7 +112,7 @@ test('auth gate ON + principal present: gated proc runs', async () => {
   // running. This fixture models an ordinary authenticated (desktop/CLI) call.
   const authedCaller = hubRouter.createCaller({
     db: h.slayDb,
-    principal: { userId: 'u1', orgId: null, scopes: ['full'] }
+    principal: { userId: 'u1', role: 'user', orgId: null, scopes: ['full'] }
   } as never)
   await authedCaller.setLabel({ label: 'authed-write' })
   expect((await authedCaller.describe()).label).toBe('authed-write')

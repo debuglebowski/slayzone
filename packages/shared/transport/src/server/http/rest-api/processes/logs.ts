@@ -1,9 +1,11 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
+import { refusedHubProcesses } from '../switch-refusal'
 
 export function registerProcessesLogsRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/processes/:id/logs', (req, res) => {
+    if (refusedHubProcesses(res, 'logs')) return
     if (!deps.processes) {
       res.status(501).json({ error: NOT_AVAILABLE_STANDALONE })
       return

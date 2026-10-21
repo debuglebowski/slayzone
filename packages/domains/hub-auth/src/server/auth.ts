@@ -5,7 +5,9 @@ import { apiKey } from '@better-auth/api-key'
 import { betterAuth } from 'better-auth'
 import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
+import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
+import { ensureFirstAdmin } from './users'
 
 export interface HubAuthConfig {
   /**
@@ -27,7 +29,11 @@ export const COMPUTER_KEY_PREFIX = 'szr_'
  * the plugin-inferred `auth.api` endpoints (bearer/jwt/organization/apiKey).
  */
 function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
-  return betterAuth({
+  // Bound below, once the instance exists — the session guard only runs after
+  // betterAuth() has returned. Until then it fails closed.
+  let findUser = (_userId: string): Promise<Record<string, unknown> | null> =>
+    Promise.reject(new Error('[hub-auth] user lookup used before the instance was built'))
+  const auth = betterAuth({
     baseURL: config.baseURL,
     secret: config.secret,
     // node:sqlite handle — better-auth's kysely adapter wraps it in its own
@@ -49,13 +55,33 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // shell on the hub box is the credential, exactly as for
     // `POST /api/computers/join-token`.
     emailAndPassword: { enabled: true, disableSignUp: true },
+    // Account model (T-08), see ./account.ts. `input: false` on both: neither
+    // sign-up nor `/update-user` may set them (better-auth answers
+    // FIELD_NOT_ALLOWED); only ./users.ts writes them. `getMigrations` adds the
+    // columns to an existing `user` table without a default, so a row from before
+    // reads NULL — `readRole` reads that as 'user'.
+    user: {
+      additionalFields: {
+        role: { type: 'string', required: false, defaultValue: 'user', input: false },
+        disabledAt: { type: 'date', required: false, input: false }
+      }
+    },
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },
     // Security audit lines on stdout (T-03): sign-in, sign-out, sessions, password
     // change. See ./audit.ts.
     hooks: { after: auditAuthResponse },
-    databaseHooks: auditDatabaseHooks,
+    databaseHooks: {
+      session: {
+        create: {
+          // A disabled account gets no session, whichever route asked for one.
+          before: refuseDisabledSessions((userId) => findUser(userId)),
+          after: auditDatabaseHooks.session.create.after
+        },
+        delete: auditDatabaseHooks.session.delete
+      }
+    },
     plugins: [
       bearer(),
       jwt(),
@@ -92,6 +118,12 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       })
     ]
   })
+  findUser = async (userId) =>
+    (await (await auth.$context).internalAdapter.findUserById(userId)) as Record<
+      string,
+      unknown
+    > | null
+  return auth
 }
 
 export type HubAuth = ReturnType<typeof buildAuth>
@@ -100,7 +132,8 @@ export type HubAuth = ReturnType<typeof buildAuth>
  * Create the hub-auth better-auth instance backed by its own sqlite file and
  * bring that file's schema up to date via better-auth's own migration
  * mechanism (`getMigrations` from `better-auth/db/migration`) — NOT the app's
- * migration registry.
+ * migration registry. Then {@link ensureFirstAdmin}: a hub upgraded from before
+ * the `role` column makes its oldest account admin.
  */
 export async function createHubAuth(config: HubAuthConfig): Promise<HubAuth> {
   mkdirSync(dirname(config.dbPath), { recursive: true })
@@ -109,5 +142,6 @@ export async function createHubAuth(config: HubAuthConfig): Promise<HubAuth> {
   const auth = buildAuth(config, database)
   const { runMigrations } = await getMigrations(auth.options)
   await runMigrations()
+  await ensureFirstAdmin(auth)
   return auth
 }

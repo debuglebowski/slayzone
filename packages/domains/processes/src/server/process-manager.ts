@@ -9,6 +9,10 @@ import type { ProcessBackend, ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal/shared'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 import { TypedEmitter } from '@slayzone/platform/events'
+import {
+  assertHubProcessesEnabled,
+  hubProcessesEnabled
+} from '@slayzone/platform/hub-switch-refusal'
 import type { ProcessEventMap } from '@slayzone/types'
 
 /** Structural slice of Electron's BrowserWindow — the legacy dual-emit target.
@@ -100,6 +104,10 @@ export async function initProcessManager(database: SlayzoneDb): Promise<void> {
 }
 
 export async function initProcessManagerWith(p: ProcessPersistence): Promise<void> {
+  // `SLAYZONE_HUB_ENABLE_PROCESSES=0`: load no persisted row, so none can be
+  // restarted or have its stale pid swept, and skip the PATH warm-up (it spawns the
+  // user's login shell). Every entry point below refuses anyway.
+  if (!hubProcessesEnabled()) return
   persistence = p
   // Warm the enriched-PATH cache off the boot critical path. Spawning the
   // user's shell to read $PATH is ~100ms (login shell + rc files); deferring
@@ -342,7 +350,10 @@ async function doSpawn(proc: ManagedProcess): Promise<void> {
     // null proc.handle before calling handle.kill(), so a manager-initiated
     // exit never reaches this guard. See reapSurvivorsAfterUnplannedExit's
     // doc comment for why a leader exiting alone can still leave orphans.
-    const groupEmpty = exitedPid != null ? await reapSurvivorsAfterUnplannedExit(proc, exitedPid, code, signal) : true
+    const groupEmpty =
+      exitedPid != null
+        ? await reapSurvivorsAfterUnplannedExit(proc, exitedPid, code, signal)
+        : true
 
     // The sweep above can take up to ~2s (poll + SIGKILL escalation). A
     // manager-initiated restart/kill may have already moved this record on
@@ -541,6 +552,7 @@ export function createProcess(
   cwd: string,
   autoRestart: boolean
 ): string {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'create', detail: { taskId, projectId } })
   const id = randomUUID()
   const proc: ManagedProcess = {
     id,
@@ -575,6 +587,7 @@ export async function spawnProcess(
   cwd: string,
   autoRestart: boolean
 ): Promise<string> {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn', detail: { taskId, projectId } })
   if (isShuttingDown) throw new Error('Cannot spawn process while app is shutting down.')
   const id = randomUUID()
   const proc: ManagedProcess = {
@@ -614,6 +627,7 @@ export function updateProcess(
     Pick<ProcessInfo, 'label' | 'command' | 'cwd' | 'autoRestart' | 'taskId' | 'projectId'>
   >
 ): boolean {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'update', detail: { processId: id } })
   const proc = processes.get(id)
   if (!proc) return false
   Object.assign(proc, updates)
@@ -668,6 +682,7 @@ export function killProcess(id: string): boolean {
 }
 
 export async function restartProcess(id: string): Promise<boolean> {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'restart', detail: { processId: id } })
   if (isShuttingDown) return false
   const proc = processes.get(id)
   if (!proc) return false

@@ -10,6 +10,7 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   setTaskDeps,
   setIntegrationOps,
@@ -141,13 +142,8 @@ import {
   createRemoteWorktreeAdapters,
   type HubComputerGateway
 } from '@slayzone/computer-transport/server'
-import {
-  createHubAuth,
-  createHubUser,
-  listHubUsers,
-  removeHubUser,
-  type HubAuth
-} from '@slayzone/hub-auth/server'
+import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import { createHubUsersCapability } from './hub-users.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
@@ -936,6 +932,8 @@ export function composeServer(opts: {
       // completes the code when the sub delivers it. Reuses the shared
       // requestGithubSignInStart — same PKCE handshake as the Electron host.
       authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
+        // Backstop for the router's check: no Convex POST, no browser open.
+        assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
         try {
           if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
           if (input.redirectTo !== 'slayzone://auth/callback') {
@@ -1165,9 +1163,9 @@ export function composeServer(opts: {
       // different connection status than the app's Computers tab.
       getGateway: () => computerGatewayRef
     },
-    // Operator account management for the loopback-only `/api/hub/users` routes
-    // (`slay hub users add|ls|rm`) — the ONLY way to create an account now that
-    // public signup is closed (hub-auth auth.ts `disableSignUp`).
+    // Operator account management for the `/api/hub/users` routes
+    // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
+    // account now that public signup is closed (hub-auth auth.ts `disableSignUp`).
     //
     // Closed over the SAME late-bound `hubAuthRef` that `get hubAuth()` below reads,
     // for the same reason the `computers` slot above is getter-shaped: hub-auth is
@@ -1175,25 +1173,13 @@ export function composeServer(opts: {
     // constructed. `ready` is therefore a function, never a captured value — and it
     // stays false permanently if `createHubAuth` threw (that failure is swallowed
     // into a diagnostic), which the route surfaces as a 503 naming
-    // `computer.init_failed`.
-    hubUsers: {
-      ready: () => hubAuthRef !== null,
-      create: async (input) => {
-        // Unreachable in practice — the route checks `ready()` first — but the
-        // closure must not silently no-op if that order ever changes.
-        if (!hubAuthRef) throw new Error('hub-auth is not ready')
-        const created = await createHubUser(hubAuthRef, input)
-        return 'error' in created
-          ? { ok: false as const, reason: created.error }
-          : { ok: true as const, user: created }
-      },
-      list: async () => (hubAuthRef ? listHubUsers(hubAuthRef) : []),
-      remove: async (email) => (hubAuthRef ? removeHubUser(hubAuthRef, email) : 'not-found')
-    },
+    // `computer.init_failed`. Disabling also revokes the account's web sessions in
+    // THIS db (see hub-users.ts).
+    hubUsers: createHubUsersCapability(() => hubAuthRef, db),
     // Bearer authority for routes that self-guard rather than sitting behind the
     // outer gate — `POST /api/computers/join-token` (so `slay computer mint` can
-    // target a hub on another machine) and `/api/hub/users` (so `slay hub users
-    // add|ls|rm` keeps working once loopback alone is no longer sufficient).
+    // target a hub on another machine) and `/api/hub/users` (so `slay hub users …`
+    // keeps working once loopback alone is no longer sufficient).
     //
     // Deliberately the SAME two pieces the outer gate uses — the login switch and
     // `verifyRestBearer` — so a route-level decision can never disagree with the

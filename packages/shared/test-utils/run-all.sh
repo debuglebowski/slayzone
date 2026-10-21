@@ -72,6 +72,8 @@ run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
 # Pull-sync pollers: v0.35.0's host started them; the move to the hub dropped the call.
 run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.ts
+# Processes / integrations switched off (T-04, T-05, T-07), end to end over tRPC.
+run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
@@ -83,6 +85,8 @@ run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
+# Account commands over real hub-auth + app DB: disable revokes BOTH session classes.
+run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
@@ -92,6 +96,8 @@ run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
 # Hub↔computer install handshake — boots the built hub+computer bins, isolated (tmp
 # home/store, ports 0, scrubbed env), asserts the computer enrolls + the real
@@ -123,6 +129,8 @@ run_test packages/domains/processes/src/server/process-manager.test.ts
 run_test packages/domains/processes/src/server/process-persistence.test.ts
 # Wave-2 spawn backend seam — fake ProcessBackend streaming/exit/autoRestart/kill.
 run_test packages/domains/processes/src/server/process-backend.test.ts
+# Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
+run_test packages/domains/processes/src/server/process-switch.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-config.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
@@ -249,6 +257,8 @@ run_test packages/shared/platform/src/device-status-queries.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
 # Security audit events on stdout (T-03).
 run_test packages/shared/platform/src/security-log.test.ts
+# Switch refusals: one audit line + one error shape per refusal.
+run_test packages/shared/platform/src/hub-switch-refusal.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
@@ -260,6 +270,7 @@ run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-a
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/web-login.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/server/integrations-switch.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
 # return adapted to {snapshotSha,headSha}). NOTE: all run_test* helpers are now strict
@@ -288,6 +299,7 @@ run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/automations.test.ts
 run_test_electron_strict_loader packages/domains/automations/src/server/engine.test.ts
+run_test_electron_strict_loader packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_test packages/domains/terminal/src/server/filter-buffer-data.test.ts
@@ -409,6 +421,7 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/proj
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/switch-refusal.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
@@ -507,6 +520,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/domains/hub-auth/src/server/audit.test.ts \
+  packages/domains/hub-auth/src/server/upgrade.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \

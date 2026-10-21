@@ -1,4 +1,5 @@
 import * as pty from 'node-pty'
+import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { wrapShellWithUlimit } from '../shell-env'
 
 /**
@@ -152,9 +153,17 @@ export function spawnLocalPty(
 /** Default backend: spawn in-process via node-pty. The returned raw IPty is a
  *  structural `PtyHandle`, so callers keep it as-is. Synchronous — the -l /
  *  shell fallbacks in pty-manager rely on a synchronous spawn (and their onExit
- *  recovery re-spawns run inside a synchronous callback). */
+ *  recovery re-spawns run inside a synchronous callback).
+ *
+ *  Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`: this backend is active
+ *  until the composition root installs the routing one, and a terminal or agent
+ *  must never start in the hub's own process meanwhile. */
 export const localPtyBackend: PtyBackend = {
   spawn(spec: PtySpawnSpec): PtyHandle {
+    assertHubProcessesEnabled('hub.process.spawn', {
+      op: 'pty.spawn',
+      detail: { sessionId: spec.sessionId, taskId: spec.taskId }
+    })
     return spawnLocalPty(spec.file, spec.args, spec.options, spec.transport)
   }
 }

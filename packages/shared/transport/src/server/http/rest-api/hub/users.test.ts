@@ -1,6 +1,6 @@
 /**
  * REST: `/api/hub/users` contract tests — the operator account-management
- * surface behind `slay hub users add|ls|rm`.
+ * surface behind `slay hub users add|ls|disable|enable|role`.
  *
  * The `hubUsers` capability is a STUB here, deliberately: the real logic lives in
  * `@slayzone/hub-auth`'s users.ts (covered against real better-auth in its own
@@ -14,7 +14,7 @@
  * `server.ts`'s `hubAuthRequired = !supervised`), a bearer is required from
  * EVERYONE, loopback included — the route used to trust any loopback peer
  * unconditionally, which a reverse proxy in front of a standalone hub turns into
- * "anyone who reaches the hub can create or delete accounts", defeating
+ * "anyone who reaches the hub can create or disable accounts", defeating
  * `disableSignUp` entirely. The HTTP harness binds 127.0.0.1, so every peer it
  * can produce is loopback — which is why the auth-required matrix is asserted
  * directly against the pure function as well as through a request.
@@ -34,12 +34,20 @@ type HubUsers = NonNullable<RestApiDeps['hubUsers']>
 function stubUsers(overrides: Partial<HubUsers> = {}): HubUsers {
   return {
     ready: () => true,
-    create: async ({ email, name }) => ({
+    create: async ({ email, name, role }) => ({
       ok: true as const,
-      user: { id: 'u1', email, name: name ?? email.split('@')[0]!, password: 'generated-pw' }
+      user: {
+        id: 'u1',
+        email,
+        name: name ?? email.split('@')[0]!,
+        role: role ?? 'user',
+        password: 'generated-pw'
+      }
     }),
     list: async () => [],
-    remove: async () => 'ok' as const,
+    disable: async () => 'ok' as const,
+    enable: async () => 'ok' as const,
+    setRole: async () => 'ok' as const,
     ...overrides
   }
 }
@@ -98,7 +106,7 @@ await describe('POST /api/hub/users', () => {
           seen = input
           return {
             ok: true as const,
-            user: { id: 'u1', email: input.email, name: 'bob', password: 'pw' }
+            user: { id: 'u1', email: input.email, name: 'bob', role: 'user', password: 'pw' }
           }
         }
       }),
@@ -118,7 +126,7 @@ await describe('POST /api/hub/users', () => {
           seen = input
           return {
             ok: true as const,
-            user: { id: 'u1', email: input.email, name: 'bob', password: 'pw' }
+            user: { id: 'u1', email: input.email, name: 'bob', role: 'user', password: 'pw' }
           }
         }
       }),
@@ -126,6 +134,30 @@ await describe('POST /api/hub/users', () => {
       { email: 'bob@example.com', name: '   ' }
     )
     expect(seen!.name).toBeUndefined()
+  })
+
+  test('passes a role through, and 400 for anything but admin or user', async () => {
+    let seen: { role?: string } | null = null
+    const res = await call<{ data: { role: string } }>(
+      stubUsers({
+        create: async (input) => {
+          seen = input
+          return {
+            ok: true as const,
+            user: { id: 'u1', email: input.email, name: 'a', role: input.role!, password: 'pw' }
+          }
+        }
+      }),
+      'POST',
+      { email: 'alice@example.com', role: 'admin' }
+    )
+    expect(res.status).toBe(200)
+    expect(seen!.role).toBe('admin')
+    expect(res.body.data.role).toBe('admin')
+    for (const role of ['owner', '', 1, null]) {
+      const bad = await call(stubUsers(), 'POST', { email: 'alice@example.com', role })
+      expect(bad.status).toBe(400)
+    }
   })
 
   test('409 when the account already exists', async () => {
@@ -187,7 +219,14 @@ await describe('POST /api/hub/users', () => {
 await describe('GET /api/hub/users', () => {
   test('lists accounts', async () => {
     const rows = [
-      { id: 'u1', email: 'alice@example.com', name: 'Alice', createdAt: '2026-01-01T00:00:00.000Z' }
+      {
+        id: 'u1',
+        email: 'alice@example.com',
+        name: 'Alice',
+        role: 'admin' as const,
+        disabledAt: null,
+        createdAt: '2026-01-01T00:00:00.000Z'
+      }
     ]
     const res = await call<{ ok: boolean; data: typeof rows }>(
       stubUsers({ list: async () => rows }),
@@ -216,56 +255,118 @@ await describe('GET /api/hub/users', () => {
   })
 })
 
-await describe('DELETE /api/hub/users', () => {
-  test('removes the named account (email travels in the body, not the path)', async () => {
-    let seen = ''
-    const res = await call<{ ok: boolean; data: { email: string } }>(
+await describe('PATCH /api/hub/users', () => {
+  /** Records which capability method a PATCH reached, with what. */
+  function recording(outcome: 'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin') {
+    const calls: string[] = []
+    const users = stubUsers({
+      disable: async (email) => {
+        calls.push(`disable ${email}`)
+        return outcome as never
+      },
+      enable: async (email) => {
+        calls.push(`enable ${email}`)
+        return outcome as never
+      },
+      setRole: async (email, role) => {
+        calls.push(`role ${email} ${role}`)
+        return outcome as never
+      }
+    })
+    return { users, calls }
+  }
+
+  test('disabled:true disables, disabled:false enables, role sets the role', async () => {
+    const { users, calls } = recording('ok')
+    const disable = await call<{ data: unknown }>(users, 'PATCH', {
+      email: 'alice@example.com',
+      disabled: true
+    })
+    expect(disable.status).toBe(200)
+    expect(disable.body.data).toEqual({ email: 'alice@example.com', disabled: true })
+    expect(
+      (await call(users, 'PATCH', { email: 'alice@example.com', disabled: false })).status
+    ).toBe(200)
+    const role = await call<{ data: unknown }>(users, 'PATCH', {
+      email: 'alice@example.com',
+      role: 'admin'
+    })
+    expect(role.body.data).toEqual({ email: 'alice@example.com', role: 'admin' })
+    expect(calls).toEqual([
+      'disable alice@example.com',
+      'enable alice@example.com',
+      'role alice@example.com admin'
+    ])
+  })
+
+  test('400 unless exactly one valid change is sent', async () => {
+    const { users, calls } = recording('ok')
+    for (const body of [
+      { email: 'alice@example.com' },
+      { email: 'alice@example.com', disabled: 'yes' },
+      { email: 'alice@example.com', role: 'owner' },
+      { email: 'alice@example.com', disabled: true, role: 'admin' },
+      { disabled: true }
+    ]) {
+      expect((await call(users, 'PATCH', body)).status).toBe(400)
+    }
+    expect(calls).toEqual([])
+  })
+
+  test('maps each refusal to a status and a reason', async () => {
+    const cases = [
+      ['not-found', { disabled: true }, 404, 'no user with email'],
+      ['protected', { disabled: true }, 409, SERVICE_EMAIL],
+      ['last-user', { disabled: true }, 409, 'last enabled account'],
+      ['last-admin', { disabled: true }, 409, 'disable the last enabled admin'],
+      ['last-admin', { role: 'user' }, 409, 'demote the last enabled admin']
+    ] as const
+    for (const [outcome, change, status, text] of cases) {
+      const res = await call<{ ok: boolean; error: string }>(recording(outcome).users, 'PATCH', {
+        email: 'alice@example.com',
+        ...change
+      })
+      expect(res.status).toBe(status)
+      expect(res.body.ok).toBe(false)
+      expect(res.body.error.includes(text)).toBe(true)
+    }
+  })
+
+  test('500 with a message when the domain layer throws', async () => {
+    const res = await call<{ message: string }>(
       stubUsers({
-        remove: async (email) => {
-          seen = email
-          return 'ok' as const
+        disable: async () => {
+          throw new Error('sqlite exploded')
         }
       }),
-      'DELETE',
-      { email: 'alice@example.com' }
+      'PATCH',
+      { email: 'alice@example.com', disabled: true }
     )
-    expect(res.status).toBe(200)
-    expect(seen).toBe('alice@example.com')
-    expect(res.body.data.email).toBe('alice@example.com')
+    expect(res.status).toBe(500)
+    expect(res.body.message).toBe('sqlite exploded')
   })
+})
 
-  test('404 for an unknown account', async () => {
-    const res = await call<{ ok: boolean }>(
-      stubUsers({ remove: async () => 'not-found' as const }),
-      'DELETE',
-      { email: 'nobody@example.com' }
-    )
-    expect(res.status).toBe(404)
-  })
-
-  test('409 for the protected computer service identity', async () => {
-    const res = await call<{ ok: boolean; error: string }>(
-      stubUsers({ remove: async () => 'protected' as const }),
-      'DELETE',
-      { email: SERVICE_EMAIL }
-    )
-    expect(res.status).toBe(409)
-    expect(res.body.error.includes('computer service identity')).toBe(true)
-  })
-
-  test('409 when it would remove the last remaining account', async () => {
-    const res = await call<{ ok: boolean; error: string }>(
-      stubUsers({ remove: async () => 'last-user' as const }),
-      'DELETE',
-      { email: 'alice@example.com' }
-    )
-    expect(res.status).toBe(409)
-    expect(res.body.error.includes('unauthenticatable')).toBe(true)
-  })
-
-  test('400 for a missing email', async () => {
-    const res = await call<{ error: string }>(stubUsers(), 'DELETE', {})
-    expect(res.status).toBe(400)
+await describe('DELETE /api/hub/users', () => {
+  test('410: accounts are disabled, never removed — names the renamed command', async () => {
+    const { users, calls } = (() => {
+      const calls: string[] = []
+      return {
+        calls,
+        users: stubUsers({
+          disable: async () => {
+            calls.push('disable')
+            return 'ok' as const
+          }
+        })
+      }
+    })()
+    const res = await call<{ ok: boolean; error: string }>(users, 'DELETE', {
+      email: 'alice@example.com'
+    })
+    expect(res.status).toBe(410)
+    expect(res.body.error.includes('renamed to `slay hub users disable <email>`')).toBe(true)
+    expect(calls).toEqual([])
   })
 })
 
@@ -274,6 +375,7 @@ await describe('the capability gate (slot absent / not ready)', () => {
     for (const [method, body] of [
       ['POST', { email: 'a@b.c' }],
       ['GET', undefined],
+      ['PATCH', { email: 'a@b.c', disabled: true }],
       ['DELETE', { email: 'a@b.c' }]
     ] as const) {
       const res = await call<{ ok: boolean; error: string }>(undefined, method, body)
@@ -346,20 +448,23 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
     expect(res.status).toBe(401)
   })
 
-  test('loopback caller on an auth-enforcing hub MUST present a bearer (remove)', async () => {
-    const res = await call<{ ok: boolean }>(
-      stubUsers(),
-      'DELETE',
-      { email: 'x@example.com' },
-      { required: () => true, verifyBearer: async () => null }
-    )
-    expect(res.status).toBe(401)
+  test('loopback caller on an auth-enforcing hub MUST present a bearer (disable, DELETE)', async () => {
+    for (const [method, body] of [
+      ['PATCH', { email: 'x@example.com', disabled: true }],
+      ['DELETE', { email: 'x@example.com' }]
+    ] as const) {
+      const res = await call<{ ok: boolean }>(stubUsers(), method, body, {
+        required: () => true,
+        verifyBearer: async () => null
+      })
+      expect(res.status).toBe(401)
+    }
   })
 
   test('loopback caller on an auth-enforcing hub administers WITH a valid bearer', async () => {
     const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
       required: () => true,
-      verifyBearer: async () => ({ userId: 'u1', scopes: ['full'] })
+      verifyBearer: async () => ({ userId: 'u1', role: 'admin', scopes: ['full'] })
     })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
@@ -371,7 +476,94 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
     // specifically, not merely "verifyBearer resolved something".
     const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
       required: () => true,
-      verifyBearer: async () => ({ userId: 'u2', scopes: ['read', 'tasks'] })
+      verifyBearer: async () => ({ userId: 'u2', role: 'user', scopes: ['read', 'tasks'] })
+    })
+    expect(res.status).toBe(401)
+  })
+
+  test('a full bearer of a USER account gets 403 on every method; the domain is never called', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    const calls: string[] = []
+    const users = stubUsers({
+      list: async () => {
+        calls.push('list')
+        return []
+      },
+      create: async () => {
+        calls.push('create')
+        return { ok: false as const, reason: 'exists' as const }
+      },
+      disable: async () => {
+        calls.push('disable')
+        return 'ok' as const
+      },
+      enable: async () => {
+        calls.push('enable')
+        return 'ok' as const
+      },
+      setRole: async () => {
+        calls.push('setRole')
+        return 'ok' as const
+      }
+    })
+    const restAuth = {
+      required: () => true,
+      verifyBearer: async () => ({
+        userId: 'u-user',
+        role: 'user' as const,
+        scopes: ['full' as const]
+      })
+    }
+    try {
+      for (const [method, body] of [
+        ['GET', undefined],
+        ['POST', { email: 'new@example.com', role: 'admin' }],
+        ['PATCH', { email: 'other@example.com', disabled: true }],
+        ['PATCH', { email: 'other@example.com', disabled: false }],
+        // Promoting itself — the escalation this gate exists for.
+        ['PATCH', { email: 'self@example.com', role: 'admin' }],
+        ['DELETE', { email: 'other@example.com' }]
+      ] as const) {
+        const res = await call<{ ok: boolean; error: string }>(users, method, body, restAuth)
+        expect(res.status).toBe(403)
+        expect(res.body.error.includes('needs an admin account')).toBe(true)
+      }
+    } finally {
+      setSecurityLogSink()
+    }
+    expect(calls).toEqual([])
+    expect(audit).toHaveLength(6)
+    for (const line of audit) {
+      expect(line.event).toBe('authz.denied')
+      expect(line.actor).toBe('u-user')
+      expect(line.detail).toEqual({ reason: 'not_admin', status: 403 })
+    }
+  })
+
+  test('a full bearer of an ADMIN account passes on every method', async () => {
+    const restAuth = {
+      required: () => true,
+      verifyBearer: async () => ({
+        userId: 'u-admin',
+        role: 'admin' as const,
+        scopes: ['full' as const]
+      })
+    }
+    for (const [method, body, status] of [
+      ['GET', undefined, 200],
+      ['POST', { email: 'new@example.com' }, 200],
+      ['PATCH', { email: 'other@example.com', role: 'admin' }, 200],
+      ['DELETE', { email: 'other@example.com' }, 410]
+    ] as const) {
+      expect((await call(stubUsers(), method, body, restAuth)).status).toBe(status)
+    }
+  })
+
+  test('a scoped web session of an ADMIN account still never passes (401, unchanged)', async () => {
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u-admin', role: 'admin', scopes: ['read', 'tasks'] })
     })
     expect(res.status).toBe(401)
   })
@@ -385,36 +577,52 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
  */
 await describe('hubUsersAuthDecision', () => {
   test('auth NOT required (supervised): loopback allows, off-box is forbidden', () => {
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
-      'forbid'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('forbid')
     // Even a caller that WOULD verify gets forbidden — no sessions exist to check.
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
-      'forbid'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: true, admin: true })
+    ).toBe('forbid')
   })
 
   test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
     // THE REGRESSION MATRIX — the old gate admitted any loopback peer
     // unconditionally, regardless of `authRequired`.
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: false })
+    ).toBe('unauthorized')
+  })
+
+  test('auth REQUIRED: a valid full bearer of a non-admin account is not-admin, from anywhere', () => {
+    for (const loopback of [true, false]) {
+      expect(
+        hubUsersAuthDecision({ loopback, authRequired: true, bearerOk: true, admin: false })
+      ).toBe('not-admin')
+    }
+    // Admin without a valid full bearer is still a credential problem, not a role one.
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
+    // Login off: no sessions, no roles — loopback alone decides, as before.
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('allow')
   })
 
   test('off-box on an enforcing hub: valid bearer allows, missing/invalid is 401', () => {
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: true })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: false, admin: false })
+    ).toBe('unauthorized')
   })
 })
 
@@ -447,26 +655,40 @@ await describe('audit (T-03)', () => {
     const users = stubUsers({
       create: async ({ email }) => {
         actors.push(currentSecurityContext()?.actor)
-        return { ok: true as const, user: { id: 'u9', email, name: 'n', password: 'pw' } }
+        return {
+          ok: true as const,
+          user: { id: 'u9', email, name: 'n', role: 'user', password: 'pw' }
+        }
       },
-      remove: async () => {
+      disable: async () => {
+        actors.push(currentSecurityContext()?.actor)
+        return 'ok' as const
+      },
+      enable: async () => {
+        actors.push(currentSecurityContext()?.actor)
+        return 'ok' as const
+      },
+      setRole: async () => {
         actors.push(currentSecurityContext()?.actor)
         return 'ok' as const
       }
     })
-    let principal: { userId: string; scopes: Array<'full'> } | null = null
+    let principal: { userId: string; role: 'admin'; scopes: Array<'full'> } | null = null
     const rest = await mount(users, { required: () => true, verifyBearer: async () => principal })
     try {
       expect(
         (await rest.request('POST', '/api/hub/users', { email: 'a@example.com' })).status
       ).toBe(401)
-      principal = { userId: 'admin-1', scopes: ['full'] }
+      principal = { userId: 'admin-1', role: 'admin', scopes: ['full'] }
       expect(
         (await rest.request('POST', '/api/hub/users', { email: 'a@example.com' })).status
       ).toBe(200)
-      expect(
-        (await rest.request('DELETE', '/api/hub/users', { email: 'a@example.com' })).status
-      ).toBe(200)
+      for (const change of [{ disabled: true }, { disabled: false }, { role: 'admin' }]) {
+        expect(
+          (await rest.request('PATCH', '/api/hub/users', { email: 'a@example.com', ...change }))
+            .status
+        ).toBe(200)
+      }
     } finally {
       setSecurityLogSink()
       await rest.close()
@@ -474,7 +696,7 @@ await describe('audit (T-03)', () => {
     expect(audit.map((l) => `${l.event}:${l.outcome}`)).toEqual(['authz.denied:denied'])
     expect(audit[0]!.route).toBe('POST /api/hub/users')
     expect((audit[0]!.detail as { reason: string }).reason).toBe('unauthenticated')
-    expect(actors).toEqual(['admin-1', 'admin-1'])
+    expect(actors).toEqual(['admin-1', 'admin-1', 'admin-1', 'admin-1'])
     expect(JSON.stringify(audit)).not.toContain('a@example.com')
   })
 })
