@@ -25,7 +25,7 @@ let auth: HubAuth
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'hub-users-test-'))
   auth = await createHubAuth({
-    dbPath: join(tmpDir, 'hub-auth.sqlite'),
+    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-auth-test-secret-at-least-32-chars-long'
   })

@@ -162,7 +162,7 @@ async function main(): Promise<void> {
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'computer-restart-'))
   const auth = await createHubAuth({
-    dbPath: join(tmpDir, 'hub-auth.sqlite'),
+    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
     baseURL: 'http://127.0.0.1:9998',
     secret: 'computer-restart-survival-secret-at-least-32-chars'
   })

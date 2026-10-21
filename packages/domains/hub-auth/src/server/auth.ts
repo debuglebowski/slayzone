@@ -8,7 +8,7 @@ import { bearer, jwt, organization } from 'better-auth/plugins'
 
 export interface HubAuthConfig {
   /**
-   * Path to the hub-auth sqlite file (e.g. `<dataDir>/hub-auth.sqlite`).
+   * Path to the hub-auth sqlite file (e.g. `<dataDir>/slayzone.auth.sqlite`).
    * This is hub-auth's OWN database — never the app's SlayzoneDb.
    */
   dbPath: string

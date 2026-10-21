@@ -7,7 +7,7 @@
  * and hand-edits — which is where a migration goes wrong. It is opt-in because it
  * needs a real store to point at:
  *
- *   SLAYZONE_REAL_STORE_FIXTURE=~/.slayzone/stable/hub/slayzone.sqlite \
+ *   SLAYZONE_REAL_STORE_FIXTURE=~/.slayzone/stable/hub/slayzone.data.sqlite \
  *     ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *       --experimental-loader ./packages/shared/test-utils/loader.ts \
  *       packages/apps/app/src/main/client-settings-migration.realstore.test.ts

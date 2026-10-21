@@ -51,7 +51,7 @@ const hubRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-done-init-hub-'))
 const storageDir = path.join(hubRoot, 'storage')
 fs.mkdirSync(storageDir, { recursive: true })
 
-const db = new Database(path.join(storageDir, 'slayzone.dev.sqlite'))
+const db = new Database(path.join(storageDir, 'slayzone.dev.data.sqlite'))
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
@@ -172,7 +172,7 @@ const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
 
 await describe('slay tasks done works without a local database', () => {
   test('sanity: this root really has no database file', () => {
-    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.sqlite'))).toBe(false)
+    expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.data.sqlite'))).toBe(false)
   })
 
   test('tasks done <prefix> writes the project done status + echoes id/title', async () => {

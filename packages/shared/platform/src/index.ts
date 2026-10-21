@@ -70,9 +70,12 @@ export {
   getManualInstallHint,
   type CliInstallResult
 } from './cli-install'
+export { adoptRenamedDatabase, type AdoptRenamedDbResult } from './adopt-renamed-db'
 export {
   DB_PRAGMAS,
   getDbName,
+  getLegacyDbName,
+  getDiagnosticsDbName,
   type SlayzoneDb,
   type PreparedBridge,
   type BatchOp,

@@ -33,12 +33,12 @@ if (!fs.existsSync(SLAY_BIN)) {
 }
 
 // tmpDir is the install ROOT handed to the CLI; it DERIVES
-// `<ROOT>/storage/slayzone.dev.sqlite` from it (SLAYZONE_DEV=1 below picks the
+// `<ROOT>/storage/slayzone.dev.data.sqlite` from it (SLAYZONE_DEV=1 below picks the
 // `.dev` filename), so the fixture DB has to live exactly there.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cli-read-'))
 const storageDir = path.join(tmpDir, 'storage')
 fs.mkdirSync(storageDir, { recursive: true })
-const db = new Database(path.join(storageDir, 'slayzone.dev.sqlite'))
+const db = new Database(path.join(storageDir, 'slayzone.dev.data.sqlite'))
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,

@@ -32,7 +32,7 @@ test.describe('CLI: slay', () => {
 
     // The install ROOT the running app was launched with. `cliEnv` narrows it to
     // the app's channel-scoped hub root, which is where the DB actually lives, so
-    // the CLI derives the same slayzone.dev.sqlite (tests are never packaged).
+    // the CLI derives the same slayzone.dev.data.sqlite (tests are never packaged).
     rootDir = await cliRoot(electronApp)
 
     // Discover dynamic MCP port

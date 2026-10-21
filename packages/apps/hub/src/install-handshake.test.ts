@@ -159,7 +159,12 @@ async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: st
 
 /** Real dev + prod primary DBs — must be byte-unchanged across this test. */
 const STATE_DIR = join(homedir(), 'Library', 'Application Support', 'slayzone')
-const GUARDED = ['slayzone.dev.sqlite', 'slayzone.sqlite'].map((f) => join(STATE_DIR, f))
+const GUARDED = [
+  'slayzone.dev.sqlite',
+  'slayzone.sqlite',
+  'slayzone.dev.data.sqlite',
+  'slayzone.data.sqlite'
+].map((f) => join(STATE_DIR, f))
 function fingerprint(p: string): string {
   try {
     const s = statSync(p)

@@ -199,7 +199,7 @@ function makeHarness(
     env: { ...process.env, ...fakeEnv } as NodeJS.ProcessEnv,
     // Diagnostics-only echo, DERIVED by the caller in production (there is no
     // path-pointing env var). Overridable per-test through `extra`.
-    dbPath: path.join(dir, 'slayzone.dev.sqlite'),
+    dbPath: path.join(dir, 'slayzone.dev.data.sqlite'),
     logger: (line) => {
       const entry = { t: Date.now(), line }
       ctx.logs.push(entry)
@@ -432,7 +432,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   }
   const dir = mkTmp()
   // Single ROOT for BOTH the seeder and the supervised child: the DB path is
-  // DERIVED (`<ROOT>/storage/slayzone.sqlite`) and there is no path-pointing env
+  // DERIVED (`<ROOT>/storage/slayzone.data.sqlite`) and there is no path-pointing env
   // var to hand over, so both processes must point at the SAME ROOT to open the
   // same file.
   //
@@ -445,7 +445,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
   // parent-death behaviour under test.
   //
   // Seed by booting the SAME bin in STANDALONE mode (no SLAYZONE_SUPERVISED), which
-  // runs the real schema bootstrap at `<dir>/slayzone.sqlite`, then killing it once
+  // runs the real schema bootstrap at `<dir>/slayzone.data.sqlite`, then killing it once
   // it reports listening. We can't `import { runMigrations }` in-process:
   // migrations.ts pulls `@slayzone/ai-config/shared` → `@dagrejs/dagre` (ESM) and
   // this test runs with NO loader (run_test_electron_strict), so the import hits
@@ -468,7 +468,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
         ...seedEnv,
         ELECTRON_RUN_AS_NODE: '1',
         // openServerDatabase bootstraps schema at the DERIVED
-        // <ROOT>/storage/slayzone.sqlite (same dir the child opens).
+        // <ROOT>/storage/slayzone.data.sqlite (same dir the child opens).
         SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
         SLAYZONE_ROOT: dir,
         SLAYZONE_HUB_AUTH_SECRET: 'seed-only-secret-at-least-32-chars-long'
@@ -498,7 +498,7 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
       SLAYZONE_SUPERVISED: '1',
       SLAYZONE_HUB_ADDRESS: '127.0.0.1:0',
       // DB path DERIVES from ROOT (there is no path handoff var); the seeder
-      // above bootstrapped <dir>/storage/slayzone.sqlite, which this child opens.
+      // above bootstrapped <dir>/storage/slayzone.data.sqlite, which this child opens.
       SLAYZONE_ROOT: dir
     },
     stdio: ['pipe', 'pipe', 'pipe']

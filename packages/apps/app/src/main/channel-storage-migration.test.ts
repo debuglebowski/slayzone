@@ -68,11 +68,13 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
-  check('DB copied', readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
+  // Source keeps the legacy name; the copy lands under the renamed main DB.
+  check('DB copied', readFileSync(join(hubRoot, 'slayzone.dev.data.sqlite'), 'utf8') === 'DEVDB')
+  check('legacy name NOT created in the hub root', !existsSync(join(hubRoot, 'slayzone.dev.sqlite')))
   check(
     'wal + shm copied',
-    existsSync(join(hubRoot, 'slayzone.dev.sqlite-wal')) &&
-      existsSync(join(hubRoot, 'slayzone.dev.sqlite-shm'))
+    existsSync(join(hubRoot, 'slayzone.dev.data.sqlite-wal')) &&
+      existsSync(join(hubRoot, 'slayzone.dev.data.sqlite-shm'))
   )
   check(
     'artifacts copied (recursive)',
@@ -184,7 +186,10 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
-  check('hub slice completed independently', existsSync(join(hubRoot, 'slayzone.dev.sqlite')))
+  check(
+    'hub slice completed independently',
+    existsSync(join(hubRoot, 'slayzone.dev.data.sqlite'))
+  )
   check(
     'computer slice completed independently (empty state, no legacy creds)',
     Object.keys(readState(computerRoot)).length === 0
@@ -234,7 +239,7 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 {
   const { legacyRoot, hubRoot, computerRoot } = setup()
   mkdirSync(hubRoot, { recursive: true })
-  writeFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'EXISTING')
+  writeFileSync(join(hubRoot, 'slayzone.dev.data.sqlite'), 'EXISTING')
   writeFileSync(join(hubRoot, 'boot-config.json'), '{"already":"here"}')
   mkdirSync(join(legacyRoot, 'storage'), { recursive: true })
   writeFileSync(join(legacyRoot, 'storage', 'slayzone.dev.sqlite'), 'INCOMING')
@@ -244,7 +249,7 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 
   check(
     'existing DB not clobbered',
-    readFileSync(join(hubRoot, 'slayzone.dev.sqlite'), 'utf8') === 'EXISTING'
+    readFileSync(join(hubRoot, 'slayzone.dev.data.sqlite'), 'utf8') === 'EXISTING'
   )
   check(
     'existing boot-config.json not clobbered',

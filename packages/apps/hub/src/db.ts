@@ -2,7 +2,10 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import {
   DB_PRAGMAS,
+  adoptRenamedDatabase,
   getDbName,
+  getDiagnosticsDbName,
+  getLegacyDbName,
   getStorageDir,
   type SlayzoneDb,
   type PreparedBridge,
@@ -124,6 +127,13 @@ class SyncSlayzoneDb implements SlayzoneDb {
  * Async only because of that backup; every query path stays synchronous.
  */
 export async function openServerDatabase(): Promise<SlayzoneDb> {
+  // The main DB was renamed `slayzone.sqlite` → `slayzone.data.sqlite`. A hub root a
+  // beta wrote (and every standalone hub) still holds the old name; move it BEFORE
+  // opening, or `new Database()` would create a fresh empty file beside the real one.
+  // The desktop app does the same earlier in boot for its own copy migrations; this is
+  // the one that covers a standalone hub, and it is a no-op once done.
+  const dev = process.env.SLAYZONE_DEV === '1'
+  adoptRenamedDatabase(getStorageDir(), getLegacyDbName(!dev), getDbName(!dev))
   const db = new Database(getDatabasePathFromEnv())
   for (const pragma of DB_PRAGMAS) db.pragma(pragma)
   // Same derivation as the DB path itself, so the backup can never be named for
@@ -141,7 +151,7 @@ export async function openServerDatabase(): Promise<SlayzoneDb> {
 
 /**
  * Open the separate diagnostics events DB (`slayzone[.dev].diagnostics.sqlite`,
- * sibling of the main DB). The sidecar owns pty + the agent pool, so its
+ * sibling of the main `slayzone[.dev].data.sqlite`). The sidecar owns pty + the agent pool, so its
  * `recordDiagnosticEvent` calls must persist HERE — otherwise they buffer and
  * drop (the events DB was only ever bound in the Electron host, so sidecar
  * diagnostics were invisible). WAL + busy_timeout (DB_PRAGMAS) make the two-process
@@ -149,7 +159,12 @@ export async function openServerDatabase(): Promise<SlayzoneDb> {
  * "mirrored", which is what let the two drift.
  */
 export function openServerDiagnosticsDatabase(): SlayzoneDb {
-  const diagPath = getDatabasePathFromEnv().replace(/\.sqlite$/, '.diagnostics.sqlite')
+  // Named explicitly, NOT derived from the main DB's name: that would now yield
+  // `slayzone.data.diagnostics.sqlite`, a second diagnostics DB beside the real one.
+  const diagPath = path.join(
+    getStorageDir(),
+    getDiagnosticsDbName(process.env.SLAYZONE_DEV !== '1')
+  )
   const db = new Database(diagPath)
   // ONE schema definition, shared with the Electron host's diag worker
   // (diagnostics/server/schema.ts). These used to diverge — four indexes and

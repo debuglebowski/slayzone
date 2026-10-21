@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { getDbName } from '@slayzone/platform'
+import { getDbName, getLegacyDbName } from '@slayzone/platform'
 import { updateJsonFile } from '@slayzone/platform/slayzone-config'
 import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-utils'
 
@@ -89,7 +89,8 @@ function migrateHubSlice(legacyRoot: string, hubRoot: string, packaged: boolean)
 
   const legacyStorageDir = join(legacyRoot, 'storage')
   if (existsSync(legacyStorageDir)) {
-    copyDbTriplet(legacyStorageDir, hubRoot, getDbName(packaged))
+    // The flat beta source keeps the pre-rename DB name; the copy lands under the new one.
+    copyDbTriplet(legacyStorageDir, hubRoot, getLegacyDbName(packaged), getDbName(packaged))
     for (const name of ['blobs', 'artifacts']) {
       const src = join(legacyStorageDir, name)
       if (existsSync(src)) mergeMissingFiles(src, join(hubRoot, name))

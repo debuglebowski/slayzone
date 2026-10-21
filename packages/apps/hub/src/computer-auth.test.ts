@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   const tmpDir = mkdtempSync(join(tmpdir(), 'computer-auth-test-'))
   const { db, close } = createMigratedDb()
   const auth = await createHubAuth({
-    dbPath: join(tmpDir, 'hub-auth.sqlite'),
+    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
     baseURL: 'http://127.0.0.1:9999',
     secret: 'computer-auth-test-secret-at-least-32-chars-long'
   })

@@ -602,9 +602,9 @@ export function clientRoot(root: string): string {
   return path.join(root, 'dev', 'client')
 }
 
-/** `<root>/dev/hub/slayzone.dev.sqlite` — for specs that open the DB directly. */
+/** `<root>/dev/hub/slayzone.dev.data.sqlite` — for specs that open the DB directly. */
 export function cliDbPath(root: string): string {
-  return path.join(supervisedHubRoot(root), 'slayzone.dev.sqlite')
+  return path.join(supervisedHubRoot(root), 'slayzone.dev.data.sqlite')
 }
 
 /**

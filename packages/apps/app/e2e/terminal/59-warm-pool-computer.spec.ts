@@ -128,7 +128,7 @@ test.describe('Warm pool (computer-hosted)', () => {
 /**
  * Read the SIDECAR's sqlite file directly.
  *
- * NOT `window.__db`: that is the MAIN process's `userdata/slayzone.dev.sqlite`,
+ * NOT `window.__db`: that is the MAIN process's `userdata/slayzone.dev.diagnostics.sqlite`,
  * while the warm pool runs in the SIDECAR and writes the app's real DB under its
  * channel-scoped hub root — two different files with the same basename.
  * Diagnostics are a third file again. Querying the wrong one silently returns

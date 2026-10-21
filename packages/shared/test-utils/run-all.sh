@@ -207,6 +207,12 @@ run_test packages/apps/app/src/main/channel-storage-migration.test.ts
 # project-icons/ was in neither allow-list above: own sentinel (reaches users a beta
 # already migrated), copy-only, non-fatal. The hub repoints the DB rows afterwards.
 run_test packages/apps/app/src/main/project-icons-migration.test.ts
+# Main DB renamed slayzone.sqlite → slayzone.data.sqlite. The in-place rename helper
+# (real better-sqlite3, rows living only in the WAL) and the app's whole first-launch
+# sequence end to end — the latter pins that a beta hub root's live DB is adopted BEFORE
+# the copy migrations can plant an older one at the new name.
+run_test_electron_strict_loader packages/shared/platform/src/adopt-renamed-db.test.ts
+run_test packages/apps/app/src/main/data-paths.test.ts
 run_test_electron_strict_loader packages/domains/projects/src/server/project-icons-relocate.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
@@ -479,6 +485,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \
+  packages/apps/hub/src/auth-db.test.ts \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \

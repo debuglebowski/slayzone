@@ -28,9 +28,14 @@ const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
   nextBackupNumber: 1
 }
 
-// slayzone.dev.2026-03-07T12-30-00-000Z.manual.sqlite
+// slayzone.dev.data.2026-03-07T12-30-00-000Z.manual.sqlite
+//
+// The prefix is the live DB filename minus `.sqlite`: `slayzone.data` / `slayzone.dev.data`
+// now, `slayzone` / `slayzone.dev` before the main DB was renamed. Backups made under
+// the old prefix are the user's safety net and must keep listing, so `.data` is optional.
+// `slayzone.auth.*` and `slayzone.diagnostics.*` deliberately do not match.
 const BACKUP_REGEX =
-  /^slayzone(?:\.dev)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
+  /^slayzone(?:\.dev)?(?:\.data)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
 
 export type BackupDeps = {
   db: SlayzoneDb

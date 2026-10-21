@@ -553,7 +553,7 @@ describe('join-token recovery (single-use token already spent)', () => {
 describe('needs-re-enrollment (the hub no longer recognizes this computer)', () => {
   // The real-world shape: the computer holds working-looking credentials, but the hub
   // cannot verify them because ITS state changed — storage deleted, one of the two
-  // DBs (hub-auth.sqlite / the computers row) restored without the other, or the
+  // DBs (slayzone.auth.sqlite / the computers row) restored without the other, or the
   // computer revoked. All human actions, so the answer is "enroll it again", not a
   // retry and not an automatic re-mint.
   it('reports needs-re-enrollment with an actionable message, and stops', async () => {

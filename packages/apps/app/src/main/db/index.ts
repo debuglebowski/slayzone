@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import path from 'path'
-import { getDbName } from '@slayzone/platform'
+import { getDbName, getDiagnosticsDbName } from '@slayzone/platform'
 import { getStorageDir } from '../data-paths'
 import { createDiagBridge, type DiagBridge } from './diag-bridge'
 
@@ -11,8 +11,7 @@ export const getDatabasePath = (): string => {
 
 const getDiagnosticsDatabasePath = (): string => {
   const userDataPath = getStorageDir()
-  const dbName = app.isPackaged ? 'slayzone.diagnostics.sqlite' : 'slayzone.dev.diagnostics.sqlite'
-  return path.join(userDataPath, dbName)
+  return path.join(userDataPath, getDiagnosticsDbName(app.isPackaged))
 }
 
 let diagDb: DiagBridge | null = null
@@ -20,7 +19,7 @@ let diagDb: DiagBridge | null = null
 /**
  * Spawn the DIAGNOSTICS worker. That is the only database this process opens.
  *
- * The shared `slayzone.sqlite` is the HUB's — it migrates it in every mode and
+ * The shared `slayzone.data.sqlite` is the HUB's — it migrates it in every mode and
  * serves every consumer that used to reach it from here. What is left is the
  * machine-local diagnostics events file, which stays because main must record
  * boot, crash-detection and single-instance-lock events when NO hub exists:

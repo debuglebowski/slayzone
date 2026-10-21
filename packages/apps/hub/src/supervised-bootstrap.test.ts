@@ -25,12 +25,20 @@
  *     --experimental-loader ./packages/shared/test-utils/loader.ts \
  *     packages/apps/hub/src/supervised-bootstrap.test.ts
  */
-import { mkdtempSync, rmSync, readdirSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect } from '../../../shared/test-utils/ipc-harness.js'
 import { LATEST_MIGRATION_VERSION } from '@slayzone/transport/db-bootstrap'
-import { openServerDatabase } from './db.js'
+import { openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
 
 const ROOT_KEY = 'SLAYZONE_ROOT'
 const SUPERVISED_KEY = 'SLAYZONE_SUPERVISED'
@@ -104,4 +112,98 @@ await test('a second open is a no-op — no re-migration, no error', async () =>
     const backups = readdirSync(dir).filter((f) => f.includes('.migration.'))
     expect(backups.length <= 1).toBe(true)
   })
+})
+
+// --- the main DB was renamed slayzone.sqlite → slayzone.data.sqlite -------------------
+// A beta hub root (and a standalone hub root) still holds the old name. The hub must
+// adopt it BEFORE opening, or it would create a fresh empty database beside the real one
+// and the user would see all their data gone.
+
+const DEV_KEY = 'SLAYZONE_DEV'
+
+async function withDevFlag<T>(dev: boolean, fn: () => Promise<T>): Promise<T> {
+  const prior = process.env[DEV_KEY]
+  if (dev) process.env[DEV_KEY] = '1'
+  else delete process.env[DEV_KEY]
+  try {
+    return await fn()
+  } finally {
+    if (prior === undefined) delete process.env[DEV_KEY]
+    else process.env[DEV_KEY] = prior
+  }
+}
+
+/** Build a real store at the NEW name, put a marker row in it, then rename it back to
+ *  the legacy name — exactly what a beta hub root looks like. */
+async function makeLegacyStore(dir: string, legacyName: string, newName: string): Promise<void> {
+  const db = await openServerDatabase()
+  await db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('marker', 'survived')")
+  await db.close()
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (existsSync(join(dir, newName + suffix))) {
+      renameSync(join(dir, newName + suffix), join(dir, legacyName + suffix))
+    }
+  }
+}
+
+const marker = async (db: { get: (sql: string) => Promise<unknown> }): Promise<string | undefined> =>
+  ((await db.get("SELECT value FROM settings WHERE key = 'marker'")) as { value: string } | undefined)
+    ?.value
+
+for (const [dev, legacyName, newName] of [
+  [false, 'slayzone.sqlite', 'slayzone.data.sqlite'],
+  [true, 'slayzone.dev.sqlite', 'slayzone.dev.data.sqlite']
+] as const) {
+  await test(`a beta store named ${legacyName} is adopted as ${newName} with its data`, async () => {
+    await withDevFlag(dev, () =>
+      withEmptyStore(async (dir) => {
+        await makeLegacyStore(dir, legacyName, newName)
+        expect(existsSync(join(dir, legacyName))).toBe(true)
+        expect(existsSync(join(dir, newName))).toBe(false)
+
+        const db = await openServerDatabase()
+        try {
+          expect(await marker(db)).toBe('survived')
+          expect(await userVersion(db)).toBe(LATEST_MIGRATION_VERSION)
+        } finally {
+          await db.close()
+        }
+        expect(existsSync(join(dir, newName))).toBe(true)
+        expect(existsSync(join(dir, legacyName))).toBe(false)
+      })
+    )
+  })
+}
+
+await test('a store that already has the new name is left alone (no second database)', async () => {
+  await withEmptyStore(async (dir) => {
+    const first = await openServerDatabase()
+    await first.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('marker', 'current')")
+    await first.close()
+    writeFileSync(join(dir, 'slayzone.sqlite'), 'STALE-OLD-FILE')
+    const db = await openServerDatabase()
+    try {
+      expect(await marker(db)).toBe('current')
+    } finally {
+      await db.close()
+    }
+    expect(readFileSync(join(dir, 'slayzone.sqlite'), 'utf8')).toBe('STALE-OLD-FILE')
+  })
+})
+
+await test('the diagnostics DB keeps its own name (not slayzone.data.diagnostics.sqlite)', async () => {
+  for (const [dev, expected] of [
+    [false, 'slayzone.diagnostics.sqlite'],
+    [true, 'slayzone.dev.diagnostics.sqlite']
+  ] as const) {
+    await withDevFlag(dev, () =>
+      withEmptyStore(async (dir) => {
+        const diag = openServerDiagnosticsDatabase()
+        await diag.close()
+        const files = readdirSync(dir)
+        expect(files.includes(expected)).toBe(true)
+        expect(files.some((f) => f.includes('.data.diagnostics'))).toBe(false)
+      })
+    )
+  }
 })

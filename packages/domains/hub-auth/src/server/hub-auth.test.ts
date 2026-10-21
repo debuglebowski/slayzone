@@ -27,7 +27,7 @@ let password: string
 
 beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'hub-auth-test-'))
-  dbPath = join(tmpDir, 'hub-auth.sqlite')
+  dbPath = join(tmpDir, 'slayzone.auth.sqlite')
   auth = await createHubAuth({
     dbPath,
     baseURL: 'http://127.0.0.1:9999',

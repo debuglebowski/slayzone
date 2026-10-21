@@ -159,6 +159,7 @@ import { wireHostKillStamp } from './host-kill.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
 import { getDatabasePathFromEnv } from './db.js'
+import { resolveAuthDbPath } from './auth-db.js'
 import { createPtyEnricher } from '@slayzone/task-terminals/server'
 
 /**
@@ -1346,7 +1347,7 @@ export function composeServer(opts: {
 
   computersReady = (async () => {
     const hubAuth = await createHubAuth({
-      dbPath: join(dataRoot, 'hub-auth.sqlite'),
+      dbPath: resolveAuthDbPath(dataRoot),
       // better-auth baseURL: a fixed loopback constant. Computers authenticate via
       // api-key/bearer (not cookies/redirects), so this is internal plumbing and
       // never needs an operator override — the SLAYZONE_COMPUTER_TRANSPORT_BASE_URL

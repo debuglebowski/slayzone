@@ -39,7 +39,7 @@ import { launchIsolatedElectron, bootConfigPath } from '../fixtures/electron'
  *
  * Isolation: `launchIsolatedElectron` gives a throwaway userdata dir, and the
  * spec pins `SLAYZONE_ROOT` to it (via the fixture's extraEnv) so the computer
- * boot's identity/*.pem + hub-auth.sqlite land under the app's channel-scoped
+ * boot's identity/*.pem + slayzone.auth.sqlite land under the app's channel-scoped
  * hub root inside it, NOT the real dev store. The computer's credential store +
  * config also live under the temp dir.
  *
@@ -202,7 +202,7 @@ base.describe('Computer loopback (computer ON)', () => {
           JSON.stringify({ server_mode: 'local' }, null, 2)
         )
       },
-      // Pin the sidecar store to the isolated dir (identity + hub-auth.sqlite land
+      // Pin the sidecar store to the isolated dir (identity + slayzone.auth.sqlite land
       // here, NOT the real dev store).
       //
       // e2e is computer-ON by default, so the in-app supervisor ALSO auto-enrolls a

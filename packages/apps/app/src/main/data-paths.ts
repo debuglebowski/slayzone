@@ -1,4 +1,10 @@
-import { getSlayzoneHomeDir, getSupervisedRoot } from '@slayzone/platform'
+import {
+  adoptRenamedDatabase,
+  getDbName,
+  getLegacyDbName,
+  getSlayzoneHomeDir,
+  getSupervisedRoot
+} from '@slayzone/platform'
 import { ensureChannelScopedStorage } from './channel-storage-migration'
 import { dirname, join } from 'node:path'
 import { ensureStorageDir } from './storage-migration'
@@ -45,6 +51,13 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  */
 export function initStorageDir(legacyStateDir: string, packaged: boolean): string {
   const target = getSupervisedRoot('hub')
+  // FIRST, before any copy: a hub root a beta wrote still holds its live DB under the
+  // pre-rename name (`slayzone.sqlite`). The copies below only fill an ABSENT
+  // destination, and the destination is now `slayzone.data.sqlite` — so with no file at
+  // that name yet they would plant an old userData/flat-storage database there and
+  // strand the user's real, current one beside it. Moving the live file to its new name
+  // first closes that. Idempotent; a no-op on a fresh or already-renamed root.
+  adoptRenamedDatabase(target, getLegacyDbName(packaged), getDbName(packaged))
   ensureChannelScopedStorage({
     // Migration SOURCE, strictly read-only: the pre-channel-scoping flat root,
     // where the old shared layout kept `storage/` and `computers/`.

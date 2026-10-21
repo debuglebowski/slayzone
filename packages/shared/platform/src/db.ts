@@ -67,7 +67,29 @@ export interface SlayzoneDb {
  * The DB filename for a given build. `packaged` Electron uses the production
  * file; everything else uses the dev file. Single source of truth so the
  * Electron host and a standalone side-car never disagree on which file to open.
+ *
+ * Databases are named `slayzone.<what>.sqlite`: this one holds the app's data
+ * (`data`), its siblings are `slayzone.auth.sqlite` and
+ * `slayzone.diagnostics.sqlite`. Dev inserts `.dev` after `slayzone`.
  */
 export function getDbName(packaged: boolean): string {
+  return packaged ? 'slayzone.data.sqlite' : 'slayzone.dev.data.sqlite'
+}
+
+/**
+ * What the main DB was called before the rename (`slayzone.sqlite`). Every legacy
+ * SOURCE dir (v0.35.0 userData, the flat beta `storage/`) still uses this name, and
+ * so does a hub root written by a beta; `adoptRenamedDatabase` moves the latter.
+ */
+export function getLegacyDbName(packaged: boolean): string {
   return packaged ? 'slayzone.sqlite' : 'slayzone.dev.sqlite'
+}
+
+/**
+ * The machine-local diagnostics events DB. NOT derived from {@link getDbName} by
+ * string replacement (that would yield `slayzone.data.diagnostics.sqlite`): it kept
+ * its name when the main DB was renamed.
+ */
+export function getDiagnosticsDbName(packaged: boolean): string {
+  return packaged ? 'slayzone.diagnostics.sqlite' : 'slayzone.dev.diagnostics.sqlite'
 }

@@ -35,7 +35,8 @@ import { resolveHubTarget } from './hub-config'
  * The fixed port THIS invocation's channel expects the sidecar on.
  *
  * Keyed on `SLAYZONE_DEV`, the same bit that used to pick the database FILENAME
- * (`slayzone.dev.sqlite` vs `slayzone.sqlite`) — so `slay` and `slay --dev` keep
+ * (`slayzone.dev.sqlite` vs `slayzone.sqlite`, now `slayzone.dev.data.sqlite` vs
+ * `slayzone.data.sqlite`) — so `slay` and `slay --dev` keep
  * targeting the same two installs they always did, just addressed by port instead
  * of by file. The app sets it from `app.isPackaged` when it spawns the sidecar, and
  * it is `global`-scoped in the env manifest, so a task terminal inherits it.

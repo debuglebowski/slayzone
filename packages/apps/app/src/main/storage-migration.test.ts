@@ -62,11 +62,13 @@ try {
     ensureStorageDir(old, storage, /* packaged */ true)
 
     // Copied into new storage:
-    check('prod DB copied', readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'PRODDB')
+    // The legacy source keeps the old name; the copy lands under the renamed main DB.
+    check('prod DB copied', readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB')
+    check('legacy name NOT created in storage', !existsSync(join(storage, 'slayzone.sqlite')))
     check(
       'wal + shm copied',
-      existsSync(join(storage, 'slayzone.sqlite-wal')) &&
-        existsSync(join(storage, 'slayzone.sqlite-shm'))
+      existsSync(join(storage, 'slayzone.data.sqlite-wal')) &&
+        existsSync(join(storage, 'slayzone.data.sqlite-shm'))
     )
     check(
       'artifacts copied (recursive)',
@@ -96,7 +98,11 @@ try {
     )
 
     // Channel scope — packaged NEVER touches the dev DB:
-    check('dev DB NOT migrated by prod channel', !existsSync(join(storage, 'slayzone.dev.sqlite')))
+    check(
+      'dev DB NOT migrated by prod channel',
+      !existsSync(join(storage, 'slayzone.dev.sqlite')) &&
+        !existsSync(join(storage, 'slayzone.dev.data.sqlite'))
+    )
     check(
       'source dev DB untouched',
       readFileSync(join(old, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB'
@@ -113,8 +119,15 @@ try {
 
     ensureStorageDir(old, storage, /* packaged */ false)
 
-    check('dev DB copied', readFileSync(join(storage, 'slayzone.dev.sqlite'), 'utf8') === 'DEVDB')
-    check('dev channel NEVER copies prod DB', !existsSync(join(storage, 'slayzone.sqlite')))
+    check(
+      'dev DB copied',
+      readFileSync(join(storage, 'slayzone.dev.data.sqlite'), 'utf8') === 'DEVDB'
+    )
+    check(
+      'dev channel NEVER copies prod DB',
+      !existsSync(join(storage, 'slayzone.sqlite')) &&
+        !existsSync(join(storage, 'slayzone.data.sqlite'))
+    )
     check(
       'dev channel NEVER touches prod DB source',
       readFileSync(join(old, 'slayzone.sqlite'), 'utf8') === 'PRODDB'
@@ -191,7 +204,7 @@ try {
     const { old, storage } = setup()
     writeFileSync(join(old, 'slayzone.sqlite'), 'DB')
     ensureStorageDir(old, storage, true)
-    check('first run copies DB', readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'DB')
+    check('first run copies DB', readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'DB')
     // Simulate the running prod app writing a NEW blob to the shared dir afterward.
     mkdirSync(join(old, 'blobs', 'ff'), { recursive: true })
     writeFileSync(join(old, 'blobs', 'ff', 'laterblob'), 'LATER')
@@ -213,12 +226,12 @@ try {
   {
     const { old, storage } = setup()
     mkdirSync(storage, { recursive: true })
-    writeFileSync(join(storage, 'slayzone.sqlite'), 'EXISTING')
+    writeFileSync(join(storage, 'slayzone.data.sqlite'), 'EXISTING')
     writeFileSync(join(old, 'slayzone.sqlite'), 'INCOMING')
     ensureStorageDir(old, storage, true)
     check(
       'existing storage DB not clobbered',
-      readFileSync(join(storage, 'slayzone.sqlite'), 'utf8') === 'EXISTING'
+      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'EXISTING'
     )
     check('source left intact when target exists', existsSync(join(old, 'slayzone.sqlite')))
   }

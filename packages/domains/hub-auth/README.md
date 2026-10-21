@@ -26,7 +26,8 @@ package. `bearer`, `jwt`, and `organization` still come from
 ## Storage / driver choice
 
 - Own sqlite file, path injected via `createHubAuth({ dbPath })`
-  (convention: `hub-auth.sqlite`). WAL mode enabled at open.
+  (convention: `slayzone.auth.sqlite`, formerly `hub-auth.sqlite`; the hub renames a
+  beta's file in place before opening). WAL mode enabled at open.
 - Driver: **`node:sqlite` (`DatabaseSync`)**, passed directly as
   `betterAuth({ database })`. better-auth 1.6.23 accepts a `DatabaseSync`
   handle first-class and wraps it in its own kysely `NodeSqliteDialect`

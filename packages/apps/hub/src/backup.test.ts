@@ -37,7 +37,7 @@ import { buildBackupOps } from './backup.js'
 const h = await createTestHarness()
 
 const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-hub-backup-'))
-const dbPath = path.join(dataRoot, 'slayzone.sqlite')
+const dbPath = path.join(dataRoot, 'slayzone.data.sqlite')
 fs.writeFileSync(dbPath, 'LIVE-DB')
 fs.writeFileSync(`${dbPath}-wal`, 'WAL')
 fs.writeFileSync(`${dbPath}-shm`, 'SHM')
@@ -88,6 +88,34 @@ test('create → list → rename → delete round-trips', async () => {
 
   await o.delete(made.filename)
   expect((await o.list()).length).toBe(0)
+})
+
+// The main DB was renamed slayzone.sqlite → slayzone.data.sqlite, and backup files are
+// named from the live DB filename. Backups made before the rename carry the old
+// prefix and are the user's safety net, so the Backups list must keep showing them.
+test('a new backup is named from the renamed DB file', async () => {
+  const o = ops()
+  const made = await o.create('Named')
+  expect(made.filename.startsWith('slayzone.data.')).toBe(true)
+  await o.delete(made.filename)
+})
+
+test('backups under every historical prefix still list', async () => {
+  const dir = path.join(dataRoot, 'backups')
+  fs.mkdirSync(dir, { recursive: true })
+  const ts = '2026-03-07T12-30-00-000Z'
+  const names = [
+    `slayzone.${ts}.manual.sqlite`, // v0.35.0 / beta prod
+    `slayzone.dev.${ts}.auto.sqlite`, // v0.35.0 / beta dev
+    `slayzone.data.${ts}.migration.sqlite`, // after the rename, prod
+    `slayzone.dev.data.${ts}.manual.sqlite` // after the rename, dev
+  ]
+  for (const n of names) fs.writeFileSync(path.join(dir, n), 'B')
+  fs.writeFileSync(path.join(dir, `slayzone.auth.${ts}.manual.sqlite`), 'NOT-A-BACKUP')
+  const listed = (await ops().list()).map((b) => b.filename)
+  for (const n of names) expect(listed.includes(n)).toBe(true)
+  expect(listed.includes(`slayzone.auth.${ts}.manual.sqlite`)).toBe(false)
+  for (const n of [...names, `slayzone.auth.${ts}.manual.sqlite`]) fs.rmSync(path.join(dir, n))
 })
 
 test('restore: close → copy → unlink wal/shm → relaunch LAST', async () => {

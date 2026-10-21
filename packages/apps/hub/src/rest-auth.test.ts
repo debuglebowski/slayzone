@@ -323,7 +323,7 @@ async function main(): Promise<void> {
   // ── verifyRestBearer against a REAL better-auth session ───────────────────
   const tmpDir = mkdtempSync(join(tmpdir(), 'hub-rest-auth-'))
   const auth: HubAuth = await createHubAuth({
-    dbPath: join(tmpDir, 'hub-auth.sqlite'),
+    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-rest-auth-test-secret-at-least-32-chars-long'
   })

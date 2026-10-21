@@ -93,14 +93,14 @@ function startServer(): Promise<{
  * local app when no hub is configured.
  *
  * Written where the CLI DERIVES it from the install root: `<ROOT>/storage/` +
- * `slayzone.sqlite` (no SLAYZONE_DEV in these tests ⇒ the packaged filename).
+ * `slayzone.data.sqlite` (no SLAYZONE_DEV in these tests ⇒ the packaged filename).
  * Returns the ROOT, which is the only thing the caller can hand the CLI.
  */
 function seedServerPortDb(port: number): string {
   const root = freshStateDir()
   const storage = path.join(root, 'storage')
   fs.mkdirSync(storage, { recursive: true })
-  const db = new DatabaseSync(path.join(storage, 'slayzone.sqlite'))
+  const db = new DatabaseSync(path.join(storage, 'slayzone.data.sqlite'))
   db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('server_port', String(port))
   db.close()

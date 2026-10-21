@@ -25,9 +25,16 @@ export function copyFileIfPresent(src: string, dst: string): void {
  * file's presence signals a complete triplet. Verifies the copy actually landed
  * and isn't empty before returning — a silent partial copy is worse than skipping.
  */
-export function copyDbTriplet(oldDir: string, newDir: string, base: string): void {
+export function copyDbTriplet(
+  oldDir: string,
+  newDir: string,
+  base: string,
+  dstBase: string = base
+): void {
+  // `dstBase` differs from `base` when the file was renamed between releases (the
+  // legacy source keeps its old name, the copy lands under the new one).
   const srcMain = join(oldDir, base)
-  const dstMain = join(newDir, base)
+  const dstMain = join(newDir, dstBase)
   if (!existsSync(srcMain) || existsSync(dstMain)) return
 
   copyFileIfPresent(`${srcMain}-wal`, `${dstMain}-wal`)
@@ -35,7 +42,7 @@ export function copyDbTriplet(oldDir: string, newDir: string, base: string): voi
   cpSync(srcMain, dstMain)
 
   if (!existsSync(dstMain) || statSync(dstMain).size === 0) {
-    throw new Error(`[copy-utils] copy of ${base} failed verification`)
+    throw new Error(`[copy-utils] copy of ${base} to ${dstBase} failed verification`)
   }
 }
 

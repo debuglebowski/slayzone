@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { getDbName, getLegacyDbName } from '@slayzone/platform'
 import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-utils'
 
 /**
@@ -34,16 +35,16 @@ import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-util
  * afterward without this migration re-scanning (and partially re-copying) it.
  *
  * Scope (explicit — NOT a glob, so diagnostics/chromium/hub-auth are left):
- *   - <channel DB>       (+ -wal, -shm)   — slayzone.sqlite | slayzone.dev.sqlite
+ *   - <channel DB>       (+ -wal, -shm)   — copied FROM slayzone.sqlite | slayzone.dev.sqlite
+ *                                          TO slayzone.data.sqlite | slayzone.dev.data.sqlite
  *   - blobs/     — artifact CONTENT (content-addressed; the DB only stores hashes)
  *   - artifacts/ — artifact working-copy cache
  *   - backups/ — the 2 MOST RECENT backups of THIS channel (older ones stay behind)
  */
 
-/** Channel → DB basename + backup filename prefix. Mirrors platform getDbName(). */
-function channelDbBasename(packaged: boolean): string {
-  return packaged ? 'slayzone.sqlite' : 'slayzone.dev.sqlite'
-}
+/** Channel → backup filename prefix. The legacy SOURCE's DB keeps the pre-rename name
+ *  (`getLegacyDbName`); the copy lands under the renamed one (`getDbName`). Backups in
+ *  the source are named from the old DB name, so the prefix stays the old one too. */
 function channelBackupPrefix(packaged: boolean): string {
   return packaged ? 'slayzone' : 'slayzone.dev'
 }
@@ -121,7 +122,7 @@ export function ensureStorageDir(oldDir: string, storageDir: string, packaged: b
   const sentinel = sentinelPath(storageDir, packaged)
   if (existsSync(sentinel)) return // this channel already migrated — do not re-scan the shared dir
 
-  copyDbTriplet(oldDir, storageDir, channelDbBasename(packaged))
+  copyDbTriplet(oldDir, storageDir, getLegacyDbName(packaged), getDbName(packaged))
   copyContentDir(oldDir, storageDir, 'blobs')
   copyContentDir(oldDir, storageDir, 'artifacts')
   copyRecentBackups(oldDir, storageDir, packaged)
