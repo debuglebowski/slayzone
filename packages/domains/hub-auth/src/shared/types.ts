@@ -16,9 +16,18 @@ export interface HubAuthSession {
   activeOrganizationId?: string | null
 }
 
+/**
+ * An account's role on a hub. Named exactly as better-auth's `admin` plugin names
+ * it (`user.role`), so switching to that plugin later is a data migration only.
+ * Nothing enforces it yet; the admin role never grants a read path into another
+ * user's sessions.
+ */
+export type HubRole = 'admin' | 'user'
+
 /** Authenticated user context resolved from a session (cookie or bearer token). */
 export interface HubAuthContext {
   userId: string
+  role: HubRole
   /** Active organization of the session, if any. */
   orgId: string | null
   session: HubAuthSession

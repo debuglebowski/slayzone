@@ -48,6 +48,7 @@ run_test_electron_strict_loader packages/apps/hub/src/web-login-routing.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
 run_test packages/apps/hub/src/build-info.test.ts
 run_test packages/apps/hub/src/health.test.ts
 run_test packages/apps/hub/src/web-assets.test.ts

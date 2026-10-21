@@ -3,11 +3,13 @@ import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
+import type { PrincipalRole } from '../../../context'
 import type { RestApiDeps } from '../types'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
- * `slay hub users add|ls|rm`.
+ * `slay hub users add|ls|disable|enable|role`. Accounts are disabled, never deleted
+ * (hub-auth users.ts).
  *
  * WHY THIS EXISTS: a hub that enforces auth gates its whole surface on a
  * better-auth bearer, and public signup is CLOSED (`emailAndPassword.disableSignUp`
@@ -36,12 +38,14 @@ import type { RestApiDeps } from '../types'
  * box keeps working with no operator action, it just now carries a real
  * credential instead of relying on the peer address.
  *
- * ONE PATH, THREE METHODS. The bearer gate's `SELF_GUARDED` set
+ * ONE PATH, ONE ENTRY IN THE GATE. The bearer gate's `SELF_GUARDED` set
  * (`apps/hub/src/rest-auth.ts`) matches the pathname EXACTLY, so a
- * `DELETE /api/hub/users/:email` shape could not be exempted without teaching the
- * gate prefix matching — which would weaken it for every route. `rm` therefore
- * carries the email in the request body (same shape as
- * `DELETE /api/tasks/:id/tags`), keeping the gate to a single exact entry.
+ * `PATCH /api/hub/users/:email` shape could not be exempted without teaching the
+ * gate prefix matching — which would weaken it for every route. Every method
+ * therefore carries the email in the request body (same shape as
+ * `DELETE /api/tasks/:id/tags`): GET lists, POST creates, PATCH disables, enables or
+ * changes the role. DELETE is gone (accounts are never deleted) and answers 410
+ * naming `disable`, so an older `slay hub users rm` gets a reason, not a 404.
  *
  * Gating mirrors the join-token route: the capability slot (`deps.hubUsers`) is
  * wired only by the hub composition root, and hub-auth is built ASYNC, so
@@ -94,6 +98,10 @@ export function hubUsersAuthDecision(opts: {
 
 /** The internal identity that owns computer API keys — never operator-creatable. */
 const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
+
+const ROLES: readonly PrincipalRole[] = ['admin', 'user']
+const isRole = (value: unknown): value is PrincipalRole =>
+  typeof value === 'string' && (ROLES as readonly string[]).includes(value)
 
 /** Cheap shape check. Real validation is the hub operator's judgement; this only
  *  rejects input that could not possibly be an address. */
@@ -161,7 +169,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     return {
       ...users,
       create: (input) => runAsSecurityActor(actor, () => users.create(input)),
-      remove: (email) => runAsSecurityActor(actor, () => users.remove(email))
+      disable: (email) => runAsSecurityActor(actor, () => users.disable(email)),
+      enable: (email) => runAsSecurityActor(actor, () => users.enable(email)),
+      setRole: (email, role) => runAsSecurityActor(actor, () => users.setRole(email, role))
     }
   }
 
@@ -169,11 +179,16 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.post('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
-    const body = (req.body ?? {}) as { email?: unknown; name?: unknown }
+    const body = (req.body ?? {}) as { email?: unknown; name?: unknown; role?: unknown }
     if (!isPlausibleEmail(body.email)) {
       res.status(400).json({ ok: false, error: 'email required' })
       return
     }
+    if (body.role !== undefined && !isRole(body.role)) {
+      res.status(400).json({ ok: false, error: 'role must be admin or user' })
+      return
+    }
+    const role = body.role
     const email = body.email.trim()
     if (email.toLowerCase() === COMPUTER_SERVICE_USER_EMAIL) {
       res.status(400).json({
@@ -184,7 +199,11 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     }
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined
     try {
-      const result = await users.create(name === undefined ? { email } : { email, name })
+      const result = await users.create({
+        email,
+        ...(name === undefined ? {} : { name }),
+        ...(role === undefined ? {} : { role })
+      })
       if (!result.ok) {
         res.status(409).json({ ok: false, error: 'a user with that email already exists' })
         return
@@ -214,21 +233,40 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     }
   })
 
-  // Remove an account. Email in the BODY, not the path — see the module note.
-  app.delete('/api/hub/users', async (req, res) => {
+  // Disable, enable, or change the role of an account. Email in the BODY, not the
+  // path — see the module note. Exactly one change per request.
+  app.patch('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
-    const body = (req.body ?? {}) as { email?: unknown }
+    const body = (req.body ?? {}) as { email?: unknown; disabled?: unknown; role?: unknown }
     if (!isPlausibleEmail(body.email)) {
       res.status(400).json({ ok: false, error: 'email required' })
       return
     }
     const email = body.email.trim()
+    const change =
+      typeof body.disabled === 'boolean' && body.role === undefined
+        ? ({ disabled: body.disabled } as const)
+        : body.disabled === undefined && isRole(body.role)
+          ? ({ role: body.role } as const)
+          : null
+    if (!change) {
+      res.status(400).json({
+        ok: false,
+        error: 'send exactly one of disabled (true|false) or role (admin|user)'
+      })
+      return
+    }
     try {
-      const outcome = await users.remove(email)
+      const outcome =
+        change.role !== undefined
+          ? await users.setRole(email, change.role)
+          : change.disabled
+            ? await users.disable(email)
+            : await users.enable(email)
       switch (outcome) {
         case 'ok':
-          res.json({ ok: true, data: { email } })
+          res.json({ ok: true, data: { email, ...change } })
           return
         case 'not-found':
           res.status(404).json({ ok: false, error: `no user with email ${email}` })
@@ -236,26 +274,45 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         case 'protected':
           res.status(409).json({
             ok: false,
-            error:
-              `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity — ` +
-              `removing it would lock out every enrolled computer`
+            error: `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity, not an account`
           })
           return
         case 'last-user':
           res.status(409).json({
             ok: false,
             error:
-              'refusing to remove the last remaining account — public signup is disabled, ' +
-              'so the hub would be left unauthenticatable'
+              'refusing to disable the last enabled account — public signup is disabled, ' +
+              'so no one could sign in to the hub again'
+          })
+          return
+        case 'last-admin':
+          res.status(409).json({
+            ok: false,
+            error:
+              `refusing to ${change.role !== undefined ? 'demote' : 'disable'} the last enabled admin — ` +
+              'make another account admin first (`slay hub users role <email> admin`)'
           })
           return
       }
     } catch (err) {
       res.status(500).json({
         ok: false,
-        error: 'failed to remove user',
+        error: 'failed to update user',
         message: err instanceof Error ? err.message : String(err)
       })
     }
+  })
+
+  // Accounts are never deleted. Gated like the rest, so it tells nothing to a caller
+  // who could not have used it.
+  app.delete('/api/hub/users', async (req, res) => {
+    const users = await gate(req, res)
+    if (!users) return
+    res.status(410).json({
+      ok: false,
+      error:
+        'accounts are no longer removed: `slay hub users rm` was renamed to ' +
+        '`slay hub users disable <email>` (the account and its data are kept)'
+    })
   })
 }

@@ -2,7 +2,7 @@
  * Address a hub over its REST surface, and report its refusals verbatim.
  *
  * ONE resolver for every command that acts ON a hub rather than on this machine's
- * hub processes — today `slay hub users add|ls|rm` and `slay computer mint`. Both
+ * hub processes — today `slay hub users …` and `slay computer mint`. Both
  * need the identical answer to "which hub, and with what credential", and both
  * need the identical failure wording; two copies would drift the moment one of
  * them learned about a new channel.

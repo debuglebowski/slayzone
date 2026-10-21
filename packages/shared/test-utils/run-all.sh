@@ -81,6 +81,8 @@ run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 # Client↔hub /trpc connection-context seam — windowId parse + bearer→principal verify (real hub-auth).
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
+# Account commands over real hub-auth + app DB: disable revokes BOTH session classes.
+run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
@@ -488,6 +490,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
   packages/domains/hub-auth/src/server/audit.test.ts \
+  packages/domains/hub-auth/src/server/upgrade.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \

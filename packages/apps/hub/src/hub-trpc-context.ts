@@ -16,11 +16,12 @@
  *
  * @module server/hub-trpc-context
  */
+import type { HubRole } from '@slayzone/hub-auth'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Scope } from '@slayzone/transport/server'
-import { isWebSessionToken, verifyWebSessionToken } from './web-sessions.js'
+import { isWebSessionToken, resolveWebSession } from './web-sessions.js'
 
 /**
  * The attributed principal for an authenticated `/trpc` connection.
@@ -34,9 +35,14 @@ import { isWebSessionToken, verifyWebSessionToken } from './web-sessions.js'
  *     actually DOES its work — `/api/*` refuses it outright (see
  *     `withRestAuth`), so `SCOPE_POLICY`'s per-procedure granularity is the
  *     only place a browser's narrower access is enforced at all.
+ *
+ * Both classes carry the account's `role` (hub-auth `user.role`), and both refuse a
+ * disabled account (`verifySession`, `resolveWebSession`). Nothing enforces the role
+ * yet.
  */
 export interface ConnectionPrincipal {
   userId: string
+  role: HubRole
   orgId?: string | null
   scopes: readonly Scope[]
 }
@@ -94,8 +100,7 @@ export async function resolveConnectionPrincipal(
   if (isWebSessionToken(token)) {
     if (!opts.db) return null
     try {
-      const result = await verifyWebSessionToken(opts.db, token)
-      return result.ok ? { userId: result.userId, scopes: result.scopes } : null
+      return await resolveWebSession(opts.hubAuth, opts.db, token)
     } catch {
       return null
     }
@@ -104,7 +109,7 @@ export async function resolveConnectionPrincipal(
   if (!opts.hubAuth) return null
   try {
     const ctx = await verifySession(opts.hubAuth, new Headers({ authorization: `Bearer ${token}` }))
-    return ctx ? { userId: ctx.userId, orgId: ctx.orgId, scopes: ['full'] } : null
+    return ctx ? { userId: ctx.userId, role: ctx.role, orgId: ctx.orgId, scopes: ['full'] } : null
   } catch {
     // Verification failure → unauthenticated (principal null), never throw.
     return null

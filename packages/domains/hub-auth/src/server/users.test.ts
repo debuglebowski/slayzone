@@ -6,26 +6,37 @@
  * sign-up route. A user row without the credential account would look fine in
  * `ls` and be permanently unauthenticatable.
  *
- * Each `describe` gets its OWN auth instance + sqlite file: `removeHubUser`'s
- * `'last-user'` refusal depends on how many accounts exist, so a shared instance
+ * Each test gets its OWN auth instance + sqlite file: the `'last-user'` and
+ * `'last-admin'` refusals depend on how many accounts exist, so a shared instance
  * would make these tests order-dependent.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { findHubAccount } from './account'
 import { createHubAuth, type HubAuth } from './auth'
 import { mintComputerApiKey, COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
-import { createHubUser, listHubUsers, removeHubUser, type CreatedHubUser } from './users'
+import {
+  createHubUser,
+  disableHubUser,
+  enableHubUser,
+  listHubUsers,
+  setHubUserRole,
+  type CreatedHubUser
+} from './users'
 import { verifyComputerApiKey, verifySession } from './verify'
 
 let tmpDir: string
+let dbPath: string
 let auth: HubAuth
 
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'hub-users-test-'))
+  dbPath = join(tmpDir, 'hub-auth.sqlite')
   auth = await createHubAuth({
-    dbPath: join(tmpDir, 'hub-auth.sqlite'),
+    dbPath,
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-auth-test-secret-at-least-32-chars-long'
   })
@@ -36,10 +47,38 @@ afterEach(() => {
 })
 
 /** Create and assert success, narrowing off the `{ error }` arm. */
-async function create(email: string, name?: string): Promise<CreatedHubUser> {
-  const result = await createHubUser(auth, name === undefined ? { email } : { email, name })
+async function create(
+  email: string,
+  name?: string,
+  role?: 'admin' | 'user'
+): Promise<CreatedHubUser> {
+  const result = await createHubUser(auth, {
+    email,
+    ...(name === undefined ? {} : { name }),
+    ...(role === undefined ? {} : { role })
+  })
   if ('error' in result) throw new Error(`expected creation to succeed, got ${result.error}`)
   return result
+}
+
+const signIn = (email: string, password: string) =>
+  auth.api.signInEmail({ body: { email, password } })
+const bearer = (token: string) => ({ authorization: `Bearer ${token}` })
+
+/** Row counts per table for one user, straight from the sqlite file. */
+function rowsOf(userId: string): Record<string, number> {
+  const db = new DatabaseSync(dbPath)
+  try {
+    const count = (sql: string) => (db.prepare(sql).get(userId) as { n: number }).n
+    return {
+      user: count('SELECT count(*) AS n FROM user WHERE id = ?'),
+      account: count('SELECT count(*) AS n FROM account WHERE userId = ?'),
+      member: count('SELECT count(*) AS n FROM member WHERE userId = ?'),
+      session: count('SELECT count(*) AS n FROM session WHERE userId = ?')
+    }
+  } finally {
+    db.close()
+  }
 }
 
 describe('createHubUser', () => {
@@ -128,6 +167,16 @@ describe('listHubUsers', () => {
     expect(await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)).not.toBeNull()
   })
 
+  it('reports role and disabledAt', async () => {
+    await create('alice@example.com')
+    await create('bob@example.com')
+    await disableHubUser(auth, 'bob@example.com')
+    const [alice, bob] = await listHubUsers(auth)
+    expect(alice).toMatchObject({ role: 'admin', disabledAt: null })
+    expect(bob!.role).toBe('user')
+    expect(bob!.disabledAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/)
+  })
+
   it('reports createdAt as an ISO-8601 string', async () => {
     await create('alice@example.com')
     const [row] = await listHubUsers(auth)
@@ -135,102 +184,238 @@ describe('listHubUsers', () => {
   })
 })
 
-describe('removeHubUser', () => {
-  it('removes an account once another human remains', async () => {
-    const alice = await create('alice@example.com')
-    await create('bob@example.com')
-
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('ok')
-    expect((await listHubUsers(auth)).map((u) => u.email)).toEqual(['bob@example.com'])
-    await expect(
-      auth.api.signInEmail({ body: { email: 'alice@example.com', password: alice.password } })
-    ).rejects.toMatchObject({ status: 'UNAUTHORIZED' })
+describe('roles', () => {
+  it('makes the first account on a hub admin, later ones user', async () => {
+    expect((await create('alice@example.com')).role).toBe('admin')
+    expect((await create('bob@example.com')).role).toBe('user')
+    expect((await create('carol@example.com', undefined, 'admin')).role).toBe('admin')
   })
 
-  it('revokes the removed account’s live sessions', async () => {
-    const alice = await create('alice@example.com')
-    await create('bob@example.com')
-    const signIn = await auth.api.signInEmail({
-      body: { email: 'alice@example.com', password: alice.password }
-    })
-    // Sanity: the bearer works before removal, so its later failure is meaningful.
-    expect(await verifySession(auth, { authorization: `Bearer ${signIn.token}` })).not.toBeNull()
-
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('ok')
-
-    expect(await verifySession(auth, { authorization: `Bearer ${signIn.token}` })).toBeNull()
-  })
-
-  it('matches the email case-insensitively', async () => {
+  it('makes the next account admin again when no enabled admin is left', async () => {
+    // Only reachable by editing the DB: the guards keep an enabled admin.
     await create('alice@example.com')
+    const db = new DatabaseSync(dbPath)
+    db.prepare("UPDATE user SET role = 'user'").run()
+    db.close()
+    expect((await create('bob@example.com')).role).toBe('admin')
+  })
+
+  it('honours an explicit role on the first account', async () => {
+    expect((await create('alice@example.com', undefined, 'user')).role).toBe('user')
+  })
+
+  it('a user cannot set their own role or disabled flag through /update-user', async () => {
+    await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    const { token } = await signIn('bob@example.com', bob.password)
+    // (A disabled user holds no session to clear their own flag with.)
+    for (const body of [{ role: 'admin' }, { disabledAt: new Date() }]) {
+      await expect(
+        auth.api.updateUser({ headers: new Headers(bearer(token)), body: body as never })
+      ).rejects.toMatchObject({ body: { code: 'FIELD_NOT_ALLOWED' } })
+    }
+    expect(await findHubAccount(auth, bob.id)).toEqual({
+      userId: bob.id,
+      role: 'user',
+      disabled: false
+    })
+  })
+
+  it('the session principal carries the role', async () => {
+    const alice = await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    const a = await signIn('alice@example.com', alice.password)
+    const b = await signIn('bob@example.com', bob.password)
+    expect((await verifySession(auth, bearer(a.token)))!.role).toBe('admin')
+    expect((await verifySession(auth, bearer(b.token)))!.role).toBe('user')
+  })
+})
+
+describe('setHubUserRole', () => {
+  it('promotes and demotes', async () => {
+    await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    expect(await setHubUserRole(auth, 'BOB@example.com', 'admin')).toBe('ok')
+    expect((await findHubAccount(auth, bob.id))!.role).toBe('admin')
+    expect(await setHubUserRole(auth, 'bob@example.com', 'user')).toBe('ok')
+    expect((await findHubAccount(auth, bob.id))!.role).toBe('user')
+  })
+
+  it('refuses to demote the last enabled admin', async () => {
+    const alice = await create('alice@example.com')
     await create('bob@example.com')
-    expect(await removeHubUser(auth, 'ALICE@example.com')).toBe('ok')
-    expect((await listHubUsers(auth)).map((u) => u.email)).toEqual(['bob@example.com'])
+    expect(await setHubUserRole(auth, 'alice@example.com', 'user')).toBe('last-admin')
+    expect((await findHubAccount(auth, alice.id))!.role).toBe('admin')
+  })
+
+  it('a disabled admin does not count as the remaining admin', async () => {
+    await create('alice@example.com')
+    await create('bob@example.com', undefined, 'admin')
+    await create('carol@example.com')
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    expect(await setHubUserRole(auth, 'alice@example.com', 'user')).toBe('last-admin')
+  })
+
+  it('refuses the computer service user in both directions', async () => {
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
+    await create('alice@example.com')
+    expect(await setHubUserRole(auth, COMPUTER_SERVICE_USER_EMAIL, 'admin')).toBe('protected')
+    expect(await setHubUserRole(auth, COMPUTER_SERVICE_USER_EMAIL, 'user')).toBe('protected')
   })
 
   it('returns not-found for an unknown email', async () => {
     await create('alice@example.com')
-    await create('bob@example.com')
-    expect(await removeHubUser(auth, 'nobody@example.com')).toBe('not-found')
+    expect(await setHubUserRole(auth, 'nobody@example.com', 'admin')).toBe('not-found')
+  })
+})
+
+describe('disableHubUser', () => {
+  /** alice (admin) and bob (user, signed in); returns bob and his bearer. */
+  async function twoUsers(): Promise<{ bob: CreatedHubUser; token: string }> {
+    await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    const { token } = await signIn('bob@example.com', bob.password)
+    return { bob, token }
+  }
+
+  it('keeps every row of the account and revokes its sessions', async () => {
+    const { bob, token } = await twoUsers()
+    // A membership row, as the organization plugin writes it.
+    await auth.api.createOrganization({
+      headers: new Headers(bearer(token)),
+      body: { name: 'Team', slug: 'team' }
+    })
+    await signIn('bob@example.com', bob.password)
+    expect(rowsOf(bob.id)).toEqual({ user: 1, account: 1, member: 1, session: 2 })
+
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+
+    expect(rowsOf(bob.id)).toEqual({ user: 1, account: 1, member: 1, session: 0 })
+    expect(await verifySession(auth, bearer(token))).toBeNull()
+    expect(await findHubAccount(auth, bob.id)).toEqual({
+      userId: bob.id,
+      role: 'user',
+      disabled: true
+    })
   })
 
-  it('refuses the last remaining human account', async () => {
+  it('blocks password sign-in with ACCOUNT_DISABLED and creates no session', async () => {
+    const { bob } = await twoUsers()
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    await expect(signIn('bob@example.com', bob.password)).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+      body: { code: 'ACCOUNT_DISABLED' }
+    })
+    expect(rowsOf(bob.id).session).toBe(0)
+    // A wrong password still answers like any wrong password.
+    await expect(signIn('bob@example.com', 'not-the-password')).rejects.toMatchObject({
+      status: 'UNAUTHORIZED'
+    })
+  })
+
+  it('revokes the sessions held outside hub-auth through the callback', async () => {
+    const { bob } = await twoUsers()
+    const revoked: string[] = []
+    const result = await disableHubUser(auth, 'bob@example.com', {
+      revokeExternalSessions: async (userId) => {
+        // Called after the flag landed, so nothing can mint a new one meanwhile.
+        expect((await findHubAccount(auth, userId))!.disabled).toBe(true)
+        revoked.push(userId)
+      }
+    })
+    expect(result).toBe('ok')
+    expect(revoked).toEqual([bob.id])
+  })
+
+  it('verification refuses a session that exists for a disabled account', async () => {
+    // A session created in the instant before the flag landed: simulated by
+    // flagging the row directly, without the revocation sweep.
+    const { token } = await twoUsers()
+    const db = new DatabaseSync(dbPath)
+    db.prepare("UPDATE user SET disabledAt = ? WHERE email = 'bob@example.com'").run(
+      new Date().toISOString()
+    )
+    db.close()
+    expect(await verifySession(auth, bearer(token))).toBeNull()
+  })
+
+  it('leaves other accounts’ sessions intact', async () => {
+    const alice = await create('alice@example.com')
+    await create('bob@example.com')
+    const a = await signIn('alice@example.com', alice.password)
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    expect(await verifySession(auth, bearer(a.token))).not.toBeNull()
+  })
+
+  it('is idempotent and keeps the original time', async () => {
+    await twoUsers()
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    const first = (await listHubUsers(auth))[1]!.disabledAt
+    expect(await disableHubUser(auth, 'Bob@Example.com')).toBe('ok')
+    expect((await listHubUsers(auth))[1]!.disabledAt).toBe(first)
+  })
+
+  it('refuses the last enabled human', async () => {
     await create('alice@example.com')
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('last-user')
-    expect((await listHubUsers(auth)).map((u) => u.email)).toEqual(['alice@example.com'])
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('last-user')
+    // A disabled second human does not unlock it.
+    await create('bob@example.com')
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('last-user')
   })
 
   it('counts humans only — the service user does not unlock the last-user refusal', async () => {
-    // Two USER ROWS exist here (alice + the computer service identity), but only one
-    // human. Counting rows instead of humans would let the operator delete alice
-    // and leave the hub with no way to authenticate.
     await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('last-user')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('last-user')
+  })
+
+  it('refuses the last enabled admin', async () => {
+    const alice = await create('alice@example.com')
+    await create('bob@example.com')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('last-admin')
+    expect((await findHubAccount(auth, alice.id))!.disabled).toBe(false)
+    // With a second admin, the first can go.
+    expect(await setHubUserRole(auth, 'bob@example.com', 'admin')).toBe('ok')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('ok')
   })
 
   it('refuses the computer service user, leaving computer keys working', async () => {
     const minted = await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
     await create('bob@example.com')
-
-    expect(await removeHubUser(auth, COMPUTER_SERVICE_USER_EMAIL)).toBe('protected')
-
-    // The point of the refusal: every enrolled computer would 401 if this identity
-    // were deleted, because its id is the referenceId on each computer API key.
+    expect(await disableHubUser(auth, COMPUTER_SERVICE_USER_EMAIL)).toBe('protected')
     expect(await verifyComputerApiKey(auth, minted.key)).toEqual({
       computerId: 'computer-1',
       keyId: minted.keyId
     })
   })
 
-  it('leaves other accounts’ sessions intact', async () => {
-    const alice = await create('alice@example.com')
+  it('returns not-found for an unknown email', async () => {
+    await twoUsers()
+    expect(await disableHubUser(auth, 'nobody@example.com')).toBe('not-found')
+  })
+})
+
+describe('enableHubUser', () => {
+  it('restores sign-in; the old sessions stay revoked', async () => {
+    await create('alice@example.com')
     const bob = await create('bob@example.com')
-    const bobSignIn = await auth.api.signInEmail({
-      body: { email: 'bob@example.com', password: bob.password }
-    })
+    const old = await signIn('bob@example.com', bob.password)
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
 
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('ok')
+    expect(await enableHubUser(auth, 'BOB@example.com')).toBe('ok')
 
-    expect(await verifySession(auth, { authorization: `Bearer ${bobSignIn.token}` })).not.toBeNull()
-    // And bob can still sign in fresh.
-    const again = await auth.api.signInEmail({
-      body: { email: 'bob@example.com', password: bob.password }
-    })
-    expect(again.token).toBeTruthy()
-    expect(alice.password).not.toBe(bob.password)
+    expect(await verifySession(auth, bearer(old.token))).toBeNull()
+    const again = await signIn('bob@example.com', bob.password)
+    expect(await verifySession(auth, bearer(again.token))).not.toBeNull()
+    expect((await listHubUsers(auth))[1]!.disabledAt).toBeNull()
   })
 
-  it('allows re-creating a removed account', async () => {
+  it('refuses the computer service user and unknown emails', async () => {
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
     await create('alice@example.com')
-    await create('bob@example.com')
-    expect(await removeHubUser(auth, 'alice@example.com')).toBe('ok')
-
-    const recreated = await create('alice@example.com')
-    const signIn = await auth.api.signInEmail({
-      body: { email: 'alice@example.com', password: recreated.password }
-    })
-    expect(signIn.token).toBeTruthy()
+    expect(await enableHubUser(auth, COMPUTER_SERVICE_USER_EMAIL)).toBe('protected')
+    expect(await enableHubUser(auth, 'nobody@example.com')).toBe('not-found')
   })
 })

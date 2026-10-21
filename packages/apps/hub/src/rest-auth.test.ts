@@ -31,6 +31,7 @@ import { createServer, type Server } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   currentSecurityContext,
@@ -268,7 +269,7 @@ async function main(): Promise<void> {
   })
 
   await test('hub user management stays open (its own loopback guard is the protection)', () => {
-    // `slay hub users add|ls|rm` runs on the hub box and holds no session — a
+    // `slay hub users …` runs on the hub box and holds no session — a
     // bearer requirement would make it impossible to create the FIRST account on a
     // remote hub, which is the whole reason the route exists. Its own 403 for a
     // non-loopback peer is strictly tighter than a bearer.
@@ -483,6 +484,55 @@ async function main(): Promise<void> {
       assertEq(parsed.other, 'xyz', 'sibling cookie parsed')
       assertEq(Object.keys(parsed).length, 2, 'malformed/blank-name entries dropped')
       assertEq(Object.keys(parseCookieHeader({})).length, 0, 'no Cookie header → empty map')
+    })
+
+    // ── account role + disabled account (T-08) ──────────────────────────────
+    const second = await createHubUser(auth, { email: 'second@example.com' })
+    assert(!('error' in second), 'created a second account')
+    const secondFull = await auth.api.signInEmail({
+      body: { email: 'second@example.com', password: second.password }
+    })
+    const secondWeb = await mintWebSession(db, { userId: second.id, scopes: ['read'] })
+    const principalOf = (token: string) =>
+      verifyRestBearer(auth, db, { authorization: `Bearer ${token}` })
+    /** Flag the account directly, leaving its sessions in place (the "exists anyway" case). */
+    const setDisabled = (userId: string, disabled: boolean): void => {
+      const authDb = new DatabaseSync(join(tmpDir, 'hub-auth.sqlite'))
+      authDb
+        .prepare('UPDATE user SET disabledAt = ? WHERE id = ?')
+        .run(disabled ? new Date().toISOString() : null, userId)
+      authDb.close()
+    }
+
+    await test('the REST principal carries the account role, for both credential classes', async () => {
+      assertEq((await principalOf(validToken))?.role, 'admin', 'first account, full')
+      assertEq((await principalOf(scopedSession.token))?.role, 'admin', 'first account, szw_')
+      assertEq((await principalOf(secondFull.token))?.role, 'user', 'second account, full')
+      assertEq((await principalOf(secondWeb.token))?.role, 'user', 'second account, szw_')
+    })
+
+    await test('a disabled account: its existing full and web sessions do not verify', async () => {
+      setDisabled(second.id, true)
+      try {
+        assertEq(await principalOf(secondFull.token), null, 'full session refused')
+        assertEq(await principalOf(secondWeb.token), null, 'szw_ bearer refused')
+        assertEq(
+          await verifyRestBearer(auth, db, {}, { [WEB_SESSION_COOKIE_NAME]: secondWeb.token }),
+          null,
+          'szw_ cookie refused'
+        )
+        const h = await mountGate({ required: true, auth, forceOffBox: true })
+        try {
+          const res = await h.get('/api/tasks', { authorization: `Bearer ${secondFull.token}` })
+          assertEq(res.status, 401, 'the gate answers 401')
+          assertEq(res.reached, false, 'the inner handler never ran')
+        } finally {
+          await h.close()
+        }
+      } finally {
+        setDisabled(second.id, false)
+      }
+      assertEq((await principalOf(secondFull.token))?.userId, second.id, 'verifies once enabled')
     })
 
     // ── withRestAuth over a REAL listener ───────────────────────────────────

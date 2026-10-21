@@ -351,6 +351,22 @@ function postJson(
  * finds a developer's or CI's real hubs — filtering keeps them out of every
  * assertion (and out of anything this test would ever stop).
  */
+/** GET with a bearer; the status is all the callers need. */
+function getStatus(port: number, path: string, token: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      `http://127.0.0.1:${port}${path}`,
+      { method: 'GET', timeout: 10_000, headers: { authorization: `Bearer ${token}` } },
+      (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode ?? -1))
+      }
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 function lsJson(root: string): Array<Record<string, unknown>> {
   const res = slay(['hub', 'ls', '--json'], { root })
   assertEq(res.status, 0, `hub ls exited 0 (stderr: ${res.stderr})`)
@@ -576,50 +592,101 @@ async function main(): Promise<void> {
       )
     })
 
-    await test('hub users: rm removes an account, and refuses the last one', async () => {
-      const listed = () => {
-        const res = slay(['--hub', NAME_A, 'hub', 'users', 'ls', '--json'], { root: rootA })
-        assertEq(res.status, 0, `ls --json exited 0 (stderr: ${res.stderr})`)
-        return JSON.parse(res.stdout) as Array<{ email: string }>
-      }
-      const before = listed()
-      assert(before.length >= 2, `earlier cases left ≥2 accounts: ${before.length}`)
+    // Accounts are disabled, never deleted (T-08). Hub A's bootstrap owner is the
+    // account THIS CLI authenticates with (read from `hub.owner.json`), so it is the
+    // one account these cases never disable.
+    const usersLs = () => {
+      const res = slay(['--hub', NAME_A, 'hub', 'users', 'ls', '--json'], { root: rootA })
+      assertEq(res.status, 0, `ls --json exited 0 (stderr: ${res.stderr})`)
+      return JSON.parse(res.stdout) as Array<{
+        email: string
+        role: string
+        disabledAt: string | null
+      }>
+    }
 
-      // `before[0]` is ALWAYS the bootstrap owner — `listHubUsers` orders by
-      // `createdAt ASC` and the owner is provisioned first, at hub boot. Its
-      // token is also what THIS CLI invocation authenticates with (read from
-      // `hub.owner.json` — a hub that requires login wants a bearer even for
-      // `/api/hub/users`). Removing it first would invalidate the CLI's own
-      // credential mid-test and 401 every call after — target a later,
-      // test-created account for the single-removal assertion instead.
-      const target = before[1]!.email
-      const rm = slay(['--hub', NAME_A, 'hub', 'users', 'rm', target], { root: rootA })
-      assertEq(rm.status, 0, `rm exited 0 (stderr: ${rm.stderr})`)
-      assert(!listed().some((u) => u.email === target), 'account is gone')
-
-      // Drain everyone EXCEPT the owner, down to exactly one, then prove the
-      // refusal ON the owner: with signup closed, removing the final account
-      // would leave the hub unauthenticatable.
-      for (const u of listed().filter((u) => u.email !== before[0]!.email)) {
-        assertEq(
-          slay(['--hub', NAME_A, 'hub', 'users', 'rm', u.email], { root: rootA }).status,
-          0,
-          `drained ${u.email}`
-        )
-      }
-      const remaining = listed()
-      assertEq(remaining.length, 1, 'one account left')
-      assertEq(remaining[0]!.email, before[0]!.email, 'the owner is the one account left')
-      const refused = slay(['--hub', NAME_A, 'hub', 'users', 'rm', remaining[0]!.email], {
+    await test('hub users: the bootstrap owner is admin; add --admin makes an admin', async () => {
+      // `ls` orders by createdAt and the owner is provisioned first, at hub boot.
+      const owner = usersLs()[0]!
+      assertEq(owner.role, 'admin', 'the bootstrap owner is the admin')
+      assertEq(owner.disabledAt, null, 'and enabled')
+      const email = `admin-${process.pid}@example.com`
+      const add = slay(['--hub', NAME_A, 'hub', 'users', 'add', email, '--admin', '--json'], {
         root: rootA
       })
-      assert(refused.status !== 0, 'refused with a non-zero exit')
-      assert(/last remaining account/.test(refused.stderr), `explained why: ${refused.stderr}`)
-      assertEq(listed().length, 1, 'and the account survived')
+      assertEq(add.status, 0, `add --admin exited 0 (stderr: ${add.stderr})`)
+      assertEq((JSON.parse(add.stdout) as { role: string }).role, 'admin', 'created as admin')
+      const ls = slay(['--hub', NAME_A, 'hub', 'users', 'ls'], { root: rootA })
+      assert(/ROLE\s+DISABLED/.test(ls.stdout), `ls shows ROLE and DISABLED: ${ls.stdout}`)
     })
 
-    await test('hub users: rm of an unknown account fails loudly', async () => {
-      const res = slay(['--hub', NAME_A, 'hub', 'users', 'rm', 'nobody@example.com'], {
+    await test('hub users: disable keeps the account and blocks it; enable restores it', async () => {
+      const a = hubs.find((h) => basename(h.root) === NAME_A)!
+      const email = `leaver-${process.pid}@example.com`
+      const add = slay(['--hub', NAME_A, 'hub', 'users', 'add', email, '--json'], { root: rootA })
+      assertEq(add.status, 0, `add exited 0 (stderr: ${add.stderr})`)
+      const { password } = JSON.parse(add.stdout) as { password: string }
+      const signIn = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
+      assertEq(signIn.status, 200, `signed in while enabled: ${signIn.body}`)
+      const token = String(signIn.headers['set-auth-token'])
+      assertEq(await getStatus(a.port, '/api/hub/users', token), 200, 'its bearer works')
+
+      const disable = slay(['--hub', NAME_A, 'hub', 'users', 'disable', email], { root: rootA })
+      assertEq(disable.status, 0, `disable exited 0 (stderr: ${disable.stderr})`)
+      assert(/Disabled account/.test(disable.stdout), `confirmed: ${disable.stdout}`)
+      const row = usersLs().find((u) => u.email === email)
+      assert(row, 'the account is still listed')
+      assert(row.disabledAt !== null, 'and marked disabled')
+      assertEq(await getStatus(a.port, '/api/hub/users', token), 401, 'its bearer is revoked')
+      const refused = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
+      assertEq(refused.status, 403, `sign-in refused: ${refused.body}`)
+      assert(refused.body.includes('ACCOUNT_DISABLED'), `names why: ${refused.body}`)
+
+      const enable = slay(['--hub', NAME_A, 'hub', 'users', 'enable', email], { root: rootA })
+      assertEq(enable.status, 0, `enable exited 0 (stderr: ${enable.stderr})`)
+      assertEq(usersLs().find((u) => u.email === email)!.disabledAt, null, 'enabled again')
+      const again = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
+      assertEq(again.status, 200, `signs in again: ${again.body}`)
+    })
+
+    await test('hub users: role sets the role; the last enabled admin is never demoted or disabled', async () => {
+      const owner = usersLs()[0]!.email
+      // Demote every other admin, so the owner is the last one.
+      for (const u of usersLs().filter((u) => u.role === 'admin' && u.email !== owner)) {
+        const res = slay(['--hub', NAME_A, 'hub', 'users', 'role', u.email, 'user'], {
+          root: rootA
+        })
+        assertEq(res.status, 0, `demoted ${u.email} (stderr: ${res.stderr})`)
+        assert(/is now user/.test(res.stdout), `confirmed: ${res.stdout}`)
+      }
+      assertEq(usersLs().filter((u) => u.role === 'admin').length, 1, 'one admin left')
+      for (const args of [
+        ['role', owner, 'user'],
+        ['disable', owner]
+      ]) {
+        const res = slay(['--hub', NAME_A, 'hub', 'users', ...args], { root: rootA })
+        assert(res.status !== 0, `${args[0]} refused with a non-zero exit`)
+        assert(/last enabled admin/.test(res.stderr), `explained why: ${res.stderr}`)
+      }
+      assertEq(usersLs()[0]!.role, 'admin', 'the owner is still admin')
+      const bad = slay(['--hub', NAME_A, 'hub', 'users', 'role', owner, 'owner'], { root: rootA })
+      assert(bad.status !== 0, 'an unknown role is refused')
+    })
+
+    await test('hub users: rm was renamed to disable and changes nothing', async () => {
+      const before = usersLs()
+      const target = before[before.length - 1]!.email
+      const rm = slay(['--hub', NAME_A, 'hub', 'users', 'rm', target], { root: rootA })
+      assert(rm.status !== 0, 'non-zero exit')
+      assert(
+        /renamed to `slay hub users disable <email>`/.test(rm.stderr),
+        `names the new command: ${rm.stderr}`
+      )
+      assertEq(JSON.stringify(usersLs()), JSON.stringify(before), 'no account changed')
+    })
+
+    await test('hub users: disable of an unknown account fails loudly', async () => {
+      const res = slay(['--hub', NAME_A, 'hub', 'users', 'disable', 'nobody@example.com'], {
         root: rootA
       })
       assert(res.status !== 0, 'non-zero exit')

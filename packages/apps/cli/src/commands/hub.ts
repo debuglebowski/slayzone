@@ -8,7 +8,7 @@
  *   - CLIENT view: which hub THIS CLI talks to (`use`, `login`, `current`,
  *     `forget`). Answered from `cli-hub-target.json` / `SLAYZONE_HUB_ADDRESS`. `use` points at
  *     a hub; `login` additionally OBTAINS the bearer an auth-enforcing hub needs.
- *   - ACCOUNTS on a hub (`users add|ls|rm`). Reaches the hub's loopback-only
+ *   - ACCOUNTS on a hub (`users add|ls|disable|enable|role`). Reaches the hub's
  *     `/api/hub/users` — see {@link hubUsersCommand}.
  *
  * `start` REGISTERS the hub with the OS supervisor (launchd/systemd) rather than
@@ -20,7 +20,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, openSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
-import { Command } from 'commander'
+import { Argument, Command } from 'commander'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
 import {
   LOOPBACK_HOSTS,
@@ -424,6 +424,9 @@ interface HubUserRow {
   id: string
   email: string
   name: string
+  role: 'admin' | 'user'
+  /** ISO-8601 when disabled, else null. */
+  disabledAt: string | null
   createdAt: string
 }
 
@@ -465,6 +468,14 @@ async function hubSignIn(baseUrl: string, email: string, password: string): Prom
     fail(`Could not reach the hub at ${baseUrl}.`)
   }
   if (!res.ok) {
+    // Only reachable with the right password (better-auth checks it first).
+    const code = ((await res.json().catch(() => ({}))) as { code?: unknown }).code
+    if (code === 'ACCOUNT_DISABLED') {
+      fail(
+        'Sign-in refused: this account is disabled on the hub. An operator can enable it ' +
+          'with `slay hub users enable <email>`.'
+      )
+    }
     // better-auth answers 401 for both a wrong password and an unknown email, and
     // deliberately does not distinguish them. Name the likely fixes instead of
     // guessing which one it was.
@@ -515,17 +526,25 @@ function hubUsersCommand(): Command {
     .command('add <email>')
     .description('Create an account and print its generated password once')
     .option('--name <name>', 'Display name (default: the email local part)')
+    .option('--admin', 'Make the account an admin (the first account on a hub always is)')
     .option('--json', 'Output as JSON')
-    .action(async (email: string, opts: { name?: string; json?: boolean }) => {
+    .action(async (email: string, opts: { name?: string; admin?: boolean; json?: boolean }) => {
       const created = await hubUsersRequest<HubUserRow & { password: string }>('POST', {
         email,
-        ...(opts.name ? { name: opts.name } : {})
+        ...(opts.name ? { name: opts.name } : {}),
+        ...(opts.admin ? { role: 'admin' } : {})
       })
       if (opts.json) {
-        console.log(JSON.stringify({ email: created.email, password: created.password }, null, 2))
+        console.log(
+          JSON.stringify(
+            { email: created.email, role: created.role, password: created.password },
+            null,
+            2
+          )
+        )
         return
       }
-      console.log(`Created account: ${created.email}`)
+      console.log(`Created account: ${created.email} (${created.role})`)
       console.log(`Password:        ${created.password}`)
       console.log('')
       // Only the hash is stored, so this really is the one and only chance.
@@ -551,25 +570,62 @@ function hubUsersCommand(): Command {
       }
       const emailW = Math.max(5, ...rows.map((r) => r.email.length))
       const nameW = Math.max(4, ...rows.map((r) => r.name.length))
-      console.log(`${'EMAIL'.padEnd(emailW)}  ${'NAME'.padEnd(nameW)}  CREATED`)
-      console.log(`${'-'.repeat(emailW)}  ${'-'.repeat(nameW)}  ${'-'.repeat(10)}`)
+      console.log(
+        `${'EMAIL'.padEnd(emailW)}  ${'NAME'.padEnd(nameW)}  ${'ROLE'.padEnd(5)}  ` +
+          `${'DISABLED'.padEnd(10)}  CREATED`
+      )
+      console.log([emailW, nameW, 5, 10, 10].map((w) => '-'.repeat(w)).join('  '))
       for (const r of rows) {
-        const created = r.createdAt.slice(0, 10)
-        console.log(`${r.email.padEnd(emailW)}  ${r.name.padEnd(nameW)}  ${created}`)
+        const disabled = r.disabledAt ? r.disabledAt.slice(0, 10) : '-'
+        console.log(
+          `${r.email.padEnd(emailW)}  ${r.name.padEnd(nameW)}  ${r.role.padEnd(5)}  ` +
+            `${disabled.padEnd(10)}  ${r.createdAt.slice(0, 10)}`
+        )
       }
     })
 
+  // No confirmation prompts below: the operator typed an exact email, every change
+  // is reversible, and the hub refuses the unrecoverable cases itself (last enabled
+  // account, last enabled admin, the computer service identity).
   users
-    .command('rm <email>')
-    .description('Remove an account and revoke its sessions')
+    .command('disable <email>')
+    .description('Disable an account: revoke its sessions and block sign-in (nothing is deleted)')
     .action(async (email: string) => {
-      // No confirmation prompt: the operator typed an exact email, the hub refuses
-      // the two dangerous cases itself (last remaining account, computer service
-      // identity), and an account is re-creatable with `add`.
-      const removed = await hubUsersRequest<{ email: string }>('DELETE', {
-        email
-      })
-      console.log(`Removed account: ${removed.email}`)
+      const done = await hubUsersRequest<{ email: string }>('PATCH', { email, disabled: true })
+      console.log(
+        `Disabled account: ${done.email} (sessions revoked; the account and its data are kept)`
+      )
+    })
+
+  users
+    .command('enable <email>')
+    .description('Enable a disabled account so it can sign in again')
+    .action(async (email: string) => {
+      const done = await hubUsersRequest<{ email: string }>('PATCH', { email, disabled: false })
+      console.log(`Enabled account: ${done.email}`)
+    })
+
+  users
+    .command('role')
+    .description('Set an account’s role')
+    .argument('<email>')
+    .addArgument(new Argument('<role>').choices(['admin', 'user']))
+    .action(async (email: string, role: 'admin' | 'user') => {
+      const done = await hubUsersRequest<{ email: string; role: string }>('PATCH', { email, role })
+      console.log(`${done.email} is now ${done.role}`)
+    })
+
+  // Renamed, not silently mapped: `rm` used to DELETE the account, `disable` keeps it.
+  // Hidden from help; any arguments are accepted so the message always shows.
+  users
+    .command('rm', { hidden: true })
+    .argument('[args...]')
+    .allowUnknownOption()
+    .action(() => {
+      fail(
+        '`slay hub users rm` was renamed to `slay hub users disable <email>`. Accounts are ' +
+          'disabled, never deleted: the account and its data are kept.'
+      )
     })
 
   return users
@@ -1189,7 +1245,7 @@ export function hubCommand(): Command {
       }
     })
 
-  // slay hub users add|ls|rm
+  // slay hub users add|ls|disable|enable|role
   cmd.addCommand(hubUsersCommand())
 
   return cmd

@@ -22,7 +22,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
-import type { HubAuth } from '@slayzone/hub-auth/server'
+import { findHubAccount, type HubAuth } from '@slayzone/hub-auth/server'
+import type { HubRole } from '@slayzone/hub-auth'
 import type { Scope } from '@slayzone/transport/server'
 
 /**
@@ -171,6 +172,35 @@ export async function verifyWebSessionToken(
   }
   if (!Array.isArray(scopes)) return { ok: false, reason: 'unknown' }
   return { ok: true, userId: row.user_id, scopes: scopes as Scope[] }
+}
+
+/** The principal a live web session resolves to. */
+export interface WebSessionPrincipal {
+  userId: string
+  role: HubRole
+  scopes: Scope[]
+}
+
+/**
+ * A `szw_` token → its principal, or null. The ONE web-session resolver both doors
+ * use (`resolveConnectionPrincipal` for `/trpc`, `verifyRestBearer` for `/api/*`).
+ *
+ * {@link verifyWebSessionToken} checks the ROW (known, not revoked, not expired);
+ * this also checks the ACCOUNT behind it in hub-auth: gone or disabled → null, else
+ * its role. Disabling an account revokes its rows (`revokeAllWebSessions`); this is
+ * the second line, for a row that exists anyway. No hub-auth instance → null: the
+ * account cannot be checked, so the session is not honoured.
+ */
+export async function resolveWebSession(
+  auth: HubAuth | null,
+  db: SlayzoneDb,
+  token: string
+): Promise<WebSessionPrincipal | null> {
+  const result = await verifyWebSessionToken(db, token)
+  if (!result.ok || !auth) return null
+  const account = await findHubAccount(auth, result.userId)
+  if (!account || account.disabled) return null
+  return { userId: result.userId, role: account.role, scopes: result.scopes }
 }
 
 export async function listWebSessions(db: SlayzoneDb, userId: string): Promise<WebSessionRow[]> {
