@@ -178,6 +178,21 @@ export function isKnownStatus(
   return resolveColumns(columns).some((column) => column.id === statusId)
 }
 
+/**
+ * The statuses valid in EVERY one of several projects — what a bulk status change
+ * across them may offer. Each project's columns are resolved exactly as the backend
+ * validates a status (`isKnownStatus`: missing/invalid config → defaults); the
+ * result is the first project's columns whose id every project has. Empty when
+ * they share none (or no project is given).
+ */
+export function getSharedStatusColumns(
+  columnSets: ReadonlyArray<ColumnConfig[] | null | undefined>
+): ColumnConfig[] {
+  if (columnSets.length === 0) return []
+  const [first, ...rest] = columnSets.map((columns) => resolveColumns(columns))
+  return first.filter((column) => rest.every((columns) => columns.some((c) => c.id === column.id)))
+}
+
 export function normalizeStatusOrDefault(
   statusId: string,
   columns: ColumnConfig[] | null | undefined

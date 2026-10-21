@@ -1418,7 +1418,6 @@ function App(): React.JSX.Element {
                   taskIds={taskIds}
                   tasks={selectedTasks}
                   projects={projects}
-                  columns={allSameProject ? (columnsByProjectId.get(firstProjectId) ?? null) : null}
                   tags={allSameProject ? tags.filter((t) => t.project_id === firstProjectId) : []}
                   taskTagsMap={taskTags}
                   onBulkUpdate={bulkContextMenuUpdate}

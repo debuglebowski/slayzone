@@ -118,6 +118,8 @@ run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
 run_test packages/domains/task/src/client/card-water-fill.test.ts
+# Workflow columns — statuses shared by several projects (bulk status menu).
+run_test packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_test packages/domains/settings/src/client/useTabStore.test.ts
 run_test packages/domains/terminal/src/client/focus-loss-diag.test.ts

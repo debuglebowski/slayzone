@@ -145,7 +145,6 @@ function SortableKanbanCard({
         taskIds={selectedIdArr}
         tasks={selectedTasks}
         projects={allProjects}
-        columns={columns}
         tags={tags}
         taskTagsMap={taskTagsMap}
         onBulkUpdate={onBulkUpdateTasks}

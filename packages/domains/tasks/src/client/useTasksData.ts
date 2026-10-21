@@ -763,7 +763,11 @@ export function useTasksData(): UseTasksDataReturn {
           ids: taskIds,
           updates: toUpdateTaskFields(updates)
         })
-      } catch {
+      } catch (err) {
+        // The batch is all-or-nothing server-side; say why it snapped back.
+        toast.error(
+          `Couldn't update ${taskIds.length} tasks: ${err instanceof Error ? err.message : String(err)}`
+        )
         setTasks(previousTasks)
         if (updates.is_blocked !== undefined) {
           setBlockedTaskIds((prev) => {

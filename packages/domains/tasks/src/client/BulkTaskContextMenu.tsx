@@ -26,7 +26,7 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
-import type { Project, ColumnConfig } from '@slayzone/projects/shared'
+import { getSharedStatusColumns, type Project } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import {
   AlarmClock,
@@ -46,7 +46,6 @@ interface BulkTaskContextMenuProps {
   taskIds: string[]
   tasks: Task[]
   projects: Project[]
-  columns?: ColumnConfig[] | null
   tags?: Tag[]
   taskTagsMap?: Map<string, string[]>
   onBulkUpdate: (taskIds: string[], updates: Partial<Task>) => void
@@ -77,7 +76,6 @@ export function BulkTaskContextMenu({
   taskIds,
   tasks,
   projects,
-  columns,
   tags,
   taskTagsMap,
   onBulkUpdate,
@@ -88,7 +86,14 @@ export function BulkTaskContextMenu({
 }: BulkTaskContextMenuProps): React.JSX.Element {
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const statusOptions = buildStatusOptions(columns)
+  // Offer only statuses EVERY selected task's project has — the backend rejects
+  // the whole batch otherwise. None shared → the Status submenu is disabled.
+  const statusColumns = useMemo(() => {
+    const columnsByProject = new Map(projects.map((p) => [p.id, p.columns_config]))
+    const projectIds = [...new Set(tasks.map((t) => t.project_id))]
+    return getSharedStatusColumns(projectIds.map((id) => columnsByProject.get(id) ?? null))
+  }, [tasks, projects])
+  const statusOptions = statusColumns.length > 0 ? buildStatusOptions(statusColumns) : []
 
   const commonStatus = useMemo(() => commonValue(tasks.map((t) => t.status)), [tasks])
   const commonPriority = useMemo(() => commonValue(tasks.map((t) => t.priority)), [tasks])
@@ -181,11 +186,15 @@ export function BulkTaskContextMenu({
 
           {/* Status */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger>
+            <ContextMenuSubTrigger disabled={statusOptions.length === 0}>
               <CircleDot className="mr-2 size-3.5" />
               <span className="flex-1">Status</span>
-              {commonStatus === MIXED && (
-                <span className="text-muted-foreground text-xs mr-1.5">—</span>
+              {statusOptions.length === 0 ? (
+                <span className="text-muted-foreground text-xs mr-1.5">none shared</span>
+              ) : (
+                commonStatus === MIXED && (
+                  <span className="text-muted-foreground text-xs mr-1.5">—</span>
+                )
               )}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent>
@@ -194,7 +203,7 @@ export function BulkTaskContextMenu({
                 onValueChange={handleStatusChange}
               >
                 {statusOptions.map((s) => {
-                  const style = getColumnStatusStyle(s.value, columns)
+                  const style = getColumnStatusStyle(s.value, statusColumns)
                   const Icon = style?.icon
                   return (
                     <ContextMenuRadioItem key={s.value} value={s.value}>
