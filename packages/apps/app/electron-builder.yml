@@ -13,6 +13,15 @@ files:
 asarUnpack:
   - resources/**
   - '**/node_modules/better-sqlite3/**'
+  # better-sqlite3's own runtime dependencies. The hub is a bundle in Resources/hub that
+  # resolves natives through NODE_PATH=app.asar.unpacked/node_modules (index.ts), and a
+  # module required from an unpacked file only looks in unpacked dirs — so a dependency
+  # left inside app.asar is invisible: `require('better-sqlite3')` succeeds and the first
+  # `new Database()` dies with "Could not locate the bindings file". Keep this list equal
+  # to better-sqlite3's `dependencies`; scripts/release/smoke-packaged-app.mjs opens a
+  # database from the build output and fails the release if one is missing.
+  - '**/node_modules/bindings/**'
+  - '**/node_modules/file-uri-to-path/**'
   - '**/node_modules/node-pty/**'
 win:
   executableName: slayzone
@@ -58,6 +67,11 @@ extraResources:
     to: "bin/slay"
   - from: "../hub/dist/bin.cjs"
     to: "hub/bin.cjs"
+  # The co-located local computer: index.ts spawns resourcesPath/computer/bin.cjs. Every
+  # agent, terminal and git operation runs on a computer, so without this the app boots
+  # but can do none of its work. Built by the app's `prebuild`.
+  - from: "../computer/dist/bin.cjs"
+    to: "computer/bin.cjs"
   # server.ts's WEB_ROOT resolves as `join(__dirname, '..', 'dist', 'web')`
   # relative to wherever bin.cjs itself runs from — an OFFSET, not a fixed
   # path, so it resolves correctly both unpackaged (dist/bin.cjs + dist/web

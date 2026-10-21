@@ -66,6 +66,11 @@ require_contains \
 
 require_contains \
   ".github/workflows/release-foundation.yml" \
+  "smoke-packaged-app.mjs" \
+  "release-foundation.yml must smoke-test the packaged app before it is collected"
+
+require_contains \
+  ".github/workflows/release-foundation.yml" \
   'Publish (${{ matrix.channel }})' \
   "release-foundation.yml must keep channel publish jobs"
 

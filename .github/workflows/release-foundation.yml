@@ -175,15 +175,18 @@ jobs:
           - name: macos-arm64
             os: macos-latest
             build_args: --mac --arm64
+            smoke_dir: mac-arm64
           - name: macos-x64
             os: macos-latest
             build_args: --mac --x64
           - name: linux-x64
             os: ubuntu-latest
             build_args: --linux --x64
+            smoke_dir: linux-unpacked
           - name: windows
             os: windows-latest
             build_args: --win --x64 --arm64
+            smoke_dir: win-unpacked
 
     runs-on: ${{ matrix.os }}
 
@@ -272,6 +275,16 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Boots the PACKAGED hub and loads the computer's natives from the builder's
+      # unpacked output. Nothing else in CI runs from a packaged layout, which is how
+      # two release-blocking packaging bugs (the hub could not open its database; no
+      # computer bundle shipped) went unseen. Only runnable builds: the macOS x64 and
+      # Windows arm64 outputs share this packaging config but not this runner's CPU.
+      - name: Smoke packaged app
+        if: matrix.smoke_dir != ''
+        shell: bash
+        run: node scripts/release/smoke-packaged-app.mjs "packages/apps/app/dist/${{ matrix.smoke_dir }}"
 
       - name: Collect release assets
         shell: bash

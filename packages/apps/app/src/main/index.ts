@@ -332,6 +332,20 @@ import {
 } from '@slayzone/task/electron'
 import { configureTaskRuntimeAdapters, closeArtifactWatcher, taskOps } from '@slayzone/task/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
+/**
+ * Env for a child that runs a bundle out of `Resources/` (the hub, the local computer)
+ * in a PACKAGED app. Their native modules are external to the bundle, and a bundle in
+ * `Resources/<role>/` has no node_modules above it, so Node's walk-up finds nothing:
+ * NODE_PATH points the resolver at the unpacked ones. Empty in dev, where the bundles
+ * run from the repo and resolve through its node_modules. Checked by
+ * `scripts/release/smoke-packaged-app.mjs` against the real build output.
+ */
+function packagedNativeModuleEnv(): { NODE_PATH?: string } {
+  return app.isPackaged
+    ? { NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules') }
+    : {}
+}
+
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
   getThemeSource as nativeGetThemeSource,
@@ -784,7 +798,10 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
       // SLAYZONE_SUPERVISED=1 (above) the computer defaults its enroll name to
       // DEFAULT_LOCAL_COMPUTER_NAME (matching the hub's localComputerName so the dedup
       // collapses to one row) and its path-jail to `[homedir()]`.
-      SLAYZONE_HUB_JOIN_TOKEN: minted.token
+      SLAYZONE_HUB_JOIN_TOKEN: minted.token,
+      // Same reason as the hub's spawn: Resources/computer/bin.cjs keeps node-pty
+      // external, and nothing above it on disk is a node_modules.
+      ...packagedNativeModuleEnv()
     },
     logger: (line) => logBoot(line),
     // Every agent pty is a direct child of the computer, so a computer exit kills
@@ -2411,13 +2428,10 @@ app
                 SLAYZONE_DESKTOP_BRIDGE_TOKEN: desktopBridge.token,
                 // Packaged resolution: only bin.js is copied to Resources/hub,
                 // so createRequire's walk-up never finds node_modules. Point the
-                // resolver at the unpacked natives (better-sqlite3, node-pty) the
-                // app ships anyway — same ABI, ELECTRON_RUN_AS_NODE shares it.
-                ...(app.isPackaged
-                  ? {
-                      NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
-                    }
-                  : {})
+                // resolver at the unpacked natives (better-sqlite3 and its
+                // dependencies, node-pty) the app ships anyway — same ABI,
+                // ELECTRON_RUN_AS_NODE shares it.
+                ...packagedNativeModuleEnv()
                 // The sidecar always builds the computer gateway/auth (a hub always
                 // accepts computers) — no env flag needed. `/computers` rides the ONE hub
                 // listener (same port as /trpc), demuxed by path; supervised binds
