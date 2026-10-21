@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { hubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   startSyncPoller as defaultStartSyncPoller,
   startDiscoveryPoller as defaultStartDiscoveryPoller
@@ -12,7 +13,8 @@ import {
  * stopped for everyone. The hub owns the database, so the hub runs them — standalone and
  * supervised alike, against its own DB.
  *
- * Both timers are unref'd: they must never be the reason the hub process stays alive.
+ * Not started at all when the hub's integrations switch is off. Both timers are unref'd:
+ * they must never be the reason the hub process stays alive.
  * `fns` is injectable so the wiring can be tested without a provider.
  */
 export type IntegrationPollerFns = {
@@ -31,6 +33,10 @@ export function startIntegrationPollers(opts: {
   } = opts.fns ?? {}
 
   const timers: NodeJS.Timeout[] = []
+  // `SLAYZONE_HUB_ENABLE_INTEGRATIONS=0`: this hub makes no provider call, so the pollers
+  // never exist (the same stance as `wireIntegrationPush`). Starting them would hit the
+  // credential refusal and write a `denied` audit line every tick.
+  if (!hubIntegrationsEnabled()) return { stop: () => {} }
   // One poller failing to start must not take the other (or the boot) down.
   const start = (label: string, run: () => NodeJS.Timeout): void => {
     try {

@@ -112,6 +112,21 @@ test('a poller that throws at start does not stop the other, or boot', async () 
   handle.stop()
 })
 
+test('SLAYZONE_HUB_ENABLE_INTEGRATIONS=0: no poller exists, so no provider call is attempted', () => {
+  const prev = process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS
+  process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS = '0'
+  try {
+    const { started, fns } = fakes()
+    const handle = startIntegrationPollers({ db, notifyTasksChanged: () => {}, fns })
+    expect(started.sync.length).toBe(0)
+    expect(started.discovery.length).toBe(0)
+    handle.stop()
+  } finally {
+    if (prev === undefined) delete process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS
+    else process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS = prev
+  }
+})
+
 test('the hub composition root calls startIntegrationPollers', () => {
   const src = readFileSync(fileURLToPath(new URL('./composition.ts', import.meta.url)), 'utf8')
   expect(/startIntegrationPollers\(/.test(src)).toBe(true)
