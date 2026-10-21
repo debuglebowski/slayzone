@@ -300,8 +300,9 @@ initStorageDir(legacyStateDir, app.isPackaged)
  * Where CLIENT state lives — `~/.slayzone/<channel>/client`.
  *
  * It used to be `getStorageDir()`, i.e. the HUB role's root. That put
- * `boot-config.json` — the file that decides whether a local hub runs at all —
- * and `hub-tokens.json` (safeStorage bearer tokens) inside the directory owned by
+ * `client.boot.json` (was `boot-config.json`) — the file that decides whether a local
+ * hub runs at all — and `client.tokens.json` (was `hub-tokens.json`; safeStorage
+ * bearer tokens) inside the directory owned by
  * the thing they configure. In remote mode that directory existed for no other
  * reason, and any future "reset the local hub" would take the user's remote-hub
  * registry and credentials with it.
@@ -3273,7 +3274,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
     )
     ipcMain.handle('app:set-hub-token', (_event, payload: { hubId: string; token: string }) => {
-      setHubToken(getClientStateRoot(), payload.hubId, payload.token)
+      setHubToken(getClientStateRoot(), payload.hubId, payload.token, getLegacyClientStateRoot())
       return { ok: true as const }
     })
     // Sign in to a remote hub (email+password → bearer). Runs main-side (CSP +
@@ -3284,7 +3285,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         const result = await hubLogin(payload.url, payload.email, payload.password)
         if (result.ok) {
           try {
-            setHubToken(getClientStateRoot(), payload.hubId, result.token)
+            setHubToken(
+              getClientStateRoot(),
+              payload.hubId,
+              result.token,
+              getLegacyClientStateRoot()
+            )
           } catch (err) {
             return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
           }

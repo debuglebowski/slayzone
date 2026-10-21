@@ -63,7 +63,7 @@ import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
  * `id` even when the address changes — the id keys the stored bearer token and
  * `default_hub_id`, so re-deriving it from the new URL would orphan both.
  *
- * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
+ * The registry lives in the pre-boot `client.boot.json` (a hub can't store the
  * list of hubs), so it is read via `getHubRegistry` and written via
  * `setBootSettings` (bootstrap IPCs). Enabling multi-hub / removing / reordering
  * a hub, toggling the local hub, or changing the default all change what the

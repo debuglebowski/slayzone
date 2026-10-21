@@ -7,7 +7,7 @@ import type { HubEntry } from '@slayzone/types'
 /**
  * Pre-boot server-mode config (slice 7).
  *
- * Deliberately a tiny JSON file (`<dataRoot>/boot-config.json`) and NOT a
+ * Deliberately a tiny JSON file (`<clientRoot>/client.boot.json`) and NOT a
  * settings-table row: in remote mode the settings DB lives on the remote
  * server, so reading the mode from the DB at boot would be circular. This file
  * is the only thing the main process consults before deciding whether to start
@@ -73,7 +73,10 @@ export type HealthProbeResult = {
 
 export type HubLoginResult = { ok: true; token: string } | { ok: false; error: string }
 
-const FILE_NAME = 'boot-config.json'
+// `client.<what>.json`: the desktop client's own files, next to `client.config.json`.
+const FILE_NAME = 'client.boot.json'
+/** What this file was called before the rename (`boot-config.json`). Read-only. */
+const LEGACY_FILE_NAME = 'boot-config.json'
 
 /**
  * Canonicalizes user input to `ws(s)://host[:port]/trpc`. Accepts http(s) and
@@ -133,12 +136,15 @@ function sanitizeHubEntry(raw: unknown): HubEntry | null {
   return entry
 }
 
-/** Reads the pre-boot config; any missing/corrupt/invalid state falls back to local. */
 /**
- * Reads the pre-boot config, falling back to `legacyDir` when the file has not
- * been written in the new location yet.
+ * Reads the pre-boot config. Any missing/corrupt/invalid state falls back to local.
  *
- * The fallback is READ-ONLY and never copies — the same stance `cli-state.ts`
+ * Looks for the file in three places, first readable one wins:
+ *   1. `<dir>/client.boot.json`   — current name and location
+ *   2. `<dir>/boot-config.json`   — the old name, in the client dir (beta.14+)
+ *   3. `<legacyDir>/boot-config.json` — the old name in the hub root (older betas)
+ *
+ * The fallbacks are READ-ONLY and never copy — the same stance `cli-state.ts`
  * takes, and for the same reason generalized: moving a file as a side effect of an
  * unrelated boot is the kind of thing that should be deliberate. The next
  * `writeBootSettings` (any server-mode / hubs / default-hub change) lands in the
@@ -147,20 +153,20 @@ function sanitizeHubEntry(raw: unknown): HubEntry | null {
  * there would brick startup.
  */
 export function readBootConfig(dir: string, legacyDir?: string): BootConfig {
+  const candidates = [join(dir, FILE_NAME), join(dir, LEGACY_FILE_NAME)]
+  if (legacyDir) candidates.push(join(legacyDir, LEGACY_FILE_NAME))
   let parsed: unknown
-  try {
-    parsed = JSON.parse(readFileSync(join(dir, FILE_NAME), 'utf8'))
-  } catch {
-    if (legacyDir) {
-      try {
-        parsed = JSON.parse(readFileSync(join(legacyDir, FILE_NAME), 'utf8'))
-      } catch {
-        return { server_mode: 'local' }
-      }
-    } else {
-      return { server_mode: 'local' }
+  let found = false
+  for (const file of candidates) {
+    try {
+      parsed = JSON.parse(readFileSync(file, 'utf8'))
+      found = true
+      break
+    } catch {
+      /* missing / unreadable → try the next location */
     }
   }
+  if (!found) return { server_mode: 'local' }
   if (typeof parsed !== 'object' || parsed === null) return { server_mode: 'local' }
   const obj = parsed as Record<string, unknown>
   if (obj.server_mode !== 'local' && obj.server_mode !== 'remote') {

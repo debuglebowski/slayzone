@@ -6,7 +6,7 @@ import { test, expect, clickSettings, resetApp, bootConfigPath } from '../fixtur
  * Local/Remote radio). It writes `server_mode` in the pre-boot config FILE (not
  * the DB): local on → `server_mode: 'local'` (spawn embedded backend); local off
  * → `server_mode: 'remote'` (pure client). `Save & relaunch`'s relaunch is a
- * no-op under PLAYWRIGHT, so the spec asserts on boot-config.json.
+ * no-op under PLAYWRIGHT, so the spec asserts on client.boot.json.
  *
  * Turning local OFF requires ≥1 remote hub to fall back to (the app must always
  * have a hub), so the spec adds a remote hub first.

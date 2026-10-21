@@ -6,7 +6,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { HOST_ID_REFRESH_MS, hostIdFilePath, reconcileHostId, sharedHostIdPath } from './host-id'
 
 let dir: string
@@ -80,6 +80,50 @@ describe('reconcileHostId', () => {
       sharedPath: join(dir, 'no-such-dir', 'shared')
     })
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
+  })
+})
+
+// computer.host-id.json → computer.host.json. The id is the machine's grouping key:
+// losing it silently splits one box into two machines on the hub, so the old file
+// has to be adopted, never ignored, and never touched.
+describe('computer.host.json rename', () => {
+  const legacyFile = (): string => join(dir, 'computer.host-id.json')
+  const legacyBytes = JSON.stringify({ hostId: 'beta-id', updatedAt: 1 })
+
+  it('is named computer.host.json', () => {
+    expect(basename(hostIdFilePath(dir))).toBe('computer.host.json')
+  })
+
+  it('adopts an id from the old file name and persists it under the new one', async () => {
+    writeFileSync(legacyFile(), legacyBytes)
+    expect(await reconcileHostId({ baseDir: dir, sharedPath: null })).toBe('beta-id')
+    const durable = JSON.parse(readFileSync(hostIdFilePath(dir), 'utf-8')) as { hostId: string }
+    expect(durable.hostId).toBe('beta-id')
+  })
+
+  it('leaves the old file byte-identical (copy, never move)', async () => {
+    writeFileSync(legacyFile(), legacyBytes)
+    await reconcileHostId({ baseDir: dir, sharedPath: null })
+    expect(readFileSync(legacyFile(), 'utf-8')).toBe(legacyBytes)
+  })
+
+  it('prefers the new file when both exist', async () => {
+    writeFileSync(legacyFile(), legacyBytes)
+    writeFileSync(hostIdFilePath(dir), JSON.stringify({ hostId: 'new-id', updatedAt: 2 }))
+    expect(await reconcileHostId({ baseDir: dir, sharedPath: null })).toBe('new-id')
+  })
+
+  it('an unparseable old file is not adopted and not touched', async () => {
+    writeFileSync(legacyFile(), '{not json')
+    const id = await reconcileHostId({ baseDir: dir, sharedPath: null })
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(readFileSync(legacyFile(), 'utf-8')).toBe('{not json')
+  })
+
+  it('the shared value still wins over an adopted old id', async () => {
+    writeFileSync(legacyFile(), legacyBytes)
+    writeFileSync(shared, 'winner\n')
+    expect(await reconcileHostId({ baseDir: dir, sharedPath: shared })).toBe('winner')
   })
 })
 

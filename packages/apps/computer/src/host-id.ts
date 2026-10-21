@@ -8,7 +8,7 @@
  *
  * The scheme is two files:
  *
- *   - DURABLE, in this computer's own `<ROOT>/computer.host-id.json` (0600). This
+ *   - DURABLE, in this computer's own `<ROOT>/computer.host.json` (0600). This
  *     is the value of record. Once written it survives reboots, `/tmp` sweeps and
  *     everything else.
  *   - SHARED, at a world-writable path in `/tmp`. Its ONLY job is to let a
@@ -58,6 +58,12 @@ function slayzoneRootDir(): string {
 }
 
 export function hostIdFilePath(baseDir?: string): string {
+  return join(baseDir ?? slayzoneRootDir(), 'computer.host.json')
+}
+
+/** The name the betas wrote (`computer.host-id.json`). A read-only source: the id
+ *  is adopted from it once, and the file is never modified or removed. */
+function legacyHostIdFilePath(baseDir?: string): string {
   return join(baseDir ?? slayzoneRootDir(), 'computer.host-id.json')
 }
 
@@ -164,6 +170,16 @@ export async function reconcileHostId(options: ReconcileHostIdOptions = {}): Pro
   const log = options.log ?? ((): void => undefined)
 
   let durable = await readDurable(filePath)
+  if (!durable) {
+    // Renamed from `computer.host-id.json`. Adopt a beta's id instead of minting a
+    // new one — a fresh id would show this box as a second machine on the hub.
+    // Copy-only: the old file stays exactly as it was.
+    const legacy = await readDurable(legacyHostIdFilePath(options.baseDir))
+    if (legacy) {
+      durable = legacy
+      await writeDurable(filePath, durable)
+    }
+  }
   const shared = sharedPath ? await readShared(sharedPath) : null
 
   if (shared && durable && shared !== durable) {

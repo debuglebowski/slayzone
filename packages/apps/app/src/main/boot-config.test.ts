@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,12 +67,12 @@ describe('readBootConfig / writeBootSettings', () => {
   })
 
   it('defaults to local when the file is corrupt JSON', () => {
-    writeFileSync(join(dir, 'boot-config.json'), '{nope')
+    writeFileSync(join(dir, 'client.boot.json'), '{nope')
     expect(readBootConfig(dir)).toEqual({ server_mode: 'local' })
   })
 
   it('defaults to local when server_mode has an invalid value', () => {
-    writeFileSync(join(dir, 'boot-config.json'), JSON.stringify({ server_mode: 'cloud' }))
+    writeFileSync(join(dir, 'client.boot.json'), JSON.stringify({ server_mode: 'cloud' }))
     expect(readBootConfig(dir)).toEqual({ server_mode: 'local' })
   })
 
@@ -104,9 +104,92 @@ describe('readBootConfig / writeBootSettings', () => {
 
   it('writes pretty-printed JSON (hand-editable pre-boot file)', () => {
     writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'ws://example.com:1/trpc' })
-    const raw = readFileSync(join(dir, 'boot-config.json'), 'utf8')
+    const raw = readFileSync(join(dir, 'client.boot.json'), 'utf8')
     expect(raw).toContain('\n')
     expect(JSON.parse(raw).server_mode).toBe('remote')
+  })
+})
+
+// boot-config.json → client.boot.json. This file decides whether a local hub runs at
+// all and holds the user's remote-hub list, and it is read at the most fragile moment
+// in boot. Every location a beta could have left it in must still be found, nothing
+// may be lost on the first write, and the old file must never be touched.
+describe('client.boot.json rename', () => {
+  let dir: string
+  let hubRoot: string
+  const OLD = 'boot-config.json'
+  const NEW = 'client.boot.json'
+  const remote = (url: string): string =>
+    JSON.stringify({ server_mode: 'remote', remote_server_url: url })
+
+  beforeEach(() => {
+    const base = mkdtempSync(join(tmpdir(), 'slayzone-boot-rename-'))
+    dir = join(base, 'client')
+    hubRoot = join(base, 'hub')
+    mkdirSync(dir)
+    mkdirSync(hubRoot)
+  })
+  afterEach(() => {
+    rmSync(join(dir, '..'), { recursive: true, force: true })
+  })
+
+  it('writes client.boot.json and never creates the old name', () => {
+    writeBootSettings(dir, { server_mode: 'remote', remote_server_url: 'ws://a.example.com/trpc' })
+    expect(existsSync(join(dir, NEW))).toBe(true)
+    expect(existsSync(join(dir, OLD))).toBe(false)
+  })
+
+  it('reads the old name in the client dir (beta.14+ layout)', () => {
+    writeFileSync(join(dir, OLD), remote('ws://beta.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot)).toEqual({
+      server_mode: 'remote',
+      remote_server_url: 'ws://beta.example.com/trpc'
+    })
+  })
+
+  it('reads the old name in the hub root (pre-client-dir layout)', () => {
+    writeFileSync(join(hubRoot, OLD), remote('ws://older.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot)).toEqual({
+      server_mode: 'remote',
+      remote_server_url: 'ws://older.example.com/trpc'
+    })
+  })
+
+  it('prefers the new file, then the old file in the client dir, then the hub root', () => {
+    writeFileSync(join(hubRoot, OLD), remote('ws://hubroot.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot).remote_server_url).toBe('ws://hubroot.example.com/trpc')
+    writeFileSync(join(dir, OLD), remote('ws://olddir.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot).remote_server_url).toBe('ws://olddir.example.com/trpc')
+    writeFileSync(join(dir, NEW), remote('ws://new.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot).remote_server_url).toBe('ws://new.example.com/trpc')
+  })
+
+  it('first write carries the old settings forward and leaves the old file byte-identical', () => {
+    const oldBytes = JSON.stringify({
+      server_mode: 'remote',
+      remote_server_url: 'ws://beta.example.com/trpc',
+      multi_hub: true,
+      hubs: [{ id: 'fp-1', kind: 'remote', label: 'Prod', url: 'wss://prod.example.com/trpc' }]
+    })
+    writeFileSync(join(dir, OLD), oldBytes)
+    writeBootSettings(dir, { default_hub_id: 'fp-1' }, hubRoot)
+    const after = readBootConfig(dir, hubRoot)
+    expect(after.server_mode).toBe('remote')
+    expect(after.multi_hub).toBe(true)
+    expect(after.hubs).toHaveLength(1)
+    expect(after.default_hub_id).toBe('fp-1')
+    expect(JSON.parse(readFileSync(join(dir, NEW), 'utf8')).hubs).toHaveLength(1)
+    expect(readFileSync(join(dir, OLD), 'utf8')).toBe(oldBytes)
+  })
+
+  it('an unreadable new file falls through to the old name instead of resetting to local', () => {
+    writeFileSync(join(dir, NEW), '{nope')
+    writeFileSync(join(dir, OLD), remote('ws://beta.example.com/trpc'))
+    expect(readBootConfig(dir, hubRoot).server_mode).toBe('remote')
+  })
+
+  it('nothing anywhere still defaults to local', () => {
+    expect(readBootConfig(dir, hubRoot)).toEqual({ server_mode: 'local' })
   })
 })
 
@@ -170,7 +253,7 @@ describe('multi-hub boot config (Phase 0)', () => {
 
   it('drops malformed hub entries on read (hand-edited file)', () => {
     writeFileSync(
-      join(dir, 'boot-config.json'),
+      join(dir, 'client.boot.json'),
       JSON.stringify({
         server_mode: 'local',
         multi_hub: true,

@@ -94,9 +94,10 @@ export type SlayzoneSupervisedRole = 'hub' | 'computer'
  * a supervised process, and `getSupervisedRoot`'s caller restriction should stay
  * true. Same channel bucketing (beta folds into stable), same anchor.
  *
- * Exists because client state was living in the HUB's root. `boot-config.json` —
- * the file that decides whether a local hub runs at all — and `hub-tokens.json`
- * (safeStorage bearer tokens) both sat under `getSupervisedRoot('hub')`. In remote
+ * Exists because client state was living in the HUB's root. `client.boot.json`
+ * (was `boot-config.json`; the file that decides whether a local hub runs at all)
+ * and `client.tokens.json` (was `hub-tokens.json`; safeStorage bearer tokens) both
+ * sat under `getSupervisedRoot('hub')`. In remote
  * mode that directory exists for no other reason, and any future "reset the local
  * hub" would take the user's remote-hub registry and their credentials with it.
  *

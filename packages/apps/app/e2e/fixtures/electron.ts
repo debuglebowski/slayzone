@@ -338,7 +338,7 @@ async function launchElectronWithRetry(args: {
       //   • ELECTRON_RENDERER_URL → points the renderer at the host dev-server.
       //   • SLAYZONE_ROOT → getTrpcDataRoot() resolves to
       //     the REAL dev data root instead of the worker dir, so specs read/write
-      //     the real boot-config.json + data dir (e.g. 100-server-settings-toggle
+      //     the real client.boot.json + data dir (e.g. 100-server-settings-toggle
       //     flips the real app to remote mode → 102-sidecar-crash-recovery + the
       //     rest boot sidecar-less and cascade-fail).
       //   • SLAYZONE_SUPERVISED / SLAYZONE_HUB_ADDRESS /
@@ -459,7 +459,7 @@ async function launchElectronWithRetry(args: {
 /**
  * Launch a SECOND, fully isolated Electron instance with its own fresh
  * userdata dir — for specs that must control boot-time state (e.g. seeding
- * boot-config.json before launch) and can't use the shared worker app.
+ * client.boot.json before launch) and can't use the shared worker app.
  * Caller owns the lifecycle: always `await close()` in a finally block.
  */
 export async function launchIsolatedElectron(opts: {
@@ -608,7 +608,7 @@ export function cliDbPath(root: string): string {
 }
 
 /**
- * `<root>/dev/client/boot-config.json` — the pre-boot server-mode config file.
+ * `<root>/dev/client/client.boot.json` — the pre-boot server-mode config file.
  *
  * Derived HERE, once, for the same reason `cliDbPath` is: the layout is the
  * app's (`getSupervisedRoot('hub')`), and e2e can only mirror it. It was
@@ -623,7 +623,7 @@ export function cliDbPath(root: string): string {
  * `SLAYZONE_USER_DATA_DIR` read back from the shared worker app).
  */
 export function bootConfigPath(root: string): string {
-  return path.join(clientRoot(root), 'boot-config.json')
+  return path.join(clientRoot(root), 'client.boot.json')
 }
 
 /**

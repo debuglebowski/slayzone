@@ -6,7 +6,7 @@ import { bootConfigPath, launchIsolatedElectron } from '../fixtures/electron'
 /**
  * Slice 7 — RemoteConfigScreen boot-fallback path.
  *
- * Boots a fully isolated app instance whose pre-seeded boot-config.json points
+ * Boots a fully isolated app instance whose pre-seeded client.boot.json points
  * remote mode at a dead URL. The renderer must show the recovery screen
  * (instead of mounting the app against a dead WS), let the user probe, and
  * write a local fallback via "Switch to local" (+ relaunch, which is a

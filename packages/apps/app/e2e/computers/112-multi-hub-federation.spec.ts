@@ -209,7 +209,7 @@ async function waitForHubHealth(port: number, timeoutMs = 30_000): Promise<void>
  * Give the running app a bearer for a remote hub, the way a Settings sign-in does.
  *
  * Goes through the product's own IPC (`app:set-hub-token` → safeStorage →
- * `<clientState>/hub-tokens.json`) rather than seeding a file, because the store
+ * `<clientState>/client.tokens.json`) rather than seeding a file, because the store
  * is encrypted with a key only the app has.
  *
  * The reload is load-bearing, not caution: `getOrCreateHubClient` caches one WS

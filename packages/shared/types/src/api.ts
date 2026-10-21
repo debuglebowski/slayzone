@@ -404,7 +404,7 @@ export interface PtyCreateOptions {
  * rail. A project belongs to exactly one hub (the DB it lives in) — there is no
  * user-facing "active hub".
  *
- * The registry lives in the pre-boot `boot-config.json` (a hub can't store the
+ * The registry lives in the pre-boot `client.boot.json` (a hub can't store the
  * list of hubs — it may be down), so this contract is shared between the main
  * process (boot-config) and the renderer (via the `app:get-hub-registry` IPC).
  */
