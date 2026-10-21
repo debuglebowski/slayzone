@@ -203,6 +203,10 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/histo
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v140-task-state-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v147-agent-sessions-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
+# A v145 (v0.35.0) database with orphan rows must still migrate; and the whole chain
+# v145 → latest must not lose a row in any table.
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/orphan-rows-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v145-chain-conserves-rows.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/agent-panel-rename-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts

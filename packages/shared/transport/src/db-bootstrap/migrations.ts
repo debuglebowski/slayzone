@@ -3132,10 +3132,16 @@ export const migrations: Migration[] = [
       // OS processes are long gone — so `status='dead'` and `cwd=NULL`.
       //   - `manual-reset` rows  → `session_resets` (a reset is not a session).
       //   - every other origin   → `agent_sessions`.
+      // Only rows whose task still exists. Both targets declare `task_id` a real foreign
+      // key, so one orphan (a ledger row left behind by a database that was ever written
+      // with enforcement off) made this INSERT throw — and a migration that throws rolls
+      // back and throws again on every launch, so the app could never start. No task can
+      // reach such a row; it stays in `task_conversations`, untouched.
       const rows = db
         .prepare(
           `SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
-             FROM task_conversations`
+             FROM task_conversations
+            WHERE task_id IN (SELECT id FROM tasks)`
         )
         .all() as Array<{
         id: string
@@ -3325,10 +3331,14 @@ export const migrations: Migration[] = [
             'pending-spawn'
           ))
         );
+        -- Only rows whose task still exists: the new table enforces the foreign key (and
+        -- \`PRAGMA foreign_keys = OFF\` is a no-op inside this transaction), so one orphan
+        -- made this copy throw on every launch. No task can reach such a row.
         INSERT INTO task_conversations_new
           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
           SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
-            FROM task_conversations;
+            FROM task_conversations
+           WHERE task_id IN (SELECT id FROM tasks);
         DROP TABLE task_conversations;
         ALTER TABLE task_conversations_new RENAME TO task_conversations;
         CREATE INDEX task_conversations_lookup
@@ -3475,10 +3485,14 @@ export const migrations: Migration[] = [
             'pending-spawn'
           ))
         );
+        -- Only rows whose task still exists: the new table enforces the foreign key (and
+        -- \`PRAGMA foreign_keys = OFF\` is a no-op inside this transaction), so one orphan
+        -- made this copy throw on every launch. No task can reach such a row.
         INSERT INTO task_conversations_new
           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
           SELECT id, task_id, mode, conversation_id, origin, pending_meta, created_at
-            FROM task_conversations;
+            FROM task_conversations
+           WHERE task_id IN (SELECT id FROM tasks);
         DROP TABLE task_conversations;
         ALTER TABLE task_conversations_new RENAME TO task_conversations;
         CREATE INDEX task_conversations_lookup
