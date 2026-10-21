@@ -174,6 +174,84 @@ test('restore rejects a filename escaping the backups dir', async () => {
   expect(trace.length).toBe(0)
 })
 
+// --- Auto-backup retention (data-safety audit M3) -------------------------------------
+// v0.35.0 skipped cleanup entirely when the cap was 0 ("0 = unlimited", which is what the
+// Settings UI stores for Unlimited). The hub port lost that guard, so with Unlimited every
+// tick deleted EVERY auto backup, including the one it had just made.
+function seedAutoBackups(n: number): string[] {
+  const dir = path.join(dataRoot, 'backups')
+  fs.mkdirSync(dir, { recursive: true })
+  const out: string[] = []
+  for (let i = 0; i < n; i++) {
+    const name = `slayzone.data.2026-01-0${i + 1}T10-00-00-000Z.auto.sqlite`
+    fs.writeFileSync(path.join(dir, name), 'OLD-AUTO')
+    out.push(name)
+  }
+  return out
+}
+function clearBackups(): void {
+  const dir = path.join(dataRoot, 'backups')
+  for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) fs.rmSync(path.join(dir, f))
+}
+
+test('Unlimited (0) auto backups: a tick adds one and deletes NOTHING', async () => {
+  clearBackups()
+  const o = ops()
+  const seeded = seedAutoBackups(3)
+  await o.setSettings({ autoEnabled: false, maxAutoBackups: 0 })
+  await o.runAutoBackup()
+  const autos = (await o.list()).filter((b) => b.type === 'auto').map((b) => b.filename)
+  expect(autos.length).toBe(4)
+  for (const n of seeded) expect(autos.includes(n)).toBe(true)
+  clearBackups()
+})
+
+test('a finite cap keeps the newest N, including the backup just made', async () => {
+  clearBackups()
+  const o = ops()
+  const seeded = seedAutoBackups(3)
+  await o.setSettings({ autoEnabled: false, maxAutoBackups: 2 })
+  await o.runAutoBackup()
+  const autos = (await o.list()).filter((b) => b.type === 'auto').map((b) => b.filename)
+  expect(autos.length).toBe(2)
+  // The two newest are the fresh one and the newest seeded one; the two oldest went.
+  expect(autos.includes(seeded[2])).toBe(true)
+  expect(autos.includes(seeded[0])).toBe(false)
+  expect(autos.includes(seeded[1])).toBe(false)
+  clearBackups()
+})
+
+test('a cap never touches manual or migration backups', async () => {
+  clearBackups()
+  const o = ops()
+  const dir = path.join(dataRoot, 'backups')
+  fs.writeFileSync(path.join(dir, 'slayzone.data.2026-01-01T10-00-00-000Z.manual.sqlite'), 'M')
+  fs.writeFileSync(path.join(dir, 'slayzone.data.2026-01-01T10-00-00-000Z.migration.sqlite'), 'G')
+  await o.setSettings({ autoEnabled: false, maxAutoBackups: 1 })
+  await o.runAutoBackup()
+  await o.runAutoBackup()
+  const kinds = (await o.list()).map((b) => b.type).sort()
+  expect(kinds.join(',')).toBe('auto,manual,migration')
+  clearBackups()
+})
+
+// v0.35.0 called startAutoBackup(db) at boot; the hub refactor dropped the call, so a user
+// with the switch ON got no backups until they happened to touch the setting.
+test('startAuto arms the timer when auto backup is enabled, and not when disabled', async () => {
+  const o = ops()
+  await o.setSettings({ autoEnabled: false })
+  await o.startAuto()
+  expect(o.autoRunning()).toBe(false)
+  await o.setSettings({ autoEnabled: true })
+  o.stopAuto()
+  expect(o.autoRunning()).toBe(false)
+  await o.startAuto()
+  expect(o.autoRunning()).toBe(true)
+  o.stopAuto()
+  expect(o.autoRunning()).toBe(false)
+  await o.setSettings({ autoEnabled: false })
+})
+
 // NO trailing `fs.rmSync(dataRoot)` here. The harness's `test()` queues async
 // bodies and returns immediately, so a cleanup at module scope runs while the
 // first test is still mid-flight — it deleted the backups dir underneath it, and

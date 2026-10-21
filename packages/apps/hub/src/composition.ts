@@ -712,17 +712,20 @@ export function composeServer(opts: {
   // Backup lives with the database now. `supervised` gates restore: on a hub a
   // client merely connects to, a whole-DB overwrite plus an app relaunch is not
   // something one client should be able to do to everyone.
-  setBackupOps(
-    buildBackupOps({
-      db,
-      dataRoot,
-      dbPath: getDatabasePathFromEnv(),
-      supervised: !opts.standalone,
-      closeDb: () => db.close(),
-      appRelaunch: () => bridge?.appDeps.appRelaunch(),
-      shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
-    })
-  )
+  const backupOps = buildBackupOps({
+    db,
+    dataRoot,
+    dbPath: getDatabasePathFromEnv(),
+    supervised: !opts.standalone,
+    closeDb: () => db.close(),
+    appRelaunch: () => bridge?.appDeps.appRelaunch(),
+    shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
+  })
+  setBackupOps(backupOps)
+  // Arm the auto-backup timer at boot. v0.35.0 did (`startAutoBackup(db)` in the host's
+  // boot); the hub refactor dropped the call, so the timer only started when someone
+  // touched the setting — a user with the switch ON silently stopped getting backups.
+  bootBestEffort('auto-backup-start', () => backupOps.startAuto())
   const integrationHandles = createIntegrationOps(db)
   setIntegrationOps(integrationHandles)
   // Push local task edits out to Linear/GitHub. Listens on `taskBus` — the SAME

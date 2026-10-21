@@ -197,9 +197,20 @@ export function buildBackupOps(deps: BackupDeps) {
   }
 
   const cleanupOld = async (type: 'auto', max: number): Promise<void> => {
+    // 0 = unlimited: what the Settings UI stores for "Unlimited". Without this guard
+    // `slice(0)` is every backup, and each tick deleted all of them — including the one
+    // it had just made. v0.35.0 had the guard; the hub port dropped it.
+    if (max <= 0) return
     const existing = (await listBackups(deps)).filter((b) => b.type === type)
     if (existing.length <= max) return
     for (const b of existing.slice(max)) await remove(b.filename)
+  }
+
+  /** One auto-backup tick: snapshot, then enforce the cap. Settings are read per tick, so
+   *  a changed cap applies to the next one without re-arming the timer. */
+  const runAutoBackup = async (): Promise<void> => {
+    await create('auto')
+    await cleanupOld('auto', (await getBackupSettings(db)).maxAutoBackups)
   }
 
   const startAuto = async (): Promise<void> => {
@@ -209,14 +220,15 @@ export function buildBackupOps(deps: BackupDeps) {
     autoTimer = setInterval(
       async () => {
         try {
-          await create('auto')
-          await cleanupOld('auto', settings.maxAutoBackups)
+          await runAutoBackup()
         } catch (err) {
           console.error('Auto-backup failed:', err)
         }
       },
       settings.intervalMinutes * 60 * 1000
     )
+    // The listener keeps the process alive; a timer must not hold up shutdown.
+    autoTimer.unref?.()
   }
 
   /**
@@ -265,6 +277,8 @@ export function buildBackupOps(deps: BackupDeps) {
     },
     revealInFinder: (): void => deps.shellOpenPath(backupsDir(dataRoot)),
     startAuto,
-    stopAuto
+    stopAuto,
+    runAutoBackup,
+    autoRunning: (): boolean => autoTimer !== null
   }
 }
