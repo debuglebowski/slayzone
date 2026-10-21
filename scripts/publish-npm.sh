@@ -53,6 +53,13 @@ git -C "$REPO_ROOT" worktree add --detach "$WT" HEAD
 cd "$WT"
 pnpm install --frozen-lockfile
 pnpm --filter @slayzone/hub build
+# Web UI: vite writes it to packages/apps/hub/dist/web, which the hub serves at `/`
+# (build.mjs never cleans dist/, so the order vs the hub build is free). Build env
+# is pinned here, not inherited from whoever runs this (decided in T-24): no
+# VITE_CONVEX_URL, so Convex stays off in the hub UI; no POSTHOG_* overrides, so
+# PostHog keeps vite.config.ts's defaults (anonymous tier, eu.i.posthog.com).
+env -u VITE_CONVEX_URL -u POSTHOG_DISABLED -u POSTHOG_API_KEY -u POSTHOG_HOST \
+  pnpm --filter @slayzone/web-shell build
 pnpm --filter @slayzone/computer build
 pnpm --filter @slayzone/cli build
 
@@ -113,6 +120,8 @@ computer gateway that computers dial into.
 `SLAYZONE_ROOT` is the install anchor: all state (DB, artifacts, logs)
 lives under `<ROOT>/storage`, and the DB filename is derived — not overridable.
 Omit it and the hub anchors to its launch directory.
+
+The web UI is served at `/` on the hub's address.
 
 ## Reaching it from other machines
 
@@ -231,6 +240,16 @@ echo "   $HUB_TGZ"
 echo "   $RUN_TGZ"
 echo "   $CLI_TGZ"
 
+# The hub tarball must carry the web UI: `files` ships dist/, so a missing bundle
+# means the web-shell build above never landed in dist/web.
+pack_fail() { echo "   PACK FAIL — $1"; echo "Aborting before publish."; exit 1; }
+HUB_FILES="$(tar tzf "$HUB_TGZ")"
+grep -qx 'package/dist/web/index.html' <<<"$HUB_FILES" \
+  || pack_fail "hub tarball has no package/dist/web/index.html (web UI not built)"
+grep -qE '^package/dist/web/assets/[^/]+\.js$' <<<"$HUB_FILES" \
+  || pack_fail "hub tarball has no package/dist/web/assets/*.js (web UI not built)"
+echo "   ✓ hub tarball carries the web UI ($(grep -c '^package/dist/web/' <<<"$HUB_FILES") of $(wc -l <<<"$HUB_FILES" | tr -d ' ') files, $(du -h "$HUB_TGZ" | cut -f1))"
+
 # --- SMOKE: install BOTH tarballs under PLAIN NODE (proves the ABI rebuild) and
 #     drive the full deploy handshake: boot hub → mint join token → boot computer →
 #     assert the computer enrolls. This is the ONLY place the published-package
@@ -311,6 +330,22 @@ for i in $(seq 1 30); do
   sleep 1
 done
 echo "   ✓ hub booted from the published tarball under plain node"
+
+# The web UI: `/` must return the shell's index.html, and one asset it references
+# must come back as JS. Check the content type, not only the 200: an unknown path
+# also gets index.html with a 200 (the SPA fallback in web-assets.ts).
+INDEX_CODE="$(curl -s -o "$SMOKE/index.html" -w '%{http_code}' "http://127.0.0.1:$HUB_PORT/" || true)"
+if [ "$INDEX_CODE" != "200" ] || ! grep -q '<title>SlayZone</title>' "$SMOKE/index.html"; then
+  smoke_fail "GET / did not return the web UI (HTTP $INDEX_CODE, want 200 + <title>SlayZone</title>)"
+fi
+ASSET_JS="$(grep -oE '/assets/[^"]+\.js' "$SMOKE/index.html" | sed -n 1p || true)"
+[ -n "$ASSET_JS" ] || smoke_fail "GET / returned no /assets/*.js reference"
+ASSET_RES="$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "http://127.0.0.1:$HUB_PORT$ASSET_JS" || true)"
+case "$ASSET_RES" in
+  "200 text/javascript"*) ;;
+  *) smoke_fail "GET $ASSET_JS did not return JS (got '$ASSET_RES')" ;;
+esac
+echo "   ✓ hub serves the web UI at / ($ASSET_JS)"
 
 # Mint a join token over the loopback REST channel (503 until the /computers wss
 # listener has bound). Needs a JSON body; curl is universally present on CI.
@@ -395,7 +430,7 @@ for i in $(seq 1 15); do
 done
 echo "   ✓ slay hub stop terminated the hub (discovery + SIGTERM path)"
 
-echo "   SMOKE PASS — hub + computer enrolled, and the published CLI drove the hub, under plain node"
+echo "   SMOKE PASS — hub served the web UI, computer enrolled, and the published CLI drove the hub, under plain node"
 kill "$HPID" "$RPID" 2>/dev/null || true
 rm -rf "$SMOKE"
 
