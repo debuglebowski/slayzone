@@ -37,6 +37,7 @@ run_test_electron_strict_loader packages/apps/hub/src/seed-computer-project-path
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
@@ -146,6 +147,8 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/orphan-rows-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v145-chain-conserves-rows.test.ts
 
 skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context) and run-all.sh never registered it. TODO(T-01): fix the test, then register it above"
@@ -177,6 +180,9 @@ run_vitest_files "vitest (transport server)" \
   packages/shared/transport/src/server/trpc.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts
+
+# The hub's accounts database: its name and the beta hub-auth.sqlite carried across.
+run_vitest_files "vitest (hub auth db)" packages/apps/hub/src/auth-db.test.ts
 
 # Packages with their own vitest config: new test files in them are picked up with no
 # edit here.
