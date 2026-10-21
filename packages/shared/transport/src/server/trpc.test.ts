@@ -95,26 +95,28 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('full reaches every path, including one classified never', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       await expect(caller.pty.create()).resolves.toBe('create-ok') // never-classified, full bypasses it
       await expect(caller.brandNewRouter.brandNewProcedure()).resolves.toBe('unclassified-ok')
     })
 
     test('agent scope reaches pty.write but is FORBIDDEN on pty.create', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u2', scopes: ['agent'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u2', role: 'user', scopes: ['agent'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       await expect(caller.pty.create()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     test('read+tasks does NOT reach an agent-only path', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u3', scopes: ['read', 'tasks'] }))
+      const caller = testRouter.createCaller(
+        ctx({ userId: 'u3', role: 'user', scopes: ['read', 'tasks'] })
+      )
       await expect(caller.pty.write()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     test('an UNCLASSIFIED path is FORBIDDEN even for a scope that would otherwise qualify', async () => {
       const caller = testRouter.createCaller(
-        ctx({ userId: 'u4', scopes: ['read', 'tasks', 'agent'] })
+        ctx({ userId: 'u4', role: 'user', scopes: ['read', 'tasks', 'agent'] })
       )
       await expect(caller.brandNewRouter.brandNewProcedure()).rejects.toMatchObject({
         code: 'FORBIDDEN'
@@ -149,7 +151,7 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('a scope refusal writes authz.denied with the actor and the scopes held', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u2', scopes: ['agent'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u2', role: 'user', scopes: ['agent'] }))
       await expect(caller.pty.create()).rejects.toMatchObject({ code: 'FORBIDDEN' })
       expect(audit).toHaveLength(1)
       expect(audit[0]).toMatchObject({
@@ -161,13 +163,13 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('an allowed call writes nothing', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       expect(audit).toHaveLength(0)
     })
 
     test('a procedure runs with the caller as the acting user', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
       await expect(caller.pty.whoami()).resolves.toEqual({
         actor: 'u1',
         ip: '203.0.113.7',

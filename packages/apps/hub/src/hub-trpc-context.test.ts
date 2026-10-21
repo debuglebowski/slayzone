@@ -25,6 +25,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
@@ -231,6 +232,53 @@ async function main(): Promise<void> {
         null,
         'unknown szw_ token'
       )
+    })
+
+    // ── account role + disabled account (T-08) ──────────────────────────────
+    const second = await createHubUser(auth, { email: 'second@example.com' })
+    assert(!('error' in second), 'created a second account')
+    const secondFull = await auth.api.signInEmail({
+      body: { email: 'second@example.com', password: second.password }
+    })
+    const secondWeb = await mintWebSession(db, { userId: second.id, scopes: ['read'] })
+    const resolve = (token: string) =>
+      resolveConnectionPrincipal({ hubAuthRequired: true, hubAuth: auth, db, token })
+    /** Flag the account directly, leaving every session row in place — the "a session
+     *  exists for a disabled account anyway" case (`disableHubUser` would revoke). */
+    const setDisabled = (userId: string, disabled: boolean): void => {
+      const authDb = new DatabaseSync(join(tmpDir, 'hub-auth.sqlite'))
+      authDb
+        .prepare('UPDATE user SET disabledAt = ? WHERE id = ?')
+        .run(disabled ? new Date().toISOString() : null, userId)
+      authDb.close()
+    }
+
+    await test('the principal carries the account role, for both credential classes', async () => {
+      assertEq((await resolve(validToken))?.role, 'admin', 'first account, full session')
+      assertEq((await resolve(scopedSession.token))?.role, 'admin', 'first account, web session')
+      assertEq((await resolve(secondFull.token))?.role, 'user', 'second account, full session')
+      assertEq((await resolve(secondWeb.token))?.role, 'user', 'second account, web session')
+    })
+
+    await test('a disabled account: its existing full and web sessions resolve to null', async () => {
+      setDisabled(second.id, true)
+      assertEq(await resolve(secondFull.token), null, 'full session refused')
+      assertEq(await resolve(secondWeb.token), null, 'web session refused')
+      assertEq((await resolve(validToken))?.userId, created.id, 'other accounts unaffected')
+      // The refusal came from the flag: clearing it lets the same sessions through.
+      setDisabled(second.id, false)
+      assertEq((await resolve(secondFull.token))?.userId, second.id, 'full session again')
+      assertEq((await resolve(secondWeb.token))?.userId, second.id, 'web session again')
+    })
+
+    await test('a szw_ token with no hubAuth resolves to null — its account cannot be checked', async () => {
+      const principal = await resolveConnectionPrincipal({
+        hubAuthRequired: true,
+        hubAuth: null,
+        db,
+        token: scopedSession.token
+      })
+      assertEq(principal, null, 'no hubAuth → null, fail-closed')
     })
 
     // ── the full server.ts wiring: token+windowId together ──────────────────

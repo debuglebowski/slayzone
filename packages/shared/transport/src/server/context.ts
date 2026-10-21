@@ -10,6 +10,13 @@ export interface AutomationEngineLike {
   executeManual(id: string): Promise<AutomationRun>
 }
 
+/**
+ * An account's role on the hub — the `role` column of the hub-auth `user` row
+ * (`@slayzone/hub-auth`'s `HubRole`, mirrored structurally: this package has no
+ * hub-auth dependency). Carried on every principal; nothing enforces it yet.
+ */
+export type PrincipalRole = 'admin' | 'user'
+
 export type TrpcServerDeps = {
   db: SlayzoneDb
   dataRoot: string
@@ -32,8 +39,16 @@ export type TrpcContext = TrpcServerDeps & {
    *  `slay` using the bootstrap-owner token) carries `['full']`, which the gate
    *  treats as "skip the check" — so this addition is byte-identical for every
    *  client that exists today. A narrower array (e.g. `['read', 'tasks',
-   *  'agent']`) is what a scoped web session will carry once one exists. */
-  principal?: { userId: string; orgId?: string | null; scopes: readonly Scope[] } | null
+   *  'agent']`) is what a scoped web session will carry once one exists.
+   *
+   *  `role` is read from the account row when the connection is verified, for
+   *  both credential classes. */
+  principal?: {
+    userId: string
+    role: PrincipalRole
+    orgId?: string | null
+    scopes: readonly Scope[]
+  } | null
 }
 
 export type TrpcContextFactory = (req?: IncomingMessage) => TrpcContext

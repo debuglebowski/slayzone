@@ -3,6 +3,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
+import type { PrincipalRole } from '../../context'
 import type { Scope } from '../../scopes'
 
 /**
@@ -11,12 +12,25 @@ import type { Scope } from '../../scopes'
  * structural duplicate rather than an import: this package has no dependency
  * on the hub app (only the hub app depends on transport), so the shape is
  * mirrored rather than shared. `scopes` drives the SAME `isPathAllowed`-style
- * decision on this side (see `rest-auth.ts`'s `restAuthAction`).
+ * decision on this side (see `rest-auth.ts`'s `restAuthAction`). `role` comes from
+ * the account row, as on the tRPC side.
  */
 export interface RestPrincipal {
   userId: string
+  role: PrincipalRole
   orgId?: string | null
   scopes: readonly Scope[]
+}
+
+/** One account as `/api/hub/users` returns it (hub-auth `HubUserRow`, mirrored). */
+export interface HubUserListRow {
+  id: string
+  email: string
+  name: string
+  role: PrincipalRole
+  /** ISO-8601 when disabled, else null. */
+  disabledAt: string | null
+  createdAt: string
 }
 
 /**
@@ -196,8 +210,9 @@ export interface RestApiDeps {
     } | null
   }
   /**
-   * Operator account management, powering the loopback-only `/api/hub/users` routes
-   * behind `slay hub users add|ls|rm`. Wired ONLY by the hub composition root.
+   * Operator account management, powering the `/api/hub/users` routes behind
+   * `slay hub users add|ls|disable|enable|role`. Wired ONLY by the hub composition
+   * root. Accounts are disabled, never deleted.
    *
    * A METHOD OBJECT, not the `HubAuth` instance: this package has no
    * `@slayzone/hub-auth` dependency and must not gain one, so better-auth stays
@@ -213,15 +228,23 @@ export interface RestApiDeps {
   hubUsers?: {
     /** False until hub-auth has loaded; stays false forever if its init threw. */
     ready: () => boolean
-    create: (input: {
-      email: string
-      name?: string
-    }) => Promise<
-      | { ok: true; user: { id: string; email: string; name: string; password: string } }
+    create: (input: { email: string; name?: string; role?: PrincipalRole }) => Promise<
+      | {
+          ok: true
+          user: { id: string; email: string; name: string; role: PrincipalRole; password: string }
+        }
       | { ok: false; reason: 'exists' }
     >
-    list: () => Promise<Array<{ id: string; email: string; name: string; createdAt: string }>>
-    remove: (email: string) => Promise<'ok' | 'not-found' | 'protected' | 'last-user'>
+    list: () => Promise<HubUserListRow[]>
+    /** Keeps every row; revokes the account's better-auth AND web sessions. */
+    disable: (
+      email: string
+    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'>
+    enable: (email: string) => Promise<'ok' | 'not-found' | 'protected'>
+    setRole: (
+      email: string,
+      role: PrincipalRole
+    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin'>
   }
   /**
    * The hub's bearer-auth authority, for routes that accept an OFF-BOX caller who

@@ -14,7 +14,7 @@
  *
  * Runs ONLY when the hub enforces auth and is not supervised, and only when no
  * non-service user exists — it never re-provisions, so a hub whose owner was
- * deliberately removed does not silently regrow one.
+ * deliberately disabled does not silently regrow one. The owner is created `admin`.
  *
  * @module hub/bootstrap-owner
  */
@@ -68,7 +68,8 @@ export async function ensureBootstrapOwner(
   if (people.length > 0) return null
 
   const email = 'owner@hub.slayzone.local'
-  const created = await createHubUser(auth, { email, name: 'Hub owner' })
+  // The hub's first admin (T-08).
+  const created = await createHubUser(auth, { email, name: 'Hub owner', role: 'admin' })
   if ('error' in created) {
     // Raced with something else creating the same address. Not fatal: the hub has
     // an owner either way, which is the only postcondition that matters.

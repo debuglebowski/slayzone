@@ -2,6 +2,7 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { fromNodeHeaders } from 'better-auth/node'
 import type { RequestHandler, Response } from 'express'
 import type { HubAuthContext, ComputerPrincipal } from '../shared/types'
+import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { findComputerServiceUserId } from './computer-keys'
 
@@ -15,7 +16,9 @@ function toWebHeaders(headers: Headers | IncomingHttpHeaders): Headers {
 /**
  * Plain session verify usable outside express. Resolves a session from
  * request headers — session cookie or `Authorization: Bearer <token>` (bearer
- * plugin). Returns null when there is no valid session.
+ * plugin). Returns null when there is no valid session, or when its account is
+ * disabled: disabling revokes the account's sessions, and this refuses one that
+ * exists anyway (see account.ts).
  */
 export async function verifySession(
   auth: HubAuth,
@@ -23,8 +26,10 @@ export async function verifySession(
 ): Promise<HubAuthContext | null> {
   const result = await auth.api.getSession({ headers: toWebHeaders(headers) })
   if (!result) return null
+  const user = result.user as typeof result.user & Record<string, unknown>
+  if (isDisabled(user)) return null
   const orgId = (result.session.activeOrganizationId as string | null | undefined) ?? null
-  return { userId: result.user.id, orgId, session: result.session }
+  return { userId: user.id, role: readRole(user.role), orgId, session: result.session }
 }
 
 function readComputerId(metadata: unknown): string | null {

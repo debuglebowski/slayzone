@@ -11,7 +11,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth } from './auth'
-import { createHubUser, removeHubUser, type CreatedHubUser } from './users'
+import {
+  createHubUser,
+  disableHubUser,
+  enableHubUser,
+  ensureFirstAdmin,
+  setHubUserRole,
+  type CreatedHubUser
+} from './users'
 
 let tmpDir: string
 let auth: HubAuth
@@ -155,25 +162,82 @@ describe('operator account commands', () => {
     expect(text).not.toContain(user.password)
   })
 
-  it('remove writes the revoked sessions and user.remove; refusals are denied', async () => {
+  it('disable writes the revoked sessions and user.disable; refusals are denied', async () => {
     const keep = await create('jack@example.com')
     const gone = await create('kim@example.com')
     await auth.api.signInEmail({ body: { email: 'kim@example.com', password: gone.password } })
     audit.length = 0
 
-    expect(await removeHubUser(auth, 'kim@example.com')).toBe('ok')
-    expect(await removeHubUser(auth, 'nobody@example.com')).toBe('not-found')
-    expect(await removeHubUser(auth, 'jack@example.com')).toBe('last-user')
+    expect(await disableHubUser(auth, 'kim@example.com')).toBe('ok')
+    expect(await disableHubUser(auth, 'nobody@example.com')).toBe('not-found')
+    expect(await disableHubUser(auth, 'jack@example.com')).toBe('last-user')
     expect(events()).toEqual([
       'auth.session.revoke:success',
-      'user.remove:success',
-      'user.remove:failure',
-      'user.remove:denied'
+      'user.disable:success',
+      'user.disable:failure',
+      'user.disable:denied'
     ])
     expect(audit[1]!.targetId).toBe(gone.id)
     expect((audit[2]!.detail as { reason: string }).reason).toBe('not_found')
     expect(audit[3]!.targetId).toBe(keep.id)
     expect((audit[3]!.detail as { reason: string }).reason).toBe('last_user')
     expect(JSON.stringify(audit)).not.toContain('@example.com')
+  })
+
+  it('enable and role change write user.enable and user.role_change with the role', async () => {
+    const admin = await create('lea@example.com')
+    const other = await create('max@example.com')
+    await disableHubUser(auth, 'max@example.com')
+    audit.length = 0
+
+    expect(await enableHubUser(auth, 'max@example.com')).toBe('ok')
+    expect(await setHubUserRole(auth, 'max@example.com', 'admin')).toBe('ok')
+    expect(await setHubUserRole(auth, 'max@example.com', 'user')).toBe('ok')
+    expect(await setHubUserRole(auth, 'lea@example.com', 'user')).toBe('last-admin')
+    expect(events()).toEqual([
+      'user.enable:success',
+      'user.role_change:success',
+      'user.role_change:success',
+      'user.role_change:denied'
+    ])
+    expect(audit[0]!.targetId).toBe(other.id)
+    expect(audit[1]!.detail).toEqual({ role: 'admin' })
+    expect(audit[2]!.detail).toEqual({ role: 'user' })
+    expect(audit[3]!.targetId).toBe(admin.id)
+    expect(audit[3]!.detail).toEqual({ reason: 'last_admin', role: 'user' })
+    expect(JSON.stringify(audit)).not.toContain('@example.com')
+  })
+
+  it('the boot promotion of a first admin writes user.role_change with reason first_admin', async () => {
+    const first = await create('nina@example.com')
+    await create('omar@example.com')
+    const db = new DatabaseSync(join(tmpDir, 'hub-auth.sqlite'))
+    db.prepare('UPDATE user SET role = NULL').run()
+    db.close()
+    audit.length = 0
+    expect(await ensureFirstAdmin(auth)).toBe(first.id)
+    expect(await ensureFirstAdmin(auth)).toBeNull()
+    expect(events()).toEqual(['user.role_change:success'])
+    expect(audit[0]!.targetId).toBe(first.id)
+    expect(audit[0]!.actor).toBeNull()
+    expect(audit[0]!.detail).toEqual({ reason: 'first_admin', role: 'admin' })
+  })
+
+  it('a disabled account signing in writes ONE auth.signin denied line, never the email or password', async () => {
+    await create('pia@example.com')
+    const user = await create('quinn@example.com')
+    await disableHubUser(auth, 'quinn@example.com')
+    audit.length = 0
+    await expect(
+      auth.api.signInEmail({ body: { email: 'quinn@example.com', password: user.password } })
+    ).rejects.toMatchObject({ body: { code: 'ACCOUNT_DISABLED' } })
+    expect(events()).toEqual(['auth.signin:denied'])
+    expect(audit[0]!.actor).toBeNull()
+    expect(audit[0]!.targetKind).toBe('user')
+    expect(audit[0]!.targetId).toBe(user.id)
+    expect(audit[0]!.detail).toEqual({ reason: 'account_disabled', endpoint: '/sign-in/email' })
+    const text = JSON.stringify(audit)
+    expect(text).not.toContain('quinn@example.com')
+    expect(text).not.toContain(user.password)
   })
 })

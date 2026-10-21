@@ -1,1 +1,1 @@
-export type { HubAuthContext, HubAuthSession, ComputerPrincipal } from './types'
+export type { HubAuthContext, HubAuthSession, HubRole, ComputerPrincipal } from './types'

@@ -58,9 +58,12 @@ export const SECURITY_EVENTS = [
   'auth.web_session.revoke',
   /** A gate refused a request: REST bearer gate, tRPC auth/scope gates, /trpc origin. */
   'authz.denied',
-  // Accounts (hub-auth `users.ts`).
+  // Accounts (hub-auth `users.ts`). Accounts are disabled, never deleted.
   'user.create',
-  'user.remove',
+  'user.disable',
+  'user.enable',
+  /** Includes the boot-time first-admin promotion (`detail.reason: 'first_admin'`). */
+  'user.role_change',
   // Computers: enrollment credentials and lifecycle.
   'computer.join_token.mint',
   'computer.join_token.redeem',

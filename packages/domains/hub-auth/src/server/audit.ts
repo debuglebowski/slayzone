@@ -9,8 +9,11 @@
  *     failure code is readable here. Sign-in and password change are logged here.
  *   - `databaseHooks.session` ({@link auditDatabaseHooks}) — runs per session ROW
  *     created or deleted, whatever caused it: sign-in, sign-out, revoke-session(s),
- *     `removeHubUser`'s sweep, or the cleanup of an expired row found on lookup. The
+ *     `disableHubUser`'s sweep, or the cleanup of an expired row found on lookup. The
  *     endpoint context, when there is one, says which.
+ *
+ * A sign-in refused because the account is disabled is logged once, by the session
+ * guard in `account.ts` (outcome `denied`), not again here.
  *
  * The client address and route come from the request context the hub's REST gate
  * sets (`runWithSecurityContext`); better-auth itself is handed none.
@@ -25,6 +28,7 @@
 import { createHmac } from 'node:crypto'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import { createAuthMiddleware } from 'better-auth/api'
+import { ACCOUNT_DISABLED_CODE } from './account'
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
   typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined
@@ -59,6 +63,8 @@ export const auditAuthResponse = createAuthMiddleware(async (ctx) => {
     const failure = failureCode(context.returned)
     const outcome: SecurityOutcome = failure ? 'failure' : 'success'
     if (path === '/sign-in/email') {
+      // Already logged as denied by the session guard (account.ts).
+      if (failure === ACCOUNT_DISABLED_CODE) return
       const email = str(asRecord(ctx.body)?.email)
       securityEvent({
         event: 'auth.signin',
@@ -129,8 +135,8 @@ export const auditDatabaseHooks = {
             detail: { userId }
           })
         } else {
-          // Who revoked it comes from the request context (the user, or no one for
-          // `slay hub users rm` on the box).
+          // Who revoked it comes from the request context (the user, or the
+          // operator of `slay hub users disable`).
           securityEvent({
             event: 'auth.session.revoke',
             outcome: 'success',
