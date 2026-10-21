@@ -4,6 +4,7 @@ export {
   updateProject,
   deleteProject,
   uploadProjectIcon,
+  relocateProjectIcons,
   reorderProjects,
   parseProject
 } from './project-store'

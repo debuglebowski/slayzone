@@ -52,7 +52,7 @@ import {
   registerConversationHealer,
   registerConversationResolver
 } from '@slayzone/task/server'
-import { handleTerminalStateChange } from '@slayzone/projects/server'
+import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
 import {
   createPtyOps,
   createDbPtySpawnLookups,
@@ -485,6 +485,12 @@ export function composeServer(opts: {
     )
   }
   bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
+  // Repoint migrated icon rows (absolute legacy paths) at the copies the desktop
+  // app placed in this root. No-op on a standalone hub / once already repointed.
+  bootBestEffort('project-icons-relocate', async () => {
+    const moved = await relocateProjectIcons(db, join(dataRoot, 'project-icons'))
+    if (moved > 0) console.log(`[project-icons] repointed ${moved} icon path(s) into ${dataRoot}`)
+  })
   // Seed v1 versions for artifacts that predate version history. Idempotent, and
   // a domain txn (`artifact-txns.ts`), so `domainTxnRegistry` dispatches it here
   // unchanged. Ran on the Electron host before — which is why a STANDALONE hub

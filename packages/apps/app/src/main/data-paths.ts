@@ -2,6 +2,7 @@ import { getSlayzoneHomeDir, getSupervisedRoot } from '@slayzone/platform'
 import { ensureChannelScopedStorage } from './channel-storage-migration'
 import { dirname, join } from 'node:path'
 import { ensureStorageDir } from './storage-migration'
+import { ensureProjectIcons } from './project-icons-migration'
 import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
 
 /**
@@ -18,10 +19,12 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  * `getSupervisedRoot` reads `SLAYZONE_RELEASE_CHANNEL`, so the channel MUST be
  * derived (in `index.ts`) before anything in this module is called.
  *
- * Two independent one-time COPY migrations feed this dir, both copy-only:
+ * Three independent one-time COPY migrations feed this dir, all copy-only:
  *  1. legacy flat `~/.slayzone/storage` → this channel-scoped root
  *     (`channel-storage-migration.ts`)
  *  2. legacy Electron userData → this root (`storage-migration.ts`)
+ *  3. `project-icons/` from both of the above (`project-icons-migration.ts`) —
+ *     separate because it must also reach users #1/#2 already ran for
  * Order matters — see `initStorageDir`.
  */
 
@@ -62,6 +65,12 @@ export function initStorageDir(legacyStateDir: string, packaged: boolean): strin
     newUserData: legacyStateDir
   })
   ensureStorageDir(legacyStateDir, target, packaged)
+  // Icons were outside both allow-lists above; own sentinel + non-fatal. Newest
+  // source first, like the DB copies: flat beta storage, then userData.
+  ensureProjectIcons({
+    sources: [join(getSlayzoneHomeDir(), 'storage'), legacyStateDir],
+    hubRoot: target
+  })
   return target
 }
 

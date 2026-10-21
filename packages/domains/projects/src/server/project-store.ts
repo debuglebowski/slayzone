@@ -227,6 +227,39 @@ export async function uploadProjectIcon(
   return parseProject(row)!
 }
 
+/**
+ * Repoint `icon_image_path` at `iconsDir` for every icon whose file now exists
+ * there. `icon_image_path` is an ABSOLUTE path, so after the storage migrations
+ * copied the DB the rows still pointed into the legacy userData / flat-storage
+ * dir; icons rendered only while that dir survived. The app copies the files into
+ * the hub root (`project-icons-migration.ts`); this repoints the rows.
+ *
+ * Only repoints when the copy is really there (and named `<projectId>.*`, so a
+ * hand-set path can never be redirected at someone else's file), so a failed copy
+ * leaves the still-valid legacy path alone. Idempotent; `updated_at` untouched
+ * (not a user edit). Returns the number of rows changed.
+ */
+export async function relocateProjectIcons(db: SlayzoneDb, iconsDir: string): Promise<number> {
+  if (!existsSync(iconsDir)) return 0
+  const rows = await db.all<{ id: string; icon_image_path: string }>(
+    'SELECT id, icon_image_path FROM projects WHERE icon_image_path IS NOT NULL'
+  )
+  let moved = 0
+  for (const { id, icon_image_path } of rows) {
+    // Split on both separators: a DB restored from another OS carries foreign ones.
+    const base = icon_image_path.split(/[\\/]/).pop()
+    if (!base || !base.startsWith(`${id}.`)) continue
+    const dest = path.join(iconsDir, base)
+    if (dest === icon_image_path || !existsSync(dest)) continue
+    const res = await db.run(
+      'UPDATE projects SET icon_image_path = ? WHERE id = ? AND icon_image_path = ?',
+      [dest, id, icon_image_path]
+    )
+    moved += res.changes
+  }
+  return moved
+}
+
 export async function reorderProjects(db: SlayzoneDb, projectIds: string[]): Promise<void> {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return
   const { count } = (await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM projects')) as {

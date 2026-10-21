@@ -204,6 +204,10 @@ run_test packages/apps/app/src/main/storage-migration.test.ts
 # copy-only (regression guard: a failed copy must never touch the legacy source),
 # computer slice is a per-host-file → shared-map TRANSFORM, not a directory copy.
 run_test packages/apps/app/src/main/channel-storage-migration.test.ts
+# project-icons/ was in neither allow-list above: own sentinel (reaches users a beta
+# already migrated), copy-only, non-fatal. The hub repoints the DB rows afterwards.
+run_test packages/apps/app/src/main/project-icons-migration.test.ts
+run_test_electron_strict_loader packages/domains/projects/src/server/project-icons-relocate.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
 # the developer's focus for the rest of that worker's specs (worker-scoped app).
