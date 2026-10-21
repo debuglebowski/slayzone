@@ -137,21 +137,26 @@ test.describe('Chat queue persistence', () => {
   })
 
   test('chat:queue-changed broadcast fires on push', async ({ mainWindow }) => {
-    // Subscribe in renderer, capture next event for this tab, then push.
+    // Subscribe in renderer, capture next event for this tab, then push. The push waits
+    // for `onStarted`: the server registers the subscription asynchronously, and a push
+    // sent right behind the subscribe message can be processed first — the event is then
+    // emitted to nobody and this promise never resolves (30 s timeout).
     const observed = await mainWindow.evaluate(async (id) => {
       return new Promise<string>((resolve) => {
         const sub = window.getTrpcVanillaClient().chat.onQueueChanged.subscribe(undefined, {
+          onStarted: () => {
+            void window.getTrpcVanillaClient().chat.queue.push.mutate({
+              tabId: id,
+              send: 'broadcast probe',
+              original: 'broadcast probe'
+            })
+          },
           onData: ({ tabId }) => {
             if (tabId === id) {
               sub.unsubscribe()
               resolve(tabId)
             }
           }
-        })
-        void window.getTrpcVanillaClient().chat.queue.push.mutate({
-          tabId: id,
-          send: 'broadcast probe',
-          original: 'broadcast probe'
         })
       })
     }, mainTabId)
