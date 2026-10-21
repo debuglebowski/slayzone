@@ -36,6 +36,7 @@ import { withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
 import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
+import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
 /**
@@ -334,13 +335,25 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
       if (!isAllowedWsOrigin(origin)) {
+        // A browser page from another origin (or a DNS rebind) tried to open the full
+        // app router — the signature this guard exists for, so it is audited (T-03).
+        securityEvent({
+          event: 'authz.denied',
+          outcome: 'denied',
+          actor: null,
+          ip: peerAddress(req),
+          route: routeOf(req.method, req.url),
+          detail: { reason: 'origin', origin: origin ?? null }
+        })
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
         socket.destroy()
         return
       }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
     } else if (pathname === '/computers' && computerWss && computerGateway) {
-      computerWss.handleUpgrade(req, socket, head, (ws) => computerGateway.handleConnection(ws))
+      computerWss.handleUpgrade(req, socket, head, (ws) =>
+        computerGateway.handleConnection(ws, { ip: peerAddress(req) })
+      )
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
       socket.destroy()

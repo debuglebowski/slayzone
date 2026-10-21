@@ -49,7 +49,7 @@ import {
   loadHubConfigProblems,
   resolveHubName
 } from '@slayzone/platform/slayzone-config'
-import { assertHubBootRulesFromEnv, peekHubReachability } from './boot-rules.js'
+import { assertHubBootRulesFromEnv, HubBootRefusal, peekHubReachability } from './boot-rules.js'
 
 /** True when the hub is running under the Electron host supervisor. */
 function isSupervised(): boolean {
@@ -87,7 +87,8 @@ export function applyStandaloneHubConfig(): void {
   // the file (B5, B4): see the module doc.
   const problems = loadHubConfigProblems()
   if (problems.length > 0) {
-    throw new Error(
+    throw new HubBootRefusal(
+      'config-file',
       `[slayzone] ${getHubConfigFilePath()} cannot be used: ` +
         `${problems.map((p) => p.message).join('; ')}. Update the file — a renamed key is ` +
         `never honored silently.`

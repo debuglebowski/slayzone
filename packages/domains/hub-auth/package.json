@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@better-auth/api-key": "1.6.23",
+    "@slayzone/platform": "workspace:*",
     "better-auth": "1.6.23",
     "express": "^5.2.1"
   },

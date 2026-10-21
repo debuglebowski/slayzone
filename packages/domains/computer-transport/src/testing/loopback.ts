@@ -92,7 +92,9 @@ export async function startLoopbackHub(
       wss.once('error', reject)
     })
   }
-  wss.on('connection', (ws) => gateway.handleConnection(ws))
+  wss.on('connection', (ws, req) =>
+    gateway.handleConnection(ws, { ip: req.socket.remoteAddress ?? null })
+  )
   const port = external ? 0 : (wss.address() as AddressInfo).port
   return {
     gateway,

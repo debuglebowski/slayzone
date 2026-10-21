@@ -180,6 +180,19 @@ async function assertRefused(
       const out = hub.logs.join('\n')
       assert(!out.includes('listening on http'), `a refused hub must not listen:\n${out}`)
       for (const n of needles) assert(out.includes(n), `message should mention '${n}':\n${out}`)
+      // One audit line on stdout before exit (T-03), naming the rule.
+      const audit = hub.logs.filter((l) => l.startsWith('{"type":"security"'))
+      assert(audit.length === 1, `one security line, got ${audit.length}:\n${out}`)
+      const event = JSON.parse(audit[0]!) as {
+        event: string
+        outcome: string
+        detail: { rule?: unknown }
+      }
+      assert(
+        event.event === 'hub.boot' && event.outcome === 'denied',
+        `hub.boot denied: ${audit[0]}`
+      )
+      assert(typeof event.detail.rule === 'string' && event.detail.rule, `rule named: ${audit[0]}`)
       // Refused BEFORE the data directory was touched: no database, no generated
       // state, no certificate identity, no log directory.
       const artifacts = bootArtifacts(root)

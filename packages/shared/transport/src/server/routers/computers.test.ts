@@ -21,6 +21,7 @@ import {
   resolveTaskComputerId
 } from '@slayzone/computers/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-computers-')) }
@@ -133,6 +134,46 @@ test('computers.revokeComputer: drops the computer from the active list', async 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(true)
   await caller.revokeComputer({ computerId: r.id })
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
+})
+
+test('computers: revoke, unrevoke, delete, claim and visibility write audit lines naming the user (T-03)', async () => {
+  const audit: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+  try {
+    const asUser = computersRouter.createCaller({
+      ...ctx,
+      principal: { userId: 'user-9', scopes: ['full'] },
+      req: { socket: { remoteAddress: '198.51.100.4' } } as never
+    })
+    const r = await registerComputer(h.slayDb, {
+      name: 'audited',
+      platform: 'linux-x64',
+      version: '0.35.0'
+    })
+    await asUser.claim({ computerId: r.id })
+    await asUser.setVisibility({ computerId: r.id, visibility: 'private' })
+    await asUser.revokeComputer({ computerId: r.id })
+    await asUser.unrevoke({ computerId: r.id })
+    await asUser.delete({ computerId: r.id })
+    expect(audit.map((l) => l.event)).toEqual([
+      'computer.claim',
+      'computer.visibility.set',
+      'computer.revoke',
+      'computer.unrevoke',
+      'computer.delete'
+    ])
+    for (const l of audit) {
+      expect(l.outcome).toBe('success')
+      expect(l.actor).toBe('user-9')
+      expect(l.ip).toBe('198.51.100.4')
+      expect(l.targetKind).toBe('computer')
+      expect(l.targetId).toBe(r.id)
+    }
+    expect((audit[1]!.detail as { visibility: string }).visibility).toBe('private')
+    expect(audit[2]!.route).toBe('trpc revokeComputer')
+  } finally {
+    setSecurityLogSink()
+  }
 })
 
 // Contract: with the gateway absent (init not yet resolved), `list` still returns store

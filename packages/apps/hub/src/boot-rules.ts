@@ -40,12 +40,36 @@ import {
   HUB_ADDRESS_ENV,
   HUB_SSO_ENV,
   HUB_SWITCH_ENV,
+  HubSwitchValueError,
   LEGACY_HUB_LISTEN_ENV,
   resolveHubSso,
   resolveHubSwitches,
   type HubSsoSettings,
   type HubSwitches
 } from '@slayzone/platform/hub-switches'
+
+/**
+ * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B14`), or
+ * `config-file` for an unusable `hub.config.json`; the bin writes it into the
+ * `hub.boot` audit line before it exits (T-03).
+ */
+export class HubBootRefusal extends Error {
+  constructor(
+    readonly rule: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'HubBootRefusal'
+  }
+}
+
+/** The rule a boot error stands for, or null for an error that is not a refusal. */
+export function bootRefusalRule(err: unknown): string | null {
+  if (err instanceof HubBootRefusal) return err.rule
+  // B4 is thrown by the switch parser itself, which the CLI and computer share.
+  if (err instanceof HubSwitchValueError) return 'B4'
+  return null
+}
 
 /** What the boot rules established — everything `server.ts` needs afterwards. */
 export interface HubBootSettings {
@@ -133,7 +157,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   // address (or, for a dial-side value inherited from a task terminal, a hub that
   // listens somewhere it never meant to), so it refuses instead.
   if (trimmed(env[LEGACY_HUB_LISTEN_ENV]) !== undefined) {
-    throw new Error(
+    throw new HubBootRefusal(
+      'B5',
       `[slayzone] ${LEGACY_HUB_LISTEN_ENV} was renamed to ${HUB_ADDRESS_ENV.listen} on the ` +
         `hub (where the hub listens, host[:port]). ${LEGACY_HUB_LISTEN_ENV} now only names the ` +
         `hub a computer or \`slay\` connects to — set ${HUB_ADDRESS_ENV.listen} instead, or ` +
@@ -146,7 +171,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   // host (A1) and the front end owns TLS; a pasted `https://…` would disagree.
   const publicAddress = trimmed(env[HUB_ADDRESS_ENV.public])
   if (publicAddress !== undefined && !isBareAuthority(publicAddress)) {
-    throw new Error(
+    throw new HubBootRefusal(
+      'B8',
       `[slayzone] ${HUB_ADDRESS_ENV.public} must be host[:port] with no scheme and no path ` +
         `(e.g. hub.example.com or hub.example.com:8443), got '${publicAddress}'. The scheme is ` +
         `derived from the host: a loopback host is http/ws, any other host is https/wss.`
@@ -154,7 +180,13 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   }
 
   // B9 — started by the desktop app ⇒ listens on loopback (login is off there).
-  if (supervised) assertLoopbackBind(host)
+  if (supervised) {
+    try {
+      assertLoopbackBind(host)
+    } catch (err) {
+      throw new HubBootRefusal('B9', err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const reachable = isHubReachable(host, publicAddress)
   const why = LOOPBACK_HOSTS.has(host)
@@ -166,7 +198,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     // bind alone, so a loopback hub published through a same-box reverse proxy is
     // covered too.
     if (!switches.requireLogin) {
-      throw new Error(
+      throw new HubBootRefusal(
+        'B1',
         `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 is required: other machines can reach this ` +
           `hub (${why}) and it would serve every client without a sign-in. Set ` +
           `${HUB_SWITCH_ENV.requireLogin}=1, or listen on 127.0.0.1 and unset ` +
@@ -176,7 +209,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     // B3 — clients and computers need to be told where the hub is. Only the
     // non-loopback-listen case can reach this with it unset.
     if (publicAddress === undefined) {
-      throw new Error(
+      throw new HubBootRefusal(
+        'B3',
         `[slayzone] ${HUB_ADDRESS_ENV.public} is required: this hub listens on ${host}, which ` +
           `other machines can reach, but join tokens and links would point at 127.0.0.1. Set ` +
           `${HUB_ADDRESS_ENV.public} to the address clients use (host[:port], no scheme), or ` +
@@ -190,7 +224,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     // e2e legitimately spawns standalone hubs that inherit PLAYWRIGHT=1, and
     // `handleDevSql` independently requires a loopback peer.)
     if (input.devSqlEnabled) {
-      throw new Error(
+      throw new HubBootRefusal(
+        'B10',
         `[slayzone] PLAYWRIGHT=1 enables the raw-SQL dev endpoint and this hub is reachable ` +
           `from other machines (${why}). Unset PLAYWRIGHT — refusing to boot a hub with ` +
           `arbitrary SQL exposed to the network.`
@@ -199,7 +234,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     // B14 — the signing key of every session and computer credential. A reachable
     // hub takes it from the environment; it never generates one onto its own disk.
     if (trimmed(env[HUB_ADDRESS_ENV.authSecret]) === undefined) {
-      throw new Error(
+      throw new HubBootRefusal(
+        'B14',
         `[slayzone] ${HUB_ADDRESS_ENV.authSecret} is required in the environment: other machines ` +
           `can reach this hub (${why}), and it must not generate its signing key onto ` +
           `its own disk. If this hub already has data, set it to the existing ` +
@@ -214,7 +250,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   if (switches.requireLogin) {
     // B2 — login with no way to sign in locks everyone out, the operator included.
     if (!switches.enablePassword && !switches.enableSso) {
-      throw new Error(
+      throw new HubBootRefusal(
+        'B2',
         `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 needs a way to sign in, but ` +
           `${HUB_SWITCH_ENV.enablePassword}=0 and ${HUB_SWITCH_ENV.enableSso}=0 — nobody ` +
           `could. Enable ${HUB_SWITCH_ENV.enablePassword} or ${HUB_SWITCH_ENV.enableSso}.`
@@ -227,7 +264,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
       if (!sso.clientId) missing.push(HUB_SSO_ENV.clientId)
       if (!sso.clientSecret) missing.push(HUB_SSO_ENV.clientSecret)
       if (missing.length > 0) {
-        throw new Error(
+        throw new HubBootRefusal(
+          'B7',
           `[slayzone] ${HUB_SWITCH_ENV.enableSso}=1 needs its SSO settings; missing: ` +
             `${missing.join(', ')}.`
         )
@@ -246,7 +284,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
  */
 export function assertAuthLoaded(requireLogin: boolean, hubAuth: unknown | null): void {
   if (requireLogin && !hubAuth) {
-    throw new Error(
+    throw new HubBootRefusal(
+      'B11',
       `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but hub auth failed to initialize — refusing ` +
         `to boot a hub that cannot check who is signing in. Check the auth database in the ` +
         `hub's data directory and the hub log.`

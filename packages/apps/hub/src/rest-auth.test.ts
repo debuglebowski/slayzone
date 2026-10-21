@@ -32,6 +32,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  currentSecurityContext,
+  setSecurityLogSink,
+  type SecurityContext
+} from '@slayzone/platform/security-log'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { restAuthAction, verifyRestBearer, withRestAuth, parseCookieHeader } from './rest-auth.js'
@@ -76,7 +81,21 @@ interface GateHarness {
     path: string,
     opts?: { authorization?: string; cookie?: string }
   ): Promise<{ status: number; body: string; reached: boolean }>
+  /** The audit context the inner handler last ran with (T-03). */
+  seenContext(): SecurityContext | undefined
   close(): Promise<void>
+}
+
+/** Collect audit lines while `fn` runs. */
+async function captureAudit(fn: () => Promise<void>): Promise<Array<Record<string, unknown>>> {
+  const lines: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => lines.push(JSON.parse(line) as Record<string, unknown>))
+  try {
+    await fn()
+  } finally {
+    setSecurityLogSink()
+  }
+  return lines
 }
 
 /**
@@ -92,12 +111,14 @@ async function mountGate(opts: {
   forceOffBox: boolean
 }): Promise<GateHarness> {
   let reached = false
+  let seen: SecurityContext | undefined
   const gated = withRestAuth({
     getHubAuthRequired: () => opts.required,
     getHubAuth: () => opts.auth,
     getDb: () => opts.db ?? null,
     next: (_req, res) => {
       reached = true
+      seen = currentSecurityContext()
       res.writeHead(200, { 'content-type': 'text/plain' })
       res.end('inner')
     }
@@ -127,6 +148,7 @@ async function mountGate(opts: {
       const body = await res.text()
       return { status: res.status, body, reached }
     },
+    seenContext: () => seen,
     close: () => new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
@@ -576,6 +598,58 @@ async function main(): Promise<void> {
         // is about the principal's scope class, not a config toggle.
         const viaFull = await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })
         assertEq(viaFull.status, 200, 'a full session is unaffected')
+      } finally {
+        await h.close()
+      }
+    })
+
+    // ── audit (T-03) ─────────────────────────────────────────────────────────
+    await test('audit: each refusal writes one authz.denied line naming why', async () => {
+      const h = await mountGate({ required: true, auth, db, forceOffBox: true })
+      try {
+        const lines = await captureAudit(async () => {
+          await h.get('/api/tasks?q=secret')
+          await h.get('/api/tasks', { authorization: 'Bearer forged' })
+          await h.get('/api/tasks', { authorization: `Bearer ${scopedSession.token}` })
+        })
+        assertEq(lines.length, 3, 'one line per refusal')
+        const [none, invalid, scoped] = lines
+        for (const l of lines) {
+          assertEq(l.event, 'authz.denied', 'event')
+          assertEq(l.outcome, 'denied', 'outcome')
+          assertEq(l.ip, WAN, 'peer address')
+          assertEq(l.route, 'GET /api/tasks', 'route without the query string')
+        }
+        assertEq((none!.detail as { reason: string }).reason, 'no_credential', 'no credential')
+        assertEq(none!.actor, null, 'no actor without a credential')
+        assertEq((invalid!.detail as { reason: string }).reason, 'invalid_credential', 'forged')
+        assertEq((scoped!.detail as { reason: string }).reason, 'scoped_session', 'scoped')
+        assertEq(scoped!.actor, created.id, 'a scoped refusal names the user')
+        for (const l of lines) {
+          assert(!JSON.stringify(l).includes(scopedSession.token), 'no token in a line')
+          assert(!JSON.stringify(l).includes('forged'), 'no presented bearer in a line')
+        }
+      } finally {
+        await h.close()
+      }
+    })
+
+    await test('audit: an admitted request writes nothing and runs as its user', async () => {
+      const h = await mountGate({ required: true, auth, db, forceOffBox: true })
+      try {
+        const lines = await captureAudit(async () => {
+          const res = await h.get('/api/tasks', { authorization: `Bearer ${validToken}` })
+          assertEq(res.status, 200, 'admitted')
+        })
+        assertEq(lines.length, 0, 'no line for an admitted request')
+        const seen = h.seenContext()
+        assertEq(seen?.actor, created.id, 'acting user is the bearer owner')
+        assertEq(seen?.ip, WAN, 'peer address')
+        assertEq(seen?.route, 'GET /api/tasks', 'route')
+
+        await h.get('/api/auth/sign-in/email')
+        assertEq(h.seenContext()?.actor, null, 'an exempt route runs with no actor')
+        assertEq(h.seenContext()?.ip, WAN, 'but with the peer address')
       } finally {
         await h.close()
       }

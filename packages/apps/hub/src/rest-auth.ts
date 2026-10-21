@@ -29,6 +29,12 @@ import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  peerAddress,
+  routeOf,
+  runWithSecurityContext,
+  securityEvent
+} from '@slayzone/platform/security-log'
 import type { RestPrincipal } from '@slayzone/transport/server'
 import { isWebSessionToken, verifyWebSessionToken, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
@@ -268,19 +274,45 @@ export function withRestAuth(opts: {
     res.end(JSON.stringify({ error: message }))
   }
   return (req, res) => {
+    // Audit (T-03): every request runs with its caller as the acting user, so the
+    // lines written below it (a better-auth sign-in, a hub → computer call) carry
+    // who and from where; every refusal here writes one `authz.denied` line.
+    const ip = peerAddress(req)
+    const route = routeOf(req.method, req.url)
+    const admit = (actor: string | null): void =>
+      runWithSecurityContext({ actor, ip, route }, () => opts.next(req, res))
+    const refuse = (
+      code: 401 | 403,
+      message: string,
+      reason: string,
+      actor: string | null
+    ): void => {
+      securityEvent({
+        event: 'authz.denied',
+        outcome: 'denied',
+        actor,
+        ip,
+        route,
+        detail: { reason, status: code }
+      })
+      deny(res, code, message)
+    }
     const action = restAuthAction({
       hubAuthRequired: opts.getHubAuthRequired(),
       url: req.url
     })
     if (action === 'allow') {
-      opts.next(req, res)
+      admit(null)
       return
     }
     const cookies = parseCookieHeader(req.headers)
+    // Only to tell "presented nothing" from "presented something invalid" in the log.
+    const presented =
+      req.headers.authorization !== undefined || cookies[WEB_SESSION_COOKIE_NAME] !== undefined
     void verifyRestBearer(opts.getHubAuth(), opts.getDb(), req.headers, cookies)
       .then((principal) => {
         if (!principal) {
-          deny(res, 401, 'Unauthorized')
+          refuse(401, 'Unauthorized', presented ? 'invalid_credential' : 'no_credential', null)
           return
         }
         // A scoped web session is deliberately GIVEN NO REST ACCESS in Phase 1
@@ -294,11 +326,18 @@ export function withRestAuth(opts: {
         // 403, not 401: the credential is real, just the wrong class for this
         // door — a distinction worth preserving for whoever reads the log.
         if (!principal.scopes.includes('full')) {
-          deny(res, 403, 'a scoped web session cannot use the REST API — use /trpc instead')
+          refuse(
+            403,
+            'a scoped web session cannot use the REST API — use /trpc instead',
+            'scoped_session',
+            principal.userId
+          )
           return
         }
-        opts.next(req, res)
+        admit(principal.userId)
       })
-      .catch(() => deny(res, 401, 'Unauthorized'))
+      .catch(() => {
+        if (!res.headersSent) refuse(401, 'Unauthorized', 'gate_error', null)
+      })
   }
 }

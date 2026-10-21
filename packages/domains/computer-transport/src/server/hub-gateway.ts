@@ -22,6 +22,11 @@
  */
 
 import type { WebSocket } from 'ws'
+import {
+  runWithSecurityContext,
+  securityEvent,
+  type SecurityOutcome
+} from '@slayzone/platform/security-log'
 import { TypedEventEmitter } from '../shared/events'
 import {
   type FsChangeParams,
@@ -42,6 +47,7 @@ import {
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
 import { wsDataToText } from '../shared/ws-data'
+import { auditedHubCall } from './hub-audit'
 
 export interface ComputerDescriptor {
   computerId: string
@@ -123,9 +129,15 @@ export interface HubComputerGatewayOptions {
   log?: (message: string, meta?: Record<string, unknown>) => void
 }
 
+/** Where an accepted computer socket came from — for the audit log. */
+export interface ComputerPeer {
+  /** TCP peer address of the upgrade request. */
+  ip?: string | null
+}
+
 export interface HubComputerGateway {
   /** Adopt an accepted WebSocket (e.g. from a `ws` server `connection` event). */
-  handleConnection(ws: WebSocket): void
+  handleConnection(ws: WebSocket, peer?: ComputerPeer): void
   /** Send a request to a connected computer. Rejects `unknownComputer` if absent. */
   request<T = unknown>(
     computerId: string,
@@ -192,6 +204,8 @@ const SUSPEND_LATENESS_MS = 2_000
 
 interface ComputerConnection {
   ws: WebSocket
+  /** TCP peer address, for audit lines. */
+  ip: string | null
   rpc: DuplexRpc
   descriptor: ComputerDescriptor | null
   heartbeatTimer: ReturnType<typeof setTimeout> | null
@@ -223,6 +237,34 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       ...(line === undefined ? {} : { line })
     })
   }
+
+  /**
+   * Audit line for an enroll or hello attempt (T-03). Never the join token or the
+   * api key — a reason code and, on success, who enrolled. A computer is not a user,
+   * so there is no request context to inherit: every field is explicit.
+   */
+  function auditAuth(
+    conn: ComputerConnection,
+    event: 'computer.enroll' | 'computer.hello',
+    outcome: SecurityOutcome,
+    computerId: string | null,
+    detail: Record<string, unknown>
+  ): void {
+    securityEvent({
+      event,
+      outcome,
+      actor: computerId,
+      ip: conn.ip,
+      targetKind: 'computer',
+      targetId: computerId,
+      route: 'WS /computers',
+      detail
+    })
+  }
+
+  /** Error code for an audit line: a JSON-RPC code, or the error's class. */
+  const errorCode = (err: unknown): number | string =>
+    err instanceof RpcError ? err.code : err instanceof Error ? err.name : 'error'
 
   /**
    * Lazy watchdog: instead of re-arming a timer per inbound frame (ruinous
@@ -346,6 +388,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         'malformed enroll request'
       )
       protocolError(conn, `malformed enroll params: ${parsed.error.message}`)
+      auditAuth(conn, 'computer.enroll', 'failure', null, { reason: 'malformed' })
       conn.ws.close(1008, 'malformed enroll')
       return
     }
@@ -355,16 +398,26 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         ComputerTransportErrorCodes.protocolMismatch,
         `hub speaks computer protocol v${COMPUTER_PROTOCOL_VERSION}, computer sent v${parsed.data.protocolVersion}`
       )
+      auditAuth(conn, 'computer.enroll', 'failure', null, {
+        reason: 'protocol_mismatch',
+        protocolVersion: parsed.data.protocolVersion
+      })
       conn.ws.close(1008, 'protocol mismatch')
       return
     }
     let minted: { computerId: string; apiKey: string }
     try {
-      minted = await options.verifyEnrollment(parsed.data)
+      // In this socket's context, so the join-token redeem line it writes carries the
+      // peer address.
+      minted = await runWithSecurityContext(
+        { actor: null, ip: conn.ip, route: 'WS /computers' },
+        () => options.verifyEnrollment(parsed.data)
+      )
     } catch (err) {
       const code = err instanceof RpcError ? err.code : ComputerTransportErrorCodes.unauthorized
       const message = err instanceof Error ? err.message : 'enrollment rejected'
       conn.rpc.respondError(id, code, message)
+      auditAuth(conn, 'computer.enroll', 'failure', null, { reason: 'rejected', code })
       // Keep the socket open: the auth timeout reaps it if the computer has no
       // other way in, and a well-behaved computer disconnects on its own.
       return
@@ -386,6 +439,11 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     conn.rpc.respond(id, { computerId: minted.computerId, apiKey: minted.apiKey })
     events.emit('computer-enrolled', { computer: { ...descriptor } })
     events.emit('computer-connected', { computer: { ...descriptor } })
+    auditAuth(conn, 'computer.enroll', 'success', minted.computerId, {
+      name: descriptor.name,
+      platform: descriptor.platform,
+      version: descriptor.version
+    })
     log('computer computer enrolled', { computerId: minted.computerId, name: descriptor.name })
   }
 
@@ -397,6 +455,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     const parsed = helloParamsSchema.safeParse(params)
     if (!parsed.success) {
       conn.rpc.respondError(id, ComputerTransportErrorCodes.unauthorized, 'malformed hello request')
+      auditAuth(conn, 'computer.hello', 'failure', null, { reason: 'malformed' })
       conn.ws.close(1008, 'malformed hello')
       return
     }
@@ -409,6 +468,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         err instanceof RpcError ? err.code : ComputerTransportErrorCodes.unauthorized,
         err instanceof Error ? err.message : 'authentication failed'
       )
+      auditAuth(conn, 'computer.hello', 'failure', null, {
+        reason: 'error',
+        code: errorCode(err)
+      })
       return
     }
     if (conn.closed) return
@@ -416,6 +479,8 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       // Keep the socket open so the computer can fall back to `enroll` on the
       // same connection; the auth timeout reaps sessions that never succeed.
       conn.rpc.respondError(id, ComputerTransportErrorCodes.unauthorized, 'unknown api key')
+      // Unknown, revoked, or minted for another computer — `verifyApiKey` does not say.
+      auditAuth(conn, 'computer.hello', 'failure', null, { reason: 'unknown_key' })
       return
     }
     const descriptor: ComputerDescriptor = {
@@ -527,13 +592,14 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
   }
 
-  function handleConnection(ws: WebSocket): void {
+  function handleConnection(ws: WebSocket, peer?: ComputerPeer): void {
     if (closed) {
       ws.terminate()
       return
     }
     const conn: ComputerConnection = {
       ws,
+      ip: peer?.ip ?? null,
       rpc: null as unknown as DuplexRpc,
       descriptor: null,
       heartbeatTimer: null,
@@ -590,16 +656,41 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       params?: unknown,
       timeoutMs?: number
     ): Promise<T> {
+      // The privileged ones are audited here, the single door (see hub-audit.ts). Actor,
+      // ip and route come from the caller's request context, captured by the promise
+      // chain this call starts.
+      const audited = auditedHubCall(method, params)
+      const audit = (outcome: SecurityOutcome, err?: unknown): void => {
+        if (!audited) return
+        securityEvent({
+          event: audited.event,
+          outcome,
+          targetKind: 'computer',
+          targetId: computerId,
+          detail: err === undefined ? audited.detail : { ...audited.detail, code: errorCode(err) }
+        })
+      }
       const conn = getConnection(computerId)
       if (!conn) {
-        return Promise.reject(
-          new RpcError(
-            ComputerTransportErrorCodes.unknownComputer,
-            `computer '${computerId}' is not connected`
-          )
+        const err = new RpcError(
+          ComputerTransportErrorCodes.unknownComputer,
+          `computer '${computerId}' is not connected`
         )
+        audit('failure', err)
+        return Promise.reject(err)
       }
-      return conn.rpc.request<T>(method, params, timeoutMs)
+      const sent = conn.rpc.request<T>(method, params, timeoutMs)
+      if (!audited) return sent
+      return sent.then(
+        (result) => {
+          audit('success')
+          return result
+        },
+        (err: unknown) => {
+          audit('failure', err)
+          throw err
+        }
+      )
     },
     notify(computerId: string, method: string, params?: unknown): void {
       getConnection(computerId)?.rpc.notify(method, params)
