@@ -58,7 +58,7 @@ try {
     const { userData, hub } = setup('stable')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'V035-DB')
     writeFileSync(join(userData, 'slayzone.sqlite-wal'), 'V035-WAL')
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     check('v0.35.0 DB lands at the new name', read(join(hub, 'slayzone.data.sqlite')) === 'V035-DB')
     check('its WAL comes with it', read(join(hub, 'slayzone.data.sqlite-wal')) === 'V035-WAL')
     check('the legacy name is NOT created in the hub root', !existsSync(join(hub, 'slayzone.sqlite')))
@@ -73,7 +73,7 @@ try {
     writeFileSync(join(hub, 'slayzone.sqlite-wal'), 'BETA-WAL')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'STALE-USERDATA') // would shadow it if copied first
     // NOTE: no .storage-migrated sentinel, i.e. the worst case for the hazard.
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     check(
       'the live beta DB is adopted, NOT shadowed by the old userData copy',
       read(join(hub, 'slayzone.data.sqlite')) === 'BETA-LIVE',
@@ -90,7 +90,7 @@ try {
     mkdirSync(flat, { recursive: true })
     writeFileSync(join(flat, 'slayzone.sqlite'), 'FLAT-DB')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'OLDER-USERDATA')
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     check('flat beta DB wins (newest source) at the new name', read(join(hub, 'slayzone.data.sqlite')) === 'FLAT-DB')
     check('flat source is untouched', read(join(flat, 'slayzone.sqlite')) === 'FLAT-DB')
   }
@@ -102,7 +102,7 @@ try {
     writeFileSync(join(hub, 'slayzone.dev.sqlite'), 'DEV-LIVE')
     writeFileSync(join(userData, 'slayzone.dev.sqlite'), 'DEV-STALE')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'PROD-DB-MUST-NOT-MOVE')
-    initStorageDir(userData, false)
+    initStorageDir(userData, false, true)
     check('dev DB adopted under slayzone.dev.data.sqlite', read(join(hub, 'slayzone.dev.data.sqlite')) === 'DEV-LIVE')
     check('dev never takes the prod DB', !existsSync(join(hub, 'slayzone.data.sqlite')) && !existsSync(join(hub, 'slayzone.sqlite')))
     check('prod source untouched by the dev channel', read(join(userData, 'slayzone.sqlite')) === 'PROD-DB-MUST-NOT-MOVE')
@@ -111,10 +111,36 @@ try {
   // --- fresh install: nothing invented ------------------------------------------------
   {
     const { userData, hub } = setup('stable')
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     check(
       'a fresh install creates no database file',
       !existsSync(join(hub, 'slayzone.data.sqlite')) && !existsSync(join(hub, 'slayzone.sqlite'))
+    )
+  }
+
+  // --- no instance lock: touch NOTHING ---------------------------------------------------
+  // A second launch while the old app still runs (v0.35.0 holds the same lock, same
+  // userData) must not copy its live WAL database, nor rename a live hub's. The caller
+  // passes whether it holds the lock; without it the whole first-launch pass is skipped.
+  {
+    const { userData, hub } = setup('stable')
+    writeFileSync(join(userData, 'slayzone.sqlite'), 'V035-DB')
+    const target = initStorageDir(userData, true, false)
+    check('without the lock the hub root is still returned', target === hub, target)
+    check('without the lock nothing is copied', !existsSync(join(hub, 'slayzone.data.sqlite')))
+    check('without the lock not even the hub root is created', !existsSync(hub))
+    check('without the lock the source is untouched', read(join(userData, 'slayzone.sqlite')) === 'V035-DB')
+    initStorageDir(userData, true, true)
+    check('the next launch that DOES hold the lock imports it', read(join(hub, 'slayzone.data.sqlite')) === 'V035-DB')
+  }
+  {
+    const { userData, hub } = setup('stable')
+    mkdirSync(hub, { recursive: true })
+    writeFileSync(join(hub, 'slayzone.sqlite'), 'LIVE-BETA-DB')
+    initStorageDir(userData, true, false)
+    check(
+      'without the lock a live hub root is not renamed under its owner',
+      read(join(hub, 'slayzone.sqlite')) === 'LIVE-BETA-DB' && !existsSync(join(hub, 'slayzone.data.sqlite'))
     )
   }
 
@@ -122,9 +148,9 @@ try {
   {
     const { userData, hub } = setup('stable')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'V035-DB')
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     writeFileSync(join(hub, 'slayzone.data.sqlite'), 'NEW-WORK') // the user has since used the app
-    initStorageDir(userData, true)
+    initStorageDir(userData, true, true)
     check('a second boot never touches the live DB', read(join(hub, 'slayzone.data.sqlite')) === 'NEW-WORK')
   }
 } finally {

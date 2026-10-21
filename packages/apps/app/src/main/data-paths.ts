@@ -6,6 +6,7 @@ import {
   getSupervisedRoot
 } from '@slayzone/platform'
 import { ensureChannelScopedStorage } from './channel-storage-migration'
+import { StorageImportError } from './copy-utils'
 import { dirname, join } from 'node:path'
 import { ensureStorageDir } from './storage-migration'
 import { ensureProjectIcons } from './project-icons-migration'
@@ -32,6 +33,8 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  *  3. `project-icons/` from both of the above (`project-icons-migration.ts`) —
  *     separate because it must also reach users #1/#2 already ran for
  * Order matters — see `initStorageDir`.
+ *
+ * The whole pass needs the single-instance lock — see `initStorageDir`'s third argument.
  */
 
 /**
@@ -48,16 +51,43 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  * first would plant its (potentially years-old) DB in the fresh channel root and
  * make the channel migration skip the user's ACTUAL current database sitting in
  * `~/.slayzone/storage`. Newest source wins by going first.
+ *
+ * `holdsInstanceLock` is a REQUIRED argument so a caller cannot forget it. Everything
+ * here copies out of, or renames inside, directories a still-running older app may be
+ * writing: v0.35.0 keeps its live WAL database in the very userData this reads, and it
+ * holds the same single-instance lock (same userData). Copying a live WAL database
+ * yielded a corrupt copy in 26 of 60 trials, and "destination exists" then makes it
+ * permanent. Without the lock this returns the root and touches nothing; the launch
+ * that does hold it does the work. (Dev and e2e never take the lock and pass `true`.)
+ *
+ * Throws {@link StorageImportError} when the database cannot be moved or copied; the
+ * caller must stop the boot and name `.path` to the user.
  */
-export function initStorageDir(legacyStateDir: string, packaged: boolean): string {
+export function initStorageDir(
+  legacyStateDir: string,
+  packaged: boolean,
+  holdsInstanceLock: boolean
+): string {
   const target = getSupervisedRoot('hub')
+  if (!holdsInstanceLock) return target
   // FIRST, before any copy: a hub root a beta wrote still holds its live DB under the
   // pre-rename name (`slayzone.sqlite`). The copies below only fill an ABSENT
   // destination, and the destination is now `slayzone.data.sqlite` — so with no file at
   // that name yet they would plant an old userData/flat-storage database there and
   // strand the user's real, current one beside it. Moving the live file to its new name
   // first closes that. Idempotent; a no-op on a fresh or already-renamed root.
-  adoptRenamedDatabase(target, getLegacyDbName(packaged), getDbName(packaged))
+  try {
+    adoptRenamedDatabase(target, getLegacyDbName(packaged), getDbName(packaged))
+  } catch (err) {
+    // A locked file, a read-only dir, or an ambiguous WAL state. Booting on would open
+    // a fresh empty database beside the real one, so stop and say which file.
+    throw new StorageImportError(
+      `could not move ${join(target, getLegacyDbName(packaged))} to its new name: ` +
+        (err instanceof Error ? err.message : String(err)),
+      join(target, getLegacyDbName(packaged)),
+      err
+    )
+  }
   ensureChannelScopedStorage({
     // Migration SOURCE, strictly read-only: the pre-channel-scoping flat root,
     // where the old shared layout kept `storage/` and `computers/`.
@@ -77,7 +107,15 @@ export function initStorageDir(legacyStateDir: string, packaged: boolean): strin
     oldUserData: join(dirname(legacyStateDir), 'omgslayzone'),
     newUserData: legacyStateDir
   })
-  ensureStorageDir(legacyStateDir, target, packaged)
+  const report = ensureStorageDir(legacyStateDir, target, packaged)
+  if (!report.complete) {
+    // Not fatal: the database is in, only content files were skipped, and the sentinel
+    // is withheld so the next boot retries exactly those.
+    console.error(
+      `[storage] ${report.skipped.length} file(s) could not be imported and will be retried ` +
+        `on the next launch: ${report.skipped.slice(0, 5).join(', ')}`
+    )
+  }
   // Icons were outside both allow-lists above; own sentinel + non-fatal. Newest
   // source first, like the DB copies: flat beta storage, then userData.
   ensureProjectIcons({

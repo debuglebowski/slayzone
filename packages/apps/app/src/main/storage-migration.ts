@@ -1,7 +1,15 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDbName, getLegacyDbName } from '@slayzone/platform'
-import { copyDbTriplet, copyFileIfPresent, mergeMissingFiles } from './copy-utils'
+import { copyDbTriplet, mergeMissingFiles, StorageImportError } from './copy-utils'
+
+/** What a run of {@link ensureStorageDir} left undone. `complete` is false iff something
+ *  was skipped; the sentinel is withheld then, so the next boot retries just that. */
+export interface StorageMigrationReport {
+  complete: boolean
+  /** Source paths that could not be copied (unreadable file, full disk, ...). */
+  skipped: string[]
+}
 
 /**
  * One-time COPY of the app's SQLite DB + artifacts + blobs + recent backups from
@@ -61,13 +69,15 @@ function sentinelPath(storageDir: string, packaged: boolean): string {
  * still sit in `oldDir` — those legacy files still cross over, or their artifacts
  * render blank (DB row in the migrated DB, content stranded in the legacy dir).
  */
-function copyContentDir(oldDir: string, newDir: string, name: string): void {
+function copyContentDir(
+  oldDir: string,
+  newDir: string,
+  name: string,
+  skip: (path: string, err: unknown) => void
+): void {
   const src = join(oldDir, name)
   if (!existsSync(src)) return
-  const dst = join(newDir, name)
-  if (!mergeMissingFiles(src, dst)) {
-    throw new Error(`[storage-migration] ${name}/ merge incomplete`)
-  }
+  mergeMissingFiles(src, join(newDir, name), skip)
 }
 
 /**
@@ -77,7 +87,12 @@ function copyContentDir(oldDir: string, newDir: string, name: string): void {
  * with its `-wal`/`-shm`. COPY-ONLY; older backups + the other channel's backups
  * stay behind untouched.
  */
-function copyRecentBackups(oldDir: string, newDir: string, packaged: boolean): void {
+function copyRecentBackups(
+  oldDir: string,
+  newDir: string,
+  packaged: boolean,
+  skip: (path: string, err: unknown) => void
+): void {
   const srcBackups = join(oldDir, 'backups')
   if (!existsSync(srcBackups)) return
   const dstBackups = join(newDir, 'backups')
@@ -94,14 +109,13 @@ function copyRecentBackups(oldDir: string, newDir: string, packaged: boolean): v
 
   mkdirSync(dstBackups, { recursive: true })
   for (const name of recent) {
-    const src = join(srcBackups, name)
-    const dst = join(dstBackups, name)
-    if (existsSync(dst)) continue // already migrated — never clobber
-    copyFileIfPresent(`${src}-wal`, `${dst}-wal`)
-    copyFileIfPresent(`${src}-shm`, `${dst}-shm`)
-    cpSync(src, dst)
-    if (!existsSync(dst) || statSync(dst).size === 0) {
-      throw new Error(`[storage-migration] backup copy of ${name} failed verification`)
+    // A backup is a DB triplet like any other (atomic, size-verified, skips an existing
+    // destination). It is a convenience copy, not the user's live data, so one that
+    // cannot be copied is skipped and retried next boot instead of stopping the app.
+    try {
+      copyDbTriplet(srcBackups, dstBackups, name)
+    } catch (err) {
+      skip(err instanceof StorageImportError ? err.path : join(srcBackups, name), err)
     }
   }
 }
@@ -115,18 +129,36 @@ function copyRecentBackups(oldDir: string, newDir: string, packaged: boolean): v
  * The legacy dir is READ-ONLY here — a still-installed pre-refactor app of the
  * OTHER channel may be actively using it. See file header.
  */
-export function ensureStorageDir(oldDir: string, storageDir: string, packaged: boolean): void {
+export function ensureStorageDir(
+  oldDir: string,
+  storageDir: string,
+  packaged: boolean
+): StorageMigrationReport {
   mkdirSync(storageDir, { recursive: true })
-  if (oldDir === storageDir) return // already anchored — nothing to copy
+  const skipped: string[] = []
+  if (oldDir === storageDir) return { complete: true, skipped } // already anchored — nothing to copy
 
   const sentinel = sentinelPath(storageDir, packaged)
-  if (existsSync(sentinel)) return // this channel already migrated — do not re-scan the shared dir
+  if (existsSync(sentinel)) return { complete: true, skipped } // this channel already migrated — do not re-scan the shared dir
 
+  // The database FIRST, and its failure is FATAL (throws StorageImportError, naming the
+  // file). Everything below is retried on the next boot; this cannot be, because once
+  // the hub has created an empty database at the new name, "destination exists" hides
+  // the real one for good.
   copyDbTriplet(oldDir, storageDir, getLegacyDbName(packaged), getDbName(packaged))
-  copyContentDir(oldDir, storageDir, 'blobs')
-  copyContentDir(oldDir, storageDir, 'artifacts')
-  copyRecentBackups(oldDir, storageDir, packaged)
 
-  // Mark this channel done so future boots skip the (shared, peer-owned) legacy dir.
-  writeFileSync(sentinel, new Date().toISOString())
+  const skip = (path: string, err: unknown): void => {
+    skipped.push(path)
+    console.error(
+      `[storage-migration] skipped ${path}: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+  copyContentDir(oldDir, storageDir, 'blobs', skip)
+  copyContentDir(oldDir, storageDir, 'artifacts', skip)
+  copyRecentBackups(oldDir, storageDir, packaged, skip)
+
+  // Mark this channel done so future boots skip the (shared, peer-owned) legacy dir —
+  // but only when nothing was skipped, so a transient failure heals on the next boot.
+  if (skipped.length === 0) writeFileSync(sentinel, new Date().toISOString())
+  return { complete: skipped.length === 0, skipped }
 }

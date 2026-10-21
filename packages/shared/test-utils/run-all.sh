@@ -209,6 +209,7 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schem
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
+run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
 # copy-only (regression guard: a failed copy must never touch the legacy source),
 # computer slice is a per-host-file → shared-map TRANSFORM, not a directory copy.

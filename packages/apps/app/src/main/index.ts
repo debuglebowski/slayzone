@@ -225,6 +225,7 @@ import {
   injectForcedHtmlTheme
 } from '@slayzone/platform'
 import { initStorageDir, getStorageDir } from './data-paths'
+import { StorageImportError } from './copy-utils'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
   if (!result.failed) {
@@ -292,7 +293,22 @@ if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
 // explicit per-child handoff is what actually keeps the two roles' state apart.
 // The main process's OWN ambient SLAYZONE_ROOT stays untouched, so the hook
 // installers later in this boot keep writing to the unscoped ~/.slayzone/hooks.
-initStorageDir(legacyStateDir, app.isPackaged)
+// The single-instance lock comes FIRST. `initStorageDir` copies the legacy database and
+// renames the live one, and both are only safe when no other instance of this app is
+// writing it — v0.35.0 holds the same lock (same userData), so a launch that cannot take
+// it must not migrate (it quits below). Dev and e2e never enforce the lock.
+const shouldEnforceSingleInstanceLock = !isPlaywright && !is.dev
+let lockOutcome: LockOutcome = { kind: 'acquired' }
+if (shouldEnforceSingleInstanceLock) {
+  lockOutcome = acquireLockWithSelfHeal()
+}
+const gotSingleInstanceLock = !shouldEnforceSingleInstanceLock || lockOutcomeIsAcquired(lockOutcome)
+
+try {
+  initStorageDir(legacyStateDir, app.isPackaged, gotSingleInstanceLock)
+} catch (err) {
+  reportStorageImportFailure(err, legacyStateDir)
+}
 
 // tRPC server data root = the resolved storage dir, so every router's ctx.dataRoot
 // resolves project-icons/artifacts to the same dir the renderer reads.
@@ -316,6 +332,45 @@ function getLegacyClientStateRoot(): string {
   return getStorageDir()
 }
 
+/**
+ * The first-launch import of the user's data failed. Stop the boot and say which file:
+ * going on would let the hub create an empty database next to the real one, and from
+ * then on the real one is invisible. Nothing has been modified or deleted — every
+ * migration is copy-only and the failed one removed its own partial output — so the
+ * next launch simply retries once the cause (permissions, disk space, a file held open
+ * by another program) is gone. Runs at module load, before `ready`: `showErrorBox` is
+ * the one dialog that is allowed there.
+ */
+function reportStorageImportFailure(err: unknown, legacyStateDir: string): never {
+  const detail = err instanceof Error ? err.message : String(err)
+  const file = err instanceof StorageImportError ? `\nFile: ${err.path}\n` : '\n'
+  console.error('[app] storage import failed; quitting', err)
+  dialog.showErrorBox(
+    'SlayZone could not import your data',
+    `SlayZone could not move your existing data into its new location.\n\n` +
+      `Nothing was changed or deleted. Your data is still where it was: ${legacyStateDir}\n` +
+      `${file}\nReason: ${detail}\n\n` +
+      `Fix the cause (file permissions, free disk space, or a program that has the file open) ` +
+      `and start SlayZone again.`
+  )
+  app.exit(1)
+  process.exit(1)
+}
+
+/**
+ * Env for a child that runs a bundle out of `Resources/` (the hub, the local computer)
+ * in a PACKAGED app. Their native modules are external to the bundle, and a bundle in
+ * `Resources/<role>/` has no node_modules above it, so Node's walk-up finds nothing:
+ * NODE_PATH points the resolver at the unpacked ones. Empty in dev, where the bundles
+ * run from the repo and resolve through its node_modules. Checked by
+ * `scripts/release/smoke-packaged-app.mjs` against the real build output.
+ */
+function packagedNativeModuleEnv(): { NODE_PATH?: string } {
+  return app.isPackaged
+    ? { NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules') }
+    : {}
+}
+
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDiagnosticsDatabase, getDatabasePath } from './db'
@@ -332,20 +387,6 @@ import {
 } from '@slayzone/task/electron'
 import { configureTaskRuntimeAdapters, closeArtifactWatcher, taskOps } from '@slayzone/task/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
-/**
- * Env for a child that runs a bundle out of `Resources/` (the hub, the local computer)
- * in a PACKAGED app. Their native modules are external to the bundle, and a bundle in
- * `Resources/<role>/` has no node_modules above it, so Node's walk-up finds nothing:
- * NODE_PATH points the resolver at the unpacked ones. Empty in dev, where the bundles
- * run from the repo and resolve through its node_modules. Checked by
- * `scripts/release/smoke-packaged-app.mjs` against the real build output.
- */
-function packagedNativeModuleEnv(): { NODE_PATH?: string } {
-  return app.isPackaged
-    ? { NODE_PATH: join(process.resourcesPath, 'app.asar.unpacked', 'node_modules') }
-    : {}
-}
-
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
   getThemeSource as nativeGetThemeSource,
@@ -1210,12 +1251,6 @@ function handleOAuthDeepLinkFromArgv(argv: string[]): void {
   }
 }
 
-const shouldEnforceSingleInstanceLock = !isPlaywright && !is.dev
-let lockOutcome: LockOutcome = { kind: 'acquired' }
-if (shouldEnforceSingleInstanceLock) {
-  lockOutcome = acquireLockWithSelfHeal()
-}
-const gotSingleInstanceLock = !shouldEnforceSingleInstanceLock || lockOutcomeIsAcquired(lockOutcome)
 if (!gotSingleInstanceLock) {
   console.error(
     '[app] Failed to acquire single-instance lock; quitting duplicate instance',
