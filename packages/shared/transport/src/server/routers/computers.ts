@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
+import {
+  securityEvent,
+  type SecurityEventName,
+  type SecurityOutcome
+} from '@slayzone/platform/security-log'
 import { router, publicProcedure } from '../trpc'
 import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import {
@@ -19,6 +24,19 @@ import {
   setComputerVisibility as storeSetComputerVisibility,
   type ComputerViewer
 } from '@slayzone/computers/server'
+
+/**
+ * Audit line for a change to who can use a computer (T-03). The acting user, peer
+ * address and procedure come from the request context `publicProcedure` sets.
+ */
+function auditComputer(
+  event: SecurityEventName,
+  computerId: string,
+  outcome: SecurityOutcome = 'success',
+  detail?: Record<string, unknown>
+): void {
+  securityEvent({ event, outcome, targetKind: 'computer', targetId: computerId, detail })
+}
 
 /**
  * Computers router — the tRPC surface over the hub/computer-split computer (hub side).
@@ -210,7 +228,10 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.principal?.userId
       if (!userId) throw new Error('sign in to claim a computer')
-      return { claimed: await storeClaimComputer(ctx.db, input.computerId, userId) }
+      const claimed = await storeClaimComputer(ctx.db, input.computerId, userId)
+      // Not claimed = it already has an owner, and claiming never reassigns one.
+      auditComputer('computer.claim', input.computerId, claimed ? 'success' : 'denied')
+      return { claimed }
     }),
 
   /** Private (owner + grants), or visible to everyone on this hub. */
@@ -219,6 +240,9 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
+      auditComputer('computer.visibility.set', input.computerId, 'success', {
+        visibility: input.visibility
+      })
       return { ok: true as const }
     }),
 
@@ -234,6 +258,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeUnrevokeComputer(ctx.db, input.computerId)
+      auditComputer('computer.unrevoke', input.computerId)
       return { ok: true as const }
     }),
 
@@ -250,6 +275,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeDeleteComputer(ctx.db, input.computerId)
+      auditComputer('computer.delete', input.computerId)
       return { ok: true as const }
     }),
 
@@ -285,6 +311,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
       await storeRevokeComputer(ctx.db, input.computerId)
+      auditComputer('computer.revoke', input.computerId)
       return { ok: true as const }
     })
 })

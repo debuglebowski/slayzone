@@ -155,6 +155,9 @@ run_test packages/shared/platform/src/env-manifest.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
 run_test packages/shared/platform/src/hub-discovery.test.ts
 
+# Security audit events on stdout (T-03): line shape, redaction, never throws.
+run_test packages/shared/platform/src/security-log.test.ts
+
 # Node-environment vitest suites: scopes + trpc (the principal/scope gate), agent-hook.
 # Under the app's vitest config, like run-all.sh.
 run_vitest_files "vitest (transport server)" \

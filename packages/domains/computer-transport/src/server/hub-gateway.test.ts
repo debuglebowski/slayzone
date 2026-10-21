@@ -4,6 +4,11 @@
  */
 import WebSocket from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  runWithSecurityContext,
+  securityEvent,
+  setSecurityLogSink
+} from '@slayzone/platform/security-log'
 import { createMemoryCredentialStore } from '../client/credential-store'
 import { HubDialer, type HubDialerOptions } from '../client/hub-dialer'
 import { ComputerTransportErrorCodes } from '../shared/frames'
@@ -605,5 +610,163 @@ describe('needs-re-enrollment (the hub no longer recognizes this computer)', () 
     expect(sawFatal).toBe(false)
     expect(calls).toBeGreaterThan(0)
     await dialer.stop()
+  })
+})
+
+describe('audit (T-03)', () => {
+  /** Audit lines written while the test runs, parsed. */
+  function captureAudit(): Array<Record<string, unknown>> {
+    const lines: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => lines.push(JSON.parse(line) as Record<string, unknown>))
+    cleanups.push(() => setSecurityLogSink())
+    return lines
+  }
+  const byEvent = (lines: Array<Record<string, unknown>>, event: string) =>
+    lines.filter((l) => l.event === event)
+
+  it('enroll writes computer.enroll with the new computer and the peer address', async () => {
+    const audit = captureAudit()
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url)
+    dialer.start()
+    await dialer.events.once('connected')
+    expect(byEvent(audit, 'computer.enroll')).toEqual([
+      expect.objectContaining({
+        outcome: 'success',
+        actor: 'computer-1',
+        ip: '127.0.0.1',
+        targetKind: 'computer',
+        targetId: 'computer-1',
+        detail: expect.objectContaining({ name: 'test-computer' })
+      })
+    ])
+    expect(JSON.stringify(audit)).not.toContain('jt-valid')
+  })
+
+  it('enrollment runs in the socket context, so lines written while verifying carry the peer', async () => {
+    const audit = captureAudit()
+    const hub = await startHub({
+      verifyEnrollment: async () => {
+        // Stands in for the hub's join-token redeem line.
+        securityEvent({ event: 'computer.join_token.redeem', outcome: 'success' })
+        return { computerId: 'computer-9', apiKey: 'key-9' }
+      }
+    })
+    const dialer = makeDialer(hub.url)
+    dialer.start()
+    await dialer.events.once('connected')
+    expect(byEvent(audit, 'computer.join_token.redeem')).toEqual([
+      expect.objectContaining({ ip: '127.0.0.1', route: 'WS /computers', actor: null })
+    ])
+  })
+
+  it('a refused join token writes computer.enroll failure, never the token', async () => {
+    const audit = captureAudit()
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, { joinToken: 'jt-WRONG' })
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+    await errorEvent
+    expect(byEvent(audit, 'computer.enroll')).toEqual([
+      expect.objectContaining({ outcome: 'failure', actor: null, ip: '127.0.0.1' })
+    ])
+    expect(JSON.stringify(audit)).not.toContain('jt-WRONG')
+  })
+
+  it('a refused hello writes computer.hello failure, never the key', async () => {
+    const audit = captureAudit()
+    const hub = await startHub()
+    const store = createMemoryCredentialStore({ computerId: 'computer-old', apiKey: 'key-revoked' })
+    const dialer = makeDialer(hub.url, { credentialStore: store })
+    dialer.start()
+    await dialer.events.once('connected')
+    expect(byEvent(audit, 'computer.hello')).toEqual([
+      expect.objectContaining({
+        outcome: 'failure',
+        ip: '127.0.0.1',
+        detail: expect.objectContaining({ reason: 'unknown_key' })
+      })
+    ])
+    expect(JSON.stringify(audit)).not.toContain('key-revoked')
+  })
+
+  it('a privileged hub → computer call is written with the acting user; args, env and content never', async () => {
+    const audit = captureAudit()
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: (method) => {
+        if (method === 'fs.writeFile') return { ok: true }
+        throw new RpcError(ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    audit.length = 0
+
+    await runWithSecurityContext(
+      { actor: 'user-7', ip: '198.51.100.9', route: 'trpc pty.create' },
+      async () => {
+        await hub.gateway
+          .request('computer-1', 'pty.spawn', {
+            sessionId: 's1',
+            projectId: 'p1',
+            command: '/bin/zsh',
+            args: ['-lc', 'claude "SECRET PROMPT"'],
+            env: { GITHUB_TOKEN: 'ghp_SECRET' }
+          })
+          .catch(() => undefined)
+        await hub.gateway.request('computer-1', 'fs.writeFile', {
+          rootPath: '/repo',
+          filePath: 'a.txt',
+          content: 'FILE BODY'
+        })
+      }
+    )
+
+    expect(audit).toEqual([
+      expect.objectContaining({
+        event: 'computer.pty.spawn',
+        outcome: 'failure',
+        actor: 'user-7',
+        ip: '198.51.100.9',
+        route: 'trpc pty.create',
+        targetKind: 'computer',
+        targetId: 'computer-1',
+        detail: expect.objectContaining({
+          method: 'pty.spawn',
+          sessionId: 's1',
+          projectId: 'p1',
+          program: 'zsh',
+          code: ComputerTransportErrorCodes.unimplemented
+        })
+      }),
+      expect.objectContaining({
+        event: 'computer.fs.write',
+        outcome: 'success',
+        actor: 'user-7',
+        detail: expect.objectContaining({
+          method: 'fs.writeFile',
+          rootPath: '/repo',
+          path: 'a.txt'
+        })
+      })
+    ])
+    const text = JSON.stringify(audit)
+    for (const leak of ['SECRET PROMPT', 'ghp_SECRET', 'FILE BODY', '-lc']) {
+      expect(text).not.toContain(leak)
+    }
+  })
+
+  it('reads, pings and terminal input are not written', async () => {
+    const audit = captureAudit()
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, { onHubRequest: () => ({ ok: true }) })
+    dialer.start()
+    await dialer.events.once('connected')
+    audit.length = 0
+    await hub.gateway.request('computer-1', 'ping', {})
+    await hub.gateway.request('computer-1', 'pty.write', { sessionId: 's', data: 'ls\n' })
+    await hub.gateway.request('computer-1', 'fs.readFile', { rootPath: '/r', filePath: 'f' })
+    expect(audit).toEqual([])
   })
 })

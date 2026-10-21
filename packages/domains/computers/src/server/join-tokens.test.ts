@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   JOIN_TOKEN_PREFIX,
@@ -157,5 +158,63 @@ describe('hashJoinToken / decodeJoinToken', () => {
     expect(decodeJoinToken('szjt1.')).toBeNull()
     expect(decodeJoinToken('szjt1.!!!!')).toBeNull()
     expect(decodeJoinToken(`szjt1.${Buffer.from('[1,2]').toString('base64url')}`)).toBeNull()
+  })
+})
+
+describe('audit (T-03)', () => {
+  let audit: Array<Record<string, unknown>>
+  beforeEach(() => {
+    audit = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+  })
+  afterEach(() => setSecurityLogSink())
+
+  it('mint writes computer.join_token.mint with the minter, never the token', async () => {
+    const minted = await runWithSecurityContext(
+      { actor: 'ctx-user', ip: '203.0.113.5', route: 'trpc computers.mintJoinToken' },
+      () => mint({ mintedByUserId: 'user-1' })
+    )
+    expect(audit).toEqual([
+      expect.objectContaining({
+        event: 'computer.join_token.mint',
+        outcome: 'success',
+        actor: 'user-1',
+        ip: '203.0.113.5',
+        targetKind: 'join_token',
+        targetId: minted.id,
+        detail: expect.objectContaining({ ttlMs: TTL, label: 'office-mac' })
+      })
+    ])
+    expect(JSON.stringify(audit)).not.toContain(minted.token)
+    expect(JSON.stringify(audit)).not.toContain(decodeJoinToken(minted.token)!.secret)
+  })
+
+  it('redeem writes computer.join_token.redeem: success once, then failure with the reason', async () => {
+    const minted = await mint({ mintedByUserId: 'user-1' })
+    audit.length = 0
+    await verifyJoinToken(t.db, minted.token, NOW + 1)
+    await verifyJoinToken(t.db, minted.token, NOW + 2)
+    await verifyJoinToken(t.db, 'szjt1.garbage', NOW + 3)
+    expect(audit).toEqual([
+      expect.objectContaining({
+        event: 'computer.join_token.redeem',
+        outcome: 'success',
+        targetId: minted.id,
+        detail: expect.objectContaining({ mintedBy: 'user-1' })
+      }),
+      expect.objectContaining({
+        event: 'computer.join_token.redeem',
+        outcome: 'failure',
+        targetId: minted.id,
+        detail: expect.objectContaining({ reason: 'used' })
+      }),
+      expect.objectContaining({
+        event: 'computer.join_token.redeem',
+        outcome: 'failure',
+        targetId: null,
+        detail: expect.objectContaining({ reason: 'malformed' })
+      })
+    ])
+    expect(JSON.stringify(audit)).not.toContain(minted.token)
   })
 })

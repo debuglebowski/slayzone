@@ -22,6 +22,7 @@
 import express from 'express'
 import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
+import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { hubUsersAuthDecision, isLoopbackAddress, registerHubUsersRoutes } from './users.js'
 import type { RestApiDeps } from '../types.js'
 
@@ -435,5 +436,45 @@ await describe('isLoopbackAddress (the loopback-only decision, no restAuth slot)
     // mistaken for loopback.
     expect(isLoopbackAddress('9.127.0.0.1')).toBe(false)
     expect(isLoopbackAddress('212.127.0.1')).toBe(false)
+  })
+})
+
+await describe('audit (T-03)', () => {
+  test('a refusal writes authz.denied; account commands run as the verified caller', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    const actors: Array<string | null | undefined> = []
+    const users = stubUsers({
+      create: async ({ email }) => {
+        actors.push(currentSecurityContext()?.actor)
+        return { ok: true as const, user: { id: 'u9', email, name: 'n', password: 'pw' } }
+      },
+      remove: async () => {
+        actors.push(currentSecurityContext()?.actor)
+        return 'ok' as const
+      }
+    })
+    let principal: { userId: string; scopes: Array<'full'> } | null = null
+    const rest = await mount(users, { required: () => true, verifyBearer: async () => principal })
+    try {
+      expect(
+        (await rest.request('POST', '/api/hub/users', { email: 'a@example.com' })).status
+      ).toBe(401)
+      principal = { userId: 'admin-1', scopes: ['full'] }
+      expect(
+        (await rest.request('POST', '/api/hub/users', { email: 'a@example.com' })).status
+      ).toBe(200)
+      expect(
+        (await rest.request('DELETE', '/api/hub/users', { email: 'a@example.com' })).status
+      ).toBe(200)
+    } finally {
+      setSecurityLogSink()
+      await rest.close()
+    }
+    expect(audit.map((l) => `${l.event}:${l.outcome}`)).toEqual(['authz.denied:denied'])
+    expect(audit[0]!.route).toBe('POST /api/hub/users')
+    expect((audit[0]!.detail as { reason: string }).reason).toBe('unauthenticated')
+    expect(actors).toEqual(['admin-1', 'admin-1'])
+    expect(JSON.stringify(audit)).not.toContain('a@example.com')
   })
 })

@@ -230,6 +230,8 @@ run_test packages/shared/platform/src/env-manifest.test.ts
 run_test packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_test packages/shared/platform/src/hub-addr.test.ts
+# Security audit events on stdout (T-03).
+run_test packages/shared/platform/src/security-log.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
@@ -485,6 +487,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/server/service.test.ts \
   packages/domains/hub-auth/src/server/hub-auth.test.ts \
   packages/domains/hub-auth/src/server/users.test.ts \
+  packages/domains/hub-auth/src/server/audit.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \

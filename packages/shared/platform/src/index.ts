@@ -69,6 +69,25 @@ export {
   type HubBindAddress
 } from './hub-addr'
 export { writeFileIfChanged, updateFileAtomically } from './fs-utils'
+// Security audit events on stdout. Also the lean `@slayzone/platform/security-log`
+// subpath — prefer that from a domain package.
+export {
+  SECURITY_EVENTS,
+  securityEvent,
+  runWithSecurityContext,
+  runAsSecurityActor,
+  currentSecurityContext,
+  setSecurityLogSink,
+  peerAddress,
+  routeOf,
+  type SecurityEventName,
+  type SecurityEventInput,
+  type SecurityOutcome,
+  type SecurityLevel,
+  type SecurityTargetKind,
+  type SecurityContext,
+  type SecurityLogSink
+} from './security-log'
 export {
   migrateXdgIfNeeded,
   migrateCliBinIfNeeded,

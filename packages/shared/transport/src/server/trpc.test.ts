@@ -20,8 +20,11 @@
  *   - principal == null with the gate on still 401s (unchanged from before
  *     scopes existed)
  *   - gate off → everything passes, no principal needed at all
+ *   - every refusal writes one `authz.denied` audit line (T-03), and a procedure
+ *     runs with the caller as the acting user for the audit lines below it
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest'
+import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { publicProcedure, openProcedure, router } from './trpc'
 import { setAuthGate } from './app-deps'
 import type { TrpcContext } from './context'
@@ -35,7 +38,9 @@ import type { TrpcContext } from './context'
 const testRouter = router({
   pty: router({
     write: publicProcedure.query(() => 'write-ok'),
-    create: publicProcedure.query(() => 'create-ok')
+    create: publicProcedure.query(() => 'create-ok'),
+    // Not in SCOPE_POLICY; called only by `full` principals or with the gate off.
+    whoami: publicProcedure.query(() => currentSecurityContext() ?? null)
   }),
   hub: router({
     describe: openProcedure.query(() => 'describe-ok')
@@ -48,8 +53,21 @@ const testRouter = router({
 })
 
 function ctx(principal: TrpcContext['principal']): TrpcContext {
-  return { db: {} as never, dataRoot: '/tmp', principal }
+  return {
+    db: {} as never,
+    dataRoot: '/tmp',
+    principal,
+    req: { socket: { remoteAddress: '203.0.113.7' } } as never
+  }
 }
+
+/** Audit lines written while the test runs. */
+let audit: Array<Record<string, unknown>> = []
+beforeEach(() => {
+  audit = []
+  setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+})
+afterEach(() => setSecurityLogSink())
 
 describe('trpc auth + scope gate', () => {
   afterEach(() => {
@@ -106,6 +124,62 @@ describe('trpc auth + scope gate', () => {
     test('openProcedure bypasses BOTH gates even with no principal at all', async () => {
       const caller = testRouter.createCaller(ctx(null))
       await expect(caller.hub.describe()).resolves.toBe('describe-ok')
+    })
+  })
+
+  describe('audit (T-03)', () => {
+    beforeEach(() => setAuthGate(() => true))
+
+    test('a 401 writes one authz.denied line: no actor, peer ip, the procedure', async () => {
+      const caller = testRouter.createCaller(ctx(null))
+      await expect(caller.pty.write()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(audit).toHaveLength(1)
+      expect(audit[0]).toMatchObject({
+        type: 'security',
+        event: 'authz.denied',
+        outcome: 'denied',
+        level: 'warn',
+        actor: null,
+        ip: '203.0.113.7',
+        targetKind: 'procedure',
+        targetId: 'pty.write',
+        route: 'trpc pty.write',
+        detail: { reason: 'unauthenticated' }
+      })
+    })
+
+    test('a scope refusal writes authz.denied with the actor and the scopes held', async () => {
+      const caller = testRouter.createCaller(ctx({ userId: 'u2', scopes: ['agent'] }))
+      await expect(caller.pty.create()).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      expect(audit).toHaveLength(1)
+      expect(audit[0]).toMatchObject({
+        event: 'authz.denied',
+        actor: 'u2',
+        targetId: 'pty.create',
+        detail: { reason: 'scope', scopes: ['agent'] }
+      })
+    })
+
+    test('an allowed call writes nothing', async () => {
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      await expect(caller.pty.write()).resolves.toBe('write-ok')
+      expect(audit).toHaveLength(0)
+    })
+
+    test('a procedure runs with the caller as the acting user', async () => {
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', scopes: ['full'] }))
+      await expect(caller.pty.whoami()).resolves.toEqual({
+        actor: 'u1',
+        ip: '203.0.113.7',
+        route: 'trpc pty.whoami'
+      })
+    })
+
+    test('gate off: nothing is refused, so nothing is written', async () => {
+      setAuthGate(() => false)
+      const caller = testRouter.createCaller(ctx(null))
+      await expect(caller.pty.create()).resolves.toBe('create-ok')
+      expect(audit).toHaveLength(0)
     })
   })
 })

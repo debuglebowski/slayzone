@@ -1,6 +1,8 @@
 import type { Express } from 'express'
 import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import { isLoopbackPeer } from '@slayzone/platform'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { auditRouteRefusal } from '../route-audit'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -115,6 +117,7 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
     const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk })
+    if (decision !== 'mint') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({
         error:
@@ -149,11 +152,15 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
         : DEFAULT_JOIN_TOKEN_TTL_MS
 
     try {
-      const minted = await storeMintJoinToken(deps.db, {
-        hubUrl,
-        ttlMs,
-        label
-      })
+      // As the verified caller, so the mint's audit line names them. Ownership is
+      // unchanged: this path still mints with no `mintedByUserId` (T-19).
+      const minted = await runAsSecurityActor(principal?.userId ?? null, () =>
+        storeMintJoinToken(deps.db, {
+          hubUrl,
+          ttlMs,
+          label
+        })
+      )
       // Return the token + the computer URL the computer should dial.
       res.json({ token: minted.token, hubUrl })
     } catch (err) {

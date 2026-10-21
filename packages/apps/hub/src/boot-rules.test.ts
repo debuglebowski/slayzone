@@ -21,6 +21,7 @@
 import {
   assertAuthLoaded,
   assertHubBootRules,
+  bootRefusalRule,
   isHubReachable,
   peekHubReachability,
   type HubBootInput
@@ -571,6 +572,56 @@ test('B11 is keyed on the switch, not on being started by the desktop app', () =
   }
   assert(threw, 'login on ⇒ required, regardless of who started the hub')
   assertAuthLoaded(false, null)
+})
+
+console.log('\nhub boot rules: the rule a refusal names, for its audit line (T-03)')
+console.log('─'.repeat(40))
+
+/** The rule `bootRefusalRule` reads off what boot throws — null when it boots. */
+function refusedRule(input: Partial<HubBootInput> & { env?: NodeJS.ProcessEnv }): string | null {
+  try {
+    assertHubBootRules({
+      env: {},
+      host: '127.0.0.1',
+      supervised: false,
+      devSqlEnabled: false,
+      ...input
+    })
+    return null
+  } catch (e) {
+    return bootRefusalRule(e)
+  }
+}
+
+test('every refusal carries its rule number', () => {
+  const cases: Array<[string, Partial<HubBootInput> & { env?: NodeJS.ProcessEnv }]> = [
+    ['B4', { env: { SLAYZONE_HUB_ENABLE_SSO: 'yes' } }],
+    ['B5', { env: { SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' } }],
+    ['B8', { env: { SLAYZONE_HUB_PUBLIC_ADDRESS: 'https://h.example' } }],
+    ['B9', { supervised: true, host: OFF_LOOPBACK }],
+    ['B1', { host: OFF_LOOPBACK, env: { SLAYZONE_HUB_PUBLIC_ADDRESS: 'h.example' } }],
+    ['B3', { host: OFF_LOOPBACK, env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1' } }],
+    ['B10', { env: REACHABLE, devSqlEnabled: true }],
+    ['B14', { env: { ...REACHABLE, SLAYZONE_HUB_AUTH_SECRET: '' } }],
+    ['B2', { env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_PASSWORD: '0' } }],
+    ['B7', { env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_SSO: '1' } }]
+  ]
+  for (const [rule, input] of cases) {
+    const got = refusedRule(input)
+    assert(got === rule, `${rule}: expected that rule, got ${got}`)
+  }
+  let b11: string | null = null
+  try {
+    assertAuthLoaded(true, null)
+  } catch (e) {
+    b11 = bootRefusalRule(e)
+  }
+  assert(b11 === 'B11', `B11: got ${b11}`)
+})
+
+test('an error that is not a boot rule has no rule', () => {
+  assert(bootRefusalRule(new Error('EADDRINUSE')) === null, 'a plain error')
+  assert(bootRefusalRule('boom') === null, 'a non-error')
 })
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
