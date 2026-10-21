@@ -1121,6 +1121,21 @@ function App(): React.JSX.Element {
     }
   }, [handleTaskMove])
 
+  // Test seam: the bulk context-menu actions (undoable wrappers, as the menu calls
+  // them) + undo, so a multi-hub spec can drive a cross-hub selection directly.
+  useEffect(() => {
+    const w = window as { __slayzone_bulkTaskActionsForTest?: unknown }
+    w.__slayzone_bulkTaskActionsForTest = {
+      update: bulkContextMenuUpdate,
+      archive: archiveTasks,
+      delete: bulkDelete,
+      undo
+    }
+    return () => {
+      delete w.__slayzone_bulkTaskActionsForTest
+    }
+  }, [bulkContextMenuUpdate, archiveTasks, bulkDelete, undo])
+
   // Project handlers
   const openProjectSettings = useCallback(
     (

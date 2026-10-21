@@ -1,5 +1,10 @@
 import { useCallback, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import {
+  getClientForHub,
+  getHubIdForTask,
+  useHubOwnershipStore,
+  useTRPCClient
+} from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
@@ -13,16 +18,31 @@ interface TaskMutations {
   updateTask: (task: Task | null | undefined) => void
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
   archiveTask: (taskId: string) => Promise<void>
-  archiveTasks: (taskIds: string[]) => Promise<void>
+  /** Bulk ops resolve to the ids that succeeded (they fan out per hub). */
+  archiveTasks: (taskIds: string[]) => Promise<string[]>
   deleteTask: (taskId: string) => Promise<void>
-  bulkDelete: (taskIds: string[]) => Promise<void>
+  bulkDelete: (taskIds: string[]) => Promise<string[]>
   contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
-  bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<void>
+  bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<string[]>
+}
+
+/**
+ * Each task's owning hub, read BEFORE an archive/delete: once the task leaves the
+ * board its owner can no longer be looked up, and undo must reach that hub.
+ */
+function captureOwners(taskIds: string[]): Map<string, string | undefined> {
+  return new Map(taskIds.map((id) => [id, getHubIdForTask(id)]))
+}
+
+/** Re-note a restored task's owner so a redo (which looks owners up) routes there. */
+function noteOwner(taskId: string, hubId: string | undefined): void {
+  if (hubId) useHubOwnershipStore.getState().noteTaskHub(taskId, hubId)
 }
 
 /**
  * Wraps task mutations with undo support.
- * Returns drop-in replacements that push onto the undo stack and show toast.
+ * Returns drop-in replacements that push onto the undo stack and show toast
+ * (same signatures — the bulk ones still resolve to the ids that succeeded).
  */
 export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) {
   const trpcClient = useTRPCClient()
@@ -75,14 +95,20 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
   const archiveTask = useCallback(
     async (taskId: string) => {
       const task = tasksRef.current.find((t) => t.id === taskId)
+      const hubId = getHubIdForTask(taskId)
       await rawArchive(taskId)
       if (!task) return
 
       undo.push({
         label: `Archived "${task.title}"`,
         undo: async () => {
-          const restored = await trpcClient.task.unarchive.mutate({ id: taskId })
-          if (restored) updateTask(restored)
+          const restored = await getClientForHub(hubId, trpcClient).task.unarchive.mutate({
+            id: taskId
+          })
+          if (restored) {
+            noteOwner(taskId, hubId)
+            updateTask(restored)
+          }
         },
         redo: () => rawArchive(taskId)
       })
@@ -95,23 +121,30 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
 
   const archiveTasks = useCallback(
     async (taskIds: string[]) => {
-      const archived = tasksRef.current.filter((t) => taskIds.includes(t.id))
-      await rawArchiveMany(taskIds)
-      if (archived.length === 0) return
+      const owners = captureOwners(taskIds)
+      const archivedIds = await rawArchiveMany(taskIds)
+      if (archivedIds.length === 0) return archivedIds
 
       undo.push({
-        label: `Archived ${archived.length} tasks`,
+        label: `Archived ${archivedIds.length} tasks`,
         undo: async () => {
-          for (const id of taskIds) {
-            const restored = await trpcClient.task.unarchive.mutate({ id })
-            if (restored) updateTask(restored)
+          for (const id of archivedIds) {
+            const hubId = owners.get(id)
+            const restored = await getClientForHub(hubId, trpcClient).task.unarchive.mutate({ id })
+            if (restored) {
+              noteOwner(id, hubId)
+              updateTask(restored)
+            }
           }
         },
-        redo: () => rawArchiveMany(taskIds)
+        redo: async () => {
+          await rawArchiveMany(archivedIds)
+        }
       })
-      toast(`Archived ${archived.length} tasks`, {
+      toast(`Archived ${archivedIds.length} tasks`, {
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
+      return archivedIds
     },
     [rawArchiveMany, updateTask, undo, trpcClient]
   )
@@ -119,14 +152,20 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
   const deleteTask = useCallback(
     async (taskId: string) => {
       const task = tasksRef.current.find((t) => t.id === taskId)
+      const hubId = getHubIdForTask(taskId)
       await rawDelete(taskId)
       if (!task) return
 
       undo.push({
         label: `Deleted "${task.title}"`,
         undo: async () => {
-          const restored = await trpcClient.task.restore.mutate({ id: taskId })
-          if (restored) setTasks((prev) => [restored, ...prev])
+          const restored = await getClientForHub(hubId, trpcClient).task.restore.mutate({
+            id: taskId
+          })
+          if (restored) {
+            noteOwner(taskId, hubId)
+            setTasks((prev) => [restored, ...prev])
+          }
         },
         redo: () => rawDelete(taskId)
       })
@@ -139,7 +178,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
 
   const bulkContextMenuUpdate = useCallback(
     async (taskIds: string[], updates: Partial<Task>) => {
-      if (taskIds.length === 0) return
+      if (taskIds.length === 0) return []
       // Per-id snapshot of changed fields for restore
       const prevById = new Map<string, Partial<Task>>()
       for (const id of taskIds) {
@@ -152,51 +191,63 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         prevById.set(id, prev)
       }
 
-      await rawBulkContextMenuUpdate(taskIds, updates)
+      const updatedIds = await rawBulkContextMenuUpdate(taskIds, updates)
+      if (updatedIds.length === 0) return updatedIds
 
       const desc = updates.status
-        ? `Changed ${taskIds.length} tasks → ${updates.status}`
+        ? `Changed ${updatedIds.length} tasks → ${updates.status}`
         : updates.is_blocked !== undefined
-          ? `${updates.is_blocked ? 'Blocked' : 'Unblocked'} ${taskIds.length} tasks`
-          : `Updated ${taskIds.length} tasks`
+          ? `${updates.is_blocked ? 'Blocked' : 'Unblocked'} ${updatedIds.length} tasks`
+          : `Updated ${updatedIds.length} tasks`
 
       undo.push({
         label: desc,
         undo: async () => {
           // Per-id restore — heterogeneous, so apply individually
-          for (const [id, prev] of prevById) {
-            await rawContextMenuUpdate(id, prev)
+          for (const id of updatedIds) {
+            const prev = prevById.get(id)
+            if (prev) await rawContextMenuUpdate(id, prev)
           }
         },
-        redo: () => rawBulkContextMenuUpdate(taskIds, updates)
+        redo: async () => {
+          await rawBulkContextMenuUpdate(updatedIds, updates)
+        }
       })
       toast(desc, {
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
+      return updatedIds
     },
     [rawBulkContextMenuUpdate, rawContextMenuUpdate, undo]
   )
 
   const bulkDelete = useCallback(
     async (taskIds: string[]) => {
-      if (taskIds.length === 0) return
-      const removed = tasksRef.current.filter((t) => taskIds.includes(t.id))
-      await rawBulkDelete(taskIds)
-      if (removed.length === 0) return
+      if (taskIds.length === 0) return []
+      const owners = captureOwners(taskIds)
+      const deletedIds = await rawBulkDelete(taskIds)
+      if (deletedIds.length === 0) return deletedIds
 
       undo.push({
-        label: `Deleted ${removed.length} tasks`,
+        label: `Deleted ${deletedIds.length} tasks`,
         undo: async () => {
-          for (const id of taskIds) {
-            const restored = await trpcClient.task.restore.mutate({ id })
-            if (restored) setTasks((prev) => [restored, ...prev])
+          for (const id of deletedIds) {
+            const hubId = owners.get(id)
+            const restored = await getClientForHub(hubId, trpcClient).task.restore.mutate({ id })
+            if (restored) {
+              noteOwner(id, hubId)
+              setTasks((prev) => [restored, ...prev])
+            }
           }
         },
-        redo: () => rawBulkDelete(taskIds)
+        redo: async () => {
+          await rawBulkDelete(deletedIds)
+        }
       })
-      toast(`Deleted ${removed.length} tasks`, {
+      toast(`Deleted ${deletedIds.length} tasks`, {
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
+      return deletedIds
     },
     [rawBulkDelete, setTasks, undo, trpcClient]
   )

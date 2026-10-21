@@ -61,6 +61,47 @@ function groupIdsByHub(
   return byHub
 }
 
+/** One bulk call per owning hub: the ids whose hub call failed, and the first error. */
+interface PerHubOutcome {
+  failedIds: Set<string>
+  error: unknown
+}
+
+/**
+ * Run a bulk task op once per owning hub. A hub writes only its own tasks — ids
+ * sent to any other hub are silently skipped — so a selection spanning hubs must
+ * be split. Hubs run in parallel and fail independently (no cross-hub atomicity).
+ */
+async function runPerHub(
+  ids: string[],
+  lookup: Map<string, string>,
+  defaultHubId: string,
+  clientForHub: (hubId: string) => TrpcVanillaClient,
+  run: (client: TrpcVanillaClient, hubIds: string[]) => Promise<unknown>
+): Promise<PerHubOutcome> {
+  const groups = [...groupIdsByHub(ids, lookup, defaultHubId)]
+  const results = await Promise.allSettled(
+    groups.map(([hubId, hubIds]) => run(clientForHub(hubId), hubIds))
+  )
+  const failedIds = new Set<string>()
+  let error: unknown
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') return
+    for (const id of groups[i][1]) failedIds.add(id)
+    error ??= result.reason
+  })
+  return { failedIds, error }
+}
+
+/** Toast why (part of) a bulk op snapped back. */
+function toastBulkFailure(verb: string, total: number, outcome: PerHubOutcome): void {
+  const failed = outcome.failedIds.size
+  if (failed === 0) return
+  const count = failed === total ? `${total}` : `${failed} of ${total}`
+  const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+  toast.error(`Couldn't ${verb} ${count} tasks: ${reason}`)
+}
+
 /**
  * Maps a snake_case `Partial<Task>` patch to the camelCase fields accepted by
  * `updateTask` / `updateTasks`. Single source of truth for the context-menu
@@ -117,11 +158,12 @@ interface UseTasksDataReturn {
   reparentTask: (taskId: string, newParentId: string | null, newSiblingTaskIds: string[]) => void
   bulkReparent: (taskIds: string[], newParentId: string | null, newSiblingTaskIds: string[]) => void
   archiveTask: (taskId: string) => Promise<void>
-  archiveTasks: (taskIds: string[]) => Promise<void>
+  /** Bulk ops fan out per owning hub; each resolves to the ids that succeeded. */
+  archiveTasks: (taskIds: string[]) => Promise<string[]>
   deleteTask: (taskId: string) => Promise<void>
-  bulkDelete: (taskIds: string[]) => Promise<void>
+  bulkDelete: (taskIds: string[]) => Promise<string[]>
   contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
-  bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<void>
+  bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<string[]>
   setTaskPinned: (taskId: string, pinned: boolean) => void
   setTasksPinned: (taskIds: string[], pinned: boolean) => void
   setTaskCollapsed: (taskId: string, collapsed: boolean) => void
@@ -659,14 +701,36 @@ export function useTasksData(): UseTasksDataReturn {
     [clientForTask]
   )
 
-  // Archive multiple tasks
+  // Archive multiple tasks — per owning hub; a failed hub's tasks un-archive again.
   const archiveTasks = useCallback(
-    async (taskIds: string[]) => {
+    async (taskIds: string[]): Promise<string[]> => {
+      if (taskIds.length === 0) return []
+      const idSet = new Set(taskIds)
       const now = new Date().toISOString()
-      setTasks((prev) => prev.map((t) => (taskIds.includes(t.id) ? { ...t, archived_at: now } : t)))
-      await clientForTask(taskIds[0]).task.archiveMany.mutate({ ids: taskIds })
+      const archivedAtBefore = new Map<string, string | null>()
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (!idSet.has(t.id)) return t
+          archivedAtBefore.set(t.id, t.archived_at)
+          return { ...t, archived_at: now }
+        })
+      )
+      const outcome = await runPerHub(taskIds, ownedTasks(), defaultHubId, clientForHub, (c, ids) =>
+        c.task.archiveMany.mutate({ ids })
+      )
+      if (outcome.failedIds.size > 0) {
+        setTasks((prev) =>
+          prev.map((t) =>
+            outcome.failedIds.has(t.id)
+              ? { ...t, archived_at: archivedAtBefore.get(t.id) ?? null }
+              : t
+          )
+        )
+        toastBulkFailure('archive', taskIds.length, outcome)
+      }
+      return taskIds.filter((id) => !outcome.failedIds.has(id))
     },
-    [clientForTask]
+    [clientForHub, defaultHubId]
   )
 
   // Delete task
@@ -679,23 +743,30 @@ export function useTasksData(): UseTasksDataReturn {
     [clientForTask]
   )
 
-  // Bulk delete
+  // Bulk delete — per owning hub; a failed hub's tasks come back.
   const bulkDelete = useCallback(
-    async (taskIds: string[]) => {
-      if (taskIds.length === 0) return
+    async (taskIds: string[]): Promise<string[]> => {
+      if (taskIds.length === 0) return []
       const idSet = new Set(taskIds)
-      let snapshot: Task[] = []
+      let removed: Task[] = []
       setTasks((prev) => {
-        snapshot = prev
+        removed = prev.filter((t) => idSet.has(t.id))
         return prev.filter((t) => !idSet.has(t.id))
       })
-      try {
-        await clientForTask(taskIds[0]).task.deleteMany.mutate({ ids: taskIds })
-      } catch {
-        setTasks(snapshot)
+      const outcome = await runPerHub(taskIds, ownedTasks(), defaultHubId, clientForHub, (c, ids) =>
+        c.task.deleteMany.mutate({ ids })
+      )
+      if (outcome.failedIds.size > 0) {
+        setTasks((prev) => {
+          const present = new Set(prev.map((t) => t.id))
+          const back = removed.filter((t) => outcome.failedIds.has(t.id) && !present.has(t.id))
+          return [...prev, ...back]
+        })
+        toastBulkFailure('delete', taskIds.length, outcome)
       }
+      return taskIds.filter((id) => !outcome.failedIds.has(id))
     },
-    [clientForTask]
+    [clientForHub, defaultHubId]
   )
 
   // Context menu update (status, priority, project, blocked).
@@ -738,16 +809,21 @@ export function useTasksData(): UseTasksDataReturn {
     [clientForTask]
   )
 
-  // Bulk context-menu update (status, priority, project, blocked, ...)
+  // Bulk context-menu update (status, priority, project, blocked, ...) — per owning
+  // hub. Each hub's batch is all-or-nothing server-side; a failed hub's tasks snap
+  // back and the toast says why.
   const bulkContextMenuUpdate = useCallback(
-    async (taskIds: string[], updates: Partial<Task>) => {
-      if (taskIds.length === 0) return
+    async (taskIds: string[], updates: Partial<Task>): Promise<string[]> => {
+      if (taskIds.length === 0) return []
       const idSet = new Set(taskIds)
-      let previousTasks: Task[] = []
-      setTasks((prev) => {
-        previousTasks = prev
-        return prev.map((t) => (idSet.has(t.id) ? { ...t, ...updates } : t))
-      })
+      const before = new Map<string, Task>()
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (!idSet.has(t.id)) return t
+          before.set(t.id, t)
+          return { ...t, ...updates }
+        })
+      )
 
       if (updates.is_blocked !== undefined) {
         setBlockedTaskIds((prev) => {
@@ -758,28 +834,26 @@ export function useTasksData(): UseTasksDataReturn {
         })
       }
 
-      try {
-        await clientForTask(taskIds[0]).task.updateMany.mutate({
-          ids: taskIds,
-          updates: toUpdateTaskFields(updates)
-        })
-      } catch (err) {
-        // The batch is all-or-nothing server-side; say why it snapped back.
-        toast.error(
-          `Couldn't update ${taskIds.length} tasks: ${err instanceof Error ? err.message : String(err)}`
-        )
-        setTasks(previousTasks)
+      const fields = toUpdateTaskFields(updates)
+      const outcome = await runPerHub(taskIds, ownedTasks(), defaultHubId, clientForHub, (c, ids) =>
+        c.task.updateMany.mutate({ ids, updates: fields })
+      )
+      const { failedIds } = outcome
+      if (failedIds.size > 0) {
+        setTasks((prev) => prev.map((t) => (failedIds.has(t.id) ? (before.get(t.id) ?? t) : t)))
         if (updates.is_blocked !== undefined) {
           setBlockedTaskIds((prev) => {
             const next = new Set(prev)
-            if (updates.is_blocked) for (const id of taskIds) next.delete(id)
-            else for (const id of taskIds) next.add(id)
+            if (updates.is_blocked) for (const id of failedIds) next.delete(id)
+            else for (const id of failedIds) next.add(id)
             return next
           })
         }
+        toastBulkFailure('update', taskIds.length, outcome)
       }
+      return taskIds.filter((id) => !failedIds.has(id))
     },
-    [clientForTask]
+    [clientForHub, defaultHubId]
   )
 
   // Reorder the pinned group — writes `pin_order = index` for the ordered ids
