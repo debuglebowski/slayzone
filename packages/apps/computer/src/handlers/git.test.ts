@@ -140,3 +140,50 @@ describe('createGitHandlers — runWorktreeSetupScript env sanitize', () => {
     }
   })
 })
+
+describe('createGitHandlers — git.removeWorktree keeps the branch unless asked', () => {
+  // The hub's archive / delete / startup-purge paths remove the worktree and say nothing
+  // about its branch. v0.35.0 kept the branch ("Branch is kept" in the Worktrees UI); this
+  // handler force-deleted it (`git branch -D`), so unmerged, unpushed commits became
+  // dangling objects. Deleting a branch is now an explicit request on the frame.
+  function repoWithWorktree(): { repo: string; wt: string } {
+    const repo = join(realpathSync(dir), 'repo')
+    mkdirSync(repo)
+    git(['init'], repo)
+    git(['config', 'user.email', 'test@example.com'], repo)
+    git(['config', 'user.name', 'Test'], repo)
+    git(['commit', '--allow-empty', '-m', 'init'], repo)
+    const wt = join(realpathSync(dir), 'wt')
+    git(['worktree', 'add', '-b', 'feature-x', wt], repo)
+    // An unmerged commit that exists ONLY on the branch.
+    writeFileSync(join(wt, 'work.txt'), 'unmerged work')
+    git(['add', '.'], wt)
+    git(['commit', '-m', 'unmerged work'], wt)
+    return { repo, wt }
+  }
+  const branches = (repo: string): string =>
+    execFileSync('git', ['branch', '--list', 'feature-x'], { cwd: repo, encoding: 'utf8' }).trim()
+
+  it('removes the worktree and KEEPS its branch by default', async () => {
+    const { repo, wt } = repoWithWorktree()
+    const handlers = createGitHandlers(ctxWithRoots(roots))
+    const res = (await handlers[GitMethods.removeWorktree]({
+      projectPath: repo,
+      worktreePath: wt
+    })) as { branchDeleted?: boolean }
+    expect(res.branchDeleted).not.toBe(true)
+    expect(branches(repo)).toContain('feature-x')
+  })
+
+  it('deletes the branch only when deleteBranch is true', async () => {
+    const { repo, wt } = repoWithWorktree()
+    const handlers = createGitHandlers(ctxWithRoots(roots))
+    const res = (await handlers[GitMethods.removeWorktree]({
+      projectPath: repo,
+      worktreePath: wt,
+      deleteBranch: true
+    })) as { branchDeleted?: boolean }
+    expect(res.branchDeleted).toBe(true)
+    expect(branches(repo)).toBe('')
+  })
+})

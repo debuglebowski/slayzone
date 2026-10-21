@@ -137,9 +137,12 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       }
     }
 
-    // `branchHint` was a local-only param the hub never sent, so this branch-delete
-    // path was dead on every routed call. Resolve the branch from the worktree
-    // itself before removing it — same effect, no phantom parameter.
+    // The branch is deleted ONLY on request (`deleteBranch`). The hub's archive, delete
+    // and startup-purge paths never ask: v0.35.0 removed just the worktree and kept the
+    // branch (the Worktrees UI still promises "Branch is kept"), whereas deleting it
+    // unconditionally left unmerged, unpushed commits dangling. The branch is resolved
+    // from the worktree itself, before it is removed.
+    if (params.deleteBranch !== true) return {}
     if (removedBranch === null) return {}
     const branch = removedBranch.replace(/^refs\/heads\//, '').trim()
     if (!branch) return {}

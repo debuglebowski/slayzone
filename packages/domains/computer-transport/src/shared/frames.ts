@@ -687,7 +687,11 @@ export type GitCreateWorktreeParams = z.infer<typeof gitCreateWorktreeParamsSche
 
 export const gitRemoveWorktreeParamsSchema = z.object({
   projectPath: z.string().min(1),
-  worktreePath: z.string().min(1)
+  worktreePath: z.string().min(1),
+  /** Also force-delete the worktree's branch (`git branch -D`). OFF unless asked: the
+   *  hub's archive / delete / purge paths remove only the worktree, and unmerged,
+   *  unpushed commits on the branch would otherwise be left dangling. */
+  deleteBranch: z.boolean().optional()
 })
 export type GitRemoveWorktreeParams = z.infer<typeof gitRemoveWorktreeParamsSchema>
 
