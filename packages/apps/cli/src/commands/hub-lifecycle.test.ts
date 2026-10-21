@@ -629,7 +629,8 @@ async function main(): Promise<void> {
       const signIn = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
       assertEq(signIn.status, 200, `signed in while enabled: ${signIn.body}`)
       const token = String(signIn.headers['set-auth-token'])
-      assertEq(await getStatus(a.port, '/api/hub/users', token), 200, 'its bearer works')
+      // Any full session may list tasks (a `user` may not use /api/hub/users).
+      assertEq(await getStatus(a.port, '/api/tasks', token), 200, 'its bearer works')
 
       const disable = slay(['--hub', NAME_A, 'hub', 'users', 'disable', email], { root: rootA })
       assertEq(disable.status, 0, `disable exited 0 (stderr: ${disable.stderr})`)
@@ -637,7 +638,7 @@ async function main(): Promise<void> {
       const row = usersLs().find((u) => u.email === email)
       assert(row, 'the account is still listed')
       assert(row.disabledAt !== null, 'and marked disabled')
-      assertEq(await getStatus(a.port, '/api/hub/users', token), 401, 'its bearer is revoked')
+      assertEq(await getStatus(a.port, '/api/tasks', token), 401, 'its bearer is revoked')
       const refused = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
       assertEq(refused.status, 403, `sign-in refused: ${refused.body}`)
       assert(refused.body.includes('ACCOUNT_DISABLED'), `names why: ${refused.body}`)
@@ -647,6 +648,32 @@ async function main(): Promise<void> {
       assertEq(usersLs().find((u) => u.email === email)!.disabledAt, null, 'enabled again')
       const again = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
       assertEq(again.status, 200, `signs in again: ${again.body}`)
+    })
+
+    await test('hub users: a user account’s bearer gets 403 and cannot promote itself', async () => {
+      const a = hubs.find((h) => basename(h.root) === NAME_A)!
+      const email = `plain-${process.pid}@example.com`
+      const add = slay(['--hub', NAME_A, 'hub', 'users', 'add', email, '--json'], { root: rootA })
+      assertEq(add.status, 0, `add exited 0 (stderr: ${add.stderr})`)
+      const { password, role } = JSON.parse(add.stdout) as { password: string; role: string }
+      assertEq(role, 'user', 'a plain account')
+      const signIn = await postJson(a.port, '/api/auth/sign-in/email', { email, password })
+      assertEq(signIn.status, 200, `signed in: ${signIn.body}`)
+      const asUser = { SLAYZONE_HUB_TOKEN: String(signIn.headers['set-auth-token']) }
+      for (const args of [
+        ['ls'],
+        ['add', `sneaky-${process.pid}@example.com`],
+        ['disable', usersLs()[0]!.email],
+        ['role', email, 'admin']
+      ]) {
+        const res = slay(['--hub', NAME_A, 'hub', 'users', ...args], { root: rootA, env: asUser })
+        assert(res.status !== 0, `${args[0]} refused with a non-zero exit`)
+        assert(/needs an admin account/.test(res.stderr), `explained why: ${res.stderr}`)
+      }
+      const after = usersLs()
+      assertEq(after.find((u) => u.email === email)!.role, 'user', 'still a user')
+      assert(!after.some((u) => u.email.startsWith('sneaky-')), 'nothing was created')
+      assertEq(after[0]!.disabledAt, null, 'the owner was not disabled')
     })
 
     await test('hub users: role sets the role; the last enabled admin is never demoted or disabled', async () => {

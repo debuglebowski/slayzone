@@ -480,6 +480,93 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
     })
     expect(res.status).toBe(401)
   })
+
+  test('a full bearer of a USER account gets 403 on every method; the domain is never called', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    const calls: string[] = []
+    const users = stubUsers({
+      list: async () => {
+        calls.push('list')
+        return []
+      },
+      create: async () => {
+        calls.push('create')
+        return { ok: false as const, reason: 'exists' as const }
+      },
+      disable: async () => {
+        calls.push('disable')
+        return 'ok' as const
+      },
+      enable: async () => {
+        calls.push('enable')
+        return 'ok' as const
+      },
+      setRole: async () => {
+        calls.push('setRole')
+        return 'ok' as const
+      }
+    })
+    const restAuth = {
+      required: () => true,
+      verifyBearer: async () => ({
+        userId: 'u-user',
+        role: 'user' as const,
+        scopes: ['full' as const]
+      })
+    }
+    try {
+      for (const [method, body] of [
+        ['GET', undefined],
+        ['POST', { email: 'new@example.com', role: 'admin' }],
+        ['PATCH', { email: 'other@example.com', disabled: true }],
+        ['PATCH', { email: 'other@example.com', disabled: false }],
+        // Promoting itself — the escalation this gate exists for.
+        ['PATCH', { email: 'self@example.com', role: 'admin' }],
+        ['DELETE', { email: 'other@example.com' }]
+      ] as const) {
+        const res = await call<{ ok: boolean; error: string }>(users, method, body, restAuth)
+        expect(res.status).toBe(403)
+        expect(res.body.error.includes('needs an admin account')).toBe(true)
+      }
+    } finally {
+      setSecurityLogSink()
+    }
+    expect(calls).toEqual([])
+    expect(audit).toHaveLength(6)
+    for (const line of audit) {
+      expect(line.event).toBe('authz.denied')
+      expect(line.actor).toBe('u-user')
+      expect(line.detail).toEqual({ reason: 'not_admin', status: 403 })
+    }
+  })
+
+  test('a full bearer of an ADMIN account passes on every method', async () => {
+    const restAuth = {
+      required: () => true,
+      verifyBearer: async () => ({
+        userId: 'u-admin',
+        role: 'admin' as const,
+        scopes: ['full' as const]
+      })
+    }
+    for (const [method, body, status] of [
+      ['GET', undefined, 200],
+      ['POST', { email: 'new@example.com' }, 200],
+      ['PATCH', { email: 'other@example.com', role: 'admin' }, 200],
+      ['DELETE', { email: 'other@example.com' }, 410]
+    ] as const) {
+      expect((await call(stubUsers(), method, body, restAuth)).status).toBe(status)
+    }
+  })
+
+  test('a scoped web session of an ADMIN account still never passes (401, unchanged)', async () => {
+    const res = await call<{ ok: boolean }>(stubUsers(), 'GET', undefined, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u-admin', role: 'admin', scopes: ['read', 'tasks'] })
+    })
+    expect(res.status).toBe(401)
+  })
 })
 
 /**
@@ -490,36 +577,52 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
  */
 await describe('hubUsersAuthDecision', () => {
   test('auth NOT required (supervised): loopback allows, off-box is forbidden', () => {
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
-      'forbid'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('forbid')
     // Even a caller that WOULD verify gets forbidden — no sessions exist to check.
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
-      'forbid'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: false, bearerOk: true, admin: true })
+    ).toBe('forbid')
   })
 
   test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
     // THE REGRESSION MATRIX — the old gate admitted any loopback peer
     // unconditionally, regardless of `authRequired`.
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: false })
+    ).toBe('unauthorized')
+  })
+
+  test('auth REQUIRED: a valid full bearer of a non-admin account is not-admin, from anywhere', () => {
+    for (const loopback of [true, false]) {
+      expect(
+        hubUsersAuthDecision({ loopback, authRequired: true, bearerOk: true, admin: false })
+      ).toBe('not-admin')
+    }
+    // Admin without a valid full bearer is still a credential problem, not a role one.
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
+    // Login off: no sessions, no roles — loopback alone decides, as before.
+    expect(
+      hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('allow')
   })
 
   test('off-box on an enforcing hub: valid bearer allows, missing/invalid is 401', () => {
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: true })).toBe(
-      'allow'
-    )
-    expect(hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('allow')
+    expect(
+      hubUsersAuthDecision({ loopback: false, authRequired: true, bearerOk: false, admin: false })
+    ).toBe('unauthorized')
   })
 })
 
