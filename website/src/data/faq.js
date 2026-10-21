@@ -74,7 +74,7 @@ export const faqGroups = [
       {
         question: 'Where exactly is my data stored?',
         answer:
-          'Everything is stored locally on your machine. On macOS, this is usually in <code>~/Library/Application Support/slayzone/slayzone.sqlite</code>. You can back up this single file to migrate your entire board and history.'
+          'Everything is stored locally on your machine, in <code>~/.slayzone/stable/hub</code> (on Windows, the same folder under your user profile). The database is <code>slayzone.data.sqlite</code>, and artifact files sit beside it. To back up or move your whole board and history, quit SlayZone and copy that folder.'
       },
       {
         question: 'Are my AI API keys stored in the app?',
