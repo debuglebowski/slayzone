@@ -41,7 +41,7 @@
     "lint": "pnpm lint:versions && pnpm lint:theme && pnpm lint:server-boundary && pnpm lint:trpc-deps && pnpm lint:window-api && pnpm lint:e2e-guardrails && pnpm lint:format && pnpm lint:biome && pnpm lint:eslint && pnpm test:unit:registered",
     "lint:versions": "node scripts/sync-versions.mjs --check",
     "sync-versions": "node scripts/sync-versions.mjs",
-    "lint:server-boundary": "bash scripts/check-server-electron-free.sh",
+    "lint:server-boundary": "bash scripts/check-server-electron-free.sh && node scripts/check-hub-exec-imports.mjs",
     "lint:trpc-deps": "bash scripts/check-trpc-stable-deps.sh",
     "lint:window-api": "bash scripts/check-renderer-window-api.sh",
     "lint:e2e-guardrails": "node scripts/check-e2e-guardrails.mjs",
