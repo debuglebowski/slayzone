@@ -156,6 +156,7 @@ import { createComputerAuthAdapters } from './computer-auth.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireHostKillStamp } from './host-kill.js'
+import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
 import { getDatabasePathFromEnv } from './db.js'
@@ -738,6 +739,9 @@ export function composeServer(opts: {
     notifyTasksChanged: notifyRenderer,
     pushGithubTask: integrationHandles.pushGithubTask
   })
+  // Pull-sync. v0.35.0's host started both pollers at boot; the slice-9 move to the hub
+  // took push-on-edit and dropped these, so Linear/GitHub/Jira stopped pulling.
+  startIntegrationPollers({ db, notifyTasksChanged: notifyRenderer })
   // Credential encryption needs Electron safeStorage, absent in this
   // ELECTRON_RUN_AS_NODE process. Supervised: forward encrypt/decrypt to the
   // host's safeStorage over the capability bridge (base64 on the wire).

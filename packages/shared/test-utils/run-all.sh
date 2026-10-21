@@ -70,6 +70,8 @@ run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
 # Push-on-edit listens on the bus the task ops actually emit on. The host held the
 # only listeners, on an ipcMain the ops stopped using at the slice-9 cutover.
 run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
+# Pull-sync pollers: v0.35.0's host started them; the move to the hub dropped the call.
+run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
