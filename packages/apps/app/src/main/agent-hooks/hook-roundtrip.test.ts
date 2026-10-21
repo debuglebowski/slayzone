@@ -26,15 +26,28 @@ import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
 // The route reaches the task + diagnostics domains; mock them (as the
 // transport's own agent-hook.test.ts does) so this stays hermetic — we assert
 // the SHELL→SERVER→BRIDGE wiring, not the DB.
-vi.mock('@slayzone/terminal/server', () => ({
-  isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode)
-}))
+// The agent tree is the REAL one (pure, no DB): it decides the state each hook
+// transitions to, which is exactly what this round-trip asserts.
+vi.mock('@slayzone/terminal/server', async () => {
+  const agentTree = await import('../../../../../domains/terminal/src/server/agent-tree.js')
+  return {
+    isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
+    applyAgentHook: agentTree.applyAgentHook,
+    createAgentTree: agentTree.createAgentTree,
+    resolveState: agentTree.resolveState,
+    subagentIdOf: agentTree.subagentIdOf,
+    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS
+  }
+})
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: vi.fn(),
   findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
+  findOwnedSpawnForConversation: vi.fn(async () => null),
+  getCurrentConversationId: vi.fn(async () => null),
   confirmSessionConversation: vi.fn(),
-  getBoundTaskId: vi.fn(async () => null)
+  getBoundTaskId: vi.fn(async () => null),
+  markSessionFirstTurn: vi.fn(async () => {})
 }))
 
 const tmpDirs: string[] = []
