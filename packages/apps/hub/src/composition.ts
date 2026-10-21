@@ -10,6 +10,7 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   setTaskDeps,
   setIntegrationOps,
@@ -910,6 +911,8 @@ export function composeServer(opts: {
       // completes the code when the sub delivers it. Reuses the shared
       // requestGithubSignInStart — same PKCE handshake as the Electron host.
       authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
+        // Backstop for the router's check: no Convex POST, no browser open.
+        assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
         try {
           if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
           if (input.redirectTo !== 'slayzone://auth/callback') {

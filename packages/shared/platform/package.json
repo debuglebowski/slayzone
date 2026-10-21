@@ -20,6 +20,7 @@
     "./hub-addr": "./src/hub-addr.ts",
     "./hub-discovery": "./src/hub-discovery.ts",
     "./hub-switches": "./src/hub-switches.ts",
+    "./hub-switch-refusal": "./src/hub-switch-refusal.ts",
     "./hub-owner-file": "./src/hub-owner-file.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",

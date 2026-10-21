@@ -1,5 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { hubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   pushTaskAfterEdit as defaultPushTaskAfterEdit,
   pushNewTaskToProviders as defaultPushNewTaskToProviders,
@@ -40,6 +41,9 @@ export function wireIntegrationPush(opts: {
   pushGithubTask: (taskId: string) => Promise<void>
   fns?: Partial<IntegrationPushFns>
 }): void {
+  // `SLAYZONE_HUB_ENABLE_INTEGRATIONS=0`: no background push at all. Not a refusal
+  // of anyone's request, so nothing to audit — the listeners simply never exist.
+  if (!hubIntegrationsEnabled()) return
   const {
     pushTaskAfterEdit = defaultPushTaskAfterEdit,
     pushNewTaskToProviders = defaultPushNewTaskToProviders,

@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 /**
  * OS secure-credential cipher seam — electron-free so this store lives in server/.
@@ -60,7 +61,14 @@ function toSettingKey(ref: string): string {
   return `integration:credential:${ref}`
 }
 
+/**
+ * `SLAYZONE_HUB_ENABLE_INTEGRATIONS=0` refuses both directions here: no
+ * `integration:credential:*` row is written, and none is read — every provider call
+ * needs one, so a row left from before the switch was turned off cannot reach a
+ * provider either.
+ */
 export async function storeCredential(db: SlayzoneDb, ref: string, secret: string): Promise<void> {
+  assertHubIntegrationsEnabled({ op: 'credential.store' })
   // Encrypt whenever a working cipher exists; otherwise fall back to plaintext
   // (headless standalone hub with no OS keychain). Availability is the sole gate.
   if (await cipherAvailable()) {
@@ -80,6 +88,7 @@ export async function storeCredential(db: SlayzoneDb, ref: string, secret: strin
 }
 
 export async function readCredential(db: SlayzoneDb, ref: string): Promise<string> {
+  assertHubIntegrationsEnabled({ op: 'credential.read' })
   const row = (await db
     .prepare('SELECT value FROM settings WHERE key = ?')
     .get(toSettingKey(ref))) as { value: string } | undefined

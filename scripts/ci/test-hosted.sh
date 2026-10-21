@@ -37,6 +37,7 @@ run_test_electron_strict_loader packages/apps/hub/src/seed-computer-project-path
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/dev-sql.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
@@ -113,6 +114,7 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/proj
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/switch-refusal.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/content.test.ts
@@ -157,6 +159,15 @@ run_test packages/shared/platform/src/hub-discovery.test.ts
 
 # Security audit events on stdout (T-03): line shape, redaction, never throws.
 run_test packages/shared/platform/src/security-log.test.ts
+
+# Processes / integrations switched off (T-04, T-05, T-07): every refusal point, on the
+# backend and on disk, not just at the router. The wire shape is switch-refusals.test.ts
+# (hub) and switch-refusal.test.ts (REST) above.
+run_test packages/shared/platform/src/hub-switch-refusal.test.ts
+run_test packages/domains/processes/src/server/process-switch.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
+run_test_electron_strict_loader packages/domains/automations/src/server/engine-switch.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/server/integrations-switch.test.ts
 
 # Node-environment vitest suites: scopes + trpc (the principal/scope gate), agent-hook.
 # Under the app's vitest config, like run-all.sh.

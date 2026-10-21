@@ -7,6 +7,7 @@ import type {
   UpdateAutomationInput
 } from '../shared'
 import { parseAutomationRow } from '../shared'
+import { assertAutomationActionsAllowed } from './hub-exec-actions'
 
 /**
  * Pure, electron-free DB ops for the automations domain. Shared by the
@@ -45,6 +46,7 @@ export async function createAutomation(
   db: SlayzoneDb,
   data: CreateAutomationInput
 ): Promise<Automation> {
+  assertAutomationActionsAllowed(data.actions, { op: 'save' })
   const id = crypto.randomUUID()
   const row = await db.namedTxn('automations:create', {
     id,
@@ -63,6 +65,9 @@ export async function updateAutomation(
   db: SlayzoneDb,
   data: UpdateAutomationInput
 ): Promise<Automation> {
+  if (data.actions !== undefined) {
+    assertAutomationActionsAllowed(data.actions, { op: 'save', automationId: data.id })
+  }
   const fields: string[] = []
   const values: unknown[] = []
 

@@ -21,6 +21,10 @@ import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // path. It reaches every agent through the injected backend, which routes to a
 // computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
 import { getPtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
+import {
+  assertHubProcessesEnabled,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
 import { RingBuffer, type BufferChunk } from '../ring-buffer'
 import {
   getAdapter,
@@ -1087,6 +1091,13 @@ function buildTransportSpawn(
 export function testExecutionContext(
   context: ExecutionContext
 ): Promise<{ success: boolean; error?: string }> {
+  // The docker / ssh probe below runs on the hub itself.
+  if (context.type !== 'host') {
+    assertHubProcessesEnabled('hub.process.spawn', {
+      op: 'pty.test_execution_context',
+      detail: { contextType: context.type }
+    })
+  }
   return new Promise((resolve) => {
     if (context.type === 'host') {
       resolve({ success: true })
@@ -1714,8 +1725,10 @@ export async function createPty(
       try {
         ptyProcess = spawn(spawnFile, initialArgs)
       } catch (err) {
-        // Fallback for shells that reject login flag combinations (host only).
-        if (!canRetryInteractiveOnly) throw err
+        // Fallback for shells that reject login flag combinations (host only). A
+        // switch refusal is policy, not a rejected flag: retrying would only refuse
+        // (and audit) a second time.
+        if (!canRetryInteractiveOnly || isHubSwitchedOffError(err)) throw err
         usedArgs = initialArgs.filter((arg) => arg !== '-l')
         ptyProcess = spawn(spawnFile, usedArgs)
         usedFallback = true
@@ -2715,6 +2728,9 @@ export async function createPty(
         cwd: cwd ?? null
       }
     })
+    // A switch refusal is policy, not a spawn failure: let it reach the transport,
+    // which answers it the same way as every other refusal (FORBIDDEN + its code).
+    if (isHubSwitchedOffError(err)) throw err
     return {
       success: false,
       error: `${err.message} (shell=${spawnAttempt?.shell ?? '?'}, cwd=${cwd || '?'})`

@@ -1,12 +1,22 @@
 import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
 import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
+import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
 
 const t = initTRPC.context<TrpcContext>().create({
-  transformer: superjson
+  transformer: superjson,
+  // A hub-switch refusal carries its stable code (`HUB_PROCESSES_DISABLED`, …) to the
+  // client as `data.appCode`; every other error keeps its shape exactly.
+  errorFormatter: ({ shape, error }) => ({
+    ...shape,
+    data: {
+      ...shape.data,
+      ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {})
+    }
+  })
 })
 
 export const router = t.router
@@ -88,12 +98,34 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
+ * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
+ * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
+ * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
+ * the INTERNAL_SERVER_ERROR an unknown throw becomes.
+ */
+const switchRefusal = t.middleware(async ({ next }) => {
+  const result = await next()
+  if (!result.ok && isHubSwitchedOffError(result.error.cause)) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  return result
+})
+
+/**
  * Default procedure — auth-gated on an authed hub, then scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
  * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
  */
-export const publicProcedure = t.procedure.use(securityContext).use(authGate).use(scopeGate)
+export const publicProcedure = t.procedure
+  .use(securityContext)
+  .use(authGate)
+  .use(scopeGate)
+  .use(switchRefusal)
 
 /**
  * Ungated procedure for pre-auth discovery ONLY (`hub.describe`) — the client

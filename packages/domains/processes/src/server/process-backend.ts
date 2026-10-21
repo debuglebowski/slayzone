@@ -1,6 +1,7 @@
 import { spawn, execFile, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { buildShellInvocation, sanitizeSpawnEnv } from '@slayzone/platform'
+import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 
 /**
@@ -140,6 +141,12 @@ function makeLocalHandle(child: ChildProcess): ProcHandle {
  */
 export const localProcessBackend: ProcessBackend = {
   spawn(spec: ProcSpawnSpec): ProcHandle {
+    // Last stop before `child_process.spawn`: a path that skipped the manager's
+    // checks still cannot start a process on a hub with processes switched off.
+    assertHubProcessesEnabled('hub.process.spawn', {
+      op: 'backend.spawn',
+      detail: { processId: spec.id, taskId: spec.taskId, projectId: spec.projectId }
+    })
     const isWin = process.platform === 'win32'
     // buildShellInvocation handles fish (-i -l for PATH init inside
     // `if status is-interactive` blocks), bash/zsh (-l only), and Windows (cmd /c).
