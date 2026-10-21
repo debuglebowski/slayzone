@@ -38,6 +38,11 @@ import type { RestApiDeps } from '../types'
  * box keeps working with no operator action, it just now carries a real
  * credential instead of relying on the peer address.
  *
+ * ADMIN ONLY once auth is required: the bearer must be a `full` session whose
+ * account is `role: 'admin'`. Any signed-in account could otherwise add accounts,
+ * disable others, or make itself admin. A `user` gets 403 (`not_admin`). The
+ * bootstrap owner is created admin, so the owner file keeps working on the box.
+ *
  * ONE PATH, ONE ENTRY IN THE GATE. The bearer gate's `SELF_GUARDED` set
  * (`apps/hub/src/rest-auth.ts`) matches the pathname EXACTLY, so a
  * `PATCH /api/hub/users/:email` shape could not be exempted without teaching the
@@ -68,11 +73,11 @@ import type { RestApiDeps } from '../types'
 export const isLoopbackAddress = isLoopbackPeer
 
 /** What to do with a `/api/hub/users` request, once its peer + credential are
- *  known. Same three outcomes as {@link joinTokenAuthDecision} — see its
+ *  known. The three outcomes of {@link joinTokenAuthDecision} — see its
  *  docstring for the shared reasoning; this is repeated rather than imported
  *  because the two routes live in sibling directories with no shared parent
- *  that isn't `RestApiDeps` itself. */
-export type HubUsersAuthOutcome = 'allow' | 'forbid' | 'unauthorized'
+ *  that isn't `RestApiDeps` itself — plus `not-admin`. */
+export type HubUsersAuthOutcome = 'allow' | 'forbid' | 'unauthorized' | 'not-admin'
 
 /**
  * Decide whether a caller may administer hub accounts. Pure, so the off-box and
@@ -86,14 +91,20 @@ export type HubUsersAuthOutcome = 'allow' | 'forbid' | 'unauthorized'
  *   hub makes every request loopback, so it was the same as no gate at all.
  * - 401 (not 403) on a missing bearer when auth IS required: the caller has a
  *   credential problem (sign in / read the owner file), not a policy one.
+ * - a valid full bearer whose account is not admin → `not-admin` (403): the
+ *   credential is fine, the account may not do this.
  */
 export function hubUsersAuthDecision(opts: {
   loopback: boolean
   authRequired: boolean
+  /** A verified `full`-scope session. */
   bearerOk: boolean
+  /** That session's account has `role: 'admin'`. */
+  admin: boolean
 }): HubUsersAuthOutcome {
   if (!opts.authRequired) return opts.loopback ? 'allow' : 'forbid'
-  return opts.bearerOk ? 'allow' : 'unauthorized'
+  if (!opts.bearerOk) return 'unauthorized'
+  return opts.admin ? 'allow' : 'not-admin'
 }
 
 /** The internal identity that owns computer API keys — never operator-creatable. */
@@ -129,15 +140,25 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     // `restAuth` slot (the Electron host) means no bearer authority at all, which
     // collapses `authRequired` to false and this whole check to loopback-only.
     //
-    // FULL ONLY: administering accounts is not a classified tRPC scope, so a
+    // FULL AND ADMIN: administering accounts is not a classified tRPC scope, so a
     // scoped web session must never satisfy this regardless of what its bearer
-    // or cookie would otherwise resolve to.
+    // or cookie would otherwise resolve to; and only an admin account may.
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
-    const decision = hubUsersAuthDecision({ loopback, authRequired, bearerOk })
+    const admin = principal?.role === 'admin'
+    const decision = hubUsersAuthDecision({ loopback, authRequired, bearerOk, admin })
     if (decision !== 'allow') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({ ok: false, error: 'hub user management is loopback-only' })
+      return null
+    }
+    if (decision === 'not-admin') {
+      res.status(403).json({
+        ok: false,
+        error:
+          'hub user management needs an admin account — an admin can grant it with ' +
+          '`slay hub users role <email> admin`'
+      })
       return null
     }
     if (decision === 'unauthorized') {

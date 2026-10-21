@@ -7,6 +7,7 @@ import type { RestPrincipal } from './types'
  * gate exempts `/api/hub/users` and `/api/computers/join-token` and lets them decide
  * (see `apps/hub/src/rest-auth.ts`), so their 403/401 is the gate's denial and is
  * written the same way: `authz.denied`, never the presented credential.
+ * `not-admin`: a valid session whose account is not admin (`/api/hub/users`).
  */
 export function auditRouteRefusal(
   req: {
@@ -16,7 +17,7 @@ export function auditRouteRefusal(
     socket?: { remoteAddress?: string }
     headers: IncomingHttpHeaders
   },
-  outcome: 'forbid' | 'unauthorized',
+  outcome: 'forbid' | 'unauthorized' | 'not-admin',
   principal: RestPrincipal | null
 ): void {
   securityEvent({
@@ -27,8 +28,14 @@ export function auditRouteRefusal(
     route: routeOf(req.method, req.originalUrl ?? req.url),
     detail: {
       reason:
-        outcome === 'forbid' ? 'not_loopback' : principal ? 'scoped_session' : 'unauthenticated',
-      status: outcome === 'forbid' ? 403 : 401
+        outcome === 'forbid'
+          ? 'not_loopback'
+          : outcome === 'not-admin'
+            ? 'not_admin'
+            : principal
+              ? 'scoped_session'
+              : 'unauthenticated',
+      status: outcome === 'unauthorized' ? 401 : 403
     }
   })
 }
