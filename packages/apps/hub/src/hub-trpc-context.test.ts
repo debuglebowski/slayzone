@@ -82,8 +82,9 @@ async function main(): Promise<void> {
   })
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'hub-trpc-ctx-'))
+  const authDbPath = join(tmpDir, 'slayzone.auth.sqlite')
   const auth: HubAuth = await createHubAuth({
-    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
+    dbPath: authDbPath,
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-trpc-ctx-test-secret-at-least-32-chars-long'
   })
@@ -246,7 +247,7 @@ async function main(): Promise<void> {
     /** Flag the account directly, leaving every session row in place — the "a session
      *  exists for a disabled account anyway" case (`disableHubUser` would revoke). */
     const setDisabled = (userId: string, disabled: boolean): void => {
-      const authDb = new DatabaseSync(join(tmpDir, 'hub-auth.sqlite'))
+      const authDb = new DatabaseSync(authDbPath)
       authDb
         .prepare('UPDATE user SET disabledAt = ? WHERE id = ?')
         .run(disabled ? new Date().toISOString() : null, userId)
