@@ -32,13 +32,13 @@
  *     subject
  *   stored refresh token cannot be decrypted            keep (`token_unreadable`)
  *
- * REVOKE = what disabling does (users.ts), except that `disabledAt` is NOT set: the
- * account's better-auth sessions are deleted, then `revokeExternal` ends what it holds
- * outside hub-auth (the hub: web sessions, open sockets, computers). The account stays
- * enabled because Entra, not the hub, decides whether it may sign in again — a password
- * change or a revoked grant ends the old refresh token but not the person's access, and
- * a person removed from the app cannot sign in anyway (the sign-in checks run every
- * time). A sign-in that replaced the refresh token while it was being asked wins: the
+ * REVOKE = the account's SESSIONS end: its better-auth sessions are deleted, then
+ * `revokeExternal` ends the sessions it holds outside hub-auth (the hub: web sessions
+ * and open sockets — not its computers, owner decision O-24; those go only when the
+ * account is disabled in the hub). `disabledAt` is NOT set: Entra, not the hub, decides
+ * whether the person may sign in again — a password change or a revoked grant ends the
+ * old refresh token but not the person's access, and a person removed from the app
+ * cannot sign in anyway (the sign-in checks run every time). A sign-in that replaced the refresh token while it was being asked wins: the
  * refusal was about the old token, so nothing is revoked.
  *
  * ROLE (O-4). The app role is the authority, as at sign-in (`syncEntraRole`), which has
@@ -113,8 +113,8 @@ export interface EntraRecheckOptions {
   now?: () => number
   /** True when the account holds a live session outside hub-auth (the hub's web sessions). */
   hasExternalSession?: (userId: string) => Promise<boolean>
-  /** After a refusal deleted the account's better-auth sessions: end what it holds
-   *  outside hub-auth (the hub: web sessions, open sockets, computers). */
+  /** After a refusal deleted the account's better-auth sessions: end the sessions it
+   *  holds outside hub-auth (the hub: web sessions and open sockets, not computers). */
   revokeExternal?: (userId: string) => Promise<unknown>
   /** After a role change: whatever captured the old role must re-read it (the hub
    *  closes the account's open sockets, which resolved their role when they opened). */

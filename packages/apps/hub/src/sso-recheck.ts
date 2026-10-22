@@ -11,9 +11,10 @@
  *     unref'd;
  *   - no Entra sign-in (the desktop app's hub, a password hub): no timer at all.
  *
- * A refusal ends the account's web sessions, open sockets and computers as disabling
- * does; a role change closes its sockets so they reconnect with the new role; a hub
- * whose web sessions are live counts as signed in.
+ * A refusal ends the account's web sessions and open sockets (`endSessions`) — NOT its
+ * computers, which only disabling the account in the hub revokes (owner decision O-24:
+ * a refusal also follows a password change). A role change closes its sockets so they
+ * reconnect with the new role; an account whose web sessions are live counts as signed in.
  *
  * @module server/sso-recheck
  */
@@ -82,7 +83,7 @@ export function startSsoRecheck(opts: {
     cfg: opts.sso,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     hasExternalSession: (userId) => hasLiveWebSession(opts.db, userId, SSO_WEB_SESSION_LIFETIME),
-    revokeExternal: (userId) => opts.revoker.revokeUser(userId, 'sso_refused'),
+    revokeExternal: (userId) => opts.revoker.endSessions(userId),
     onRoleChange: (userId) => opts.revoker.reconnectUser(userId),
     log
   })

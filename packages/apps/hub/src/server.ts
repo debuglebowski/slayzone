@@ -172,7 +172,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         enablePassword: switches.enablePassword,
         ssoActive: boot.ssoActive,
         log: (m) => log(m),
-        revokeUser: (userId) => composition.userAccess.revokeUser(userId, 'user_disabled')
+        revokeUser: (userId) => composition.userAccess.revokeUser(userId)
       })
     } catch (err) {
       const message = `[slayzone] break-glass step failed: ${err instanceof Error ? err.message : String(err)}`

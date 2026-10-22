@@ -45,7 +45,7 @@ export function createHubUsersCapability(
       const auth = getAuth()
       if (!auth) return 'not-found'
       return disableHubUser(auth, email, {
-        revokeExternalSessions: (userId) => revoker.revokeUser(userId, 'user_disabled')
+        revokeExternalSessions: (userId) => revoker.revokeUser(userId)
       })
     },
     enable: async (email) => {

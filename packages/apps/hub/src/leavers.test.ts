@@ -7,7 +7,8 @@
  *   disable  → bearer 401, `szw_` cookie 401, the account's open sockets closed, its
  *              computers revoked and dropped, every data row kept, audit lines written;
  *              its computer keys and join tokens refused; enable resurrects nothing;
- *   re-check → `invalid_grant` revokes within one tick (the account stays enabled); an
+ *   re-check → `invalid_grant` ends sessions, web sessions and sockets within one tick;
+ *              the account stays enabled and its computers stay enrolled (O-24); an
  *              outage (503) keeps every session and is retried next hour, audited once;
  *              a changed app role updates `role` and closes the sockets; never two
  *              passes at once; a hub without Entra sign-in creates no timer at all.
@@ -590,7 +591,7 @@ async function main(): Promise<void> {
     })
 
     audit.length = 0
-    await test('one tick: invalid_grant revokes everything (account stays enabled)', async () => {
+    await test('one tick: invalid_grant ends her sessions; account enabled, computer kept (O-24)', async () => {
       timers.fire('timeout')
       await waitFor(async () => (await sessionsOf(alice.userId)) === 0, 'alice revoked')
       await waitFor(
@@ -607,8 +608,14 @@ async function main(): Promise<void> {
         'SELECT revoked_at FROM computers WHERE id = ?',
         ['c-alice']
       )
-      assert(computer?.revoked_at !== null, 'her computer revoked')
-      assertEq(ssoGateway.dropped, ['c-alice'], 'and dropped')
+      assertEq(computer?.revoked_at, null, 'her computer stays enrolled')
+      assertEq(ssoGateway.dropped, [], 'and connected')
+      assert(!audit.some((l) => l.event === 'computer.revoke'), 'no computer.revoke line')
+      // Its key still authenticates: her account is not disabled.
+      const minted = await mintComputerApiKey(ssoAuth, { computerId: 'c-alice', name: 'a' })
+      await db.run('UPDATE computers SET auth_key_id = ? WHERE id = ?', [minted.keyId, 'c-alice'])
+      const adapters = createComputerAuthAdapters({ db, auth: ssoAuth })
+      assert((await adapters.verifyApiKey(minted.key)) !== null, 'her computer still connects')
       const disabled = (
         (await (await ssoAuth.$context).internalAdapter.findUserById(alice.userId)) as {
           disabledAt?: unknown
@@ -619,8 +626,6 @@ async function main(): Promise<void> {
       assertEq(denied.length, 1, 'one denied line')
       assertEq(denied[0]?.targetId, alice.userId, 'for alice')
       assertEq((denied[0]?.detail as { reason?: string }).reason, 'invalid_grant', 'reason')
-      const revokeLine = audit.find((l) => l.event === 'computer.revoke')
-      assertEq((revokeLine?.detail as { reason?: string }).reason, 'sso_refused', 'computer reason')
     })
 
     await test('same tick: the outage keeps his sessions; audited once, at level info', async () => {
