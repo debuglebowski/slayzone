@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { ownedRowsClause } from '../owner-scope'
 
 /**
  * Shared id-prefix / project-reference resolution for the CLI-parity REST
@@ -12,6 +13,13 @@ import type { SlayzoneDb } from '@slayzone/platform'
  *
  * Failures are returned as `{ status, error }` values (not thrown) so routes
  * translate them 1:1 into HTTP responses.
+ *
+ * OWNER-SCOPED (T-18): inside a `user` request on a hub with login, every lookup here
+ * sees only rows in the caller's projects (`ownedRowsClause`, the request's access
+ * scope). A prefix or a name that matches only someone else's row is "not found", one
+ * shared with someone else's row resolves to the caller's, and neither an ambiguity
+ * nor the "Available:" hint ever names another user's row. Outside such a request
+ * (the desktop app's hub, an admin route) nothing changes.
  */
 
 export type ResolveFailure = { status: 404 | 400; error: string }
@@ -49,9 +57,10 @@ export async function resolveByIdPrefix<T extends { id: string }>(
   opts: ResolveByIdPrefixOptions = {}
 ): Promise<Resolved<T>> {
   const extra = opts.where ? ` AND ${opts.where}` : ''
+  const owned = await ownedRowsClause(table)
   const rows = await db.all<T>(
-    `SELECT ${columns} FROM ${table} WHERE id LIKE ? || '%'${extra} LIMIT 2`,
-    [prefix]
+    `SELECT ${columns} FROM ${table} WHERE id LIKE ? || '%'${extra}${owned.sql} LIMIT 2`,
+    [prefix, ...owned.params]
   )
   if (rows.length === 0) return { status: 404, error: `${entity} not found: ${prefix}` }
   if (rows.length > 1) {
@@ -74,15 +83,19 @@ export async function resolveProjectRef(
   db: SlayzoneDb,
   ref: string
 ): Promise<Resolved<ResolvedProject>> {
+  const owned = await ownedRowsClause('projects')
   const rows = await db.all<ResolvedProject & { id: string }>(
-    `SELECT id, name, path FROM projects WHERE id = ? OR LOWER(name) LIKE ? LIMIT 10`,
-    [ref, `%${ref.toLowerCase()}%`]
+    `SELECT id, name, path FROM projects WHERE (id = ? OR LOWER(name) LIKE ?)${owned.sql} LIMIT 10`,
+    [ref, `%${ref.toLowerCase()}%`, ...owned.params]
   )
   if (rows.length === 0) {
     // The CLI's resolver printed the available names on a miss ("Available: A, B")
     // and that hint is most of what makes a typo recoverable. Only read on the
     // failure path, so the happy path stays a single query.
-    const all = await db.all<{ name: string }>(`SELECT name FROM projects ORDER BY name`)
+    const all = await db.all<{ name: string }>(
+      `SELECT name FROM projects WHERE 1=1${owned.sql} ORDER BY name`,
+      owned.params
+    )
     const available = all.length > 0 ? ` Available: ${all.map((p) => p.name).join(', ')}` : ''
     return { status: 404, error: `No project matching "${ref}".${available}` }
   }
@@ -115,9 +128,10 @@ export async function resolveTemplateRef(
   projectId: string,
   ref: string
 ): Promise<Resolved<ResolvedTemplate>> {
+  const owned = await ownedRowsClause('task_templates')
   const byPrefix = await db.all<ResolvedTemplate>(
-    `SELECT id, name FROM task_templates WHERE id LIKE ? || '%' AND project_id = ? LIMIT 2`,
-    [ref, projectId]
+    `SELECT id, name FROM task_templates WHERE id LIKE ? || '%' AND project_id = ?${owned.sql} LIMIT 2`,
+    [ref, projectId, ...owned.params]
   )
   if (byPrefix.length === 1) return { row: byPrefix[0] }
   if (byPrefix.length > 1) {
@@ -128,8 +142,8 @@ export async function resolveTemplateRef(
   }
 
   const byName = await db.all<ResolvedTemplate>(
-    `SELECT id, name FROM task_templates WHERE project_id = ? AND LOWER(name) = LOWER(?) LIMIT 2`,
-    [projectId, ref]
+    `SELECT id, name FROM task_templates WHERE project_id = ? AND LOWER(name) = LOWER(?)${owned.sql} LIMIT 2`,
+    [projectId, ref, ...owned.params]
   )
   if (byName.length === 1) return { row: byName[0] }
   if (byName.length > 1) return { status: 400, error: `Ambiguous template name "${ref}".` }

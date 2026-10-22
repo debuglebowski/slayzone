@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
+import { ownedProjectsClause } from '../../owner-scope'
 
 /**
  * GET /api/tasks/search — title/description substring search.
@@ -37,12 +38,14 @@ export function registerSearchTasksRoute(app: Express, deps: RestApiDeps): void 
         params.push(project, `%${project.toLowerCase()}%`)
       }
 
+      // The caller's projects only on a hub with login (T-18), so `limit` counts theirs.
+      const owned = await ownedProjectsClause('p.id')
       const tasks = await deps.db.all(
         `SELECT t.id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
          FROM tasks t JOIN projects p ON t.project_id = p.id
-         WHERE ${conditions.join(' AND ')}
+         WHERE ${conditions.join(' AND ')}${owned.sql}
          ORDER BY t.updated_at DESC LIMIT ?`,
-        [...params, limit]
+        [...params, ...owned.params, limit]
       )
       res.json({ ok: true, data: tasks })
     } catch (err) {

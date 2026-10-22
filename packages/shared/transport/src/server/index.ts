@@ -134,3 +134,11 @@ export {
   type Ref as OwnerRef
 } from './owner-policy'
 export { accessRequestOf, checkOwnership, isNotOwnedError } from './owner-gate'
+// Owner checks on REST, MCP and agent hooks (T-18): the classification and the hook rule.
+export {
+  REST_OWNER_POLICY,
+  MCP_OWNER_POLICY,
+  type HttpIdRef,
+  type HttpOwnerRule
+} from './http-owner-policy'
+export type { HookReporter } from './http/rest-api/agent-hook-owner'

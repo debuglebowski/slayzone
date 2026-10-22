@@ -715,7 +715,9 @@ run_vitest_files "vitest (role gate)" \
 
 # The owner-check classification (T-17): every user procedure marked, exhaustively.
 run_vitest_files "vitest (owner checks)" \
-  packages/shared/transport/src/server/owner-policy.test.ts
+  packages/shared/transport/src/server/owner-policy.test.ts \
+  packages/shared/transport/src/server/http-owner-policy.test.ts \
+  packages/shared/transport/src/server/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150

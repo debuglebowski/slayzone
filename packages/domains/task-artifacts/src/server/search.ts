@@ -59,6 +59,11 @@ export interface ArtifactSearchOptions {
   /** null = every task (the CLI's `--all-tasks`). */
   taskId?: string | null
   folderId?: string | null
+  /**
+   * Only artifacts of tasks in these projects (a hub with login: the caller's own,
+   * T-18). Null/absent = every project, as before.
+   */
+  projectIds?: readonly string[] | null
   titlesOnly?: boolean
   contentOnly?: boolean
   regex?: boolean
@@ -161,6 +166,14 @@ export function searchArtifacts(
   if (opts.folderId) {
     sqlParts.push('AND folder_id = ?')
     params.push(opts.folderId)
+  }
+  if (opts.projectIds) {
+    sqlParts.push(
+      opts.projectIds.length === 0
+        ? 'AND 0'
+        : `AND task_id IN (SELECT id FROM tasks WHERE project_id IN (${opts.projectIds.map(() => '?').join(', ')}))`
+    )
+    params.push(...opts.projectIds)
   }
   sqlParts.push('ORDER BY updated_at DESC')
   const artifacts = db.prepare(sqlParts.join(' ')).all(...params) as ArtifactScanRow[]
