@@ -46,6 +46,7 @@ import {
   securityEvent
 } from '@slayzone/platform/security-log'
 import { bindRestPrincipal, type RestPrincipal } from '@slayzone/transport/server'
+import { BREAK_GLASS_PATH, type BreakGlass, isBreakGlassToken } from './break-glass'
 import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
 /**
@@ -69,7 +70,7 @@ export type RestAuthAction = 'allow' | 'verify'
  * reads. Enumerating what is genuinely needed is the only version of this that
  * stays correct when a dependency adds a route.
  *
- * The four below are exactly what `hubSignIn` (CLI) and a browser session need:
+ * The first four are exactly what `hubSignIn` (CLI) and a browser session need:
  *   - `sign-in/email`  — obtain a FULL session. Sign-UP is deliberately absent;
  *                        `emailAndPassword.disableSignUp` also refuses it at the
  *                        source, so this is belt-and-braces.
@@ -81,6 +82,10 @@ export type RestAuthAction = 'allow' | 'verify'
  *                        server-side and discards the full session it returns,
  *                        so a browser never holds `full` for even one request.
  *                        See `web-sessions.ts` for why that distinction exists.
+ *   - `break-glass`    — OURS (break-glass.ts): redeem an operator's grant for a
+ *                        break-glass session. Answers 404 unless break-glass is on
+ *                        (login required); without a grant opened on the hub machine
+ *                        and the verifier that matches it, it answers 403.
  *
  * Matching is EXACT, so `/api/auth/sign-in/email/extra` inherits nothing. Adding
  * a route here is a security decision: it makes that route reachable by anyone
@@ -94,7 +99,8 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/email',
   '/api/auth/sign-out',
   '/api/auth/get-session',
-  '/api/auth/web-login'
+  '/api/auth/web-login',
+  BREAK_GLASS_PATH
 ])
 
 /** The members of {@link AUTH_BOOTSTRAP_PATHS} that sign in with a password. */
@@ -214,6 +220,29 @@ const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/use
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'
 
+/**
+ * Everything a break-glass session (`szbg_`, break-glass.ts) may call: EXACT
+ * `METHOD path`, matched before {@link restAuthAction}, so the self-guarded and open
+ * routes are covered too. Anything else is 403 with one `authz.denied` line
+ * (`reason: 'break_glass'`) — `/mcp`, every content route, `POST /api/hub/users`
+ * (creating accounts) and `POST /api/computers/join-token` (enrolling a computer it
+ * would own) included. `/trpc` refuses the token outright (hub-trpc-context.ts). The
+ * session exists to stop access — disable an account, revoke a computer — so this is an
+ * allowlist, not the admin role: whatever the role gate or ownership rules would let an
+ * admin read, a break-glass session reaches none of it (O-6).
+ *
+ * Role changes through `PATCH /api/hub/users` are still the hub's to refuse: on a hub
+ * with Entra sign-in every one (`SSO_MANAGED_ROLE`), and the break-glass account's own
+ * anywhere (hub-auth `protected`).
+ */
+export const BREAK_GLASS_ROUTES: ReadonlySet<string> = new Set([
+  'GET /api/hub/users',
+  'PATCH /api/hub/users',
+  'GET /api/computers',
+  'PATCH /api/hub/computers',
+  `DELETE ${BREAK_GLASS_PATH}`
+])
+
 export interface RestAuthActionOptions {
   /** Whether THIS hub requires login (`SLAYZONE_HUB_REQUIRE_LOGIN`, see `server.ts`). */
   hubAuthRequired: boolean
@@ -296,7 +325,8 @@ export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, 
  * same two credential classes, same fail-closed/fail-quiet shape, reached over
  * headers instead of a tRPC connect frame.
  *
- * TWO CREDENTIAL CLASSES, checked in a specific order:
+ * TWO CREDENTIAL CLASSES, checked in a specific order (plus a break-glass session's
+ * `szbg_` bearer, resolved by `breakGlass` alone and refused without it):
  *   1. A `szw_`-prefixed value — from EITHER the bearer header OR the
  *      `slayzone_web_session` cookie — is looked up in `web_sessions` and
  *      resolves to that row's OWN `scopes`. Checked FIRST and by prefix alone,
@@ -322,9 +352,19 @@ export async function verifyRestBearer(
   auth: HubAuth | null,
   db: SlayzoneDb | null,
   headers: IncomingHttpHeaders,
-  cookies: Record<string, string> = {}
+  cookies: Record<string, string> = {},
+  breakGlass: Pick<BreakGlass, 'resolve'> | null = null
 ): Promise<RestPrincipal | null> {
   const bearerToken = extractBearerToken(headers)
+  // A break-glass session (break-glass.ts), from the header only — never a cookie.
+  if (bearerToken && isBreakGlassToken(bearerToken)) {
+    if (!breakGlass) return null
+    try {
+      return await breakGlass.resolve(bearerToken)
+    } catch {
+      return null
+    }
+  }
   const cookieToken = cookies[WEB_SESSION_COOKIE_NAME]
   const webToken =
     bearerToken && isWebSessionToken(bearerToken)
@@ -378,6 +418,9 @@ export function withRestAuth(opts: {
    *  such table available (there is none today; kept optional for callers
    *  that genuinely have no DB, e.g. a future capability-only test double). */
   getDb: () => SlayzoneDb | null
+  /** Resolves a break-glass session (`szbg_`, break-glass.ts). Absent: such a bearer
+   *  never authenticates. */
+  getBreakGlass?: () => Pick<BreakGlass, 'resolve'> | null
   next: (req: IncomingMessage, res: ServerResponse) => void
 }): (req: IncomingMessage, res: ServerResponse) => void {
   const deny = (res: ServerResponse, code: 401 | 403, message: string): void => {
@@ -434,6 +477,44 @@ export function withRestAuth(opts: {
         res.writeHead(403, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: false, error: off.message, code: off.code }))
       }
+      return
+    }
+    // A break-glass session reaches BREAK_GLASS_ROUTES and nothing else — decided here,
+    // before the exemptions below, so no open or self-guarded route is a way around it.
+    // Each request it makes is one `auth.break_glass.use` line. Only where login is
+    // required: elsewhere every request is admitted as before and break-glass is off.
+    const bearer = extractBearerToken(req.headers)
+    if (bearer && isBreakGlassToken(bearer) && opts.getHubAuthRequired()) {
+      const breakGlass = opts.getBreakGlass?.() ?? null
+      void (breakGlass ? breakGlass.resolve(bearer) : Promise.resolve(null))
+        .then((principal) => {
+          if (!principal) {
+            refuse(401, 'Unauthorized', 'invalid_credential', null)
+            return
+          }
+          const path = (req.url ?? '').split('?')[0]
+          if (!BREAK_GLASS_ROUTES.has(`${req.method ?? 'GET'} ${path}`)) {
+            refuse(
+              403,
+              'a break-glass session can only manage accounts and computers',
+              'break_glass',
+              principal.userId
+            )
+            return
+          }
+          securityEvent({
+            event: 'auth.break_glass.use',
+            outcome: 'success',
+            actor: principal.userId,
+            ip,
+            route
+          })
+          bindRestPrincipal(req, principal)
+          admit(principal.userId)
+        })
+        .catch(() => {
+          if (!res.headersSent) refuse(401, 'Unauthorized', 'gate_error', null)
+        })
       return
     }
     const action = restAuthAction({

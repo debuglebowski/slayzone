@@ -1,14 +1,13 @@
 /**
  * The password switch on the hub (T-10): the REST gate refuses every password route
  * with 403 `HUB_PASSWORD_DISABLED` and one audit line, on any hub, before the bearer
- * gate; and break-glass (O-9) opens and closes with the switch at boot.
+ * gate. (Break-glass no longer rides the switch: break-glass.test.ts.)
  *
  *   1. `passwordRouteRefusal` / `restAuthAction` — pure.
  *   2. `withRestAuth` on a real listener: refused before the inner handler, the
  *      switch-refusal body and audit line; untouched with the switch on.
- *   3. `applyBreakGlassAtBoot` against a REAL hub-auth (an Entra hub; nothing signs in
- *      through Entra) and a real migrated app DB: the 0600 file, a web login with it,
- *      a restart keeps it, closing disables it and revokes BOTH session classes.
+ *   3. the hub users capability refuses to create a password account when off (real
+ *      hub-auth, real migrated app DB).
  *   4. the switch-refusal leaf itself (`assertHubPasswordEnabled`).
  *
  * Native ABI (the app DB is better-sqlite3 built for Electron) → Electron strict loader,
@@ -19,8 +18,7 @@
  *     --experimental-loader ./packages/shared/test-utils/loader.ts \
  *     packages/apps/hub/src/password-switch.test.ts
  */
-import { generateKeyPairSync } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,18 +29,12 @@ import {
   isHubSwitchedOffError
 } from '@slayzone/platform/hub-switch-refusal'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { createHubAuth, type HubAuth, listHubUsers } from '@slayzone/hub-auth/server'
+import { createHubAuth } from '@slayzone/hub-auth/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import { applyBreakGlassAtBoot, breakGlassFilePath, type BreakGlassFile } from './break-glass.js'
 import { createHubUsersCapability } from './hub-users.js'
 import { createTrpcConnectionRegistry } from './trpc-connections.js'
 import { createUserAccessRevoker } from './user-access.js'
-import {
-  passwordRouteRefusal,
-  restAuthAction,
-  verifyRestBearer,
-  withRestAuth
-} from './rest-auth.js'
+import { passwordRouteRefusal, restAuthAction, withRestAuth } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
 
 /** The hub's revocation outside hub-auth (T-12), with no computer gateway. */
@@ -277,182 +269,19 @@ async function main(): Promise<void> {
     }
   })
 
-  // --- 3. break-glass at boot ---------------------------------------------------
+  // --- 3. the hub users capability with the switch off --------------------------
   const tmpDir = mkdtempSync(join(tmpdir(), 'hub-password-switch-'))
-  const authDbPath = join(tmpDir, 'hub-auth.sqlite')
-  const dataRoot = join(tmpDir, 'root')
-  const privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey
-  /** An Entra hub-auth instance on the shared auth DB, with the switch as given. */
-  const bootAuth = (enablePassword: boolean, sso = true, dbPath = authDbPath): Promise<HubAuth> =>
-    createHubAuth({
-      dbPath,
-      baseURL: 'http://127.0.0.1:9999',
-      secret: 'hub-password-switch-test-secret-at-least-32-chars',
-      enablePassword,
-      ...(sso
-        ? {
-            sso: {
-              tenantId: '11111111-2222-3333-4444-555555555555',
-              clientId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-              credential: { privateKey, thumbprintS256: 'unused' },
-              requireMfa: true
-            }
-          }
-        : {})
-    })
   const harness = await createTestHarness()
   const db: SlayzoneDb = harness.slayDb
-  const logs: string[] = []
-  const log = (m: string): void => void logs.push(m)
-  const file = breakGlassFilePath(dataRoot)
 
   try {
-    await test('Entra hub + password off: nothing to close, no file, nothing written', async () => {
-      const auth = await bootAuth(false)
-      const outcome = await applyBreakGlassAtBoot({
-        auth,
-        db,
-        dataRoot,
-        enablePassword: false,
-        ssoActive: true,
-        log
-      })
-      assertEq(outcome.state, 'closed', 'closed')
-      assert(outcome.state === 'closed' && outcome.closed.length === 0, 'none closed')
-      assert(!existsSync(file), 'no file')
-    })
-
-    await test('a password hub without Entra: break-glass is not a thing (no read, no file)', async () => {
-      const auth = await bootAuth(true, false)
-      const outcome = await applyBreakGlassAtBoot({
-        auth,
-        db,
-        dataRoot,
-        enablePassword: true,
-        ssoActive: false,
-        log
-      })
-      assertEq(outcome.state, 'none', 'none')
-      assert(!existsSync(file), 'no file')
-    })
-
-    let opened: BreakGlassFile | null = null
-    await test('open: one `user` account, credentials in a 0600 file only, audited break_glass', async () => {
-      const auth = await bootAuth(true)
-      logs.length = 0
-      const lines = await captureAudit(async () => {
-        const outcome = await applyBreakGlassAtBoot({
-          auth,
-          db,
-          dataRoot,
-          enablePassword: true,
-          ssoActive: true,
-          log
-        })
-        assert(outcome.state === 'open' && outcome.created, 'created')
-      })
-      assert(existsSync(file), 'file written')
-      assertEq(statSync(file).mode & 0o777, 0o600, 'file is 0600')
-      opened = JSON.parse(readFileSync(file, 'utf8')) as BreakGlassFile
-      assert(/^break-glass-.+@hub\.slayzone\.local$/.test(opened.email), opened.email)
-      const row = (await listHubUsers(auth)).find((u) => u.id === opened?.userId)
-      assertEq(row?.role, 'user', 'never admin on an Entra hub (O-4)')
-      const create = lines.find((l) => l.event === 'user.create')
-      assert(create, 'user.create line')
-      assertEq((create.detail as { reason?: string }).reason, 'break_glass', 'reason')
-      const all = `${JSON.stringify(lines)}\n${logs.join('\n')}`
-      assert(!all.includes(opened.password), 'the password is in no log or audit line')
-      assert(
-        logs.some((l) => l.includes(file)),
-        'the log names the file'
-      )
-    })
-
-    let webToken = ''
-    let fullToken = ''
-    await test('the break-glass account signs in (web login and a full bearer)', async () => {
-      const auth = await bootAuth(true)
-      assert(opened, 'opened')
-      const web = await webLogin(auth, db, opened.email, opened.password)
-      assert(web.ok, 'web login')
-      webToken = web.token
-      const full = await auth.api.signInEmail({
-        body: { email: opened.email, password: opened.password }
-      })
-      fullToken = full.token
-      assert(await verifyRestBearer(auth, db, { authorization: `Bearer ${webToken}` }), 'web ok')
-      assert(await verifyRestBearer(auth, db, { authorization: `Bearer ${fullToken}` }), 'full ok')
-    })
-
-    await test('a restart with break-glass still open keeps the same account and file', async () => {
-      const auth = await bootAuth(true)
-      const before = readFileSync(file, 'utf8')
-      const outcome = await applyBreakGlassAtBoot({
-        auth,
-        db,
-        dataRoot,
-        enablePassword: true,
-        ssoActive: true,
-        log
-      })
-      assert(outcome.state === 'open' && !outcome.created, 'kept')
-      assertEq(readFileSync(file, 'utf8'), before, 'file unchanged')
-    })
-
-    await test('close: disabled, both session classes revoked, file deleted, rows kept, audited', async () => {
-      const auth = await bootAuth(false)
-      assert(opened, 'opened')
-      const lines = await captureAudit(async () => {
-        const outcome = await applyBreakGlassAtBoot({
-          auth,
-          db,
-          dataRoot,
-          enablePassword: false,
-          ssoActive: true,
-          log
-        })
-        assert(outcome.state === 'closed', 'closed')
-        assertEq(outcome.closed.join(), opened?.userId, 'the one account')
-      })
-      assert(!existsSync(file), 'file deleted')
-      const row = (await listHubUsers(auth)).find((u) => u.id === opened?.userId)
-      assert(row?.disabledAt, 'disabled, row kept')
-      assertEq(
-        await verifyRestBearer(auth, db, { authorization: `Bearer ${webToken}` }),
-        null,
-        'web session revoked'
-      )
-      assertEq(
-        await verifyRestBearer(auth, db, { authorization: `Bearer ${fullToken}` }),
-        null,
-        'full session revoked'
-      )
-      const disable = lines.find((l) => l.event === 'user.disable')
-      assertEq((disable?.detail as { reason?: string }).reason, 'break_glass_closed', 'reason')
-      assert(
-        lines.some((l) => l.event === 'auth.web_session.revoke'),
-        'web revoke audited'
-      )
-    })
-
-    await test('re-opening later makes a NEW account; the closed one stays closed', async () => {
-      const auth = await bootAuth(true)
-      const outcome = await applyBreakGlassAtBoot({
-        auth,
-        db,
-        dataRoot,
-        enablePassword: true,
-        ssoActive: true,
-        log
-      })
-      assert(outcome.state === 'open' && outcome.created, 'created')
-      assert(opened && outcome.userId !== opened.userId, 'a different account')
-      const old = await webLogin(auth, db, opened.email, opened.password)
-      assert(!old.ok, 'the closed account cannot sign in')
-    })
-
     await test('hub users capability: create refused with HUB_PASSWORD_DISABLED when off', async () => {
-      const auth = await bootAuth(false, false, join(tmpDir, 'other-hub-auth.sqlite'))
+      const auth = await createHubAuth({
+        dbPath: join(tmpDir, 'hub-auth.sqlite'),
+        baseURL: 'http://127.0.0.1:9999',
+        secret: 'hub-password-switch-test-secret-at-least-32-chars',
+        enablePassword: false
+      })
       const users = createHubUsersCapability(() => auth, revokerFor(db))
       let err: unknown = null
       const lines = await captureAudit(async () => {

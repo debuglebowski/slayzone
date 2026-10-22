@@ -354,7 +354,14 @@ await describe('PATCH /api/hub/users', () => {
   test('maps each refusal to a status and a reason', async () => {
     const cases = [
       ['not-found', { disabled: true }, 404, 'no user with email'],
-      ['protected', { disabled: true }, 409, SERVICE_EMAIL],
+      ['protected', { disabled: true, email: SERVICE_EMAIL }, 409, 'computer service identity'],
+      // The other protected account: break-glass's (hub-auth break-glass.ts).
+      [
+        'protected',
+        { disabled: true, email: 'break-glass@hub.slayzone.local' },
+        409,
+        'slayzone-hub break-glass'
+      ],
       ['last-user', { disabled: true }, 409, 'last enabled account'],
       ['last-admin', { disabled: true }, 409, 'disable the last enabled admin'],
       ['last-admin', { role: 'user' }, 409, 'demote the last enabled admin']

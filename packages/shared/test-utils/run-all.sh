@@ -774,6 +774,12 @@ run_package_tests packages/shared/ui @slayzone/ui
 run_test packages/apps/hub/src/security-headers.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/security-headers-served.test.ts
 
+# Break-glass v2 (O-9/O-23): grant over the local socket, one-time redemption, the REST
+# allowlist, TTL / end / boot closing, over real hub-auth + app DB; and the computer
+# revoke route it uses (hub-auth's account half runs in its package suite).
+run_test_electron_strict_loader packages/apps/hub/src/break-glass.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/hub/computers.test.ts
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.

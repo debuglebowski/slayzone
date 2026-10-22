@@ -327,7 +327,12 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         case 'protected':
           res.status(409).json({
             ok: false,
-            error: `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity, not an account`
+            error:
+              email.toLowerCase() === COMPUTER_SERVICE_USER_EMAIL
+                ? `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity, not an account`
+                : // The other protected kind: a break-glass account (hub-auth break-glass.ts).
+                  `${email} is the break-glass account — only \`slayzone-hub break-glass\` on the ` +
+                  'hub machine opens or ends it'
           })
           return
         case 'last-user':

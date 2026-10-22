@@ -157,6 +157,7 @@ import type { HubSsoBootConfig } from './boot-rules.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
 
 import { createHubUsersCapability } from './hub-users.js'
+import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
@@ -249,6 +250,8 @@ export type ServerComposition = {
   trpcConnections: TrpcConnectionRegistry
   /** Ends what an account holds outside hub-auth (T-12, user-access.ts). */
   userAccess: UserAccessRevoker
+  /** Emergency admin access while sign-in is down (break-glass.ts). */
+  breakGlass: BreakGlass
 }
 
 export function composeServer(opts: {
@@ -1175,6 +1178,13 @@ export function composeServer(opts: {
     getGateway: () => computerGatewayRef,
     connections: trpcConnections
   })
+  // Break-glass (break-glass.ts): off unless login is required; closing its account
+  // revokes everything the account holds, like disabling any other (T-12).
+  const breakGlass = createBreakGlass({
+    getAuth: () => hubAuthRef,
+    requireLogin: opts.requireLogin,
+    revokeUser: (userId) => userAccess.revokeUser(userId)
+  })
 
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
@@ -1247,7 +1257,8 @@ export function composeServer(opts: {
     // there exactly as before.
     restAuth: {
       required: () => opts.requireLogin && hubAuthRef !== null,
-      verifyBearer: (headers, cookies) => verifyRestBearer(hubAuthRef, db, headers, cookies)
+      verifyBearer: (headers, cookies) =>
+        verifyRestBearer(hubAuthRef, db, headers, cookies, breakGlass)
     },
     // Scoped browser login. Absent only when hub-auth failed to init — a hub with
     // login off has no meaningful login to offer, but the slot itself does not
@@ -1711,6 +1722,7 @@ export function composeServer(opts: {
       computerHubUrl = info.hubUrl
     },
     trpcConnections,
-    userAccess
+    userAccess,
+    breakGlass
   }
 }

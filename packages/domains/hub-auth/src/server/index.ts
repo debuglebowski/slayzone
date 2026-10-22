@@ -8,10 +8,11 @@ export {
 export { createAuthExpressApp, type FetchHandlerAuth } from './app'
 export { isPasswordSignInEnabled, PASSWORD_AUTH_ENDPOINTS } from './password'
 export {
+  BREAK_GLASS_EMAIL,
   closeBreakGlassAccounts,
-  createBreakGlassAccount,
   isBreakGlassEmail,
-  listOpenBreakGlassAccounts
+  listOpenBreakGlassAccounts,
+  openBreakGlassAccount
 } from './break-glass'
 export {
   API_KEY_HEADER,
