@@ -33,16 +33,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { isAPIError } from 'better-auth/api'
-import { isDisabled } from './account'
 import type { HubAuth } from './auth'
-import {
-  DEVICE_CLIENTS,
-  DEVICE_CODE_TTL_MS,
-  DEVICE_PAGE_PATH,
-  deviceRequestRef,
-  SIGN_IN_METHOD
-} from './device'
-import { ENTRA_PROVIDER_ID } from './entra'
+import { DEVICE_CLIENTS, DEVICE_CODE_TTL_MS, DEVICE_PAGE_PATH, deviceRequestRef } from './device'
+import { cookieOnlyHeaders, redirectToEntraSignIn, ssoSessionFromCookie } from './sso-page'
 
 /** Codes matching nothing, per account, before the page locks that account out. */
 export const WRONG_CODE_LIMIT = 5
@@ -65,13 +58,8 @@ interface DeviceCodeRow {
   clientId?: string | null
 }
 
-/** The plugin endpoints and the one core endpoint the page calls (in process). */
+/** The plugin endpoints the page calls (in process). */
 interface PageApi {
-  signInSocial(input: {
-    body: Record<string, unknown>
-    headers: Headers
-    returnHeaders: true
-  }): Promise<{ headers: Headers; response: { url?: string } }>
   deviceVerify(input: { query: { user_code: string }; headers: Headers }): Promise<unknown>
   deviceApprove(input: { body: { userCode: string }; headers: Headers }): Promise<unknown>
   deviceDeny(input: { body: { userCode: string }; headers: Headers }): Promise<unknown>
@@ -99,13 +87,6 @@ const displayCode = (code: string): string => `${code.slice(0, 4)}-${code.slice(
 
 const toMs = (v: unknown): number =>
   v instanceof Date ? v.getTime() : new Date(String(v ?? '')).getTime()
-
-/** Only the cookie: the page never accepts a bearer as the approving session. */
-function cookieHeaders(req: IncomingMessage): Headers {
-  const headers = new Headers()
-  if (typeof req.headers.cookie === 'string') headers.set('cookie', req.headers.cookie)
-  return headers
-}
 
 async function readForm(req: IncomingMessage): Promise<URLSearchParams | null> {
   const type = String(req.headers['content-type'] ?? '')
@@ -193,27 +174,13 @@ export function createDevicePage(
     return entry.count === WRONG_CODE_LIMIT
   }
 
-  /** 302 to Entra through better-auth, back to this page for this code. */
-  const signInAgain = async (res: ServerResponse, headers: Headers, code: string) => {
+  /** 302 to Entra through better-auth (sso-page.ts), back to this page for this code. */
+  const signInAgain = (res: ServerResponse, headers: Headers, code: string): Promise<void> => {
     const back = `${DEVICE_PAGE_PATH}?user_code=${encodeURIComponent(code)}`
-    const { headers: set, response } = await api.signInSocial({
-      body: {
-        provider: ENTRA_PROVIDER_ID,
-        callbackURL: back,
-        errorCallbackURL: `${back}&signin=failed`,
-        disableRedirect: true
-      },
-      headers,
-      returnHeaders: true
+    return redirectToEntraSignIn(auth, res, headers, {
+      callbackURL: back,
+      errorCallbackURL: `${back}&signin=failed`
     })
-    if (!response.url) throw new Error('[hub-auth] Entra sign-in returned no URL')
-    res.writeHead(302, {
-      location: response.url,
-      'set-cookie': set.getSetCookie(),
-      'cache-control': 'no-store',
-      'referrer-policy': 'same-origin'
-    })
-    res.end()
   }
 
   type Resolved =
@@ -232,14 +199,9 @@ export function createDevicePage(
     step: 'view' | 'approve' | 'deny'
   ): Promise<Resolved> => {
     const ctx = await auth.$context
-    const found = await auth.api.getSession({ headers })
-    const session = found?.session as Record<string, unknown> | undefined
-    const user = found?.user as
-      | (Record<string, unknown> & { id: string; email: string })
-      | undefined
-    if (!session || !user || session.signInMethod !== SIGN_IN_METHOD.sso || isDisabled(user)) {
-      return { kind: 'sign-in' }
-    }
+    const sso = await ssoSessionFromCookie(auth, headers)
+    if (!sso) return { kind: 'sign-in' }
+    const user = { id: sso.userId, email: sso.email }
     const locked = lockedFor(user.id)
     if (locked > 0) {
       securityEvent({
@@ -295,7 +257,7 @@ export function createDevicePage(
     }
     // An Entra sign-in from before this code was issued does not count: every device
     // sign-in is its own Entra sign-in with MFA.
-    if (toMs(session.createdAt) < toMs(row.expiresAt) - DEVICE_CODE_TTL_MS) {
+    if (sso.createdAt < toMs(row.expiresAt) - DEVICE_CODE_TTL_MS) {
       return { kind: 'sign-in' }
     }
     // Claim it for this account (the plugin binds a code to the first account that
@@ -350,7 +312,7 @@ export function createDevicePage(
       )
       return
     }
-    const headers = cookieHeaders(req)
+    const headers = cookieOnlyHeaders(req)
     const r = await resolve(res, headers, code, 'view')
     if (r.kind === 'sign-in') return signInAgain(res, headers, code)
     if (r.kind === 'done') return
@@ -403,7 +365,7 @@ export function createDevicePage(
       send(res, 400, 'Not a sign-in code', codeForm())
       return
     }
-    const headers = cookieHeaders(req)
+    const headers = cookieOnlyHeaders(req)
     const r = await resolve(res, headers, code, step)
     if (r.kind === 'done') return
     if (r.kind === 'sign-in') {
