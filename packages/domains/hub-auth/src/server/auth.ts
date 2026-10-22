@@ -5,6 +5,7 @@ import { apiKey } from '@better-auth/api-key'
 import { betterAuth } from 'better-auth'
 import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
+import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
 import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
 import {
@@ -100,6 +101,18 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },
+    // Client IP (T-22): the session row's `ipAddress` and the rate-limit key. By default
+    // better-auth reads `X-Forwarded-For`, which any client can send — a direct caller
+    // could pick the IP it is recorded and rate-limited under — and it cannot see the
+    // TCP peer to check who sent it. So it reads ONLY the header the hub overwrites on
+    // every request with the address it resolved from the peer and its trusted front
+    // ends (`adoptClientAddress`); an in-process `auth.api.*` call carries none, so
+    // records none (better-auth's dev/test fallback is 127.0.0.1). `trustedProxyHeaders:
+    // false` pins that X-Forwarded-Host/-Proto never move the base URL (env rule 5).
+    advanced: {
+      ipAddress: { ipAddressHeaders: [CLIENT_ADDRESS_HEADER] },
+      trustedProxyHeaders: false
+    },
     // Security audit lines on stdout (T-03): sign-in, sign-out, sessions, password
     // change. See ./audit.ts.
     hooks: { after: auditAuthResponse },

@@ -37,7 +37,14 @@ import { withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
 import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
-import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
+import { routeOf, securityEvent } from '@slayzone/platform/security-log'
+import {
+  adoptClientAddress,
+  clientAddress,
+  NO_TRUSTED_PROXIES,
+  readTrustedProxies,
+  trustedProxiesBootWarning
+} from '@slayzone/platform/client-address'
 import type { ServerHandle, StartServerConfig } from './index.js'
 
 /**
@@ -59,7 +66,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Every rule that refuses to start the hub runs HERE, before it creates its data
   // directory, opens its database or binds a port — see boot-rules.ts for the
-  // rules (B1–B14) and the reasoning behind each. A refusal throws a message that
+  // rules (B1–B15) and the reasoning behind each. A refusal throws a message that
   // names the variable to change.
   //
   // `SLAYZONE_SUPERVISED` keeps only the meaning "started by the desktop app" (hub
@@ -239,6 +246,21 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // (clients) and `/computers` (computers) ride the ONE listener below, demuxed by
   // path.
 
+  // Who the client is (T-22): the TCP peer, unless the peer is a front end listed in
+  // SLAYZONE_HUB_TRUSTED_PROXIES — then the client that front end names in
+  // X-Forwarded-For (the rule is in client-address.ts). Resolved ONCE, first thing, for
+  // every request and every upgrade below, and read back with `clientAddress(req)` by
+  // everything that records it: the audit context (tRPC, REST, `/api/auth/*`), the
+  // computer gateway, better-auth (through CLIENT_ADDRESS_HEADER) and rate limits.
+  // B15 validated the list. Empty = trust nobody = the peer (the desktop app's hub).
+  const trustedProxiesRead = readTrustedProxies(process.env)
+  const trustedProxies = trustedProxiesRead.ok ? trustedProxiesRead.value : NO_TRUSTED_PROXIES
+  const trustedProxiesWarning = trustedProxiesBootWarning(boot.publicAddress, trustedProxies)
+  if (trustedProxiesWarning) {
+    process.stderr.write(`${trustedProxiesWarning}\n`)
+    log(trustedProxiesWarning)
+  }
+
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
   // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
@@ -316,6 +338,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     next: dispatchRequest
   })
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
+    adoptClientAddress(req, trustedProxies)
     // /health answers BEFORE the gate: a liveness probe has no credentials, and
     // it must keep answering even when auth is misconfigured.
     if (handleHealth(state, req, res)) return
@@ -354,6 +377,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const wss = new WebSocketServer({ noServer: true })
   const computerWss = computerGateway ? new WebSocketServer({ noServer: true }) : null
   httpServer.on('upgrade', (req, socket, head) => {
+    adoptClientAddress(req, trustedProxies)
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
@@ -366,7 +390,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           event: 'authz.denied',
           outcome: 'denied',
           actor: null,
-          ip: peerAddress(req),
+          ip: clientAddress(req),
           route: routeOf(req.method, req.url),
           detail: { reason: 'origin', origin: origin ?? null }
         })
@@ -377,7 +401,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
     } else if (pathname === '/computers' && computerWss && computerGateway) {
       computerWss.handleUpgrade(req, socket, head, (ws) =>
-        computerGateway.handleConnection(ws, { ip: peerAddress(req) })
+        computerGateway.handleConnection(ws, { ip: clientAddress(req) })
       )
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
