@@ -1242,6 +1242,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'automations.onChanged': streamed(byActor),
   'computers.claim': none(COMPUTER),
   'computers.mintJoinToken': none(COMPUTER),
+  'computers.unrevoke': none(COMPUTER),
   // Events naming another user's task, session or project are dropped in the handler.
   'diagnostics.exportBundle': listed(SCOPED_IN_HANDLER),
   'diagnostics.getConfig': none(HUB_CONFIG),
