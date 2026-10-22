@@ -14,7 +14,10 @@ vi.mock('@slayzone/terminal/server', () => ({
 }))
 
 const OWNED = new Set(['project:pA', 'task:tA', 'session:sA'])
-vi.mock('../../access', () => ({
+// The real module, with only the decision stubbed: everything else it exports
+// (`hubStateRoots`, used by owner-scope.ts) stays real.
+vi.mock('../../access', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../access')>()),
   createAccessScope: () => ({
     allows: (r: { kind: string; id: string }) => OWNED.has(`${r.kind}:${r.id}`)
   })
