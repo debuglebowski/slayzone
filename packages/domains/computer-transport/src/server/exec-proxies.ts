@@ -1404,7 +1404,9 @@ export interface RemoteFsAdaptersOptions {
    * no computer to ask. See the note on `WorkspaceFsAdapters`: that is a boundary
    * condition (standalone/fork sidecar, or before the local computer enrolls), not
    * a preference for the hub's disk. Whenever a computer is connected the caller's
-   * resolver returns it and nothing here touches local.
+   * resolver returns it and nothing here touches local. On a hub with
+   * `SLAYZONE_HUB_ENABLE_PROCESSES=0` every `createLocalWorkspaceFs` op refuses
+   * (`NO_COMPUTER_CONNECTED`), so there the null branch is "connect a computer".
    */
   local: LocalWorkspaceFs
   /** Mint a correlation id for a watch. Injected so tests are deterministic. */

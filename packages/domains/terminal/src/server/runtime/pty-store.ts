@@ -1,5 +1,6 @@
 import { getPtyHostBridge, type PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
@@ -99,6 +100,9 @@ export function createPtyOps(db: SlayzoneDb) {
   const terminalModesTest = async (
     command: string
   ): Promise<{ ok: boolean; error?: string; detail?: string }> => {
+    // `which` on THIS machine: refused on a hub with processes switched off (T-06),
+    // outside the try so the refusal is not reported as "command not found".
+    assertHubLocalExecEnabled({ op: 'terminal_modes.test' })
     try {
       const parts = parseShellArgs(command)
       const bin = parts[0]

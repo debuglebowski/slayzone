@@ -52,6 +52,7 @@ export {
   hubIntegrationsEnabled,
   assertHubProcessesEnabled,
   assertHubIntegrationsEnabled,
+  assertHubLocalExecEnabled,
   type HubSwitchedOffCode,
   type HubRefusal
 } from './hub-switch-refusal'

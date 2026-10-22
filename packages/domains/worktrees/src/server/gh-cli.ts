@@ -8,6 +8,7 @@ import type {
   MergePrInput,
   EditPrCommentInput
 } from '../shared/types'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { execAsync, execGit } from './exec-async'
 
 const GH_PR_JSON_FIELDS =
@@ -47,9 +48,11 @@ export interface GhExecutor {
  *
  * Exported so a routed executor can delegate to it for the zero-computer case,
  * where this host's disk is the only one and its own `gh` is therefore the only
- * meaningful identity.
+ * meaningful identity. Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`
+ * (T-06): that hub has no `gh` identity of its own, so no computer = no `gh`.
  */
 export const runGhLocally: GhExecutor = async (args, opts) => {
+  assertHubLocalExecEnabled({ op: 'gh' })
   if (!ghPath) await resolveGhPath()
   if (!ghPath) throw new Error('gh CLI not found')
 

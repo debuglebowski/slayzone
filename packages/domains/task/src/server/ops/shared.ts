@@ -27,6 +27,10 @@ import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import {
+  assertHubLocalExecEnabled,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
+import {
   removeWorktree,
   createWorktree,
   runWorktreeSetupScript,
@@ -180,6 +184,19 @@ export interface TaskRuntimeAdapters {
 }
 
 /**
+ * The workspace ops below run on the hub's own disk, so each refuses first (as a
+ * rejection) on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06) — this default is
+ * live before the hub installs the routing adapter, and stays live if that init
+ * fails. Colors and the two hub-storage ops are hub-owned and stay.
+ */
+const onHubDisk =
+  <A extends unknown[], R>(op: string, fn: (...args: A) => R | Promise<R>) =>
+  async (...args: A): Promise<R> => {
+    assertHubLocalExecEnabled({ op: `worktree.${op}` })
+    return fn(...args)
+  }
+
+/**
  * Default exec adapters wrap today's direct imports 1:1 — the build-time
  * dependency on `@slayzone/worktrees/server` intentionally REMAINS this wave.
  * The seam (not the import) is what a later wave rebinds to a computer-backed
@@ -189,18 +206,25 @@ export interface TaskRuntimeAdapters {
 export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
   // so a routing impl can resolve which computer the work belongs to.
-  createWorktree: (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
-    createWorktree(repoPath, worktreePath, branch, sourceBranch),
-  removeWorktree: (_taskId, projectPath, worktreePath) => removeWorktree(projectPath, worktreePath),
-  runWorktreeSetupScript: (_taskId, worktreePath, repoPath, sourceBranch) =>
-    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch),
-  copyIgnoredFiles: (_taskId, repoPath, worktreePath, behavior, customPaths) =>
-    copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths),
-  getCurrentBranch: (_taskId, repoPath) => getCurrentBranch(repoPath),
-  isGitRepo: (_taskId, path) => isGitRepo(path),
+  createWorktree: onHubDisk('create', (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
+    createWorktree(repoPath, worktreePath, branch, sourceBranch)
+  ),
+  removeWorktree: onHubDisk('remove', (_taskId, projectPath, worktreePath) =>
+    removeWorktree(projectPath, worktreePath)
+  ),
+  runWorktreeSetupScript: onHubDisk('setup', (_taskId, worktreePath, repoPath, sourceBranch) =>
+    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
+  ),
+  copyIgnoredFiles: onHubDisk(
+    'copy_ignored',
+    (_taskId, repoPath, worktreePath, behavior, customPaths) =>
+      copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths)
+  ),
+  getCurrentBranch: onHubDisk('branch', (_taskId, repoPath) => getCurrentBranch(repoPath)),
+  isGitRepo: onHubDisk('is_git_repo', (_taskId, path) => isGitRepo(path)),
   getWorktreeColor,
   ensureProjectWorktreeColors,
-  pathExists: (_taskId, p) => existsSync(p),
+  pathExists: onHubDisk('path_exists', (_taskId, p) => existsSync(p)),
   hubPathExists: (p) => existsSync(p),
   removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
 }
@@ -572,7 +596,12 @@ export async function maybeAutoCreateWorktree(
   try {
     await createWorktreeForTask(db, taskId, projectId, taskTitle, repoName)
   } catch (err) {
-    if (err instanceof Error && err.name === 'NoComputerAvailableError') {
+    // A hub with processes switched off refuses the hub-local fallback the same way
+    // (`NO_COMPUTER_CONNECTED`, T-06) — same skip, never a failed create.
+    if (
+      (err instanceof Error && err.name === 'NoComputerAvailableError') ||
+      (isHubSwitchedOffError(err) && err.code === 'NO_COMPUTER_CONNECTED')
+    ) {
       runtimeAdapters.recordDiagnosticEvent({
         level: 'warn',
         source: 'task',

@@ -93,9 +93,9 @@ export const SECURITY_EVENTS = [
   'hub.process.spawn',
   /** T-05: an automation action that execs on the hub (`run_command`, `ai`) refused, at save or at run. */
   'automation.run_command',
-  // Reserved for later work — named now so those call sites cannot invent names.
-  /** T-06: hub-local file/git/exec refused ("connect a computer"). */
+  /** T-06: hub-local file/git/gh/exec refused ("connect a computer", `NO_COMPUTER_CONNECTED`). */
   'hub.local_exec',
+  // Reserved for later work — named now so those call sites cannot invent names.
   /** T-07: an integration connect, provider call or sign-in start refused. */
   'integration.connect',
   /** T-23: the retention sweep ran; `detail` carries the row counts. */

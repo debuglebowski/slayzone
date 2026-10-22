@@ -35,6 +35,10 @@
  * requires the UI to keep rendering and reserves hard failure for spawning
  * agents and mutating worktrees.
  *
+ * Except on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06): that hub never
+ * holds or touches project data, so every {@link LocalWorkspaceFs} op is refused
+ * there with `NO_COMPUTER_CONNECTED` before it reads, writes, watches or runs git.
+ *
  * @module file-editor/server/workspace-fs
  */
 
@@ -42,6 +46,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, parse, resolve, sep } from 'node:path'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   copy,
   copyIn,
@@ -274,9 +279,30 @@ export const WORKSPACE_MAX_SEARCH_RESULTS = 2_000
  *
  * Browse ops are unjailed here on purpose: a hub has no `allowedRoots` (that is
  * a computer concept), so the only honest answer to "what may I browse" is the
- * whole filesystem, seeded at `$HOME`.
+ * whole filesystem, seeded at `$HOME`. Which is exactly why every op is refused on
+ * a hub with processes switched off (see the module note).
  */
 export function createLocalWorkspaceFs(): LocalWorkspaceFs {
+  return refuseOnSwitchedOffHub(createUnguardedLocalWorkspaceFs())
+}
+
+/**
+ * Every op checks the switch first, so nothing reaches this process's disk on a hub
+ * with processes switched off. Per call, not at construction: the default adapters
+ * are built at module load, before any env a test or boot sets.
+ */
+function refuseOnSwitchedOffHub(fs: LocalWorkspaceFs): LocalWorkspaceFs {
+  const guarded = {} as Record<string, unknown>
+  for (const [op, fn] of Object.entries(fs) as Array<[string, (...a: unknown[]) => unknown]>) {
+    guarded[op] = (...args: unknown[]) => {
+      assertHubLocalExecEnabled({ op: `fs.${op}` })
+      return fn(...args)
+    }
+  }
+  return guarded as unknown as LocalWorkspaceFs
+}
+
+function createUnguardedLocalWorkspaceFs(): LocalWorkspaceFs {
   const localProjectPaths = new Map<string, string>()
   return {
     listRoots() {

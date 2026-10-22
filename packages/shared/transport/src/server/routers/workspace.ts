@@ -20,6 +20,7 @@
  */
 
 import { z } from 'zod'
+import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { router, publicProcedure } from '../trpc'
 import { getWorkspaceDeps } from '../app-deps'
 
@@ -29,6 +30,15 @@ const targetInput = z.object({
   taskId: z.string().optional(),
   projectId: z.string().optional()
 })
+
+/**
+ * The stable code of a hub-switch refusal (`NO_COMPUTER_CONNECTED` on a hub with
+ * processes switched off and no computer, T-06), for the two probes below that answer
+ * "could not ask" instead of throwing.
+ */
+function refusalCode(err: unknown): { code?: string } {
+  return isHubSwitchedOffError(err) ? { code: err.code } : {}
+}
 
 export const workspaceRouter = router({
   /**
@@ -121,7 +131,8 @@ export const workspaceRouter = router({
           computerId,
           reachable: false,
           path: null,
-          error: err instanceof Error ? err.message : String(err)
+          error: err instanceof Error ? err.message : String(err),
+          ...refusalCode(err)
         }
       }
     }),
@@ -173,7 +184,8 @@ export const workspaceRouter = router({
           computerId,
           exists: false,
           reachable: false,
-          error: err instanceof Error ? err.message : String(err)
+          error: err instanceof Error ? err.message : String(err),
+          ...refusalCode(err)
         }
       }
     })

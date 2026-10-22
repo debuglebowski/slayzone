@@ -1,10 +1,13 @@
 /**
- * Refusals for work a hub switch turned off (T-04, T-05, T-07).
+ * Refusals for work a hub switch turned off (T-04, T-05, T-06, T-07).
  *
  *   SLAYZONE_HUB_ENABLE_PROCESSES=0     the hub runs nothing itself: no background
  *                                       process, no automation command (`run_command`,
  *                                       `ai`), no terminal or agent spawned in its own
- *                                       process. Work routed to a computer is unaffected.
+ *                                       process (T-04/05), and no git, `gh`, shell probe,
+ *                                       OS opener or project-file access on its own disk
+ *                                       (T-06, "connect a computer"). Work routed to a
+ *                                       computer is unaffected.
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS=0  no integration connect, no stored provider
  *                                       credential, no provider call, no sign-in start.
  *
@@ -27,18 +30,25 @@
 import { HUB_SWITCH_ENV, resolveHubSwitches } from './hub-switches'
 import { securityEvent } from './security-log'
 
-export type HubSwitchedOffCode = 'HUB_PROCESSES_DISABLED' | 'HUB_INTEGRATIONS_DISABLED'
+export type HubSwitchedOffCode =
+  | 'HUB_PROCESSES_DISABLED'
+  | 'HUB_INTEGRATIONS_DISABLED'
+  | 'NO_COMPUTER_CONNECTED'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
     'This hub does not run processes, automation commands, terminals or agents itself ' +
     `(${HUB_SWITCH_ENV.enableProcesses}=0).`,
-  HUB_INTEGRATIONS_DISABLED: `Integrations are switched off on this hub (${HUB_SWITCH_ENV.enableIntegrations}=0).`
+  HUB_INTEGRATIONS_DISABLED: `Integrations are switched off on this hub (${HUB_SWITCH_ENV.enableIntegrations}=0).`,
+  NO_COMPUTER_CONNECTED:
+    'Connect a computer: this hub does not read project files or run git, gh or other ' +
+    `commands itself (${HUB_SWITCH_ENV.enableProcesses}=0).`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED: HUB_SWITCH_ENV.enableProcesses,
-  HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations
+  HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations,
+  NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -82,7 +92,7 @@ export interface HubRefusal {
 }
 
 function refuse(
-  event: 'hub.process.spawn' | 'automation.run_command' | 'integration.connect',
+  event: 'hub.process.spawn' | 'automation.run_command' | 'integration.connect' | 'hub.local_exec',
   code: HubSwitchedOffCode,
   refusal: HubRefusal
 ): never {
@@ -113,4 +123,16 @@ export function assertHubProcessesEnabled(
  */
 export function assertHubIntegrationsEnabled(refusal: HubRefusal): void {
   if (!hubIntegrationsEnabled()) refuse('integration.connect', 'HUB_INTEGRATIONS_DISABLED', refusal)
+}
+
+/**
+ * Throw {@link HubSwitchedOffError} (`NO_COMPUTER_CONNECTED`) after one `hub.local_exec`
+ * audit line when `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06). Called at every point where
+ * the hub would touch its OWN disk or exec on its own machine for project work: git,
+ * `gh`, login-shell probes, the OS opener, the local workspace filesystem — including
+ * each fallback that used to run here when no computer was resolved. Such a hub never
+ * holds or touches project data; computers do.
+ */
+export function assertHubLocalExecEnabled(refusal: HubRefusal): void {
+  if (!hubProcessesEnabled()) refuse('hub.local_exec', 'NO_COMPUTER_CONNECTED', refusal)
 }

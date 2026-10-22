@@ -1,5 +1,6 @@
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
   hydrateSession,
@@ -916,11 +917,22 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       return created
     },
 
-    listSkills: (cwd: string): Promise<SkillInfo[]> => listSkills(cwd),
+    // The three autocomplete scans read `cwd` and `~/.claude` on THIS machine:
+    // refused on a hub with processes switched off (T-06), like the file scan below.
+    listSkills: async (cwd: string): Promise<SkillInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.skills' })
+      return listSkills(cwd)
+    },
 
-    listCommands: (cwd: string): Promise<CommandInfo[]> => listCommands(cwd),
+    listCommands: async (cwd: string): Promise<CommandInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.commands' })
+      return listCommands(cwd)
+    },
 
-    listAgents: (cwd: string): Promise<AgentInfo[]> => listAgents(cwd),
+    listAgents: async (cwd: string): Promise<AgentInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.agents' })
+      return listAgents(cwd)
+    },
 
     listFiles: (cwd: string, query: string, limit?: number): Promise<FileMatch[]> =>
       listProjectFiles(cwd, query, limit ?? 50),

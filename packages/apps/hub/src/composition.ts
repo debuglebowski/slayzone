@@ -10,7 +10,10 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
+import {
+  assertHubIntegrationsEnabled,
+  assertHubLocalExecEnabled
+} from '@slayzone/platform/hub-switch-refusal'
 import {
   setTaskDeps,
   setIntegrationOps,
@@ -934,6 +937,9 @@ export function composeServer(opts: {
       authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
         // Backstop for the router's check: no Convex POST, no browser open.
         assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
+        // The browser opens on THIS machine (xdg-open): not on a hub that runs nothing
+        // itself (T-06). Checked before the Convex POST, not swallowed by the catch.
+        assertHubLocalExecEnabled({ op: 'shell.open_external', detail: { provider: 'github' } })
         try {
           if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
           if (input.redirectTo !== 'slayzone://auth/callback') {
@@ -1444,7 +1450,8 @@ export function composeServer(opts: {
     setGhExecutor(async (args, opts) => {
       const computerId = resolveExecComputer(null)
       // No computer = this hub's own disk is the only one, so its own `gh` is the
-      // only meaningful identity. Falls through to the local executor.
+      // only meaningful identity. Falls through to the local executor — which refuses
+      // on a hub with processes switched off (T-06): there, no computer = no `gh`.
       if (computerId == null || !opts.cwd) return runGhLocally(args, opts)
       const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
         args,

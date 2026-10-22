@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import * as path from 'node:path'
 import { promisify } from 'node:util'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { FileMatch } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
@@ -10,12 +11,15 @@ const execFileAsync = promisify(execFile)
  * List project files for `@file` autocomplete.
  * Prefers `git ls-files` (honors `.gitignore`, deterministic).
  * Falls back to depth-limited fs walk if not a git repo.
+ * Both read the hub's own disk, so both are refused on a hub with processes
+ * switched off (T-06).
  */
 export async function listProjectFiles(
   cwd: string,
   query: string,
   limit = 50
 ): Promise<FileMatch[]> {
+  assertHubLocalExecEnabled({ op: 'files.scan' })
   const gitResults = await tryGitLs(cwd, query, limit)
   if (gitResults !== null) return gitResults
   return fsWalk(cwd, query, limit)

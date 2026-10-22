@@ -21,6 +21,7 @@
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 const DEBOUNCE_MS = 200
 
@@ -210,6 +211,9 @@ export function createGitWatcher(): GitWatcher {
   }
 
   emitter.subscribe = (worktreePath: string): void => {
+    // Watches a path on the hub's own disk: refused on a hub with processes
+    // switched off (T-06), like every other hub-local git/file access.
+    assertHubLocalExecEnabled({ op: 'git.watch' })
     let entry = entries.get(worktreePath)
     if (entry) {
       entry.refCount++
