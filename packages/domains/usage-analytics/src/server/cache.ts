@@ -162,23 +162,50 @@ function dateRangeToSql(range: DateRange): string {
   }
 }
 
+/**
+ * Which usage records a query may count. `null`: every record (a hub without login).
+ * Otherwise only records of tasks in these projects — a record with no task has no
+ * owner and is never counted (T-17: the projects come from the access scope).
+ */
+export type UsageScope = { readonly projectIds: readonly string[] } | null
+
+/** `AND …` restricting `alias.task_id` to the scope, with its parameters. */
+function scopeSql(scope: UsageScope, alias = ''): { sql: string; params: string[] } {
+  if (!scope) return { sql: '', params: [] }
+  if (scope.projectIds.length === 0) return { sql: ' AND 0', params: [] }
+  const marks = scope.projectIds.map(() => '?').join(', ')
+  return {
+    sql: ` AND ${alias}task_id IN (SELECT id FROM tasks WHERE project_id IN (${marks}))`,
+    params: [...scope.projectIds]
+  }
+}
+
 /** Total tokens per day across all providers (no date filtering). */
 export async function queryDailyTotals(
-  db: SlayzoneDb
+  db: SlayzoneDb,
+  scope: UsageScope = null
 ): Promise<Array<{ date: string; totalTokens: number }>> {
+  const s = scopeSql(scope)
   return (await db
     .prepare(
       `SELECT date(timestamp, 'localtime') as date,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
       FROM usage_records
+      WHERE 1${s.sql}
       GROUP BY date(timestamp, 'localtime')
       ORDER BY date ASC`
     )
-    .all()) as Array<{ date: string; totalTokens: number }>
+    .all(...s.params)) as Array<{ date: string; totalTokens: number }>
 }
 
-export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<AnalyticsSummary> {
+export async function queryAnalytics(
+  db: SlayzoneDb,
+  range: DateRange,
+  scope: UsageScope = null
+): Promise<AnalyticsSummary> {
   const since = dateRangeToSql(range)
+  const s = scopeSql(scope)
+  const ur = scopeSql(scope, 'ur.')
 
   const totals = (await db
     .prepare(
@@ -189,9 +216,9 @@ export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<
         COALESCE(SUM(cache_write_tokens), 0) as totalCacheWriteTokens,
         COUNT(DISTINCT session_id) as totalSessions
       FROM usage_records
-      WHERE timestamp >= ${since}`
+      WHERE timestamp >= ${since}${s.sql}`
     )
-    .get()) as {
+    .get(...s.params)) as {
     totalInputTokens: number
     totalOutputTokens: number
     totalCacheReadTokens: number
@@ -214,10 +241,10 @@ export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<
         COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
         COALESCE(SUM(cache_write_tokens), 0) as cacheWriteTokens,
         COUNT(DISTINCT session_id) as sessions
-      FROM usage_records WHERE timestamp >= ${since}
+      FROM usage_records WHERE timestamp >= ${since}${s.sql}
       GROUP BY provider ORDER BY totalTokens DESC`
     )
-    .all()) as Array<{
+    .all(...s.params)) as Array<{
     provider: string
     totalTokens: number
     inputTokens: number
@@ -231,19 +258,19 @@ export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<
     .prepare(
       `SELECT provider, model,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
-      FROM usage_records WHERE timestamp >= ${since}
+      FROM usage_records WHERE timestamp >= ${since}${s.sql}
       GROUP BY provider, model ORDER BY totalTokens DESC`
     )
-    .all()) as Array<{ provider: string; model: string; totalTokens: number }>
+    .all(...s.params)) as Array<{ provider: string; model: string; totalTokens: number }>
 
   const byDay = (await db
     .prepare(
       `SELECT date(timestamp, 'localtime') as date, provider,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
-      FROM usage_records WHERE timestamp >= ${since}
+      FROM usage_records WHERE timestamp >= ${since}${s.sql}
       GROUP BY date(timestamp, 'localtime'), provider ORDER BY date ASC`
     )
-    .all()) as Array<{ date: string; provider: string; totalTokens: number }>
+    .all(...s.params)) as Array<{ date: string; provider: string; totalTokens: number }>
 
   const byTask = (await db
     .prepare(
@@ -251,11 +278,16 @@ export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<
         SUM(ur.input_tokens + ur.output_tokens + ur.cache_read_tokens + ur.cache_write_tokens) as totalTokens
       FROM usage_records ur
       LEFT JOIN tasks t ON ur.task_id = t.id
-      WHERE ur.timestamp >= ${since} AND ur.task_id IS NOT NULL
+      WHERE ur.timestamp >= ${since} AND ur.task_id IS NOT NULL${ur.sql}
       GROUP BY ur.provider, ur.task_id ORDER BY totalTokens DESC
       LIMIT 20`
     )
-    .all()) as Array<{ provider: string; taskId: string; taskTitle: string; totalTokens: number }>
+    .all(...ur.params)) as Array<{
+    provider: string
+    taskId: string
+    taskTitle: string
+    totalTokens: number
+  }>
 
   return {
     ...totals,

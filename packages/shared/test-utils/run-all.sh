@@ -127,6 +127,11 @@ run_test_electron_strict_loader packages/shared/transport/src/server/project-own
 # Session retention (T-23): the sweep and its schedule, then through the built hub.
 run_test_electron_strict_loader packages/apps/hub/src/session-retention.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/session-retention-boot.test.ts
+# Owner checks (T-17): the one access function over a real DB, then two users on a real
+# hub with login (ids, lists, live streams, admin) and the desktop's hub with login off.
+run_test_electron_strict_loader packages/shared/transport/src/server/access.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-login-off.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -704,6 +709,10 @@ run_vitest_files "vitest (swept-in suites)" \
 run_vitest_files "vitest (role gate)" \
   packages/shared/transport/src/server/admin-policy.test.ts \
   packages/apps/hub/src/admin-authz.test.ts
+
+# The owner-check classification (T-17): every user procedure marked, exhaustively.
+run_vitest_files "vitest (owner checks)" \
+  packages/shared/transport/src/server/owner-policy.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150

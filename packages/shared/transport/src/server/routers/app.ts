@@ -7,6 +7,7 @@ import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { buildExportImportOps } from '../export-import'
+import { ownedProjectIds } from '../owner-gate'
 import type { TrpcContext } from '../context'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
@@ -72,7 +73,11 @@ export const appLevelRouter = router({
   // process asked the Electron host to run a query against the database THIS
   // process owns; standalone hubs got a fail-loud stub instead of a leaderboard.
   leaderboard: router({
-    getLocalStats: publicProcedure.query(({ ctx }) => getLocalLeaderboardStats(ctx.db))
+    // Summed over the caller's projects only, on a hub with login (T-17).
+    getLocalStats: publicProcedure.query(async ({ ctx }) => {
+      const projectIds = await ownedProjectIds(ctx)
+      return getLocalLeaderboardStats(ctx.db, projectIds ? { projectIds } : null)
+    })
   }),
 
   // Export/Import — reads and writes ctx.db. Was seven AppDeps slots, i.e. this

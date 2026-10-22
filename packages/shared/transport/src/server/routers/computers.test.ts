@@ -283,6 +283,9 @@ test('T-15: an admin manages a private computer of another user but cannot bind 
       `UPDATE computers SET owner_user_id = 'bob', visibility = 'private' WHERE id = ?`,
       [bobs.id]
     )
+    // The work is the admin's own, so what refuses the binding is the computer's
+    // visibility, not the owner check (T-17) that would refuse someone else's task.
+    await h.slayDb.run(`UPDATE projects SET owner_user_id = 'alice' WHERE id = ?`, [projectId])
     const as = (userId: string, role: 'admin' | 'user') =>
       appRouter.createCaller({ ...ctx, principal: { userId, role, scopes: ['full'] } }).computers
     const admin = as('alice', 'admin')
@@ -331,5 +334,6 @@ test('T-15: an admin manages a private computer of another user but cannot bind 
     expect(await refusal(admin.delete({ computerId: bobs.id }))).toBe('ok')
   } finally {
     setAuthGate(() => false)
+    await h.slayDb.run(`UPDATE projects SET owner_user_id = NULL WHERE id = ?`, [projectId])
   }
 })

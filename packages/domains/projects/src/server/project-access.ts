@@ -2,8 +2,9 @@ import type { SlayzoneDb } from '@slayzone/platform'
 
 /**
  * "May principal P access project X?" — the ONE place that answers it (T-16).
- * Not wired into any procedure yet: enforcement is T-17 (tRPC) / T-18 (REST, MCP),
- * which call this rather than re-deriving the rule.
+ * Every resource check goes through it: `canAccess` (transport `server/access.ts`)
+ * resolves a task, tab, session … to its project and asks this. Enforced on tRPC
+ * (T-17); REST and MCP (T-18) call the same `canAccess`.
  *
  * The rule, in order:
  *   1. A hub without login (`authRequired: false` — the desktop app's hub, a
