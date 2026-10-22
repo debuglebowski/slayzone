@@ -75,6 +75,8 @@ run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
 run_test_electron_strict_loader packages/apps/hub/src/local-computer-roots.test.ts
+# T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
+run_test_electron_strict_loader packages/apps/hub/src/computer-placement.test.ts
 # `projects.path` is being deleted; this is the one-time hand-off of its values to
 # the local computer. It must never overwrite a mapping the user re-pointed, and
 # must never record a path that is not on that machine.
@@ -350,6 +352,8 @@ run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/computer-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
+# T-19: the REST computer roster is the caller's own (every one for an admin).
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/list.test.ts
 # Loopback operator account routes (`slay hub users`). no_loader: the routes never
 # touch the DB (the hubUsers capability is stubbed), so no Electron-ABI harness.
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts

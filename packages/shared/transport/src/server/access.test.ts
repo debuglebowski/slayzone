@@ -92,6 +92,12 @@ sql(`INSERT INTO ai_config_items (id, type, scope, project_id, name, slug) VALUE
   ('aiA', 'skill', 'project', 'pA', 'x', 'x'), ('aiGlobal', 'skill', 'global', NULL, 'g', 'g')`)
 sql(`INSERT INTO project_groups (id, name) VALUES ('gA', 'a'), ('gEmpty', 'e'), ('gMixed', 'm')`)
 sql(`UPDATE projects SET group_id = 'gA' WHERE id = 'pA'`)
+// Computers (T-19): A's, and one enrolled with nobody recorded as its minter.
+sql(
+  `INSERT INTO computers (id, name, platform, version, capabilities_json, last_seen_at, created_at,
+  owner_user_id) VALUES ('cA', 'a', 'linux-x64', '0', '{}', 0, 0, ?), ('cU', 'u', 'linux-x64', '0', '{}', 0, 0, NULL)`,
+  A
+)
 sql(
   `INSERT INTO projects (id, name, color, owner_user_id, group_id) VALUES
   ('pA2', 'A2', '#111', ?, 'gMixed'), ('pB2', 'B2', '#222', ?, 'gMixed')`,
@@ -127,7 +133,8 @@ const OF_A: Record<ResourceKind, string> = {
   aiConfigItem: 'aiA',
   projectGroup: 'gA',
   path: join(aWorktree, 'src', 'index.ts'),
-  automation: 'auA'
+  automation: 'auA',
+  computer: 'cA'
 }
 
 await describe('every kind: the owner, and nobody else', () => {
@@ -185,7 +192,9 @@ await describe('missing and ownerless: refused to everyone on a hub with login',
     ['path', join(hubRoot, 'slayzone.data.sqlite'), "the hub's own database file"],
     ['path', join(hubRoot, 'hub.owner.json'), "the hub's owner token"],
     ['path', hubRoot, "the hub's state directory itself"],
-    ['path', '', 'an empty path']
+    ['path', '', 'an empty path'],
+    ['computer', 'cU', 'unowned computer (nobody recorded minting its token)'],
+    ['computer', 'nope', 'missing computer']
   ]
   for (const [kind, id, what] of refused) {
     test(`${kind} — ${what}`, async () => {

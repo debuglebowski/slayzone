@@ -192,6 +192,8 @@ export interface Owned {
   /** The task's worktree (an absolute path). */
   readonly path: string
   readonly automation: string
+  /** A computer the owner owns (T-19). */
+  readonly computer: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -217,7 +219,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     aiConfigItem: id('aiConfigItem'),
     projectGroup: id('group'),
     path: join(root, 'work', `${mark}_worktree`),
-    automation: id('automation')
+    automation: id('automation'),
+    computer: id('computer')
   }
 }
 
@@ -359,6 +362,13 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.mark,
       o.mark.toLowerCase(),
       `${o.mark}_SKILL_BODY`
+    )
+    run(
+      `INSERT INTO computers (id, name, platform, version, capabilities_json, last_seen_at,
+         created_at, owner_user_id) VALUES (?, ?, 'linux-x64', '0.0.0', '{}', 0, 0, ?)`,
+      o.computer,
+      `${o.mark}_COMPUTER_NAME`,
+      o.userId
     )
     // Usage: distinct token counts per owner, so a sum shows whose rows it took.
     run(

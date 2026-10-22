@@ -18,6 +18,8 @@ import {
   createRoutingChatBackend,
   createRoutingPtyBackend,
   NoComputerAvailableError,
+  type ComputerWork,
+  type ComputerWorkGate,
   type PtyExitEvent,
   type RoutingGateway
 } from './exec-proxies'
@@ -1390,5 +1392,119 @@ describe('createRemoteFsAdapters — watch', () => {
       relPath: 'a.ts'
     })
     expect(seen).toEqual([])
+  })
+})
+
+// ===========================================================================
+// The work gate (T-19): asked before anything reaches a computer
+// ===========================================================================
+
+describe('the work gate: a computer works only for the work it was admitted for', () => {
+  /** A gate that admits only `allowed`, recording what it was asked. */
+  const gateFor = (allowed: string) => {
+    const asked: Array<{ computerId: string; work: ComputerWork }> = []
+    const gate: ComputerWorkGate = async (computerId, work) => {
+      asked.push({ computerId, work })
+      if (computerId !== allowed) throw new Error('not yours')
+    }
+    return { gate, asked }
+  }
+
+  it('pty spawn: asks for the task; a refusal sends nothing — not the spawn, not early input', async () => {
+    const gateway = new FakeGateway()
+    const { gate, asked } = gateFor('mine')
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId,
+      gate
+    })
+    const handle = backend.spawn(ptySpec({ computerId: 'theirs' })) as PtyHandle
+    handle.write('ls\n')
+    handle.resize(100, 40)
+    await expect(handle.whenSpawned).rejects.toThrow('not yours')
+    await new Promise((r) => setImmediate(r))
+    expect(asked).toEqual([{ computerId: 'theirs', work: { kind: 'task', id: 'task-1' } }])
+    expect(gateway.calls).toEqual([])
+  })
+
+  it('pty spawn: admitted, the spawn goes first and input queued behind it follows in order', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId,
+      gate: gateFor('mine').gate
+    })
+    const handle = backend.spawn(ptySpec({ computerId: 'mine' })) as PtyHandle
+    handle.write('ls\n')
+    await handle.whenSpawned
+    await vi.waitFor(() => expect(gateway.calls).toHaveLength(2))
+    expect(gateway.calls.map((c) => c.method)).toEqual(['pty.spawn', 'pty.write'])
+  })
+
+  it('pty adopt: asks for the session before anything is tracked or sent', async () => {
+    const gateway = new FakeGateway()
+    const { gate, asked } = gateFor('mine')
+    const backend = createRoutingPtyBackend({ gateway, resolveComputerId: () => null, gate })
+    await expect(backend.adopt!('theirs', 'warm:1', 'task-1:tab-1', 'bash')).rejects.toThrow(
+      'not yours'
+    )
+    expect(asked).toEqual([{ computerId: 'theirs', work: { kind: 'session', id: 'task-1:tab-1' } }])
+    expect(gateway.calls).toEqual([])
+  })
+
+  it('chat spawn: asks for the task; a refusal sends nothing', async () => {
+    const gateway = new FakeGateway()
+    const { gate, asked } = gateFor('mine')
+    const chat = createRoutingChatBackend({ gateway, resolveComputerId: () => 'theirs', gate })
+    await expect(
+      chat.spawn({
+        sessionId: 's',
+        taskId: 'task-9',
+        computerId: 'theirs',
+        binaryName: 'claude',
+        args: [],
+        cwd: '/tmp',
+        env: {}
+      })
+    ).rejects.toThrow('not yours')
+    expect(asked).toEqual([{ computerId: 'theirs', work: { kind: 'task', id: 'task-9' } }])
+    expect(gateway.calls).toEqual([])
+  })
+
+  it('worktree/git: every routed op asks for its task', async () => {
+    const gateway = new FakeGateway()
+    const { gate, asked } = gateFor('mine')
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'theirs',
+      gate
+    })
+    await expect(adapters.createWorktree('task-3', '/r', '/wt', 'b')).rejects.toThrow('not yours')
+    await expect(adapters.isGitRepo('task-3', '/r')).rejects.toThrow('not yours')
+    await expect(adapters.pathExists('task-3', '/r')).rejects.toThrow('not yours')
+    expect(asked.every((a) => a.work?.kind === 'task' && a.work.id === 'task-3')).toBe(true)
+    expect(gateway.calls).toEqual([])
+  })
+
+  it("filesystem: every op is the caller's own request (work null); a refused watch never starts", async () => {
+    const gateway = new FakeGateway()
+    const { gate, asked } = gateFor('mine')
+    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs(), gate })
+    await expect(fs.listRoots('theirs')).rejects.toThrow('not yours')
+    await expect(fs.setAllowedRoots('theirs', ['/'])).rejects.toThrow('not yours')
+    await expect(fs.readFile('theirs', '/r', 'a.ts')).rejects.toThrow('not yours')
+    const stop = fs.watch('theirs', '/r', () => undefined)
+    await new Promise((r) => setImmediate(r))
+    stop()
+    expect(asked.every((a) => a.work === null)).toBe(true)
+    expect(gateway.requestsOf('fs.listRoots')).toEqual([])
+    expect(gateway.requestsOf('computer.setAllowedRoots')).toEqual([])
+    expect(gateway.requestsOf('fs.watchStart')).toEqual([])
+    expect(gateway.calls).toEqual([])
+    // With no computer the hub's own disk answers, and nothing is asked.
+    await fs.listRoots(null)
+    expect(asked).toHaveLength(4)
   })
 })
