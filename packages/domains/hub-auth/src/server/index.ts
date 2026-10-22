@@ -36,6 +36,7 @@ export {
   enableHubUser,
   ensureFirstAdmin,
   findFirstAdmin,
+  findHubUser,
   listHubUsers,
   setHubUserRole,
   type CreatedHubUser,

@@ -253,21 +253,45 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
     field: 'createdAt',
     direction: 'asc'
   })
-  return users
-    .filter((u) => u.email !== COMPUTER_SERVICE_USER_EMAIL)
-    .map((u) => {
-      const row = u as typeof u & Record<string, unknown>
-      return {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        role: readRole(row.role),
-        disabledAt: isDisabled(row)
-          ? new Date(row.disabledAt as string | Date).toISOString()
-          : null,
-        createdAt: new Date(u.createdAt).toISOString()
-      }
-    })
+  return users.filter((u) => u.email !== COMPUTER_SERVICE_USER_EMAIL).map(toHubUserRow)
+}
+
+/** An adapter user row as {@link HubUserRow}. */
+function toHubUserRow(u: {
+  id: string
+  email: string
+  name: string
+  createdAt: Date | string
+}): HubUserRow {
+  const row = u as typeof u & Record<string, unknown>
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: readRole(row.role),
+    disabledAt: isDisabled(row) ? new Date(row.disabledAt as string | Date).toISOString() : null,
+    createdAt: new Date(u.createdAt).toISOString()
+  }
+}
+
+/**
+ * The person `ref` names — an account id, or an email in any case — disabled or not.
+ * Null for no such account, and for the two accounts that are not a person: the
+ * computer service user and a break-glass account. Used to name the owner of a join
+ * token (T-20), which a computer only a machine or an emergency session "owns" would
+ * make meaningless.
+ */
+export async function findHubUser(auth: HubAuth, ref: string): Promise<HubUserRow | null> {
+  const wanted = ref.trim()
+  if (!wanted) return null
+  const ctx = await auth.$context
+  const user = wanted.includes('@')
+    ? ((await ctx.internalAdapter.findUserByEmail(normalizeEmail(wanted)))?.user ?? null)
+    : await ctx.internalAdapter.findUserById(wanted)
+  if (!user || user.email === COMPUTER_SERVICE_USER_EMAIL || isBreakGlassEmail(user.email)) {
+    return null
+  }
+  return toHubUserRow(user)
 }
 
 /** Enabled, and counted: a break-glass account is never a human or an admin here. */

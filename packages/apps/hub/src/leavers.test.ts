@@ -378,7 +378,7 @@ async function main(): Promise<void> {
         hubUrl: 'ws://127.0.0.1:1/computers',
         ttlMs: 60_000,
         label: 'leaver laptop',
-        mintedByUserId: leaverId
+        ownerUserId: leaverId
       })
       let refused: unknown = null
       try {

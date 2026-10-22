@@ -21,8 +21,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
-import { createHubAuth, COMPUTER_KEY_PREFIX } from '@slayzone/hub-auth/server'
+import {
+  createHubAuth,
+  createHubUser,
+  COMPUTER_KEY_PREFIX,
+  disableHubUser
+} from '@slayzone/hub-auth/server'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
+import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   deterministicLocalComputerId,
   getComputer,
@@ -375,6 +381,103 @@ async function main(): Promise<void> {
       // Both remote computers survive — dedup is scoped to the single local name only.
       assert((await getComputer(db, r1.computerId)) !== null, 'remote-alpha survives')
       assert((await getComputer(db, r2.computerId)) !== null, 'remote-beta survives')
+    })
+
+    // T-20: the token names who the computer is for. Redeeming carries no identity
+    // of its own, so whoever runs the enroll, the computer is the named user's — never
+    // the admin who minted it — and the token works once.
+    const admin = await createHubUser(auth, { email: 'admin@example.com', role: 'admin' })
+    const bob = await createHubUser(auth, { email: 'bob@example.com', role: 'user' })
+    const dave = await createHubUser(auth, { email: 'dave@example.com', role: 'user' })
+    assert(!('error' in admin) && !('error' in bob) && !('error' in dave), 'users created')
+    const mintFor = async (ownerUserId: string, label: string) =>
+      mintJoinToken(db, {
+        hubUrl: 'https://hub.local:4141',
+        ttlMs: 60_000,
+        label,
+        mintedByUserId: admin.id,
+        ownerUserId
+      })
+
+    await test('T-20: redeem makes the named user the owner, not the minter; a second redeem is refused', async () => {
+      const audit: Array<Record<string, unknown>> = []
+      setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+      try {
+        const minted = await mintFor(bob.id, 'bob-laptop')
+        audit.length = 0
+        // The enroll runs in the socket's context (hub-gateway.ts): client address only.
+        const enrolled = await runWithSecurityContext(
+          { actor: null, ip: '198.51.100.9', route: 'WS /computers' },
+          () =>
+            adapters.verifyEnrollment({
+              ...ENROLL_BASE,
+              name: 'bob-laptop',
+              joinToken: minted.token
+            })
+        )
+        const row = await getComputer(db, enrolled.computerId)
+        assertEq(row?.owner_user_id, bob.id, 'owner is the named user')
+        const tokenRow = await db.get<{ computer_id: string | null }>(
+          'SELECT computer_id FROM join_tokens WHERE id = ?',
+          [minted.id]
+        )
+        assertEq(tokenRow?.computer_id, enrolled.computerId, 'the token records its computer')
+
+        let refused = ''
+        try {
+          await adapters.verifyEnrollment({
+            ...ENROLL_BASE,
+            name: 'thief-box',
+            joinToken: minted.token
+          })
+        } catch (err) {
+          refused = err instanceof Error ? err.message : String(err)
+        }
+        assert(/used/.test(refused), `second redeem refused as used, got: ${refused}`)
+
+        const redeems = audit.filter((l) => l.event === 'computer.join_token.redeem')
+        assertEq(redeems.length, 2, 'one success line, one refusal')
+        assertEq(redeems[0]!.outcome, 'success', 'success first')
+        assertEq(redeems[0]!.targetId, minted.id, 'names the token row')
+        assertEq(redeems[0]!.ip, '198.51.100.9', 'client address from the socket context')
+        const detail = redeems[0]!.detail as { computerId?: string; owner?: string }
+        assertEq(detail.computerId, enrolled.computerId, 'carries the computer')
+        assertEq(detail.owner, bob.id, 'carries the owner')
+        assertEq((redeems[1]!.detail as { reason?: string }).reason, 'used', 'then used')
+        const all = JSON.stringify(audit)
+        assert(!all.includes(minted.token), 'no line carries the token')
+        assert(!all.includes(minted.token.split('.')[1]!), 'nor its payload')
+      } finally {
+        setSecurityLogSink()
+      }
+    })
+
+    await test('T-20: a token for a user disabled since is refused at redeem, audited', async () => {
+      const minted = await mintFor(dave.id, 'dave-laptop')
+      assertEq(await disableHubUser(auth, 'dave@example.com'), 'ok', 'dave disabled')
+      const audit: Array<Record<string, unknown>> = []
+      setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+      let refused = ''
+      try {
+        await adapters.verifyEnrollment({
+          ...ENROLL_BASE,
+          name: 'dave-laptop',
+          joinToken: minted.token
+        })
+      } catch (err) {
+        refused = err instanceof Error ? err.message : String(err)
+      } finally {
+        setSecurityLogSink()
+      }
+      assert(/disabled/.test(refused), `refused, got: ${refused}`)
+      const line = audit.find((l) => l.event === 'computer.join_token.redeem')
+      assertEq(line?.outcome, 'denied', 'denied')
+      assertEq((line?.detail as { reason?: string }).reason, 'owner_disabled', 'reason')
+      const owned = await db.get<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM computers WHERE owner_user_id = ?',
+        [dave.id]
+      )
+      assertEq(owned?.n, 0, 'no computer for dave')
     })
   } finally {
     close()

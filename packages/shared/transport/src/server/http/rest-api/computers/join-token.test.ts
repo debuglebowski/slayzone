@@ -41,10 +41,37 @@ import type { RestApiDeps } from '../types.js'
 
 const h = await createTestHarness()
 
+/** The hub's accounts, as the hub-auth lookup reports them (T-20). */
+const ACCOUNTS: Record<string, { userId: string; disabled: boolean }> = {
+  'u-bob': { userId: 'u-bob', disabled: false },
+  'bob@example.com': { userId: 'u-bob', disabled: false },
+  'u-dave': { userId: 'u-dave', disabled: true }
+}
+
 /** A bound computer listener (computer ON, url present). */
 const boundComputers = {
-  getHubUrl: () => 'wss://127.0.0.1:54321/computers'
+  getHubUrl: () => 'wss://127.0.0.1:54321/computers',
+  findAccount: async (ref: string) => ACCOUNTS[ref] ?? null
 }
+
+/** A hub with login, the caller signed in as `principal`. */
+const loginHub = (principal: {
+  userId: string
+  role?: 'admin' | 'user'
+  scopes: Array<'full' | 'read' | 'tasks'>
+}): RestApiDeps['restAuth'] => ({
+  required: () => true,
+  verifyBearer: async () => principal
+})
+
+const lastRow = () =>
+  h.db
+    .prepare(
+      'SELECT minted_by_user_id, owner_user_id, expires_at - created_at AS ttl FROM join_tokens ORDER BY rowid DESC LIMIT 1'
+    )
+    .get() as { minted_by_user_id: string | null; owner_user_id: string | null; ttl: number }
+const rowCount = () =>
+  (h.db.prepare('SELECT COUNT(*) AS n FROM join_tokens').get() as { n: number }).n
 
 function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['restAuth']) {
   const app = express()
@@ -150,20 +177,20 @@ await describe('POST /api/computers/join-token', () => {
     }
   })
 
-  test('loopback caller on an auth-enforcing hub mints WITH a valid admin bearer', async () => {
-    const rest = await mount(boundComputers, {
-      required: () => true,
-      verifyBearer: async () => ({ userId: 'u1', role: 'admin', scopes: ['full'] })
-    })
+  test('loopback caller on an auth-enforcing hub mints WITH a valid admin bearer, for a named user', async () => {
+    const rest = await mount(
+      boundComputers,
+      loginHub({ userId: 'u1', role: 'admin', scopes: ['full'] })
+    )
     try {
-      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {
+        forUser: 'bob@example.com'
+      })
       expect(res.status).toBe(200)
-      // T-19: the minter is recorded, so the computer that redeems it is theirs — the
-      // REST twin of computers.mintJoinToken (this path used to drop it).
-      const row = h.db
-        .prepare('SELECT minted_by_user_id FROM join_tokens ORDER BY rowid DESC LIMIT 1')
-        .get() as { minted_by_user_id: string | null }
-      expect(row.minted_by_user_id).toBe('u1')
+      // T-20: the named user owns the computer the token enrolls; the admin is only
+      // the minter, kept for the record.
+      const row = lastRow()
+      expect([row.minted_by_user_id, row.owner_user_id]).toEqual(['u1', 'u-bob'])
     } finally {
       await rest.close()
     }
@@ -205,6 +232,81 @@ await describe('POST /api/computers/join-token', () => {
   })
 })
 
+// T-20 (O-5): on a hub with login an admin mints FOR a named, enabled user, for at most
+// 1 hour. Each refusal is a 400 with a stable code, and nothing is minted.
+await describe('who the token is for, and for how long (T-20)', () => {
+  const admin = loginHub({ userId: 'u-admin', role: 'admin', scopes: ['full'] })
+  const refused = async (
+    restAuth: RestApiDeps['restAuth'] | undefined,
+    body: Record<string, unknown>
+  ): Promise<{ status: number; code?: string }> => {
+    const rest = await mount(boundComputers, restAuth)
+    try {
+      const before = rowCount()
+      const res = await rest.request<{ code?: string }>('POST', '/api/computers/join-token', body)
+      if (res.status !== 200) expect(rowCount()).toBe(before)
+      return { status: res.status, code: res.body.code }
+    } finally {
+      await rest.close()
+    }
+  }
+
+  test('an admin naming nobody is refused: JOIN_TOKEN_OWNER_REQUIRED', async () => {
+    expect(await refused(admin, {})).toEqual({ status: 400, code: 'JOIN_TOKEN_OWNER_REQUIRED' })
+    expect(await refused(admin, { forUser: '  ' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_REQUIRED'
+    })
+  })
+
+  test('an unknown or disabled user is refused', async () => {
+    expect(await refused(admin, { forUser: 'nobody@example.com' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_UNKNOWN'
+    })
+    expect(await refused(admin, { forUser: 'u-dave' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_DISABLED'
+    })
+  })
+
+  test('a lifetime over 1 hour is refused, on every hub; 1 hour exactly mints', async () => {
+    const twoHours = 2 * 60 * 60_000
+    expect(await refused(admin, { forUser: 'u-bob', ttlMs: twoHours })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect(await refused(undefined, { ttlMs: twoHours })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect((await refused(admin, { forUser: 'u-bob', ttlMs: 60 * 60_000 })).status).toBe(200)
+    expect(lastRow().ttl).toBe(60 * 60_000)
+  })
+
+  test('the default lifetime is 15 minutes', async () => {
+    expect((await refused(admin, { forUser: 'u-bob' })).status).toBe(200)
+    expect(lastRow().ttl).toBe(15 * 60_000)
+  })
+
+  test('a non-admin is still 403 ADMIN_ONLY, naming a user or not', async () => {
+    const user = loginHub({ userId: 'u-bob', role: 'user', scopes: ['full'] })
+    expect(await refused(user, { forUser: 'u-bob' })).toEqual({ status: 403, code: 'ADMIN_ONLY' })
+  })
+
+  // Login off (the desktop app's own hub, no restAuth slot): unchanged — anyone on the
+  // box mints, for nobody. Naming a user there is refused rather than ignored.
+  test('login off: mints for nobody, as before; naming a user is refused', async () => {
+    expect((await refused(undefined, { label: 'local-computer' })).status).toBe(200)
+    const row = lastRow()
+    expect([row.minted_by_user_id, row.owner_user_id]).toEqual([null, null])
+    expect(await refused(undefined, { forUser: 'u-bob' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_UNSUPPORTED'
+    })
+  })
+})
+
 await describe('audit (T-03)', () => {
   test('a refusal writes authz.denied; a mint is written as the verified caller', async () => {
     const audit: Array<Record<string, unknown>> = []
@@ -225,21 +327,48 @@ await describe('audit (T-03)', () => {
       principal = { userId: 'u-user', role: 'user', scopes: ['full'] }
       expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(403)
       principal = { userId: 'u-full', role: 'admin', scopes: ['full'] }
-      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(200)
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(400)
+      expect(
+        (await rest.request('POST', '/api/computers/join-token', { forUser: 'u-dave' })).status
+      ).toBe(400)
+      const minted = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {
+        forUser: 'bob@example.com'
+      })
+      expect(minted.status).toBe(200)
       expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
         'authz.denied:denied:null',
         'authz.denied:denied:u-scoped',
         'authz.denied:denied:u-user',
+        'computer.join_token.mint:denied:u-full',
+        'computer.join_token.mint:denied:u-full',
         'computer.join_token.mint:success:u-full'
       ])
       expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
         'unauthenticated',
         'scoped_session',
         'not_admin',
+        'JOIN_TOKEN_OWNER_REQUIRED',
+        'JOIN_TOKEN_OWNER_DISABLED',
         undefined
       ])
+      // Minter (actor), owner and lifetime; the disabled owner's id, never the typed email.
+      expect(audit[4]!.detail).toEqual({
+        reason: 'JOIN_TOKEN_OWNER_DISABLED',
+        ttlMs: 15 * 60_000,
+        owner: 'u-dave'
+      })
+      expect(audit[5]!.targetKind).toBe('join_token')
+      expect(audit[5]!.detail).toEqual({
+        label: 'local-computer',
+        ttlMs: 15 * 60_000,
+        owner: 'u-bob'
+      })
       expect(audit[0]!.route).toBe('POST /api/computers/join-token')
       expect(audit[0]!.ip).toBe('127.0.0.1')
+      const all = JSON.stringify(audit)
+      expect(all).not.toContain(minted.body.token)
+      expect(all).not.toContain(minted.body.token.split('.')[1]!)
+      expect(all).not.toContain('bob@example.com')
     } finally {
       setSecurityLogSink()
       await rest.close()

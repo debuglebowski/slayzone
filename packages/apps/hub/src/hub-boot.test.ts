@@ -529,7 +529,8 @@ async function main(): Promise<void> {
                 'content-type': 'application/json',
                 authorization: `Bearer ${owner.token}`
               },
-              body: JSON.stringify({ label: 'hub-boot-test' })
+              // T-20: minted FOR a named user.
+              body: JSON.stringify({ label: 'hub-boot-test', forUser: BOOTSTRAP_OWNER_EMAIL })
             })
             return r.status === 200 ? ((await r.json()) as { token: string; hubUrl: string }) : null
           },

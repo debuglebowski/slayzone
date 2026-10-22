@@ -60,8 +60,10 @@ describe('computer schema migration (v149 + v163)', () => {
         'expires_at',
         'used_at',
         'computer_id',
-        // v162 — carries the minting user through to the computer's owner at enroll.
-        'minted_by_user_id'
+        // v162 — who minted it (the owner until T-20).
+        'minted_by_user_id',
+        // v170 — who it is for: the redeemed computer's owner (T-20).
+        'owner_user_id'
       ])
       expect(columnNames(t.raw, 'project_placements')).toEqual([
         'computer_id',
@@ -109,6 +111,28 @@ describe('computer schema migration (v149 + v163)', () => {
     try {
       expect(() => runMigrations(t.raw)).not.toThrow()
       expect(t.raw.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
+    } finally {
+      t.close()
+    }
+  })
+
+  it("v170 backfills a join token's owner from its minter, who was the owner before", () => {
+    const t = createMigratedDb()
+    try {
+      // Back to v169: no owner column, one unused token an admin minted for themselves.
+      t.raw.exec('ALTER TABLE join_tokens DROP COLUMN owner_user_id')
+      t.raw.pragma('user_version = 169')
+      t.raw
+        .prepare(
+          `INSERT INTO join_tokens (id, token_hash, label, created_at, expires_at, minted_by_user_id)
+           VALUES ('jt-old', 'h', 'old', 1, 2, 'alice'), ('jt-local', 'h2', 'local', 1, 2, NULL)`
+        )
+        .run()
+      runMigrations(t.raw)
+      expect(t.raw.prepare('SELECT id, owner_user_id FROM join_tokens ORDER BY id').all()).toEqual([
+        { id: 'jt-local', owner_user_id: null },
+        { id: 'jt-old', owner_user_id: 'alice' }
+      ])
     } finally {
       t.close()
     }

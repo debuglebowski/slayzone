@@ -248,7 +248,8 @@ async function main(): Promise<void> {
     // `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
     // simulating an authenticated caller some other way.
     const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
-    const ownerToken = (JSON.parse(ownerRaw) as { token?: string }).token
+    const owner = JSON.parse(ownerRaw) as { token?: string; userId?: string }
+    const ownerToken = owner.token
     assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
 
     // --- mint a join token over the loopback REST channel --------------------
@@ -261,7 +262,8 @@ async function main(): Promise<void> {
             'content-type': 'application/json',
             authorization: `Bearer ${ownerToken}`
           },
-          body: JSON.stringify({ label: 'install-handshake' })
+          // T-20: minted FOR a named user — the owner, by account id.
+          body: JSON.stringify({ label: 'install-handshake', forUser: owner.userId })
         })
         if (r.status !== 200) return null
         return (await r.json()) as { token: string; hubUrl: string }

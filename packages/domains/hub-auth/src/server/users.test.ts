@@ -17,12 +17,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { findHubAccount } from './account'
 import { createHubAuth, type HubAuth } from './auth'
+import { openBreakGlassAccount } from './break-glass'
 import { mintComputerApiKey, COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import {
   createHubUser,
   disableHubUser,
   enableHubUser,
   findFirstAdmin,
+  findHubUser,
   listHubUsers,
   setHubUserRole,
   type CreatedHubUser
@@ -197,6 +199,37 @@ describe('listHubUsers', () => {
     await create('alice@example.com')
     const [row] = await listHubUsers(auth)
     expect(row!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/)
+  })
+})
+
+describe('findHubUser (the owner a join token names, T-20)', () => {
+  it('finds a person by id, or by email in any case, disabled or not', async () => {
+    const alice = await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    expect((await findHubUser(auth, alice.id))?.email).toBe('alice@example.com')
+    expect((await findHubUser(auth, '  ALICE@Example.com '))?.id).toBe(alice.id)
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    const found = await findHubUser(auth, bob.id)
+    expect(found?.id).toBe(bob.id)
+    expect(found?.disabledAt).not.toBeNull()
+  })
+
+  it('is null for no such account, a blank reference, the service user and break-glass', async () => {
+    await create('alice@example.com')
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
+    const { userId: breakGlassId } = await openBreakGlassAccount(auth)
+    const ctx = await auth.$context
+    const service = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
+    for (const ref of [
+      'nobody@example.com',
+      'no-such-id',
+      '   ',
+      COMPUTER_SERVICE_USER_EMAIL,
+      service!.user.id,
+      breakGlassId
+    ]) {
+      expect(await findHubUser(auth, ref), ref).toBeNull()
+    }
   })
 })
 

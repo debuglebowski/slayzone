@@ -35,6 +35,13 @@
 /** Prefix of a v1 join token — must match `@slayzone/computers/server`. */
 export const JOIN_TOKEN_PREFIX = 'szjt1'
 
+/**
+ * The longest a join token may live: 1 hour (O-5, T-20). The hub refuses a longer
+ * lifetime (`@slayzone/computers/server` join-tokens.ts, which re-exports this);
+ * `slay computer mint` checks it before asking.
+ */
+export const JOIN_TOKEN_MAX_TTL_MS = 60 * 60_000
+
 /** Decoded contents of a join token — what an enrolling computer needs. */
 export interface JoinTokenPayload {
   hubUrl: string
