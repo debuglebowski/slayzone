@@ -84,6 +84,11 @@ autocomplete scans, shell probes, `slay init`, the OS opener) — refuses with
 Hub storage (`hubPathExists`, `removeArtifactDir`) and worktree colors stay; colors
 on such a hub stay empty because their detection runs git.
 
+The uploads that copy a path the client names off the hub's disk — `artifacts.upload`,
+`artifacts.uploadDir`, `projects.uploadIcon`, and `artifacts.pasteFiles` from anywhere
+but the hub's own artifact store — refuse the same way (T-107); bytes sent by the client
+(`artifacts.uploadBlob`, `POST /api/tasks/:id/artifacts`) never touch a client path.
+
 The desktop keeps every path above: its hub runs with the switch at `1`, and it
 depends on the hub-local git panel and on the fallback until its local computer
 enrolls. `pnpm lint:server-boundary` (`scripts/check-hub-exec-imports.mjs`) fails on a

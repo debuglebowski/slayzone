@@ -13,6 +13,7 @@
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
 import { setAppDeps, setHubDescribeDeps, setAuthGate, type AppDeps } from '../app-deps.js'
 import { hubRouter } from './hub.js'
+import { appRouter } from '../router.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb }
@@ -110,11 +111,13 @@ test('auth gate ON + principal present: gated proc runs', async () => {
   // is what a scoped web session with an empty grant would look like, which
   // correctly gets FORBIDDEN on hub.setLabel (never-classified) rather than
   // running. This fixture models an ordinary authenticated (desktop/CLI) call.
-  // An ADMIN account: the hub's name is the admin's to set (T-15).
-  const authedCaller = hubRouter.createCaller({
+  // An ADMIN account: the hub's name is the admin's to set (T-15). Through `appRouter`,
+  // so the gates see the real paths (`hub.setLabel`, `hub.describe`) and their real
+  // role and owner classification (T-17) — a bare `setLabel` is classified nowhere.
+  const authedCaller = appRouter.createCaller({
     db: h.slayDb,
     principal: { userId: 'u1', role: 'admin', orgId: null, scopes: ['full'] }
-  } as never)
+  } as never).hub
   await authedCaller.setLabel({ label: 'authed-write' })
   expect((await authedCaller.describe()).label).toBe('authed-write')
   // Reset the gate so other in-process suites are unaffected.
@@ -124,10 +127,10 @@ test('auth gate ON + principal present: gated proc runs', async () => {
 test('auth gate ON + a non-admin account: setLabel is FORBIDDEN, describe still works (T-15)', async () => {
   setAuthGate(() => true)
   try {
-    const userCaller = hubRouter.createCaller({
+    const userCaller = appRouter.createCaller({
       db: h.slayDb,
       principal: { userId: 'u2', role: 'user', orgId: null, scopes: ['full'] }
-    } as never)
+    } as never).hub
     let code = ''
     try {
       await userCaller.setLabel({ label: 'not-allowed' })

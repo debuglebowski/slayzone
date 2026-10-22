@@ -11,13 +11,15 @@
  *
  * Not a test file: no `.test.` in the name, so the runner does not collect it.
  */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import {
   getAgentLifecycleEvents,
@@ -88,10 +90,13 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
   let adminToken: string | null = null
   let adminUserId: string | null = null
   if (opts.login) {
-    const owner = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as {
-      userId: string
-      token: string
-    }
+    // A reachable hub writes no owner file (T-11): the owner's password derives from
+    // the auth secret, as `slay hub owner-password` prints it.
+    const owner = await signIn(
+      handle.port,
+      BOOTSTRAP_OWNER_EMAIL,
+      deriveBootstrapOwnerPassword(SECRET)
+    )
     adminToken = owner.token
     adminUserId = owner.userId
   }
@@ -120,16 +125,26 @@ export async function signedInUser(
   })
   const body = (await created.json()) as { data: { id: string; password: string } }
   if (!created.ok) throw new Error(`create ${email}: ${created.status} ${JSON.stringify(body)}`)
+  return signIn(hub.port, email, body.data.password)
+}
+
+/** Password sign-in: the account's id and session token. */
+async function signIn(
+  port: number,
+  email: string,
+  password: string
+): Promise<{ userId: string; token: string }> {
   // better-auth checks the Origin of a sign-in; the hub's auth base URL is trusted —
   // its public address (`https://`, composition.ts) since T-09.
-  const signIn = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/sign-in/email`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: `https://${PUBLIC_ADDRESS}` },
-    body: JSON.stringify({ email, password: body.data.password })
+    body: JSON.stringify({ email, password })
   })
-  const session = (await signIn.json()) as { token?: string }
-  if (!signIn.ok || !session.token) throw new Error(`sign in ${email}: ${signIn.status}`)
-  return { userId: body.data.id, token: session.token }
+  const session = (await res.json()) as { token?: string; user?: { id?: string } }
+  if (!res.ok || !session.token || !session.user?.id)
+    throw new Error(`sign in ${email}: ${res.status}`)
+  return { userId: session.user.id, token: session.token }
 }
 
 /** A tRPC client over the hub's real `/trpc` socket. Every client says it is window 7
@@ -194,6 +209,8 @@ export interface Owned {
   readonly automation: string
   /** A computer the owner owns (T-19). */
   readonly computer: string
+  /** The same worktree, as a directory walked whole (T-107). */
+  readonly pathTree: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -220,7 +237,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     projectGroup: id('group'),
     path: join(root, 'work', `${mark}_worktree`),
     automation: id('automation'),
-    computer: id('computer')
+    computer: id('computer'),
+    pathTree: join(root, 'work', `${mark}_worktree`)
   }
 }
 

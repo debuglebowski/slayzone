@@ -6,9 +6,13 @@
  * Drives the real `appRouter` over the tRPC HTTP adapter (the same middleware chain and
  * error formatting the ws adapter uses) on a hub WITHOUT login (no principal, gate off:
  * the desktop's hub) and WITH login (a signed-in `user`), plus the REST and MCP twins of
- * archive-many. Every bad id is refused with BAD_REQUEST + `appCode: INVALID_ID` (REST
- * 400 `{ code }`, MCP `isError`); afterwards the data dir, the DB file, other tasks'
- * artifacts and other projects' icons are byte-identical and nothing appeared outside.
+ * archive-many. Without login every bad id is refused with BAD_REQUEST + `appCode:
+ * INVALID_ID` (REST 400 `{ code }`, MCP `isError`). With login the owner gate (T-17)
+ * answers first: a bad id names nothing the caller owns, so NOT_FOUND — which says
+ * nothing about whether anything exists; only an empty id, which the gate reads as
+ * absent, still reaches INVALID_ID. Either way the data dir, the DB file, other
+ * tasks' artifacts and other projects' icons are byte-identical and nothing appeared
+ * outside.
  * Valid ids still work. Also: a folder download cannot write outside the chosen
  * directory, and the blob store cannot name a path outside `blobs/`.
  *
@@ -175,16 +179,21 @@ for (const [label, principal] of [
       lines.length = 0
     })
 
+    // With login the owner gate refuses before the id is looked at (T-17); it skips an
+    // empty id as absent, which then fails the id check like it does without login.
+    const refusal = principal ? 'NOT_FOUND' : 'BAD_REQUEST + INVALID_ID'
     for (const [proc, input] of PROCEDURES) {
-      test(`${proc}: BAD_REQUEST + INVALID_ID for every bad id`, async () => {
+      test(`${proc}: ${refusal} for every bad id`, async () => {
         const rowsBefore = artifactRows()
         for (const bad of BAD_IDS) {
           const res = await call(principal as Principal | null, proc, input(bad))
-          if (res.error?.data.appCode !== 'INVALID_ID') {
-            throw new Error(`${proc}(${JSON.stringify(bad)}) → ${JSON.stringify(res)}`)
-          }
-          expect(res.status).toBe(400)
-          expect(res.error.data.code).toBe('BAD_REQUEST')
+          const notFound = res.status === 404 && res.error?.data.code === 'NOT_FOUND'
+          const invalid =
+            res.status === 400 &&
+            res.error?.data.code === 'BAD_REQUEST' &&
+            res.error.data.appCode === 'INVALID_ID'
+          const got = principal ? notFound || (bad === '' && invalid) : invalid
+          if (!got) throw new Error(`${proc}(${JSON.stringify(bad)}) → ${JSON.stringify(res)}`)
         }
         expect(artifactRows()).toBe(rowsBefore)
         expect(archivedAt(taskB)).toBeNull()
@@ -195,7 +204,9 @@ for (const [label, principal] of [
     test('each refusal wrote one denied audit line, as the caller', () => {
       expect(lines.length).toBeGreaterThanOrEqual(PROCEDURES.length * BAD_IDS.length)
       for (const l of lines) {
-        expect(l.event).toBe('hub.path.refused')
+        // With login: the owner gate's line, or the id check's for an empty id.
+        if (principal) expect(['authz.denied', 'hub.path.refused']).toContain(l.event)
+        else expect(l.event).toBe('hub.path.refused')
         expect(l.outcome).toBe('denied')
         expect(l.actor).toBe(principal ? 'user-7' : null)
       }
