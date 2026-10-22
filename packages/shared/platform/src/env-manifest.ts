@@ -122,6 +122,9 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // default. Infra like the switches: a hub started from a task terminal must not
   // inherit its parent's period and start deleting.
   SLAYZONE_HUB_SESSION_RETENTION_DAYS: 'infra',
+  // The Convex deployment (host[:port]) the hub starts GitHub sign-in against — never
+  // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
+  SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect

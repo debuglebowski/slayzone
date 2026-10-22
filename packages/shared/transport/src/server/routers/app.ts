@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { hubGithubSignInConvexUrl } from '../auth-github'
 import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
@@ -256,7 +257,12 @@ export const appLevelRouter = router({
     // GitHub's authorize page itself.
     githubSystemSignIn: publicProcedure.input(anyInput).mutation(({ input }) => {
       assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
-      return getAppDeps().authGithubSystemSignIn(input as never)
+      // T-99: the host POSTs only to THIS hub's Convex deployment. A client `convexUrl`
+      // naming another host (or a hub with none configured) is refused here, before the
+      // host is asked; what the host gets is the hub's own value, never the client's.
+      const req = typeof input === 'object' && input !== null ? input : {}
+      const convexUrl = hubGithubSignInConvexUrl((req as { convexUrl?: unknown }).convexUrl)
+      return getAppDeps().authGithubSystemSignIn({ ...req, convexUrl } as never)
     }),
     // Chromium-fork OAuth callback relay. The C++ shell forwards the
     // `slayzone://auth/callback` deep-link to the sidecar (auth:deep-link), the

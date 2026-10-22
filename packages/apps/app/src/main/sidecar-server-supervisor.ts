@@ -88,6 +88,13 @@ export type SidecarServerOpts = {
    * ambiguity. Overrides the sticky-port/probe logic entirely — never cleared.
    */
   fixedPort?: number
+  /**
+   * The Convex deployment (`host[:port]`) this app's renderer was built for, handed to
+   * the hub as `SLAYZONE_HUB_CONVEX_ADDRESS` (after the inherited hub config is
+   * stripped). The hub starts GitHub sign-in only against this one, never a URL a
+   * client names (T-99). Absent = the hub has no Convex sign-in.
+   */
+  convexAddress?: string
 }
 
 export type SidecarHealth = 'starting' | 'ready' | 'restarting' | 'failed'
@@ -333,7 +340,8 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           // Set explicitly (it is also the default) so this does not depend on
           // whatever the app was launched with. Boot rule B1 is what keeps such a hub
           // on loopback.
-          SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+          SLAYZONE_HUB_REQUIRE_LOGIN: '0',
+          ...(opts.convexAddress ? { SLAYZONE_HUB_CONVEX_ADDRESS: opts.convexAddress } : {})
         }
         const proc = spawn(opts.execPath, [opts.scriptPath], {
           env: childEnv,

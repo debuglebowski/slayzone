@@ -97,6 +97,12 @@ export default defineConfig(({ mode }) => {
   return {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps })],
+      // The renderer's Convex deployment (its `import.meta.env.VITE_CONVEX_URL`, read
+      // from the same `root` env + mode), so main can hand the hub the one deployment
+      // the renderer signs in against (T-99, hub-convex.ts). '' = Convex off.
+      define: {
+        __SLAYZONE_CONVEX_URL__: JSON.stringify(env.VITE_CONVEX_URL ?? '')
+      },
       build: {
         rollupOptions: {
           input: {

@@ -106,6 +106,13 @@ export const HUB_ALLOWED_WEB_ORIGINS_ENV = 'SLAYZONE_HUB_ALLOWED_WEB_ORIGINS'
 export const HUB_TRUSTED_PROXIES_ENV = 'SLAYZONE_HUB_TRUSTED_PROXIES'
 
 /**
+ * The Convex deployment this hub starts GitHub sign-in against (`host[:port]`, no
+ * scheme — loopback → http, else https). Unset = no Convex sign-in on this hub. The hub
+ * never POSTs to a Convex URL a client names (T-99); see `hub-convex.ts`.
+ */
+export const HUB_CONVEX_ADDRESS_ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
+
+/**
  * Every variable that configures a hub PROCESS. A parent that spawns a hub with its
  * own values (the desktop app's sidecar) must clear all of these first: whatever it
  * inherited from wherever IT was launched (a task terminal, a shell profile, a CI
@@ -127,7 +134,8 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   LEGACY_HUB_LISTEN_ENV,
   HUB_ALLOWED_WEB_ORIGINS_ENV,
   HUB_TRUSTED_PROXIES_ENV,
-  HUB_SESSION_RETENTION_DAYS_ENV
+  HUB_SESSION_RETENTION_DAYS_ENV,
+  HUB_CONVEX_ADDRESS_ENV
 ]
 
 /** Thrown for a malformed switch value (rule B4). */

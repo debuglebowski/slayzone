@@ -394,7 +394,13 @@ import {
 } from '@slayzone/settings/theme'
 import { getClientRoot } from '@slayzone/platform'
 import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
+import { convexAddressFromUrl } from '@slayzone/platform/hub-convex'
 import { migrateClientSettings } from './client-settings-migration'
+
+// Inlined by electron.vite.config.ts (main `define`) from the SAME `VITE_CONVEX_URL` the
+// renderer is built with, so the hub is handed exactly the deployment the renderer names.
+declare const __SLAYZONE_CONVEX_URL__: string | undefined
+const BUILD_CONVEX_URL = typeof __SLAYZONE_CONVEX_URL__ === 'string' ? __SLAYZONE_CONVEX_URL__ : ''
 
 /**
  * One-shot latch for the Linux CLI-symlink warning. Client-scoped by nature —
@@ -2446,6 +2452,9 @@ app
               // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
               // so the Diagnostics "Database" row can name the file.
               dbPath: getDatabasePath(),
+              // T-99: the Convex deployment THIS build's renderer signs in against. The
+              // hub starts GitHub sign-in only against it, never a URL a client names.
+              convexAddress: convexAddressFromUrl(BUILD_CONVEX_URL),
               env: {
                 ...process.env,
                 // The sidecar IS this app's hub, so hand it this app's own
