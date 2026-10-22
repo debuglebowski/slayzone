@@ -1172,6 +1172,52 @@ await describe('run_command stderr handling', () => {
   })
 })
 
+// T-102: automations.create stores its config as sent, and the engine reads it off
+// the caller's stack (task events, the cron timer). A malformed row used to throw
+// there with nobody listening, which ends the process; on every boot again for cron.
+await describe('malformed rows never escape the engine', () => {
+  test('bad trigger/condition/cron rows are skipped; the good row still fires', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    const insert = (trigger: unknown, conditions: unknown): void => {
+      h.db
+        .prepare(
+          `INSERT INTO automations (id, project_id, name, enabled, trigger_config, conditions, actions, sort_order, last_run_at)
+           VALUES (?, ?, 'bad', 1, ?, ?, '[]', 0, datetime('now', '-1 day'))`
+        )
+        .run(crypto.randomUUID(), projectId, JSON.stringify(trigger), JSON.stringify(conditions))
+    }
+    insert(null, [])
+    insert({ type: 'task_created' }, {})
+    insert({ type: 'task_created' }, [null])
+    insert({ type: 'task_status_change' }, [])
+    insert({ type: 'cron' }, [])
+    insert({ type: 'cron', params: { expression: 5 } }, [])
+    const good = createAutomation({ triggerType: 'task_created' })
+
+    const escaped: unknown[] = []
+    const onEscape = (e: unknown): void => void escaped.push(e)
+    process.on('unhandledRejection', onEscape)
+    process.on('uncaughtException', onEscape)
+    try {
+      h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
+      taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
+      taskEvents.emit('task:created', { taskId, projectId })
+      taskEvents.emit('task:archived', { taskId, projectId })
+      testIpcMain.emit('db:taskTags:setForTask:done', null, taskId, [])
+      await engine.runCatchup()
+      await (engine as unknown as { tickCron(): Promise<void> }).tickCron()
+      await new Promise((r) => setTimeout(r, 300))
+    } finally {
+      process.off('unhandledRejection', onEscape)
+      process.off('uncaughtException', onEscape)
+      h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
+    }
+    expect(escaped).toHaveLength(0)
+    expect(getRuns(good).length).toBeGreaterThan(0)
+  })
+})
+
 taskEvents.removeAllListeners()
 engine.stop()
 h.cleanup()
