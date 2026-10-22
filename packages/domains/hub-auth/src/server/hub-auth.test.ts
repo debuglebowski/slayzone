@@ -112,6 +112,22 @@ describe('sign-in (in-process auth.api)', () => {
     expect(result.token).toBeTruthy()
   })
 
+  it('a session lives 7 days (O-8, T-12), renewed at most daily, never from a cookie cache', async () => {
+    expect(auth.options.session).toMatchObject({
+      expiresIn: 7 * 24 * 60 * 60,
+      updateAge: 24 * 60 * 60,
+      cookieCache: { enabled: false }
+    })
+    const before = Date.now()
+    const { token } = await auth.api.signInEmail({ body: { email: EMAIL, password } })
+    const session = await auth.api.getSession({
+      headers: new Headers({ authorization: `Bearer ${token}` })
+    })
+    const lifetime = new Date(session!.session.expiresAt).getTime() - before
+    expect(lifetime).toBeGreaterThan(7 * 24 * 60 * 60 * 1000 - 60_000)
+    expect(lifetime).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1000 + 60_000)
+  })
+
   it('rejects a wrong password', async () => {
     await expect(
       auth.api.signInEmail({ body: { email: EMAIL, password: 'wrong-password-123' } })

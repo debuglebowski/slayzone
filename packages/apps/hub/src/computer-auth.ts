@@ -20,7 +20,12 @@
 import { randomUUID } from 'node:crypto'
 import type { HubComputerGatewayOptions } from '@slayzone/computer-transport/server'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
-import { type HubAuth, mintComputerApiKey, verifyComputerApiKey } from '@slayzone/hub-auth/server'
+import {
+  findHubAccount,
+  type HubAuth,
+  mintComputerApiKey,
+  verifyComputerApiKey
+} from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   deterministicLocalComputerId,
@@ -107,6 +112,12 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
 
   const grace = new Map<string, GraceEntry>()
 
+  /** The account exists and is not disabled. */
+  const isActiveAccount = async (userId: string): Promise<boolean> => {
+    const account = await findHubAccount(auth, userId)
+    return account !== null && !account.disabled
+  }
+
   const graceKey = (joinToken: string, name: string): string =>
     `${hashJoinToken(joinToken)} ${name}`
 
@@ -130,6 +141,15 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
       throw new RpcError(
         ComputerTransportErrorCodes.unauthorized,
         `join token rejected: ${verified.reason}`
+      )
+    }
+    // The computer would belong to whoever minted the token: not to an account that has
+    // since been disabled (T-12), nor to one that does not exist. A token minted with
+    // login off names nobody and is unaffected.
+    if (verified.mintedByUserId !== null && !(await isActiveAccount(verified.mintedByUserId))) {
+      throw new RpcError(
+        ComputerTransportErrorCodes.unauthorized,
+        'join token rejected: its account is disabled'
       )
     }
 
@@ -194,6 +214,11 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
 
     const computer = await getComputer(db, principal.computerId)
     if (!computer || computer.revoked_at !== null) return null
+    // An owned computer works only while its owner's account does (T-12). Disabling
+    // revokes the owner's computers too (user-access.ts); this refuses one that is still
+    // unrevoked anyway. An unowned computer (login off, or enrolled before ownership)
+    // has no account to check.
+    if (computer.owner_user_id && !(await isActiveAccount(computer.owner_user_id))) return null
 
     // The key must be THE key this computer enrolled with, not merely A key that
     // names it. Second half of the impersonation fix whose first half lives in

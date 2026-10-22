@@ -35,6 +35,8 @@ import { createHubAuth, type HubAuth, listHubUsers } from '@slayzone/hub-auth/se
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { applyBreakGlassAtBoot, breakGlassFilePath, type BreakGlassFile } from './break-glass.js'
 import { createHubUsersCapability } from './hub-users.js'
+import { createTrpcConnectionRegistry } from './trpc-connections.js'
+import { createUserAccessRevoker } from './user-access.js'
 import {
   passwordRouteRefusal,
   restAuthAction,
@@ -42,6 +44,14 @@ import {
   withRestAuth
 } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
+
+/** The hub's revocation outside hub-auth (T-12), with no computer gateway. */
+const revokerFor = (db: SlayzoneDb) =>
+  createUserAccessRevoker({
+    db,
+    getGateway: () => null,
+    connections: createTrpcConnectionRegistry()
+  })
 
 let passed = 0
 let failed = 0
@@ -443,7 +453,7 @@ async function main(): Promise<void> {
 
     await test('hub users capability: create refused with HUB_PASSWORD_DISABLED when off', async () => {
       const auth = await bootAuth(false, false, join(tmpDir, 'other-hub-auth.sqlite'))
-      const users = createHubUsersCapability(() => auth, db)
+      const users = createHubUsersCapability(() => auth, revokerFor(db))
       let err: unknown = null
       const lines = await captureAudit(async () => {
         err = await users.create({ email: 'new@example.com' }).catch((e: unknown) => e)

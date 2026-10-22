@@ -179,6 +179,14 @@ export interface HubComputerGateway {
   /** {@link listUsableComputers} for one computer. */
   isComputerUsable(computerId: string): boolean
   readonly events: TypedEventEmitter<ComputerGatewayEvents>
+  /**
+   * Drop one computer's connection now and reject its in-flight requests — for a
+   * computer whose credential was just revoked (T-12: its owner was disabled), which
+   * would otherwise keep working until it next reconnected. False when it is not
+   * connected. It may dial back: whether its `hello` is accepted is `verifyApiKey`'s
+   * decision, not this one's.
+   */
+  disconnect(computerId: string, reason: string): boolean
   /** Terminate every connection and reject all in-flight requests. */
   close(): void
 }
@@ -710,6 +718,14 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     isComputerUsable(computerId: string): boolean {
       const conn = byComputerId.get(computerId)
       return conn !== undefined && isUsable(conn)
+    },
+    disconnect(computerId: string, reason: string): boolean {
+      const conn = byComputerId.get(computerId)
+      if (!conn) return false
+      teardown(conn, reason)
+      // 1008 = policy violation. A close reason is capped at 123 bytes.
+      conn.ws.close(1008, reason.slice(0, 120))
+      return true
     },
     close(): void {
       closed = true

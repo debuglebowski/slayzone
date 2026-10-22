@@ -1,4 +1,10 @@
-export { createHubAuth, COMPUTER_KEY_PREFIX, type HubAuth, type HubAuthConfig } from './auth'
+export {
+  createHubAuth,
+  COMPUTER_KEY_PREFIX,
+  SESSION_LIFETIME,
+  type HubAuth,
+  type HubAuthConfig
+} from './auth'
 export { createAuthExpressApp, type FetchHandlerAuth } from './app'
 export { isPasswordSignInEnabled, PASSWORD_AUTH_ENDPOINTS } from './password'
 export {
@@ -48,5 +54,16 @@ export {
   isEntraSsoAuth,
   loadEntraClientCredential,
   type EntraClientCredential,
+  type EntraFetch,
   type EntraSsoConfig
 } from './entra'
+export {
+  createEntraRecheck,
+  DEFINITE_REFUSALS,
+  ENTRA_RECHECK_TIMEOUT_MS,
+  type EntraRecheck,
+  type EntraRecheckOptions,
+  type RecheckKeptReason,
+  type RecheckOutcome,
+  type RecheckReport
+} from './entra-recheck'

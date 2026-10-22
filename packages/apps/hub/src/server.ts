@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { WebSocketServer } from 'ws'
+import { type WebSocket, WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
   appRouter,
@@ -171,7 +171,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         dataRoot,
         enablePassword: switches.enablePassword,
         ssoActive: boot.ssoActive,
-        log: (m) => log(m)
+        log: (m) => log(m),
+        revokeUser: (userId) => composition.userAccess.revokeUser(userId, 'user_disabled')
       })
     } catch (err) {
       const message = `[slayzone] break-glass step failed: ${err instanceof Error ? err.message : String(err)}`
@@ -451,9 +452,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // principal stays null, no verify → byte-identical to trusted loopback.
   const createTrpcContext = async ({
     req,
+    res,
     info
   }: {
     req: IncomingMessage
+    res?: WebSocket
     info?: { connectionParams?: Record<string, string | undefined> | null }
   }) => {
     // windowId (?windowId=N) → ctx.windowId. Required by claimSession +
@@ -467,12 +470,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // auth. An invalid/absent token → principal stays null; individual procedures
     // gate on ctx.principal via the auth gate (an authed hub still accepts the
     // connection but attributes it). See hub-trpc-context.ts for the decision.
-    const principal = await resolveConnectionPrincipal({
-      hubAuthRequired,
-      hubAuth,
-      db,
-      token: info?.connectionParams?.token
-    })
+    const resolve = () =>
+      resolveConnectionPrincipal({
+        hubAuthRequired,
+        hubAuth,
+        db,
+        token: info?.connectionParams?.token
+      })
+    const principal = await resolve()
+    // T-12: the principal is resolved once per socket, so the socket is tracked by its
+    // account — revoking the account closes it, and its credential is re-resolved
+    // periodically (trpc-connections.ts). Login off: no principal, nothing tracked.
+    if (principal && res) {
+      composition.trpcConnections.track(res, principal.userId, async () => {
+        return (await resolve())?.userId ?? null
+      })
+    }
     return {
       db,
       dataRoot,

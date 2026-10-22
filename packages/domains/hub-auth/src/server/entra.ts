@@ -64,7 +64,7 @@ import {
   type OAuth2Tokens,
   type OAuthProvider
 } from 'better-auth/oauth2'
-import { createRemoteJWKSet, type JWTPayload, jwtVerify } from 'jose'
+import { createRemoteJWKSet, customFetch, type JWTPayload, jwtVerify } from 'jose'
 import type { HubRole } from '../shared/types'
 import { readRole } from './account'
 
@@ -340,10 +340,36 @@ async function passedVerdict(): Promise<Extract<EntraVerdict, { ok: true }> | nu
 // Token endpoint
 // ---------------------------------------------------------------------------
 
-/** One POST to the token endpoint, authenticated with a fresh client assertion. */
+/**
+ * The token endpoint answered with an error. Carries only the HTTP status, the OAuth
+ * `error` code and Entra's AADSTS number — never the request (code, assertion, refresh
+ * token) or the free-text description.
+ */
+export class EntraTokenError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    readonly aadsts: string | null
+  ) {
+    super(
+      `[hub-auth] Entra token endpoint answered ${status} (${code}${aadsts ? `, ${aadsts}` : ''})`
+    )
+    this.name = 'EntraTokenError'
+  }
+}
+
+/** The `fetch` the token endpoint and the key set are reached through; tests pass a fake. */
+export type EntraFetch = typeof fetch
+
+/**
+ * One POST to the token endpoint, authenticated with a fresh client assertion. Throws
+ * {@link EntraTokenError} when Entra answers with an error; a network failure or a
+ * timeout throws whatever `fetch` threw.
+ */
 async function tokenRequest(
   cfg: EntraSsoConfig,
-  params: Record<string, string>
+  params: Record<string, string>,
+  opts: { fetch?: EntraFetch; signal?: AbortSignal } = {}
 ): Promise<OAuth2Tokens> {
   const endpoint = tokenEndpoint(cfg)
   const body = new URLSearchParams({
@@ -354,23 +380,102 @@ async function tokenRequest(
   })
   // `manual`: the code and the assertion go to exactly one place, never on to
   // wherever a redirect points.
-  const res = await fetch(endpoint, {
+  const res = await (opts.fetch ?? fetch)(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
     body,
-    redirect: 'manual'
+    redirect: 'manual',
+    ...(opts.signal ? { signal: opts.signal } : {})
   })
   const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!res.ok || !data) {
     // Only the error code and Entra's AADSTS number reach the log (better-auth logs
     // this error): never the request, which carries the code and the assertion.
     const code = str(data?.error) ?? 'no_body'
-    const aadsts = /AADSTS\d+/.exec(String(data?.error_description ?? ''))?.[0]
-    throw new Error(
-      `[hub-auth] Entra token endpoint answered ${res.status} (${code}${aadsts ? `, ${aadsts}` : ''})`
-    )
+    const aadsts = /AADSTS\d+/.exec(String(data?.error_description ?? ''))?.[0] ?? null
+    throw new EntraTokenError(res.status, code, aadsts)
   }
   return getOAuth2Tokens(data)
+}
+
+/**
+ * Redeem a refresh token (the hourly re-check, ./entra-recheck.ts): the same request,
+ * scopes and client assertion as the provider's own refresh below — no secret.
+ */
+export function refreshEntraTokens(
+  cfg: EntraSsoConfig,
+  refreshToken: string,
+  opts: { fetch?: EntraFetch; signal?: AbortSignal } = {}
+): Promise<OAuth2Tokens> {
+  return tokenRequest(
+    cfg,
+    { grant_type: 'refresh_token', refresh_token: refreshToken, scope: ENTRA_SCOPES.join(' ') },
+    opts
+  )
+}
+
+/** The tenant's signing keys (cached by jose, refetched on an unknown `kid`). */
+export function entraKeySet(cfg: EntraSsoConfig, fetchImpl?: EntraFetch): KeyResolver {
+  return createRemoteJWKSet(
+    new URL(`${authorityOf(cfg)}/${cfg.tenantId.toLowerCase()}/discovery/v2.0/keys`),
+    fetchImpl ? { [customFetch]: fetchImpl } : undefined
+  )
+}
+
+/** What a refreshed ID token says about the account, or why it says nothing usable. */
+export type RefreshedIdTokenVerdict =
+  /** `role: null`: the token carries no `roles` claim at all, so it says nothing about
+   *  the role (see below). */
+  | { ok: true; role: HubRole | null }
+  | {
+      ok: false
+      /** `unassigned`: verified, this account, and it holds neither app role. The rest:
+       *  the token could not be trusted (a key-set fetch failure lands here too). */
+      reason: 'unassigned' | 'invalid_token' | 'wrong_tenant' | 'subject_mismatch'
+    }
+
+/**
+ * The ID token a refresh returned, checked like a sign-in's — signature, audience,
+ * lifetime, then tenant and issuer ({@link evaluateEntraIdToken}) — and bound to the
+ * account it was refreshed for. `amr` and the email are not re-checked: they describe
+ * the sign-in this token descends from, which passed them.
+ *
+ * A token with NO `roles` claim is read as "no information", not as "unassigned": if
+ * Entra ever left the claim out of refreshed tokens, reading its absence as a refusal
+ * would sign every account out every hour. An unassigned person is still caught: with
+ * "Assignment required" on the enterprise app (what the hub's setup uses) Entra refuses
+ * the refresh itself (`invalid_grant`, AADSTS50105), and every sign-in checks the roles.
+ * A `roles` claim that holds neither app role is a definite `unassigned`.
+ */
+export async function evaluateRefreshedIdToken(
+  cfg: EntraSsoConfig,
+  idToken: string,
+  keys: KeyResolver,
+  accountId: string
+): Promise<RefreshedIdTokenVerdict> {
+  let claims: JWTPayload
+  try {
+    ;({ payload: claims } = await jwtVerify(idToken, keys, {
+      audience: cfg.clientId,
+      algorithms: ['RS256'],
+      clockTolerance: CLOCK_TOLERANCE_SEC
+    }))
+  } catch {
+    return { ok: false, reason: 'invalid_token' }
+  }
+  const tid = str(claims.tid)?.toLowerCase() ?? null
+  if (tid !== cfg.tenantId.toLowerCase() || claims.iss !== entraIssuer(cfg)) {
+    return { ok: false, reason: 'wrong_tenant' }
+  }
+  const oid = str(claims.oid)
+  if (!oid || entraAccountId(oid, tid) !== accountId) {
+    return { ok: false, reason: 'subject_mismatch' }
+  }
+  if (!Array.isArray(claims.roles)) return { ok: true, role: null }
+  const roles = strings(claims.roles)
+  if (roles.includes(ENTRA_ADMIN_ROLE)) return { ok: true, role: 'admin' }
+  if (roles.includes(ENTRA_USER_ROLE)) return { ok: true, role: 'user' }
+  return { ok: false, reason: 'unassigned' }
 }
 
 // ---------------------------------------------------------------------------
@@ -419,12 +524,7 @@ function entraProvider(
     },
     // better-auth's `/refresh-token` and `/get-access-token` (and the re-check of T-12)
     // land here: same client assertion, no secret.
-    refreshAccessToken: (refreshToken) =>
-      tokenRequest(cfg, {
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        scope: ENTRA_SCOPES.join(' ')
-      }),
+    refreshAccessToken: (refreshToken) => refreshEntraTokens(cfg, refreshToken),
     // No ID-token sign-in: a client handing the hub a token it obtained elsewhere is
     // refused. Only the code flow this hub runs itself signs anyone in.
     verifyIdToken: async () => false,
@@ -499,9 +599,7 @@ async function auditRefusal(
 export function entraSso(cfg: EntraSsoConfig) {
   // One key set per instance: jose caches the tenant's keys and refetches on an
   // unknown `kid` (Entra rotates its signing keys).
-  const keys = createRemoteJWKSet(
-    new URL(`${authorityOf(cfg)}/${cfg.tenantId.toLowerCase()}/discovery/v2.0/keys`)
-  )
+  const keys = entraKeySet(cfg)
   let context: AuthContext | null = null
   return {
     id: ENTRA_PLUGIN_ID,

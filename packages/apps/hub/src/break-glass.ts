@@ -68,13 +68,16 @@ export async function applyBreakGlassAtBoot(opts: {
   enablePassword: boolean
   ssoActive: boolean
   log: (message: string) => void
+  /** What closing revokes outside hub-auth (user-access.ts): web sessions, sockets,
+   *  computers. Default: the web sessions only. */
+  revokeUser?: (userId: string) => Promise<unknown>
 }): Promise<BreakGlassOutcome> {
   const { auth, db, dataRoot, log } = opts
   const file = breakGlassFilePath(dataRoot)
 
   if (!opts.enablePassword) {
     const closed = await closeBreakGlassAccounts(auth, {
-      revokeExternalSessions: (userId) => revokeAllWebSessions(db, userId)
+      revokeExternalSessions: opts.revokeUser ?? ((userId) => revokeAllWebSessions(db, userId))
     })
     await rm(file, { force: true })
     if (closed.length > 0) {

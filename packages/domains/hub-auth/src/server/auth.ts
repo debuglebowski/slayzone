@@ -52,6 +52,22 @@ export interface HubAuthConfig {
 export const COMPUTER_KEY_PREFIX = 'szr_'
 
 /**
+ * Full (better-auth) session lifetime, every hub (O-8, T-12): 7 days, renewed to 7 days
+ * from now at most once a day while it is used — so it ends 7 days after its last use.
+ * Both are better-auth's defaults, written down so an upgrade cannot move them. Not
+ * absolute, unlike a web session (web-sessions.ts in the hub): these are the desktop
+ * app's and the CLI's sessions, and on a hub with Entra sign-in the hourly re-check
+ * (./entra-recheck.ts) ends a leaver's within the hour anyway. `cookieCache` stays off:
+ * with it on, `getSession` answers from a signed cookie for its max age without reading
+ * the session or the user, so a revoked session or a disabled account would still pass.
+ */
+export const SESSION_LIFETIME = {
+  expiresIn: 7 * 24 * 60 * 60,
+  updateAge: 24 * 60 * 60,
+  cookieCache: { enabled: false }
+} as const
+
+/**
  * Options are built inline inside `betterAuth()` so the instance type keeps
  * the plugin-inferred `auth.api` endpoints (bearer/jwt/organization/apiKey).
  */
@@ -100,6 +116,8 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         disabledAt: { type: 'date', required: false, input: false }
       }
     },
+    // 7 days (O-8), see SESSION_LIFETIME above.
+    session: { ...SESSION_LIFETIME },
     // OAuth accounts (only Entra's, ./entra.ts; inert on a hub without SSO). An Entra
     // identity is the `account` row keyed on `<oid>.<tid>` and is NEVER linked to an
     // existing user by email: Entra's `email` claim is mutable and not proof of

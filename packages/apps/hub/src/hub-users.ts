@@ -1,8 +1,8 @@
 /**
  * The `hubUsers` capability behind `/api/hub/users` (`slay hub users …`): hub-auth's
- * account functions (`@slayzone/hub-auth/server` users.ts), plus the one step
- * hub-auth cannot take itself — revoking a disabled account's scoped web sessions,
- * which live in the app DB (`web_sessions`, see web-sessions.ts).
+ * account functions (`@slayzone/hub-auth/server` users.ts), plus what hub-auth cannot
+ * reach itself when an account is disabled — its web sessions, open `/trpc` sockets and
+ * computers (user-access.ts, T-12).
  *
  * `getAuth` is read per call: hub-auth is built asynchronously after the REST deps
  * (see the composition root), and stays null forever if its init threw. `ready()`
@@ -18,13 +18,12 @@ import {
   setHubUserRole,
   type HubAuth
 } from '@slayzone/hub-auth/server'
-import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '@slayzone/transport/server'
-import { revokeAllWebSessions } from './web-sessions.js'
+import type { UserAccessRevoker } from './user-access.js'
 
 export function createHubUsersCapability(
   getAuth: () => HubAuth | null,
-  db: SlayzoneDb
+  revoker: Pick<UserAccessRevoker, 'revokeUser'>
 ): NonNullable<RestApiDeps['hubUsers']> {
   return {
     ready: () => getAuth() !== null,
@@ -46,7 +45,7 @@ export function createHubUsersCapability(
       const auth = getAuth()
       if (!auth) return 'not-found'
       return disableHubUser(auth, email, {
-        revokeExternalSessions: (userId) => revokeAllWebSessions(db, userId)
+        revokeExternalSessions: (userId) => revoker.revokeUser(userId, 'user_disabled')
       })
     },
     enable: async (email) => {

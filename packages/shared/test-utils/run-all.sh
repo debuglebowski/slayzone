@@ -112,6 +112,9 @@ run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # Account commands over real hub-auth + app DB: disable revokes BOTH session classes.
 run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
+# Leavers + session lifetimes (T-12): disable ends bearer, szw_, open sockets and owned
+# computers, keeps every row; the hourly Entra re-check through fake timers + fake Entra.
+run_test_electron_strict_loader packages/apps/hub/src/leavers.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
