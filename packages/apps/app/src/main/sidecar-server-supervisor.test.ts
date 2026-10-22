@@ -333,6 +333,9 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     SLAYZONE_HUB_SSO_TENANT_ID: 'inherited-tenant',
     SLAYZONE_HUB_SSO_CLIENT_ID: 'inherited-client',
     SLAYZONE_HUB_SSO_CLIENT_SECRET: 'inherited-sso-secret',
+    SLAYZONE_HUB_SSO_CERT_PATH: '/inherited/sso-cert.pem',
+    SLAYZONE_HUB_SSO_KEY_PATH: '/inherited/sso-key.pem',
+    SLAYZONE_HUB_SSO_REQUIRE_MFA: 'perhaps',
     SLAYZONE_HUB_AUTH_SECRET: 'inherited-auth-secret',
     SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com'
   }
