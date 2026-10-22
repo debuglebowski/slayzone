@@ -107,7 +107,12 @@ export const SECURITY_EVENTS = [
   'hub.retention.sweep',
   /** T-104: an id that is not one plain path segment, or a path outside its base dir,
    *  refused before any disk access (`safe-path.ts`); `detail.code`, `detail.kind`. */
-  'hub.path.refused'
+  'hub.path.refused',
+  // T-12 (added): the hourly Entra re-check (hub-auth `entra-recheck.ts`).
+  /** `denied`: Entra refused an account's refresh token (or it holds no app role any
+   *  more) and its sessions were revoked; `failure` (level info, once per outage): Entra
+   *  could not be asked, sessions kept; `success`: asking works again. */
+  'auth.sso.recheck'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]

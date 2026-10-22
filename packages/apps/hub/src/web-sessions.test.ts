@@ -24,7 +24,11 @@ import {
   hashWebSessionToken,
   WEB_SESSION_TOKEN_PREFIX,
   WEB_SESSION_IDLE_MS,
-  WEB_SESSION_ABSOLUTE_MS
+  WEB_SESSION_ABSOLUTE_MS,
+  SSO_WEB_SESSION_LIFETIME,
+  DEFAULT_WEB_SESSION_LIFETIME,
+  hasLiveWebSession,
+  webSessionLifetimeFor
 } from './web-sessions.js'
 
 const h = await createTestHarness()
@@ -133,6 +137,63 @@ await describe('idle refresh, capped at the absolute ceiling', () => {
     // usedAt + WEB_SESSION_IDLE_MS at this last step is created+31d — past the
     // 30-day ceiling — so the stored value must be the CAPPED ceiling, not that.
     expect(row!.expires_at).toBe(absoluteCeiling)
+  })
+})
+
+await describe('lifetime on a hub with Entra sign-in (O-8, T-12): 7 days absolute', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const sso = SSO_WEB_SESSION_LIFETIME
+
+  test('the lifetimes: SSO 7 days absolute; every other hub unchanged (7 idle / 30)', () => {
+    expect(sso).toEqual({ idleMs: 7 * DAY, absoluteMs: 7 * DAY })
+    expect(DEFAULT_WEB_SESSION_LIFETIME).toEqual({ idleMs: 7 * DAY, absoluteMs: 30 * DAY })
+    expect(webSessionLifetimeFor(null)).toBe(DEFAULT_WEB_SESSION_LIFETIME)
+  })
+
+  test('use does not extend it, and it ends exactly 7 days after minting', async () => {
+    const created = 50_000_000
+    const minted = await mintWebSession(h.slayDb, {
+      userId: 'u-sso',
+      scopes: ['read'],
+      lifetime: sso,
+      now: created
+    })
+    expect(minted.expiresAt).toBe(created + 7 * DAY)
+    expect((await verifyWebSessionToken(h.slayDb, minted.token, created + 6 * DAY, sso)).ok).toBe(
+      true
+    )
+    const row = await h.slayDb.get<{ expires_at: number }>(
+      `SELECT expires_at FROM web_sessions WHERE id = ?`,
+      [minted.id]
+    )
+    expect(row!.expires_at).toBe(created + 7 * DAY) // not slid
+    const late = await verifyWebSessionToken(h.slayDb, minted.token, created + 7 * DAY, sso)
+    expect(late.ok).toBe(false)
+    if (!late.ok) expect(late.reason).toBe('expired')
+  })
+
+  test('a row minted under the 30-day ceiling ends at 7 days once the hub has Entra sign-in', async () => {
+    const created = 60_000_000
+    const minted = await mintWebSession(h.slayDb, {
+      userId: 'u-old',
+      scopes: ['read'],
+      now: created
+    })
+    // Kept alive by use under the old lifetime...
+    expect((await verifyWebSessionToken(h.slayDb, minted.token, created + 6 * DAY)).ok).toBe(true)
+    // ...but past 7 days from minting it no longer verifies under the SSO one.
+    const result = await verifyWebSessionToken(h.slayDb, minted.token, created + 8 * DAY, sso)
+    expect(result.ok).toBe(false)
+  })
+
+  test('hasLiveWebSession: unrevoked, unexpired, within the absolute limit', async () => {
+    const now = 70_000_000
+    await mintWebSession(h.slayDb, { userId: 'u-live', scopes: ['read'], lifetime: sso, now })
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + DAY)).toBe(true)
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + 7 * DAY)).toBe(false)
+    expect(await hasLiveWebSession(h.slayDb, 'u-nobody', sso, now)).toBe(false)
+    await revokeAllWebSessions(h.slayDb, 'u-live')
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + DAY)).toBe(false)
   })
 })
 

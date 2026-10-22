@@ -613,6 +613,34 @@ describe('needs-re-enrollment (the hub no longer recognizes this computer)', () 
   })
 })
 
+describe('disconnect (T-12: the credential was revoked)', () => {
+  it('drops a live computer now; with its key revoked it cannot come back', async () => {
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    hub.auth.byApiKey.set('key-live', { computerId: 'computer-9', ...IDENTITY })
+    await store.save({ computerId: 'computer-9', apiKey: 'key-live' })
+    const dialer = makeDialer(hub.url, { credentialStore: store, joinToken: undefined })
+    dialer.start()
+    await dialer.events.once('connected')
+    expect(hub.gateway.isComputerUsable('computer-9')).toBe(true)
+
+    const gone = hub.gateway.events.once('computer-disconnected')
+    const fatal = dialer.events.once('error')
+    hub.auth.byApiKey.delete('key-live') // what revoking does to verifyApiKey
+    expect(hub.gateway.disconnect('computer-9', 'owner disabled')).toBe(true)
+
+    expect(await gone).toEqual({ computerId: 'computer-9', reason: 'owner disabled' })
+    expect(hub.gateway.listComputers()).toEqual([])
+    const { reason } = await fatal
+    expect(reason).toBe('needs-re-enrollment')
+  })
+
+  it('is false for a computer that is not connected', async () => {
+    const hub = await startHub()
+    expect(hub.gateway.disconnect('computer-nobody', 'owner disabled')).toBe(false)
+  })
+})
+
 describe('audit (T-03)', () => {
   /** Audit lines written while the test runs, parsed. */
   function captureAudit(): Array<Record<string, unknown>> {

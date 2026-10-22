@@ -96,10 +96,10 @@ export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admi
 
 export interface DisableHubUserOptions {
   /**
-   * Revoke the account's sessions held OUTSIDE hub-auth's database — the hub's
-   * scoped web sessions (`web_sessions` in the app DB, which this package cannot
-   * reach). Called after the account is flagged and its better-auth sessions are
-   * gone.
+   * Revoke what the account holds OUTSIDE hub-auth's database, which this package
+   * cannot reach — on the hub (T-12, `user-access.ts`): its scoped web sessions
+   * (`web_sessions` in the app DB), its open `/trpc` sockets and its computers. Called
+   * after the account is flagged and its better-auth sessions are gone.
    */
   revokeExternalSessions?: (userId: string) => Promise<unknown>
 }

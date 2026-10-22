@@ -169,6 +169,9 @@ import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
 import { startSessionRetention } from './session-retention.js'
+import { startSsoRecheck } from './sso-recheck.js'
+import { createTrpcConnectionRegistry, type TrpcConnectionRegistry } from './trpc-connections.js'
+import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.js'
 import { getDatabasePathFromEnv } from './db.js'
 import { resolveAuthDbPath } from './auth-db.js'
 import { createPtyEnricher } from '@slayzone/task-terminals/server'
@@ -240,6 +243,11 @@ export type ServerComposition = {
    *  after it binds its port, which happens AFTER composeServer returns — so it's a
    *  late-bound setter, not a constructor arg. */
   setComputerListenerInfo: (info: { hubUrl: string }) => void
+  /** Authenticated `/trpc` sockets by account (T-12): server.ts tracks them, revoking
+   *  an account closes them. */
+  trpcConnections: TrpcConnectionRegistry
+  /** Ends what an account holds outside hub-auth (T-12, user-access.ts). */
+  userAccess: UserAccessRevoker
 }
 
 export function composeServer(opts: {
@@ -1156,6 +1164,15 @@ export function composeServer(opts: {
   ptyEvents.on('replacing', (sessionId) => evictAgentTree(sessionId))
   ptyEvents.on('exit', (sessionId) => evictAgentTree(sessionId))
 
+  // T-12: disabling an account (or an Entra refusal) also ends its web sessions, its
+  // open /trpc sockets and its computers — see user-access.ts.
+  const trpcConnections = createTrpcConnectionRegistry()
+  const userAccess = createUserAccessRevoker({
+    db,
+    getGateway: () => computerGatewayRef,
+    connections: trpcConnections
+  })
+
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
     db,
@@ -1205,9 +1222,9 @@ export function composeServer(opts: {
     // constructed. `ready` is therefore a function, never a captured value — and it
     // stays false permanently if `createHubAuth` threw (that failure is swallowed
     // into a diagnostic), which the route surfaces as a 503 naming
-    // `computer.init_failed`. Disabling also revokes the account's web sessions in
-    // THIS db (see hub-users.ts).
-    hubUsers: createHubUsersCapability(() => hubAuthRef, db),
+    // `computer.init_failed`. Disabling also revokes the account's web sessions,
+    // sockets and computers (see user-access.ts).
+    hubUsers: createHubUsersCapability(() => hubAuthRef, userAccess),
     // Bearer authority for routes that self-guard rather than sitting behind the
     // outer gate — `POST /api/computers/join-token` (so `slay computer mint` can
     // target a hub on another machine) and `/api/hub/users` (so `slay hub users …`
@@ -1389,6 +1406,9 @@ export function composeServer(opts: {
       ...(opts.enablePassword === false ? { enablePassword: false } : {})
     })
     hubAuthRef = hubAuth
+    // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
+    // (sso-recheck.ts). No-op without SSO — the desktop app's hub creates no timer.
+    startSsoRecheck({ auth: hubAuth, sso, db, revoker: userAccess })
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
     // which enroll name is the co-located auto-spawned computer so it collapses to
     // ONE deterministic-id row instead of orphaning one per boot. MUST match the
@@ -1661,6 +1681,8 @@ export function composeServer(opts: {
     computersReady,
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
-    }
+    },
+    trpcConnections,
+    userAccess
   }
 }

@@ -23,7 +23,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
 import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
-import { findHubAccount, type HubAuth } from '@slayzone/hub-auth/server'
+import { findHubAccount, type HubAuth, isEntraSsoAuth } from '@slayzone/hub-auth/server'
 import type { HubRole } from '@slayzone/hub-auth'
 import type { Scope } from '@slayzone/transport/server'
 
@@ -55,6 +55,38 @@ export const WEB_SESSION_COOKIE_NAME = 'slayzone_web_session'
 export const WEB_SESSION_IDLE_MS = 7 * 24 * 60 * 60 * 1000
 export const WEB_SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * How long a web session lives: `idleMs` after its last use, and never past
+ * `absoluteMs` after it was minted.
+ */
+export interface WebSessionLifetime {
+  idleMs: number
+  absoluteMs: number
+}
+
+/** Every hub without Entra sign-in (the desktop app's included): unchanged, 7 days idle
+ *  within 30 days. */
+export const DEFAULT_WEB_SESSION_LIFETIME: WebSessionLifetime = {
+  idleMs: WEB_SESSION_IDLE_MS,
+  absoluteMs: WEB_SESSION_ABSOLUTE_MS
+}
+
+/**
+ * A hub with Entra sign-in (O-8, T-12): 7 days ABSOLUTE — use does not extend it. No
+ * shorter idle limit: a leaver is ended by disabling (which revokes) or by the hourly
+ * Entra re-check, not by a browser going quiet, and a daily sign-in would only add
+ * friction.
+ */
+export const SSO_WEB_SESSION_LIFETIME: WebSessionLifetime = {
+  idleMs: 7 * 24 * 60 * 60 * 1000,
+  absoluteMs: 7 * 24 * 60 * 60 * 1000
+}
+
+/** The lifetime web sessions get on the hub `auth` belongs to. */
+export function webSessionLifetimeFor(auth: HubAuth | null): WebSessionLifetime {
+  return auth && isEntraSsoAuth(auth) ? SSO_WEB_SESSION_LIFETIME : DEFAULT_WEB_SESSION_LIFETIME
+}
+
 export interface WebSessionRow {
   id: string
   user_id: string
@@ -70,6 +102,8 @@ export interface MintWebSessionInput {
   userId: string
   scopes: readonly Scope[]
   label?: string | null
+  /** Default {@link DEFAULT_WEB_SESSION_LIFETIME}. */
+  lifetime?: WebSessionLifetime
   /** Clock override for tests. */
   now?: number
 }
@@ -103,7 +137,8 @@ export async function mintWebSession(
   const now = input.now ?? Date.now()
   const token = `${WEB_SESSION_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
   const id = randomUUID()
-  const expiresAt = now + WEB_SESSION_IDLE_MS
+  const lifetime = input.lifetime ?? DEFAULT_WEB_SESSION_LIFETIME
+  const expiresAt = now + Math.min(lifetime.idleMs, lifetime.absoluteMs)
   await db.run(
     `INSERT INTO web_sessions
        (id, user_id, token_hash, scopes_json, label, created_at, expires_at, revoked_at)
@@ -135,26 +170,32 @@ export type VerifyWebSessionResult =
 
 /**
  * Verify a token and, on success, slide its idle expiry forward — capped at
- * `WEB_SESSION_ABSOLUTE_MS` from ORIGINAL `created_at`, never from the refresh
- * itself, so a continuously-used stolen token still dies within 30 days.
+ * `lifetime.absoluteMs` from ORIGINAL `created_at`, never from the refresh
+ * itself, so a continuously-used stolen token still dies within 30 days (7 on a hub
+ * with Entra sign-in, where idle = absolute and nothing slides).
  *
- * Fails CLOSED on anything but a clean hit: unknown hash, `revoked_at` set, or
- * past `expires_at` are all `ok: false` — never throws, matching the fail-quiet
- * shape `verifySession`/`verifyRestBearer` already establish for this codebase.
+ * Fails CLOSED on anything but a clean hit: unknown hash, `revoked_at` set, past
+ * `expires_at`, or older than the absolute limit (a row minted under a longer one, on
+ * a hub that has since turned Entra sign-in on) are all `ok: false` — never throws,
+ * matching the fail-quiet shape `verifySession`/`verifyRestBearer` already establish
+ * for this codebase. This checks the ROW only; {@link resolveWebSession} also checks
+ * the account behind it.
  */
 export async function verifyWebSessionToken(
   db: SlayzoneDb,
   token: string,
-  now = Date.now()
+  now = Date.now(),
+  lifetime: WebSessionLifetime = DEFAULT_WEB_SESSION_LIFETIME
 ): Promise<VerifyWebSessionResult> {
   const row = await db.get<WebSessionRow>(`SELECT * FROM web_sessions WHERE token_hash = ?`, [
     hashWebSessionToken(token)
   ])
   if (!row) return { ok: false, reason: 'unknown' }
   if (row.revoked_at !== null) return { ok: false, reason: 'revoked' }
-  if (row.expires_at <= now) return { ok: false, reason: 'expired' }
+  const ceiling = row.created_at + lifetime.absoluteMs
+  if (row.expires_at <= now || ceiling <= now) return { ok: false, reason: 'expired' }
 
-  const slidExpiry = Math.min(now + WEB_SESSION_IDLE_MS, row.created_at + WEB_SESSION_ABSOLUTE_MS)
+  const slidExpiry = Math.min(now + lifetime.idleMs, ceiling)
   if (slidExpiry > row.expires_at) {
     // Best-effort refresh — a write failure here must not fail the request
     // that is already legitimately authenticated by the row just read.
@@ -197,11 +238,30 @@ export async function resolveWebSession(
   db: SlayzoneDb,
   token: string
 ): Promise<WebSessionPrincipal | null> {
-  const result = await verifyWebSessionToken(db, token)
+  const result = await verifyWebSessionToken(db, token, Date.now(), webSessionLifetimeFor(auth))
   if (!result.ok || !auth) return null
   const account = await findHubAccount(auth, result.userId)
   if (!account || account.disabled) return null
   return { userId: result.userId, role: account.role, scopes: result.scopes }
+}
+
+/**
+ * True when the user holds a web session that would still verify (the Entra re-check
+ * asks only about accounts somebody is signed in to).
+ */
+export async function hasLiveWebSession(
+  db: SlayzoneDb,
+  userId: string,
+  lifetime: WebSessionLifetime = DEFAULT_WEB_SESSION_LIFETIME,
+  now = Date.now()
+): Promise<boolean> {
+  const row = await db.get<{ id: string }>(
+    `SELECT id FROM web_sessions
+     WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? AND created_at > ?
+     LIMIT 1`,
+    [userId, now, now - lifetime.absoluteMs]
+  )
+  return row !== undefined
 }
 
 export async function listWebSessions(db: SlayzoneDb, userId: string): Promise<WebSessionRow[]> {
@@ -293,11 +353,12 @@ export async function webLogin(
   } catch {
     return { ok: false, error: 'invalid email or password' }
   }
-  const minted = await mintWebSession(db, { userId, scopes: DEFAULT_WEB_LOGIN_SCOPES })
+  const lifetime = webSessionLifetimeFor(auth)
+  const minted = await mintWebSession(db, { userId, scopes: DEFAULT_WEB_LOGIN_SCOPES, lifetime })
   return {
     ok: true,
     token: minted.token,
     cookieName: WEB_SESSION_COOKIE_NAME,
-    maxAgeSec: Math.floor(WEB_SESSION_IDLE_MS / 1000)
+    maxAgeSec: Math.floor(Math.min(lifetime.idleMs, lifetime.absoluteMs) / 1000)
   }
 }
