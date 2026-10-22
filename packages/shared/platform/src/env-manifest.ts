@@ -118,6 +118,10 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // not global: it identifies THIS hub process, so inheriting it into a task
   // terminal — which may target a different hub entirely — would mislabel.
   SLAYZONE_HUB_NAME: 'infra',
+  // Days THIS hub keeps session content (T-23, hub session-retention.ts); 0 = off, the
+  // default. Infra like the switches: a hub started from a task terminal must not
+  // inherit its parent's period and start deleting.
+  SLAYZONE_HUB_SESSION_RETENTION_DAYS: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect

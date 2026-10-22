@@ -769,5 +769,44 @@ test('an error that is not a boot rule has no rule', () => {
   assert(bootRefusalRule('boom') === null, 'a non-error')
 })
 
+console.log('\nB16: session retention period (T-23)')
+console.log('─'.repeat(40))
+
+test('B16: unset, 0 and whole numbers of days boot', () => {
+  for (const v of [undefined, '0', '90', '365', '0090']) {
+    assertBoots({ env: v === undefined ? {} : { SLAYZONE_HUB_SESSION_RETENTION_DAYS: v } })
+  }
+  // Also on a reachable hub with login — the shared hub that sets it.
+  assertBoots({
+    host: OFF_LOOPBACK,
+    env: { ...REACHABLE, SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90' }
+  })
+})
+
+test('B16: anything that is not a non-negative whole number refuses boot, naming the value', () => {
+  for (const v of [
+    '',
+    ' 90',
+    '90 ',
+    '-1',
+    '1.5',
+    '90d',
+    'ninety',
+    '1e3',
+    '0x10',
+    '99999999999999999'
+  ]) {
+    assertRefuses(
+      { env: { SLAYZONE_HUB_SESSION_RETENTION_DAYS: v } },
+      'SLAYZONE_HUB_SESSION_RETENTION_DAYS',
+      `'${v}'`
+    )
+    assert(
+      refusedRule({ env: { SLAYZONE_HUB_SESSION_RETENTION_DAYS: v } }) === 'B16',
+      `'${v}' is B16`
+    )
+  }
+})
+
 console.log(`\n${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

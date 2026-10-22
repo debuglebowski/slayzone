@@ -72,6 +72,11 @@ check(
   'SLAYZONE_RUNNER_JOIN_TOKEN is retired (absent from manifest)',
   !('SLAYZONE_RUNNER_JOIN_TOKEN' in ENV_MANIFEST)
 )
+// T-23: describes THIS hub, like the switches; a terminal-started hub must not inherit it.
+check(
+  'SLAYZONE_HUB_SESSION_RETENTION_DAYS is infra',
+  ENV_MANIFEST.SLAYZONE_HUB_SESSION_RETENTION_DAYS === 'infra'
+)
 check('SLAYZONE_TASK_ID is identity', ENV_MANIFEST.SLAYZONE_TASK_ID === 'identity')
 check('SLAYZONE_RELEASE_CHANNEL is global', ENV_MANIFEST.SLAYZONE_RELEASE_CHANNEL === 'global')
 // INSTALL-IDENTITY vars: they name WHICH SlayZone install a process belongs to

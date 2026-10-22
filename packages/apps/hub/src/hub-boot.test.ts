@@ -357,6 +357,11 @@ async function main(): Promise<void> {
       },
       ['SLAYZONE_HUB_SSO_CERT_PATH / SLAYZONE_HUB_SSO_KEY_PATH', 'ENOENT']
     )
+    await assertRefused(
+      'B16: a session retention period that is not a whole number of days refuses boot',
+      { ...LOOP, SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90 days' },
+      ['SLAYZONE_HUB_SESSION_RETENTION_DAYS', "'90 days'", '"rule":"B16"']
+    )
 
     // --- the defaults, on loopback -----------------------------------------
     await test('defaults boot on loopback: login off, password on, SSO off, processes + integrations on', async () => {
