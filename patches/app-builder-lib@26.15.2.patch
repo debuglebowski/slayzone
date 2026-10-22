@@ -1,0 +1,44 @@
+diff --git a/out/node-module-collector/index.js b/out/node-module-collector/index.js
+index d8f70cf875f8337e6c579a60d1b92e40db67bde1..8b8bc4d39b74b4e9f4173cfa35862028845e0745 100644
+--- a/out/node-module-collector/index.js
++++ b/out/node-module-collector/index.js
+@@ -51,11 +51,18 @@ const determinePackageManagerEnv = ({ projectDir, appDir, workspaceRoot }) => ne
+ });
+ exports.determinePackageManagerEnv = determinePackageManagerEnv;
+ async function findWorkspaceRoot(pm, cwd) {
++    if (pm === packageManager_1.PM.PNPM) {
++        // Backport of electron-builder 26.17.0 (electron-userland/electron-builder#10187): find the pnpm workspace root by an
++        // upward search for `pnpm-workspace.yaml` (what pnpm itself does) instead of `pnpm --workspace-root exec pwd`. `pwd` is
++        // POSIX-only, so on Windows the root was lost and `@electron/rebuild` never rebuilt natives hoisted to the root.
++        const root = await findNearestDir(cwd, dir => (0, builder_util_1.exists)(path.join(dir, "pnpm-workspace.yaml")));
++        if (root != null) {
++            return root;
++        }
++        return findNearestPackageJsonWithWorkspacesField(cwd);
++    }
+     let command;
+     switch (pm) {
+-        case packageManager_1.PM.PNPM:
+-            command = { command: "pnpm", args: ["--workspace-root", "exec", "pwd"] };
+-            break;
+         case packageManager_1.PM.YARN_BERRY:
+             command = { command: "yarn", args: ["workspaces", "list", "--json"] };
+             break;
+@@ -127,4 +134,17 @@ async function findNearestPackageJsonWithWorkspacesField(dir) {
+     }
+     return undefined;
+ }
++async function findNearestDir(dir, isRoot) {
++    let current = dir;
++    while (true) {
++        if (await isRoot(current)) {
++            return current;
++        }
++        const parent = path.dirname(current);
++        if (parent === current) {
++            return undefined;
++        }
++        current = parent;
++    }
++}
+ //# sourceMappingURL=index.js.map
