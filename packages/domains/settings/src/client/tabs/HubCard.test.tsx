@@ -335,8 +335,28 @@ describe('HubCard', () => {
       fireEvent.click(screen.getByTestId('computer-add'))
     })
     expect(remoteMintSpy).toHaveBeenCalled()
+    // Nobody named: no `forUser` sent (a hub without login mints as before).
+    expect((remoteMintSpy.mock.calls[0]![0] as { forUser?: string }).forUser).toBeUndefined()
     await waitFor(() => {
       expect(screen.getByTestId('computer-minted-token')).toBeDefined()
+    })
+  })
+
+  // T-20: a hub with login mints only FOR a named user, who owns the computer.
+  it('sends the user the computer is for', async () => {
+    await renderRemote()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-add-open'))
+    })
+    fireEvent.change(screen.getByTestId('computer-enroll-for'), {
+      target: { value: ' bob@example.com ' }
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-add'))
+    })
+    expect(remoteMintSpy.mock.calls[0]![0]).toEqual({
+      label: 'computer',
+      forUser: 'bob@example.com'
     })
   })
 

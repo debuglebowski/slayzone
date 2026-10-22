@@ -319,6 +319,9 @@ export function HubCard({
 
   const [adding, setAdding] = useState(false)
   const [label, setLabel] = useState('')
+  // Who the computer is for (T-20): on a hub with login the hub refuses a mint that
+  // names nobody, and that user owns the computer. Blank on a hub without login.
+  const [forUser, setForUser] = useState('')
 
   // A hub always accepts computers, so the list is always available (no mode to
   // enable). `list` merges live connection status when a computer is connected;
@@ -357,9 +360,13 @@ export function HubCard({
 
   const mint = async (): Promise<void> => {
     try {
-      const res = await mintMutation.mutateAsync({ label: label.trim() || 'computer' })
+      const res = await mintMutation.mutateAsync({
+        label: label.trim() || 'computer',
+        ...(forUser.trim() ? { forUser: forUser.trim() } : {})
+      })
       showMintedToken({ token: res.token, hubLabel, hubUrl: res.hubUrl })
       setLabel('')
+      setForUser('')
       setAdding(false)
       void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
       toast.success('Enrollment token created')
@@ -644,6 +651,14 @@ export function HubCard({
                             className="max-w-xs"
                             data-testid="computer-enroll-label"
                           />
+                          <Input
+                            value={forUser}
+                            onChange={(e) => setForUser(e.target.value)}
+                            placeholder="For user (email)"
+                            disabled={mintMutation.isPending}
+                            className="max-w-xs"
+                            data-testid="computer-enroll-for"
+                          />
                           <Button
                             variant="outline"
                             disabled={mintMutation.isPending}
@@ -664,6 +679,7 @@ export function HubCard({
                             onClick={() => {
                               setAdding(false)
                               setLabel('')
+                              setForUser('')
                             }}
                             data-testid="computer-add-cancel"
                           >
@@ -674,7 +690,8 @@ export function HubCard({
                           Mint a one-time enrollment token for{' '}
                           <span className="text-foreground">{hubLabel || 'this hub'}</span> and
                           paste it into the computer machine&apos;s config. The token embeds that
-                          hub&apos;s address, and expires after 15 minutes.
+                          hub&apos;s address, and expires after 15 minutes. On a hub with sign-in,
+                          name the user the computer is for: it becomes theirs.
                         </p>
                       </>
                     ) : (

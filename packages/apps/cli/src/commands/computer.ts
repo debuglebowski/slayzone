@@ -28,7 +28,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { Command } from 'commander'
-import { decodeJoinToken } from '@slayzone/platform/join-token'
+import { decodeJoinToken, JOIN_TOKEN_MAX_TTL_MS } from '@slayzone/platform/join-token'
 import { isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
 import { discoverHubs } from '@slayzone/platform/hub-discovery'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
@@ -77,6 +77,12 @@ const COMPUTER_PACKAGE = servicePackage('computer')
 
 /** How long to wait for a fresh computer to reach the hub before giving up. */
 const ENROLL_TIMEOUT_MS = 30_000
+
+/** The hub's cap on a join token's lifetime (T-20), in `--ttl` units. */
+const MAX_TTL_MINUTES = JOIN_TOKEN_MAX_TTL_MS / 60_000
+
+/** `slay computer mint` options. */
+type MintOptions = { for?: string; ttl: string; json?: boolean }
 
 /**
  * The computer's own log line proving it reached the hub.
@@ -405,16 +411,29 @@ export function computerCommand(): Command {
   // created is a computer's credential; addressing follows the ambient hub target
   // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging computer
   // mint` reads the same as every other hub-targeted command.
+  //
+  // On a hub with login only an admin mints, and always FOR a named user (`--for`), who
+  // owns the computer that redeems the token (T-20); the hub refuses a mint without
+  // one. On a hub without login (the desktop app's) nobody is named, as before.
   cmd
     .command('mint [label]')
     .description('Mint a computer enrollment token on a hub (see `slay hub current`)')
-    .option('--ttl <minutes>', 'Token lifetime in minutes', '15')
+    .option(
+      '--for <user>',
+      'Who the computer is for: their email or account id. Required on a hub with login'
+    )
+    .option('--ttl <minutes>', `Token lifetime in minutes (at most ${MAX_TTL_MINUTES})`, '15')
     .option('--json', 'Output as JSON')
-    .action(async (label: string | undefined, opts: { ttl: string; json?: boolean }) => {
+    .action(async (label: string | undefined, opts: MintOptions) => {
       const ttlMinutes = Number(opts.ttl)
       if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) {
         fail(`Invalid --ttl ${opts.ttl} — expected a positive number of minutes.`)
       }
+      if (ttlMinutes > MAX_TTL_MINUTES) {
+        fail(`Invalid --ttl ${opts.ttl} — a join token lives at most ${MAX_TTL_MINUTES} minutes.`)
+      }
+      const forUser = opts.for?.trim()
+      if (opts.for !== undefined && !forUser) fail('Invalid --for — name a user (email or id).')
       const target = await resolveHubRequestTarget('computer mint', discoverHubs)
       const minted = await hubRequest<{ token: string; hubUrl: string }>({
         target,
@@ -422,10 +441,19 @@ export function computerCommand(): Command {
         method: 'POST',
         body: {
           label: label ?? 'computer',
-          ttlMs: Math.round(ttlMinutes * 60_000)
+          ttlMs: Math.round(ttlMinutes * 60_000),
+          ...(forUser ? { forUser } : {})
         },
         unwrap: 'raw',
         hints: {
+          // The hub's 400s here are all about who the token is for (the lifetime is
+          // checked above): unnamed on a hub with login, unknown or disabled, or named
+          // on a hub without login.
+          400: forUser
+            ? `\`slay hub users ls\` lists this hub's accounts.`
+            : `Name the user the computer is for:\n` +
+              `  slay computer mint ${label ?? '<name>'} --for <email>\n` +
+              `(\`slay hub users ls\` lists this hub's accounts.)`,
           // The hub cannot know which command the operator should run to get a
           // credential, so name it here rather than leaving a bare 401.
           401:
@@ -444,6 +472,7 @@ export function computerCommand(): Command {
         return
       }
       console.log(`Hub:   ${minted.hubUrl}`)
+      if (forUser) console.log(`For:   ${forUser}`)
       console.log(`Token: ${minted.token}`)
       console.log('')
       console.log(`Expires in ${ttlMinutes} minute${ttlMinutes === 1 ? '' : 's'}, single use.`)
