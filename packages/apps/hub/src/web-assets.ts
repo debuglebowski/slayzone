@@ -60,6 +60,15 @@ function decodeUriSafe(path: string): string {
 }
 
 /**
+ * True when a raw request URL names a path another handler owns — the same test
+ * `handleWebAssets` applies. `security-headers.ts` uses it to give those paths the
+ * API headers and every other path the web shell's.
+ */
+export function isReservedUrl(url: string | undefined): boolean {
+  return isReserved(decodeUriSafe((url ?? '/').split('?')[0]))
+}
+
+/**
  * Serve `dist/web/assets/*` with a long, immutable cache lifetime (Vite
  * content-hashes every filename under `assets/`, so a stale cached copy is
  * never served under the name a fresh build would use) and everything else
