@@ -48,6 +48,7 @@ import {
   writeHubConfig
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
+import { deviceSignIn, postAuthJson, readSignInMethods, signedInEmail } from '../hub-sign-in'
 import { hubOwnerPasswordCommand } from './hub-owner-password'
 import {
   ensureLogDir,
@@ -456,16 +457,12 @@ async function readPasswordFromStdin(): Promise<string> {
  * header the bearer plugin sets, falling back to a `token` field in the body. That
  * route is deliberately gate-exempt (`AUTH_BOOTSTRAP_PREFIX`) — it has to be
  * reachable without a credential, or a hub could never be authenticated at all.
+ * Sent with `postAuthJson`, not `fetch`: see `../hub-sign-in` (MISSING_OR_NULL_ORIGIN).
  */
 async function hubSignIn(baseUrl: string, email: string, password: string): Promise<string> {
   let res: Response
   try {
-    res = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-      signal: AbortSignal.timeout(10_000)
-    })
+    res = await postAuthJson(`${baseUrl}/api/auth/sign-in/email`, { email, password })
   } catch {
     fail(`Could not reach the hub at ${baseUrl}.`)
   }
@@ -1158,34 +1155,66 @@ export function hubCommand(): Command {
   // needs one — so without this the only way to get a token was to read it out of
   // the desktop app's encrypted store by hand. This exchanges an account for one,
   // then stores it exactly as `use` does (0600 cli-hub-target.json).
+  //
+  // Which way is the hub's answer (`/health` switches), never a guess: a hub with
+  // Entra sign-in gets device sign-in (browser + MFA, no password here, T-14) unless
+  // `--email` asks for a password; a password hub needs `--email`.
   cmd
     .command('login <url>')
     .description('Sign in to a hub and store its bearer token for this CLI')
-    .requiredOption('--email <email>', 'Account email (see `slay hub users ls`)')
+    .option(
+      '--email <email>',
+      'Sign in with this account and a password (see `slay hub users ls`). ' +
+        'Omit on a hub with Microsoft sign-in: you approve in a browser instead'
+    )
     .option('--password <password>', 'Account password (omit to read from stdin)')
-    .action(async (rawUrl: string, opts: { email: string; password?: string }) => {
-      const url = normalizeHubUrl(rawUrl)
-      if (!url) fail(`Invalid hub URL (expected an http(s) URL): ${rawUrl}`)
-      // Prefer a piped password over an argv one: argv lands in the shell history
-      // and in `ps` output. Named `--password` still exists for scripts that
-      // already hold the secret in an env var.
-      const password = opts.password ?? (await readPasswordFromStdin())
-      if (!password) {
-        fail(
-          'No password given. Pass --password, or pipe it:\n' +
-            `  echo '<password>' | slay hub login ${rawUrl} --email ${opts.email}`
-        )
+    .option('--no-browser', 'Microsoft sign-in: print the page, do not try to open a browser')
+    .action(
+      async (rawUrl: string, opts: { email?: string; password?: string; browser: boolean }) => {
+        const url = normalizeHubUrl(rawUrl)
+        if (!url) fail(`Invalid hub URL (expected an http(s) URL): ${rawUrl}`)
+        const methods = await readSignInMethods(url)
+        let token: string
+        let who: string
+        if (opts.email === undefined) {
+          if (!methods.sso) {
+            fail(
+              `${url} signs in with an email and password:\n` +
+                `  echo '<password>' | slay hub login ${rawUrl} --email <email>`
+            )
+          }
+          token = await deviceSignIn(url, { openBrowser: opts.browser })
+          who = (await signedInEmail(url, token)) ?? 'your Microsoft account'
+        } else {
+          if (!methods.password) {
+            fail(
+              `Password sign-in is off on ${url}. Sign in through Microsoft instead:\n` +
+                `  slay hub login ${rawUrl}`
+            )
+          }
+          // Prefer a piped password over an argv one: argv lands in the shell history
+          // and in `ps` output. Named `--password` still exists for scripts that
+          // already hold the secret in an env var.
+          const password = opts.password ?? (await readPasswordFromStdin())
+          if (!password) {
+            fail(
+              'No password given. Pass --password, or pipe it:\n' +
+                `  echo '<password>' | slay hub login ${rawUrl} --email ${opts.email}`
+            )
+          }
+          token = await hubSignIn(url, opts.email, password)
+          who = opts.email
+        }
+        const configPath = writeHubConfig(url, token)
+        console.log(`Signed in to ${url} as ${who}.`)
+        console.log(`Token stored: ${configPath}`)
+        if (process.env.SLAYZONE_HUB_TOKEN) {
+          console.error(
+            'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
+          )
+        }
       }
-      const token = await hubSignIn(url, opts.email, password)
-      const configPath = writeHubConfig(url, token)
-      console.log(`Signed in to ${url} as ${opts.email}.`)
-      console.log(`Token stored: ${configPath}`)
-      if (process.env.SLAYZONE_HUB_TOKEN) {
-        console.error(
-          'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
-        )
-      }
-    })
+    )
 
   // slay hub current
   cmd
