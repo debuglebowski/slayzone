@@ -68,11 +68,10 @@ export function roleAllows(cls: AccessClass | undefined, role: PrincipalRole): b
  */
 export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
   // A user manages their own computer; anyone else's (or an unowned one) is the
-  // admin's. The admin passes the visibility guard for these via `isHubAdmin`.
+  // admin's (`computer-access.ts` mayManageComputer, T-19).
   'computers.delete': 'the caller does not own the computer',
   'computers.revokeComputer': 'the caller does not own the computer',
   'computers.setVisibility': 'the caller does not own the computer',
-  'computers.unrevoke': 'the caller does not own the computer',
   'computers.renameMachine': 'the caller does not own every computer on that machine',
   // Per-user keys (view state, layout) stay writable by everyone; hub-wide ones do not.
   'settings.set': 'the key is hub-wide or server-internal (`hub-setting-keys.ts`)'
@@ -85,7 +84,12 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
  * `hub.setLabel`                  the hub's name, shown to every user.
  * `computers.mintJoinToken`       enrollment secrets: only an admin mints (O-5). The
  *                                 TTL and named-user policy is T-20.
- * `computers.claim`               assigning an unowned computer an owner.
+ * `computers.claim`               assigning an unowned computer an owner (and refused
+ *                                 outright on a hub with login, T-19).
+ * `computers.unrevoke`            re-trusting a revoked computer's credential: the
+ *                                 revocation may be the admin's own response to a lost
+ *                                 machine, or the side effect of disabling its owner
+ *                                 (T-12), so its owner may not undo it (T-19).
  * `diagnostics.getConfig/setConfig/exportBundle`  the hub's diagnostics. The two
  *                                 `recordClient*` procedures stay `user`: each client
  *                                 writes its OWN events there, read back only through
@@ -428,7 +432,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'computers.setProjectDefaultComputer': 'user',
   'computers.setTaskComputer': 'user',
   'computers.setVisibility': 'user',
-  'computers.unrevoke': 'user',
+  'computers.unrevoke': 'admin',
   'diagnostics.exportBundle': 'admin',
   'diagnostics.getConfig': 'admin',
   'diagnostics.recordClientError': 'user',

@@ -166,13 +166,16 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
         : DEFAULT_JOIN_TOKEN_TTL_MS
 
     try {
-      // As the verified caller, so the mint's audit line names them. Ownership is
-      // unchanged: this path still mints with no `mintedByUserId` (T-19).
+      // As the verified caller, so the mint's audit line names them, and with them as
+      // the minter, so the computer that redeems the token is theirs (T-19) — the twin
+      // of `computers.mintJoinToken`. Null only on a hub without login, where nobody is
+      // signed in and the computer is honestly unowned.
       const minted = await runAsSecurityActor(principal?.userId ?? null, () =>
         storeMintJoinToken(deps.db, {
           hubUrl,
           ttlMs,
-          label
+          label,
+          mintedByUserId: principal?.userId ?? null
         })
       )
       // Return the token + the computer URL the computer should dial.

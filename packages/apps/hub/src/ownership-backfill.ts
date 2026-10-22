@@ -53,6 +53,19 @@ export async function backfillOwnership(opts: {
   // hubAuth here means login is off.
   if (!opts.requireLogin || !hubAuth) return null
 
+  // Computers are NOT backfilled (T-19): an unowned one is visible to admins only and
+  // serves nobody (transport `computer-access.ts` says why). Name the count, since
+  // each needs a re-enroll with a join token minted for its owner.
+  const unownedComputers = await db.get<{ n: number }>(
+    'SELECT count(*) AS n FROM computers WHERE owner_user_id IS NULL AND revoked_at IS NULL'
+  )
+  if ((unownedComputers?.n ?? 0) > 0) {
+    log?.(
+      `[ownership] ${unownedComputers!.n} computer(s) have no owner: visible to admins only ` +
+        'and usable by nobody; re-enroll each with a join token minted for its owner'
+    )
+  }
+
   const owner = await findFirstAdmin(hubAuth)
   if (!owner) {
     // Only reachable with no human account at all (the bootstrap owner failed).

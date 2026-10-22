@@ -5,10 +5,17 @@ import {
   type SecurityEventName,
   type SecurityOutcome
 } from '@slayzone/platform/security-log'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc'
-import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
+import { getAuthGate, getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import { adminOnlyTrpcError, callerIsNotAdmin } from '../admin-gate'
 import type { TrpcContext } from '../context'
+import { accessRequestOf } from '../owner-gate'
+import {
+  filterManagedComputers,
+  mayManageComputer,
+  type ComputerManagerRequest
+} from '../computer-access'
 import {
   listComputers as storeListComputers,
   mintJoinToken as storeMintJoinToken,
@@ -20,13 +27,10 @@ import {
   resolveTaskComputerId as storeResolveTaskComputerId,
   machinesByHostId as storeMachinesByHostId,
   renameMachine as storeRenameMachine,
-  assertComputerVisible,
-  isComputerOwnedBy,
-  listVisibleComputerIds,
+  getComputer as storeGetComputer,
   ownsEveryComputerOnHost,
   claimComputer as storeClaimComputer,
-  setComputerVisibility as storeSetComputerVisibility,
-  type ComputerViewer
+  setComputerVisibility as storeSetComputerVisibility
 } from '@slayzone/computers/server'
 
 /**
@@ -66,40 +70,33 @@ function auditComputer(
 const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 
 /**
- * Whose view this request runs in. `principal` is null on a supervised hub, where
- * the Electron host owns the process and there is exactly one human — filtering
- * there would break the desktop app for no gain.
+ * The request as a computer MANAGER (T-19, `computer-access.ts`): the owner, or an
+ * admin, who sees every computer for management only. Binding work to a computer is
+ * not management: `setTaskComputer` / `setProjectDefaultComputer` are id-checked by
+ * the owner gate (`computer` in owner-policy.ts — the owner only), so the admin role
+ * opens no path to run on, or read from, another user's computer.
  */
-const viewerOf = (ctx: { principal?: { userId?: string } | null }): ComputerViewer => ({
-  userId: ctx.principal?.userId ?? null
-})
+const managerRequestOf = (
+  ctx: Pick<TrpcContext, 'principal' | 'dataRoot'>
+): ComputerManagerRequest => ({ ...accessRequestOf(ctx), role: ctx.principal?.role ?? null })
 
-/**
- * The same viewer for MANAGING computers (list, revoke, delete, visibility): a hub
- * admin sees every computer here (T-15). Never for binding work to a computer —
- * `setTaskComputer` / `setProjectDefaultComputer` keep {@link viewerOf}, so the
- * admin role opens no path to run on, or read from, another user's computer.
- */
-const managerOf = (ctx: {
-  principal?: { userId?: string; role?: string } | null
-}): ComputerViewer => ({
-  userId: ctx.principal?.userId ?? null,
-  isHubAdmin: ctx.principal?.role === 'admin'
-})
+const noSuchComputer = (): Error => new Error('no such computer, or you do not have access to it')
 
 /**
  * Lifecycle of someone else's computer, or an unowned one, is the admin's (T-15,
- * `CONDITIONAL_ADMIN`): a user may revoke, delete or re-scope only their own.
+ * `CONDITIONAL_ADMIN`): a user may revoke, delete or re-scope only their own. The
+ * same message for a missing id as for one that is not the caller's.
  */
-async function requireOwnerOrAdmin(
-  ctx: Pick<TrpcContext, 'db' | 'principal'>,
+async function requireManager(
+  ctx: Pick<TrpcContext, 'db' | 'principal' | 'dataRoot'>,
   path: string,
   computerId: string
 ): Promise<void> {
-  if (!callerIsNotAdmin(ctx)) return
-  const userId = ctx.principal?.userId
-  if (userId && (await isComputerOwnedBy(ctx.db, computerId, userId))) return
-  throw adminOnlyTrpcError(path)
+  if (!(await mayManageComputer(ctx.db, managerRequestOf(ctx), computerId))) {
+    // An admin manages every computer there is, so for one it is simply missing.
+    throw callerIsNotAdmin(ctx) ? adminOnlyTrpcError(path) : noSuchComputer()
+  }
+  if (!(await storeGetComputer(ctx.db, computerId))) throw noSuchComputer()
 }
 
 export const computersRouter = router({
@@ -121,10 +118,20 @@ export const computersRouter = router({
       const rows = await storeListComputers(ctx.db, {
         includeRevoked: input?.includeRevoked ?? true
       })
-      // Same predicate the binding guards use — a list that shows a computer a
-      // mutation would refuse (or worse, hides one it would accept) is the drift
-      // this shares one implementation to avoid.
-      const visible = await listVisibleComputerIds(ctx.db, managerOf(ctx))
+      // The management view (T-19): the caller's own computers, or every one for an
+      // admin — the same decision the lifecycle mutations below take, so the list
+      // never shows a computer they would refuse or hides one they would accept.
+      // Active rows only, as before T-19: the visibility predicate this replaces
+      // never listed a revoked computer, whatever `includeRevoked` said.
+      const visible = new Set(
+        (
+          await filterManagedComputers(
+            ctx.db,
+            managerRequestOf(ctx),
+            rows.filter((r) => r.revoked_at === null)
+          )
+        ).map((r) => r.id)
+      )
       // One query for the whole list rather than a join per row: the machine is
       // decoration, and a computer with no host id is legitimately ungrouped.
       const machines = await storeMachinesByHostId(ctx.db)
@@ -206,22 +213,32 @@ export const computersRouter = router({
       }
     }),
 
-  /** Pin a task to a computer (`null` = inherit the project default). */
+  /**
+   * Pin a task to a computer (`null` = inherit the project default).
+   *
+   * Binding a task to a computer is code execution in that computer's $HOME. On a hub
+   * with login the owner gate checks both ids before this runs (owner-policy.ts): the
+   * task and the computer must both be the caller's, so the computer is the task
+   * owner's. `null` (unbind) names no computer and can only narrow.
+   */
   setTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      // Binding a task to a computer is code execution in that computer's $HOME.
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+      if (input.computerId !== null && !(await storeGetComputer(ctx.db, input.computerId))) {
+        throw noSuchComputer()
+      }
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
       return { ok: true as const }
     }),
 
   /** Set a project's default computer (`null` = no explicit default; exec falls back
-   *  to the connected default computer, else in-process). */
+   *  to the connected default computer). Checked like {@link setTaskComputer}. */
   setProjectDefaultComputer: publicProcedure
     .input(z.object({ projectId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+      if (input.computerId !== null && !(await storeGetComputer(ctx.db, input.computerId))) {
+        throw noSuchComputer()
+      }
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
       return { ok: true as const }
     }),
@@ -256,15 +273,26 @@ export const computersRouter = router({
     }),
 
   /**
-   * Take ownership of an UNOWNED computer.
+   * Take ownership of an UNOWNED computer. Never reassigns an owned one.
    *
-   * Every row is unowned today (v161 did not backfill — inventing an owner is a
-   * claim about whose machine it is that nothing knows), so this is the path from
-   * "visible to everyone" to actually private. Never reassigns an owned one.
+   * REFUSED on a hub with login (T-19). There every computer gets its owner at enroll
+   * — the user its join token was minted for — and an unowned one is visible to
+   * admins only and serves nobody (`computer-access.ts`). Claiming would let whoever
+   * asks first take a shell in an account that may not be theirs; the hub cannot
+   * know whose machine it is. Re-enroll it with a token minted for its owner instead.
    */
   claim: publicProcedure
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      if (getAuthGate()) {
+        auditComputer('computer.claim', input.computerId, 'denied', { reason: 'login_hub' })
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'claiming a computer is off on a hub with login: re-enroll it with a join token ' +
+            'minted for its owner'
+        })
+      }
       const userId = ctx.principal?.userId
       if (!userId) throw new Error('sign in to claim a computer')
       const claimed = await storeClaimComputer(ctx.db, input.computerId, userId)
@@ -273,12 +301,26 @@ export const computersRouter = router({
       return { claimed }
     }),
 
-  /** Private (owner + grants), or visible to everyone on this hub. */
+  /**
+   * Private, or visible to everyone on this hub. The owner or an admin.
+   *
+   * On a hub with login a computer is private, full stop (O-6, T-19): only `private`
+   * is accepted there, because any other value would claim to open a machine that
+   * the access rule (`canAccess`, owner only) keeps closed.
+   */
   setVisibility: publicProcedure
     .input(z.object({ computerId: z.string(), visibility: z.enum(['private', 'hub', 'shared']) }))
     .mutation(async ({ ctx, input, path }) => {
-      await requireOwnerOrAdmin(ctx, path, input.computerId)
-      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
+      await requireManager(ctx, path, input.computerId)
+      if (getAuthGate() && input.visibility !== 'private') {
+        auditComputer('computer.visibility.set', input.computerId, 'denied', {
+          visibility: input.visibility
+        })
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'computers are private on a hub with login'
+        })
+      }
       await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
       auditComputer('computer.visibility.set', input.computerId, 'success', {
         visibility: input.visibility
@@ -287,7 +329,10 @@ export const computersRouter = router({
     }),
 
   /**
-   * Clear a revocation.
+   * Clear a revocation. An admin's alone on a hub with login (T-19, `admin-policy.ts`):
+   * it re-trusts a credential, and the revocation may have been the admin's response
+   * to a lost machine or the side effect of disabling its owner (T-12) — neither is the
+   * owner's to undo.
    *
    * Not enough on its own to bring the computer back: revoking made its next
    * `hello` fatal, so the process exited and its supervisor latched. Un-revoking
@@ -296,8 +341,7 @@ export const computersRouter = router({
   unrevoke: publicProcedure
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input, path }) => {
-      await requireOwnerOrAdmin(ctx, path, input.computerId)
-      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
+      await requireManager(ctx, path, input.computerId)
       await storeUnrevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.unrevoke', input.computerId)
       return { ok: true as const }
@@ -314,8 +358,7 @@ export const computersRouter = router({
   delete: publicProcedure
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input, path }) => {
-      await requireOwnerOrAdmin(ctx, path, input.computerId)
-      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
+      await requireManager(ctx, path, input.computerId)
       await storeDeleteComputer(ctx.db, input.computerId)
       auditComputer('computer.delete', input.computerId)
       return { ok: true as const }
@@ -338,12 +381,28 @@ export const computersRouter = router({
    *
    * Emits an id, not a row: the row carries machine and ownership fields this
    * event knows nothing about, so the client invalidates and refetches.
+   *
+   * On a hub with login each subscriber hears only about the computers it may see in
+   * `list` (its own; every one for an admin), decided per event in arrival order.
    */
-  onStatusChange: publicProcedure.subscription(() =>
+  onStatusChange: publicProcedure.subscription(({ ctx }) =>
     observable<{ computerId: string; connected: boolean }>((emit) => {
       const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
       if (!subscribe) return () => undefined
-      return subscribe((change) => emit.next(change))
+      const req = managerRequestOf(ctx)
+      if (!req.authRequired) return subscribe((change) => emit.next(change))
+      let closed = false
+      let tail: Promise<void> = Promise.resolve()
+      const unsubscribe = subscribe((change) => {
+        tail = tail.then(async () => {
+          const allowed = await mayManageComputer(ctx.db, req, change.computerId).catch(() => false)
+          if (allowed && !closed) emit.next(change)
+        })
+      })
+      return () => {
+        closed = true
+        unsubscribe()
+      }
     })
   ),
 
@@ -351,8 +410,7 @@ export const computersRouter = router({
   revokeComputer: publicProcedure
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input, path }) => {
-      await requireOwnerOrAdmin(ctx, path, input.computerId)
-      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
+      await requireManager(ctx, path, input.computerId)
       await storeRevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.revoke', input.computerId)
       return { ok: true as const }

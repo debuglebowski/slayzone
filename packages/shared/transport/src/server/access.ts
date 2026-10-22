@@ -55,6 +55,11 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *                  refused (the database, auth store and owner token live there) unless
  *                  a project root there is more specific — and an artifact file is its
  *                  task's. Anywhere else it is hub-wide.
+ *   computer       a computer (T-19): its OWNER only — `computers.owner_user_id`, not a
+ *                  project. A computer is one OS account's environment, so using it is
+ *                  code execution in that account: no admin, no sharing, and an unowned
+ *                  one is nobody's (O-6). Managing one (list, rename, revoke) is wider —
+ *                  the owner or an admin — and is decided in `computer-access.ts`.
  */
 export type ResourceKind =
   | 'project'
@@ -76,6 +81,7 @@ export type ResourceKind =
   | 'projectGroup'
   | 'path'
   | 'automation'
+  | 'computer'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -96,7 +102,8 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'aiConfigItem',
   'projectGroup',
   'path',
-  'automation'
+  'automation',
+  'computer'
 ]
 
 export interface OwnedResource {
@@ -363,7 +370,10 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   projectGroup: resolveProjectGroup,
   path: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? []),
   // An automation rule (T-106): its project's, like its runs.
-  automation: viaProjectColumn('automations')
+  automation: viaProjectColumn('automations'),
+  // Its owner row stands in for a project's: it carries no members, so sharing (T-100)
+  // never extends to a computer.
+  computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?')
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */
