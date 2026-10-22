@@ -59,32 +59,28 @@ test('wrapped shell actually raises ulimit when invoked', () => {
 })
 
 test('wrapped shell does NOT lower an already-higher soft limit', () => {
-  // Parent raises to 70000 first, then invokes the wrapper. The inner shell
-  // must see 70000 (preserved), not 65535 (lowered).
-  const r = wrapShellWithUlimit('/bin/sh', ['-c', 'ulimit -n'])
-  try {
-    const out = execFileSync(
-      '/bin/sh',
-      [
-        '-c',
-        `ulimit -n 70000 2>/dev/null && ${quoteForShell(r.file)} ${r.args.map(quoteForShell).join(' ')}`
-      ],
-      { encoding: 'utf8' }
-    ).trim()
-    if (out === 'unlimited') return
-    const n = parseInt(out, 10)
-    // Should be at least 70000 (the parent's value) — either preserved exactly
-    // or the kernel clamped slightly lower, but in any case not ≤ 65535.
-    if (n < 65535) throw new Error(`ulimit lowered — parent had 70000+, child sees ${n}`)
-  } catch (e) {
-    // If parent can't reach 70000 due to kernel cap, skip this test.
-    const msg = e instanceof Error ? e.message : String(e)
-    if (msg.includes('Operation not permitted') || msg.includes('setrlimit')) {
-      console.log('    (skipped: kernel cap below 70000)')
-      return
-    }
-    throw e
+  // Parent raises its soft limit above the wrapper's 65535 floor, then invokes the
+  // wrapper. The inner shell must see the parent's value (preserved), not 65535.
+  // The parent can only go above 65535 if the hard limit allows it: GitHub's Linux
+  // runners cap it at 65536, macOS is unlimited, docker defaults to 1048576.
+  const hard = execFileSync('/bin/sh', ['-c', 'ulimit -Hn'], { encoding: 'utf8' }).trim()
+  const parent = hard === 'unlimited' ? 70000 : Math.min(parseInt(hard, 10), 70000)
+  if (parent <= 65535) {
+    console.log(`    (skipped: hard limit ${hard} leaves no room above 65535)`)
+    return
   }
+  const r = wrapShellWithUlimit('/bin/sh', ['-c', 'ulimit -n'])
+  const out = execFileSync(
+    '/bin/sh',
+    [
+      '-c',
+      `ulimit -n ${parent} && ${quoteForShell(r.file)} ${r.args.map(quoteForShell).join(' ')}`
+    ],
+    { encoding: 'utf8' }
+  ).trim()
+  if (out === 'unlimited') return
+  const n = parseInt(out, 10)
+  if (n < parent) throw new Error(`ulimit lowered — parent had ${parent}, child sees ${n}`)
 })
 
 test('quotes args with spaces correctly', () => {
