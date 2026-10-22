@@ -150,14 +150,33 @@ await describe('POST /api/computers/join-token', () => {
     }
   })
 
-  test('loopback caller on an auth-enforcing hub mints WITH a valid bearer', async () => {
+  test('loopback caller on an auth-enforcing hub mints WITH a valid admin bearer', async () => {
     const rest = await mount(boundComputers, {
       required: () => true,
-      verifyBearer: async () => ({ userId: 'u1', scopes: ['full'] })
+      verifyBearer: async () => ({ userId: 'u1', role: 'admin', scopes: ['full'] })
     })
     try {
       const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(200)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  // T-15 (O-5): only an admin mints. A valid full session of a `user` account is 403.
+  test('a valid full bearer of a NON-admin account is 403 ADMIN_ONLY', async () => {
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u3', role: 'user', scopes: ['full'] })
+    })
+    try {
+      const res = await rest.request<{ error: string; code?: string }>(
+        'POST',
+        '/api/computers/join-token',
+        {}
+      )
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe('ADMIN_ONLY')
     } finally {
       await rest.close()
     }
@@ -184,25 +203,33 @@ await describe('audit (T-03)', () => {
   test('a refusal writes authz.denied; a mint is written as the verified caller', async () => {
     const audit: Array<Record<string, unknown>> = []
     setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
-    let principal: { userId: string; scopes: Array<'full' | 'read' | 'tasks'> } | null = null
+    let principal: {
+      userId: string
+      role: 'admin' | 'user'
+      scopes: Array<'full' | 'read' | 'tasks'>
+    } | null = null
     const rest = await mount(boundComputers, {
       required: () => true,
       verifyBearer: async () => principal
     })
     try {
       expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
-      principal = { userId: 'u-scoped', scopes: ['read', 'tasks'] }
+      principal = { userId: 'u-scoped', role: 'user', scopes: ['read', 'tasks'] }
       expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
-      principal = { userId: 'u-full', scopes: ['full'] }
+      principal = { userId: 'u-user', role: 'user', scopes: ['full'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(403)
+      principal = { userId: 'u-full', role: 'admin', scopes: ['full'] }
       expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(200)
       expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
         'authz.denied:denied:null',
         'authz.denied:denied:u-scoped',
+        'authz.denied:denied:u-user',
         'computer.join_token.mint:success:u-full'
       ])
       expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
         'unauthenticated',
         'scoped_session',
+        'not_admin',
         undefined
       ])
       expect(audit[0]!.route).toBe('POST /api/computers/join-token')
@@ -227,12 +254,12 @@ await describe('audit (T-03)', () => {
  */
 await describe('joinTokenAuthDecision', () => {
   test('auth NOT required (supervised): loopback mints, off-box is forbidden', () => {
-    expect(joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
-      'mint'
-    )
-    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
-      'forbid'
-    )
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('mint')
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('forbid')
   })
 
   test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
@@ -240,35 +267,47 @@ await describe('joinTokenAuthDecision', () => {
     // same answer an off-box peer would: verified bearer mints, missing/invalid
     // is 401. This is the fix — the old function returned 'mint' unconditionally
     // for loopback regardless of `authRequired`.
-    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
-      'mint'
-    )
-    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('mint')
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
   })
 
   test('off-box on a hub that does NOT enforce auth: 403, unchanged', () => {
     // A local-mode hub has no sessions to verify, so a bearer would be
     // unverifiable — accepting one would be security theater. Being on the box
     // stays the only authority here.
-    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
-      'forbid'
-    )
-    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
-      'forbid'
-    )
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('forbid')
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true, admin: true })
+    ).toBe('forbid')
+  })
+
+  test('auth REQUIRED: a valid bearer of a non-admin account is not-admin (T-15)', () => {
+    for (const loopback of [true, false]) {
+      expect(
+        joinTokenAuthDecision({ loopback, authRequired: true, bearerOk: true, admin: false })
+      ).toBe('not-admin')
+    }
+    // No login on this hub: no account, no role — loopback stays the authority.
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('mint')
   })
 
   test('off-box on an enforcing hub: valid bearer mints, missing/invalid is 401', () => {
-    expect(joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: true })).toBe(
-      'mint'
-    )
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('mint')
     // 401, not 403: the caller has a credential problem (fixable by signing in),
     // not a policy one (fixable only by moving to the hub's machine).
-    expect(joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
-      'unauthorized'
-    )
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
   })
 })
 

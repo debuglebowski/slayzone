@@ -1,13 +1,15 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
 import type { RestPrincipal } from './types'
+import { ADMIN_ONLY } from '../../admin-policy'
 
 /**
  * Audit line for a refusal by a route that guards ITSELF (T-03) — the hub's REST
  * gate exempts `/api/hub/users` and `/api/computers/join-token` and lets them decide
  * (see `apps/hub/src/rest-auth.ts`), so their 403/401 is the gate's denial and is
  * written the same way: `authz.denied`, never the presented credential.
- * `not-admin`: a valid session whose account is not admin (`/api/hub/users`).
+ * `not-admin`: a valid session whose account is not admin (`/api/hub/users`,
+ * `/api/computers/join-token`).
  */
 export function auditRouteRefusal(
   req: {
@@ -35,7 +37,9 @@ export function auditRouteRefusal(
             : principal
               ? 'scoped_session'
               : 'unauthenticated',
-      status: outcome === 'unauthorized' ? 401 : 403
+      status: outcome === 'unauthorized' ? 401 : 403,
+      // Same code as every other role refusal (T-15).
+      ...(outcome === 'not-admin' ? { code: ADMIN_ONLY } : {})
     }
   })
 }

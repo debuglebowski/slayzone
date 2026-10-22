@@ -7,6 +7,8 @@ import {
 } from '@slayzone/platform/security-log'
 import { router, publicProcedure } from '../trpc'
 import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
+import { adminOnlyTrpcError, callerIsNotAdmin } from '../admin-gate'
+import type { TrpcContext } from '../context'
 import {
   listComputers as storeListComputers,
   mintJoinToken as storeMintJoinToken,
@@ -19,7 +21,9 @@ import {
   machinesByHostId as storeMachinesByHostId,
   renameMachine as storeRenameMachine,
   assertComputerVisible,
+  isComputerOwnedBy,
   listVisibleComputerIds,
+  ownsEveryComputerOnHost,
   claimComputer as storeClaimComputer,
   setComputerVisibility as storeSetComputerVisibility,
   type ComputerViewer
@@ -70,6 +74,34 @@ const viewerOf = (ctx: { principal?: { userId?: string } | null }): ComputerView
   userId: ctx.principal?.userId ?? null
 })
 
+/**
+ * The same viewer for MANAGING computers (list, revoke, delete, visibility): a hub
+ * admin sees every computer here (T-15). Never for binding work to a computer —
+ * `setTaskComputer` / `setProjectDefaultComputer` keep {@link viewerOf}, so the
+ * admin role opens no path to run on, or read from, another user's computer.
+ */
+const managerOf = (ctx: {
+  principal?: { userId?: string; role?: string } | null
+}): ComputerViewer => ({
+  userId: ctx.principal?.userId ?? null,
+  isHubAdmin: ctx.principal?.role === 'admin'
+})
+
+/**
+ * Lifecycle of someone else's computer, or an unowned one, is the admin's (T-15,
+ * `CONDITIONAL_ADMIN`): a user may revoke, delete or re-scope only their own.
+ */
+async function requireOwnerOrAdmin(
+  ctx: Pick<TrpcContext, 'db' | 'principal'>,
+  path: string,
+  computerId: string
+): Promise<void> {
+  if (!callerIsNotAdmin(ctx)) return
+  const userId = ctx.principal?.userId
+  if (userId && (await isComputerOwnedBy(ctx.db, computerId, userId))) return
+  throw adminOnlyTrpcError(path)
+}
+
 export const computersRouter = router({
   /**
    * All non-revoked computers from the store, each annotated with live status from
@@ -92,7 +124,7 @@ export const computersRouter = router({
       // Same predicate the binding guards use — a list that shows a computer a
       // mutation would refuse (or worse, hides one it would accept) is the drift
       // this shares one implementation to avoid.
-      const visible = await listVisibleComputerIds(ctx.db, viewerOf(ctx))
+      const visible = await listVisibleComputerIds(ctx.db, managerOf(ctx))
       // One query for the whole list rather than a join per row: the machine is
       // decoration, and a computer with no host id is legitimately ungrouped.
       const machines = await storeMachinesByHostId(ctx.db)
@@ -211,7 +243,14 @@ export const computersRouter = router({
    */
   renameMachine: publicProcedure
     .input(z.object({ hostId: z.string().min(1), name: z.string().trim().max(64).nullable() }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input, path }) => {
+      // A machine shared with anyone else, or unowned, is the admin's to name (T-15).
+      if (callerIsNotAdmin(ctx)) {
+        const userId = ctx.principal?.userId
+        if (!userId || !(await ownsEveryComputerOnHost(ctx.db, input.hostId, userId))) {
+          throw adminOnlyTrpcError(path)
+        }
+      }
       await storeRenameMachine(ctx.db, input.hostId, input.name)
       return { ok: true as const }
     }),
@@ -237,8 +276,9 @@ export const computersRouter = router({
   /** Private (owner + grants), or visible to everyone on this hub. */
   setVisibility: publicProcedure
     .input(z.object({ computerId: z.string(), visibility: z.enum(['private', 'hub', 'shared']) }))
-    .mutation(async ({ ctx, input }) => {
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireOwnerOrAdmin(ctx, path, input.computerId)
+      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
       await storeSetComputerVisibility(ctx.db, input.computerId, input.visibility)
       auditComputer('computer.visibility.set', input.computerId, 'success', {
         visibility: input.visibility
@@ -255,8 +295,9 @@ export const computersRouter = router({
    */
   unrevoke: publicProcedure
     .input(z.object({ computerId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireOwnerOrAdmin(ctx, path, input.computerId)
+      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
       await storeUnrevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.unrevoke', input.computerId)
       return { ok: true as const }
@@ -272,8 +313,9 @@ export const computersRouter = router({
    */
   delete: publicProcedure
     .input(z.object({ computerId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireOwnerOrAdmin(ctx, path, input.computerId)
+      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
       await storeDeleteComputer(ctx.db, input.computerId)
       auditComputer('computer.delete', input.computerId)
       return { ok: true as const }
@@ -308,8 +350,9 @@ export const computersRouter = router({
   /** Revoke a computer (idempotent — first revocation time wins). */
   revokeComputer: publicProcedure
     .input(z.object({ computerId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      await assertComputerVisible(ctx.db, input.computerId, viewerOf(ctx))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireOwnerOrAdmin(ctx, path, input.computerId)
+      await assertComputerVisible(ctx.db, input.computerId, managerOf(ctx))
       await storeRevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.revoke', input.computerId)
       return { ok: true as const }

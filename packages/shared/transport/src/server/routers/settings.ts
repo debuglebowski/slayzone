@@ -1,3 +1,4 @@
+import { settingsWriteProcedure } from './settings-admin'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { SettingsService, settingsEvents } from '@slayzone/settings/server'
@@ -40,7 +41,7 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => (await settingsFor(ctx).get(input.key)) ?? null),
 
-  set: publicProcedure
+  set: settingsWriteProcedure
     .input(z.object({ key: z.string(), value: z.string() }))
     .mutation(({ ctx, input }) => settingsFor(ctx).set(input.key, input.value)),
 

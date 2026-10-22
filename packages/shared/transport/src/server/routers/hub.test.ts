@@ -110,12 +110,33 @@ test('auth gate ON + principal present: gated proc runs', async () => {
   // is what a scoped web session with an empty grant would look like, which
   // correctly gets FORBIDDEN on hub.setLabel (never-classified) rather than
   // running. This fixture models an ordinary authenticated (desktop/CLI) call.
+  // An ADMIN account: the hub's name is the admin's to set (T-15).
   const authedCaller = hubRouter.createCaller({
     db: h.slayDb,
-    principal: { userId: 'u1', role: 'user', orgId: null, scopes: ['full'] }
+    principal: { userId: 'u1', role: 'admin', orgId: null, scopes: ['full'] }
   } as never)
   await authedCaller.setLabel({ label: 'authed-write' })
   expect((await authedCaller.describe()).label).toBe('authed-write')
   // Reset the gate so other in-process suites are unaffected.
   setAuthGate(() => false)
+})
+
+test('auth gate ON + a non-admin account: setLabel is FORBIDDEN, describe still works (T-15)', async () => {
+  setAuthGate(() => true)
+  try {
+    const userCaller = hubRouter.createCaller({
+      db: h.slayDb,
+      principal: { userId: 'u2', role: 'user', orgId: null, scopes: ['full'] }
+    } as never)
+    let code = ''
+    try {
+      await userCaller.setLabel({ label: 'not-allowed' })
+    } catch (err) {
+      code = (err as { code?: string }).code ?? ''
+    }
+    expect(code).toBe('FORBIDDEN')
+    expect((await userCaller.describe()).label).toBe('authed-write')
+  } finally {
+    setAuthGate(() => false)
+  }
 })

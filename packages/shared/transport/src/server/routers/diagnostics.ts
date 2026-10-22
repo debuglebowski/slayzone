@@ -10,7 +10,8 @@ import {
 import type {
   ClientErrorEventInput,
   ClientDiagnosticEventInput,
-  DiagnosticsConfig
+  DiagnosticsConfig,
+  DiagnosticsExportBundle
 } from '@slayzone/diagnostics/shared'
 import { router, publicProcedure } from '../trpc'
 
@@ -49,11 +50,32 @@ export const diagnosticsRouter = router({
   // to the server host's platform — the renderer has no clean source for it.
   exportBundle: publicProcedure
     .input(exportRequestInput.extend({ appVersion: z.string(), platform: z.string().optional() }))
-    .query(({ input }) =>
-      buildExportBundle({
+    .query(async ({ ctx, input }) => {
+      const bundle = await buildExportBundle({
         request: { fromTsMs: input.fromTsMs, toTsMs: input.toTsMs },
         appVersion: input.appVersion,
         platform: input.platform ?? process.platform
       })
-    )
+      // On a hub with login only an admin gets here (T-15), and an admin must not
+      // read other users' terminals (O-4): drop captured pty output whatever
+      // `includePtyOutput` was when it was recorded. No principal (the desktop app's
+      // own hub) keeps the bundle exactly as recorded.
+      return ctx.principal ? withoutPtyOutput(bundle) : bundle
+    })
 })
+
+/** The bundle with every `pty.data` event's captured bytes replaced by their length. */
+export function withoutPtyOutput(
+  bundle: DiagnosticsExportBundle | null
+): DiagnosticsExportBundle | null {
+  if (!bundle) return bundle
+  return {
+    ...bundle,
+    events: bundle.events.map((e) => {
+      const payload = e.payload as { data?: unknown; length?: unknown } | null
+      if (e.event !== 'pty.data' || !payload || payload.data === undefined) return e
+      return { ...e, payload: { length: payload.length ?? null, included: false } }
+    }),
+    redaction: { ...bundle.redaction, includePtyOutput: false }
+  }
+}

@@ -46,6 +46,8 @@ export {
 export {
   assertComputerVisible,
   isComputerVisible,
+  isComputerOwnedBy,
+  ownsEveryComputerOnHost,
   listVisibleComputerIds,
   visibilityClause,
   claimComputer,

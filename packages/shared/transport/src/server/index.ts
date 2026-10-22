@@ -9,6 +9,15 @@ export {
   type PrincipalScope,
   type ProcedureScope
 } from './scopes'
+export {
+  ADMIN_ONLY,
+  CONDITIONAL_ADMIN,
+  MCP_ADMIN_POLICY,
+  REST_ADMIN_POLICY,
+  TRPC_ADMIN_POLICY,
+  roleAllows,
+  type AccessClass
+} from './admin-policy'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
 export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
 export {

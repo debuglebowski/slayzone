@@ -14,7 +14,8 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
 import { computersRouter } from './computers.js'
-import { setComputersDeps, type ComputersDeps } from '../app-deps.js'
+import { setAuthGate, setComputersDeps, type ComputersDeps } from '../app-deps.js'
+import { appRouter } from '../router.js'
 import {
   registerComputer,
   decodeJoinToken,
@@ -261,4 +262,74 @@ test('pty and chat resolve a task to the SAME computer at every precedence step'
   // silently inheriting some other project's machine.
   await h.slayDb.run(`UPDATE projects SET default_computer_id = NULL WHERE id = 'p-res'`)
   expect(await both('t-res')).toEqual([null, null])
+})
+
+/**
+ * T-15 on a hub with login: the admin MANAGES every computer (sees it in the list,
+ * changes its visibility, revokes, deletes) but gets no path to put work on one that
+ * is not visible to them — binding a task is running code in that user's account
+ * (O-4). A user manages only their own. Through the real `appRouter`, so the role
+ * gate and the procedure checks run exactly as on the hub.
+ */
+test('T-15: an admin manages a private computer of another user but cannot bind work to it', async () => {
+  setAuthGate(() => true)
+  try {
+    const bobs = await registerComputer(h.slayDb, {
+      name: 'bob-private',
+      platform: 'linux-x64',
+      version: '0.35.0'
+    })
+    await h.slayDb.run(
+      `UPDATE computers SET owner_user_id = 'bob', visibility = 'private' WHERE id = ?`,
+      [bobs.id]
+    )
+    const as = (userId: string, role: 'admin' | 'user') =>
+      appRouter.createCaller({ ...ctx, principal: { userId, role, scopes: ['full'] } }).computers
+    const admin = as('alice', 'admin')
+    const bob = as('bob', 'user')
+    const carol = as('carol', 'user')
+    const refusal = async (p: Promise<unknown>): Promise<string> =>
+      p.then(
+        () => 'ok',
+        (e: { code?: string; cause?: { name?: string }; message?: string }) =>
+          e.cause?.name === 'AdminOnlyError' ? `${e.code}:ADMIN_ONLY` : String(e.message)
+      )
+
+    // List: management metadata, so the admin sees it; another user does not.
+    expect((await admin.list()).some((r) => r.id === bobs.id)).toBe(true)
+    expect((await carol.list()).some((r) => r.id === bobs.id)).toBe(false)
+    expect((await bob.list()).some((r) => r.id === bobs.id)).toBe(true)
+
+    // Binding work: refused to the admin exactly like to any other non-viewer.
+    expect(
+      (await refusal(admin.setTaskComputer({ taskId, computerId: bobs.id }))).includes(
+        'no such computer'
+      )
+    ).toBe(true)
+    expect(
+      (await refusal(admin.setProjectDefaultComputer({ projectId, computerId: bobs.id }))).includes(
+        'no such computer'
+      )
+    ).toBe(true)
+
+    // Lifecycle of someone else's computer: admin only.
+    expect(await refusal(carol.setVisibility({ computerId: bobs.id, visibility: 'hub' }))).toBe(
+      'FORBIDDEN:ADMIN_ONLY'
+    )
+    expect(await refusal(carol.revokeComputer({ computerId: bobs.id }))).toBe(
+      'FORBIDDEN:ADMIN_ONLY'
+    )
+    expect(await refusal(carol.claim({ computerId: bobs.id }))).toBe('FORBIDDEN:ADMIN_ONLY')
+    expect(await refusal(carol.mintJoinToken({ label: 'x' }))).toBe('FORBIDDEN:ADMIN_ONLY')
+    expect(await refusal(admin.setVisibility({ computerId: bobs.id, visibility: 'private' }))).toBe(
+      'ok'
+    )
+    // The owner manages their own.
+    expect(await refusal(bob.revokeComputer({ computerId: bobs.id }))).toBe('ok')
+    expect(await refusal(admin.unrevoke({ computerId: bobs.id }))).toBe('ok')
+    expect(await refusal(carol.delete({ computerId: bobs.id }))).toBe('FORBIDDEN:ADMIN_ONLY')
+    expect(await refusal(admin.delete({ computerId: bobs.id }))).toBe('ok')
+  } finally {
+    setAuthGate(() => false)
+  }
 })
