@@ -111,6 +111,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     lock_config: null,
     icon_letters: null,
     icon_image_path: null,
+    owner_user_id: null,
     group_id: null,
     starred: false,
     sort_order: 0,

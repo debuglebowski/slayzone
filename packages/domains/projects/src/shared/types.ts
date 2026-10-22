@@ -72,6 +72,12 @@ export interface Project {
   group_id: string | null
   /** Exempts the project from the sidebar tree's "hide inactive" collapse. */
   starred: boolean
+  /**
+   * The hub-auth user who owns the project. Null on a hub without login (the
+   * desktop app's), where requests carry no user, and on rows from before
+   * ownership existed until the hub assigns them (`ownership-backfill.ts`).
+   */
+  owner_user_id: string | null
   created_at: string
   updated_at: string
 }

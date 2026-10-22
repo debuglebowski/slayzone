@@ -1,6 +1,14 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { settingScope } from './scope'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
+
+/** The settings API as one request sees it — what the settings router serves. */
+export interface SettingsView {
+  get(key: string): Promise<string | undefined>
+  set(key: string, value: string): Promise<void>
+  getAll(): Promise<Record<string, string>>
+}
 
 export class SettingsService {
   // One shared instance per DB handle. The warmed cache is per-instance and
@@ -44,6 +52,51 @@ export class SettingsService {
       value: string
     }[]
     return Object.fromEntries(rows.map((r) => [r.key, r.value]))
+  }
+
+  /**
+   * The settings as the request from `userId` sees them (T-16; key scopes in
+   * scope.ts). `null` = a request with no user, i.e. a hub without login: the
+   * global table, as before. A user: `hub` keys are the global rows everyone
+   * shares, `user` keys are that user's own `user_settings` rows (absent = unset,
+   * never another row). `internal` keys are invisible and unwritable either way.
+   */
+  forUser(userId: string | null): SettingsView {
+    return {
+      get: async (key) => {
+        const scope = settingScope(key)
+        if (scope === 'internal') return undefined
+        if (userId === null || scope === 'hub') return this.get(key)
+        const row = (await this.db
+          .prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?')
+          .get(userId, key)) as { value: string } | undefined
+        return row?.value
+      },
+      set: async (key, value) => {
+        const scope = settingScope(key)
+        if (scope === 'internal') {
+          throw new Error(`Setting "${key}" cannot be written through the settings API`)
+        }
+        if (userId === null || scope === 'hub') return this.set(key, value)
+        await this.db
+          .prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+          .run(userId, key, value)
+      },
+      getAll: async () => {
+        const all = await this.getAll()
+        const out: Record<string, string> = {}
+        for (const [key, value] of Object.entries(all)) {
+          const scope = settingScope(key)
+          if (scope === 'hub' || (userId === null && scope === 'user')) out[key] = value
+        }
+        if (userId === null) return out
+        const mine = (await this.db
+          .prepare('SELECT key, value FROM user_settings WHERE user_id = ?')
+          .all(userId)) as { key: string; value: string }[]
+        for (const r of mine) if (settingScope(r.key) === 'user') out[r.key] = r.value
+        return out
+      }
+    }
   }
 
   async getJSON<T>(key: string): Promise<T | undefined> {

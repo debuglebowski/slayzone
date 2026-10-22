@@ -3856,6 +3856,45 @@ export const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_process_pids_process ON process_pids(process_id);
       `)
     }
+  },
+  {
+    version: 169,
+    up: (db) => {
+      // Who owns a project, and per-user settings (T-16).
+      //
+      // `projects.owner_user_id` is the root of ownership on a hub with several
+      // users. Tasks hang off a project, and terminal tabs, chat, artifacts and
+      // agent prompts off a task, all through NOT NULL foreign keys — so they
+      // inherit the owner through that chain instead of carrying a copy that
+      // could drift. A LOOSE reference to a hub-auth user id, like
+      // `web_sessions.user_id` (v166): the users live in the auth database, so
+      // nothing here can enforce it.
+      //
+      // NULL = no owner recorded: every project that exists today, and every
+      // project created on a hub without login (the desktop app's), where no user
+      // is attached to the request. Not backfilled here, because this database
+      // cannot see the users; a hub that requires login assigns unowned projects
+      // to its first admin at boot (`apps/hub/src/ownership-backfill.ts`).
+      //
+      // `user_settings`: settings rows that are one person's state (open tabs,
+      // layout, filters) rather than the hub's. Same loose `user_id`. Used only
+      // for a request that carries a user; a hub without login keeps every key
+      // in `settings`, exactly as before. Which key is which: `settingScope` in
+      // `@slayzone/settings/server`. The `key` index serves the boot purge, which
+      // reads every user's `viewState`.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN owner_user_id TEXT;
+        CREATE INDEX idx_projects_owner_user_id ON projects(owner_user_id);
+
+        CREATE TABLE user_settings (
+          user_id TEXT NOT NULL,
+          key     TEXT NOT NULL,
+          value   TEXT NOT NULL,
+          PRIMARY KEY (user_id, key)
+        );
+        CREATE INDEX idx_user_settings_key ON user_settings(key);
+      `)
+    }
   }
 ]
 

@@ -1,6 +1,7 @@
 export {
   listAllProjects,
   createProject,
+  assignUnownedProjects,
   updateProject,
   deleteProject,
   uploadProjectIcon,
@@ -20,3 +21,10 @@ export {
   type ProjectGroupsSnapshot
 } from './project-groups-store'
 export { handleTerminalStateChange } from './task-automation'
+export {
+  mayAccessProject,
+  mayAccessProjectId,
+  type ProjectAccessPrincipal,
+  type ProjectAccessRequest,
+  type ProjectOwnership
+} from './project-access'

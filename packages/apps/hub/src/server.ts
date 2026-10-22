@@ -29,6 +29,7 @@ import { handleHealth, type HealthState } from './health.js'
 import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
+import { backfillOwnership } from './ownership-backfill.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
@@ -158,6 +159,19 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         `[slayzone] could not provision a bootstrap owner: ${err instanceof Error ? err.message : String(err)}`
       )
     }
+  }
+
+  // T-16: unowned projects (an upgrade, or created while login was off) and the
+  // pre-login settings rows go to the first admin — after the accounts above are
+  // settled, before the hub listens. No-op without login, and once done.
+  try {
+    await backfillOwnership({ db, hubAuth, requireLogin: hubAuthRequired, log })
+  } catch (err) {
+    // Unowned projects are refused to every user, never shown to all, so a failed
+    // pass loses nothing; the next boot retries.
+    log(
+      `[ownership] backfill failed, retried next boot: ${err instanceof Error ? err.message : String(err)}`
+    )
   }
 
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards

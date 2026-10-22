@@ -70,7 +70,18 @@ export async function listAllProjects(db: SlayzoneDb): Promise<Project[]> {
   return rows.map((row) => parseProject(row)!)
 }
 
-export async function createProject(db: SlayzoneDb, data: CreateProjectInput): Promise<Project> {
+/**
+ * `ownerUserId` is the user the request came from: `ctx.principal.userId` (tRPC)
+ * or the bound REST principal, and null on a hub without login, where requests
+ * carry no user. Deliberately a separate, REQUIRED argument rather than a field of
+ * the client-supplied input: a client never chooses the owner, and a new create
+ * path cannot compile without deciding it.
+ */
+export async function createProject(
+  db: SlayzoneDb,
+  data: CreateProjectInput,
+  ownerUserId: string | null
+): Promise<Project> {
   const prepared = prepareProjectCreate(data)
   const row = await db.namedTxn('projects:create', {
     id: prepared.id,
@@ -79,9 +90,22 @@ export async function createProject(db: SlayzoneDb, data: CreateProjectInput): P
     path: prepared.path,
     columnsConfigJson: prepared.columnsConfigJson,
     createdAt: prepared.createdAt,
-    updatedAt: prepared.updatedAt
+    updatedAt: prepared.updatedAt,
+    ownerUserId
   })
   return parseProject(row)!
+}
+
+/**
+ * Give every project with no owner to `ownerUserId`. Returns how many changed.
+ * Idempotent: once nothing is unowned this is a no-op. The hub's boot backfill
+ * (`apps/hub/src/ownership-backfill.ts`) is the only caller — it decides WHO.
+ */
+export async function assignUnownedProjects(db: SlayzoneDb, ownerUserId: string): Promise<number> {
+  const result = await db.run('UPDATE projects SET owner_user_id = ? WHERE owner_user_id IS NULL', [
+    ownerUserId
+  ])
+  return result.changes
 }
 
 export async function updateProject(
@@ -197,7 +221,10 @@ export async function deleteProject(
   iconsDir: string
 ): Promise<boolean> {
   const result = await db.run('DELETE FROM projects WHERE id = ?', [id])
+  // A per-user key (see `settingScope`): global on a hub without login, one row
+  // per user otherwise — clear both.
   await db.run('DELETE FROM settings WHERE key = ?', [`commit_graph:project:${id}`])
+  await db.run('DELETE FROM user_settings WHERE key = ?', [`commit_graph:project:${id}`])
   unlinkProjectIconFiles(iconsDir, id)
   return result.changes > 0
 }

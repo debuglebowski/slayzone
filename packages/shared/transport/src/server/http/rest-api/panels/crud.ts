@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 import type { Express } from 'express'
-import type { SlayzoneDb } from '@slayzone/platform'
+import { SettingsService, type SettingsView } from '@slayzone/settings/server'
 import type { PanelConfig, WebPanelDefinition } from '@slayzone/task/shared'
 import {
   DEFAULT_PANEL_CONFIG,
@@ -12,6 +13,7 @@ import {
   validatePanelShortcut
 } from '@slayzone/task/shared'
 import type { RestApiDeps } from '../types'
+import { restPrincipalOf } from '../principal'
 
 /**
  * Web-panel management (the `panel_config` settings blob).
@@ -21,25 +23,28 @@ import type { RestApiDeps } from '../types'
  * - POST   /api/panels   { name, url, shortcut?, blockHandoff?, protocol? }
  * - PATCH  /api/panels/:idOrName  { enabled: boolean }  (task-view visibility)
  * - DELETE /api/panels/:idOrName      (predefined panels are tombstoned)
+ *
+ * `panel_config` is a per-user setting (T-16, `settingScope`): the caller's own
+ * copy when the request carries a user, the global row on a hub without login —
+ * the same row the app's settings router serves that caller.
  */
 
-async function loadPanelConfig(db: SlayzoneDb): Promise<PanelConfig> {
-  const row = await db.get<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'panel_config' LIMIT 1`
-  )
-  if (!row?.value) return { ...DEFAULT_PANEL_CONFIG }
+function panelSettings(deps: RestApiDeps, req: IncomingMessage): SettingsView {
+  return SettingsService.forDatabase(deps.db).forUser(restPrincipalOf(req)?.userId ?? null)
+}
+
+async function loadPanelConfig(settings: SettingsView): Promise<PanelConfig> {
+  const value = await settings.get('panel_config')
+  if (!value) return { ...DEFAULT_PANEL_CONFIG }
   try {
-    return mergePredefinedWebPanels(JSON.parse(row.value) as PanelConfig)
+    return mergePredefinedWebPanels(JSON.parse(value) as PanelConfig)
   } catch {
     return { ...DEFAULT_PANEL_CONFIG }
   }
 }
 
-async function savePanelConfig(db: SlayzoneDb, config: PanelConfig): Promise<void> {
-  await db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [
-    'panel_config',
-    JSON.stringify(config)
-  ])
+async function savePanelConfig(settings: SettingsView, config: PanelConfig): Promise<void> {
+  await settings.set('panel_config', JSON.stringify(config))
 }
 
 function findPanel(config: PanelConfig, idOrName: string): WebPanelDefinition | undefined {
@@ -49,9 +54,9 @@ function findPanel(config: PanelConfig, idOrName: string): WebPanelDefinition | 
 }
 
 export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void {
-  app.get('/api/panels', async (_req, res) => {
+  app.get('/api/panels', async (req, res) => {
     try {
-      const config = await loadPanelConfig(deps.db)
+      const config = await loadPanelConfig(panelSettings(deps, req))
       // Augment each panel with its task-view enabled state (additive) so the
       // CLI's `slay panels list` can render the ON column without a 2nd fetch.
       const data = config.webPanels.map((p) => ({
@@ -90,7 +95,8 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
     if (!url.startsWith('http://') && !url.startsWith('https://')) url = `https://${url}`
 
     try {
-      const config = await loadPanelConfig(deps.db)
+      const settings = panelSettings(deps, req)
+      const config = await loadPanelConfig(settings)
 
       const shortcut = typeof body.shortcut === 'string' ? body.shortcut : undefined
       if (shortcut) {
@@ -128,7 +134,7 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
         handoffHostScope
       }
 
-      await savePanelConfig(deps.db, { ...config, webPanels: [...config.webPanels, newPanel] })
+      await savePanelConfig(settings, { ...config, webPanels: [...config.webPanels, newPanel] })
       deps.notifyRenderer()
       res.json({ ok: true, data: newPanel })
     } catch (err) {
@@ -144,13 +150,14 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
       return
     }
     try {
-      const config = await loadPanelConfig(deps.db)
+      const settings = panelSettings(deps, req)
+      const config = await loadPanelConfig(settings)
       const panel = findPanel(config, req.params.idOrName)
       if (!panel) {
         res.status(404).json({ ok: false, error: `Panel not found: ${req.params.idOrName}` })
         return
       }
-      await savePanelConfig(deps.db, {
+      await savePanelConfig(settings, {
         ...config,
         viewEnabled: {
           ...config.viewEnabled,
@@ -166,7 +173,8 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
 
   app.delete('/api/panels/:idOrName', async (req, res) => {
     try {
-      const config = await loadPanelConfig(deps.db)
+      const settings = panelSettings(deps, req)
+      const config = await loadPanelConfig(settings)
       const panel = findPanel(config, req.params.idOrName)
       if (!panel) {
         res.status(404).json({ ok: false, error: `Panel not found: ${req.params.idOrName}` })
@@ -181,7 +189,7 @@ export function registerPanelsCrudRoutes(app: Express, deps: RestApiDeps): void 
         next.deletedPredefined = [...(config.deletedPredefined ?? []), panel.id]
       }
 
-      await savePanelConfig(deps.db, next)
+      await savePanelConfig(settings, next)
       deps.notifyRenderer()
       res.json({ ok: true, data: { id: panel.id, name: panel.name } })
     } catch (err) {

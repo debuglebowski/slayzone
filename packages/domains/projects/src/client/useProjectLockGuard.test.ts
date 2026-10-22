@@ -35,6 +35,7 @@ function makeProject(id: string, lock_config: ProjectLockConfig | null): Project
     lock_config,
     icon_letters: null,
     icon_image_path: null,
+    owner_user_id: null,
     sort_order: 0,
     created_at: '',
     updated_at: ''

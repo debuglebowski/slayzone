@@ -255,6 +255,9 @@ export interface CreateProjectTxnParams {
   columnsConfigJson: string | null
   createdAt: string
   updatedAt: string
+  /** The creating user (hub-auth id), or null on a hub without login. Required,
+   *  so no create path can forget to decide it. */
+  ownerUserId: string | null
 }
 
 export interface UpdateProjectTxnParams {
@@ -292,8 +295,8 @@ export const projectsTxns = {
         )
         .get() as { sort_order: number }
       const stmt = db.prepare(`
-        INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at, owner_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       stmt.run(
         p.id,
@@ -303,7 +306,8 @@ export const projectsTxns = {
         p.columnsConfigJson,
         nextOrder,
         p.createdAt,
-        p.updatedAt
+        p.updatedAt,
+        p.ownerUserId
       )
       return db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id) as Row
     })(),

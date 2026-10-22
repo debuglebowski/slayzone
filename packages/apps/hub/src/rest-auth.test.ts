@@ -39,6 +39,7 @@ import {
   type SecurityContext
 } from '@slayzone/platform/security-log'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
+import { restPrincipalOf, type RestPrincipal } from '@slayzone/transport/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { restAuthAction, verifyRestBearer, withRestAuth, parseCookieHeader } from './rest-auth.js'
 import { mintWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
@@ -84,6 +85,8 @@ interface GateHarness {
   ): Promise<{ status: number; body: string; reached: boolean }>
   /** The audit context the inner handler last ran with (T-03). */
   seenContext(): SecurityContext | undefined
+  /** The REST principal the inner handler last saw bound to its request (T-16). */
+  seenPrincipal(): RestPrincipal | null
   close(): Promise<void>
 }
 
@@ -113,13 +116,15 @@ async function mountGate(opts: {
 }): Promise<GateHarness> {
   let reached = false
   let seen: SecurityContext | undefined
+  let seenPrincipal: RestPrincipal | null = null
   const gated = withRestAuth({
     getHubAuthRequired: () => opts.required,
     getHubAuth: () => opts.auth,
     getDb: () => opts.db ?? null,
-    next: (_req, res) => {
+    next: (req, res) => {
       reached = true
       seen = currentSecurityContext()
+      seenPrincipal = restPrincipalOf(req)
       res.writeHead(200, { 'content-type': 'text/plain' })
       res.end('inner')
     }
@@ -150,6 +155,7 @@ async function mountGate(opts: {
       return { status: res.status, body, reached }
     },
     seenContext: () => seen,
+    seenPrincipal: () => seenPrincipal,
     close: () => new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
@@ -560,6 +566,30 @@ async function main(): Promise<void> {
         assertEq(good.reached, true, 'the inner handler ran')
       } finally {
         await h.close()
+      }
+    })
+
+    await test('withRestAuth: binds the verified principal to the request (who creates a project, T-16)', async () => {
+      const h = await mountGate({ required: true, auth, forceOffBox: true })
+      try {
+        const good = await h.get('/api/projects', { authorization: `Bearer ${validToken}` })
+        assertEq(good.status, 200, 'valid bearer → 200')
+        assertEq(h.seenPrincipal()?.userId, created.id, 'the handler sees the signed-in user')
+        assertEq(h.seenPrincipal()?.scopes.includes('full'), true, 'full principal')
+        // An open path is admitted without verifying anyone: nothing bound.
+        const open = await h.get('/api/auth/sign-in/email')
+        assertEq(open.reached, true, 'open path reached')
+        assertEq(h.seenPrincipal(), null, 'no principal on an unverified request')
+      } finally {
+        await h.close()
+      }
+      const off = await mountGate({ required: false, auth, forceOffBox: true })
+      try {
+        const res = await off.get('/api/projects', { authorization: `Bearer ${validToken}` })
+        assertEq(res.reached, true, 'login off → through')
+        assertEq(off.seenPrincipal(), null, 'login off: no user on the request, even with a bearer')
+      } finally {
+        await off.close()
       }
     })
 

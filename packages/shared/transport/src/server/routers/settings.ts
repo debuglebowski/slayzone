@@ -3,8 +3,20 @@ import { observable } from '@trpc/server/observable'
 import { SettingsService, settingsEvents } from '@slayzone/settings/server'
 import { router, publicProcedure } from '../trpc'
 import { getAppDeps } from '../app-deps'
+import type { TrpcContext } from '../context'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
+
+/**
+ * Per user (T-16): a request that carries a user (a hub that requires login) sees
+ * the hub's shared keys plus its OWN copy of every per-user key (`viewState`,
+ * layout, filters …); a request without one (a hub without login) sees the global
+ * table as before. Integration credentials are never served. Which key is which:
+ * `settingScope` in `@slayzone/settings/server`. The client sends nothing new —
+ * the user comes from the verified connection.
+ */
+const settingsFor = (ctx: TrpcContext) =>
+  SettingsService.forDatabase(ctx.db).forUser(ctx.principal?.userId ?? null)
 
 /**
  * Theme is Electron `nativeTheme`-backed (host-only), so the theme procedures
@@ -26,15 +38,13 @@ const themeInput = z.enum(['light', 'dark', 'system'])
 export const settingsRouter = router({
   get: publicProcedure
     .input(z.object({ key: z.string() }))
-    .query(
-      async ({ ctx, input }) => (await SettingsService.forDatabase(ctx.db).get(input.key)) ?? null
-    ),
+    .query(async ({ ctx, input }) => (await settingsFor(ctx).get(input.key)) ?? null),
 
   set: publicProcedure
     .input(z.object({ key: z.string(), value: z.string() }))
-    .mutation(({ ctx, input }) => SettingsService.forDatabase(ctx.db).set(input.key, input.value)),
+    .mutation(({ ctx, input }) => settingsFor(ctx).set(input.key, input.value)),
 
-  getAll: publicProcedure.query(({ ctx }) => SettingsService.forDatabase(ctx.db).getAll()),
+  getAll: publicProcedure.query(({ ctx }) => settingsFor(ctx).getAll()),
 
   // --- Theme (Electron nativeTheme — host-only, via injected AppDeps) ---
 

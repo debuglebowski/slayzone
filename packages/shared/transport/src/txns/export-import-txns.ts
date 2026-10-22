@@ -142,7 +142,11 @@ function clearProviderConversationIds(providerConfig: string | null): string | n
   }
 }
 
-function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
+function importBundle(
+  db: Database,
+  data: SlayExportData,
+  ownerUserId: string | null
+): ImportTxnResult {
   const remap = new Map<string, string>()
 
   // Generate new UUIDs for all entities with `id` columns
@@ -168,6 +172,10 @@ function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
       name = `${name} (imported)`
     }
     p.name = name
+    // The importer owns what they import. Whatever the bundle says (a user id on
+    // the hub it was exported from, or nothing at all from a build before
+    // ownership) means nothing here.
+    p.owner_user_id = ownerUserId
   }
 
   // Clean non-portable task fields
@@ -266,6 +274,8 @@ function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
 
 export interface ImportTxnParams {
   data: SlayExportData
+  /** The importing user (hub-auth id), or null on a hub without login. */
+  ownerUserId: string | null
 }
 
 export interface SetTaskParentTxnParams {
@@ -275,7 +285,7 @@ export interface SetTaskParentTxnParams {
 
 export const exportImportTxns = {
   'export-import:import': (db: Database, p: ImportTxnParams): ImportTxnResult =>
-    importBundle(db, p.data),
+    importBundle(db, p.data, p.ownerUserId),
 
   // Test-only: set parent_id directly. Allows tests to simulate stale (orphan)
   // FKs by temporarily disabling FK checks for this single statement. Must not
