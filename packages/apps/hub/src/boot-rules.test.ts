@@ -1,5 +1,5 @@
 /**
- * The hub's boot rules (B1–B5, B7–B11, B13–B15): one case per refusal, plus the
+ * The hub's boot rules (B1–B5, B7–B11, B13–B17): one case per refusal, plus the
  * combinations that must boot. Pure — `assertHubBootRules` takes an env object and
  * returns/throws, with no database, port or process — so every rule is checked
  * without a boot. `hub-boot.test.ts` drives the same rules through the real
@@ -12,7 +12,8 @@
  *   B1 reachable ⇒ login · B3 reachable ⇒ public address · B10 reachable ⇒ no raw-SQL
  *   dev endpoint · B14 reachable ⇒ auth secret in env · B2 login ⇒ password or SSO ·
  *   B7 SSO ⇒ tenant + client id (GUIDs) + certificate + public address, no client
- *   secret, and the certificate loads · B11 login ⇒ auth database loads.
+ *   secret, and the certificate loads · B11 login ⇒ auth database loads ·
+ *   B17 reachable ⇒ the env secret matches one this hub generated earlier.
  * A leftover SLAYZONE_MODE is ignored: there is deliberately no rule for it.
  *
  * Pure Node → runs under plain `npx tsx`.
@@ -22,6 +23,7 @@
 import {
   assertAuthLoaded,
   assertHubBootRules,
+  assertKeptAuthSecret,
   assertSsoCredential,
   bootRefusalRule,
   isHubReachable,
@@ -806,6 +808,54 @@ test('B16: anything that is not a non-negative whole number refuses boot, naming
       `'${v}' is B16`
     )
   }
+})
+
+console.log('\nB17: a secret this hub generated earlier (T-11)')
+
+const KEPT = 'kept-secret-0123456789abcdef0123456789abcdef'
+const KEPT_PATH = '/srv/hub/hub.state.json'
+const kept = (over: Partial<Parameters<typeof assertKeptAuthSecret>[0]>) =>
+  assertKeptAuthSecret({
+    reachable: true,
+    envSecret: KEPT,
+    kept: KEPT,
+    keptPath: KEPT_PATH,
+    ...over
+  })
+
+test('B17: the same secret in env boots and reports the kept file', () => {
+  assert(kept({}) === 'kept', 'same value → kept')
+})
+
+test('B17: nothing to compare boots — no kept secret, or not reachable', () => {
+  assert(kept({ kept: undefined }) === 'none', 'no kept secret')
+  assert(kept({ reachable: false, envSecret: 'other' }) === 'none', 'loopback: never compared')
+})
+
+test('B17: a different secret refuses boot, naming the file and both ways out, never a value', () => {
+  let err: unknown = null
+  try {
+    kept({ envSecret: 'a-different-env-secret-0123456789abcdef' })
+  } catch (e) {
+    err = e
+  }
+  assert(bootRefusalRule(err) === 'B17', `B17, got ${String(err)}`)
+  const message = err instanceof Error ? err.message : ''
+  for (const needle of ['SLAYZONE_HUB_AUTH_SECRET', KEPT_PATH, 'delete the file']) {
+    assert(message.includes(needle), `mentions ${needle}: ${message}`)
+  }
+  assert(!message.includes(KEPT), 'the kept secret is not in the message')
+  assert(!message.includes('a-different-env-secret'), 'the env secret is not in the message')
+})
+
+test('B17: compares the raw value — a trailing newline is a different secret', () => {
+  let rule: string | null = null
+  try {
+    kept({ envSecret: `${KEPT}\n` })
+  } catch (e) {
+    rule = bootRefusalRule(e)
+  }
+  assert(rule === 'B17', `B17, got ${rule}`)
 })
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

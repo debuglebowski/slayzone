@@ -1,6 +1,7 @@
 /**
  * `<dataRoot>/hub.owner.json` — the read-side contract shared between the hub
- * (which writes it) and the CLI (which reads it).
+ * (which writes it) and the CLI (which reads it). Only a hub that this machine alone
+ * reaches writes it: a reachable hub writes no generated secret to disk (T-11).
  *
  * WHY THIS IS A SHARED LEAF, NOT HUB-LOCAL. `packages/apps/hub` provisions the
  * file (`bootstrap-owner.ts`), and `packages/apps/cli` needs to read its `token`
@@ -35,6 +36,13 @@ export interface BootstrapOwnerFile {
   token?: string
   createdAt: number
 }
+
+/**
+ * The bootstrap owner's account. On a reachable hub there is no file: its password
+ * derives from the auth secret (`hub-auth-secret.ts`), and `slay hub owner-password`
+ * prints it for this address.
+ */
+export const BOOTSTRAP_OWNER_EMAIL = 'owner@hub.slayzone.local'
 
 export function ownerFilePath(dataRoot: string): string {
   return join(dataRoot, 'hub.owner.json')

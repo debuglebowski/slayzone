@@ -28,6 +28,7 @@ import {
   isBareAuthority,
   parseHubAddress
 } from '@slayzone/platform/hub-addr'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { updateHubConfigFile } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
@@ -47,6 +48,7 @@ import {
   writeHubConfig
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
+import { hubOwnerPasswordCommand } from './hub-owner-password'
 import {
   ensureLogDir,
   fail,
@@ -882,12 +884,22 @@ export function hubCommand(): Command {
           // and a first boot that fails (a taken port) must not swallow the one step
           // that makes the deployment usable. The config is already on disk at this
           // point, so the instruction is valid whether or not the hub comes up.
+          //
+          // A reachable hub writes no owner file (T-11): its first admin's password
+          // derives from the auth secret, which this unit holds, so sign in as it first.
+          const hubUrl = hubUrlFromAddr(publicAddress, 'http')
           console.log('')
-          console.log('This hub requires sign-in and public signup is closed, so create the')
-          console.log('first account on THIS machine — there is no other way in:')
-          console.log(`  slay hub users add <email> --hub ${name}`)
+          console.log('This hub requires sign-in and public signup is closed. Its first admin,')
+          console.log(
+            `${BOOTSTRAP_OWNER_EMAIL}, has a password derived from SLAYZONE_HUB_AUTH_SECRET.`
+          )
+          console.log('Sign in as it, then create accounts:')
+          console.log(
+            `  slay hub owner-password ${name} | slay hub login ${hubUrl} --email ${BOOTSTRAP_OWNER_EMAIL}`
+          )
+          console.log('  slay hub users add <email>')
           console.log('Then, from another machine:')
-          console.log(`  slay hub login ${hubUrlFromAddr(publicAddress, 'http')} --email <email>`)
+          console.log(`  slay hub login ${hubUrl} --email <email>`)
           console.log('')
         }
 
@@ -1254,6 +1266,9 @@ export function hubCommand(): Command {
 
   // slay hub users add|ls|disable|enable|role
   cmd.addCommand(hubUsersCommand())
+
+  // slay hub owner-password [name] — a reachable hub's first admin (T-11)
+  cmd.addCommand(hubOwnerPasswordCommand())
 
   return cmd
 }

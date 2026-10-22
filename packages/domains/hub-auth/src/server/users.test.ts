@@ -122,6 +122,21 @@ describe('createHubUser', () => {
     expect(a.password).not.toBe(b.password)
   })
 
+  it("a caller-chosen password (a reachable hub's derived owner password) is the one that signs in", async () => {
+    const chosen = 'derived-0123456789abcd'
+    const created = await createHubUser(auth, { email: 'owner@example.com' }, { password: chosen })
+    if ('error' in created) throw new Error(created.error)
+    expect(created.password).toBe(chosen)
+    expect((await signIn('owner@example.com', chosen)).token).toBeTruthy()
+  })
+
+  it('refuses a caller-chosen password outside the length bounds, creating nothing', async () => {
+    await expect(
+      createHubUser(auth, { email: 'short@example.com' }, { password: 'short' })
+    ).rejects.toThrow(/outside the configured bounds/)
+    expect(await listHubUsers(auth)).toEqual([])
+  })
+
   it('refuses a duplicate email, case-insensitively', async () => {
     await create('alice@example.com')
     expect(await createHubUser(auth, { email: 'Alice@Example.COM' })).toEqual({ error: 'exists' })

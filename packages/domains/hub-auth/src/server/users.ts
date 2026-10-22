@@ -158,12 +158,14 @@ function normalizeEmail(email: string): string {
  * With password sign-in off (T-10) throws `HubSwitchedOffError`
  * (`HUB_PASSWORD_DISABLED`) after one `user.create` denied line: no account gets a
  * password nobody could use. `opts.reason` is written into the success line
- * (`break_glass`, ./break-glass.ts).
+ * (`break_glass`, ./break-glass.ts). `opts.password` replaces the generated one: the
+ * bootstrap owner of a reachable hub, whose password derives from the auth secret so
+ * that nothing is written to disk (T-11). Never from a request body.
  */
 export async function createHubUser(
   auth: HubAuth,
   input: CreateHubUserInput,
-  opts: { reason?: 'break_glass' } = {}
+  opts: { reason?: 'break_glass'; password?: string } = {}
 ): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' }> {
   assertHubPasswordEnabled('user.create', { op: 'create' }, isPasswordSignInEnabled(auth))
   const ctx = await auth.$context
@@ -180,16 +182,16 @@ export async function createHubUser(
     return { error: 'exists' }
   }
 
-  const password = generatePassword()
-  // Fail LOUD if the generated length ever falls outside better-auth's configured
+  const password = opts.password ?? generatePassword()
+  // Fail LOUD if the password's length ever falls outside better-auth's configured
   // bounds: silently minting an account whose password the sign-in route rejects
-  // would be a mystery to debug. Only reachable if the config or the generator
+  // would be a mystery to debug. Only reachable if the config or a generator
   // changes, which is exactly when we want to hear about it.
   const { minPasswordLength, maxPasswordLength } = ctx.password.config
   if (password.length < minPasswordLength || password.length > maxPasswordLength) {
     throw new Error(
-      `[hub-auth] generated password length ${password.length} is outside the configured ` +
-        `bounds ${minPasswordLength}–${maxPasswordLength} — adjust generatePassword()`
+      `[hub-auth] password length ${password.length} is outside the configured ` +
+        `bounds ${minPasswordLength}–${maxPasswordLength} — adjust its generator`
     )
   }
 

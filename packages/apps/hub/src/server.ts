@@ -191,9 +191,17 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Entra; the first admin is whoever first signs in holding the app role. (A hub
   // that requires login with password off has Entra on — B2 — so the first condition
   // only restates the second there; it is the one that names the switch.)
+  //
+  // A hub other machines can reach writes and logs no generated secret (T-11): its
+  // owner's password derives from the auth secret B14 put in env, and no file is kept.
   if (hubAuthRequired && hubAuth && switches.enablePassword && !boot.ssoActive) {
     try {
-      await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
+      await ensureBootstrapOwner(
+        hubAuth,
+        dataRoot,
+        (m) => log(m),
+        boot.reachable ? { derivePasswordFrom: process.env.SLAYZONE_HUB_AUTH_SECRET ?? '' } : {}
+      )
     } catch (err) {
       // A hub with no owner is still a correctly-secured hub — the operator can
       // add one with `slay hub users add`. Do not fail the boot over convenience.

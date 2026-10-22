@@ -7,7 +7,9 @@
  *                                 enableSso, ssoTenantId, ssoClientId, enableProcesses,
  *                                 enableIntegrations — booleans; secrets are env only)
  *   `<ROOT>/hub.state.json`     — system-generated: computerTransportSecret (the hub-auth
- *                                 secret; auto-generated on first boot, never typed in)
+ *                                 secret; auto-generated on first boot, never typed in,
+ *                                 by a hub only this machine reaches — a reachable hub
+ *                                 takes it from env and never writes this file, T-11)
  *   `<ROOT>/computer.config.json` — operator-set: joinToken, computerName, hubUrl,
  *                                 allowedRoots
  *
@@ -361,6 +363,24 @@ export function loadHubStateFile(path: string = getHubStateFilePath()): HubState
   if (raw) return coerceHubState(raw)
   const legacy = readJsonObject(legacyConfigFilePathFor(path))
   return legacy ? coerceHubState(legacy) : {}
+}
+
+/**
+ * {@link loadHubStateFile}'s secret plus the file it came from — read-only. For a hub
+ * other machines can reach, which takes its secret from env and only compares it with
+ * one it generated earlier (boot rule B17, T-11); it never writes either file.
+ */
+export function readKeptHubAuthSecret(path: string = getHubStateFilePath()): {
+  secret: string | undefined
+  path: string
+} {
+  const raw = readJsonObject(path)
+  if (raw) return { secret: coerceHubState(raw).computerTransportSecret, path }
+  const legacyPath = legacyConfigFilePathFor(path)
+  const legacy = readJsonObject(legacyPath)
+  return legacy
+    ? { secret: coerceHubState(legacy).computerTransportSecret, path: legacyPath }
+    : { secret: undefined, path }
 }
 
 export function saveHubStateFile(state: HubState, path: string = getHubStateFilePath()): void {
