@@ -47,6 +47,7 @@ import {
   trustedProxiesBootWarning
 } from '@slayzone/platform/client-address'
 import type { ServerHandle, StartServerConfig } from './index.js'
+import { withSecurityHeaders } from './security-headers.js'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -370,7 +371,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     if (handleHealth(state, req, res)) return
     gatedDispatch(req, res)
   }
-  const httpServer = createServer(handleRequest)
+  // Every response gets the security headers here, whichever handler writes it.
+  const httpServer = createServer(
+    withSecurityHeaders(handleRequest, { publicAddress: boot.publicAddress })
+  )
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
   // The decision is a pure, unit-tested function; this is only the wiring.

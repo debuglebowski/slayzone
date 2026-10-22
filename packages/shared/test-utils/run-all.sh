@@ -715,6 +715,11 @@ run_package_tests packages/shared/markdown @slayzone/markdown
 run_package_tests packages/shared/shortcuts @slayzone/shortcuts
 run_package_tests packages/shared/ui @slayzone/ui
 
+# Security headers on every hub response (T-25): the header logic, and the built hub
+# through each handler (shell, assets, better-auth, REST, 404, /trpc, /health).
+run_test packages/apps/hub/src/security-headers.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/security-headers-served.test.ts
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.
