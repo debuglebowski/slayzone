@@ -27,6 +27,7 @@ import {
   shortcutDefinitions,
   KeyRecorder,
   useUndo,
+  focusOwnsUndoKey,
   toast,
   cn
 } from '@slayzone/ui'
@@ -378,13 +379,11 @@ export function HomeView(): React.JSX.Element {
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
-  // Undo / redo — skip text inputs, CodeMirror + xterm (they own these keys).
+  // Undo / redo — unless the focused element owns the key (focusOwnsUndoKey).
   useGuardedHotkeys(
     'mod+z',
     async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (focusOwnsUndoKey(e)) return
       e.preventDefault()
       const label = await undo()
       if (label) toast(`Undid: ${label}`)
@@ -394,9 +393,7 @@ export function HomeView(): React.JSX.Element {
   useGuardedHotkeys(
     'mod+shift+z',
     async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (focusOwnsUndoKey(e)) return
       e.preventDefault()
       const label = await redo()
       if (label) toast(`Redid: ${label}`)

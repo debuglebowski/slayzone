@@ -7,7 +7,7 @@ import {
   withModalGuard,
   toast
 } from '@slayzone/ui'
-import { useUndo } from '@slayzone/ui'
+import { useUndo, focusOwnsUndoKey } from '@slayzone/ui'
 import { useTabStore, useDialogStore, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import type { Project } from '@slayzone/projects/shared'
@@ -148,9 +148,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   useGuardedHotkeys(
     'mod+z',
     async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (focusOwnsUndoKey(e)) return
       e.preventDefault()
       const label = await undo()
       if (label) {
@@ -164,9 +162,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   useGuardedHotkeys(
     'mod+shift+z',
     async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+      if (focusOwnsUndoKey(e)) return
       e.preventDefault()
       const label = await redo()
       if (label) {
