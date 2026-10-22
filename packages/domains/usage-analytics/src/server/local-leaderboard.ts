@@ -1,29 +1,36 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { LocalLeaderboardStats } from '@slayzone/types'
-import { refreshUsageData, queryDailyTotals } from './cache'
+import { refreshUsageData, queryDailyTotals, type UsageScope } from './cache'
 import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 
 async function getDailyTokens(
-  db: SlayzoneDb
+  db: SlayzoneDb,
+  scope: UsageScope
 ): Promise<Array<{ date: string; totalTokens: number }>> {
   try {
     await refreshUsageData(db)
   } catch {
     /* best-effort: still query stale data */
   }
-  return queryDailyTotals(db)
+  return queryDailyTotals(db, scope)
 }
 
-async function getTodayCompletedTasks(db: SlayzoneDb): Promise<number> {
+async function getTodayCompletedTasks(db: SlayzoneDb, scope: UsageScope): Promise<number> {
   const today = new Date().toISOString().slice(0, 10)
+  const ids = scope?.projectIds ?? []
+  const inScope = !scope
+    ? ''
+    : ids.length === 0
+      ? ' AND 0'
+      : ` AND p.id IN (${ids.map(() => '?').join(', ')})`
   const rows = (await db.all(
     `SELECT t.status, p.columns_config
        FROM tasks t
        JOIN projects p ON p.id = t.project_id
        WHERE t.is_temporary = 0
        AND t.archived_at IS NULL
-       AND date(t.updated_at) = ?`,
-    [today]
+       AND date(t.updated_at) = ?${inScope}`,
+    [today, ...(scope ? ids : [])]
   )) as Array<{ status: string; columns_config: string | null }>
 
   return rows.reduce(
@@ -42,10 +49,13 @@ async function getTodayCompletedTasks(db: SlayzoneDb): Promise<number> {
  * `db` handle was. A standalone hub consequently had no leaderboard at all (the slot
  * was a fail-loud stub), which this move fixes as a side effect.
  */
-export async function getLocalLeaderboardStats(db: SlayzoneDb): Promise<LocalLeaderboardStats> {
+export async function getLocalLeaderboardStats(
+  db: SlayzoneDb,
+  scope: UsageScope = null
+): Promise<LocalLeaderboardStats> {
   const today = new Date().toISOString().slice(0, 10)
-  const todayCompletedTasks = await getTodayCompletedTasks(db)
-  const tokenDays = await getDailyTokens(db)
+  const todayCompletedTasks = await getTodayCompletedTasks(db, scope)
+  const tokenDays = await getDailyTokens(db, scope)
 
   const days = tokenDays
     .map((d) => ({

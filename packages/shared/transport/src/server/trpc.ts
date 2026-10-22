@@ -10,6 +10,7 @@ import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
 import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
+import { checkOwnership, ownedResult } from './owner-gate'
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -125,6 +126,19 @@ const adminGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
+ * Owner gate (T-17) — see `owner-gate.ts`. On a hub with login, every id a `user`
+ * procedure's input names must belong to the caller (else NOT_FOUND + one
+ * `authz.denied` line), and lists and subscriptions are cut to the caller's rows. Inert
+ * when the auth gate is off, like the gates above.
+ */
+const ownerGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) => {
+  const check = await checkOwnership({ ctx, path, type, getRawInput })
+  const result = await next()
+  if (!check || !result.ok) return result
+  return { ...result, data: await ownedResult(check, result.data) }
+})
+
+/**
  * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
  * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
  * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
@@ -153,6 +167,7 @@ export const publicProcedure = t.procedure
   .use(authGate)
   .use(adminGate)
   .use(scopeGate)
+  .use(ownerGate)
   .use(switchRefusal)
 
 /**

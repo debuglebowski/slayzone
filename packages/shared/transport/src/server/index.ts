@@ -112,3 +112,25 @@ export type {
   BrowserAccess,
   ArtifactExportAccess
 } from './http/rest-api/types'
+// Owner checks (T-17): the ONE access function, the tRPC classification and its gate.
+export {
+  canAccess,
+  createAccessScope,
+  invalidateAccessCache,
+  resolveOwnership,
+  resource,
+  RESOURCE_KINDS,
+  type AccessRequest,
+  type AccessScope,
+  type OwnedResource,
+  type Ownership,
+  type ResourceKind
+} from './access'
+export {
+  TRPC_OWNER_POLICY,
+  isCustomRef,
+  type OwnerMark,
+  type OwnerRule,
+  type Ref as OwnerRef
+} from './owner-policy'
+export { accessRequestOf, checkOwnership, isNotOwnedError } from './owner-gate'

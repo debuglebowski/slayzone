@@ -279,10 +279,13 @@ export const taskRouter = router({
 
   // --- Subscription ---
   // Fires on any task mutation. Replaces the renderer's `tasks:changed` polling once
-  // it cuts over (slice 5). Emits `void` — subscribers refetch.
+  // it cuts over (slice 5). Subscribers refetch. Emits the changed task's ids (it
+  // emitted nothing before; no client reads the value) so the owner gate can send
+  // each user only their own projects' changes (T-17).
   onChanged: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const handler = (): void => emit.next()
+    observable<{ taskId: string; projectId: string }>((emit) => {
+      const handler = (e: { taskId: string; projectId: string }): void =>
+        emit.next({ taskId: e.taskId, projectId: e.projectId })
       const events: (keyof TaskEventMap)[] = [
         'task:created',
         'task:archived',
