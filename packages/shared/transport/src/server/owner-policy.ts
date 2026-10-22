@@ -30,6 +30,7 @@
  * @module transport/server/owner-policy
  */
 import { currentSecurityContext } from '@slayzone/platform/security-log'
+import { settingProjectId } from '@slayzone/settings/server'
 import type { AccessScope, OwnedResource, ResourceKind } from './access'
 import type { AccessClass } from './admin-policy'
 
@@ -230,6 +231,31 @@ const connectionUsage: OutputFilter = async (data, scope) => {
     mapped_project_count: projects.filter((p) => p.has_mapping).length,
     linked_task_count: projects.reduce((n, p) => n + (p.linked_task_count ?? 0), 0)
   }
+}
+
+/**
+ * A project-keyed hub setting (`ai_providers:<projectId>`, `ai_instruction_variant:…`)
+ * is its project's (T-108): named by `key`, it must be accessible; in a settings map,
+ * one whose project is not is cut. Every other key is the caller's own view or
+ * hub-wide (T-16 `settingScope`) and passes.
+ */
+const settingKey = (at: string): CustomRef => ({
+  pick: (raw) => {
+    const key = isRecord(raw) ? raw[at] : undefined
+    const r = res('project', typeof key === 'string' ? settingProjectId(key) : null)
+    return r ? [r] : []
+  },
+  sample: { kind: 'project', input: (id) => ({ key: `ai_providers:${id}`, value: '[]' }) }
+})
+
+const settingsMap: OutputFilter = async (data, scope) => {
+  if (!isRecord(data)) return data
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(data)) {
+    const r = res('project', settingProjectId(key))
+    if (!r || (await scope.allows(r))) out[key] = value
+  }
+  return out
 }
 
 // ── event filters ─────────────────────────────────────────────────────────────
@@ -900,9 +926,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.onResizeNeeded': streamed(on('sessionId', 'session')),
 
   // ── settings (T-16 keyed them per user) ──
-  'settings.get': none(SELF),
-  'settings.set': none(SELF),
-  'settings.getAll': none(SELF),
+  'settings.get': checked(settingKey('key')),
+  'settings.set': checked(settingKey('key')),
+  'settings.getAll': listed(settingsMap),
   'settings.getEffectiveTheme': none(HOST),
   'settings.getThemeSource': none(HOST),
   'settings.setTheme': none(HOST),

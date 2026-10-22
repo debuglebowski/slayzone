@@ -388,6 +388,13 @@ describe('tRPC CONDITIONAL_ADMIN: refused to a non-admin only for the listed inp
   })
 
   test('settings.set: hub-wide and internal keys need an admin, per-user keys do not', async () => {
+    // A project-keyed key is also its project's (T-108, owner gate first): here the
+    // caller owns `p1`, so only the role decides.
+    const ownsP1 = (p: RestPrincipal) =>
+      ({
+        get: async () => ({ owner_user_id: p.userId }),
+        all: async () => []
+      }) as unknown as TrpcContext['db']
     for (const key of [
       'hub_label',
       'default_terminal_mode',
@@ -395,11 +402,12 @@ describe('tRPC CONDITIONAL_ADMIN: refused to a non-admin only for the listed inp
       'integration:credential:linear'
     ]) {
       expect(settingWriteNeedsAdmin(key), key).toBe(true)
-      expect(isRoleRefusal(await call(USER, NO_DB, 'settings.set', { key, value: 'v' })), key).toBe(
-        true
-      )
       expect(
-        isRoleRefusal(await call(ADMIN, NO_DB, 'settings.set', { key, value: 'v' })),
+        isRoleRefusal(await call(USER, ownsP1(USER), 'settings.set', { key, value: 'v' })),
+        key
+      ).toBe(true)
+      expect(
+        isRoleRefusal(await call(ADMIN, ownsP1(ADMIN), 'settings.set', { key, value: 'v' })),
         key
       ).toBe(false)
     }

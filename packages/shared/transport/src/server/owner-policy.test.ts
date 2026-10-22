@@ -22,7 +22,7 @@ import { TRPCError } from '@trpc/server'
 import { appRouter } from './router'
 import { setAuthGate } from './app-deps'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
-import { checkOwnership } from './owner-gate'
+import { checkOwnership, ownedResult } from './owner-gate'
 import {
   TRPC_OWNER_POLICY,
   isCustomRef,
@@ -269,6 +269,63 @@ describe('runtime', () => {
       getRawInput: async () => ({ id: 'au-1' })
     })
     expect(own).not.toBeNull()
+  })
+
+  test('a project-keyed setting is its project’s: get/set refused, getAll cut (T-108)', async () => {
+    setAuthGate(() => true)
+    setSecurityLogSink(() => {})
+    const owners: Record<string, string> = { 'p-a': 'u-a', 'p-b': 'u-b' }
+    const db = {
+      get: async (_sql: string, params: unknown[] = []) => {
+        const owner = owners[String(params[0])]
+        return owner ? { owner_user_id: owner } : undefined
+      },
+      all: async () => []
+    } as unknown as TrpcContext['db']
+    const as = (userId: string, role: 'user' | 'admin' = 'user'): TrpcContext => ({
+      db,
+      dataRoot: '',
+      principal: { userId, role, scopes: ['full'] }
+    })
+    const check = (ctx: TrpcContext, path: string, input: unknown) =>
+      checkOwnership({ ctx, path, type: PROCS[path]!._def.type, getRawInput: async () => input })
+    const code = async (p: Promise<unknown>): Promise<string | undefined> =>
+      ((await p.catch((e: unknown) => e)) as TRPCError | null)?.code
+
+    // B and the admin: another user's project-keyed key is not found, read or write.
+    for (const ctx of [as('u-b'), as('u-admin', 'admin')]) {
+      expect(await code(check(ctx, 'settings.get', { key: 'ai_providers:p-a' }))).toBe('NOT_FOUND')
+      expect(
+        await code(check(ctx, 'settings.set', { key: 'ai_instruction_variant:p-a', value: 'v' }))
+      ).toBe('NOT_FOUND')
+    }
+    // The owner passes; a per-user or plain hub key names no project and passes.
+    expect(await check(as('u-a'), 'settings.get', { key: 'ai_providers:p-a' })).not.toBeNull()
+    expect(await code(check(as('u-b'), 'settings.get', { key: 'sidebar_width' }))).toBeUndefined()
+    expect(await code(check(as('u-b'), 'settings.get', { key: 'hub_label' }))).toBeUndefined()
+
+    // getAll: every other user's project-keyed key cut, the rest kept.
+    const all = {
+      'ai_providers:p-a': 'A',
+      'ai_providers:p-b': 'B',
+      'ai_instruction_variant:p-a': 'A',
+      sidebar_width: '1',
+      hub_label: 'h'
+    }
+    const seen = async (ctx: TrpcContext) =>
+      ownedResult((await check(ctx, 'settings.getAll', undefined))!, all)
+    expect(await seen(as('u-b'))).toEqual({
+      'ai_providers:p-b': 'B',
+      sidebar_width: '1',
+      hub_label: 'h'
+    })
+    expect(await seen(as('u-admin', 'admin'))).toEqual({ sidebar_width: '1', hub_label: 'h' })
+    expect(await seen(as('u-a'))).toEqual({
+      'ai_providers:p-a': 'A',
+      'ai_instruction_variant:p-a': 'A',
+      sidebar_width: '1',
+      hub_label: 'h'
+    })
   })
 
   test('needsOne: a call that would create an ownerless row is refused', async () => {
