@@ -17,6 +17,7 @@ import {
   syncEntraRole
 } from './entra'
 import { PASSWORD_AUTH_ENDPOINTS } from './password'
+import { hubAuthRateLimit } from './rate-limit'
 import { demoteNonEntraAdmins, ensureFirstAdmin } from './users'
 
 export interface HubAuthConfig {
@@ -48,6 +49,12 @@ export interface HubAuthConfig {
    * credentials are kept but cannot be used.
    */
   enablePassword?: boolean
+  /**
+   * better-auth's rate limiter (T-26, ./rate-limit.ts), keyed on the client address the
+   * hub resolved. Default on; the hub passes false only where no other machine can
+   * reach it (the desktop app's loopback hub). Never left to NODE_ENV.
+   */
+  rateLimit?: boolean
 }
 
 /** Prefix minted computer API keys start with (SlayZone computer). */
@@ -142,6 +149,10 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },
+    // Rate limits on `/api/auth/*` over HTTP (T-26): sizes and storage in
+    // ./rate-limit.ts. `enabled` is explicit so better-auth never falls back to its
+    // NODE_ENV=production default.
+    rateLimit: hubAuthRateLimit(config.rateLimit !== false),
     // Client IP (T-22): the session row's `ipAddress` and the rate-limit key. By default
     // better-auth reads `X-Forwarded-For`, which any client can send — a direct caller
     // could pick the IP it is recorded and rate-limited under — and it cannot see the

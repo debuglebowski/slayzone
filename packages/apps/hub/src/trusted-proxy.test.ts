@@ -14,10 +14,12 @@
  * Proved, per case: the audit `ip` of a REST refusal, a `/trpc` upgrade (origin
  * refusal) and a `/trpc` call on it (auth gate), a `/computers` upgrade (enroll
  * refusal) and a better-auth sign-in; the `ipAddress` better-auth stores on the
- * session; and better-auth's rate-limit key — `NODE_ENV=production` switches its
- * limiter on (3 sign-ins / 10 s per key): through the front end two clients get
- * separate buckets, while a direct client rotating `X-Forwarded-For` (and the hub's
- * own client-IP header) stays in ONE bucket, its peer's. Then: a reachable hub with
+ * session; and better-auth's rate-limit key — its limiter is on for every reachable
+ * hub whatever NODE_ENV says (T-26, hub-auth `rate-limit.ts`: 10 sign-ins a minute per
+ * key; the front-end hub runs with NODE_ENV=production as the hosted hub does, the
+ * direct one without): through the front end two clients get separate buckets, while
+ * a direct client rotating `X-Forwarded-For` (and the hub's own client-IP header)
+ * stays in ONE bucket, its peer's. Then: a reachable hub with
  * no list warns once at boot and records the peer; the default hub (loopback, login
  * off, no list — the desktop app's shape) does not warn and records the peer; a
  * malformed list refuses boot (B15).
@@ -39,6 +41,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
+import { AUTH_RATE_LIMIT_RULES } from '@slayzone/hub-auth/server'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 
@@ -427,6 +430,9 @@ async function badSignIn(hub: Hub, headers: OutgoingHttpHeaders): Promise<number
 
 const CLIENT_IP_HEADER = 'x-slayzone-client-ip'
 
+/** Sign-ins one client address may make in a window (better-auth, T-26). */
+const SIGN_IN_MAX = AUTH_RATE_LIMIT_RULES['/sign-in/*']!.max
+
 async function main(): Promise<void> {
   console.log('\ntrusted front end: the real client IP, through the real built hub\n')
   ensureBuilt()
@@ -496,15 +502,11 @@ async function main(): Promise<void> {
 
     await test('front end trusted: better-auth rate-limits per client, not per front end', async () => {
       const a = { 'x-forwarded-for': '203.0.113.30:1' }
-      const statuses = [
-        await badSignIn(front, a),
-        await badSignIn(front, a),
-        await badSignIn(front, a),
-        await badSignIn(front, a)
-      ]
+      const statuses: number[] = []
+      for (let i = 0; i <= SIGN_IN_MAX; i++) statuses.push(await badSignIn(front, a))
       assert(
-        statuses.join() === '401,401,401,429',
-        `client A: three tries then 429, got ${statuses}`
+        statuses.join() === [...Array(SIGN_IN_MAX).fill(401), 429].join(),
+        `client A: ${SIGN_IN_MAX} tries then 429, got ${statuses}`
       )
       const b = await badSignIn(front, { 'x-forwarded-for': '203.0.113.31:1' })
       assert(b === 401, `client B has its own bucket, got ${b}`)
@@ -517,10 +519,10 @@ async function main(): Promise<void> {
     })
 
     // --- the same headers from a peer the hub does not trust ------------------
+    // No NODE_ENV: the limiter must not need it (T-26).
     const direct = await bootHub({
       ...REACHABLE,
-      SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24',
-      NODE_ENV: 'production'
+      SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24'
     })
     hubs.push(direct)
 
@@ -536,7 +538,7 @@ async function main(): Promise<void> {
     })
 
     await test('untrusted peer: a direct client cannot pick the IP better-auth stores or limits on', async () => {
-      // One successful sign-in (counts toward the 3-per-10s sign-in bucket)…
+      // One successful sign-in (counts toward the sign-in bucket)…
       const { token, auditIp } = await signIn(direct, {
         'x-forwarded-for': '203.0.113.20',
         [CLIENT_IP_HEADER]: '203.0.113.20'
@@ -547,13 +549,16 @@ async function main(): Promise<void> {
       // …then a fresh spoofed address on every try. Before T-22 better-auth keyed on
       // X-Forwarded-For, so each try had a bucket of its own and the limit never hit.
       const statuses: number[] = []
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < SIGN_IN_MAX; i++) {
         const fake = `198.51.100.${10 + i}`
         statuses.push(
           await badSignIn(direct, { 'x-forwarded-for': fake, [CLIENT_IP_HEADER]: fake })
         )
       }
-      assert(statuses.join() === '401,401,429', `one bucket, the peer's: got ${statuses}`)
+      assert(
+        statuses.join() === [...Array(SIGN_IN_MAX - 1).fill(401), 429].join(),
+        `one bucket, the peer's: got ${statuses}`
+      )
     })
 
     // --- no list: the peer, and a warning when a front end is implied -----------
