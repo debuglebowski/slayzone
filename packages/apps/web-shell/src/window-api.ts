@@ -71,6 +71,11 @@ const webApiTarget: ElectronAPI = {
     // this against a browser session should degrade silently, not throw.
     setHubToken: async () => ({ ok: true }),
     hubLogin,
+    // Device sign-in is for clients without the hub's browser session (T-14); a page
+    // the hub serves has one, so there is nothing to do here.
+    hubDeviceLoginStart: async () => ({ ok: false, error: NOT_SUPPORTED }),
+    hubDeviceLoginWait: async () => ({ ok: false, error: NOT_SUPPORTED }),
+    hubDeviceLoginCancel: async () => ({ ok: true }),
     getWindowId: async () => resolveWindowId(),
     relaunch: async () => {
       window.location.reload()

@@ -24,6 +24,7 @@ import {
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { homedir } from 'os'
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
 import { electronApp, is } from '@electron-toolkit/utils'
@@ -81,6 +82,9 @@ import { attachRendererCsp } from './renderer-csp'
 import {
   probeRemoteHealth,
   hubLogin,
+  hubDeviceCode,
+  isHubOwnPage,
+  waitForHubDeviceToken,
   readBootConfig,
   writeBootSettings,
   resolveHubRegistry,
@@ -3354,6 +3358,63 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: false as const, error: result.error }
       }
     )
+    // Sign in to a remote hub with Entra (T-14, device sign-in): no password in the app.
+    // `start` asks the hub for a code and opens its approval page in the SYSTEM browser
+    // (only when the page is on the hub's own host); the dialog shows the code; `wait`
+    // polls until the person approved there and stores the bearer like `app:hub-login`.
+    // One flow per dialog, keyed by an id the renderer holds; `cancel` stops polling.
+    const deviceFlows = new Map<
+      string,
+      {
+        hubId: string
+        url: string
+        code: { deviceCode: string; expiresInSec: number; intervalSec: number }
+        abort: AbortController
+      }
+    >()
+    ipcMain.handle(
+      'app:hub-device-login-start',
+      async (_event, payload: { hubId: string; url: string }) => {
+        const code = await hubDeviceCode(payload.url)
+        if (!code.ok) return code
+        const flowId = randomUUID()
+        deviceFlows.set(flowId, {
+          hubId: payload.hubId,
+          url: payload.url,
+          code,
+          abort: new AbortController()
+        })
+        const opened = isHubOwnPage(payload.url, code.verificationUri)
+        if (opened) void shell.openExternal(code.verificationUri)
+        return {
+          ok: true as const,
+          flowId,
+          userCode: code.userCode,
+          verificationUri: code.verificationUri,
+          opened
+        }
+      }
+    )
+    ipcMain.handle('app:hub-device-login-wait', async (_event, payload: { flowId: string }) => {
+      const flow = deviceFlows.get(payload.flowId)
+      if (!flow) return { ok: false as const, error: 'No sign-in in progress' }
+      try {
+        const result = await waitForHubDeviceToken(flow.url, flow.code, {
+          signal: flow.abort.signal
+        })
+        if (!result.ok) return result
+        setHubToken(getClientStateRoot(), flow.hubId, result.token, getLegacyClientStateRoot())
+        return { ok: true as const }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        deviceFlows.delete(payload.flowId)
+      }
+    })
+    ipcMain.handle('app:hub-device-login-cancel', (_event, payload: { flowId: string }) => {
+      deviceFlows.get(payload.flowId)?.abort.abort()
+      return { ok: true as const }
+    })
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(
       'app:set-boot-settings',

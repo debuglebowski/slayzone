@@ -46,6 +46,15 @@ export const electronBootstrap = {
   hubLogin: (payload: { hubId: string; url: string; email: string; password: string }) =>
     api().app.hubLogin?.(payload) ??
     Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  // Entra hubs (T-14): device sign-in through the system browser.
+  hubDeviceLoginStart: (payload: { hubId: string; url: string }) =>
+    api().app.hubDeviceLoginStart?.(payload) ??
+    Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  hubDeviceLoginWait: (payload: { flowId: string }) =>
+    api().app.hubDeviceLoginWait?.(payload) ??
+    Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  hubDeviceLoginCancel: (payload: { flowId: string }) =>
+    api().app.hubDeviceLoginCancel?.(payload) ?? Promise.resolve({ ok: true as const }),
   getWindowId: () => api().app.getWindowId?.() ?? Promise.resolve(null),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
