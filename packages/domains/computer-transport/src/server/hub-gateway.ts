@@ -8,10 +8,14 @@
  * join tokens are validated and how credentials are minted/stored.
  *
  * Connection lifecycle:
+ *  0. `admitUpgrade(peer)` — before the host completes the WebSocket upgrade: refuse
+ *     it cheaply, with no per-socket state, when the flood limits say so (T-26,
+ *     {@link ComputerFloodLimits}).
  *  1. `handleConnection(ws)` — socket accepted, unauthenticated. The first
  *     computer request must be `enroll` (join token) or `hello` (api key);
  *     anything else is rejected with `unauthorized`. Sockets that never
- *     authenticate are dropped after `authTimeoutMs`.
+ *     authenticate are dropped after `authTimeoutMs`, and one that tries more
+ *     than `attemptsPerSocket` times is closed.
  *  2. Authenticated — computer is registered (a reconnect supersedes any stale
  *     socket for the same computerId), heartbeat watchdog armed.
  *  3. Loss — missing heartbeats/traffic for `heartbeatTimeoutMs` terminates
@@ -22,6 +26,11 @@
  */
 
 import type { WebSocket } from 'ws'
+import {
+  addressBucket,
+  createFixedWindowLimiter,
+  createRateLimitAudit
+} from '@slayzone/platform/rate-limit'
 import {
   runWithSecurityContext,
   securityEvent,
@@ -126,8 +135,66 @@ export interface HubComputerGatewayOptions {
   authTimeoutMs?: number
   /** Default timeout for hub→computer requests. Default 30s. */
   requestTimeoutMs?: number
+  /**
+   * Caps on what a client that has not authenticated can hold or retry (T-26). Default
+   * {@link DEFAULT_COMPUTER_FLOOD_LIMITS}; `false` = none, for a hub no other machine
+   * can reach (the desktop app's, whose only computer is its own).
+   */
+  floodLimits?: ComputerFloodLimits | false
   log?: (message: string, meta?: Record<string, unknown>) => void
 }
+
+/**
+ * Flood limits on `/computers` (T-26), all keyed on the client address (an IPv6
+ * address as its /64). They touch only sockets that have NOT authenticated: an
+ * authenticated computer holds no pending slot and is never counted, and a refused
+ * upgrade is a transient failure to the computer, which retries with backoff
+ * (`hub-dialer.ts`), so a burst over a cap delays a reconnect rather than losing one.
+ */
+export interface ComputerFloodLimits {
+  /** Unauthenticated sockets one address may hold at once. */
+  pendingPerAddress: number
+  /** Unauthenticated sockets the hub holds at once, all addresses together. */
+  pendingTotal: number
+  /** `enroll`/`hello` requests one socket may send before it is closed. */
+  attemptsPerSocket: number
+  /** Sockets from one address that ended without authenticating, per window, after
+   *  which that address's upgrades are refused until the window ends. */
+  failedPerAddress: number
+  failedWindowMs: number
+}
+
+/**
+ * Sized for one hub's computers, several of which may share an address (an office
+ * NAT, a cloud NAT gateway) and all reconnect at once after a hub restart:
+ *   - 16 pending per address, 256 in total: a reconnect authenticates in one round
+ *     trip, so a slot is held for milliseconds; past the cap the computer retries in
+ *     100 ms, 200 ms, …
+ *   - 4 attempts per socket: a computer needs at most 3 (`hello`, then `enroll` when
+ *     the hub has forgotten its key, then `enroll` once more with a fresh join token).
+ *   - 30 failed sockets per address a minute: a computer that authenticates fails
+ *     none, one with a dead credential stops after one or two. With 4 attempts each,
+ *     one address gets at most ~120 credential checks a minute.
+ */
+export const DEFAULT_COMPUTER_FLOOD_LIMITS: ComputerFloodLimits = {
+  pendingPerAddress: 16,
+  pendingTotal: 256,
+  attemptsPerSocket: 4,
+  failedPerAddress: 30,
+  failedWindowMs: 60_000
+}
+
+/** {@link HubComputerGateway.admitUpgrade}'s answer. */
+export type ComputerUpgradeAdmission =
+  | { ok: true }
+  | {
+      ok: false
+      /** 429: this address is over a limit; 503: the hub is (all addresses together). */
+      status: 429 | 503
+      retryAfterSec: number
+      /** The limit that refused it (the audit line's `detail.limit`). */
+      limit: string
+    }
 
 /** Where an accepted computer socket came from — for the audit log. */
 export interface ComputerPeer {
@@ -137,6 +204,13 @@ export interface ComputerPeer {
 }
 
 export interface HubComputerGateway {
+  /**
+   * Whether to complete a `/computers` upgrade from `peer` (T-26). Call it BEFORE the
+   * upgrade, in the same tick as `handleConnection` would follow it: a refusal costs
+   * no socket, no RPC state and no timer. Refusals are audited once per limit and
+   * address a minute.
+   */
+  admitUpgrade(peer?: ComputerPeer): ComputerUpgradeAdmission
   /** Adopt an accepted WebSocket (e.g. from a `ws` server `connection` event). */
   handleConnection(ws: WebSocket, peer?: ComputerPeer): void
   /** Send a request to a connected computer. Rejects `unknownComputer` if absent. */
@@ -192,6 +266,10 @@ export interface HubComputerGateway {
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000
+// Kept at 10 s under the flood limits (T-26): the caps, not the timeout, bound what idle
+// sockets can hold (16 per address for at most 10 s, each a strike when it lapses), while
+// a shorter one would start failing a slow computer's first frame — a laptop just woken,
+// a high-latency link — and every lapse is a strike against its address.
 const DEFAULT_AUTH_TIMEOUT_MS = 10_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
@@ -215,6 +293,10 @@ interface ComputerConnection {
   ws: WebSocket
   /** TCP peer address, for audit lines. */
   ip: string | null
+  /** Flood-limit key of `ip` while this socket holds a pending slot, else null. */
+  pendingBucket: string | null
+  /** `enroll`/`hello` requests made before authenticating. */
+  authAttempts: number
   rpc: DuplexRpc
   descriptor: ComputerDescriptor | null
   heartbeatTimer: ReturnType<typeof setTimeout> | null
@@ -238,6 +320,80 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   const byComputerId = new Map<string, ComputerConnection>()
   const connections = new Set<ComputerConnection>()
   let closed = false
+
+  // ── Flood limits (T-26) ─────────────────────────────────────────────────────
+  const limits =
+    options.floodLimits === false ? null : (options.floodLimits ?? DEFAULT_COMPUTER_FLOOD_LIMITS)
+  const pendingByBucket = new Map<string, number>()
+  let pendingTotal = 0
+  const failedSockets = createFixedWindowLimiter()
+  const auditRefusal = createRateLimitAudit()
+  const failedRule = limits
+    ? { max: limits.failedPerAddress, windowMs: limits.failedWindowMs }
+    : null
+
+  /** Over a limit? Read-only: nothing is counted here. */
+  function overLimit(ip: string | null): ComputerUpgradeAdmission {
+    if (!limits) return { ok: true }
+    const bucket = addressBucket(ip)
+    const failed = failedSockets.check(bucket, failedRule!)
+    if (!failed.allowed) {
+      return {
+        ok: false,
+        status: 429,
+        retryAfterSec: failed.retryAfterSec,
+        limit: 'computers.failed_per_address'
+      }
+    }
+    if ((pendingByBucket.get(bucket) ?? 0) >= limits.pendingPerAddress) {
+      return { ok: false, status: 429, retryAfterSec: 1, limit: 'computers.pending_per_address' }
+    }
+    if (pendingTotal >= limits.pendingTotal) {
+      return { ok: false, status: 503, retryAfterSec: 1, limit: 'computers.pending_total' }
+    }
+    return { ok: true }
+  }
+
+  function auditLimit(ip: string | null, limit: string, retryAfterSec?: number): void {
+    if (!limits) return
+    const max =
+      limit === 'computers.failed_per_address'
+        ? limits.failedPerAddress
+        : limit === 'computers.pending_per_address'
+          ? limits.pendingPerAddress
+          : limit === 'computers.pending_total'
+            ? limits.pendingTotal
+            : limits.attemptsPerSocket
+    auditRefusal({
+      limit,
+      address: ip,
+      route: 'WS /computers',
+      max,
+      ...(limit === 'computers.failed_per_address'
+        ? { windowSec: Math.round(limits.failedWindowMs / 1000) }
+        : {}),
+      ...(retryAfterSec === undefined ? {} : { retryAfterSec })
+    })
+  }
+
+  function admitUpgrade(peer?: ComputerPeer): ComputerUpgradeAdmission {
+    if (closed) return { ok: false, status: 503, retryAfterSec: 1, limit: 'computers.closed' }
+    const ip = peer?.ip ?? null
+    const verdict = overLimit(ip)
+    if (!verdict.ok) auditLimit(ip, verdict.limit, verdict.retryAfterSec)
+    return verdict
+  }
+
+  /** Release `conn`'s pending slot (it authenticated, or it ended). Idempotent. */
+  function releasePending(conn: ComputerConnection): void {
+    const bucket = conn.pendingBucket
+    if (bucket === null) return
+    conn.pendingBucket = null
+    pendingTotal -= 1
+    const left = (pendingByBucket.get(bucket) ?? 1) - 1
+    if (left > 0) pendingByBucket.set(bucket, left)
+    else pendingByBucket.delete(bucket)
+  }
 
   function protocolError(conn: ComputerConnection, detail: string, line?: string): void {
     events.emit('protocol-error', {
@@ -357,6 +513,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   function teardown(conn: ComputerConnection, reason: string): void {
     if (conn.closed) return
     conn.closed = true
+    // A socket that held a pending slot and ends without authenticating is a strike
+    // against its address — timed out, closed, or closed for too many attempts. Not
+    // when the hub itself is shutting down.
+    if (conn.pendingBucket !== null && conn.descriptor === null && reason !== 'gateway-closed') {
+      failedSockets.hit(conn.pendingBucket, failedRule!)
+    }
+    releasePending(conn)
     if (conn.heartbeatTimer) clearTimeout(conn.heartbeatTimer)
     if (conn.authTimer) clearTimeout(conn.authTimer)
     conn.rpc.dispose(reason)
@@ -376,6 +539,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
     conn.descriptor = descriptor
     byComputerId.set(descriptor.computerId, conn)
+    releasePending(conn)
     if (conn.authTimer) {
       clearTimeout(conn.authTimer)
       conn.authTimer = null
@@ -519,6 +683,17 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     id: JsonRpcId
   ): void {
     if (!conn.descriptor) {
+      const isAuth = method === ComputerToHubMethods.enroll || method === ComputerToHubMethods.hello
+      if (isAuth && limits && ++conn.authAttempts > limits.attemptsPerSocket) {
+        conn.rpc.respondError(
+          id,
+          ComputerTransportErrorCodes.unauthorized,
+          'too many authentication attempts on one connection'
+        )
+        auditLimit(conn.ip, 'computers.attempts_per_socket')
+        conn.ws.close(1008, 'too many authentication attempts')
+        return
+      }
       if (method === ComputerToHubMethods.enroll) {
         void handleEnroll(conn, params, id)
       } else if (method === ComputerToHubMethods.hello) {
@@ -606,9 +781,20 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       ws.terminate()
       return
     }
+    const ip = peer?.ip ?? null
+    // Re-checked here for a host that adopts sockets without `admitUpgrade` first; in
+    // the hub it was asked in the same tick, so this agrees with it.
+    const admission = overLimit(ip)
+    if (!admission.ok) {
+      auditLimit(ip, admission.limit, admission.retryAfterSec)
+      ws.terminate()
+      return
+    }
     const conn: ComputerConnection = {
       ws,
-      ip: peer?.ip ?? null,
+      ip,
+      pendingBucket: null,
+      authAttempts: 0,
       rpc: null as unknown as DuplexRpc,
       descriptor: null,
       heartbeatTimer: null,
@@ -626,6 +812,12 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       onParseError: (line, err) => protocolError(conn, `unparseable frame: ${String(err)}`, line)
     })
     connections.add(conn)
+    if (limits) {
+      const bucket = addressBucket(ip)
+      conn.pendingBucket = bucket
+      pendingByBucket.set(bucket, (pendingByBucket.get(bucket) ?? 0) + 1)
+      pendingTotal += 1
+    }
 
     if (authTimeoutMs > 0) {
       conn.authTimer = setTimeout(() => {
@@ -658,6 +850,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
 
   return {
     events,
+    admitUpgrade,
     handleConnection,
     request<T = unknown>(
       computerId: string,
