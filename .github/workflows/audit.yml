@@ -1,0 +1,50 @@
+name: Dependency audit
+
+# Two dependency policies, enforced in CI:
+# - every security advisory in a production dependency has a recorded decision
+#   (scripts/ci/audit-check.mjs + audit-allowlist.json). Weekly, because advisories
+#   appear without any change on our side.
+# - every package version a PR adds to the lockfile is at least minimumReleaseAge
+#   old (scripts/ci/release-age-check.mjs; pnpm itself only enforces it on resolve).
+
+on:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - '**/package.json'
+      - scripts/ci/audit-check.mjs
+      - scripts/ci/audit-allowlist.json
+      - scripts/ci/release-age-check.mjs
+      - .github/workflows/audit.yml
+
+concurrency:
+  group: audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      # Reads only the lockfile; no install needed.
+      - name: Every advisory has a current decision
+        run: node scripts/ci/audit-check.mjs
+
+      - name: New package versions are old enough
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/release-age-check.mjs "origin/${{ github.base_ref }}"

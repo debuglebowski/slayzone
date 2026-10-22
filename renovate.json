@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Weekly dependency updates, only to versions published at least 30 days ago (same rule as minimumReleaseAge in pnpm-workspace.yaml), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
+  "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
+  "timezone": "Europe/Stockholm",
+  "schedule": ["before 6am on monday"],
+  "rangeStrategy": "bump",
+  "prConcurrentLimit": 5,
+  "minimumReleaseAge": "30 days",
+  "internalChecksFilter": "strict",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "minimumReleaseAge": "30 days",
+    "labels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "major": {
+    "dependencyDashboardApproval": true
+  },
+  "packageRules": [
+    {
+      "description": "One weekly PR for every stable minor/patch update. 0.x minors can break, so they keep their own PRs.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^v?0\\./",
+      "groupName": "non-major dependencies",
+      "groupSlug": "all-minor-patch"
+    },
+    {
+      "description": "Electron ships the whole runtime: its own PR, verified with the e2e suite and a packaged-app smoke test.",
+      "matchPackageNames": ["electron"],
+      "groupName": "electron"
+    },
+    {
+      "description": "Native modules are rebuilt against Electron's ABI: their own PR.",
+      "matchPackageNames": ["better-sqlite3", "node-pty", "@electron/rebuild", "node-abi"],
+      "groupName": "native modules"
+    },
+    {
+      "description": "Patched in patches/ (package.json pnpm.patchedDependencies, keyed by exact version): a bump needs the patch re-ported, so approve it from the Dependency Dashboard. electron-builder is here because it pins the patched app-builder-lib.",
+      "matchPackageNames": ["@convex-dev/auth", "posix", "app-builder-lib", "electron-builder"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}
