@@ -525,9 +525,15 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
         ['PATCH', { email: 'self@example.com', role: 'admin' }],
         ['DELETE', { email: 'other@example.com' }]
       ] as const) {
-        const res = await call<{ ok: boolean; error: string }>(users, method, body, restAuth)
+        const res = await call<{ ok: boolean; error: string; code?: string }>(
+          users,
+          method,
+          body,
+          restAuth
+        )
         expect(res.status).toBe(403)
         expect(res.body.error.includes('needs an admin account')).toBe(true)
+        expect(res.body.code).toBe('ADMIN_ONLY')
       }
     } finally {
       setSecurityLogSink()
@@ -537,7 +543,7 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
     for (const line of audit) {
       expect(line.event).toBe('authz.denied')
       expect(line.actor).toBe('u-user')
-      expect(line.detail).toEqual({ reason: 'not_admin', status: 403 })
+      expect(line.detail).toEqual({ reason: 'not_admin', status: 403, code: 'ADMIN_ONLY' })
     }
   })
 

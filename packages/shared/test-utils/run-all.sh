@@ -661,6 +661,12 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \
   packages/shared/transport/src/txns/txns.test.ts
 
+# The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
+# hub's open REST routes.
+run_vitest_files "vitest (role gate)" \
+  packages/shared/transport/src/server/admin-policy.test.ts \
+  packages/apps/hub/src/admin-authz.test.ts
+
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
 # assertions — were never in this aggregate, so they only ran if someone happened

@@ -9,8 +9,10 @@ import {
   assertComputerVisible,
   claimComputer,
   grantComputerAccess,
+  isComputerOwnedBy,
   isComputerVisible,
   listVisibleComputerIds,
+  ownsEveryComputerOnHost,
   revokeComputerAccess,
   setComputerVisibility
 } from './visibility'
@@ -133,5 +135,29 @@ describe('resolveTaskComputerIdOrDefault', () => {
     ).toBeNull()
     // No viewer = supervised hub, where filtering would be wrong.
     expect(await resolveTaskComputerIdOrDefault(t.db, taskId, connected)).toBe(c)
+  })
+})
+
+// T-15: a user may manage (revoke, delete, re-scope, rename) only what they own.
+describe('ownership, for the role gate', () => {
+  it("isComputerOwnedBy: only the owner; an unowned or absent computer is no one's", async () => {
+    const c = await add('mine')
+    expect(await isComputerOwnedBy(t.db, c, 'alice')).toBe(false)
+    await own(c, 'alice')
+    expect(await isComputerOwnedBy(t.db, c, 'alice')).toBe(true)
+    expect(await isComputerOwnedBy(t.db, c, 'bob')).toBe(false)
+    expect(await isComputerOwnedBy(t.db, 'no-such-id', 'alice')).toBe(false)
+  })
+
+  it('ownsEveryComputerOnHost: every computer on the machine, and at least one', async () => {
+    const a = await add('a')
+    const b = await add('b')
+    await t.db.run(`UPDATE computers SET host_id = 'h1' WHERE id IN (?, ?)`, [a, b])
+    await own(a, 'alice')
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'alice')).toBe(false)
+    await own(b, 'alice')
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'alice')).toBe(true)
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'bob')).toBe(false)
+    expect(await ownsEveryComputerOnHost(t.db, 'no-such-host', 'alice')).toBe(false)
   })
 })

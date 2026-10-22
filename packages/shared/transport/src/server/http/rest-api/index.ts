@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
+import { withAdminGate } from './admin-routes'
 import { registerNotifyRoute } from './notify'
 import { registerAgentHookRoute } from './agent-hook'
 // Re-exported so the hub composition root can feed a computer-RELAYED agent-hook
@@ -77,7 +78,10 @@ import { registerWebLoginRoute } from './hub/web-login'
 
 export type { RestApiDeps } from './types'
 
-export function registerRestApi(app: Express, deps: RestApiDeps): void {
+export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
+  // Every route below gets the account-role guard for its own `METHOD path` (T-15).
+  const app = withAdminGate(rawApp)
+
   // Notify
   registerNotifyRoute(app, deps)
 

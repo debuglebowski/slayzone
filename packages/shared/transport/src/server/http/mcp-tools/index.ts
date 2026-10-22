@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { McpToolsDeps } from './types'
+import { withMcpAdminGate } from './admin-gate'
 import { registerGetCurrentTaskIdTool } from './get-current-task-id'
 import { registerUpdateTaskTool } from './update-task'
 import { registerCreateSubtaskTool } from './create-subtask'
@@ -11,7 +12,9 @@ import { registerUnarchiveTaskTool } from './unarchive-task'
 
 export type { McpToolsDeps } from './types'
 
-export function registerMcpTools(server: McpServer, deps: McpToolsDeps): void {
+export function registerMcpTools(rawServer: McpServer, deps: McpToolsDeps): void {
+  // Every tool below checks the caller's role against `MCP_ADMIN_POLICY` (T-15).
+  const server = withMcpAdminGate(rawServer)
   registerGetCurrentTaskIdTool(server, deps)
   registerUpdateTaskTool(server, deps)
   registerCreateSubtaskTool(server, deps)

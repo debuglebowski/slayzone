@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto'
 import { registerRestApi } from './rest-api'
 import type { RestApiDeps } from './rest-api/types'
 import { registerMcpTools } from './mcp-tools'
+import { mcpAuthInfo } from './mcp-tools/admin-gate'
+import { restPrincipalOf } from './rest-api/principal'
 
 const SESSION_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 min
 const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
@@ -71,6 +73,11 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
 
   app.post('/mcp', async (req, res) => {
     try {
+      // The caller the hub's bearer gate verified, for the tool role gate (T-15):
+      // the SDK hands `req.auth` to every handler of this request as `authInfo`.
+      const principal = restPrincipalOf(req)
+      if (principal)
+        (req as { auth?: ReturnType<typeof mcpAuthInfo> }).auth = mcpAuthInfo(principal)
       const sessionId = req.headers['mcp-session-id'] as string | undefined
 
       if (sessionId && transports.has(sessionId)) {

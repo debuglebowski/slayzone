@@ -3,6 +3,7 @@ import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
+import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '../../../context'
 import type { RestApiDeps } from '../types'
 
@@ -157,7 +158,8 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ok: false,
         error:
           'hub user management needs an admin account — an admin can grant it with ' +
-          '`slay hub users role <email> admin`'
+          '`slay hub users role <email> admin`',
+        code: ADMIN_ONLY
       })
       return null
     }

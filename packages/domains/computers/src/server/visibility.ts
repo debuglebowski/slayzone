@@ -17,7 +17,8 @@
  *   owner              — always
  *   visibility = 'hub' — any authenticated user on this hub
  *   explicit grant     — a row in `computer_grants`
- *   hub admin          — org-level role, not a notion invented here
+ *   hub admin          — the account role (T-15), and only for MANAGEMENT: see
+ *                        {@link ComputerViewer.isHubAdmin}
  *
  * @module computers/server/visibility
  */
@@ -28,6 +29,15 @@ export interface ComputerViewer {
   /** Null = unauthenticated. Only reachable on a supervised hub, where the
    *  Electron host owns the process and there is exactly one user. */
   userId: string | null
+  /**
+   * The viewer is a hub admin AND is managing computers: listing them, revoking,
+   * deleting, changing visibility. Sees every computer for that.
+   *
+   * NEVER set it for a guard that puts work on a computer or reads from one
+   * (binding a task, spawning, browsing files): an admin manages accounts and
+   * machines and has no read path to anyone's sessions, prompts, files or computers
+   * (O-4). Such a guard uses the plain viewer, where an admin is a user like any other.
+   */
   isHubAdmin?: boolean
 }
 
@@ -96,6 +106,34 @@ export async function assertComputerVisible(
   if (!(await isComputerVisible(db, computerId, viewer))) {
     throw new Error('no such computer, or you do not have access to it')
   }
+}
+
+/** Whether `userId` owns the computer. An unowned or absent computer is owned by no one. */
+export async function isComputerOwnedBy(
+  db: SlayzoneDb,
+  computerId: string,
+  userId: string
+): Promise<boolean> {
+  const row = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM computers WHERE id = ? AND owner_user_id = ?`,
+    [computerId, userId]
+  )
+  return (row?.n ?? 0) > 0
+}
+
+/** Whether `userId` owns every computer on a machine (`host_id`), and there is one. */
+export async function ownsEveryComputerOnHost(
+  db: SlayzoneDb,
+  hostId: string,
+  userId: string
+): Promise<boolean> {
+  const row = await db.get<{ total: number; mine: number }>(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN owner_user_id = ? THEN 1 ELSE 0 END), 0) AS mine
+       FROM computers WHERE host_id = ?`,
+    [userId, hostId]
+  )
+  return (row?.total ?? 0) > 0 && row?.total === row?.mine
 }
 
 /** Take ownership of an unowned computer. Never reassigns an owned one. */

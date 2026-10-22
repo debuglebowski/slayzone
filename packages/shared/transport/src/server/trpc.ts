@@ -8,6 +8,8 @@ import {
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
+import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
+import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -17,7 +19,9 @@ const t = initTRPC.context<TrpcContext>().create({
     ...shape,
     data: {
       ...shape.data,
-      ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {})
+      ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A role refusal (T-15) carries `ADMIN_ONLY` the same way.
+      ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {})
     }
   })
 })
@@ -101,6 +105,26 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
+ * Account-role gate (T-15) — see `admin-policy.ts`. A non-admin account calling an
+ * `admin` procedure (or an unclassified one: fail closed) gets FORBIDDEN with
+ * `data.appCode: 'ADMIN_ONLY'` and one `authz.denied` line.
+ *
+ * Inert when the auth gate is off, exactly like the scope gate: the desktop app's
+ * own hub (`SLAYZONE_HUB_REQUIRE_LOGIN=0`) has no principal and no role, so it keeps
+ * full access. On an enforcing hub `authGate` already refused a null principal.
+ *
+ * Runs before the scope gate: both refuse with FORBIDDEN, and either order admits
+ * exactly the calls that pass both.
+ */
+const adminGate = t.middleware(({ ctx, next, path }) => {
+  if (!getAuthGate()) return next()
+  if (!roleAllows(TRPC_ADMIN_POLICY[path], ctx.principal?.role ?? 'user')) {
+    throw adminOnlyTrpcError(path)
+  }
+  return next()
+})
+
+/**
  * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
  * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
  * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
@@ -119,7 +143,7 @@ const switchRefusal = t.middleware(async ({ next }) => {
 })
 
 /**
- * Default procedure — auth-gated on an authed hub, then scope-gated. All app
+ * Default procedure — auth-gated on an authed hub, then role- and scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
  * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
@@ -127,6 +151,7 @@ const switchRefusal = t.middleware(async ({ next }) => {
 export const publicProcedure = t.procedure
   .use(securityContext)
   .use(authGate)
+  .use(adminGate)
   .use(scopeGate)
   .use(switchRefusal)
 

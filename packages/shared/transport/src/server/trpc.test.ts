@@ -105,7 +105,9 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('full reaches every path, including one classified never', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
+      // An admin account: `brandNewProcedure` is unclassified in the role policy too,
+      // which refuses it to a `user` account (T-15, admin-policy.test.ts).
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'admin', scopes: ['full'] }))
       await expect(caller.pty.write()).resolves.toBe('write-ok')
       await expect(caller.pty.create()).resolves.toBe('create-ok') // never-classified, full bypasses it
       await expect(caller.brandNewRouter.brandNewProcedure()).resolves.toBe('unclassified-ok')
@@ -179,7 +181,8 @@ describe('trpc auth + scope gate', () => {
     })
 
     test('a procedure runs with the caller as the acting user', async () => {
-      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'user', scopes: ['full'] }))
+      // Admin: `pty.whoami` is a test-only path no policy classifies (see above).
+      const caller = testRouter.createCaller(ctx({ userId: 'u1', role: 'admin', scopes: ['full'] }))
       await expect(caller.pty.whoami()).resolves.toEqual({
         actor: 'u1',
         ip: '203.0.113.7',

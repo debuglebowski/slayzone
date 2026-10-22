@@ -3,6 +3,7 @@ import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
+import { ADMIN_ONLY } from '../../../admin-policy'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -72,7 +73,7 @@ const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches computersRo
 export const isLoopbackAddress = isLoopbackPeer
 
 /** What to do with a mint request, once its peer + credential are known. */
-export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized'
+export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized' | 'not-admin'
 
 /**
  * Decide whether a caller may mint. Pure, so the off-box AND proxied-loopback
@@ -89,14 +90,19 @@ export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized'
  *   credential problem (fixable by signing in / reading the owner file), not a
  *   policy one (fixable only by moving machines) — conflating the two sends
  *   operators to the wrong fix.
+ * - a valid full bearer whose account is not admin → `not-admin` (403, code
+ *   `ADMIN_ONLY`): only an admin mints (T-15, O-5), as on `computers.mintJoinToken`.
  */
 export function joinTokenAuthDecision(opts: {
   loopback: boolean
   authRequired: boolean
   bearerOk: boolean
+  /** That session's account has `role: 'admin'`. */
+  admin: boolean
 }): JoinTokenAuthOutcome {
   if (!opts.authRequired) return opts.loopback ? 'mint' : 'forbid'
-  return opts.bearerOk ? 'mint' : 'unauthorized'
+  if (!opts.bearerOk) return 'unauthorized'
+  return opts.admin ? 'mint' : 'not-admin'
 }
 
 export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
@@ -116,7 +122,8 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     // cookies passed here, only the header, and only a `full` principal counts.
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
-    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk })
+    const admin = principal?.role === 'admin'
+    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk, admin })
     if (decision !== 'mint') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({
@@ -130,6 +137,13 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     if (decision === 'unauthorized') {
       res.status(401).json({
         error: 'Unauthorized — sign in to this hub with `slay hub login <url>` first'
+      })
+      return
+    }
+    if (decision === 'not-admin') {
+      res.status(403).json({
+        error: 'minting a computer join token needs a hub admin account',
+        code: ADMIN_ONLY
       })
       return
     }
