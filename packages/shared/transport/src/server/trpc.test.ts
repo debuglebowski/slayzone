@@ -23,12 +23,13 @@
  *   - every refusal writes one `authz.denied` audit line (T-03), and a procedure
  *     runs with the caller as the acting user for the audit lines below it
  */
-import { describe, test, expect, beforeEach, afterEach } from 'vitest'
+import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { publicProcedure, openProcedure, router } from './trpc'
 import { setAuthGate } from './app-deps'
 import type { TrpcContext } from './context'
+import { TRPC_OWNER_POLICY } from './owner-policy'
 
 // `pty.write` -> 'agent' and `pty.create` -> 'never' in the REAL SCOPE_POLICY
 // (see scopes.ts / scopes.test.ts). `hub.describe` is real too, but reachable
@@ -60,6 +61,25 @@ const testRouter = router({
       throw new Error('boom')
     })
   })
+})
+
+// The owner gate (T-17) refuses a procedure with no owner rule on a hub with login.
+// The real paths above have theirs; the test-only ones get one here, naming nothing a
+// user owns, so each test still isolates the auth/role/scope gate it is about.
+const TEST_ONLY = [
+  'pty.whoami',
+  'brandNewRouter.brandNewProcedure',
+  'switched.off',
+  'switched.broken'
+]
+beforeAll(() => {
+  for (const p of TEST_ONLY) {
+    expect(TRPC_OWNER_POLICY[p]).toBeUndefined()
+    TRPC_OWNER_POLICY[p] = { mark: 'no-owned-input', why: 'trpc.test.ts stand-in procedure' }
+  }
+})
+afterAll(() => {
+  for (const p of TEST_ONLY) delete TRPC_OWNER_POLICY[p]
 })
 
 function ctx(principal: TrpcContext['principal']): TrpcContext {
