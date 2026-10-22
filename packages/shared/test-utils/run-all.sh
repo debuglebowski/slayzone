@@ -780,6 +780,10 @@ run_test_electron_strict_loader packages/apps/hub/src/security-headers-served.te
 run_test_electron_strict_loader packages/apps/hub/src/break-glass.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/hub/computers.test.ts
 
+# Flood limits (T-26): the hub's front-door limits (web-login, break-glass redemption,
+# /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.
+run_test packages/apps/hub/src/flood-limits.test.ts
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.

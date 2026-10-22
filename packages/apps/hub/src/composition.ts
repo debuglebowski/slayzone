@@ -273,6 +273,12 @@ export function composeServer(opts: {
   sso?: HubSsoBootConfig<EntraClientCredential> | null
   /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
   enablePassword?: boolean
+  /**
+   * Flood limits on (T-26): better-auth's rate limiter (hub-auth `rate-limit.ts`) and the
+   * unauthenticated `/computers` caps (computer-transport `hub-gateway.ts`). Required, so
+   * no caller can forget to decide; `server.ts` passes `boot.reachable`.
+   */
+  floodLimits: boolean
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -1417,7 +1423,8 @@ export function composeServer(opts: {
       secret: hubAuthSecret,
       ...(sso ? { sso } : {}),
       // Off: no password sign-in or account with a password (hub-auth password.ts).
-      ...(opts.enablePassword === false ? { enablePassword: false } : {})
+      ...(opts.enablePassword === false ? { enablePassword: false } : {}),
+      rateLimit: opts.floodLimits
     })
     hubAuthRef = hubAuth
     // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
@@ -1439,9 +1446,11 @@ export function composeServer(opts: {
     let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> =
       async () => undefined
     let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
-    const computerGateway = createHubComputerGateway(
-      createComputerAuthAdapters({ db, auth: hubAuth, localComputerName })
-    )
+    const computerGateway = createHubComputerGateway({
+      ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
+      // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
+      ...(opts.floodLimits ? {} : { floodLimits: false as const })
+    })
     computerGatewayRef = computerGateway
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its

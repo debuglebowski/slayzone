@@ -58,6 +58,7 @@ import {
 } from '@slayzone/platform/client-address'
 import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
+import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -125,6 +126,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     publicAddress: boot.publicAddress,
     sso,
     enablePassword: switches.enablePassword,
+    // Flood limits (T-26): better-auth's limiter and the /computers caps. On exactly
+    // where other machines can reach this hub; never on the desktop app's (B1/B9 keep a
+    // login-off, supervised hub on loopback with no public address).
+    floodLimits: boot.reachable,
     diagnosticsDb
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
@@ -293,6 +298,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // B15 validated the list. Empty = trust nobody = the peer (the desktop app's hub).
   const trustedProxiesRead = readTrustedProxies(process.env)
   const trustedProxies = trustedProxiesRead.ok ? trustedProxiesRead.value : NO_TRUSTED_PROXIES
+  // The front-door flood limits (flood-limits.ts): web-login, break-glass redemption and
+  // /trpc upgrades, per client address. Same switch as the limits composeServer wired.
+  const floodGuard = createHubFloodGuard({ enabled: boot.reachable })
   const trustedProxiesWarning = trustedProxiesBootWarning(boot.publicAddress, trustedProxies)
   if (trustedProxiesWarning) {
     process.stderr.write(`${trustedProxiesWarning}\n`)
@@ -392,6 +400,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // /health answers BEFORE the gate: a liveness probe has no credentials, and
     // it must keep answering even when auth is misconfigured.
     if (handleHealth(state, req, res)) return
+    if (floodGuard.refuseRequest(req, res)) return
     gatedDispatch(req, res)
   }
   // Every response gets the security headers here, whichever handler writes it.
@@ -433,6 +442,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     adoptClientAddress(req, trustedProxies)
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
+      // Flood limits first (T-26, flood-limits.ts): cheapest, and they bound the audit
+      // lines a flood of refused origins below could write.
+      const admission = floodGuard.admitTrpcUpgrade(req)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
@@ -451,10 +467,23 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         socket.destroy()
         return
       }
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        admission.track(ws)
+        wss.emit('connection', ws, req)
+      })
     } else if (pathname === '/computers' && computerWss && computerGateway) {
+      // Unauthenticated-socket caps (T-26, hub-gateway.ts `admitUpgrade`), asked before
+      // the upgrade so a refused one allocates nothing. Inert where the hub turned them
+      // off (`floodLimits` above). `handleUpgrade` calls back in this same tick, so the
+      // gateway's count cannot move between the answer and the adoption.
+      const peer = { ip: clientAddress(req) }
+      const admission = computerGateway.admitUpgrade(peer)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       computerWss.handleUpgrade(req, socket, head, (ws) =>
-        computerGateway.handleConnection(ws, { ip: clientAddress(req) })
+        computerGateway.handleConnection(ws, peer)
       )
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
