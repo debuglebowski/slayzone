@@ -14,8 +14,8 @@
  *    "detail":{"method":"password","reason":"INVALID_EMAIL_OR_PASSWORD"}}
  *
  * Every field is always present (null when unknown) so a log query sees one shape.
- * `ip` is the TCP peer address: behind a front end that is the front end, until the
- * hub trusts its `X-Forwarded-For` (T-22).
+ * `ip` is the client address (`client-address.ts`, T-22): the TCP peer, or behind a
+ * front end listed in `SLAYZONE_HUB_TRUSTED_PROXIES` the client it forwarded.
  *
  * WHAT NEVER GOES IN A LINE: passwords, tokens, cookies, secrets, prompts, terminal
  * bytes, file content, email addresses. Callers pass ids and short codes; `detail`
@@ -33,12 +33,13 @@
  * {@link securityEvent} fills any field its caller leaves `undefined` from there.
  * An explicit `null` stays null.
  *
- * Lean leaf (node:async_hooks only), also the `@slayzone/platform/security-log`
- * subpath.
+ * Lean leaf (node builtins and `client-address.ts` only), also the
+ * `@slayzone/platform/security-log` subpath.
  *
  * @module platform/security-log
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { clientAddress } from './client-address'
 
 /**
  * Every event name. A call site can only emit one of these, so the catalogue in
@@ -254,13 +255,18 @@ export function currentSecurityContext(): SecurityContext | undefined {
   return contextStore.getStore()
 }
 
-/** The TCP peer of a request (an `IncomingMessage` or anything shaped like one). */
-export function peerAddress(
+/**
+ * The audit `ip` of a request (an `IncomingMessage` or anything shaped like one): its
+ * client address as the hub resolved it at the front door, else the TCP peer.
+ *
+ * @deprecated Same function as `clientAddress` from `@slayzone/platform/client-address`
+ * — use that. Kept under this name (T-22) so the call sites that already audit with it
+ * (`trpc.ts`, `route-audit.ts`, hub `rest-auth.ts`, and those in open PRs) record the
+ * real client without each being edited.
+ */
+export const peerAddress: (
   req: { socket?: { remoteAddress?: string | undefined } | null } | null | undefined
-): string | null {
-  const addr = req?.socket?.remoteAddress
-  return typeof addr === 'string' && addr ? addr : null
-}
+) => string | null = clientAddress
 
 /** `METHOD /path` without the query string, which can carry codes. */
 export function routeOf(method: string | undefined, url: string | undefined): string {
