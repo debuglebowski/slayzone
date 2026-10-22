@@ -8,6 +8,8 @@ export {
   tabStoreReady,
   loadTabStoreState,
   type Tab,
+  type ClosedTab,
+  type ClosedTabRestorer,
   type ActiveView,
   type TreeGroupBy,
   type TreeOrderBy,

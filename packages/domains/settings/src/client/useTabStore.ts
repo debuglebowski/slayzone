@@ -38,6 +38,22 @@ export type Tab =
 
 type TaskTab = Extract<Tab, { type: 'task' }>
 
+/**
+ * An entry on the reopen (⌘⇧T) stack. `discarded` marks a tab whose close also
+ * deleted its task — a temporary task has no home outside its tab. Reopening it
+ * restores the task first, on `discarded.hubId`: the hub the close deleted it on
+ * (absent = default hub), captured then because a deleted task drops out of the
+ * hub-ownership map.
+ */
+export type ClosedTab = TaskTab & { discarded?: { hubId?: string } }
+
+/**
+ * Brings a `discarded` task back on its hub. Resolves to the restored task, or
+ * null when it's gone for good (e.g. purged at boot). Throws when the restore
+ * couldn't be attempted (hub unreachable) — the entry then stays on the stack.
+ */
+export type ClosedTabRestorer = (tab: ClosedTab) => Promise<TaskLookupTask | null>
+
 export interface TaskLookupTask {
   id: string
   title?: string
@@ -75,7 +91,7 @@ interface TabState {
   activeTabIndex: number
   activeView: ActiveView
   selectedProjectId: string
-  closedTabs: TaskTab[]
+  closedTabs: ClosedTab[]
   projectScopedTabs: boolean
   isLoaded: boolean
   // Registry id of the currently selected sidebar view (default 'projects').
@@ -182,10 +198,16 @@ interface TabState {
   reorderTabs: (from: number, to: number) => void
   openTask: (taskId: string) => void
   openTaskInBackground: (taskId: string) => void
-  closeTab: (index: number) => void
+  /** `discarded`: this close also deletes the task (see `ClosedTab`). */
+  closeTab: (index: number, discarded?: ClosedTab['discarded']) => void
   closeTabByTaskId: (taskId: string) => void
   goBack: () => void
-  reopenClosedTab: () => void
+  /**
+   * Reopen the most recently closed tab that still can be, skipping ones already
+   * open or whose task is gone. A `discarded` entry is first restored through
+   * `restore`; without one it's skipped like any other gone task.
+   */
+  reopenClosedTab: (restore?: ClosedTabRestorer) => Promise<void>
 
   // Internal
   _loadState: (state: {
@@ -226,8 +248,20 @@ interface TabState {
     taskHeaderPanelAlign?: TaskHeaderAlign
     taskHeaderTitleAlign?: TaskHeaderAlign
     projectLastActiveTab?: Record<string, string>
-    closedTabs?: TaskTab[]
+    closedTabs?: ClosedTab[]
   }) => void
+}
+
+/** A persisted `closedTabs` entry, or null when it isn't one. `discarded` drives a
+ *  hub write on reopen, so a malformed one is dropped rather than trusted. */
+export function parseClosedTab(raw: unknown): ClosedTab | null {
+  const t = raw as Partial<ClosedTab> | null
+  if (t?.type !== 'task' || typeof t.taskId !== 'string') return null
+  const { discarded, ...tab } = t as ClosedTab
+  const hubId: unknown = discarded && typeof discarded === 'object' ? discarded.hubId : null
+  if (hubId === undefined) return { ...tab, discarded: {} }
+  if (typeof hubId === 'string') return { ...tab, discarded: { hubId } }
+  return tab
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
@@ -416,20 +450,15 @@ export const useTabStore = create<TabState>()(
 
     // Note: intentionally does NOT reset activeView — closing a background tab
     // while viewing leaderboard/usage-analytics should not dismiss the overlay.
-    closeTab: (index) => {
+    closeTab: (index, discarded) => {
       const { tabs, activeTabIndex, closedTabs } = get()
       const tab = tabs[index]
       if (!tab || tab.type !== 'task') return
-      // Push to closed stack (unless temporary — caller handles temp task cleanup)
-      const task = get()._taskLookup.tasks.find((t) => t.id === tab.taskId)
-      if (!task?.is_temporary) {
-        const newClosed = [...closedTabs, tab]
-        if (newClosed.length > 20) newClosed.shift()
-        set({ closedTabs: newClosed })
-      }
+      const newClosed: ClosedTab[] = [...closedTabs, discarded ? { ...tab, discarded } : tab]
+      if (newClosed.length > 20) newClosed.shift()
       const newTabs = tabs.filter((_, i) => i !== index)
       const newActive = activeTabIndex >= index ? Math.max(0, activeTabIndex - 1) : activeTabIndex
-      set({ tabs: newTabs, activeTabIndex: newActive })
+      set({ tabs: newTabs, activeTabIndex: newActive, closedTabs: newClosed })
     },
 
     closeTabByTaskId: (taskId) => {
@@ -442,19 +471,36 @@ export const useTabStore = create<TabState>()(
       if (activeTabIndex > 0) get().closeTab(activeTabIndex)
     },
 
-    reopenClosedTab: () => {
-      const { closedTabs, tabs, _taskLookup } = get()
-      const taskIds = new Set(_taskLookup.tasks.map((t) => t.id))
-      const newClosed = [...closedTabs]
-      while (newClosed.length > 0) {
-        const tab = newClosed.pop()!
-        if (!taskIds.has(tab.taskId)) continue
+    reopenClosedTab: async (restore) => {
+      for (;;) {
+        const { closedTabs, tabs, _taskLookup } = get()
+        const tab = closedTabs.at(-1)
+        if (!tab) return
+        // Pop before any await, so a second ⌘⇧T mid-restore takes the next entry.
+        set({ closedTabs: closedTabs.slice(0, -1) })
         if (tabs.some((t) => t.type === 'task' && t.taskId === tab.taskId)) continue
-        set({ closedTabs: newClosed })
-        get().openTask(tab.taskId)
+        if (_taskLookup.tasks.some((t) => t.id === tab.taskId)) {
+          get().openTask(tab.taskId)
+          return
+        }
+        if (!tab.discarded || !restore) continue
+        let restored: TaskLookupTask | null
+        try {
+          restored = await restore(tab)
+        } catch (err) {
+          set({ closedTabs: [...get().closedTabs, tab] })
+          throw err
+        }
+        if (!restored) continue
+        // The board's lookup only catches up on its next sync; openTask reads the
+        // title and temporary-ness from it now.
+        const lookup = get()._taskLookup
+        if (!lookup.tasks.some((t) => t.id === restored.id)) {
+          set({ _taskLookup: { ...lookup, tasks: [restored, ...lookup.tasks] } })
+        }
+        get().openTask(restored.id)
         return
       }
-      set({ closedTabs: newClosed })
     },
 
     _loadState: (state) => {
@@ -572,10 +618,8 @@ export const useTabStore = create<TabState>()(
             : {},
         closedTabs: Array.isArray(state.closedTabs)
           ? state.closedTabs
-              .filter(
-                (t: { type?: string; taskId?: unknown }) =>
-                  t?.type === 'task' && typeof t.taskId === 'string'
-              )
+              .map(parseClosedTab)
+              .filter((t): t is ClosedTab => t !== null)
               .slice(-20)
           : [],
         isLoaded: true

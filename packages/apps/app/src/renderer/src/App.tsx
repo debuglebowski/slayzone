@@ -34,6 +34,7 @@ import {
   useTasksData,
   useUndoableTaskActions,
   useCloseTaskTab,
+  useReopenClosedTab,
   useCompleteAndCloseTask,
   useFilterState,
   useFilterStore,
@@ -205,8 +206,7 @@ function App(): React.JSX.Element {
     setSelectedProjectId,
     openTask: rawOpenTask,
     openTaskInBackground,
-    reorderTabs,
-    reopenClosedTab
+    reorderTabs
   } = useTabStore.getState()
   const [, startTransition] = useTransition()
 
@@ -602,6 +602,8 @@ function App(): React.JSX.Element {
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
   // Closing a temporary task's tab deletes the task on its owning hub.
   const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawDeleteTask)
+  // ⌘⇧T — restores a temporary task its close deleted before reopening the tab.
+  const reopenClosedTab = useReopenClosedTab(updateTask)
   const completeAndCloseTask = useCompleteAndCloseTask(
     { tasks, projects, updateTask, closeTabByTaskId, openTask },
     { push: pushUndo, undo }
@@ -1813,6 +1815,7 @@ function App(): React.JSX.Element {
             setSelectedProjectId={setSelectedProjectId}
             setActiveTabIndex={setActiveTabIndex}
             handleCreateScratchTerminal={handleCreateScratchTerminal}
+            reopenClosedTab={reopenClosedTab}
             selectedProjectId={selectedProjectId}
             globalAgentPanelState={globalAgentPanelState}
             setGlobalAgentPanelState={setGlobalAgentPanelState}

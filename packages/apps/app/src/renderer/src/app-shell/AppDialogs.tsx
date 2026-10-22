@@ -99,6 +99,7 @@ interface AppDialogsProps {
   setSelectedProjectId: (id: string) => void
   setActiveTabIndex: (index: number) => void
   handleCreateScratchTerminal: () => void | Promise<void>
+  reopenClosedTab: () => Promise<void>
   selectedProjectId: string
   globalAgentPanelState: GlobalAgentPanelState
   setGlobalAgentPanelState: (updates: Partial<GlobalAgentPanelState>) => void
@@ -166,6 +167,7 @@ export function AppDialogs({
   setSelectedProjectId,
   setActiveTabIndex,
   handleCreateScratchTerminal,
+  reopenClosedTab,
   selectedProjectId,
   globalAgentPanelState,
   setGlobalAgentPanelState,
@@ -317,7 +319,7 @@ export function AppDialogs({
             onNewTemporaryTask={() => {
               void handleCreateScratchTerminal()
             }}
-            onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()}
+            onReopenClosedTab={() => void reopenClosedTab()}
             onAddProject={() => useDialogStore.getState().openCreateProject()}
             onGoHome={() => {
               const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home')

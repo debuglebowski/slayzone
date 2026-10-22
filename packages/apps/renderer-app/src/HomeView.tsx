@@ -35,6 +35,7 @@ import {
   useTasksData,
   useUndoableTaskActions,
   useCloseTaskTab,
+  useReopenClosedTab,
   useCompleteAndCloseTask
 } from '@slayzone/tasks/client'
 import {
@@ -231,6 +232,8 @@ export function HomeView(): React.JSX.Element {
   // Electron App.tsx); the live board subscription + optimistic deleteTask drop
   // it from the board.
   const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawData.deleteTask)
+  // ⌘⇧T — restores a temporary task its close deleted before reopening the tab.
+  const reopenClosedTab = useReopenClosedTab(rawData.updateTask)
 
   // Complete & Close Tab (⌘⇧D) — confirm dialog lives in AppDialogs.
   const completeAndCloseTask = useCompleteAndCloseTask(
@@ -462,7 +465,7 @@ export function HomeView(): React.JSX.Element {
     getKeys('reopen-closed-tab'),
     (e) => {
       e.preventDefault()
-      useTabStore.getState().reopenClosedTab()
+      void reopenClosedTab()
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
@@ -926,6 +929,7 @@ export function HomeView(): React.JSX.Element {
         onSelectProject={(id) => useTabStore.getState().selectProject(id)}
         onOpenTask={openTask}
         onCompleteTask={completeAndCloseTask}
+        onReopenClosedTab={reopenClosedTab}
         startTour={startTour}
         markSetupGuideCompleted={markSetupGuideCompleted}
       />

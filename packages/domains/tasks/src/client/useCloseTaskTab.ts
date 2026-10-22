@@ -4,7 +4,9 @@ import { getClientForHub, getHubIdForTask, useTRPCClient } from '@slayzone/trans
 
 /**
  * Closing a task's tab. A temporary task has no home outside its tab, so closing
- * it also kills its terminal and deletes the task — on the hub that owns it.
+ * it also kills its terminal and deletes the task — on the hub that owns it. The
+ * tab still goes on the reopen stack, marked with that hub, so ⌘⇧T
+ * (useReopenClosedTab) can restore it.
  *
  * `deleteTask` is the RAW (non-undoable) board delete: a scratch terminal closing
  * shouldn't surface an "undo delete" toast. The returned closers resolve once a
@@ -17,17 +19,20 @@ export function useCloseTaskTab(deleteTask: (taskId: string) => Promise<void>) {
     async (index: number): Promise<void> => {
       const store = useTabStore.getState()
       const tab = store.tabs[index]
-      let discarded: Promise<void> | undefined
+      let deleted: Promise<void> | undefined
+      let discardedOnHub: { hubId?: string } | undefined
       if (tab?.type === 'task') {
         const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
         if (task?.is_temporary) {
-          const client = getClientForHub(getHubIdForTask(tab.taskId), trpcClient)
+          const hubId = getHubIdForTask(tab.taskId)
+          const client = getClientForHub(hubId, trpcClient)
           void client.pty.kill.mutate({ sessionId: `${tab.taskId}:${tab.taskId}` })
-          discarded = deleteTask(tab.taskId)
+          deleted = deleteTask(tab.taskId)
+          discardedOnHub = { hubId }
         }
       }
-      store.closeTab(index)
-      await discarded
+      store.closeTab(index, discardedOnHub)
+      await deleted
     },
     [deleteTask, trpcClient]
   )

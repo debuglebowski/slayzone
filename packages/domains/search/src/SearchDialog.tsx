@@ -77,6 +77,8 @@ export function SearchDialog({
     const out: { tab: TaskTab; projectName: string; updatedAt: string }[] = []
     const push = (tab: TaskTab) => {
       if (out.length >= MAX_RECENT) return
+      // Scratch terminals aren't "recent work" — open or closed.
+      if (tab.isTemporary) return
       if (seen.has(tab.taskId)) return
       if (tab.taskId === activeTaskId) return
       const task = taskMap.get(tab.taskId)
@@ -86,10 +88,7 @@ export function SearchDialog({
       out.push({ tab, projectName, updatedAt: task.updated_at })
     }
     for (let i = closedTabs.length - 1; i >= 0; i--) push(closedTabs[i])
-    for (const tab of openTaskTabs) {
-      if (tab.isTemporary) continue
-      push(tab)
-    }
+    for (const tab of openTaskTabs) push(tab)
     return out
   }, [closedTabs, openTaskTabs, activeTaskId, tasks, projects])
 

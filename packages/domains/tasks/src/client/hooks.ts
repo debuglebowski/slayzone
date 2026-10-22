@@ -1,6 +1,7 @@
 export { useTasksData } from './useTasksData'
 export { useUndoableTaskActions } from './useUndoableTaskActions'
 export { useCloseTaskTab } from './useCloseTaskTab'
+export { useReopenClosedTab } from './useReopenClosedTab'
 export { useCompleteAndCloseTask } from './useCompleteAndCloseTask'
 export { useFilterState, useFilterStateMap, useFilterStore } from './useFilterState'
 export {

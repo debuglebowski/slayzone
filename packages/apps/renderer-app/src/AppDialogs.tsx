@@ -122,6 +122,8 @@ interface AppDialogsProps {
   onOpenTask: (taskId: string) => void
   /** Complete & Close Tab for a task, undoably (HomeView's useCompleteAndCloseTask). */
   onCompleteTask: (taskId: string) => Promise<void>
+  /** ⌘⇧T reopen-last-closed-tab, restoring a discarded temp task (HomeView's useReopenClosedTab). */
+  onReopenClosedTab: () => Promise<void>
   /**
    * Onboarding close-flow handlers from HomeView's useOnboardingChecklist (the
    * checklist hook lives there to feed the sidebar). Finishing onboarding marks
@@ -150,6 +152,7 @@ export function AppDialogs({
   onSelectProject,
   onOpenTask,
   onCompleteTask,
+  onReopenClosedTab,
   startTour,
   markSetupGuideCompleted
 }: AppDialogsProps): React.JSX.Element {
@@ -485,7 +488,7 @@ export function AppDialogs({
             onSelectProject={onSelectProject}
             onNewTask={() => useDialogStore.getState().openCreateTask()}
             onNewTemporaryTask={() => void handleNewTemporaryTask()}
-            onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()}
+            onReopenClosedTab={() => void onReopenClosedTab()}
             onAddProject={() => useDialogStore.getState().openCreateProject()}
             onGoHome={() => {
               const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home')

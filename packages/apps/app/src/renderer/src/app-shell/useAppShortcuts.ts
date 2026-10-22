@@ -32,7 +32,7 @@ export interface AppShortcutsDeps {
   tabCycleOrder: number[]
   setActiveTabIndex: (index: number) => void
   setSelectedProjectId: (id: string) => void
-  reopenClosedTab: () => void
+  reopenClosedTab: () => Promise<void>
   openTaskRef: RefObject<(taskId: string, projectOverride?: Project) => void>
   undo: UndoApi['undo']
   redo: UndoApi['redo']
@@ -257,7 +257,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     (e) => {
       e.preventDefault()
       track('tab_reopened')
-      reopenClosedTab()
+      void reopenClosedTab()
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
