@@ -116,13 +116,19 @@ fi
 #     that durably shadows the real conversation (the restart-clobber regression).
 #     The 4 get-ops already comply; this keeps load-board-data + any future list
 #     op honest.
-BOARD_OPS="packages/domains/task/src/main/ops/load-board-data.ts \
-  packages/domains/task/src/main/ops/get-all.ts \
-  packages/domains/task/src/main/ops/get-by-project.ts \
-  packages/domains/task/src/main/ops/get-subtasks.ts \
-  packages/domains/task/src/main/ops/get.ts"
+BOARD_OPS="packages/domains/task/src/server/ops/load-board-data.ts \
+  packages/domains/task/src/server/ops/get-all.ts \
+  packages/domains/task/src/server/ops/get-by-project.ts \
+  packages/domains/task/src/server/ops/get-subtasks.ts \
+  packages/domains/task/src/server/ops/get.ts"
 for f in $BOARD_OPS; do
-  [ -f "$f" ] || continue
+  # A moved file must fail the guard, not pass it: skipping silently is how this
+  # check went on running against src/main/ops/ long after the ops moved away.
+  if [ ! -f "$f" ]; then
+    echo "Board-op guard points at a file that does not exist: $f — repoint BOARD_OPS."
+    fail=1
+    continue
+  fi
   if ! grep -q "parseAndColorTask" "$f"; then
     echo "Task op feeds the renderer store but does not hydrate currentConversationByMode:"
     echo "  $f — use parseAndColorTask(s) (see attachCurrentConversationByMode), not bare parseTask(s)."

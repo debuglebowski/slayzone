@@ -1,12 +1,32 @@
 #!/bin/bash
-# Run all IPC handler contract tests
+# The ONE list of unit suites: `pnpm test:unit` locally and the CI unit-tests job.
 # Usage: bash packages/shared/test-utils/run-all.sh
-# Exits non-zero if any suite fails. The hub/hosted-mode subset is gated in CI by
-# scripts/ci/test-hosted.sh (same runners, from runners.sh).
+#        SLZ_UNIT_DRY=1 bash packages/shared/test-utils/run-all.sh   (registration check only)
+#
+# Strict: exits non-zero if any suite fails, or if any test file under packages/ is
+# neither run nor skipped with a reason (require_registered at the bottom). Add a suite:
+# one line below with the runner it needs; a test file nobody registers fails the run.
+#
+# Needs Node >= 24 (the hub-auth suites use node:sqlite without a flag) and the native
+# modules rebuilt for Electron's ABI by the root postinstall (scripts/postinstall.js),
+# so do not install with CI_SKIP_POSTINSTALL.
 
 set -e
 # shellcheck source=packages/shared/test-utils/runners.sh
 source "$(dirname "${BASH_SOURCE[0]}")/runners.sh"
+
+if ! dry_run; then
+  NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+  if [ "$NODE_MAJOR" -lt 24 ]; then
+    echo "test:unit needs Node >= 24, found $(node -v)" >&2
+    exit 2
+  fi
+  ELECTRON_NODE=$(ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -p 'process.versions.node + " (electron " + process.versions.electron + ")"') || {
+    echo "test:unit: electron cannot run as node (is it installed and rebuilt?)" >&2
+    exit 2
+  }
+  echo "node $(node -v); electron's node $ELECTRON_NODE"
+fi
 
 # Domain handler contract tests touch the harness better-sqlite3 DB, so they need
 # the Electron node ABI (strict+loader) — plain `npx tsx` ERR_DLOPENs. Paths moved
@@ -275,12 +295,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/int
 run_test_electron_strict_loader packages/domains/integrations/src/server/integrations-switch.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
-# return adapted to {snapshotSha,headSha}). NOTE: all run_test* helpers are now strict
-# (pipefail), so the ~30 still-broken domain suites no longer mask as PASS — they now
-# count as FAIL. Two known buckets remain, tracked as a separate per-domain-fix task:
-#   1. better-sqlite3 ERR_DLOPEN — DB-handler tests on plain-node `run_test` need the
-#      Electron computer (some also need async-DB await fixes once they load).
-#   2. rest-api/tasks/* + mcp-tools/* — real assertion failures (async-DB move fallout).
+# return adapted to {snapshotSha,headSha}). All run_test* helpers are strict (pipefail),
+# so a broken suite counts as FAIL; a known-red one is skip_suite'd with a reason.
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/db.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/server/turn-tracker.test.ts
@@ -448,6 +464,8 @@ run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/upd
 # Warm-pool session → task fallback for MCP tools (mirrors the CLI/REST fallback above).
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/tasks/open.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/auth-deep-link.test.ts
 run_test_electron_loader packages/apps/cli/test/tasks-rest.test.ts
 
 # CLI command tests (need Electron Node for better-sqlite3 + ESM interop).
@@ -474,10 +492,88 @@ run_test_electron_loader packages/apps/cli/test/done-init-rest.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts
+else
+  skip_suite packages/domains/integrations/src/electron/handlers.integration.linear.test.ts \
+    "live Linear API: runs only with LINEAR_API_KEY set"
 fi
 if [ -n "$GITHUB_TOKEN" ]; then
   run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.github.test.ts
+else
+  skip_suite packages/domains/integrations/src/electron/handlers.integration.github.test.ts \
+    "live GitHub API: runs only with GITHUB_TOKEN set"
 fi
+
+# Swept in 2026-10-22: these suites existed (most passed untouched) but no runner ran
+# them. Electron-ABI runner where the suite needs better-sqlite3, plain tsx otherwise.
+run_test packages/apps/app/src/main/db/v127-disk-migration.test.ts
+run_test packages/apps/app/src/main/raise-fd-limit.test.ts
+run_test_electron_strict_loader packages/apps/cli/test/artifacts-mv.test.ts
+run_test_electron_strict_loader packages/apps/cli/test/hub.test.ts
+run_test_electron_strict_loader packages/apps/cli/test/init-skills.test.ts
+run_test_electron_strict_loader packages/apps/cli/test/panels.test.ts
+run_test packages/domains/agent-panels/src/agent-status/useIdleTasks.test.ts
+run_test packages/domains/ai-config/src/client/skill-validation.test.ts
+run_test packages/domains/ai-config/src/client/sync-view-model.test.ts
+run_test_electron_strict_loader packages/domains/automations/src/server/history.test.ts
+run_test_electron_strict_loader packages/domains/diagnostics/src/server/self-heal.test.ts
+run_test packages/domains/integrations/src/server/credentials.test.ts
+run_test packages/domains/integrations/src/server/sync.test.ts
+run_test packages/domains/projects/src/client/useProjectLockGuard.test.ts
+run_test packages/domains/projects/src/shared/columns.test.ts
+run_test packages/domains/projects/src/shared/resolve-repo.test.ts
+run_test packages/domains/settings/src/client/useDialogStore.test.ts
+run_test packages/domains/task-browser/src/client/dom-picker.test.ts
+run_test packages/domains/task-browser/src/client/scale.test.ts
+run_test packages/domains/task-terminals/src/client/chat/autocomplete/autocomplete.test.ts
+run_test packages/domains/task-terminals/src/client/chat/autocomplete/ranking.test.ts
+run_test packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
+run_test packages/domains/task-terminals/src/client/get-tab-label.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/create-project-guard.test.ts
+run_test packages/domains/task/src/shared/handoff.test.ts
+run_test packages/domains/task/src/shared/panel-config.test.ts
+run_test packages/domains/task/src/shared/reparent-validation.test.ts
+run_test packages/domains/terminal/src/client/chat-timeline.test.ts
+run_test packages/domains/terminal/src/client/useLoopMode.test.ts
+run_test packages/domains/terminal/src/client/web-link-provider.test.ts
+run_test packages/domains/terminal/src/server/adapters/copilot-adapter.test.ts
+run_test packages/domains/terminal/src/server/adapters/encode-submit.test.ts
+run_test packages/domains/terminal/src/server/adapters/gemini-adapter.test.ts
+run_test packages/domains/terminal/src/server/adapters/qwen-adapter.test.ts
+run_test packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
+run_test packages/domains/terminal/src/server/files-scan.test.ts
+run_test packages/domains/terminal/src/server/runtime/session-registry.test.ts
+run_test packages/domains/terminal/src/server/shell-env.test.ts
+run_test packages/domains/terminal/src/server/skills.test.ts
+run_test packages/domains/terminal/src/shared/agent-event-handler.test.ts
+run_test packages/domains/terminal/src/shared/bg-shell-helpers.test.ts
+run_test packages/domains/terminal/src/shared/chat-effort.test.ts
+run_test packages/domains/terminal/src/shared/chat-model.test.ts
+run_test packages/domains/terminal/src/shared/key-sequences.test.ts
+run_test packages/domains/terminal/src/shared/osc.test.ts
+run_test packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
+run_test packages/domains/worktrees/src/client/parse-diff.test.ts
+run_test packages/domains/worktrees/src/client/utils.test.ts
+run_test packages/domains/worktrees/src/server/list-project-repos.test.ts
+run_test packages/domains/worktrees/src/server/remove-worktree.test.ts
+run_test packages/domains/worktrees/src/server/resolve-graph.test.ts
+run_test packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
+
+# Known-red suites, skipped visibly with the reason instead of failing every run. Each
+# has a follow-up task; drop the skip_suite line when the suite is fixed.
+skip_suite packages/domains/terminal/src/server/runtime/chat-handlers.test.ts \
+  "10 of 14 cases fail: its hand-written mini-schema predates the projects table the handlers now query (already ported to the async SlayzoneDb adapter). Fix: build on createTestHarness's migrated DB"
+skip_suite packages/domains/diagnostics/src/electron/batching.test.ts \
+  "1 assertion fails (Expected 1, got 0) and the process never exits; blob prune also throws 'require is not defined' under ESM. Fix the flush expectation, the ESM require, and the lingering timer"
+skip_suite packages/domains/file-editor/src/client/useFileEditor.test.ts \
+  "11 cases stub window.api.fs, the renderer IPC removed in June; the hook now uses tRPC (useTRPC needs a provider). Port the stubs to a tRPC test client"
+skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
+  "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
+
+# Known-red suites, skipped visibly with the reason and owner instead of failing every run.
+skip_suite packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
+  "fails at HEAD (2 of 4 tests: the transition spy is never called). TODO(T-01): fix the test, then move it into the vitest run below"
+skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
+  "fails at HEAD (duplicate column name: execution_context). TODO(T-01): fix the test, then register it with the other migration suites"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) can't run
 # under the tsx/electron computers above — they need the vitest computer. The app
@@ -485,10 +581,8 @@ fi
 # default include glob so only these run (no sweep of the tsx-harness *.test.ts).
 #
 # A few non-jsdom node suites ride along here because they need vitest's computer for
-# other reasons — the hub-auth ones use `vi`-free vitest globals plus node:sqlite,
-# which the tsx/electron computers above don't provide. (Their own
-# `pnpm --filter @slayzone/hub-auth test` also covers them; listing them here is
-# what puts them in the aggregate run.)
+# other reasons (vi.mock, or node:sqlite which the tsx/electron computers above don't
+# provide).
 run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
@@ -502,8 +596,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
-  packages/shared/ui/src/secure-context.test.ts \
-  packages/shared/ui/src/select.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
@@ -520,15 +612,42 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
-  packages/domains/hub-auth/src/server/hub-auth.test.ts \
-  packages/domains/hub-auth/src/server/users.test.ts \
-  packages/domains/hub-auth/src/server/audit.test.ts \
-  packages/domains/hub-auth/src/server/upgrade.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
+  packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts \
+  packages/apps/app/src/main/agent-hooks/hook-execution.test.ts \
+  packages/apps/app/src/main/agent-hooks/hook-roundtrip.test.ts \
+  packages/apps/app/src/main/agent-hooks/notify-script-gemini.test.ts \
+  packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
   packages/shared/transport/src/server/trpc.test.ts
+
+# Swept in 2026-10-22: vitest suites (jsdom / vi.mock) that no runner ran.
+run_vitest_files "vitest (swept-in suites)" \
+  packages/apps/app/src/main/browser-link-context-menu.test.ts \
+  packages/apps/app/src/main/floating-global-agent-panel/state-machine.test.ts \
+  packages/apps/app/src/preload/browser-link-task-capture.test.ts \
+  packages/apps/app/src/renderer/src/components/ErrorBoundary.test.tsx \
+  packages/apps/app/src/renderer/src/components/dialogs/CliInstallDialog.test.tsx \
+  packages/domains/automations/src/client/AutomationCard.test.tsx \
+  packages/domains/file-editor/src/client/useWatchedFile.test.ts \
+  packages/domains/projects/src/client/TasksGeneralTab.test.tsx \
+  packages/domains/task-terminals/src/client/focus-handoff.test.ts \
+  packages/domains/task/src/client/TaskDetailDataLoader.test.tsx \
+  packages/domains/task/src/client/TaskSettingsPanel.test.tsx \
+  packages/domains/task/src/client/createTaskFormDefaults.test.ts \
+  packages/domains/task/src/client/usePanelSizes.test.ts \
+  packages/domains/task/src/shared/create-task-draft.test.ts \
+  packages/domains/worktrees/src/client/GhMarkdown.test.tsx \
+  packages/domains/worktrees/src/client/git-diff-store.test.ts \
+  packages/domains/worktrees/src/client/highlight.test.ts \
+  packages/domains/worktrees/src/client/parse-diff.cache.test.ts \
+  packages/domains/worktrees/src/shared/worktree-color.test.ts \
+  packages/shared/editor/src/milkdown-task-list.test.ts \
+  packages/shared/suspense/src/suspense-cache.test.tsx \
+  packages/shared/transport/src/client/hubRegistryStore.test.ts \
+  packages/shared/transport/src/txns/txns.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
@@ -536,7 +655,12 @@ run_vitest_files "vitest (jsdom client suites)" \
 # to run the package directly. Listing the files under the app's jsdom config is
 # not a substitute: `fs.watch({recursive:true})` never delivers there, at any
 # timeout. Run each package's own suite instead.
-run_package_tests packages/apps/computer @slayzone/computer
+if [ -n "${CI:-}" ]; then
+  skip_package_tests packages/apps/computer @slayzone/computer \
+    "not yet proven green on Linux CI: its handler suites spawn real ptys, git and gh, and fs.test.ts's fs.watch test timed out once under load (5s). TODO(T-01): enable after the first green unit-tests run, then drop this branch"
+else
+  run_package_tests packages/apps/computer @slayzone/computer
+fi
 
 # Same reason: the hub⇄computer fs round trip loads the real computer handlers.
 run_package_tests packages/domains/computer-transport @slayzone/computer-transport
@@ -547,6 +671,25 @@ run_package_tests packages/domains/computer-transport @slayzone/computer-transpo
 # vitest.config.ts excludes `project-paths.test.ts`, which is an ipc-harness
 # suite run above by the strict loader.
 run_package_tests packages/domains/computers @slayzone/computers
+
+# hub-auth (node:sqlite, real better-auth) and platform (shell primitives, hook
+# installers) have their own vitest configs; platform's excludes its tsx-harness
+# scripts, which are registered file-by-file above.
+run_package_tests packages/domains/hub-auth @slayzone/hub-auth
+run_package_tests packages/shared/platform @slayzone/platform
+# Packages whose own `vitest run` was green but never aggregated (swept in 2026-10-22).
+run_package_tests packages/domains/task-artifacts @slayzone/task-artifacts
+run_package_tests packages/domains/hub-identity @slayzone/hub-identity
+run_package_tests packages/shared/layout @slayzone/layout
+run_package_tests packages/shared/markdown @slayzone/markdown
+run_package_tests packages/shared/shortcuts @slayzone/shortcuts
+run_package_tests packages/shared/ui @slayzone/ui
+
+# Every test file in every package must be run or skipped above, file by file or as
+# part of a package run. Without this, 75 test files had drifted out of every runner
+# (and most out of typecheck too) and rotted unnoticed.
+# shellcheck disable=SC2046
+require_registered $(find packages -mindepth 2 -maxdepth 2 -type d | sort)
 
 print_summary
 if [ "$FAIL" -gt 0 ]; then

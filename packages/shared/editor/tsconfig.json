@@ -3,6 +3,5 @@
   "compilerOptions": {
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*", "../types/src/txn-registry.d.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["src/**/*", "../types/src/txn-registry.d.ts"]
 }

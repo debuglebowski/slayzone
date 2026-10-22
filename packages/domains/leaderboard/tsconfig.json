@@ -7,6 +7,5 @@
       "convex/_generated/*": ["../../../convex/_generated/*"]
     }
   },
-  "include": ["src/**/*", "../../shared/types/src/txn-registry.d.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/**/*", "../../shared/types/src/txn-registry.d.ts"]
 }

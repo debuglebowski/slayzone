@@ -41,11 +41,11 @@ jobs:
         env:
           CI_SKIP_POSTINSTALL: '1'
 
-      - name: Lint theme tokens
-        run: pnpm lint:theme
-
-      - name: Lint server boundary (electron-free guard)
-        run: pnpm lint:server-boundary
+      # Everything `pnpm lint` runs: versions, theme tokens, server boundary, tRPC deps,
+      # window API, e2e guardrails, format, biome, eslint, and the unit-test registration
+      # check (every test file is in run-all.sh or skipped there with a reason).
+      - name: Lint
+        run: pnpm lint
 
       - name: Typecheck
         run: pnpm typecheck
@@ -60,14 +60,15 @@ jobs:
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
 
-  # The tests that prove the hub switches, hub auth and per-user ownership. Strict:
-  # scripts/ci/test-hosted.sh exits non-zero if any suite fails. Node 24 because the
-  # hub-auth suites use node:sqlite flag-free. No CI_SKIP_POSTINSTALL: the root
-  # postinstall rebuilds better-sqlite3 + node-pty for Electron's ABI, which the
-  # Electron-run suites load.
-  hosted-tests:
+  # Every unit suite: the one list in packages/shared/test-utils/run-all.sh (it absorbed
+  # the former hosted-tests subset: hub switches, hub auth, per-user ownership). Strict:
+  # exits non-zero if any suite fails or any test file is registered nowhere. Node 24
+  # because the hub-auth suites use node:sqlite flag-free. No CI_SKIP_POSTINSTALL: the
+  # root postinstall rebuilds better-sqlite3 + node-pty for Electron's ABI, which the
+  # Electron-run suites load. ~12 min on an M-series laptop.
+  unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v5
@@ -86,8 +87,8 @@ jobs:
       - name: Build web shell
         run: pnpm --filter @slayzone/web-shell build
 
-      - name: Test hub switches, auth and ownership
-        run: pnpm test:hosted
+      - name: Unit tests
+        run: pnpm test:unit
 
   # Windows job: the cross-platform shell + agent-hook path code (issue #88) is
   # only meaningfully exercised on a real Windows runner — Git Bash is

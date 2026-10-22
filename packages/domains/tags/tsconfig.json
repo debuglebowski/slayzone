@@ -3,6 +3,5 @@
   "compilerOptions": {
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*", "../../shared/types/src/global.d.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["src/**/*", "../../shared/types/src/global.d.ts"]
 }
