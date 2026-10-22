@@ -47,7 +47,8 @@ vi.mock('@slayzone/task/server', () => ({
   getCurrentConversationId: vi.fn(async () => null),
   confirmSessionConversation: vi.fn(),
   getBoundTaskId: vi.fn(async () => null),
-  markSessionFirstTurn: vi.fn(async () => {})
+  markSessionFirstTurn: vi.fn(async () => {}),
+  artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
 }))
 
 const tmpDirs: string[] = []
