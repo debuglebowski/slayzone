@@ -8,6 +8,7 @@ import { bearer, jwt, organization } from 'better-auth/plugins'
 import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
 import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
+import { deviceSignIn, markSignInMethod } from './device'
 import {
   type EntraSsoConfig,
   entraSso,
@@ -35,8 +36,9 @@ export interface HubAuthConfig {
   /** Further browser origins better-auth trusts (callback URLs, CSRF origin check). */
   trustedOrigins?: string[]
   /**
-   * Entra ID sign-in (T-09, ./entra.ts). Absent = no SSO: the desktop app's hub and
-   * every hub without `SLAYZONE_HUB_ENABLE_SSO=1` + login required.
+   * Entra ID sign-in (T-09, ./entra.ts) and, with it, device sign-in for the CLI and
+   * desktop (T-14, ./device.ts). Absent = no SSO: the desktop app's hub and every hub
+   * without `SLAYZONE_HUB_ENABLE_SSO=1` + login required.
    */
   sso?: EntraSsoConfig
   /**
@@ -117,7 +119,15 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       }
     },
     // 7 days (O-8), see SESSION_LIFETIME above.
-    session: { ...SESSION_LIFETIME },
+    // How a session was made (T-14, ./device.ts `markSignInMethod`): `sso`, `device` or
+    // null. The device approval page accepts only a recent `sso` one. Same migration
+    // path as above (a nullable column; older rows read null).
+    session: {
+      ...SESSION_LIFETIME,
+      additionalFields: {
+        signInMethod: { type: 'string', required: false, input: false }
+      }
+    },
     // OAuth accounts (only Entra's, ./entra.ts; inert on a hub without SSO). An Entra
     // identity is the `account` row keyed on `<oid>.<tid>` and is NEVER linked to an
     // existing user by email: Entra's `email` claim is mutable and not proof of
@@ -155,10 +165,11 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         create: {
           // A disabled account gets no session, whichever route asked for one. Then an
           // Entra sign-in sets the role its token carries — in that order, so a refused
-          // sign-in changes nothing.
+          // sign-in changes nothing. Last, the session records how it was made.
           before: async (session, ctx) => {
             await refuseDisabled(session, ctx)
             await syncEntraRole(session, ctx)
+            return markSignInMethod(session, ctx)
           },
           after: auditDatabaseHooks.session.create.after
         },
@@ -199,7 +210,7 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         // default because the default is a footgun for this key class.
         rateLimit: { enabled: false }
       }),
-      ...(config.sso ? [entraSso(config.sso)] : [])
+      ...(config.sso ? [entraSso(config.sso), ...deviceSignIn()] : [])
     ]
   })
   findUser = async (userId) =>

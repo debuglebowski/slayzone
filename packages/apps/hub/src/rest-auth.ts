@@ -166,10 +166,19 @@ export function passwordRouteRefusal(
  * Better-auth's other OAuth routes (`/link-social`, `/refresh-token`,
  * `/get-access-token`, `/account-info`, its `/error` page) are not listed: each needs a
  * session, or nothing the server flow uses.
+ *
+ * Device sign-in (T-14, hub-auth `device.ts`), for a CLI/desktop with no token yet:
+ *   - `device/code`  — issue a device + user code to a known client id.
+ *   - `device/token` — poll; answers a bearer only after the person approved on
+ *                      `/device` (the hub's page, outside `/api`), signed in by Entra.
+ * The plugin's browser-leg routes (`/device`, `/device/approve`, `/device/deny`) are
+ * not listed and answer 404 over HTTP even with a bearer: only the page calls them.
  */
 const SSO_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/social',
-  `/api/auth/callback/${ENTRA_PROVIDER_ID}`
+  `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
+  '/api/auth/device/code',
+  '/api/auth/device/token'
 ])
 
 /**

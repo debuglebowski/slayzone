@@ -48,6 +48,7 @@ export {
 export { ACCOUNT_DISABLED_CODE, findHubAccount, type HubAccount } from './account'
 export {
   ENTRA_ADMIN_ROLE,
+  ENTRA_AUTHORITY,
   ENTRA_PROVIDER_ID,
   ENTRA_USER_ROLE,
   entraAccountId,
@@ -67,3 +68,18 @@ export {
   type RecheckOutcome,
   type RecheckReport
 } from './entra-recheck'
+export {
+  DEVICE_CLIENTS,
+  DEVICE_CODE_TTL_MS,
+  DEVICE_PAGE_PATH,
+  DEVICE_POLL_INTERVAL_SEC,
+  MAX_PENDING_DEVICE_CODES,
+  SIGN_IN_METHOD
+} from './device'
+export {
+  createDevicePage,
+  normalizeUserCode,
+  WRONG_CODE_LIMIT,
+  WRONG_CODE_WINDOW_MS,
+  type DevicePageOptions
+} from './device-page'
