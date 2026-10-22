@@ -336,6 +336,11 @@ async function passedVerdict(): Promise<Extract<EntraVerdict, { ok: true }> | nu
   return verdict?.ok ? verdict : null
 }
 
+/** True inside an Entra callback whose ID token passed every check above (MFA included). */
+export async function isPassedEntraSignIn(): Promise<boolean> {
+  return (await passedVerdict()) !== null
+}
+
 // ---------------------------------------------------------------------------
 // Token endpoint
 // ---------------------------------------------------------------------------

@@ -11,7 +11,12 @@ import {
   setAuthGate
 } from '@slayzone/transport/server'
 import { beginTerminalShutdown } from '@slayzone/terminal/server'
-import { createAuthExpressApp, loadEntraClientCredential } from '@slayzone/hub-auth/server'
+import {
+  createAuthExpressApp,
+  createDevicePage,
+  ENTRA_AUTHORITY,
+  loadEntraClientCredential
+} from '@slayzone/hub-auth/server'
 import {
   bindInHubPortBlock,
   ensureDataRoot,
@@ -134,6 +139,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
+  // Device sign-in's approval page (T-14, hub-auth `device-page.ts`): `/device`, where a
+  // person approves a CLI/desktop sign-in after signing in through Entra. Entra hubs
+  // only; everywhere else `/device` falls through to the web shell / 404 as before.
+  const devicePage =
+    hubAuth && boot.ssoActive
+      ? createDevicePage(hubAuth, { signInOrigin: new URL(ENTRA_AUTHORITY).origin })
+      : null
   if (computerGateway) log('computer transport ready (gateway + hub-auth loaded)')
 
   // Multi-hub: wire the client-facing `hub.describe` deps so a connecting client
@@ -361,6 +373,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // `main.tsx` skips `LoginScreen` and connects with no token whenever `/health`
     // reports `authRequired: false`, the same "just connect" shape desktop/CLI
     // clients use against a login-less hub.
+    // Outside `/api`, so the gate let it through like the web shell: the page checks its
+    // own session (a fresh Entra one, from the cookie) and the forms' Origin.
+    if (devicePage?.(req, res)) return
     if (handleWebAssets(WEB_ROOT, req, res)) return
     mcpRest.app(req, res)
   }

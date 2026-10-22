@@ -52,6 +52,16 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:hub-login', payload) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
+    hubDeviceLoginStart: (payload) =>
+      ipcRenderer.invoke('app:hub-device-login-start', payload) as ReturnType<
+        ElectronAPI['app']['hubDeviceLoginStart']
+      >,
+    hubDeviceLoginWait: (payload) =>
+      ipcRenderer.invoke('app:hub-device-login-wait', payload) as ReturnType<
+        ElectronAPI['app']['hubDeviceLoginWait']
+      >,
+    hubDeviceLoginCancel: (payload) =>
+      ipcRenderer.invoke('app:hub-device-login-cancel', payload) as Promise<{ ok: true }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>
@@ -62,6 +72,7 @@ const api: ElectronAPI = {
         normalizedUrl?: string
         error?: string
         authRequired?: boolean
+        signIn?: { sso: boolean; password: boolean }
       }>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,

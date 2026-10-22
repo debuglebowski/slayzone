@@ -86,6 +86,15 @@ export const appShim = {
     ok: false,
     error: 'Not supported in the Chromium shell'
   }),
+  hubDeviceLoginStart: async (): Promise<{ ok: false; error: string }> => ({
+    ok: false,
+    error: 'Not supported in the Chromium shell'
+  }),
+  hubDeviceLoginWait: async (): Promise<{ ok: false; error: string }> => ({
+    ok: false,
+    error: 'Not supported in the Chromium shell'
+  }),
+  hubDeviceLoginCancel: async (): Promise<{ ok: true }> => ({ ok: true }),
   // The fork's sidecar is an external process the shell doesn't supervise.
   restartSidecar: async (): Promise<{ ok: boolean; error?: string }> => ({
     ok: false,

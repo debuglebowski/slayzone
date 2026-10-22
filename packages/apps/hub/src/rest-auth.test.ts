@@ -305,6 +305,28 @@ async function main(): Promise<void> {
     )
   })
 
+  // Device sign-in (T-14): the code + token routes open on an SSO hub only; the plugin's
+  // browser-leg routes stay behind the bearer (and 404 there — hub-auth device.test.ts).
+  await test('device sign-in: code + token open only when SSO is on, by exact path', () => {
+    const sso = (url: string): RestAuthAction =>
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, url })
+    for (const url of ['/api/auth/device/code', '/api/auth/device/token']) {
+      assertEq(remoteWan(url), 'verify', `SSO off: ${url} stays gated`)
+      assertEq(sso(url), 'allow', `SSO on: ${url} open`)
+    }
+    for (const url of [
+      '/api/auth/device',
+      '/api/auth/device/approve',
+      '/api/auth/device/deny',
+      '/api/auth/device/code/extra',
+      '/api/auth/device/tokens'
+    ]) {
+      assertEq(sso(url), 'verify', `SSO on: ${url} stays gated`)
+    }
+    // The approval page is outside /api, like the web shell: the gate never sees it.
+    assertEq(sso('/device?user_code=ABCDEFGH'), 'allow', 'page not gated')
+  })
+
   await test('computer join-token stays open (its own loopback guard is the protection)', () => {
     // The Electron MAIN process mints over loopback with no bearer at boot; a
     // bearer requirement here would break local-computer auto-enroll on a remote

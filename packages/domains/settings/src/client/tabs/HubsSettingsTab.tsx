@@ -81,7 +81,12 @@ import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
 type ProbeState =
   | { kind: 'idle' }
   | { kind: 'probing' }
-  | { kind: 'ok'; normalizedUrl: string; authRequired: boolean | undefined }
+  | {
+      kind: 'ok'
+      normalizedUrl: string
+      authRequired: boolean | undefined
+      signIn?: SignInMethods
+    }
   | { kind: 'fail'; reason: string }
 
 /**
@@ -97,6 +102,20 @@ type AuthNeed = 'gated' | 'open' | 'unknown'
 
 const authNeedFromProbe = (authRequired: boolean | undefined): AuthNeed =>
   authRequired === undefined ? 'unknown' : authRequired ? 'gated' : 'open'
+
+/**
+ * How a hub signs people in, from its `/health` switches. `sso` = Entra: the app opens
+ * the hub's page in the system browser and never asks for a password (device sign-in,
+ * T-14). A hub too old to say keeps the email + password form.
+ */
+type SignInMethods = { sso: boolean; password: boolean }
+
+/** Device sign-in progress inside the Sign in dialog. */
+type DeviceSignInState =
+  | { kind: 'idle' }
+  | { kind: 'starting' }
+  | { kind: 'waiting'; flowId: string; userCode: string; verificationUri: string; opened: boolean }
+  | { kind: 'fail'; error: string }
 
 export function HubsSettingsTab() {
   // OrNull: the Chromium fork renders this surface outside a FederationProvider.
@@ -135,6 +154,11 @@ export function HubsSettingsTab() {
   // Absent key = not asked yet. See `authNeedFromProbe` for why 'unknown' is a
   // distinct state.
   const [authNeeds, setAuthNeeds] = useState<Record<string, AuthNeed>>({})
+  // How each remote hub signs people in (same probe). Absent = not known.
+  const [signInMethods, setSignInMethods] = useState<Record<string, SignInMethods>>({})
+  const rememberSignIn = (hubId: string, methods: SignInMethods | undefined): void => {
+    if (methods) setSignInMethods((prev) => ({ ...prev, [hubId]: methods }))
+  }
 
   // Sign-in modal (per remote hub bearer auth). `signInHubId` non-empty = open;
   // the row that launched it names the hub, so there's no picker.
@@ -145,6 +169,7 @@ export function HubsSettingsTab() {
     { kind: 'idle' } | { kind: 'busy' } | { kind: 'ok' } | { kind: 'fail'; error: string }
   >({ kind: 'idle' })
   const [authedHubIds, setAuthedHubIds] = useState<Set<string>>(new Set())
+  const [deviceSignIn, setDeviceSignIn] = useState<DeviceSignInState>({ kind: 'idle' })
 
   // Baseline snapshot save() diffs against to detect a pure addition (see
   // `isAddOnly` below) — kept in a ref (not state) since it never drives a
@@ -181,6 +206,8 @@ export function HubsSettingsTab() {
       if (!hub.url) continue
       void electronBootstrap.probeServerHealth(hub.url).then((result) => {
         setAuthNeeds((prev) => ({ ...prev, [hub.id]: authNeedFromProbe(result.authRequired) }))
+        const methods = result.signIn
+        if (methods) setSignInMethods((prev) => ({ ...prev, [hub.id]: methods }))
       })
     }
   }, [])
@@ -190,12 +217,53 @@ export function HubsSettingsTab() {
     setEmail('')
     setPassword('')
     setSignInState({ kind: 'idle' })
+    setDeviceSignIn({ kind: 'idle' })
   }
 
   const closeSignIn = (): void => {
+    // Stop polling for a sign-in nobody is waiting on any more.
+    if (deviceSignIn.kind === 'waiting') {
+      void electronBootstrap.hubDeviceLoginCancel({ flowId: deviceSignIn.flowId })
+    }
     setSignInHubId('')
     setPassword('')
     setSignInState({ kind: 'idle' })
+    setDeviceSignIn({ kind: 'idle' })
+  }
+
+  /** The bearer just stored for `hubId`: mark it signed in, hand it to the live registry. */
+  const signedIn = async (hubId: string): Promise<void> => {
+    setSignInState({ kind: 'ok' })
+    setAuthedHubIds((prev) => new Set(prev).add(hubId))
+    const tokens = await electronBootstrap.getHubTokens()
+    useHubRegistryStore.getState().setTokens(tokens)
+  }
+
+  // Entra hub: the hub's page opens in the system browser, where the person signs in
+  // with MFA and approves; the code shown here must match the page's.
+  const signInWithBrowser = async (): Promise<void> => {
+    const hub = remotes.find((h) => h.id === signInHubId)
+    if (!hub?.url) return
+    setDeviceSignIn({ kind: 'starting' })
+    const started = await electronBootstrap.hubDeviceLoginStart({ hubId: hub.id, url: hub.url })
+    if (!started.ok) {
+      setDeviceSignIn({ kind: 'fail', error: started.error })
+      return
+    }
+    setDeviceSignIn({
+      kind: 'waiting',
+      flowId: started.flowId,
+      userCode: started.userCode,
+      verificationUri: started.verificationUri,
+      opened: started.opened
+    })
+    const result = await electronBootstrap.hubDeviceLoginWait({ flowId: started.flowId })
+    if (result.ok) {
+      setDeviceSignIn({ kind: 'idle' })
+      await signedIn(hub.id)
+    } else {
+      setDeviceSignIn({ kind: 'fail', error: result.error })
+    }
   }
 
   const signIn = async (): Promise<void> => {
@@ -209,14 +277,11 @@ export function HubsSettingsTab() {
       password
     })
     if (result.ok) {
-      setSignInState({ kind: 'ok' })
       setPassword('')
-      setAuthedHubIds((prev) => new Set(prev).add(hub.id))
-      // Push the freshly-stored token into the live registry too — if this
+      // Pushes the freshly-stored token into the live registry too — if this
       // hub was already live-added this session (see save()'s isAddOnly
       // path), FederationProvider needs the token without a relaunch.
-      const tokens = await electronBootstrap.getHubTokens()
-      useHubRegistryStore.getState().setTokens(tokens)
+      await signedIn(hub.id)
     } else {
       setSignInState({ kind: 'fail', error: result.error })
     }
@@ -233,7 +298,8 @@ export function HubsSettingsTab() {
       setProbe({
         kind: 'ok',
         normalizedUrl: result.normalizedUrl,
-        authRequired: result.authRequired
+        authRequired: result.authRequired,
+        signIn: result.signIn
       })
     else setProbe({ kind: 'fail', reason: result.error ?? 'Unreachable' })
   }
@@ -260,6 +326,7 @@ export function HubsSettingsTab() {
     // The Validate probe already asked this hub whether it gates — carry the
     // answer over so the new row decides about Sign in without a second probe.
     setAuthNeeds((prev) => ({ ...prev, [id]: authNeedFromProbe(probe.authRequired) }))
+    rememberSignIn(id, probe.signIn)
     collapseAddHub()
     setDirty(true)
   }
@@ -355,6 +422,7 @@ export function HubsSettingsTab() {
     // switched to remote mode (or back) since the tab opened is reflected here.
     if (result.ok) {
       setAuthNeeds((prev) => ({ ...prev, [hub.id]: authNeedFromProbe(result.authRequired) }))
+      rememberSignIn(hub.id, result.signIn)
     }
   }
 
@@ -428,6 +496,11 @@ export function HubsSettingsTab() {
   }
 
   const signInHub = remotes.find((h) => h.id === signInHubId)
+  // Entra hub → browser sign-in; the password form only where the hub has password on
+  // (or cannot say). An SSO-only hub shows no password field at all.
+  const signInMethodsOfHub = signInMethods[signInHubId]
+  const offerBrowserSignIn = signInMethodsOfHub?.sso === true
+  const offerPassword = signInMethodsOfHub === undefined || signInMethodsOfHub.password
   const editHub = remotes.find((h) => h.id === editHubId)
   const editUrlChanged = !!editHub && editUrl.trim() !== (editHub.url ?? '')
 
@@ -856,25 +929,63 @@ export function HubsSettingsTab() {
             <DialogHeader>
               <DialogTitle>Sign in to {signInHub?.label ?? 'hub'}</DialogTitle>
               <DialogDescription>
-                This remote hub requires auth. Sign in with your hub account; the token is stored
-                encrypted on this machine.
+                This remote hub requires auth.{' '}
+                {offerBrowserSignIn
+                  ? 'Sign in with Microsoft in your browser'
+                  : 'Sign in with your hub account'}
+                ; the token is stored encrypted on this machine.
               </DialogDescription>
             </DialogHeader>
+            {offerBrowserSignIn && (
+              <div className="space-y-2" data-testid="hub-signin-browser">
+                <Button
+                  disabled={deviceSignIn.kind === 'starting' || deviceSignIn.kind === 'waiting'}
+                  onClick={() => {
+                    void signInWithBrowser()
+                  }}
+                  data-testid="hub-signin-sso"
+                >
+                  {deviceSignIn.kind === 'waiting'
+                    ? 'Waiting for approval…'
+                    : 'Sign in with Microsoft'}
+                </Button>
+                {deviceSignIn.kind === 'waiting' && (
+                  <div className="text-sm" data-testid="hub-signin-code">
+                    <p>
+                      Approve in your browser. Check the page shows this code:{' '}
+                      <span className="font-mono font-semibold">{deviceSignIn.userCode}</span>
+                    </p>
+                    {!deviceSignIn.opened && (
+                      <p className="select-all break-all text-muted-foreground">
+                        Open: {deviceSignIn.verificationUri}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {deviceSignIn.kind === 'fail' && (
+                  <div className="text-xs text-destructive">✗ {deviceSignIn.error}</div>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
-              <Input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="email"
-                type="email"
-                data-testid="hub-signin-email"
-              />
-              <Input
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="password"
-                type="password"
-                data-testid="hub-signin-password"
-              />
+              {offerPassword && (
+                <>
+                  <Input
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="email"
+                    type="email"
+                    data-testid="hub-signin-email"
+                  />
+                  <Input
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="password"
+                    type="password"
+                    data-testid="hub-signin-password"
+                  />
+                </>
+              )}
               <div className="h-4 text-xs" data-testid="hub-signin-result">
                 {signInState.kind === 'ok' && <span className="text-green-500">✓ signed in</span>}
                 {signInState.kind === 'fail' && (
@@ -886,15 +997,17 @@ export function HubsSettingsTab() {
               <Button variant="outline" onClick={closeSignIn}>
                 {signInState.kind === 'ok' ? 'Done' : 'Cancel'}
               </Button>
-              <Button
-                disabled={signInState.kind === 'busy' || !email.trim() || !password}
-                onClick={() => {
-                  void signIn()
-                }}
-                data-testid="hub-signin"
-              >
-                {signInState.kind === 'busy' ? 'Signing in…' : 'Sign in'}
-              </Button>
+              {offerPassword && (
+                <Button
+                  disabled={signInState.kind === 'busy' || !email.trim() || !password}
+                  onClick={() => {
+                    void signIn()
+                  }}
+                  data-testid="hub-signin"
+                >
+                  {signInState.kind === 'busy' ? 'Signing in…' : 'Sign in'}
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>

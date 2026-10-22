@@ -444,6 +444,21 @@ export interface ElectronAPI {
       email: string
       password: string
     }) => Promise<{ ok: true } | { ok: false; error: string }>
+    /** Entra hub (T-14): ask for a device code and open the hub's approval page in the
+     *  system browser (`opened` false = the page is not on the hub's host; show it). */
+    hubDeviceLoginStart: (payload: {
+      hubId: string
+      url: string
+    }) => Promise<
+      | { ok: true; flowId: string; userCode: string; verificationUri: string; opened: boolean }
+      | { ok: false; error: string }
+    >
+    /** Poll until approved in the browser; stores the bearer token for that hub. */
+    hubDeviceLoginWait: (payload: {
+      flowId: string
+    }) => Promise<{ ok: true } | { ok: false; error: string }>
+    /** Stop waiting (the dialog was closed). */
+    hubDeviceLoginCancel: (payload: { flowId: string }) => Promise<{ ok: true }>
     getWindowId: () => Promise<number | null>
     relaunch: () => Promise<void>
     setBootSettings: (payload: {
@@ -460,6 +475,8 @@ export interface ElectronAPI {
       /** Whether the probed hub gates its client API on a bearer token.
        *  Undefined = the hub is too old to report it (treat as unknown). */
       authRequired?: boolean
+      /** How the hub signs people in (`/health` switches). Undefined on an older hub. */
+      signIn?: { sso: boolean; password: boolean }
     }>
     restartSidecar: () => Promise<{ ok: boolean; error?: string }>
     /** Cycle the co-located computer, or start it if it never came up. Stops every
@@ -735,6 +752,8 @@ export interface _LegacyElectronAPI {
       /** Whether the probed hub gates its client API on a bearer token.
        *  Undefined = the hub is too old to report it (treat as unknown). */
       authRequired?: boolean
+      /** How the hub signs people in (`/health` switches). Undefined on an older hub. */
+      signIn?: { sso: boolean; password: boolean }
     }>
     getSidecarStatus: () => Promise<{
       health: 'starting' | 'ready' | 'restarting' | 'failed'

@@ -10,6 +10,9 @@ import {
   readBootConfig,
   writeBootSettings,
   probeRemoteHealth,
+  hubDeviceCode,
+  isHubOwnPage,
+  waitForHubDeviceToken,
   resolveHubRegistry,
   resolveDefaultHubId,
   localHubEntry,
@@ -459,6 +462,21 @@ describe('probeRemoteHealth', () => {
     expect(result.error).toBeTruthy()
   })
 
+  it('reports how the hub signs people in from its switches', async () => {
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          ok: true,
+          authRequired: true,
+          switches: { enableSso: true, enablePassword: false }
+        })
+      )
+    })
+    const result = await probeRemoteHealth(`http://127.0.0.1:${port}`)
+    expect(result.signIn).toEqual({ sso: true, password: false })
+  })
+
   it('rejects invalid URLs without attempting a request', async () => {
     const result = await probeRemoteHealth('not a url')
     expect(result.ok).toBe(false)
@@ -472,5 +490,139 @@ describe('probeRemoteHealth', () => {
     const result = await probeRemoteHealth(`http://127.0.0.1:${port}`, 200)
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/timed out/i)
+  })
+})
+
+/**
+ * Device sign-in against an Entra hub (T-14), against a stub of the hub's two routes:
+ * the code request names the desktop client, the poll honours `slow_down`, and each
+ * end state (token, denied, expired) comes back as what the dialog shows. Plain
+ * `http.request`, so no Fetch Metadata reaches the hub (MISSING_OR_NULL_ORIGIN).
+ */
+describe('device sign-in (hubDeviceCode / waitForHubDeviceToken)', () => {
+  let server: http.Server | null = null
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()))
+      server = null
+    }
+  })
+
+  /** Stub hub: answers `/device/code`, then each `/device/token` poll from `polls`. */
+  const stubHub = (polls: Array<[number, Record<string, unknown>]>) => {
+    const seen: Array<{
+      url: string
+      body: Record<string, unknown>
+      headers: http.IncomingHttpHeaders
+    }> = []
+    server = http.createServer((req, res) => {
+      let raw = ''
+      req.on('data', (c) => (raw += c))
+      req.on('end', () => {
+        const body = JSON.parse(raw || '{}') as Record<string, unknown>
+        seen.push({ url: req.url ?? '', body, headers: req.headers })
+        const [status, reply] =
+          req.url === '/api/auth/device/code'
+            ? [
+                200,
+                {
+                  device_code: 'dev-code',
+                  user_code: 'ABCDEFGH',
+                  verification_uri: `http://${req.headers.host}/device`,
+                  verification_uri_complete: `http://${req.headers.host}/device?user_code=ABCDEFGH`,
+                  expires_in: 600,
+                  interval: 5
+                }
+              ]
+            : (polls.shift() ?? [400, { error: 'expired_token' }])
+        res.writeHead(status, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(reply))
+      })
+    })
+    return new Promise<{ url: string; seen: typeof seen }>((resolve) =>
+      server!.listen(0, '127.0.0.1', () =>
+        resolve({ url: `http://127.0.0.1:${(server!.address() as AddressInfo).port}`, seen })
+      )
+    )
+  }
+
+  const sleeps: number[] = []
+  const sleep = async (ms: number): Promise<void> => {
+    sleeps.push(ms)
+  }
+
+  beforeEach(() => {
+    sleeps.length = 0
+  })
+
+  it('asks for a code as the desktop client, with no Fetch Metadata', async () => {
+    const hub = await stubHub([])
+    const code = await hubDeviceCode(hub.url)
+    expect(code).toMatchObject({
+      ok: true,
+      deviceCode: 'dev-code',
+      userCode: 'ABCD-EFGH',
+      intervalSec: 5
+    })
+    expect(hub.seen[0]!.body).toEqual({ client_id: 'slayzone-desktop' })
+    expect(hub.seen[0]!.headers['sec-fetch-mode']).toBeUndefined()
+    expect(hub.seen[0]!.headers.origin).toBeUndefined()
+  })
+
+  it('polls through pending and slow_down to the token', async () => {
+    const hub = await stubHub([
+      [400, { error: 'authorization_pending' }],
+      [400, { error: 'slow_down' }],
+      [200, { access_token: 'bearer-1', token_type: 'Bearer' }]
+    ])
+    const result = await waitForHubDeviceToken(
+      hub.url,
+      { deviceCode: 'dev-code', expiresInSec: 600, intervalSec: 5 },
+      { sleep }
+    )
+    expect(result).toEqual({ ok: true, token: 'bearer-1' })
+    expect(sleeps).toEqual([5000, 5000, 10000])
+    expect(hub.seen.map((s) => s.body.device_code)).toEqual(['dev-code', 'dev-code', 'dev-code'])
+  })
+
+  it('denied and expired end the wait with a clean error', async () => {
+    const denied = await stubHub([[400, { error: 'access_denied' }]])
+    expect(
+      await waitForHubDeviceToken(
+        denied.url,
+        { deviceCode: 'd', expiresInSec: 600, intervalSec: 5 },
+        { sleep }
+      )
+    ).toEqual({ ok: false, error: 'Sign-in was denied in the browser' })
+    await new Promise<void>((resolve) => server!.close(() => resolve()))
+    const expired = await stubHub([[400, { error: 'expired_token' }]])
+    expect(
+      await waitForHubDeviceToken(
+        expired.url,
+        { deviceCode: 'd', expiresInSec: 600, intervalSec: 5 },
+        { sleep }
+      )
+    ).toEqual({ ok: false, error: 'The sign-in code expired' })
+  })
+
+  it('stops when cancelled', async () => {
+    const hub = await stubHub([[400, { error: 'authorization_pending' }]])
+    const abort = new AbortController()
+    abort.abort()
+    const result = await waitForHubDeviceToken(
+      hub.url,
+      { deviceCode: 'd', expiresInSec: 600, intervalSec: 5 },
+      { sleep, signal: abort.signal }
+    )
+    expect(result).toEqual({ ok: false, error: 'Sign-in cancelled' })
+  })
+
+  it("opens only the hub's own page in the browser", () => {
+    expect(
+      isHubOwnPage('https://hub.example.com', 'https://hub.example.com/device?user_code=X')
+    ).toBe(true)
+    expect(isHubOwnPage('wss://hub.example.com/trpc', 'https://hub.example.com/device')).toBe(true)
+    expect(isHubOwnPage('https://hub.example.com', 'https://evil.example/device')).toBe(false)
+    expect(isHubOwnPage('https://hub.example.com', 'javascript:alert(1)')).toBe(false)
   })
 })

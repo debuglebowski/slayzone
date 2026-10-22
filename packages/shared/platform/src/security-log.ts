@@ -112,7 +112,20 @@ export const SECURITY_EVENTS = [
   /** `denied`: Entra refused an account's refresh token (or it holds no app role any
    *  more) and its sessions were revoked; `failure` (level info, once per outage): Entra
    *  could not be asked, sessions kept; `success`: asking works again. */
-  'auth.sso.recheck'
+  'auth.sso.recheck',
+  // Device sign-in (T-14, hub-auth `device.ts`): CLI/desktop sign-in approved in a
+  // browser. The token itself is an `auth.signin` line with `detail.method: 'device'`.
+  // `detail.requestRef` correlates one request's lines; no code is ever written.
+  /** A device code issued (`success`) or refused (`denied`: unknown client, too many pending). */
+  'auth.device.code',
+  /** A user code on the approval page that matches nothing (`failure`), or the lockout (`denied`). */
+  'auth.device.user_code',
+  /** The signed-in user approved a request (`success`), or was refused approving it (`denied`). */
+  'auth.device.approve',
+  /** The signed-in user denied a request. */
+  'auth.device.deny',
+  /** A request expired before a token was issued (seen at poll, on the page, or swept). */
+  'auth.device.expire'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]

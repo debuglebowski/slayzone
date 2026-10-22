@@ -204,6 +204,11 @@ run_test packages/shared/platform/src/service-unit.test.ts
 # launchd/systemd unit is ever installed by the suite. Electron ABI (the hub
 # bundle needs better-sqlite3) → strict loader.
 run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.test.ts
+# Device sign-in (T-14): `slay hub login` against the REAL built hub with Entra sign-in
+# on and password off (local fake Entra), browser approval with MFA, bearer on REST,
+# denial, no token without MFA, audit; plus the CLI's password path (no more
+# MISSING_OR_NULL_ORIGIN). Electron ABI (hub bundle) → strict loader.
+run_test_electron_strict_loader packages/apps/hub/src/hub-device-sign-in.test.ts
 # `slay computer` end-to-end: boots a REAL hub in a temp root, mints a join token over
 # its loopback REST channel, then drives `computer create` through the built CLI and
 # asserts the computer ENROLLS (a computer has no /health to probe — its own
