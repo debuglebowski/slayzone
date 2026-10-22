@@ -411,18 +411,16 @@ export interface PtyCreateOptions {
 export type HubKind = 'local' | 'remote'
 
 export interface HubEntry {
-  /** Stable id — the `'local'` sentinel for the co-located sidecar, the pinned
-   * TLS cert fingerprint for a remote hub. */
+  /** Stable id — the `'local'` sentinel for the co-located sidecar; for a remote
+   * hub `hub:<url>`, or `remote-legacy` for a migrated pre-multi-hub remote. */
   id: string
   kind: HubKind
   /** User-facing display name. */
   label: string
   /** Canonical ws(s)://host[:port]/trpc URL. Absent for local (resolved at
-   * runtime from the live sidecar port). */
+   * runtime from the live sidecar port). A remote wss:// hub's certificate is
+   * verified the normal way (CA chain + hostname) — nothing is pinned. */
   url?: string
-  /** Pinned TLS cert sha256 (hex) — remote wss only; the client refuses to
-   * connect to a hub presenting a different leaf. */
-  fingerprint?: string
 }
 
 // Bootstrap-only preload contract. Domain/backend calls use tRPC over WebSocket.

@@ -270,6 +270,37 @@ describe('multi-hub boot config (Phase 0)', () => {
     ])
   })
 
+  it('a certificate pin an older release kept per hub is dropped, the hub kept', () => {
+    // Remote hubs are verified the normal way (CA chain + hostname) — no pin is ever
+    // read back, and the next write no longer carries it.
+    writeFileSync(
+      join(dir, 'client.boot.json'),
+      JSON.stringify({
+        server_mode: 'local',
+        multi_hub: true,
+        hubs: [
+          {
+            id: 'hub:wss://prod.example.com/trpc',
+            kind: 'remote',
+            label: 'Prod',
+            url: 'wss://prod.example.com/trpc',
+            fingerprint: 'ab'.repeat(32)
+          }
+        ]
+      })
+    )
+    const hub = {
+      id: 'hub:wss://prod.example.com/trpc',
+      kind: 'remote',
+      label: 'Prod',
+      url: 'wss://prod.example.com/trpc'
+    }
+    expect(readBootConfig(dir).hubs).toEqual([hub])
+    writeBootSettings(dir, { default_hub_id: hub.id })
+    expect(readFileSync(join(dir, 'client.boot.json'), 'utf8')).not.toContain('fingerprint')
+    expect(readBootConfig(dir).hubs).toEqual([hub])
+  })
+
   it('round-trips default_hub_id and clears it', () => {
     writeBootSettings(dir, { default_hub_id: 'fp-abc' })
     expect(readBootConfig(dir).default_hub_id).toBe('fp-abc')

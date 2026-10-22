@@ -30,7 +30,7 @@ function localLink(id: string): TRPCLink<AppRouter> {
           describeCalls[id] = (describeCalls[id] ?? 0) + 1
           observer.next({
             result: {
-              data: { label: `hub:${id}`, version: '0', fingerprint: null, authRequired: false }
+              data: { label: `hub:${id}`, version: '0', authRequired: false }
             }
           })
           observer.complete()

@@ -598,7 +598,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
-  packages/apps/app/src/main/hub-cert-pinning.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/trpc.test.ts \
@@ -698,7 +697,6 @@ run_package_tests packages/domains/hub-auth @slayzone/hub-auth
 run_package_tests packages/shared/platform @slayzone/platform
 # Packages whose own `vitest run` was green but never aggregated (swept in 2026-10-22).
 run_package_tests packages/domains/task-artifacts @slayzone/task-artifacts
-run_package_tests packages/domains/hub-identity @slayzone/hub-identity
 run_package_tests packages/shared/layout @slayzone/layout
 run_package_tests packages/shared/markdown @slayzone/markdown
 run_package_tests packages/shared/shortcuts @slayzone/shortcuts

@@ -7,15 +7,15 @@ import type { JoinToken } from '../shared/types'
  * Single-use computer enrollment tokens.
  *
  * Token format: `szjt1.<base64url(JSON payload)>` where the payload embeds the
- * hub URL, a `certFingerprint` field and a 256-bit random secret. The DB stores
- * ONLY `sha256(token)` — the plaintext token is returned once from `mintJoinToken`
- * and can never be recovered from the hub afterwards.
+ * hub URL and a 256-bit random secret. The DB stores ONLY `sha256(token)` — the
+ * plaintext token is returned once from `mintJoinToken` and can never be recovered
+ * from the hub afterwards.
  *
- * `certFingerprint` is ALWAYS EMPTY in a freshly minted token: the hub no longer
- * terminates TLS or presents a certificate of its own (a front end does), so there
- * is nothing to pin and a computer verifies the front end's certificate the normal
- * way. The field stays in the grammar — and in both decoders — only so a token
- * minted by an older hub still decodes; removing it is a later change.
+ * There is no certificate pin: the hub never terminates TLS or presents a
+ * certificate of its own (a front end does), and a computer verifies the front
+ * end's certificate the normal way. A token minted by an OLDER hub also carries a
+ * `certFingerprint` field; both decoders ignore it, so such a token (still unused in
+ * `join_tokens` after an upgrade) redeems exactly like a new one.
  */
 
 export const JOIN_TOKEN_PREFIX = 'szjt1'
@@ -23,17 +23,12 @@ export const JOIN_TOKEN_PREFIX = 'szjt1'
 /** Decoded contents of a join token — what an enrolling computer needs. */
 export interface JoinTokenPayload {
   hubUrl: string
-  certFingerprint: string
   /** 256-bit random secret (base64url). Makes the token unguessable. */
   secret: string
 }
 
 export interface MintJoinTokenInput {
   hubUrl: string
-  /** Leave unset: the hub has no certificate to pin, so the token carries an empty
-   *  fingerprint (see the module note). Kept optional for a caller that still
-   *  passes one. */
-  certFingerprint?: string
   ttlMs: number
   label: string
   /**
@@ -77,9 +72,9 @@ export function hashJoinToken(token: string): string {
 }
 
 /**
- * Stateless decode of a token's embedded payload (no DB) — the computer side
- * uses this to learn the hub URL + pinned cert before dialing. Returns `null`
- * for anything that isn't a well-formed `szjt1.` token.
+ * Stateless decode of a token's embedded payload (no DB). Returns `null` for
+ * anything that isn't a well-formed `szjt1.` token. Other fields — an older hub's
+ * `certFingerprint` included — are ignored.
  */
 export function decodeJoinToken(token: string): JoinTokenPayload | null {
   const dot = token.indexOf('.')
@@ -89,15 +84,9 @@ export function decodeJoinToken(token: string): JoinTokenPayload | null {
   try {
     const parsed: unknown = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'))
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    const { hubUrl, certFingerprint, secret } = parsed as Record<string, unknown>
-    if (
-      typeof hubUrl !== 'string' ||
-      typeof certFingerprint !== 'string' ||
-      typeof secret !== 'string'
-    ) {
-      return null
-    }
-    return { hubUrl, certFingerprint, secret }
+    const { hubUrl, secret } = parsed as Record<string, unknown>
+    if (typeof hubUrl !== 'string' || typeof secret !== 'string') return null
+    return { hubUrl, secret }
   } catch {
     return null
   }
@@ -111,7 +100,6 @@ export async function mintJoinToken(
   const now = input.now ?? Date.now()
   const payload: JoinTokenPayload = {
     hubUrl: input.hubUrl,
-    certFingerprint: input.certFingerprint ?? '',
     secret: randomBytes(32).toString('base64url')
   }
   const token = `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`

@@ -29,7 +29,7 @@ import {
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import { ENV_VARS, loadComputerConfig } from './config'
+import { ENV_VARS, ignoredCertPinNotices, loadComputerConfig } from './config'
 import { startComputer } from './main'
 
 /**
@@ -176,6 +176,10 @@ async function main(): Promise<void> {
     const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
     process.stdout.write(`[computer] ${message}${suffix}\n`)
   }
+
+  // A certificate pin from an older release is ignored, never enforced (see
+  // ignoredCertPinNotices) — said once at boot so the change is not silent.
+  for (const notice of ignoredCertPinNotices()) log(notice)
 
   // Agent lifecycle hooks, BEFORE accepting any work. This computer spawns agents,
   // and their status (running spinner, unread marker) is reported only through

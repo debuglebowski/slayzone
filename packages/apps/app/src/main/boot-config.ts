@@ -18,7 +18,7 @@ import type { HubEntry } from '@slayzone/types'
 
 export type ServerMode = 'local' | 'remote'
 
-/** Stable sentinel id for the co-located sidecar hub (never a fingerprint). */
+/** Stable sentinel id for the co-located sidecar hub. */
 export const LOCAL_HUB_ID = 'local'
 /**
  * Fixed id assigned to a pre-multi-hub single-remote server when it is migrated
@@ -116,7 +116,9 @@ export function toHealthUrl(wsUrl: string): string {
  * Validates + normalizes one persisted REMOTE hub entry. Returns null for any
  * shape we won't trust (missing id/url, unnormalizable url, wrong kind) so a
  * hand-edited or partially-written file can't inject a broken hub. The local
- * hub is never persisted, so `kind` must be `'remote'` here.
+ * hub is never persisted, so `kind` must be `'remote'` here. A `fingerprint` an
+ * older release kept per hub (a certificate pin) is dropped: remote hubs are
+ * verified the normal way, and the next write no longer carries it.
  */
 function sanitizeHubEntry(raw: unknown): HubEntry | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -132,7 +134,6 @@ function sanitizeHubEntry(raw: unknown): HubEntry | null {
     label: typeof o.label === 'string' && o.label ? o.label : o.id,
     url
   }
-  if (typeof o.fingerprint === 'string' && o.fingerprint) entry.fingerprint = o.fingerprint
   return entry
 }
 

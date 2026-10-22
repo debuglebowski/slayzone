@@ -254,8 +254,7 @@ export function HubsSettingsTab() {
       toast.error('That hub is already in the list')
       return
     }
-    // Stable id: the fingerprint is learned on first connect (Phase 6 pins it);
-    // until then key by the normalized URL so the entry is idempotent.
+    // Stable id: keyed by the normalized URL so the entry is idempotent.
     const id = `hub:${url}`
     setRemotes((prev) => [...prev, { id, kind: 'remote', label: hostOf(url), url }])
     // The Validate probe already asked this hub whether it gates — carry the

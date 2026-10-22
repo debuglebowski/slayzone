@@ -1,8 +1,9 @@
 /**
  * `slay computer` — install and manage computers on THIS machine.
  *
- * A computer is an execution node: it dials OUT to a hub over a pinned `wss://` link
- * using a join token, then runs terminals/agents/git locally. `create` hands it to
+ * A computer is an execution node: it dials OUT to a hub over `wss://` (the hub's front
+ * end certificate verified the normal way) using a join token, then runs
+ * terminals/agents/git locally. `create` hands it to
  * the OS supervisor (launchd/systemd --user) so a crash or a logout doesn't silently
  * end it — the same guarantee `slay hub create` gives, with the same verbs.
  *
@@ -399,8 +400,8 @@ export function computerCommand(): Command {
   //
   // The only verb here whose subject is a hub rather than this machine, and that is
   // unavoidable: a join token can only be minted by the hub it points at (it embeds
-  // that hub's dial URL + cert fingerprint), so WHICH HUB A COMPUTER CONNECTS TO is
-  // decided here, not by `create`. It lives under `computer` because the thing being
+  // that hub's dial URL), so WHICH HUB A COMPUTER CONNECTS TO is decided here, not
+  // by `create`. It lives under `computer` because the thing being
   // created is a computer's credential; addressing follows the ambient hub target
   // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging computer
   // mint` reads the same as every other hub-targeted command.
@@ -541,8 +542,8 @@ export function computerCommand(): Command {
 
       // VALIDATE THE TOKEN LOCALLY FIRST. A malformed token would otherwise install a
       // unit whose computer can never dial anywhere, and the supervisor would retry it
-      // forever. The token embeds the hub url + cert fingerprint, so decoding it also
-      // tells us (and `ls`) which hub this computer belongs to.
+      // forever. The token embeds the hub url, so decoding it also tells us (and `ls`)
+      // which hub this computer belongs to.
       const decoded = decodeJoinToken(opts.token)
       if (!decoded) {
         fail(

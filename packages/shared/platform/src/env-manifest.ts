@@ -64,8 +64,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // (name by what the value IS). `_SECRET` = a key you HOLD and sign with, vs
   // `_TOKEN` = a bearer you PRESENT (SLAYZONE_HUB_TOKEN above).
   SLAYZONE_HUB_AUTH_SECRET: 'secret',
-  // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url, the hub's
-  // TLS cert fingerprint, and a secret verified against the hub's `join_tokens`
+  // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url and a
+  // secret verified against the hub's `join_tokens`
   // row. `mintJoinToken` binds it to NO computer (computer_id stays NULL until
   // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).

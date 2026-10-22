@@ -227,7 +227,6 @@ async function main(): Promise<void> {
         for (const label of ['orphan-1', 'orphan-2', 'orphan-3']) {
           const t = await mintJoinToken(db, {
             hubUrl: `wss://${HOST}:59999/computers`,
-            certFingerprint: 'sha256:deadbeef',
             ttlMs: 60_000,
             label
           })
@@ -243,7 +242,6 @@ async function main(): Promise<void> {
         // A real remote computer (different name) — a sleeping laptop; must NOT be reaped.
         const remoteToken = await mintJoinToken(db, {
           hubUrl: `wss://${HOST}:59999/computers`,
-          certFingerprint: 'sha256:deadbeef',
           ttlMs: 60_000,
           label: 'sleeping-laptop'
         })

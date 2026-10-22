@@ -90,7 +90,7 @@ test('computers.mintJoinToken: returns a decodable szjt1 token embedding the hub
   expect(payload).not.toBeNull()
   expect(payload!.hubUrl).toBe('ws://127.0.0.1:8788/computers')
   // The hub presents no certificate of its own, so there is nothing to pin.
-  expect(payload!.certFingerprint).toBe('')
+  expect('certFingerprint' in payload!).toBe(false)
   expect(minted.expiresAt).toBeGreaterThan(minted.createdAt)
   // The dial target is returned ALONGSIDE the token so a client can tell whether
   // the token is usable off-box without decoding it — `decodeJoinToken` needs

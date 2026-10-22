@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getComputerConfigFilePath,
+  ignoredComputerConfigKeys,
   loadComputerConfigFile,
   saveComputerConfigFile,
   updateComputerConfigFile
@@ -105,7 +106,6 @@ test('valid config parses all known keys, drops wrong types', () => {
       computerName: 'r1',
       hubUrl: 'wss://hub/computers',
       allowedRoots: ['/srv/a', '/srv/b'],
-      pinnedCertSha256: 'a'.repeat(64),
       // wrong-typed / unknown → dropped
       joinToken2: 'nope',
       extra: { nested: 1 }
@@ -116,7 +116,6 @@ test('valid config parses all known keys, drops wrong types', () => {
   assertEq(cfg.computerName, 'r1', 'computerName')
   assertEq(cfg.hubUrl, 'wss://hub/computers', 'hubUrl')
   assertEq(JSON.stringify(cfg.allowedRoots), JSON.stringify(['/srv/a', '/srv/b']), 'allowedRoots')
-  assertEq(cfg.pinnedCertSha256, 'a'.repeat(64), 'pinnedCertSha256')
   assert(!('extra' in cfg), 'unknown key dropped')
   rmSync(dir, { recursive: true, force: true })
 })
@@ -129,16 +128,54 @@ test('wrong-typed values are dropped (empty joinToken/hubUrl, non-array allowedR
     JSON.stringify({
       joinToken: '',
       hubUrl: '',
-      allowedRoots: 'not-an-array',
-      pinnedCertSha256: 42
+      allowedRoots: 'not-an-array'
     })
   )
   const cfg = loadComputerConfigFile(p)
   assert(cfg.joinToken === undefined, 'empty joinToken dropped')
   assert(cfg.hubUrl === undefined, 'empty hubUrl dropped')
   assert(cfg.allowedRoots === undefined, 'non-array allowedRoots dropped')
-  assert(cfg.pinnedCertSha256 === undefined, 'non-string pinnedCertSha256 dropped')
   rmSync(dir, { recursive: true, force: true })
+})
+
+test('a certificate pin from an older release is ignored, and reported as such', () => {
+  // `pinnedCertSha256` pinned the certificate an older hub served itself. The rest of
+  // the file still loads; the key is never coerced, but ignoredComputerConfigKeys
+  // names it so the computer can say it ignores it.
+  const dir = tmp()
+  const p = join(dir, 'computer.config.json')
+  writeFileSync(
+    p,
+    JSON.stringify({
+      hubUrl: 'wss://hub/computers',
+      joinToken: 'jt-1',
+      pinnedCertSha256: 'a'.repeat(64)
+    })
+  )
+  const cfg = loadComputerConfigFile(p)
+  assertEq(cfg.hubUrl, 'wss://hub/computers', 'the rest of the file still loads')
+  assert(!('pinnedCertSha256' in cfg), 'the pin is never coerced')
+  assertEq(JSON.stringify(ignoredComputerConfigKeys(p)), '["pinnedCertSha256"]', 'pin reported')
+
+  // The next write drops it from disk (update re-coerces the current file).
+  updateComputerConfigFile({ computerName: 'r1' }, p)
+  assert(!readFileSync(p, 'utf8').includes('pinnedCertSha256'), 'gone after the next write')
+  assertEq(ignoredComputerConfigKeys(p).length, 0, 'nothing left to report')
+
+  // Read through the legacy config.json fallback too, same as loadComputerConfigFile.
+  const legacyDir = tmp()
+  writeFileSync(
+    join(legacyDir, 'config.json'),
+    JSON.stringify({ pinnedCertSha256: 'b'.repeat(64) })
+  )
+  assertEq(
+    JSON.stringify(ignoredComputerConfigKeys(join(legacyDir, 'computer.config.json'))),
+    '["pinnedCertSha256"]',
+    'legacy file pin reported'
+  )
+  const emptyDir = tmp()
+  assertEq(ignoredComputerConfigKeys(join(emptyDir, 'computer.config.json')).length, 0, 'no file')
+  for (const d of [dir, legacyDir, emptyDir]) rmSync(d, { recursive: true, force: true })
 })
 
 test('allowedRoots filters out non-string / empty entries, keeps a non-empty result', () => {
