@@ -12,6 +12,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       getState: () => {
         tabs: Array<{ type: string; taskId?: string }>
         activeTabIndex: number
+        setActiveTabIndex: (index: number) => void
       }
     }
   }
@@ -49,9 +50,28 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       .getByRole('button', { name: 'Undo' })
       .click()
 
-  /** ⌘⇧Z is ignored while focus sits in an input/editor/terminal — park it on body. */
+  /**
+   * ⌘⇧Z is ignored while focus sits in an input/editor/terminal, and a live
+   * terminal takes focus back whenever it blurs to <body> (Terminal's focus
+   * self-heal) — so with a restored scratch terminal on screen there's nowhere
+   * neutral to park focus. Redo from Home, as a user would: the task's terminal
+   * is hidden there and can't reclaim it.
+   */
   const redo = async (page: Page) => {
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.evaluate(() => {
+      const s = (window as TabStoreWindow).__slayzone_tabStore!.getState()
+      s.setActiveTabIndex(s.tabs.findIndex((t) => t.type === 'home'))
+    })
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            ;(document.activeElement as HTMLElement | null)?.blur()
+            return !!document.activeElement?.closest('.xterm')
+          }),
+        poll
+      )
+      .toBe(false)
     await page.keyboard.press('Meta+Shift+z')
   }
 
