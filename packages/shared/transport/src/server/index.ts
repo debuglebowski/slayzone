@@ -49,6 +49,7 @@ export {
 export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
 export {
   requestGithubSignInStart,
+  hubGithubSignInConvexUrl,
   parseAuthCallbackUrl,
   type GithubSignInStart
 } from './auth-github'

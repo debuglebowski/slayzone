@@ -24,19 +24,22 @@
  * nothing to cache. Defaults are on, so a process that never sets these (the desktop
  * app's hub, tests) behaves exactly as before.
  *
- * Lean leaf (hub-switches + security-log only), also the
+ * Lean leaf (hub-switches + hub-convex + security-log only), also the
  * `@slayzone/platform/hub-switch-refusal` subpath.
  *
  * @module platform/hub-switch-refusal
  */
-import { HUB_SWITCH_ENV, resolveHubSwitches } from './hub-switches'
+import { HUB_CONVEX_ADDRESS_ENV, HUB_SWITCH_ENV, resolveHubSwitches } from './hub-switches'
 import { securityEvent } from './security-log'
+import { convexOriginOf, hubConvexOrigin } from './hub-convex'
 
 export type HubSwitchedOffCode =
   | 'HUB_PROCESSES_DISABLED'
   | 'HUB_INTEGRATIONS_DISABLED'
   | 'NO_COMPUTER_CONNECTED'
   | 'HUB_PASSWORD_DISABLED'
+  | 'HUB_CONVEX_NOT_CONFIGURED'
+  | 'HUB_CONVEX_MISMATCH'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
@@ -46,14 +49,20 @@ const MESSAGES: Record<HubSwitchedOffCode, string> = {
   NO_COMPUTER_CONNECTED:
     'Connect a computer: this hub does not read project files or run git, gh or other ' +
     `commands itself (${HUB_SWITCH_ENV.enableProcesses}=0).`,
-  HUB_PASSWORD_DISABLED: `Password sign-in is switched off on this hub (${HUB_SWITCH_ENV.enablePassword}=0).`
+  HUB_PASSWORD_DISABLED: `Password sign-in is switched off on this hub (${HUB_SWITCH_ENV.enablePassword}=0).`,
+  HUB_CONVEX_NOT_CONFIGURED: `GitHub sign-in is off on this hub: no Convex deployment is configured (${HUB_CONVEX_ADDRESS_ENV}).`,
+  HUB_CONVEX_MISMATCH:
+    'This hub starts GitHub sign-in only against its own Convex deployment ' +
+    `(${HUB_CONVEX_ADDRESS_ENV}); the request named another.`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED: HUB_SWITCH_ENV.enableProcesses,
   HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations,
   NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses,
-  HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword
+  HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword,
+  HUB_CONVEX_NOT_CONFIGURED: HUB_CONVEX_ADDRESS_ENV,
+  HUB_CONVEX_MISMATCH: HUB_CONVEX_ADDRESS_ENV
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -171,4 +180,30 @@ export function assertHubPasswordEnabled(
   enabled: boolean = hubPasswordEnabled()
 ): void {
   if (!enabled) refuse(event, 'HUB_PASSWORD_DISABLED', refusal)
+}
+
+/**
+ * The Convex URL a GitHub sign-in start may POST to: this hub's OWN deployment
+ * ({@link HUB_CONVEX_ADDRESS_ENV}), never one a client names (T-99, `hub-convex.ts`).
+ *
+ * Returns that origin when `clientUrl` names the same one. Otherwise throws
+ * {@link HubSwitchedOffError} after one `integration.connect` audit line, before anything
+ * is sent: `HUB_CONVEX_NOT_CONFIGURED` when the hub has none, `HUB_CONVEX_MISMATCH` when
+ * the client named another (or nothing usable) — the requested origin goes in the line.
+ */
+export function assertHubConvexSignInUrl(
+  clientUrl: unknown,
+  refusal: HubRefusal,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const own = hubConvexOrigin(env)
+  if (own === null) refuse('integration.connect', 'HUB_CONVEX_NOT_CONFIGURED', refusal)
+  const requested = convexOriginOf(clientUrl)
+  if (requested !== own) {
+    refuse('integration.connect', 'HUB_CONVEX_MISMATCH', {
+      ...refusal,
+      detail: { ...refusal.detail, requestedOrigin: requested }
+    })
+  }
+  return own
 }

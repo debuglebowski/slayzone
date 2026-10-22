@@ -303,6 +303,11 @@ run_test packages/shared/platform/src/client-address.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/trusted-proxy.test.ts
 # Switch refusals: one audit line + one error shape per refusal.
 run_test packages/shared/platform/src/hub-switch-refusal.test.ts
+# The hub's own Convex deployment (T-99): address parsing, the desktop hand-over, and
+# the gate that refuses a client-named Convex host; then end to end over tRPC with
+# fetch stubbed — refused means nothing was sent.
+run_test packages/shared/platform/src/hub-convex.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/convex-sign-in.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).

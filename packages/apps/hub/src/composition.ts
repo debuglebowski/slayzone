@@ -32,6 +32,7 @@ import {
   setComputersDeps,
   setWorkspaceDeps,
   requestGithubSignInStart,
+  hubGithubSignInConvexUrl,
   evictAgentTree,
   type AppDeps,
   type NotifyEventMap,
@@ -970,7 +971,8 @@ export function composeServer(opts: {
             return { ok: false as const, error: `Unsupported redirect URI: ${input.redirectTo}` }
           }
           const start = await requestGithubSignInStart(
-            input.convexUrl,
+            // T-99 backstop: only this hub's own Convex, never a client-named host.
+            hubGithubSignInConvexUrl(input.convexUrl),
             input.redirectTo,
             'chromium-sidecar'
           )
