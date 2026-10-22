@@ -30,6 +30,7 @@ import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
 import { backfillOwnership } from './ownership-backfill.js'
+import { applyBreakGlassAtBoot } from './break-glass'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
@@ -112,6 +113,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     requireLogin: switches.requireLogin,
     publicAddress: boot.publicAddress,
     sso,
+    enablePassword: switches.enablePassword,
     diagnosticsDb
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
@@ -156,17 +158,39 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // enforces auth. Off → inert pass-through (byte-identical).
   setAuthGate(() => hubAuthRequired)
 
+  // The password switch's boot step (T-10, break-glass.ts): with Entra sign-in on and
+  // `ENABLE_PASSWORD=1` the hub keeps one temporary password account for the operator
+  // (O-9); with `ENABLE_PASSWORD=0` it closes any it kept. No-op on the desktop app's
+  // hub. A failure is logged, never fatal: password sign-in is refused regardless.
+  if (hubAuth) {
+    try {
+      await applyBreakGlassAtBoot({
+        auth: hubAuth,
+        db,
+        dataRoot,
+        enablePassword: switches.enablePassword,
+        ssoActive: boot.ssoActive,
+        log: (m) => log(m)
+      })
+    } catch (err) {
+      const message = `[slayzone] break-glass step failed: ${err instanceof Error ? err.message : String(err)}`
+      process.stderr.write(`${message}\n`)
+      log(message)
+    }
+  }
+
   // A hub that requires login must not come up unusable by the operator who just
   // started it. Creates the first user on first boot only, prints the credentials
-  // once, and leaves them in a 0600 file `slay` reads on this box. (A generated
-  // password is a password sign-in; skipping this when `ENABLE_PASSWORD=0` belongs
-  // to the work that enforces that switch.)
+  // once, and leaves them in a 0600 file `slay` reads on this box.
   //
-  // Not on a hub with Entra sign-in: its accounts come from Entra and admin only from
-  // the `SlayZone.Admin` app role (O-4), so an owner minted here would be exactly the
-  // admin that rule excludes. Users sign in through Entra; the first admin is whoever
-  // first signs in holding the app role.
-  if (hubAuthRequired && hubAuth && !boot.ssoActive) {
+  // Not with password sign-in off (T-10): a generated password nobody could use, in a
+  // file and in the log. Not on a hub with Entra sign-in either: its accounts come
+  // from Entra and admin only from the `SlayZone.Admin` app role (O-4), so an owner
+  // minted here would be exactly the admin that rule excludes. Users sign in through
+  // Entra; the first admin is whoever first signs in holding the app role. (A hub
+  // that requires login with password off has Entra on — B2 — so the first condition
+  // only restates the second there; it is the one that names the switch.)
+  if (hubAuthRequired && hubAuth && switches.enablePassword && !boot.ssoActive) {
     try {
       await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
     } catch (err) {
@@ -333,6 +357,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const gatedDispatch = withRestAuth({
     getHubAuthRequired: () => hubAuthRequired,
     getSsoActive: () => boot.ssoActive,
+    // Off: every password route answers 403 HUB_PASSWORD_DISABLED before the gate (T-10).
+    getPasswordEnabled: () => switches.enablePassword,
     getHubAuth: () => hubAuth,
     getDb: () => db,
     next: dispatchRequest
@@ -518,6 +544,30 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Phase 4, see port-claim.ts).
   await claimServerPort(db, host, actualPort, log)
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
+
+  // Audit (T-10): a hub that requires login records how it can be signed in to at each
+  // boot, so opening and closing break-glass (O-9: password on beside Entra) are both
+  // on the record. `warn` while it is open. Not on a hub with login off (the desktop
+  // app's), which has no sign-in.
+  if (hubAuthRequired) {
+    const breakGlass = boot.ssoActive && switches.enablePassword
+    securityEvent({
+      event: 'hub.boot',
+      outcome: 'success',
+      level: breakGlass ? 'warn' : 'info',
+      actor: null,
+      ip: null,
+      route: null,
+      targetKind: 'hub',
+      detail: {
+        methods: [
+          ...(switches.enablePassword ? ['password'] : []),
+          ...(boot.ssoActive ? ['sso'] : [])
+        ],
+        breakGlass
+      }
+    })
+  }
 
   // Boot canary: records THIS process's build identity so the running sidecar's
   // code is visible in the diagnostics DB (plans/sidecar-staleness.md). Also the

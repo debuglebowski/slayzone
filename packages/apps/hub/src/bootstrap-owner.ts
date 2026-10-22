@@ -15,6 +15,9 @@
  * Runs ONLY when the hub enforces auth and is not supervised, and only when no
  * non-service user exists — it never re-provisions, so a hub whose owner was
  * deliberately disabled does not silently regrow one. The owner is created `admin`.
+ * Never with password sign-in off (T-10: there would be a password nobody can use,
+ * written to a file and the log) or Entra sign-in on (O-4: an admin not from Entra) —
+ * `server.ts` skips it, and `createHubUser` refuses an account with a password anyway.
  *
  * @module hub/bootstrap-owner
  */
@@ -34,11 +37,14 @@ import {
 // module's docstring for why.
 export { ownerFilePath, readBootstrapOwner, type BootstrapOwnerFile }
 
-async function writeOwnerFile(dataRoot: string, file: BootstrapOwnerFile): Promise<void> {
-  const target = ownerFilePath(dataRoot)
+/**
+ * Write `value` as JSON to `target`, 0600, atomically (tmp + rename). For a file that
+ * holds a credential — this one, and the break-glass file (break-glass.ts).
+ */
+export async function writePrivateJsonFile(target: string, value: unknown): Promise<void> {
   await mkdir(dirname(target), { recursive: true })
   const tmp = `${target}.tmp-${process.pid}`
-  await writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 })
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
   try {
     await rename(tmp, target)
     // rename preserves the tmp file's mode, but be explicit — this file holds a
@@ -48,6 +54,10 @@ async function writeOwnerFile(dataRoot: string, file: BootstrapOwnerFile): Promi
     await rm(tmp, { force: true })
     throw err
   }
+}
+
+function writeOwnerFile(dataRoot: string, file: BootstrapOwnerFile): Promise<void> {
+  return writePrivateJsonFile(ownerFilePath(dataRoot), file)
 }
 
 /**

@@ -258,6 +258,8 @@ export function composeServer(opts: {
   publicAddress?: string
   /** Entra sign-in, when on (`assertSsoCredential` in boot-rules.ts). */
   sso?: HubSsoBootConfig<EntraClientCredential> | null
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
+  enablePassword?: boolean
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -1380,7 +1382,9 @@ export function composeServer(opts: {
       // checks. Empty on the desktop app's hub (its parent clears both variables).
       trustedOrigins: resolveAllowedWebOrigins(),
       secret: hubAuthSecret,
-      ...(sso ? { sso } : {})
+      ...(sso ? { sso } : {}),
+      // Off: no password sign-in or account with a password (hub-auth password.ts).
+      ...(opts.enablePassword === false ? { enablePassword: false } : {})
     })
     hubAuthRef = hubAuth
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
