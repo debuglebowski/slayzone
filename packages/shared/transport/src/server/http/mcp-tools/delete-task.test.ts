@@ -42,17 +42,6 @@ function seedTask(): string {
   return id
 }
 
-function seedAgentSession(taskId: string | null, status: 'pooled' | 'bound'): string {
-  const id = crypto.randomUUID()
-  h.db
-    .prepare(
-      `INSERT INTO agent_sessions (id, mode, cwd, task_id, origin, status, created_at)
-       VALUES (?, 'claude-code', '/tmp', ?, 'slay-spawned-fresh', ?, 0)`
-    )
-    .run(id, taskId, status)
-  return id
-}
-
 await describe('mcp delete_task', () => {
   test('register: tool registered', () => {
     expect(stub.has('delete_task')).toBe(true)
@@ -116,21 +105,13 @@ await describe('mcp delete_task', () => {
     expect(row.deleted_at).toBeNull()
   })
 
-  test('warm-pool fallback: no id arg, resolves via bound agent_sessions row', async () => {
-    const id = seedTask()
-    const sessionId = seedAgentSession(id, 'bound')
-    const res = (await stub.invoke('delete_task', { session_id: sessionId })) as {
-      content: { text: string }[]
-      isError?: boolean
-    }
-    expect(res.isError === true).toBe(false)
-    const row = h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
-      deleted_at: string | null
-    }
-    expect(row.deleted_at !== null).toBe(true)
+  test('takes the task id only — no session id argument, no mention of one', () => {
+    const tool = stub.get('delete_task')!
+    expect('session_id' in tool.schema).toBe(false)
+    expect(tool.description.includes('SESSION_ID')).toBe(false)
   })
 
-  test('no id and no session_id → isError', async () => {
+  test('no id → isError', async () => {
     const res = (await stub.invoke('delete_task', {})) as {
       content: { text: string }[]
       isError?: boolean

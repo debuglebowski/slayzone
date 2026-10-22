@@ -12,8 +12,8 @@
  *     an id prefix or project name only ever reaches B's own rows.
  *   - B cannot fetch A's artifact file — by id, by prefix, by a crafted id, through a
  *     version, or by having an export WRITTEN into A's artifact directory.
- *   - A hook event naming A's task or session, relayed by B's computer (or an unowned
- *     one), changes nothing — neither A's task nor B's — and is audited; A's own
+ *   - A hook event naming A's task (or only an old session id), relayed by B's computer
+ *     (or an unowned one), changes nothing — neither A's task nor B's — and is audited; A's own
  *     computer's event is processed and attributed to A. Same over `POST /api/agent-hook`.
  *   - REST refresh pings are attributed to their caller (T-17's stream filter).
  *   - The admin gets exactly what B gets of A's: nothing.
@@ -634,13 +634,14 @@ async function main(): Promise<void> {
     const turnMarked = (mark: string): boolean =>
       !!raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(`conv-${mark}`)
 
-    await test('hooks: B’s computer cannot change A’s task or session, nor B’s via A’s session; audited', async () => {
+    await test('hooks: B’s computer cannot change A’s task, and a session id attributes nothing; audited', async () => {
       const aPrompts = promptsFor(A.task)
       const bPrompts = promptsFor(B.task)
       const cases: [string, unknown][] = [
         ['A task', prompt(A, 'H1')],
-        ['A session', prompt(null, 'H2', { slaySessionId: A.session })],
-        ['B task with A session', prompt(B, 'H3', { slaySessionId: A.session })],
+        // An agent booted by an older build named itself by session id; that names no
+        // task any more, so it cannot be used to reach A's.
+        ['A session (older agent)', prompt(null, 'H2', { slaySessionId: A.session })],
         ['nothing to attribute', prompt(null, 'H4')]
       ]
       for (const [label, payload] of cases) {
@@ -662,7 +663,7 @@ async function main(): Promise<void> {
         promptsFor(A.task) === aPrompts && promptsFor(B.task) === bPrompts,
         'no prompt captured'
       )
-      for (const m of ['H1', 'H2', 'H3', 'H4']) assert(!turnMarked(m), `${m} marked a turn`)
+      for (const m of ['H1', 'H2', 'H4']) assert(!turnMarked(m), `${m} marked a turn`)
     })
 
     await test('hooks: an unowned computer reports for nobody', async () => {
@@ -676,12 +677,7 @@ async function main(): Promise<void> {
       transitions.length = 0
       const aPrompts = promptsFor(A.task)
       const before = lines.length
-      const r = await relayAgentHook(
-        'comp-a',
-        prompt(A, 'H6', { slaySessionId: A.session }),
-        deps,
-        bridge
-      )
+      const r = await relayAgentHook('comp-a', prompt(A, 'H6'), deps, bridge)
       await sleep(100)
       assert(r === 'ok', `A's own: ${r}`)
       assert(hookEvents.length === 1 && hookEvents[0]!.taskId === A.task, 'lifecycle event')

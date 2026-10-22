@@ -302,10 +302,10 @@ export function createPtyOps(db: SlayzoneDb) {
 
     const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
 
-    // Warm-process pool: if this project has a ready warm agent ON THE COMPUTER this
-    // spawn resolves to, and it matches (default mode, project-root cwd, fresh
-    // start, same flags), adopt it instead of cold-spawning. A miss is silent —
-    // createPty cold-spawns exactly as before.
+    // Warm-process pool: if a warm agent was reserved for THIS task at create (it
+    // booted with the task's id) and the spawn matches it (default mode,
+    // project-root cwd, fresh start, same flags, same computer), adopt it instead of
+    // cold-spawning. A miss is silent — createPty cold-spawns exactly as before.
     //
     // Claiming is gated on a RESOLVED computer, the inverse of the old rule. It used
     // to fire only when `computerId == null`, because the pool was hub-local — which
@@ -323,18 +323,16 @@ export function createPtyOps(db: SlayzoneDb) {
       computerId = await lookups.resolveComputerId(taskId)
       projectId = await lookups.getTaskProjectId(taskId)
       if (computerId != null) {
-        if (projectId) {
-          warmClaim = claimWarmShell({
-            projectId,
-            mode: modeId,
-            cwd: opts.cwd,
-            resuming: !!opts.existingConversationId,
-            computerId,
-            // The warm agent baked the mode's default flags; only adopt it when
-            // this spawn's flags match (else cold-spawn with the right flags).
-            flags: opts.providerFlags ?? null
-          })
-        }
+        warmClaim = claimWarmShell({
+          taskId,
+          mode: modeId,
+          cwd: opts.cwd,
+          resuming: !!opts.existingConversationId,
+          computerId,
+          // The warm agent baked the mode's default flags; only adopt it when
+          // this spawn's flags match (else cold-spawn with the right flags).
+          flags: opts.providerFlags ?? null
+        })
       }
     }
 

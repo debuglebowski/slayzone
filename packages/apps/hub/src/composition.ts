@@ -93,6 +93,7 @@ import {
   broadcastRespawnRequest,
   initWarmProcessManager,
   reapOrphanWarms,
+  reserveWarmTaskId,
   onGlobalStateChange,
   hasSessionUserInput,
   configureTransport,
@@ -440,7 +441,9 @@ export function composeServer(opts: {
   // callers (integrations sync/pull) must tear them down here — the Electron
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
-  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
+  // The warm pool runs here (initWarmProcessManager below), so this is the one host
+  // where a task created to be opened at once can take a warm agent's id.
+  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer, reserveWarmTaskId })
 
   // Conversation self-heal + authoritative resolver. `createPty` runs in THIS
   // process post-slice-9, so the healer/resolver seams it calls must be wired

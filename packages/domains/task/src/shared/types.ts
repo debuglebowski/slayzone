@@ -888,6 +888,13 @@ export interface CreateTaskInput {
   externalId?: string | null
   /** The system `externalId` belongs to. Only meaningful alongside one. */
   externalProvider?: string | null
+  /**
+   * The caller opens the task as soon as it is created (scratch terminal, "Create and
+   * open"). Lets the create hand the project's warm agent to it: the task then gets
+   * the id that agent booted with. Renderer-only — deliberately not in
+   * `CreateTaskInputSchema`, since no REST or MCP caller opens what it creates.
+   */
+  openAfterCreate?: boolean
 }
 
 export interface UpdateTaskInput {

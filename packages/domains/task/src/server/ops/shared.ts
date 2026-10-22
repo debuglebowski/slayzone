@@ -566,7 +566,10 @@ function parseBooleanSetting(value: string | null | undefined): boolean {
   return value === '1' || value.toLowerCase() === 'true'
 }
 
-async function isAutoCreateWorktreeEnabled(db: SlayzoneDb, projectId: string): Promise<boolean> {
+export async function isAutoCreateWorktreeEnabled(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<boolean> {
   const projectRow = await db.get<{ auto_create_worktree_on_task_create: number | null }>(
     'SELECT auto_create_worktree_on_task_create FROM projects WHERE id = ?',
     [projectId]
@@ -1415,4 +1418,15 @@ export interface OpDeps {
    *  router injects ops with `{}` deps). Emit sites guard with `?.`. */
   ipcMain?: { emit(channel: string, ...args: unknown[]): boolean }
   onMutation?: () => void
+  /**
+   * The warm pool's `reserveWarmTaskId` (terminal domain). Injected rather than
+   * imported because terminal depends on task, never the reverse. Wired only where
+   * the pool runs (the hub) for the renderer's create; absent everywhere else, which
+   * simply means no task takes a warm agent's id.
+   */
+  reserveWarmTaskId?: (criteria: {
+    projectId: string
+    mode: string
+    flags: string | null
+  }) => Promise<string | null>
 }

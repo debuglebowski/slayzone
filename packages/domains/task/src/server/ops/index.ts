@@ -82,6 +82,5 @@ export {
   markSessionDead,
   markSessionFirstTurn,
   listResumeCandidates,
-  bindSessionToTask,
-  getBoundTaskId
+  bindSessionToTask
 } from './agent-sessions.js'

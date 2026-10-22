@@ -8,7 +8,8 @@
  * why it had no e2e coverage at all and the violation went unnoticed.
  *
  * These tests assert the invariant end-to-end: with pre-warm ON, the warm agent is
- * spawned through the computer, and adopting it produces a working terminal.
+ * spawned through the computer, and a task created to be opened takes the id the
+ * agent booted with, so its first spawn adopts it.
  */
 // `node:sqlite`, not better-sqlite3: the latter's native binding is compiled for
 // Electron's ABI and will not load in the Playwright computer's plain node.
@@ -69,11 +70,11 @@ test.describe('Warm pool (computer-hosted)', () => {
     // diagnostic — diagnostics are batched before flush, so that table lags and
     // asserting on it reads as "the pool never ran" when it merely has not flushed.
     //
-    // Reaching this state requires `backend.warmSpawn` to have RESOLVED, which only
-    // the routing backend implements: the local backend has no warm pool, so a
-    // pooled row cannot exist unless a computer accepted the spawn. That the computerId
-    // is threaded correctly, and that nothing warms when no computer resolves, are
-    // asserted directly in warm-process-manager.test.ts.
+    // Reaching this state requires the routing backend: the local backend has no
+    // warm pool, and the pool writes no row without a computer to boot the agent on
+    // (a spawn the computer then refuses marks the row dead, not pooled). That the
+    // computerId is threaded correctly, and that nothing warms when no computer
+    // resolves, are asserted directly in warm-process-manager.test.ts.
     await expect
       .poll(
         async () => {
@@ -87,6 +88,111 @@ test.describe('Warm pool (computer-hosted)', () => {
         { timeout: 30_000, intervals: [500, 1_000] }
       )
       .toBe(true)
+  })
+
+  test('a task created to be opened takes the warm agent’s task id, and its first spawn adopts it', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const project = (await seed(mainWindow).createProject({
+      name: 'WarmAdopt',
+      color: '#a855f7',
+      path: TEST_PROJECT_PATH
+    })) as { id: string; path: string }
+    const projectId = project.id
+    await mainWindow.evaluate(() =>
+      window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'terminal_prewarm_enabled', value: '1' })
+    )
+    const pooledIds = async (): Promise<string[]> =>
+      (
+        await querySidecarDb<{ id: string }>(
+          electronApp,
+          `SELECT id FROM agent_sessions WHERE status = 'pooled'`
+        )
+      ).map((r) => r.id)
+    // The gate is a synthetic "this project has an open tab" report. The renderer
+    // re-reports its REAL tabs whenever they change (the create below does), which
+    // drops this project again — so, as in the first test, every poll re-reports.
+    const reportTabOpen = (): Promise<unknown> =>
+      mainWindow.evaluate(
+        (pid) =>
+          window
+            .getTrpcVanillaClient()
+            .pty.warmSetProjectTabCounts.mutate({ counts: { [pid]: 1 } }),
+        projectId
+      )
+    // Other projects' warm agents (an earlier test's) are already pooled; this
+    // project's is the one that appears after its tab is reported open.
+    const before = new Set(await pooledIds())
+    let warmSessionId: string | undefined
+    await expect
+      .poll(
+        async () => {
+          await reportTabOpen()
+          warmSessionId = (await pooledIds()).find((id) => !before.has(id))
+          return !!warmSessionId
+        },
+        { timeout: 15_000, intervals: [500, 1_000] }
+      )
+      .toBe(true)
+
+    // What the scratch-terminal button does: create a temp task it opens at once.
+    const task = (await mainWindow.evaluate(
+      (pid) =>
+        window.getTrpcVanillaClient().task.create.mutate({
+          projectId: pid,
+          title: 'Terminal 1',
+          isTemporary: true,
+          openAfterCreate: true
+        }),
+      projectId
+    )) as { id: string; provider_config: Record<string, { flags?: string }> }
+
+    // Its terminal's first spawn: fresh, project root, the task's own flags.
+    const sessionId = `${task.id}:${task.id}`
+    await mainWindow.evaluate(
+      ({ sId, dir, flags }) =>
+        window.getTrpcVanillaClient().pty.create.mutate({
+          sessionId: sId,
+          cwd: dir,
+          mode: 'claude-code',
+          providerFlags: flags
+        }),
+      { sId: sessionId, dir: project.path, flags: task.provider_config['claude-code']?.flags ?? '' }
+    )
+
+    // The warm agent's own ledger row is now this task's: it booted with this task's
+    // id, so nothing else could have claimed it.
+    await expect
+      .poll(
+        async () =>
+          (
+            await querySidecarDb<{ status: string; task_id: string | null }>(
+              electronApp,
+              `SELECT status, task_id FROM agent_sessions WHERE id = '${warmSessionId}'`
+            )
+          )[0],
+        { timeout: 10_000, intervals: [250, 500] }
+      )
+      .toEqual({ status: 'bound', task_id: task.id })
+
+    // And the project got a fresh warm agent for the next task.
+    await expect
+      .poll(
+        async () => {
+          await reportTabOpen()
+          return (await pooledIds()).some((id) => !before.has(id) && id !== warmSessionId)
+        },
+        { timeout: 10_000, intervals: [500, 1_000] }
+      )
+      .toBe(true)
+
+    await mainWindow.evaluate(
+      (id) => window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: id }),
+      sessionId
+    )
   })
 
   test('pre-warm off spawns nothing', async ({ mainWindow, electronApp }) => {

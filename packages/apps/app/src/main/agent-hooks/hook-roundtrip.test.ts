@@ -36,7 +36,8 @@ vi.mock('@slayzone/terminal/server', async () => {
     createAgentTree: agentTree.createAgentTree,
     resolveState: agentTree.resolveState,
     subagentIdOf: agentTree.subagentIdOf,
-    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS
+    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS,
+    unadoptedWarmAgent: () => null
   }
 })
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
@@ -46,7 +47,6 @@ vi.mock('@slayzone/task/server', () => ({
   findOwnedSpawnForConversation: vi.fn(async () => null),
   getCurrentConversationId: vi.fn(async () => null),
   confirmSessionConversation: vi.fn(),
-  getBoundTaskId: vi.fn(async () => null),
   markSessionFirstTurn: vi.fn(async () => {}),
   artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
 }))

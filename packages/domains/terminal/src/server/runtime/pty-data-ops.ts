@@ -63,8 +63,7 @@ export function createDbPtySessionLedger(db: SlayzoneDb): PtySessionLedger {
     recordPendingSpawn: (args) => recordPendingSpawnDb(db, args),
     prunePendingSpawns: (scope) => prunePendingSpawnsDb(db, scope),
     bindSessionToTask: (args) => bindSessionToTaskDb(db, args),
-    buildMcpEnv: (taskId, mode, remote) =>
-      buildMcpEnvDb(db, taskId, mode, undefined, undefined, remote)
+    buildMcpEnv: (taskId, mode, remote) => buildMcpEnvDb(db, taskId, mode, undefined, remote)
   }
 }
 

@@ -1549,7 +1549,7 @@ export async function createPty(
       ? {}
       : ledger
         ? await ledger.buildMcpEnv(taskId, terminalMode, remoteMcpEnv)
-        : await buildMcpEnv(null, taskId, terminalMode, undefined, undefined, remoteMcpEnv)
+        : await buildMcpEnv(null, taskId, terminalMode, undefined, remoteMcpEnv)
 
     // Adoption: the warm shell was spawned without the task-scoped MCP env
     // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export

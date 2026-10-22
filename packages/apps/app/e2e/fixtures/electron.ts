@@ -662,7 +662,7 @@ export function notifyScriptEnv(opts: {
   port: number
   agentId: string
   taskId?: string
-  /** Extra ctx-blob fields (e.g. `slaySessionId`) for pool/warm-adoption paths. */
+  /** Extra ctx-blob fields (e.g. `projectId`). */
   ctx?: Record<string, unknown>
 }): Record<string, string> {
   const scrubbed: Record<string, string> = {}

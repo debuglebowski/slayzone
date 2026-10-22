@@ -99,8 +99,9 @@ export {
 export {
   initWarmProcessManager,
   reapOrphanWarms,
+  reserveWarmTaskId,
   teardownAllWarm,
-  warmSessionPlacement
+  unadoptedWarmAgent
 } from './runtime/warm-process-manager'
 export {
   ptyEvents,

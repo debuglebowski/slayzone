@@ -80,8 +80,7 @@ async function main(): Promise<void> {
         `/api/tasks/${A.task}`,
         `/api/tasks/${A.task.slice(0, 6)}/progress`,
         `/api/artifacts/${A.artifact}`,
-        `/api/tags?project=${A.project}`,
-        `/api/session/${A.session}/task`
+        `/api/tags?project=${A.project}`
       ]) {
         const r = await json(path)
         assert(r.status === 200, `${path}: ${r.status} ${r.text}`)

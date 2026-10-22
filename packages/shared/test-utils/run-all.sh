@@ -523,8 +523,6 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/arti
 # run host-side; asserts the CLI's exact result shape + flag semantics.
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
-# Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
-run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
@@ -599,6 +597,7 @@ run_test packages/domains/task-terminals/src/client/chat/autocomplete/ranking.te
 run_test packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_test packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/create-project-guard.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_test packages/domains/task/src/shared/handoff.test.ts
 run_test packages/domains/task/src/shared/panel-config.test.ts
 run_test packages/domains/task/src/shared/reparent-validation.test.ts

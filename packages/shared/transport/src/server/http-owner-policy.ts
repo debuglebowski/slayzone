@@ -307,7 +307,6 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/:id/write': checked(session('params.id')),
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
-  'GET /api/session/:sessionId/task': checked(session('params.sessionId')),
 
   // ── terminal tabs ──
   'POST /api/tabs/create': checked(task('body.taskId')),
@@ -408,14 +407,13 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
 
 // ── MCP ───────────────────────────────────────────────────────────────────────
 
-/** `session_id` is `$SLAYZONE_SESSION_ID`: the agent-session row, which names its task. */
 export const MCP_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   archive_many_task: checked(task('ids[]')),
-  archive_task: checked(task('id'), session('session_id')),
-  create_subtask: checked(task('parent_task_id'), session('session_id')),
+  archive_task: checked(task('id')),
+  create_subtask: checked(task('parent_task_id')),
   create_task: checked(projectExact('projectId'), task('parentId'), template('templateId')),
-  delete_task: checked(task('id'), session('session_id')),
-  get_current_task_id: checked(task('task_id'), session('session_id')),
-  unarchive_task: checked(task('id'), session('session_id')),
-  update_task: checked(task('task_id'), session('session_id'), task('parent_id'))
+  delete_task: checked(task('id')),
+  get_current_task_id: checked(task('task_id')),
+  unarchive_task: checked(task('id')),
+  update_task: checked(task('task_id'), task('parent_id'))
 }

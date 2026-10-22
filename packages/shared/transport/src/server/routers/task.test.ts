@@ -206,6 +206,28 @@ test('create: falls back to inbox when project columns config is invalid', async
 // ===========================================================================
 // db:tasks:get
 // ===========================================================================
+test('create: openAfterCreate takes the id of the warm agent the host wired in', async () => {
+  // The hub wires the warm pool's reserve via setTaskDeps; the router must hand it to
+  // the create op, or no task ever adopts a warm agent.
+  const reservedId = crypto.randomUUID()
+  const asked: Array<{ projectId: string; mode: string }> = []
+  setTaskDeps({
+    ops: taskOps,
+    reserveWarmTaskId: async (c) => {
+      asked.push(c)
+      return reservedId
+    }
+  })
+  try {
+    const t = await createTask('Terminal 1', { isTemporary: true, openAfterCreate: true })
+    expect(t.id).toBe(reservedId)
+    expect(asked.length).toBe(1)
+    expect(asked[0].projectId).toBe(projectId)
+  } finally {
+    setTaskDeps({ ops: taskOps })
+  }
+})
+
 test('get: returns task by id', async () => {
   const created = await createTask('GetMe')
   const t = await caller.get({ id: created.id })

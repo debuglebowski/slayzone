@@ -1,5 +1,3 @@
-import { apiGet } from '../../api'
-
 // Re-exported for existing call sites; implementation lives in a decoupled,
 // unit-testable module (no CLI DB/api graph).
 export { cliAuthor } from './cli-author'
@@ -40,23 +38,13 @@ export function mergeTemplateProviderConfig(
 }
 
 /**
- * Resolve the target task id. Order: explicit arg → `$SLAYZONE_TASK_ID` (the
- * fast path for a normally-spawned agent) → live session→task lookup for a
- * pre-warmed pooled agent (plans/agent-sessions.md slice 4/B): such an agent has
- * no `SLAYZONE_TASK_ID` but an immutable `SLAYZONE_SESSION_ID`, and its bound
- * task is resolved from `agent_sessions.task_id` via the local API. Async
- * because the pooled fallback hits the app.
+ * Resolve the target task id: the explicit arg, else `$SLAYZONE_TASK_ID`. Every
+ * agent has the latter — a pre-warmed one too, which boots with the id its task is
+ * created under. Async only so callers keep one shape.
  */
 export async function resolveId(explicit?: string): Promise<string> {
   const id = explicit ?? process.env.SLAYZONE_TASK_ID
   if (id) return id
-  const sessionId = process.env.SLAYZONE_SESSION_ID
-  if (sessionId) {
-    const { taskId } = await apiGet<{ taskId: string | null }>(
-      `/api/session/${encodeURIComponent(sessionId)}/task`
-    )
-    if (taskId) return taskId
-  }
   console.error('No task ID provided and $SLAYZONE_TASK_ID is not set.')
   process.exit(1)
 }

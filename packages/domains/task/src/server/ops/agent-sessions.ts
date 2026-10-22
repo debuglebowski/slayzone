@@ -557,10 +557,8 @@ export async function recordSessionSpawn(
  * mark means "has content", not "was last active", so a later turn must never
  * move it (that would make it a mtime, and every reader would start racing it).
  *
- * Keyed by `conversation_id` rather than the runtime session id, because that is
- * the only identifier a provider hook carries for BOTH a task-spawned agent and a
- * warm-pool one (whose env was fixed before any task existed — see
- * `getBoundTaskId`). Returns true if this call was the one that marked it.
+ * Keyed by `conversation_id`: it marks the conversation itself, whichever task
+ * holds it. Returns true if this call was the one that marked it.
  */
 export async function markSessionFirstTurn(
   db: SlayzoneDb,
@@ -671,19 +669,4 @@ export async function bindSessionToTask(
     agentSessionsEvents.emit('agent-sessions:changed', { taskId: args.taskId })
   }
   return res.changes > 0
-}
-
-/**
- * Resolve the task a (pool) session id is bound to, if any. A warm-pool agent's
- * env vars are fixed at process spawn (no `SLAYZONE_TASK_ID` — the task didn't
- * exist yet), so its hook payloads carry only `slaySessionId` forever; this is
- * how the hook route recovers the task id `bindSessionToTask` recorded here.
- * `bound_at IS NOT NULL` is the set-once bind marker (never reverts).
- */
-export async function getBoundTaskId(db: SlayzoneDb, sessionId: string): Promise<string | null> {
-  const row = await db.get<{ task_id: string | null }>(
-    `SELECT task_id FROM agent_sessions WHERE id = ? AND bound_at IS NOT NULL`,
-    [sessionId]
-  )
-  return row?.task_id ?? null
 }

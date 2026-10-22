@@ -177,7 +177,9 @@ export function CreateTaskDialog({
       status: opts?.statusOverride ?? data.status,
       priority: data.priority,
       dueDate: data.dueDate ?? undefined,
-      templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId
+      templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId,
+      // "Create and open" — lets the hub hand it the project's warm agent.
+      openAfterCreate: !!(opts?.andOpen && onCreatedAndOpen)
     })
     // Record the new row's hub before anything can open it. Its owning hub's
     // board reload has not landed yet, so without this the tab would resolve to

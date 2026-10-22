@@ -71,7 +71,6 @@ import { registerBrowserNewTabRoute } from './browser/new-tab'
 import { registerTabsCreateRoute } from './tabs/create'
 import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
-import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
 import { registerComputersJoinTokenRoute } from './computers/join-token'
 import { registerComputersListRoute } from './computers/list'
 import { registerHubUsersRoutes } from './hub/users'
@@ -178,9 +177,6 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerTabsCreateRoute(app, deps)
   registerTabsSplitRoute(app, deps)
   registerTabsRenameRoute(app, deps)
-
-  // Agent sessions (pool: session → bound task resolution for the slay CLI)
-  registerResolveSessionTaskRoute(app, deps)
 
   // Computers (hub/computer split): loopback join-token mint for the MAIN process's
   // boot-time local-computer auto-enroll. 503 only if the computer init failed.

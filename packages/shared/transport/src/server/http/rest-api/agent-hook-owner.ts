@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
-import { warmSessionPlacement } from '@slayzone/terminal/server'
+import { unadoptedWarmAgent } from '@slayzone/terminal/server'
 import { createAccessScope, type AccessScope, type OwnedResource } from '../../access'
 import { httpAccessRequest } from '../owner-scope'
 
@@ -17,12 +17,13 @@ import { httpAccessRequest } from '../owner-scope'
  * relaying computer, or the REST route).
  *
  * What an event touches, and so what is checked:
- *   - its task (the envelope's `taskId`, or the task its slay session is bound to):
- *     lifecycle event, prompt capture, conversation id, the pty state machine;
- *   - its slay session (`slaySessionId`): a bound one is its task's; a POOLED one
- *     (warm, no task yet) belongs to the project it was warmed for, on the computer
- *     holding it (`warmSessionPlacement`) — the relaying computer must be that one;
- *   - neither: nothing to attribute it to → dropped.
+ *   - its task (the envelope's `taskId`): lifecycle event, prompt capture, conversation
+ *     id, the pty state machine;
+ *   - unless that id is a warm agent's the pool still holds (`unadoptedWarmAgent`): the
+ *     agent booted with the id of a task created later, if ever, so the task may not
+ *     exist. Such an agent belongs to the project it was warmed for, on the computer
+ *     holding it — the relaying computer must be that one;
+ *   - no task id: nothing to attribute it to → dropped.
  * An unowned computer reports for nobody. A hub without login checks nothing (the
  * desktop app's hub — byte-identical to before).
  *
@@ -42,7 +43,6 @@ export interface HookReporter {
 /** What a resolved hook names. */
 export interface HookTargets {
   readonly taskId?: string
-  readonly slaySessionId?: string
 }
 
 /** Decisions are reused for a few seconds per reporter: hooks fire many times a turn. */
@@ -72,25 +72,19 @@ async function decide(
   targets: HookTargets
 ): Promise<Verdict> {
   if (!reporter?.userId) return { ok: false, reason: 'no_reporter' }
-  if (!targets.taskId && !targets.slaySessionId) return { ok: false, reason: 'ownerless' }
+  if (!targets.taskId) return { ok: false, reason: 'ownerless' }
   const scope = scopeFor(db, reporter.userId)
-  if (targets.taskId) {
-    const r: OwnedResource = { kind: 'task', id: targets.taskId }
-    if (!(await scope.allows(r))) return { ok: false, reason: 'not_owner', resource: r }
-  }
-  if (targets.slaySessionId) {
-    const r: OwnedResource = { kind: 'session', id: targets.slaySessionId }
-    const pooled = warmSessionPlacement(targets.slaySessionId)
-    if (pooled) {
-      if (reporter.computerId !== null && pooled.computerId !== reporter.computerId) {
-        return { ok: false, reason: 'not_this_computer', resource: r }
-      }
-      const p: OwnedResource = { kind: 'project', id: pooled.projectId }
-      if (!(await scope.allows(p))) return { ok: false, reason: 'not_owner', resource: r }
-    } else if (!(await scope.allows(r))) {
-      return { ok: false, reason: 'not_owner', resource: r }
+  const r: OwnedResource = { kind: 'task', id: targets.taskId }
+  const warm = unadoptedWarmAgent(targets.taskId)
+  if (warm) {
+    if (reporter.computerId !== null && warm.computerId !== reporter.computerId) {
+      return { ok: false, reason: 'not_this_computer', resource: r }
     }
+    const p: OwnedResource = { kind: 'project', id: warm.projectId }
+    if (!(await scope.allows(p))) return { ok: false, reason: 'not_owner', resource: r }
+    return { ok: true }
   }
+  if (!(await scope.allows(r))) return { ok: false, reason: 'not_owner', resource: r }
   return { ok: true }
 }
 

@@ -8,11 +8,12 @@ import {
   isHonoredConversation,
   deleteSession,
   InvalidTaskUpdateError,
+  type OpDeps,
   type TaskEventMap
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
-import { getTaskOps, getTaskOnMutation } from '../app-deps'
+import { getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are
@@ -29,8 +30,13 @@ const ops = (): ReturnType<typeof getTaskOps> => getTaskOps()
 // guard `ipcMain?.emit(...)`), but the host injects `onMutation` (notifyTasksChanged)
 // via `setTaskDeps`, so every tRPC mutation fires the same `notify.onTasksChanged`
 // renderer-refresh signal the legacy IPC handlers emit. A given renderer call uses
-// one transport (tRPC OR IPC), so this fires exactly once per mutation.
-const deps = (): { onMutation?: () => void } => ({ onMutation: getTaskOnMutation() })
+// one transport (tRPC OR IPC), so this fires exactly once per mutation. The warm
+// pool's reserve rides along for `create` (the renderer is the only caller that
+// opens what it creates).
+const deps = (): Pick<OpDeps, 'onMutation' | 'reserveWarmTaskId'> => ({
+  onMutation: getTaskOnMutation(),
+  reserveWarmTaskId: getTaskReserveWarmTaskId()
+})
 
 // An update that breaks a task invariant (unknown status, bad priority) is the
 // caller's fault — surface it as BAD_REQUEST, not INTERNAL_SERVER_ERROR.

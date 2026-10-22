@@ -29,12 +29,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import {
-  getBoundTaskId,
-  getCurrentConversationId,
-  getTaskOp,
-  listTaskSessions
-} from '@slayzone/task/server'
+import { getCurrentConversationId, getTaskOp, listTaskSessions } from '@slayzone/task/server'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { runMigrations } from '../../../shared/transport/src/db-bootstrap/migrations.js'
 import {
@@ -368,12 +363,11 @@ await test('a live session keeps working: its task, its resume target, its chat 
   const nextBefore = await getNextSeqForTab(db, 'tab1')
   await sweepSessionContent(db, { days: 90, now })
 
-  // The agent's hook resolves its task through its ledger row — started 150 days ago,
-  // never ended — which the sweep does not touch.
-  assertEq(await getBoundTaskId(db, 's-live'), 't1', 'the live agent still resolves its task')
+  // The live agent's ledger row — started 150 days ago, never ended, bound to its
+  // task — is the task's resume binding, and the sweep does not touch it.
   assertEq(
-    raw.prepare('SELECT status, ended_at FROM agent_sessions WHERE id = ?').get('s-live'),
-    { status: 'bound', ended_at: null },
+    raw.prepare('SELECT status, ended_at, task_id FROM agent_sessions WHERE id = ?').get('s-live'),
+    { status: 'bound', ended_at: null, task_id: 't1' },
     'the live session row is as it was'
   )
   assertEq(await getNextSeqForTab(db, 'tab1'), nextBefore, 'next chat seq is unchanged')

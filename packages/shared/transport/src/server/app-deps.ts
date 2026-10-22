@@ -24,7 +24,7 @@ import type {
 import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { IntegrationOps } from '@slayzone/integrations/server'
-import type { TaskOps } from '@slayzone/task/server'
+import type { OpDeps, TaskOps } from '@slayzone/task/server'
 import type {
   BackupInfo,
   BackupSettings,
@@ -144,10 +144,20 @@ let taskOps: TaskOps | null = null
 // refresh signal the legacy IPC handlers fire. Threaded into the task router's
 // OpDeps so tRPC mutations broadcast `notify.onTasksChanged` like the IPC path.
 let taskOnMutation: (() => void) | undefined
+// The warm pool's `reserveWarmTaskId`, wired only where the pool runs (the hub). The
+// task router hands it to `createTaskOp` so a task created to be opened at once can
+// take a warm agent's id. Unset (the Electron host): no task ever does.
+type ReserveWarmTaskId = NonNullable<OpDeps['reserveWarmTaskId']>
+let taskReserveWarmTaskId: ReserveWarmTaskId | undefined
 
-export function setTaskDeps(deps: { ops: TaskOps; onMutation?: () => void }): void {
+export function setTaskDeps(deps: {
+  ops: TaskOps
+  onMutation?: () => void
+  reserveWarmTaskId?: ReserveWarmTaskId
+}): void {
   taskOps = deps.ops
   taskOnMutation = deps.onMutation
+  taskReserveWarmTaskId = deps.reserveWarmTaskId
 }
 
 export function getTaskOps(): TaskOps {
@@ -157,6 +167,10 @@ export function getTaskOps(): TaskOps {
 
 export function getTaskOnMutation(): (() => void) | undefined {
   return taskOnMutation
+}
+
+export function getTaskReserveWarmTaskId(): ReserveWarmTaskId | undefined {
+  return taskReserveWarmTaskId
 }
 
 // Notify event bus — the cross-domain `tasks-changed` / `settings-changed`

@@ -8,18 +8,18 @@ import {
 // processAgentHook reaches into the task + diagnostics domains (DB writes). Mock
 // those exactly as the transport's own agent-hook.test.ts does, so this unit
 // stays hermetic and asserts the CONSUMER wiring, not the domains.
+// A warm agent the pool still holds (booted with `taskId`, not adopted yet).
+const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
 vi.mock('@slayzone/terminal/server', () => ({
-  isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode)
+  isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
+  unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
 }))
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
-const getBoundTaskIdSpy = vi.fn<(db: unknown, sid: string) => Promise<string | null>>(
-  async () => null
-)
+const confirmSessionConversationSpy = vi.fn()
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: vi.fn(),
   findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
-  confirmSessionConversation: vi.fn(),
-  getBoundTaskId: (_db: unknown, sid: string) => getBoundTaskIdSpy(_db, sid)
+  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args)
 }))
 
 /** A fake gateway that lets the test emit `event` notifications synchronously. */
@@ -81,7 +81,8 @@ describe('attachAgentHookRelayConsumer', () => {
     transitionSpy.mockReset()
     markActiveSpy.mockReset()
     lifecycleSpy.mockReset()
-    getBoundTaskIdSpy.mockClear()
+    unadoptedWarmAgentSpy.mockReset().mockReturnValue(null)
+    confirmSessionConversationSpy.mockReset()
   })
 
   test('an `agent-hook` event drives the SAME processAgentHook path (bridge transition)', async () => {
@@ -132,9 +133,10 @@ describe('attachAgentHookRelayConsumer', () => {
     expect(lifecycleSpy).not.toHaveBeenCalled()
   })
 
-  test('relayed pooled hook (slaySessionId, no taskId) resolves task via getBoundTaskId', async () => {
-    getBoundTaskIdSpy.mockResolvedValue('bound-task' as never)
-    findSessionSpy.mockReturnValue('bound-task:bound-task')
+  test("a relayed warm agent's SessionStart confirms its conversation on the pooled session", async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) =>
+      taskId === 'reserved-1' ? { sessionId: 'pool-1' } : null
+    )
     const { gateway, emit } = makeFakeGateway()
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
 
@@ -142,17 +144,18 @@ describe('attachAgentHookRelayConsumer', () => {
       computerId: 'computer-a',
       name: 'agent-hook',
       payload: {
-        ctx: { v: 1, slaySessionId: 'pool-1', agentId: 'claude-code' },
-        raw: { hook_event_name: 'UserPromptSubmit' }
+        ctx: { v: 1, taskId: 'reserved-1', agentId: 'claude-code' },
+        raw: { hook_event_name: 'SessionStart', session_id: '55555555-5555-4555-8555-555555555555' }
       }
     })
     await flush()
 
-    expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-1')
-    expect(transitionSpy).toHaveBeenCalledWith(
-      'bound-task:bound-task',
-      'running',
-      'UserPromptSubmit'
-    )
+    expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
+      sessionId: 'pool-1',
+      observedConversationId: '55555555-5555-4555-8555-555555555555'
+    })
+    // Not adopted yet: no terminal holds it, so nothing task-scoped runs.
+    expect(findSessionSpy).not.toHaveBeenCalled()
+    expect(lifecycleSpy).not.toHaveBeenCalled()
   })
 })

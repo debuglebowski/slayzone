@@ -159,7 +159,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // --- identity: per-task/agent; overlay re-adds the correct value per spawn ---
   SLAYZONE_TASK_ID: 'identity',
   SLAYZONE_PROJECT_ID: 'identity',
-  SLAYZONE_SESSION_ID: 'identity',
+  // `SLAYZONE_SESSION_ID` (a warm agent's pre-task identity) is RETIRED and
+  // deliberately unlisted: warm agents boot with SLAYZONE_TASK_ID now.
   SLAYZONE_AGENT_ID: 'identity',
   SLAYZONE_AGENT_HOOK_URL: 'identity',
   // Pairs with _HOOK_URL (where to post / who is posting). The pre-v4 name

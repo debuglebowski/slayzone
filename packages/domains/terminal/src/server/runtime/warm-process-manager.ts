@@ -23,11 +23,20 @@ import { parseShellArgs } from '../adapters/flag-parser'
  * **The agent is pre-BOOTED, not merely a warm shell.** `spawnWarm` execs the mode's
  * provider command immediately, with the mode's DEFAULT flags and a pre-minted
  * conversation id, so adoption requires mode + cwd + fresh-start + flags to match (a
- * live agent cannot be re-flagged). Task identity is resolved through the pooled
- * `agent_sessions` row rather than baked in: the warm env carries
- * `SLAYZONE_SESSION_ID` + `SLAYZONE_PROJECT_ID` but no `SLAYZONE_TASK_ID`, and the
- * agent's `slay` CLI + conversation hook resolve the task via session→task once the
- * pool binds it.
+ * live agent cannot be re-flagged).
+ *
+ * **The agent boots with the id of a task that does not exist yet.** Each warm agent
+ * gets a pre-minted task id in `SLAYZONE_TASK_ID` (and in its hook context), so an
+ * agent always knows its task — there is no second identity to resolve it through.
+ * A task created to be opened right away takes that id (`reserveWarmTaskId`, called
+ * from task create), and its first `pty:create` adopts the agent (`claimWarmShell`).
+ * Nothing is written to `tasks` early: until the create, the id lives only in the
+ * agent's env and this module's memory. An agent whose id is never used dies with it
+ * (TTL, teardown, mismatch at claim) — the id is single-use.
+ *
+ * So the pool only serves a task created and opened in one go. An older task opening
+ * its first agent cold-spawns: its id is already fixed, and a live agent's env cannot
+ * be changed.
  *
  * Adoption is a REKEY on the computer (`pty.warmAdopt`), not a handoff of a live
  * process object: the computer renames the session in place, so pid, output buffer and
@@ -37,6 +46,12 @@ import { parseShellArgs } from '../adapters/flag-parser'
 
 const WARM_MODE = 'claude-code' // default provider; only this mode is pre-warmed
 const RECONCILE_DEBOUNCE_MS = 150
+/**
+ * How long a reserved agent waits for its task's first `pty:create`. The create and
+ * the open are one user action, so this only bounds the case where the tab never
+ * spawns (closed at once, renderer crash): an unclaimed pre-booted agent is billable.
+ */
+const DEFAULT_RESERVE_TTL_MS = 60_000
 // (No seed cap here any more — the COMPUTER buffers warm output in its own
 // RingBuffer, which is already capped at 750 KiB and evicts oldest-first.)
 
@@ -46,12 +61,18 @@ interface WarmHandle {
   /** The computer holding the process. Part of the pool key — a warm agent is only
    *  useful to a task that resolves to the SAME machine. */
   computerId: string
+  projectId: string
   cwd: string
-  state: 'ready' | 'adopting'
-  /** Runtime session id of the pre-warmed agent (= `agent_sessions.id`,
-   *  `status='pooled'`). Exported into the agent as `SLAYZONE_SESSION_ID` so its
-   *  `slay` CLI + conversation hook resolve the task via session→task once the
-   *  pool binds it (plans/agent-sessions.md slice 4/B). */
+  /** `booting`: registered (and its pooled row written) before the computer is asked
+   *  to spawn it, so a hook that fires during boot already finds it. `ready`: can be
+   *  reserved. `reserved`: handed to a task being created, waiting for its spawn. */
+  state: 'booting' | 'ready' | 'reserved'
+  /** The id the task that adopts this agent gets. In the agent's env as
+   *  `SLAYZONE_TASK_ID` from boot; no `tasks` row exists until the create. */
+  taskId: string
+  /** The pooled `agent_sessions.id`. Internal: it keys the session ledger row (the
+   *  conversation is confirmed on it before adoption, bound to the task at adoption)
+   *  and the computer's `warmId`. The agent itself never sees it. */
   sessionId: string
   /** Pre-minted conversation id for `{id}`-template agents (claude-code), so the
    *  warm agent's transcript + resume id are known before adoption. Null when the
@@ -89,7 +110,8 @@ export interface WarmPoolDataOps {
     initial_command: string | null
     default_flags: string | null
   } | null>
-  /** Record the pooled session entity at warm spawn (status='pooled', no task/tab yet). */
+  /** Record the pooled session entity at warm spawn (status='pooled', no task/tab yet —
+   *  the reserved task id has no `tasks` row, and `task_id` is a foreign key). */
   recordSessionSpawn(input: {
     id: string
     taskId: string | null
@@ -142,19 +164,27 @@ interface WarmDeps {
    * would boot a billable agent nobody can adopt.
    */
   resolveComputerId: (projectId: string) => Promise<string | null>
+  /** Override of {@link DEFAULT_RESERVE_TTL_MS} (tests). */
+  reserveTtlMs?: number
 }
 
 type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
 
 let deps: ResolvedWarmDeps | null = null
 let shuttingDown = false
+/** Bumped by `__resetForTests`, so a spawn still in flight from a previous test
+ *  bails instead of landing in the next one. */
+let epoch = 0
 /**
- * Keyed by projectId. One warm agent per project, on whichever computer that
- * project currently resolves to — the handle carries its own `computerId`, and a
- * claim only matches when the claimant resolves to that same computer (a warm agent
- * on machine A is worthless to a task that will run on machine B).
+ * Keyed by projectId. One warm agent per project (booting or ready), on whichever
+ * computer that project currently resolves to — the handle carries its own
+ * `computerId`, and a reserve only matches when the project still resolves to that
+ * same computer (a warm agent on machine A is worthless to a task on machine B).
  */
 const warm = new Map<string /* projectId */, WarmHandle>()
+/** Reserved for a task being created, keyed by that task's id, until its first
+ *  `pty:create` claims it or its TTL runs out. */
+const reserved = new Map<string /* taskId */, { handle: WarmHandle; timer: NodeJS.Timeout }>()
 const spawning = new Set<string /* projectId */>()
 // Full per-window snapshot of open-task-tab counts keyed by projectId (renderer-sourced).
 const tabCountsByWindow = new Map<number /* windowId */, Record<string, number>>()
@@ -186,14 +216,77 @@ export function clearWindowTabCounts(windowId: number): void {
 }
 
 /**
- * Called from the `pty:create` handler before `createPty`. Returns the warm agent to adopt
- * (and re-arms a fresh one) if one is ready for this project and the spawn matches, else null.
- * The agent is pre-booted with the mode's DEFAULT flags + a pre-minted conversation id, so a
- * spawn matches only when mode + cwd + fresh-start + flags all line up (a task overriding flags
- * cold-spawns). Returns the pooled `sessionId`/`conversationId` so createPty can bind + resume.
+ * Called by task create for a task that will be opened right away. Hands the
+ * project's ready agent to that task: returns the task id the agent booted with,
+ * which the caller MUST use as the new task's id — or null (no ready agent, or it
+ * could not serve this task), in which case the caller mints its own and the task
+ * cold-spawns.
+ *
+ * The agent moves out of the ready slot at once, so no other task can take it, and
+ * the project re-arms. `mode` and `flags` are the task's: a live agent cannot change
+ * either, so a mismatch is a miss here rather than a kill at claim.
+ */
+export async function reserveWarmTaskId(criteria: {
+  projectId: string
+  mode: string
+  /** The task's effective flags for `mode`. Must equal the agent's baked defaults. */
+  flags: string | null
+}): Promise<string | null> {
+  if (!deps || shuttingDown || !deps.isEnabled()) return null
+  if (criteria.mode !== WARM_MODE) return null
+  const handle = warm.get(criteria.projectId)
+  if (!handle || handle.state !== 'ready') return null
+  if ((handle.flags ?? '') !== (criteria.flags ?? '')) return null
+  // A new task runs where its project resolves NOW; the agent was booted wherever the
+  // project resolved then.
+  const computerId = await deps.resolveComputerId(criteria.projectId)
+  if (computerId !== handle.computerId) return null
+  // Re-check after the await: the agent may have been reserved, killed or replaced.
+  if (shuttingDown || warm.get(criteria.projectId) !== handle || handle.state !== 'ready') {
+    return null
+  }
+
+  warm.delete(criteria.projectId)
+  handle.state = 'reserved'
+  const ttl = deps.reserveTtlMs ?? DEFAULT_RESERVE_TTL_MS
+  const timer = setTimeout(() => {
+    if (reserved.get(handle.taskId)?.handle !== handle) return
+    recordDiagnosticEvent({
+      level: 'warn',
+      source: 'pty',
+      event: 'warm.reservation_expired',
+      sessionId: handle.sessionId,
+      taskId: handle.taskId,
+      payload: { projectId: handle.projectId, ttlMs: ttl }
+    })
+    killReserved(handle.taskId)
+  }, ttl)
+  timer.unref?.()
+  reserved.set(handle.taskId, { handle, timer })
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'pty',
+    event: 'warm.reserved',
+    sessionId: handle.sessionId,
+    taskId: handle.taskId,
+    payload: { projectId: handle.projectId, computerId: handle.computerId }
+  })
+  // The task being opened will count as an open tab, so re-arm now.
+  void spawnWarm(criteria.projectId)
+  return handle.taskId
+}
+
+/**
+ * Called from the `pty:create` handler before `createPty`. Returns the warm agent to
+ * adopt when one was reserved for this task (see `reserveWarmTaskId`), else null.
+ *
+ * The reservation is consumed either way. On a mismatch (the spawn is not the fresh,
+ * default-flagged, project-root agent the reservation predicted) the agent is killed:
+ * it carries this task's id, so no other task can use it, and this one cold-spawns.
+ * Returns the pooled `sessionId`/`conversationId` so createPty can bind + resume.
  */
 export function claimWarmShell(criteria: {
-  projectId: string
+  taskId: string
   mode: string
   cwd: string
   resuming: boolean
@@ -211,30 +304,55 @@ export function claimWarmShell(criteria: {
   sessionId: string
   conversationId: string | null
 } | null {
-  if (!deps || shuttingDown || !deps.isEnabled()) return null
-  if (criteria.mode !== WARM_MODE) return null
-  if (criteria.resuming) return null
-  const handle = warm.get(criteria.projectId)
-  if (!handle || handle.state !== 'ready') return null
-  if (handle.cwd !== criteria.cwd) return null
-  // The process lives on ONE machine; a spawn routed elsewhere must cold-spawn.
-  if (handle.computerId !== criteria.computerId) return null
-  // Flags are baked into the running agent — adopt only on an exact match.
-  if ((handle.flags ?? '') !== (criteria.flags ?? '')) return null
+  const entry = reserved.get(criteria.taskId)
+  if (!entry) return null
+  const { handle } = entry
+  const mismatch =
+    !deps || shuttingDown || !deps.isEnabled()
+      ? 'disabled'
+      : criteria.mode !== WARM_MODE
+        ? 'mode'
+        : criteria.resuming
+          ? 'resuming'
+          : handle.cwd !== criteria.cwd
+            ? 'cwd'
+            : handle.computerId !== criteria.computerId
+              ? 'computer'
+              : (handle.flags ?? '') !== (criteria.flags ?? '')
+                ? 'flags'
+                : null
+  if (mismatch) {
+    recordDiagnosticEvent({
+      level: 'warn',
+      source: 'pty',
+      event: 'warm.reservation_mismatch',
+      sessionId: handle.sessionId,
+      taskId: criteria.taskId,
+      payload: {
+        reason: mismatch,
+        projectId: handle.projectId,
+        warmCwd: handle.cwd,
+        cwd: criteria.cwd,
+        warmComputerId: handle.computerId,
+        computerId: criteria.computerId
+      }
+    })
+    killReserved(criteria.taskId)
+    return null
+  }
 
   // Hand it off. No output plumbing to unwind: the computer has been buffering all
   // along and replays it in the `pty.warmAdopt` reply.
-  handle.state = 'adopting'
-  warm.delete(criteria.projectId)
+  clearTimeout(entry.timer)
+  reserved.delete(criteria.taskId)
   recordDiagnosticEvent({
     level: 'info',
     source: 'pty',
     event: 'warm.adopted',
     sessionId: handle.sessionId,
-    payload: { projectId: criteria.projectId, cwd: criteria.cwd, computerId: handle.computerId }
+    taskId: criteria.taskId,
+    payload: { projectId: handle.projectId, cwd: criteria.cwd, computerId: handle.computerId }
   })
-  // The task being opened still counts as ≥1 open tab, so re-arm immediately.
-  void spawnWarm(criteria.projectId)
   return {
     warmId: handle.warmId,
     computerId: handle.computerId,
@@ -252,22 +370,24 @@ export function teardownAllWarm(): void {
     reconcileTimer = undefined
   }
   for (const projectId of [...warm.keys()]) killWarm(projectId)
+  for (const taskId of [...reserved.keys()]) killReserved(taskId)
   tabCountsByWindow.clear()
 }
 
 /**
- * Where a pooled (not yet adopted) warm agent runs: the project it was warmed for and
- * the computer holding it. Null once it is adopted (its task then says whose it is),
- * reaped, or unknown. The hub reads it to decide whose a pooled session's hooks are
- * (T-18): an `agent_sessions` row in the pool has no task, hence no owner of its own.
+ * The warm agent that booted with `taskId` and has not been adopted yet — booting,
+ * ready, or reserved — or null. Such an agent's hooks name a task that may not exist
+ * yet (it exists once reserved and created, but no terminal holds the agent until the
+ * claim), so the hook route reads this to treat them as pool hooks, and the hub reads
+ * it to decide whose they are (T-18): the project it was warmed for, on the computer
+ * holding it.
  */
-export function warmSessionPlacement(
-  sessionId: string
-): { projectId: string; computerId: string } | null {
-  for (const [projectId, handle] of warm) {
-    if (handle.sessionId === sessionId) return { projectId, computerId: handle.computerId }
-  }
-  return null
+export function unadoptedWarmAgent(
+  taskId: string
+): { sessionId: string; projectId: string; computerId: string } | null {
+  const handle = reserved.get(taskId)?.handle ?? [...warm.values()].find((h) => h.taskId === taskId)
+  if (!handle) return null
+  return { sessionId: handle.sessionId, projectId: handle.projectId, computerId: handle.computerId }
 }
 
 /** Test/diagnostic hook: current warm state per project. */
@@ -284,10 +404,13 @@ export function __resetForTests(): void {
     reconcileTimer = undefined
   }
   for (const projectId of [...warm.keys()]) killWarm(projectId)
+  for (const taskId of [...reserved.keys()]) killReserved(taskId)
   warm.clear()
+  reserved.clear()
   spawning.clear()
   tabCountsByWindow.clear()
   shuttingDown = false
+  epoch++
 }
 
 function scheduleReconcile(): void {
@@ -308,6 +431,7 @@ async function reconcile(): Promise<void> {
     // never triggered".
     recordDiagnosticEvent({ level: 'info', source: 'pty', event: 'warm.reconcile_skip_disabled' })
     for (const projectId of [...warm.keys()]) killWarm(projectId)
+    for (const taskId of [...reserved.keys()]) killReserved(taskId)
     return
   }
   const desired = new Set<string>()
@@ -340,6 +464,7 @@ async function spawnWarm(projectId: string): Promise<void> {
   if (!deps || shuttingDown || !deps.isEnabled()) return
   if (warm.has(projectId) || spawning.has(projectId)) return
   spawning.add(projectId)
+  const spawnEpoch = epoch
   try {
     const cwd = await deps.getProjectRoot(projectId)
     // KNOWN LIMITATION: this probes the HUB's filesystem, but the warm agent now
@@ -365,17 +490,18 @@ async function spawnWarm(projectId: string): Promise<void> {
     const modeRow = await deps.ops.getModeSpawnConfig(WARM_MODE)
 
     const sessionId = randomUUID()
+    // The id of the task this agent will serve. Only ever used if a task is created
+    // under it (`reserveWarmTaskId`); no row is written for it here.
+    const taskId = randomUUID()
     // claude-code pre-mints the conversation id (its initial_command has the
     // `{id}` placeholder), so the warm agent's transcript + resume id are known
     // before adoption. Providers without `{id}` mint their own → null here.
     const conversationId = modeRow?.initial_command?.includes('{id}') ? randomUUID() : null
 
-    // Pooled env: SLAYZONE_SESSION_ID (no SLAYZONE_TASK_ID — there's no task yet),
-    // but SLAYZONE_PROJECT_ID IS already known (the pool is per-project) — pass it
-    // explicitly so it's set regardless of task binding. The agent's slay CLI +
-    // conversation hook resolve the task via session→task once the pool binds it.
-    // Same buildMcpEnv source as a cold spawn → no drift.
-    const extraEnv = await buildMcpEnv(deps.db, undefined, WARM_MODE, sessionId, projectId)
+    // The agent's identity is its (future) task id, exactly like a cold spawn's — same
+    // buildMcpEnv source, so no drift. The project id is passed explicitly: there is
+    // no task row to derive it from yet.
+    const extraEnv = await buildMcpEnv(deps.db, taskId, WARM_MODE, projectId)
 
     // Which machine will this project's tasks actually run on? Warming anywhere
     // else boots an agent (billable, with no task) that nothing can ever adopt.
@@ -402,7 +528,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       return
     }
     // Re-check after awaits (gate may have closed / shutdown / raced).
-    if (shuttingDown || warm.has(projectId)) return
+    if (shuttingDown || spawnEpoch !== epoch || warm.has(projectId)) return
     // Spawn-time hook self-heal for the WARM path. A pre-warmed agent's notify.sh
     // hooks fire from warm time (before any task), and it's NEVER healed at
     // adoption (createPty skips preWarmedAgent) — so if we don't heal here, the
@@ -426,46 +552,65 @@ async function spawnWarm(projectId: string): Promise<void> {
     }
 
     const warmId = `warm:${sessionId}`
-    const shell = resolveUserShell()
-    await backend.warmSpawn(computerId, {
-      warmId,
-      command: shell,
-      args: getShellStartupArgs(shell),
-      cwd,
-      env: { ...buildBaseEnv(), ...extraEnv },
-      ...(postSpawnCommand ? { postSpawnCommand } : {})
-    })
-
     const handle: WarmHandle = {
       warmId,
       computerId,
+      projectId,
       cwd,
-      state: 'ready',
+      state: 'booting',
+      taskId,
       sessionId,
       conversationId,
       flags: modeRow?.default_flags ?? null
     }
+    // Registered, and its pooled row written, BEFORE the computer is asked to boot
+    // it: the agent's SessionStart hook confirms its conversation on that row, found
+    // through this handle, and may fire before `warmSpawn` returns.
     warm.set(projectId, handle)
-
-    // Record the pooled session entity (status='pooled', no task/tab yet). The
-    // conversation id is confirmed write-once by the agent's SessionStart hook
-    // (keyed by SLAYZONE_SESSION_ID — see agent-hook).
-    await deps.ops.recordSessionSpawn({
-      id: sessionId,
-      taskId: null,
-      tabId: null,
-      mode: WARM_MODE,
-      cwd,
-      expectedConversationId: conversationId,
-      usedResume: false,
-      status: 'pooled'
-    })
+    try {
+      await deps.ops.recordSessionSpawn({
+        id: sessionId,
+        taskId: null,
+        tabId: null,
+        mode: WARM_MODE,
+        cwd,
+        expectedConversationId: conversationId,
+        usedResume: false,
+        status: 'pooled'
+      })
+      const shell = resolveUserShell()
+      await backend.warmSpawn(computerId, {
+        warmId,
+        command: shell,
+        args: getShellStartupArgs(shell),
+        cwd,
+        env: { ...buildBaseEnv(), ...extraEnv },
+        ...(postSpawnCommand ? { postSpawnCommand } : {})
+      })
+    } catch (err) {
+      if (warm.get(projectId) === handle) warm.delete(projectId)
+      void deps.ops.markSessionDead(sessionId).catch(() => {
+        // Best-effort: a pooled row is only ever bound through this handle, which is
+        // gone, so a stale one is never resumed.
+      })
+      throw err
+    }
+    if (warm.get(projectId) !== handle) {
+      // Torn down while booting (gate closed, pre-warm off, shutdown). That kill may
+      // have reached the computer before the spawn did, so ask again.
+      void backend.warmKill?.(computerId, warmId).catch(() => {
+        // Unreachable computer: its warm agents are already gone.
+      })
+      return
+    }
+    handle.state = 'ready'
 
     recordDiagnosticEvent({
       level: 'info',
       source: 'pty',
       event: 'warm.agent_spawned',
       sessionId,
+      taskId,
       payload: { projectId, cwd, computerId, hasConversationId: !!conversationId }
     })
   } catch (err) {
@@ -477,7 +622,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       payload: { projectId }
     })
   } finally {
-    spawning.delete(projectId)
+    if (spawnEpoch === epoch) spawning.delete(projectId)
   }
 }
 
@@ -485,6 +630,19 @@ function killWarm(projectId: string): void {
   const handle = warm.get(projectId)
   if (!handle) return
   warm.delete(projectId)
+  releaseHandle(handle)
+}
+
+function killReserved(taskId: string): void {
+  const entry = reserved.get(taskId)
+  if (!entry) return
+  clearTimeout(entry.timer)
+  reserved.delete(taskId)
+  releaseHandle(entry.handle)
+}
+
+/** Kill an agent the pool no longer holds (already removed from its map). */
+function releaseHandle(handle: WarmHandle): void {
   // The process is the COMPUTER's, so this is a request, not a local kill — and it
   // is fire-and-forget: a computer that has gone away already took its warm agents
   // with it, and `reapOrphanWarms` covers anything that outlives us.
@@ -519,7 +677,9 @@ export async function reapOrphanWarms(computerId: string): Promise<void> {
   try {
     const remote = await backend.warmList(computerId)
     const tracked = new Set(
-      [...warm.values()].filter((h) => h.computerId === computerId).map((h) => h.warmId)
+      [...warm.values(), ...[...reserved.values()].map((r) => r.handle)]
+        .filter((h) => h.computerId === computerId)
+        .map((h) => h.warmId)
     )
     for (const entry of remote) {
       if (tracked.has(entry.warmId)) continue

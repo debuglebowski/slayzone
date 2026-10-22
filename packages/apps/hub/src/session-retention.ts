@@ -20,12 +20,12 @@
  * particular the session LEDGER stays — `agent_sessions`, `task_conversations`,
  * `session_turns`, `session_resets`, `session_deletions`: ids, modes, paths and times,
  * no text. It is the task's resume binding (a copy of which also lives in the task row,
- * `tasks.provider_config`), an append-only provenance record by design
- * (`task/server/ops/agent-sessions.ts`), and the row a live agent resolves its task
- * through (`getBoundTaskId`). The database cannot tell whether a bound session is still
- * running (`ended_at` is only ever set for warm-pool agents), so deleting by age could
- * cut a live agent off its task while removing no content. `usage_records` (token
- * counts, no text) is usage analytics' "all time" range and stays too.
+ * `tasks.provider_config`) and an append-only provenance record by design
+ * (`task/server/ops/agent-sessions.ts`). The database cannot tell whether a bound
+ * session is still running (`ended_at` is only ever set for warm-pool agents), so
+ * deleting by age could cut a live agent off its resume target while removing no
+ * content. `usage_records` (token counts, no text) is usage analytics' "all time" range
+ * and stays too.
  *
  * `agent_turns` rows stay with the preview blanked, not deleted: each pins a snapshot
  * ref in the user's repository (`refs/slayzone/turns/<id>`) that only the per-worktree

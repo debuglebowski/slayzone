@@ -1,12 +1,14 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/shared'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
+import { agentAutoStarts, TERMINAL_AUTO_START_SETTING } from '@slayzone/terminal/shared'
 import { taskEvents } from '../events.js'
 import { getTemplateForTask } from '../template-store.js'
 import {
   colorOne,
   getEnabledModeDefaults,
   getProjectColumns,
+  isAutoCreateWorktreeEnabled,
   maybeAutoCreateWorktree,
   parseTask,
   type OpDeps
@@ -22,7 +24,6 @@ export async function createTaskOp(
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
-  const id = crypto.randomUUID()
 
   // A task row is FK-bound to its project, and under multi-hub federation a
   // project exists in exactly ONE hub's DB — so a create aimed at the wrong hub
@@ -30,9 +31,10 @@ export async function createTaskOp(
   // names neither the project nor the hub. Fail here instead, with the id in the
   // message. (The REST path resolves the project before it gets this far; this
   // covers the tRPC + MCP callers, which share this op.)
-  const project = await db.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [
-    data.projectId
-  ])
+  const project = await db.get<{ id: string; selected_repo: string | null }>(
+    'SELECT id, selected_repo FROM projects WHERE id = ?',
+    [data.projectId]
+  )
   if (!project) {
     // Marked with a `code` rather than a custom class so the tRPC router can map
     // it to NOT_FOUND without importing this electron-coupled module (the
@@ -93,6 +95,13 @@ export async function createTaskOp(
     : null
   const browserTabs = template?.browser_tabs ? JSON.stringify(template.browser_tabs) : null
   const webPanelUrls = template?.web_panel_urls ? JSON.stringify(template.web_panel_urls) : null
+
+  const id =
+    (await reserveWarmAgent(db, data, deps, {
+      selectedRepo: project.selected_repo,
+      terminalMode,
+      providerConfig
+    })) ?? crypto.randomUUID()
 
   const initialTask = await insertTaskRow(db, {
     id,
@@ -159,4 +168,39 @@ export async function createTaskOp(
     onMutation?.()
   }
   return colorOne(db, task)
+}
+
+/**
+ * The id of the warm agent handed to this task, or null to mint one.
+ *
+ * A warm agent booted with the id of a task that did not exist yet; the task that
+ * takes it is created under that id, and its first spawn adopts the agent. Asked
+ * only when that spawn will happen right away and in the project root: a task the
+ * caller does not open, whose agent waits behind the Start gate, or whose terminal
+ * runs in a worktree, a child repo or a parent's workspace would never claim the
+ * agent, and a reservation nobody claims is a booted agent killed for nothing. The
+ * pool itself checks what it alone knows (provider, flags, computer).
+ */
+async function reserveWarmAgent(
+  db: SlayzoneDb,
+  data: CreateTaskInput,
+  deps: OpDeps,
+  task: { selectedRepo: string | null; terminalMode: string; providerConfig: ProviderConfig }
+): Promise<string | null> {
+  if (!deps.reserveWarmTaskId || !data.openAfterCreate) return null
+  if (data.parentId || data.repoName || task.selectedRepo) return null
+  const autoStart = await db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [
+    TERMINAL_AUTO_START_SETTING
+  ])
+  if (
+    !agentAutoStarts({ isTemporary: Boolean(data.isTemporary), autoStartSetting: autoStart?.value })
+  ) {
+    return null
+  }
+  if (await isAutoCreateWorktreeEnabled(db, data.projectId)) return null
+  return deps.reserveWarmTaskId({
+    projectId: data.projectId,
+    mode: task.terminalMode,
+    flags: task.providerConfig[task.terminalMode]?.flags ?? null
+  })
 }

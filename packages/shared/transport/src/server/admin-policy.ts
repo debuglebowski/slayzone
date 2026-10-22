@@ -878,7 +878,6 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'POST /api/pty/:id/write': 'user',
   'POST /api/pty/respawn': 'user',
   'POST /api/pty/start': 'user',
-  'GET /api/session/:sessionId/task': 'user',
   'POST /api/tabs/create': 'user',
   'POST /api/tabs/rename': 'user',
   'POST /api/tabs/split': 'user',
