@@ -148,7 +148,7 @@ assert(killProcess('missing') === false, 'kill of an unknown id still answers')
 
 // --- switch back on: the same manager spawns again (defaults unchanged) ---
 delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
-const id = createProcess('p1', null, 'dev', 'echo hi', '/tmp', false)
+const id = await createProcess('p1', null, 'dev', 'echo hi', '/tmp', false)
 assert(
   typeof id === 'string' && listAllProcesses().some((p) => p.id === id),
   'default: create works'

@@ -804,7 +804,7 @@ export type ProcessesDeps = {
     updates: Partial<
       Pick<ProcessInfo, 'label' | 'command' | 'cwd' | 'autoRestart' | 'taskId' | 'projectId'>
     >
-  ) => boolean
+  ) => boolean | Promise<boolean>
   stop: (processId: string) => boolean | Promise<boolean>
   kill: (processId: string) => boolean | Promise<boolean>
   restart: (processId: string) => boolean | Promise<boolean>
