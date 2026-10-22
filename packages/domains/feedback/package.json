@@ -16,7 +16,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "peerDependencies": {
-    "electron": "^41.0.0",
+    "electron": "^41.10.7",
     "react": "^19.0.0"
   },
   "devDependencies": {
