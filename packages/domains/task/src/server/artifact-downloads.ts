@@ -9,6 +9,7 @@ import {
 } from 'fs'
 import archiver from 'archiver'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { containedPath } from '@slayzone/platform/safe-path'
 import {
   getEffectiveRenderMode,
   canExportAsPdf,
@@ -130,10 +131,13 @@ export async function downloadArtifactFolder(
   const rootFolderPath = folderPath(folderId)
   const rootParentPath = path.dirname(rootFolderPath)
 
+  // Folder names and titles are free text (an agent can name an artifact `../../.zshrc`):
+  // every write stays inside the chosen directory, or the download is refused.
   for (const id of targetIds) {
     const rel =
       rootParentPath === '.' ? folderPath(id) : path.relative(rootParentPath, folderPath(id))
-    mkdirSync(path.join(destRoot, rel), { recursive: true })
+    // '' = destRoot itself (an unnamed folder), which the user picked and exists.
+    if (rel) mkdirSync(containedPath(destRoot, rel), { recursive: true })
   }
 
   const artifacts = (await db
@@ -154,7 +158,7 @@ export async function downloadArtifactFolder(
       rootParentPath === '.'
         ? folderPath(artifact.folder_id as string)
         : path.relative(rootParentPath, folderPath(artifact.folder_id as string))
-    copyFileSync(srcPath, path.join(destRoot, folderRel, artifact.title as string))
+    copyFileSync(srcPath, containedPath(destRoot, folderRel, artifact.title as string))
   }
 
   return true

@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
 import { cleanupTaskFull, parseTasks, type OpDeps } from './shared.js'
@@ -10,6 +11,9 @@ export async function archiveManyTasksOp(
 ): Promise<void> {
   const { ipcMain, onMutation } = deps
   if (ids.length === 0) return
+  // Every id becomes an artifact dir name in cleanupTaskFull: refuse the whole batch
+  // before the first cleanup, not halfway through it.
+  for (const id of ids) assertPathSafeId(id, 'taskId')
   const placeholdersForExisting = ids.map(() => '?').join(',')
   const existingRows = await db.all<Record<string, unknown>>(
     `SELECT * FROM tasks WHERE id IN (${placeholdersForExisting}) OR parent_id IN (${placeholdersForExisting})`,

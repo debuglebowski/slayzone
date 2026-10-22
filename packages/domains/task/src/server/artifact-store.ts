@@ -10,7 +10,6 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
 import type {
   AuthorContext,
   VersionRef,
@@ -23,6 +22,7 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task
 // can stream a version's bytes off disk instead of hauling them through the
 // worker boundary as a utf-8 string.
 import { BlobStore } from '@slayzone/task-artifacts/server'
+import { artifactFilePathIn, artifactsDirOf, artifactTaskDir } from './artifact-paths'
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -104,18 +104,16 @@ export function collectFolderAndDescendants(
 export type ArtifactStore = ReturnType<typeof createArtifactStore>
 
 export function createArtifactStore(dataDir: string) {
-  const artifactsDir = path.join(dataDir, 'artifacts')
+  const artifactsDir = artifactsDirOf(dataDir)
 
   function getArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-    const ext = getExtensionFromTitle(title) || '.txt'
-    return path.join(artifactsDir, taskId, `${artifactId}${ext}`)
+    return artifactFilePathIn(artifactsDir, taskId, artifactId, title)
   }
 
   // Fallback to pre-v127 path for users where the boot-time disk migration silently
   // failed (permission/FS errors). Belt-and-suspenders — read on every miss, don't mutate.
   function getLegacyArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-    const ext = getExtensionFromTitle(title) || '.txt'
-    return path.join(dataDir, 'assets', taskId, `${artifactId}${ext}`)
+    return artifactFilePathIn(path.join(dataDir, 'assets'), taskId, artifactId, title)
   }
 
   async function getRow(db: SlayzoneDb, id: string): Promise<Record<string, unknown> | undefined> {
@@ -326,8 +324,9 @@ export function createArtifactStore(dataDir: string) {
       }
     },
 
+    /** Removes `<artifactsDir>/<taskId>` only; any other id is refused (`UnsafePathError`). */
     cleanupTaskArtifacts(taskId: string): void {
-      const taskDir = path.join(artifactsDir, taskId)
+      const taskDir = artifactTaskDir(artifactsDir, taskId)
       if (existsSync(taskDir)) rmSync(taskDir, { recursive: true, force: true })
     },
 

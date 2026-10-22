@@ -5,6 +5,7 @@ import {
   assertHubLocalExecEnabled,
   isHubSwitchedOffError
 } from '@slayzone/platform/hub-switch-refusal'
+import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
@@ -21,7 +22,9 @@ const t = initTRPC.context<TrpcContext>().create({
       ...shape.data,
       ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {}),
       // A role refusal (T-15) carries `ADMIN_ONLY` the same way.
-      ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {})
+      ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
+      // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
+      ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {})
     }
   })
 })
@@ -143,6 +146,23 @@ const switchRefusal = t.middleware(async ({ next }) => {
 })
 
 /**
+ * An id that is not one plain path segment, or a path outside its base dir, is refused
+ * deep in a domain (`@slayzone/platform/safe-path`, T-104) before any disk access.
+ * Surface it as BAD_REQUEST with the same message, not INTERNAL_SERVER_ERROR.
+ */
+const unsafePathRefusal = t.middleware(async ({ next }) => {
+  const result = await next()
+  if (!result.ok && isUnsafePathError(result.error.cause)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  return result
+})
+
+/**
  * Default procedure — auth-gated on an authed hub, then role- and scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
@@ -154,6 +174,7 @@ export const publicProcedure = t.procedure
   .use(adminGate)
   .use(scopeGate)
   .use(switchRefusal)
+  .use(unsafePathRefusal)
 
 /**
  * A procedure that works on the hub's OWN disk — git, `gh` probes, the OS opener,

@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs'
 import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertPathSafeId, containedPath, isPathSafeId } from '@slayzone/platform/safe-path'
 import type { ColumnConfig, CreateProjectInput, Project, UpdateProjectInput } from '../shared'
 import { parseColumnsConfig, prepareProjectCreate, validateColumns } from '../shared'
 
@@ -13,7 +14,8 @@ const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.s
  * from `ctx.dataRoot`.
  */
 function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
-  if (!existsSync(iconsDir)) return
+  // Not an id (`''` matched every dotfile): no project's icon, nothing to remove.
+  if (!isPathSafeId(projectId) || !existsSync(iconsDir)) return
   for (const entry of readdirSync(iconsDir)) {
     if (entry.startsWith(`${projectId}.`)) {
       try {
@@ -239,9 +241,10 @@ export async function uploadProjectIcon(
   if (!ALLOWED_ICON_EXTS.has(ext)) {
     throw new Error(`Unsupported icon extension: ${ext}`)
   }
+  // The id is the file name: one plain segment, inside iconsDir (`UnsafePathError`).
+  const destPath = containedPath(iconsDir, `${assertPathSafeId(projectId, 'projectId')}${ext}`)
   mkdirSync(iconsDir, { recursive: true })
   unlinkProjectIconFiles(iconsDir, projectId)
-  const destPath = path.join(iconsDir, `${projectId}${ext}`)
   copyFileSync(sourcePath, destPath)
 
   await db.run(

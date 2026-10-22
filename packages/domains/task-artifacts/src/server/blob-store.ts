@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import path from 'node:path'
+import { containedPath } from '@slayzone/platform/safe-path'
 import type { ContentHash } from '../shared/types'
 import { VersionError } from './errors'
 
@@ -39,8 +40,9 @@ export class BlobStore {
     return path.join(this.rootDir, hash.slice(0, 2))
   }
 
+  /** Strictly inside `rootDir` whatever `hash` holds (`UnsafePathError`): `delete` rm's it. */
   blobPath(hash: ContentHash | string): string {
-    return path.join(this.dirFor(hash), hash.slice(2))
+    return containedPath(this.rootDir, hash.slice(0, 2), hash.slice(2))
   }
 
   has(hash: ContentHash | string): boolean {

@@ -45,6 +45,7 @@ import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   resolveWorktreeBasePathTemplate
 } from '@slayzone/worktrees/shared'
+import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 
 /**
  * The board's task ordering, defined once and interpolated by every list query
@@ -499,11 +500,13 @@ export async function cleanupTaskFull(
   taskId: string,
   batchIds: string[] = [taskId]
 ): Promise<void> {
+  // Resolved first: an id that is not one plain path segment (`..` named the data dir)
+  // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
+  // is the single source of truth for the storage dir (<ROOT>/storage).
+  const artifactsBaseDir = artifactTaskDir(artifactsDirOf(runtimeAdapters.getDataRoot()), taskId)
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
-  // Clean up artifact files on disk. getDataRoot() is the single source of truth
-  // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
-  const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
+  // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
   if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
