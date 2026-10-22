@@ -21,7 +21,8 @@
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { securityEvent } from '@slayzone/platform/security-log'
+import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
+import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
 import { findHubAccount, type HubAuth } from '@slayzone/hub-auth/server'
 import type { HubRole } from '@slayzone/hub-auth'
 import type { Scope } from '@slayzone/transport/server'
@@ -281,7 +282,13 @@ export async function webLogin(
   if (!auth) return { ok: false, error: 'hub-auth unavailable' }
   let userId: string
   try {
-    const signedIn = await auth.api.signInEmail({ body: { email, password } })
+    // The caller's client address (T-22) — this runs inside the request's audit
+    // context — so the session row better-auth writes carries it, like an HTTP sign-in.
+    const ip = currentSecurityContext()?.ip
+    const signedIn = await auth.api.signInEmail({
+      body: { email, password },
+      ...(ip ? { headers: new Headers({ [CLIENT_ADDRESS_HEADER]: ip }) } : {})
+    })
     userId = signedIn.user.id
   } catch {
     return { ok: false, error: 'invalid email or password' }

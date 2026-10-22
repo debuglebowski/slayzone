@@ -131,7 +131,8 @@ export interface HubComputerGatewayOptions {
 
 /** Where an accepted computer socket came from — for the audit log. */
 export interface ComputerPeer {
-  /** TCP peer address of the upgrade request. */
+  /** Client address of the upgrade request: the TCP peer, or the client a trusted front
+   *  end forwarded (`clientAddress` in `@slayzone/platform/client-address`, T-22). */
   ip?: string | null
 }
 

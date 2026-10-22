@@ -26,7 +26,8 @@
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
     "./security-log": "./src/security-log.ts",
-    "./agent-hooks": "./src/agent-hooks/index.ts"
+    "./agent-hooks": "./src/agent-hooks/index.ts",
+    "./client-address": "./src/client-address.ts"
   },
   "scripts": {
     "test": "vitest run",

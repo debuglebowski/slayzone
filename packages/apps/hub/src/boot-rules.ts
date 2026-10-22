@@ -8,7 +8,8 @@
  * `server.ts` keeps only the wiring, the way `rest-auth.ts` and `ws-origin.ts` do.
  *
  *   Always:                 B4 every switch is 0|1 · B5 the hub never read the old
- *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port]
+ *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
+ *                           B15 trusted proxies are IPs/CIDRs
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
  *   (B13)                   dev endpoint · B14 auth secret in env
@@ -49,9 +50,10 @@ import {
   type HubSsoSettings,
   type HubSwitches
 } from '@slayzone/platform/hub-switches'
+import { readTrustedProxies } from '@slayzone/platform/client-address'
 
 /**
- * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B14`), or
+ * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B15`), or
  * `config-file` for an unusable `hub.config.json`; the bin writes it into the
  * `hub.boot` audit line before it exits (T-03).
  */
@@ -152,7 +154,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B9, B1, B3, B10, B14, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -186,6 +188,12 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
         `derived from the host: a loopback host is http/ws, any other host is https/wss.`
     )
   }
+
+  // B15 — the front ends whose X-Forwarded-For names the client (T-22,
+  // client-address.ts) are IPs and CIDRs, every one. Dropping a typo would quietly
+  // record the front end as every user; `/0` would let any client name itself.
+  const trustedProxies = readTrustedProxies(env)
+  if (!trustedProxies.ok) throw new HubBootRefusal('B15', trustedProxies.message)
 
   // B9 — started by the desktop app ⇒ listens on loopback (login is off there).
   if (supervised) {

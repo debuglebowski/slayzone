@@ -93,6 +93,12 @@ export const LEGACY_HUB_LISTEN_ENV = 'SLAYZONE_HUB_ADDRESS'
 export const HUB_ALLOWED_WEB_ORIGINS_ENV = 'SLAYZONE_HUB_ALLOWED_WEB_ORIGINS'
 
 /**
+ * The front ends whose `X-Forwarded-For` the hub believes: comma-separated IPs and
+ * CIDRs (T-22, `@slayzone/platform/client-address`). Unset = trust nobody.
+ */
+export const HUB_TRUSTED_PROXIES_ENV = 'SLAYZONE_HUB_TRUSTED_PROXIES'
+
+/**
  * Every variable that configures a hub PROCESS. A parent that spawns a hub with its
  * own values (the desktop app's sidecar) must clear all of these first: whatever it
  * inherited from wherever IT was launched (a task terminal, a shell profile, a CI
@@ -109,7 +115,8 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   ...Object.values(HUB_ADDRESS_ENV),
   LEGACY_HUB_LISTEN_ENV,
-  HUB_ALLOWED_WEB_ORIGINS_ENV
+  HUB_ALLOWED_WEB_ORIGINS_ENV,
+  HUB_TRUSTED_PROXIES_ENV
 ]
 
 /** Thrown for a malformed switch value (rule B4). */

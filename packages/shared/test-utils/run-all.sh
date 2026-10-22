@@ -292,6 +292,9 @@ run_test packages/shared/platform/src/device-status-queries.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
 # Security audit events on stdout (T-03).
 run_test packages/shared/platform/src/security-log.test.ts
+# Real client IP behind a trusted front end (T-22): the resolver, then the built hub.
+run_test packages/shared/platform/src/client-address.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/trusted-proxy.test.ts
 # Switch refusals: one audit line + one error shape per refusal.
 run_test packages/shared/platform/src/hub-switch-refusal.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.

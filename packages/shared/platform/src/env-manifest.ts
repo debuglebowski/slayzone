@@ -95,6 +95,9 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ADDRESS: 'infra',
   SLAYZONE_HUB_LISTEN_ADDRESS: 'infra', // hub-only; where the hub listens
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; how other machines reach it, written into join tokens
+  // Hub-only; the front ends (IPs/CIDRs, comma-separated) whose X-Forwarded-For names
+  // the client (client-address.ts). Not `_ADDRESS`: these are networks, not an authority.
+  SLAYZONE_HUB_TRUSTED_PROXIES: 'infra',
   // Per-hub switches (0|1) replacing SLAYZONE_MODE. Infra: they describe THIS hub
   // process, so a task terminal must not inherit them (a hub started from one would
   // otherwise pick up its parent's switches by accident).

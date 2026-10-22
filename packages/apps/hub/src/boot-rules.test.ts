@@ -1,5 +1,5 @@
 /**
- * The hub's boot rules (B1–B5, B7–B11, B13, B14): one case per refusal, plus the
+ * The hub's boot rules (B1–B5, B7–B11, B13–B15): one case per refusal, plus the
  * combinations that must boot. Pure — `assertHubBootRules` takes an env object and
  * returns/throws, with no database, port or process — so every rule is checked
  * without a boot. `hub-boot.test.ts` drives the same rules through the real
@@ -222,6 +222,31 @@ test('B8: host, host:port and bracketed ipv6 are accepted', () => {
   for (const ok of ['hub.example.com', 'hub.example.com:8443', '[2001:db8::1]:8443']) {
     assertBoots({ env: { ...REACHABLE, SLAYZONE_HUB_PUBLIC_ADDRESS: ok } })
   }
+})
+
+console.log('\nhub boot rules: B15 — the trusted front ends are IPs and CIDRs (T-22)')
+console.log('─'.repeat(40))
+
+test('B15: an entry that is not an IP or CIDR refuses boot, naming it', () => {
+  assertRefuses(
+    { env: { ...REACHABLE, SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24, appgw.internal' } },
+    'SLAYZONE_HUB_TRUSTED_PROXIES',
+    "'appgw.internal'"
+  )
+  assertRefuses({ env: { SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/33' } }, "'10.93.4.0/33'")
+})
+
+test('B15: a /0 range refuses boot — it would let any client name its own address', () => {
+  for (const bad of ['0.0.0.0/0', '::/0']) {
+    assertRefuses({ env: { ...REACHABLE, SLAYZONE_HUB_TRUSTED_PROXIES: bad } }, '/0')
+  }
+})
+
+test('B15: unset, blank, and IPv4/IPv6 addresses and ranges boot', () => {
+  for (const ok of ['', ' , ', '10.93.4.0/24', '10.93.4.0/24, 10.93.5.7, 2001:db8::/64, ::1']) {
+    assertBoots({ env: { ...REACHABLE, SLAYZONE_HUB_TRUSTED_PROXIES: ok } })
+  }
+  assertBoots({ env: { SLAYZONE_HUB_TRUSTED_PROXIES: '127.0.0.1' } })
 })
 
 console.log('\nhub boot rules: B9 — the desktop app hub listens on loopback')
@@ -723,7 +748,8 @@ test('every refusal carries its rule number', () => {
     ['B10', { env: REACHABLE, devSqlEnabled: true }],
     ['B14', { env: { ...REACHABLE, SLAYZONE_HUB_AUTH_SECRET: '' } }],
     ['B2', { env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_PASSWORD: '0' } }],
-    ['B7', { env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_SSO: '1' } }]
+    ['B7', { env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1', SLAYZONE_HUB_ENABLE_SSO: '1' } }],
+    ['B15', { env: { SLAYZONE_HUB_TRUSTED_PROXIES: 'nope' } }]
   ]
   for (const [rule, input] of cases) {
     const got = refusedRule(input)

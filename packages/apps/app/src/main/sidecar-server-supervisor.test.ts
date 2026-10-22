@@ -337,7 +337,8 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     SLAYZONE_HUB_SSO_KEY_PATH: '/inherited/sso-key.pem',
     SLAYZONE_HUB_SSO_REQUIRE_MFA: 'perhaps',
     SLAYZONE_HUB_AUTH_SECRET: 'inherited-auth-secret',
-    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com'
+    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com',
+    SLAYZONE_HUB_TRUSTED_PROXIES: '0.0.0.0/0'
   }
   // The list under test must be the WHOLE hub-side surface, not what this test
   // remembers: a hub variable added to the platform list without a case here is a
