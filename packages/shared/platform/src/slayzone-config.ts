@@ -71,7 +71,7 @@ export interface HubConfig {
   requireLogin?: boolean
   /** Email + password sign-in. Default on. */
   enablePassword?: boolean
-  /** Entra OIDC sign-in. Default off; needs `ssoTenantId`, `ssoClientId` and the env-only client secret. */
+  /** Entra OIDC sign-in. Default off; needs `ssoTenantId`, `ssoClientId` and the env-only certificate + key paths (`SLAYZONE_HUB_SSO_CERT_PATH` / `_KEY_PATH`). */
   enableSso?: boolean
   /** Entra tenant id. */
   ssoTenantId?: string

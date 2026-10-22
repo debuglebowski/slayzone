@@ -70,8 +70,10 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
-  // Entra OIDC client secret (SSO). Env only — never read from hub.config.json,
-  // never logged, never in a terminal.
+  // Retired before it was ever read: Entra sign-in authenticates with a certificate
+  // (SLAYZONE_HUB_SSO_CERT_PATH / _KEY_PATH below), and boot refuses a hub that still
+  // sets this (B7). Still classified `secret` so a leftover value never reaches a
+  // terminal or a log.
   SLAYZONE_HUB_SSO_CLIENT_SECRET: 'secret',
   // Per-boot bearer the desktop's `/cap` listener requires on every connection
   // (desktop-bridge-server.ts `verifyClient`). Loopback is NOT trusted there —
@@ -103,6 +105,12 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'infra',
   SLAYZONE_HUB_SSO_TENANT_ID: 'infra',
   SLAYZONE_HUB_SSO_CLIENT_ID: 'infra',
+  // Paths to the Entra client certificate and its private key, and the MFA switch.
+  // Infra, not secret: a path is not the key (the file's own permissions protect it),
+  // but a task terminal must still never inherit a hub's SSO wiring.
+  SLAYZONE_HUB_SSO_CERT_PATH: 'infra',
+  SLAYZONE_HUB_SSO_KEY_PATH: 'infra',
+  SLAYZONE_HUB_SSO_REQUIRE_MFA: 'infra',
   // Operator-facing hub name (`slay hub ls`/`stop` address a hub by it). Infra,
   // not global: it identifies THIS hub process, so inheriting it into a task
   // terminal — which may target a different hub entirely — would mislabel.

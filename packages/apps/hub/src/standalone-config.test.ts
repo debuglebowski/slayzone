@@ -119,14 +119,23 @@ test('env WINS over hub.config.json (does not overwrite a set env)', () => {
 
 // ── the switches: file booleans become the 0|1 env channel ───────────────────
 test('hub.config.json switches seed the env as 0|1', () => {
-  // SSO on needs its client secret, which only env can supply (B7).
-  withIsolatedEnv({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 'sso-secret' }, () => {
+  // SSO on needs its certificate + key paths, which only env supplies, and a public
+  // address (B7) — which makes the hub reachable, so the auth secret too (B14).
+  const SSO_ENV = {
+    SLAYZONE_HUB_SSO_CERT_PATH: '/run/sso/cert.pem',
+    SLAYZONE_HUB_SSO_KEY_PATH: '/run/sso/key.pem',
+    SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+    SLAYZONE_HUB_AUTH_SECRET: 'a-long-random-secret'
+  }
+  const TENANT = '11111111-2222-3333-4444-555555555555'
+  const CLIENT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+  withIsolatedEnv(SSO_ENV, () => {
     saveHubConfigFile({
       requireLogin: true,
       enablePassword: false,
       enableSso: true,
-      ssoTenantId: 'tenant-1',
-      ssoClientId: 'client-1',
+      ssoTenantId: TENANT,
+      ssoClientId: CLIENT,
       enableProcesses: false,
       enableIntegrations: false
     })
@@ -136,8 +145,8 @@ test('hub.config.json switches seed the env as 0|1', () => {
     assertEq(process.env.SLAYZONE_HUB_ENABLE_SSO, '1', 'enableSso true → 1')
     assertEq(process.env.SLAYZONE_HUB_ENABLE_PROCESSES, '0', 'enableProcesses false → 0')
     assertEq(process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS, '0', 'enableIntegrations false → 0')
-    assertEq(process.env.SLAYZONE_HUB_SSO_TENANT_ID, 'tenant-1', 'ssoTenantId')
-    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, 'client-1', 'ssoClientId')
+    assertEq(process.env.SLAYZONE_HUB_SSO_TENANT_ID, TENANT, 'ssoTenantId')
+    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, CLIENT, 'ssoClientId')
   })
 })
 

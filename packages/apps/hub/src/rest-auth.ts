@@ -27,7 +27,7 @@
  */
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
-import { verifySession } from '@slayzone/hub-auth/server'
+import { ENTRA_PROVIDER_ID, verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   peerAddress,
@@ -84,6 +84,25 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
 ])
 
 /**
+ * The Entra sign-in routes (T-09), open ONLY on a hub with Entra sign-in on — on any
+ * other hub they stay behind the bearer like every unlisted `/api/auth/` route.
+ *   - `sign-in/social` — starts the flow: answers the Entra authorize URL and sets the
+ *                        state cookie. better-auth only knows the one provider this
+ *                        hub installs, and refuses its ID-token variant (entra.ts).
+ *   - `callback/microsoft` — where Entra sends the browser back. The callback of the
+ *                        configured provider only, by exact path; it signs in nobody
+ *                        without the state cookie and a code Entra will redeem for
+ *                        this hub's own certificate.
+ * Better-auth's other OAuth routes (`/link-social`, `/refresh-token`,
+ * `/get-access-token`, `/account-info`, its `/error` page) are not listed: each needs a
+ * session, or nothing the server flow uses.
+ */
+const SSO_BOOTSTRAP_PATHS = new Set<string>([
+  '/api/auth/sign-in/social',
+  `/api/auth/callback/${ENTRA_PROVIDER_ID}`
+])
+
+/**
  * Routes that carry their OWN stronger guard and must not additionally require a
  * bearer.
  *
@@ -119,6 +138,8 @@ const MCP_PATH = '/mcp'
 export interface RestAuthActionOptions {
   /** Whether THIS hub requires login (`SLAYZONE_HUB_REQUIRE_LOGIN`, see `server.ts`). */
   hubAuthRequired: boolean
+  /** Whether Entra sign-in is on (`HubBootSettings.ssoActive`). Opens {@link SSO_BOOTSTRAP_PATHS}. */
+  ssoActive?: boolean
   /** The raw request url (`req.url`), query string included. */
   url: string | undefined
 }
@@ -148,6 +169,7 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   if (path !== MCP_PATH && !path.startsWith('/api/')) return 'allow'
   if (SELF_GUARDED.has(path)) return 'allow'
   if (AUTH_BOOTSTRAP_PATHS.has(path)) return 'allow'
+  if (opts.ssoActive === true && SSO_BOOTSTRAP_PATHS.has(path)) return 'allow'
   return 'verify'
 }
 
@@ -261,6 +283,8 @@ export async function verifyRestBearer(
  */
 export function withRestAuth(opts: {
   getHubAuthRequired: () => boolean
+  /** Entra sign-in on: its two routes pass the gate (see {@link SSO_BOOTSTRAP_PATHS}). */
+  getSsoActive?: () => boolean
   getHubAuth: () => HubAuth | null
   /** Needed to resolve a `szw_` web-session token — null on a host with no
    *  such table available (there is none today; kept optional for callers
@@ -299,6 +323,7 @@ export function withRestAuth(opts: {
     }
     const action = restAuthAction({
       hubAuthRequired: opts.getHubAuthRequired(),
+      ssoActive: opts.getSsoActive?.() === true,
       url: req.url
     })
     if (action === 'allow') {

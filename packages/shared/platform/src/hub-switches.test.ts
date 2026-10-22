@@ -129,28 +129,49 @@ check(
   !isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: 'garbage' })
 )
 
-// --- SSO settings: blank = unset ---
+// --- SSO settings: blank = unset; MFA required unless exactly 0 ---
 {
   const none = resolveHubSso({})
-  check('sso: nothing set → empty', !none.tenantId && !none.clientId && !none.clientSecret)
+  check(
+    'sso: nothing set → empty, MFA required',
+    !none.tenantId && !none.clientId && !none.certPath && !none.keyPath && none.requireMfa
+  )
   const blank = resolveHubSso({
     SLAYZONE_HUB_SSO_TENANT_ID: '  ',
     SLAYZONE_HUB_SSO_CLIENT_ID: '',
-    SLAYZONE_HUB_SSO_CLIENT_SECRET: ' '
+    SLAYZONE_HUB_SSO_CERT_PATH: ' ',
+    SLAYZONE_HUB_SSO_KEY_PATH: ''
   })
   check(
     'sso: blank values count as unset',
-    !blank.tenantId && !blank.clientId && !blank.clientSecret
+    !blank.tenantId && !blank.clientId && !blank.certPath && !blank.keyPath
   )
   const full = resolveHubSso({
     SLAYZONE_HUB_SSO_TENANT_ID: 't',
     SLAYZONE_HUB_SSO_CLIENT_ID: 'c',
-    SLAYZONE_HUB_SSO_CLIENT_SECRET: 's'
+    SLAYZONE_HUB_SSO_CERT_PATH: '/c.pem',
+    SLAYZONE_HUB_SSO_KEY_PATH: '/k.pem',
+    SLAYZONE_HUB_SSO_REQUIRE_MFA: '0'
   })
   check(
-    'sso: all three read',
-    full.tenantId === 't' && full.clientId === 'c' && full.clientSecret === 's'
+    'sso: all read',
+    full.tenantId === 't' &&
+      full.clientId === 'c' &&
+      full.certPath === '/c.pem' &&
+      full.keyPath === '/k.pem' &&
+      full.requireMfa === false
   )
+  check(
+    'sso: the retired client secret is not read',
+    !('clientSecret' in resolveHubSso({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 's' }))
+  )
+  let threw: unknown = null
+  try {
+    resolveHubSso({ SLAYZONE_HUB_SSO_REQUIRE_MFA: 'yes' })
+  } catch (e) {
+    threw = e
+  }
+  check('sso: REQUIRE_MFA other than 0|1 throws (B4)', threw instanceof HubSwitchValueError)
 }
 
 // --- HUB_PROCESS_ENV: everything a parent must clear before spawning a hub ---
@@ -163,6 +184,10 @@ check(
       ...Object.values(HUB_SWITCH_ENV),
       'SLAYZONE_HUB_SSO_TENANT_ID',
       'SLAYZONE_HUB_SSO_CLIENT_ID',
+      'SLAYZONE_HUB_SSO_CERT_PATH',
+      'SLAYZONE_HUB_SSO_KEY_PATH',
+      'SLAYZONE_HUB_SSO_REQUIRE_MFA',
+      // Retired, but a parent still clears it.
       'SLAYZONE_HUB_SSO_CLIENT_SECRET',
       'SLAYZONE_HUB_LISTEN_ADDRESS',
       'SLAYZONE_HUB_PUBLIC_ADDRESS',

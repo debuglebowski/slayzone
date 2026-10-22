@@ -11,7 +11,7 @@ import {
   setAuthGate
 } from '@slayzone/transport/server'
 import { beginTerminalShutdown } from '@slayzone/terminal/server'
-import { createAuthExpressApp } from '@slayzone/hub-auth/server'
+import { createAuthExpressApp, loadEntraClientCredential } from '@slayzone/hub-auth/server'
 import {
   bindInHubPortBlock,
   ensureDataRoot,
@@ -21,7 +21,7 @@ import {
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
-import { assertAuthLoaded, assertHubBootRules } from './boot-rules.js'
+import { assertAuthLoaded, assertHubBootRules, assertSsoCredential } from './boot-rules.js'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
@@ -72,6 +72,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     devSqlEnabled: isDevSqlEnabled()
   })
   const { switches } = boot
+  // B7, second half: Entra sign-in's certificate and key load — still before the hub
+  // has created anything. Null unless SSO is on (login required + ENABLE_SSO=1).
+  const sso = assertSsoCredential(boot, loadEntraClientCredential)
 
   const dataRoot = cfg.storeDir ?? ensureDataRoot()
   const log = createLogger(dataRoot)
@@ -99,6 +102,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     dataRoot,
     standalone: !supervised,
     requireLogin: switches.requireLogin,
+    publicAddress: boot.publicAddress,
+    sso,
     diagnosticsDb
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
@@ -148,7 +153,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // once, and leaves them in a 0600 file `slay` reads on this box. (A generated
   // password is a password sign-in; skipping this when `ENABLE_PASSWORD=0` belongs
   // to the work that enforces that switch.)
-  if (hubAuthRequired && hubAuth) {
+  //
+  // Not on a hub with Entra sign-in: its accounts come from Entra and admin only from
+  // the `SlayZone.Admin` app role (O-4), so an owner minted here would be exactly the
+  // admin that rule excludes. Users sign in through Entra; the first admin is whoever
+  // first signs in holding the app role.
+  if (hubAuthRequired && hubAuth && !boot.ssoActive) {
     try {
       await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
     } catch (err) {
@@ -286,6 +296,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   const gatedDispatch = withRestAuth({
     getHubAuthRequired: () => hubAuthRequired,
+    getSsoActive: () => boot.ssoActive,
     getHubAuth: () => hubAuth,
     getDb: () => db,
     next: dispatchRequest

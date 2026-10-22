@@ -142,7 +142,16 @@ import {
   createRemoteWorktreeAdapters,
   type HubComputerGateway
 } from '@slayzone/computer-transport/server'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
+import {
+  createHubAuth,
+  type EntraClientCredential,
+  type EntraSsoConfig,
+  type HubAuth
+} from '@slayzone/hub-auth/server'
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import type { HubSsoBootConfig } from './boot-rules.js'
+import { resolveAllowedWebOrigins } from './ws-origin.js'
+
 import { createHubUsersCapability } from './hub-users.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
@@ -238,6 +247,13 @@ export function composeServer(opts: {
    *  REST routes that self-guard (join-token, hub users) demand a bearer, so they
    *  can never disagree with the outer gate about whether this hub authenticates. */
   requireLogin: boolean
+  /**
+   * `SLAYZONE_HUB_PUBLIC_ADDRESS` (`host[:port]`): where browsers and Entra reach
+   * this hub. Becomes hub-auth's base URL. Unset = the loopback constant (below).
+   */
+  publicAddress?: string
+  /** Entra sign-in, when on (`assertSsoCredential` in boot-rules.ts). */
+  sso?: HubSsoBootConfig<EntraClientCredential> | null
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -1334,14 +1350,25 @@ export function composeServer(opts: {
   setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
   computersReady = (async () => {
+    const sso: EntraSsoConfig | undefined = opts.sso ?? undefined
     const hubAuth = await createHubAuth({
       dbPath: resolveAuthDbPath(dataRoot),
-      // better-auth baseURL: a fixed loopback constant. Computers authenticate via
-      // api-key/bearer (not cookies/redirects), so this is internal plumbing and
-      // never needs an operator override — the SLAYZONE_COMPUTER_TRANSPORT_BASE_URL
-      // env knob was inlined.
-      baseURL: 'http://127.0.0.1:8788',
-      secret: hubAuthSecret
+      // better-auth baseURL. A hub other machines reach is addressed by its public
+      // address (`https://` unless the host is loopback, rule A1): it is where Entra
+      // redirects back to (`<baseURL>/api/auth/callback/microsoft`, registered on the
+      // app) and the origin browsers send. Without one — the desktop app's hub and
+      // every loopback-only hub — a fixed loopback constant, as before: computers
+      // authenticate by api-key/bearer, never by cookies or redirects, so nothing
+      // there reads it.
+      baseURL: opts.publicAddress
+        ? hubUrlFromAddr(opts.publicAddress, 'http')
+        : 'http://127.0.0.1:8788',
+      // The same browser origins the /trpc origin guard accepts (the public origin plus
+      // SLAYZONE_HUB_ALLOWED_WEB_ORIGINS), for better-auth's callback-URL and CSRF
+      // checks. Empty on the desktop app's hub (its parent clears both variables).
+      trustedOrigins: resolveAllowedWebOrigins(),
+      secret: hubAuthSecret,
+      ...(sso ? { sso } : {})
     })
     hubAuthRef = hubAuth
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
