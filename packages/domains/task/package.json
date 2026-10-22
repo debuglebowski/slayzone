@@ -60,7 +60,7 @@
     "zod": "^4.3.5"
   },
   "peerDependencies": {
-    "electron": "^41.0.0",
+    "electron": "^41.10.7",
     "react": "^19.0.0"
   },
   "devDependencies": {

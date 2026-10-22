@@ -24,7 +24,7 @@
     "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
-    "electron": "^41.0.0"
+    "electron": "^41.10.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"
