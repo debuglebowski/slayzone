@@ -398,7 +398,12 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'DELETE /api/hub/users': none(ACCOUNTS),
   'GET /api/hub/users': none(ACCOUNTS),
   'PATCH /api/hub/users': none(ACCOUNTS),
-  'POST /api/hub/users': none(ACCOUNTS)
+  'POST /api/hub/users': none(ACCOUNTS),
+  // Break-glass v2 (added): revoke / unrevoke. Metadata only; the handler asks T-19's
+  // `mayManageComputer` (an admin: any existing computer), else 404.
+  'PATCH /api/hub/computers': none(
+    'computer lifecycle (revoked or not): management metadata, decided in the handler by computer-access.ts mayManageComputer (T-19); no content'
+  )
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────
