@@ -25,7 +25,6 @@ import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
 import {
   getDefaultStatus,
-  getDoneStatus,
   getStatusByCategory,
   isCompletedStatus,
   resolveRepoPath
@@ -34,6 +33,8 @@ import {
 import {
   useTasksData,
   useUndoableTaskActions,
+  useCloseTaskTab,
+  useCompleteAndCloseTask,
   useFilterState,
   useFilterStore,
   applyFilters,
@@ -598,32 +599,12 @@ function App(): React.JSX.Element {
   const openTaskRef = useRef(openTask)
   openTaskRef.current = openTask
 
-  // Tab management (declared early so IPC-listener refs below can close over closeTab)
-  const closeTab = useCallback(
-    (index: number): void => {
-      const store = useTabStore.getState()
-      const tab = store.tabs[index]
-      if (tab?.type === 'task') {
-        const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
-        if (task?.is_temporary) {
-          void trpcClient.pty.kill.mutate({ sessionId: `${tab.taskId}:${tab.taskId}` })
-          void trpcClient.task.delete.mutate({ id: tab.taskId })
-          setTasks((prev) => prev.filter((t) => t.id !== tab.taskId))
-        }
-      }
-      store.closeTab(index)
-    },
-    [setTasks, trpcClient]
-  )
-
-  const closeTabByTaskId = useCallback(
-    (taskId: string): void => {
-      const index = useTabStore
-        .getState()
-        .tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
-      if (index >= 0) closeTab(index)
-    },
-    [closeTab]
+  // Tab management (declared early so IPC-listener refs below can close over closeTab).
+  // Closing a temporary task's tab deletes the task on its owning hub.
+  const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawDeleteTask)
+  const completeAndCloseTask = useCompleteAndCloseTask(
+    { tasks, projects, updateTask, closeTabByTaskId, openTask },
+    { push: pushUndo, undo }
   )
 
   const goBack = useCallback((): void => {
@@ -929,29 +910,8 @@ function App(): React.JSX.Element {
   const handleCompleteTaskConfirm = async (): Promise<void> => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab.type !== 'task') return
-    const task = tasksMap.get(activeTab.taskId)
-    if (!task) return
-    const project = projectsMap.get(task.project_id)
-    const doneStatus = getDoneStatus(project?.columns_config)
-    const prevStatus = task.status
-    await trpcClient.task.update.mutate({ id: activeTab.taskId, status: doneStatus })
-    updateTask({ ...task, status: doneStatus })
-    closeTab(activeTabIndex)
+    await completeAndCloseTask(activeTab.taskId)
     useDialogStore.getState().closeCompleteTaskDialog()
-    if (prevStatus !== doneStatus) {
-      pushUndo({
-        label: `Completed "${task.title}"`,
-        undo: async () => {
-          await trpcClient.task.update.mutate({ id: task.id, status: prevStatus })
-          setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t)))
-        },
-        redo: async () => {
-          await trpcClient.task.update.mutate({ id: task.id, status: doneStatus })
-          setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t)))
-        }
-      })
-      toast(`Completed "${task.title}"`, { action: { label: 'Undo', onClick: () => void undo() } })
-    }
   }
 
   // Scratch terminal

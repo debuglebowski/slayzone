@@ -31,7 +31,6 @@ import {
 import {
   Toaster,
   toast,
-  useUndo,
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -50,7 +49,6 @@ import {
 } from '@slayzone/transport/client'
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
-import { getDoneStatus } from '@slayzone/projects/shared'
 import type { useTasksData } from '@slayzone/tasks/client'
 import type { Project } from '@slayzone/projects/shared'
 import type { Task } from '@slayzone/task/shared'
@@ -122,6 +120,8 @@ interface AppDialogsProps {
   onSelectProject: (id: string) => void
   /** Open a task in the fork's selected-task router (HomeView). */
   onOpenTask: (taskId: string) => void
+  /** Complete & Close Tab for a task, undoably (HomeView's useCompleteAndCloseTask). */
+  onCompleteTask: (taskId: string) => Promise<void>
   /**
    * Onboarding close-flow handlers from HomeView's useOnboardingChecklist (the
    * checklist hook lives there to feed the sidebar). Finishing onboarding marks
@@ -149,6 +149,7 @@ export function AppDialogs({
   selectedProjectId,
   onSelectProject,
   onOpenTask,
+  onCompleteTask,
   startTour,
   markSetupGuideCompleted
 }: AppDialogsProps): React.JSX.Element {
@@ -306,44 +307,16 @@ export function AppDialogs({
   // ── Complete-task confirm + active-terminals dialog ───────────────────────
   // Both consume useDialogStore fields the Electron app drives; rendering them
   // here keeps the fork at parity (no dead store fields). Complete marks the
-  // active task's status → done, closes its tab, and offers undo — mirrors
-  // canonical App.tsx handleCompleteTaskConfirm. (Its trigger is the
-  // "complete active task" keyboard shortcut, which lands with the app-shortcuts
-  // port; the store action is wired now so it works the moment a trigger fires.)
+  // active task done, closes its tab, and offers undo — the shared
+  // useCompleteAndCloseTask HomeView passes in (same as the Electron App.tsx).
   const completeTaskDialogOpen = useDialogStore((s) => s.completeTaskDialogOpen)
-  const { push: pushUndo, undo } = useUndo()
   const handleCompleteTaskConfirm = useCallback(async () => {
     const store = useTabStore.getState()
-    const idx = store.activeTabIndex
-    const at = store.tabs[idx]
+    const at = store.tabs[store.activeTabIndex]
     if (at?.type !== 'task') return
-    const task = data.tasks.find((t) => t.id === at.taskId)
-    if (!task) return
-    const project = data.projects.find((p) => p.id === task.project_id)
-    const doneStatus = getDoneStatus(project?.columns_config)
-    const prevStatus = task.status
-    await trpcClient.task.update.mutate({ id: at.taskId, status: doneStatus })
-    data.updateTask({ ...task, status: doneStatus })
-    store.closeTab(idx)
+    await onCompleteTask(at.taskId)
     useDialogStore.getState().closeCompleteTaskDialog()
-    if (prevStatus === doneStatus) return
-    pushUndo({
-      label: `Completed "${task.title}"`,
-      undo: async () => {
-        await trpcClient.task.update.mutate({ id: task.id, status: prevStatus })
-        data.setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t))
-        )
-      },
-      redo: async () => {
-        await trpcClient.task.update.mutate({ id: task.id, status: doneStatus })
-        data.setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t))
-        )
-      }
-    })
-    toast(`Completed "${task.title}"`, { action: { label: 'Undo', onClick: () => void undo() } })
-  }, [data, trpcClient, pushUndo, undo])
+  }, [onCompleteTask])
 
   return (
     <>

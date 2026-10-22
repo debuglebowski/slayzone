@@ -31,7 +31,12 @@ import {
   cn
 } from '@slayzone/ui'
 import { useExplodeMode, AppHeaderActions } from '@slayzone/app-shell/client'
-import { useTasksData, useUndoableTaskActions } from '@slayzone/tasks/client'
+import {
+  useTasksData,
+  useUndoableTaskActions,
+  useCloseTaskTab,
+  useCompleteAndCloseTask
+} from '@slayzone/tasks/client'
 import {
   useDialogStore,
   useTabStore,
@@ -222,34 +227,21 @@ export function HomeView(): React.JSX.Element {
   }, [openTask])
 
   // Close a tab by index. Temporary tasks have no persistent home, so closing
-  // one kills its PTY + deletes the task (mirrors the Electron App.tsx wrapper);
-  // the live board subscription + optimistic deleteTask drop it from the board.
-  const closeTab = useCallback(
-    async (index: number): Promise<void> => {
-      const store = useTabStore.getState()
-      const tab = store.tabs[index]
-      if (tab?.type === 'task') {
-        const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
-        if (task?.is_temporary) {
-          void trpcClient.pty.kill.mutate({ sessionId: `${tab.taskId}:${tab.taskId}` })
-          // Raw delete (not the undoable wrapper) — a scratch terminal closing
-          // shouldn't surface an "undo delete" toast.
-          void rawData.deleteTask(tab.taskId)
-        }
-      }
-      store.closeTab(index)
-    },
-    [rawData, trpcClient]
-  )
+  // one kills its PTY + deletes the task on its owning hub (shared with the
+  // Electron App.tsx); the live board subscription + optimistic deleteTask drop
+  // it from the board.
+  const { closeTab, closeTabByTaskId } = useCloseTaskTab(rawData.deleteTask)
 
-  const closeTabByTaskId = useCallback(
-    (taskId: string): void => {
-      const index = useTabStore
-        .getState()
-        .tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
-      if (index >= 0) void closeTab(index)
+  // Complete & Close Tab (⌘⇧D) — confirm dialog lives in AppDialogs.
+  const completeAndCloseTask = useCompleteAndCloseTask(
+    {
+      tasks: rawData.tasks,
+      projects,
+      updateTask: rawData.updateTask,
+      closeTabByTaskId,
+      openTask
     },
-    [closeTab]
+    { push: pushUndo, undo }
   )
 
   // Scratch terminal — create a temporary `Terminal N` task and open it (mirrors
@@ -933,6 +925,7 @@ export function HomeView(): React.JSX.Element {
         selectedProjectId={selectedProjectId}
         onSelectProject={(id) => useTabStore.getState().selectProject(id)}
         onOpenTask={openTask}
+        onCompleteTask={completeAndCloseTask}
         startTour={startTour}
         markSetupGuideCompleted={markSetupGuideCompleted}
       />

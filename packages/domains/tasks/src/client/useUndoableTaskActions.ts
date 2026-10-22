@@ -8,7 +8,7 @@ import {
 import type { Task } from '@slayzone/task/shared'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
-interface UndoAPI {
+export interface UndoAPI {
   push: (action: UndoableAction) => void
   undo: () => Promise<string | undefined>
 }

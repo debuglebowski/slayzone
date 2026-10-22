@@ -672,6 +672,126 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
+  base('Complete & Close Tab on a remote-hub task writes to THAT hub, and undo too', async () => {
+    base.setTimeout(180_000)
+
+    // ⌘⇧D marks the active task done and closes its tab; closing a TEMPORARY task's
+    // tab also deletes it. Each of those writes — and undo's restore — must reach the
+    // hub that owns the task, not the default hub (which has no such row).
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+
+      const { regularId, temporaryId } = await withHubClient(remoteHubUrl, async (c) => {
+        const project = (await c.projects.create.mutate({
+          name: 'Remote-P',
+          color: '#22c55e',
+          path: '/tmp'
+        })) as { id: string }
+        const regular = (await c.task.create.mutate({
+          projectId: project.id,
+          title: 'remote complete task',
+          status: 'todo',
+          terminalMode: 'terminal'
+        })) as { id: string }
+        const temporary = (await c.task.create.mutate({
+          projectId: project.id,
+          title: 'remote temporary task',
+          status: 'todo',
+          isTemporary: true,
+          terminalMode: 'terminal'
+        })) as { id: string }
+        return { regularId: regular.id, temporaryId: temporary.id }
+      })
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-complete-undo',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify(
+              {
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
+                default_hub_id: 'local'
+              },
+              null,
+              2
+            )
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
+      // The remote project's rail tile proves the federated board — and with it the
+      // task→hub ownership every write here routes on — has landed.
+      await expect(projectBlob(page, 'RE')).toBeVisible({ timeout: 30_000 })
+
+      type Row = { status: string; deleted_at: string | null } | null
+      const remoteTask = (id: string) =>
+        withHubClient(remoteHubUrl, (c) => c.task.get.query({ id }) as Promise<Row>)
+      const openTab = (id: string) =>
+        page.evaluate(
+          (tid) =>
+            (window as { __slayzone_openTask?: (taskId: string) => void }).__slayzone_openTask?.(
+              tid
+            ),
+          id
+        )
+      const complete = async () => {
+        await page.keyboard.press('Meta+Shift+d')
+        const dialog = page.locator('[data-slot="alert-dialog-content"]')
+        await expect(dialog.getByText('Mark as complete and close tab?')).toBeVisible({
+          timeout: 10_000
+        })
+        await dialog.getByRole('button', { name: 'Complete' }).click()
+        await expect(dialog).not.toBeVisible({ timeout: 10_000 })
+      }
+      const undo = () =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __slayzone_bulkTaskActionsForTest: { undo: () => Promise<unknown> }
+            }
+          ).__slayzone_bulkTaskActionsForTest.undo()
+        )
+      const poll = { timeout: 15_000, intervals: [250, 500, 1_000] }
+
+      // (1) Regular task: done lands on the REMOTE hub; undo reverts it there.
+      await openTab(regularId)
+      await complete()
+      await expect.poll(async () => (await remoteTask(regularId))?.status, poll).toBe('done')
+      await undo()
+      await expect.poll(async () => (await remoteTask(regularId))?.status, poll).toBe('todo')
+
+      // (2) Temporary task: the close deletes it on the REMOTE hub; undo restores it there.
+      await openTab(temporaryId)
+      await complete()
+      await expect.poll(async () => !!(await remoteTask(temporaryId))?.deleted_at, poll).toBe(true)
+      await undo()
+      await expect
+        .poll(async () => (await remoteTask(temporaryId))?.deleted_at ?? null, poll)
+        .toBeNull()
+      await expect.poll(async () => (await remoteTask(temporaryId))?.status, poll).toBe('todo')
+    } finally {
+      if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
   base('creating a task on a remote-hub project writes to THAT hub and opens there', async () => {
     base.setTimeout(180_000)
 
