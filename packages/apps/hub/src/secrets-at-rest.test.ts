@@ -4,15 +4,15 @@
  *
  * Each hub boots with KNOWN secret values, is driven through the paths that touch a
  * credential (owner sign-in, a failed sign-in, a join token, a computer enrolling, an
- * account created, break-glass, Entra sign-in errors, boot refusals), stops, and then:
+ * account created, break-glass v2, Entra sign-in errors, boot refusals), stops, and then:
  *   - nothing under `<ROOT>/logs`, stdout or stderr holds any of those values, nor the
  *     auth secret's hex / base64 / base64url forms;
  *   - no file under `<ROOT>` (the databases and their WAL included) holds the auth
  *     secret in any form, the derived owner password, a generated password, a join
  *     token or a computer API key — only hashes and ciphertext;
- *   - there is no `hub.state.json` or `hub.owner.json`. The one file that holds a
- *     generated password is `hub.break-glass.json`, written only while break-glass is
- *     open (O-9), 0600 — the accepted exception, checked here.
+ *   - there is no `hub.state.json`, `hub.owner.json` or `hub.break-glass.json`: break-glass
+ *     v2 keeps its grant and session in memory, so its verifier and session token are on
+ *     no disk and in no log either (v1's file, the former exception, is gone).
  * Plus the upgrade (compat): a hub that generated its secret while loopback-only, then
  * published with that secret in env, boots, leaves its old files untouched (and names
  * them), and keeps every session and enrolled computer; a different secret is B17.
@@ -26,8 +26,8 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *   packages/apps/hub/src/secrets-at-rest.test.ts
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   existsSync,
   mkdtempSync,
@@ -140,6 +140,16 @@ function spawnHub(root: string, env: Record<string, string>): Hub {
         proc.kill('SIGTERM')
       })
   }
+}
+
+/** Run the built bin with `args` (an operator command, not a hub): exit code + output. */
+function runBin(args: string[]): { code: number | null; out: string } {
+  const r = spawnSync(ELECTRON_BIN, [HUB_BIN, ...args], {
+    env: { ...scrubbedEnv(), ELECTRON_RUN_AS_NODE: '1' },
+    encoding: 'utf8',
+    timeout: 30_000
+  })
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
 
 async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: string): Promise<T> {
@@ -432,28 +442,36 @@ async function main(): Promise<void> {
       assertNotLogged(root, hub, { ...never, 'a session bearer': [bearer] })
     })
 
-    await test('SSO hub with break-glass open: only the 0600 break-glass file, nothing in any log', async () => {
+    await test('SSO hub with break-glass used: no break-glass file; verifier and session token on no disk, in no log', async () => {
       const root = newRoot()
       const secret = randomBytes(32).toString('hex')
       const { certPath, keyPath } = writeSsoCert(root)
       const hub = spawnHub(root, {
         ...reachable(secret),
         SLAYZONE_HUB_ENABLE_SSO: '1',
-        SLAYZONE_HUB_ENABLE_PASSWORD: '1',
+        SLAYZONE_HUB_ENABLE_PASSWORD: '0',
         SLAYZONE_HUB_SSO_TENANT_ID: '11111111-2222-3333-4444-555555555555',
         SLAYZONE_HUB_SSO_CLIENT_ID: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
         SLAYZONE_HUB_SSO_CERT_PATH: certPath,
         SLAYZONE_HUB_SSO_KEY_PATH: keyPath
       })
-      let account: { email: string; password: string }
-      let bearer: string
-      const breakGlass = join(root, 'hub.break-glass.json')
+      const verifier = randomBytes(32).toString('base64url')
+      let bearer = ''
       try {
         const port = await bootAndGetPort(hub)
-        assert(existsSync(breakGlass), 'break-glass file written')
-        assert((statSync(breakGlass).mode & 0o777) === 0o600, 'break-glass file is 0600')
-        account = JSON.parse(readFileSync(breakGlass, 'utf8')) as typeof account
-        bearer = await signIn(port, account.email, account.password)
+        // Break-glass v2: a grant over the local socket, redeemed with the verifier.
+        const challenge = createHash('sha256').update(verifier).digest('base64url')
+        const open = runBin(['break-glass', 'open', '--challenge', challenge, '--root', root])
+        assert(open.code === 0, `break-glass open: ${open.out}`)
+        const redeemed = await postJson(`http://127.0.0.1:${port}/api/auth/break-glass`, {
+          verifier
+        })
+        bearer = typeof redeemed.json.token === 'string' ? redeemed.json.token : ''
+        assert(redeemed.status === 200 && bearer, `break-glass redeem: ${redeemed.status}`)
+        const users = await fetch(`http://127.0.0.1:${port}/api/hub/users`, {
+          headers: { authorization: `Bearer ${bearer}` }
+        })
+        assert(users.status === 200, `the session works, got ${users.status}`)
         // Entra sign-in: start (builds the authorize URL, reaches no one) and a callback
         // with an error — the SSO error path, without Microsoft.
         const start = await postJson(`http://127.0.0.1:${port}/api/auth/sign-in/social`, {
@@ -470,21 +488,19 @@ async function main(): Promise<void> {
       } finally {
         await hub.stop()
       }
-      for (const name of ['hub.state.json', 'hub.owner.json']) {
+      for (const name of ['hub.state.json', 'hub.owner.json', 'hub.break-glass.json']) {
         assert(!existsSync(join(root, name)), `no ${name} under ROOT`)
       }
-      // The certificate and key are the operator's own files (paths in env); only the
-      // break-glass file holds a generated password. Everything else holds none.
-      const others = (f: string): boolean => !['hub.break-glass.json', 'sso-key.pem'].includes(f)
-      const files = allFiles(root).filter((f) => others(f.path))
-      for (const v of [...forms(secret), account.password]) {
+      // The certificate and key are the operator's own files (paths in env).
+      const files = allFiles(root).filter((f) => f.path !== 'sso-key.pem')
+      for (const v of [...forms(secret), verifier, bearer]) {
         const hit = files.find((f) => f.bytes.includes(v))
         assert(!hit, `a secret is on disk in ${hit?.path}`)
       }
       assertNotLogged(root, hub, {
         'the auth secret': forms(secret),
-        'the break-glass password': [account.password],
-        'a session bearer': [bearer],
+        'the break-glass verifier': [verifier],
+        'the break-glass session': [bearer],
         'the SSO private key': [...keySlices(keyPath), 'PRIVATE KEY']
       })
     })
