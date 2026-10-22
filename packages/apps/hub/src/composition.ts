@@ -160,8 +160,9 @@ import { createHubUsersCapability } from './hub-users.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
+import { createComputerPlacement } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireHostKillStamp } from './host-kill.js'
@@ -576,8 +577,9 @@ export function composeServer(opts: {
   })
   // Computer resolution for exec routing: a task's explicit binding, else the
   // connected default computer (sole connected, else the one named
-  // DEFAULT_LOCAL_COMPUTER_NAME; several unnamed → refuse to guess). `null` means
-  // "run in-process", which every routing backend below handles as a local spawn.
+  // DEFAULT_LOCAL_COMPUTER_NAME; several unnamed → refuse to guess). On a hub with
+  // login only the work owner's computers count, and every request is gated on that
+  // again on its way out (T-19, ./computer-placement.ts).
   //
   // Deliberately simple: the reconnect grace + last-known-computer cache that used to
   // live here existed only to keep the no-fallback invariant from failing spawns
@@ -586,28 +588,29 @@ export function composeServer(opts: {
   // (plan phases A→D) this is replaced by a single `listUsableComputers()` authority
   // on the gateway, not by re-adding these.
   let execGateway: HubComputerGateway | null = null
-  const resolveExecComputer = (specComputerId: string | null | undefined): string | null => {
-    if (specComputerId != null) return specComputerId
+  const placement = createComputerPlacement({
+    db,
+    requireLogin: opts.requireLogin,
     // `listUsableComputers`, NOT `listComputers`: usable = authenticated + heard from
     // inside the heartbeat window. An open-but-silent socket would otherwise be
     // picked and every dispatch to it would hang until the watchdog reaped it.
-    const usable = execGateway?.listUsableComputers() ?? []
-    if (usable.length === 0) return null
-    if (usable.length === 1) return usable[0].computerId
-    const local = usable.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
-    return local ? local.computerId : null
+    usable: () => execGateway?.listUsableComputers() ?? []
+  })
+  const resolveExecComputer = placement.forSpec
+  /** `rows` whose project this computer's owner owns — every row without login. */
+  const ownProjects = async <T extends { id: string }>(
+    computerId: string,
+    rows: readonly T[]
+  ): Promise<T[]> => {
+    if (!opts.requireLogin) return [...rows]
+    const out: T[] = []
+    for (const row of rows) if (await placement.servesProject(computerId, row.id)) out.push(row)
+    return out
   }
   /** Effective computer for a task: explicit binding, else connected default. */
-  const resolveComputerForTask = async (taskId: string): Promise<string | null> =>
-    resolveExecComputer(await resolveTaskComputerId(db, taskId))
+  const resolveComputerForTask = placement.forTask
   /** Same, for a project — its default binding, else the connected default. */
-  const resolveComputerForProject = async (projectId: string): Promise<string | null> => {
-    const row = await db.get<{ default_computer_id?: string | null }>(
-      'SELECT default_computer_id FROM projects WHERE id = ?',
-      [projectId]
-    )
-    return resolveExecComputer(row?.default_computer_id ?? null)
-  }
+  const resolveComputerForProject = placement.forProject
 
   // Inject computer-aware spawn lookups BEFORE createPtyOps (which captures the
   // lookups at construction). Only `resolveComputerId` is overridden; the mode-row /
@@ -1450,7 +1453,8 @@ export function composeServer(opts: {
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
-        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
+        gate: placement.gate
       })
     )
     // Warm agents are the COMPUTER's processes, so they outlive a hub or sidecar
@@ -1482,7 +1486,8 @@ export function composeServer(opts: {
     configureTransport({
       backend: createRoutingChatBackend({
         gateway: computerGateway,
-        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
+        gate: placement.gate
       })
     })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
@@ -1498,6 +1503,7 @@ export function composeServer(opts: {
         // computer had its worktree created on the hub, leaving the agent with a cwd
         // that does not exist on its own machine.
         resolveComputerId: (taskId) => resolveComputerForTask(taskId),
+        gate: placement.gate,
         local: defaultWorktreeExecAdapters
       })
     })
@@ -1507,7 +1513,9 @@ export function composeServer(opts: {
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.
     setGhExecutor(async (args, opts) => {
-      const computerId = resolveExecComputer(null)
+      // The caller's own computer on a hub with login (T-19): `gh` speaks as the
+      // machine's account, which must never be someone else's.
+      const computerId = await placement.forCaller()
       // No computer = this hub's own disk is the only one, so its own `gh` is the
       // only meaningful identity. Falls through to the local executor — which refuses
       // on a hub with processes switched off (T-06): there, no computer = no `gh`.
@@ -1526,9 +1534,20 @@ export function composeServer(opts: {
     // is the entire point: the picker must browse the filesystem the agent will
     // actually get. Serving these from the hub is what made a task on a remote
     // computer report "No repository path configured" for a path that existed.
+    const localWorkspaceFs = createLocalWorkspaceFs()
+    // The hub's own maintenance on connect (below): the computer is named by the
+    // gateway event, not by a caller, and what it is handed is cut to its owner's
+    // projects (T-19).
     const workspaceFs = createRemoteFsAdapters({
       gateway: computerGateway,
-      local: createLocalWorkspaceFs()
+      local: localWorkspaceFs
+    })
+    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): gated as the
+    // caller's own request on a hub with login (T-19).
+    const userWorkspaceFs = createRemoteFsAdapters({
+      gateway: computerGateway,
+      local: localWorkspaceFs,
+      gate: placement.gate
     })
     // The supervised local computer defaults its jail to `[homedir()]`, but the
     // desktop app that used to do this work had no jail at all — so routing the
@@ -1540,13 +1559,15 @@ export function composeServer(opts: {
       if (computerName !== localComputerName) return
       try {
         const { roots } = await workspaceFs.listRoots(computerId)
-        const rows = await db.all<{ path: string | null }>(
-          'SELECT DISTINCT path FROM projects WHERE path IS NOT NULL'
+        // On the owner's behalf only: a project of anyone else's never widens this
+        // computer's jail (T-19). Every project without login.
+        const rows = await ownProjects(
+          computerId,
+          await db.all<{ id: string; path: string | null }>(
+            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+          )
         )
-        const additions = missingRootsForProjects(
-          rows.map((r) => r.path),
-          roots
-        )
+        const additions = missingRootsForProjects([...new Set(rows.map((r) => r.path))], roots)
         if (additions.length === 0) return
         const applied = await workspaceFs.setAllowedRoots(computerId, [...roots, ...additions])
         recordDiagnosticEvent({
@@ -1576,8 +1597,13 @@ export function composeServer(opts: {
     seedLocalProjectPaths = async (computerId: string, computerName: string): Promise<void> => {
       if (computerName !== localComputerName) return
       try {
-        const rows = await db.all<{ id: string; path: string | null }>(
-          'SELECT id, path FROM projects WHERE path IS NOT NULL'
+        // The owner's projects only, like the roots above: another user's project id
+        // and path never reach this computer (T-19).
+        const rows = await ownProjects(
+          computerId,
+          await db.all<{ id: string; path: string | null }>(
+            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+          )
         )
         if (rows.length === 0) return
         const outcome = await seedProjectPaths(rows, {
@@ -1619,10 +1645,17 @@ export function composeServer(opts: {
         )
         const parsed = projectListResultSchema.safeParse(listed)
         if (!parsed.success) return
+        // A computer places only its owner's projects (T-19): a report naming anyone
+        // else's would make paths on it resolve to their project (access.ts `path`).
         await recordComputerProjectPaths(
           db,
           computerId,
-          parsed.data.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
+          (
+            await ownProjects(
+              computerId,
+              parsed.data.projects.map((p) => ({ id: p.projectId, path: p.path }))
+            )
+          ).map((p) => ({ projectId: p.id, path: p.path }))
         )
       } catch (err) {
         // A computer too old to answer `project.list`, or one that dropped
@@ -1638,15 +1671,10 @@ export function composeServer(opts: {
       }
     }
     setWorkspaceDeps({
-      fs: workspaceFs,
-      resolveComputer: async ({ computerId, taskId, projectId }) => {
-        // An id the user explicitly chose wins — the create-project flow picks a
-        // computer before any task or project row exists to resolve from.
-        if (computerId != null) return resolveExecComputer(computerId)
-        if (taskId != null) return resolveComputerForTask(taskId)
-        if (projectId != null) return resolveComputerForProject(projectId)
-        return resolveExecComputer(null)
-      },
+      fs: userWorkspaceFs,
+      // An explicit computer (the caller's own, with login), else the task's, else the
+      // project's, else the caller's default — see ./computer-placement.ts.
+      resolveComputer: (target) => placement.forTarget(target),
       // No computer at all = this hub's own disk, which for a supervised hub IS the
       // desktop's. Otherwise only the co-spawned local computer shares a machine
       // with the user; every remote one is somewhere they cannot see.

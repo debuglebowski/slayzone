@@ -140,6 +140,7 @@ describe('classification: the admin items the hub needs', () => {
     'hub.setLabel',
     'computers.mintJoinToken',
     'computers.claim',
+    'computers.unrevoke',
     'diagnostics.getConfig',
     'diagnostics.setConfig',
     'diagnostics.exportBundle',
@@ -256,7 +257,7 @@ describe('tRPC, on a hub that requires login', () => {
 
   const ADMIN_PATHS = ofClass(TRPC_ADMIN_POLICY, 'admin')
 
-  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(32))
+  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(33))
 
   for (const path of ADMIN_PATHS) {
     test(`${path}: a user account is FORBIDDEN (ADMIN_ONLY, one audit line); an admin passes`, async () => {
@@ -328,9 +329,12 @@ describe('tRPC CONDITIONAL_ADMIN: refused to a non-admin only for the listed inp
     return {
       get: async (sql: string) => {
         if (sql.includes('AS total')) return owner.host
-        if (sql.includes('owner_user_id = ?') && !sql.includes('IS NULL')) {
-          return { n: owner.computer ? 1 : 0 }
+        // canAccess on a `computer` (T-19): its owner row.
+        if (sql.startsWith('SELECT owner_user_id FROM computers')) {
+          return { owner_user_id: owner.computer ? USER.userId : 'someone-else' }
         }
+        // The computer exists (an admin's management check, and the store read).
+        if (sql.includes('FROM computers WHERE id = ?')) return { id: 'c1' }
         throw new Error('not modelled')
       },
       all: async () => {
@@ -359,12 +363,7 @@ describe('tRPC CONDITIONAL_ADMIN: refused to a non-admin only for the listed inp
     )
   }
 
-  const lifecycle = [
-    'computers.revokeComputer',
-    'computers.unrevoke',
-    'computers.delete',
-    'computers.setVisibility'
-  ]
+  const lifecycle = ['computers.revokeComputer', 'computers.delete', 'computers.setVisibility']
   for (const path of lifecycle) {
     const input = { computerId: 'c1', visibility: 'private' }
     test(`${path}: someone else's (or an unowned) computer needs an admin`, async () => {

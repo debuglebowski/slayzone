@@ -142,3 +142,13 @@ export {
   type HttpOwnerRule
 } from './http-owner-policy'
 export type { HookReporter } from './http/rest-api/agent-hook-owner'
+// Computers (T-19): use = the owner (canAccess `computer`), manage = the owner or an
+// admin, serve = the work's owner.
+export {
+  computerOwnerOf,
+  computerServes,
+  filterManagedComputers,
+  mayManageComputer,
+  mayUseComputer,
+  type ComputerManagerRequest
+} from './computer-access'

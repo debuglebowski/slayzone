@@ -158,6 +158,12 @@ await describe('POST /api/computers/join-token', () => {
     try {
       const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
       expect(res.status).toBe(200)
+      // T-19: the minter is recorded, so the computer that redeems it is theirs — the
+      // REST twin of computers.mintJoinToken (this path used to drop it).
+      const row = h.db
+        .prepare('SELECT minted_by_user_id FROM join_tokens ORDER BY rowid DESC LIMIT 1')
+        .get() as { minted_by_user_id: string | null }
+      expect(row.minted_by_user_id).toBe('u1')
     } finally {
       await rest.close()
     }

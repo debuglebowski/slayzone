@@ -109,6 +109,7 @@ const template = ref('template')
 const aiItem = ref('aiConfigItem')
 const group = ref('projectGroup')
 const automation = ref('automation')
+const computer = ref('computer')
 
 const checked = (...ids: Ref[]): OwnerRule => ({ mark: 'id-checked', ids })
 const listed = (output: OutputFilter): OwnerRule => ({ mark: 'list-filtered', output })
@@ -326,7 +327,8 @@ const HUB_CONFIG = 'hub-wide configuration with no owner column'
 const LIBRARY = 'the global AI-config library and its registries: hub-wide by design'
 const CONNECTION =
   'integration connections are hub-wide (no owner column); the credential is never served'
-const COMPUTER = 'computers: ownership and visibility are T-19 (T-15 gates who manages one)'
+const COMPUTER =
+  "computer management (metadata, lifecycle): decided in the handler — the computer's owner, or an admin (computer-access.ts, T-19)"
 const SELF = "the caller's own settings or client diagnostics (T-16 scopes settings per user)"
 const FEEDBACK = 'feedback threads to the SlayZone team: no owner column (hub-wide)'
 const TEST = 'test-only (PLAYWRIGHT=1); refused in production'
@@ -672,14 +674,15 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
-  // ── computers (T-19 owns them; only the task/project links are content) ──
+  // ── computers (T-19): binding work needs the task/project AND the computer to be
+  // the caller's (so the computer is the work owner's); managing one is the owner's
+  // or an admin's, decided in the handler ──
   'computers.list': none(COMPUTER),
-  'computers.setTaskComputer': checked(task('taskId')),
-  'computers.setProjectDefaultComputer': checked(project('projectId')),
+  'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
+  'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
-  'computers.unrevoke': none(COMPUTER),
   'computers.delete': none(COMPUTER),
   'computers.onStatusChange': none(COMPUTER),
   'computers.revokeComputer': none(COMPUTER),
@@ -695,33 +698,126 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'feedback.deleteThread': none(FEEDBACK),
 
   // ── file editor + workspace (filesystem of a computer) ──
-  'fileEditor.readDir': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.readFile': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.listAllFiles': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.writeFile': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.createFile': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.createDir': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.rename': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.delete': checked(task('taskId'), project('projectId'), path('rootPath')),
+  'fileEditor.readDir': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.readFile': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.listAllFiles': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.writeFile': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.createFile': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.createDir': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.rename': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.delete': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
   'fileEditor.copyIn': checked(
     task('taskId'),
     project('projectId'),
+    computer('computerId'),
     path('rootPath'),
     path('absoluteSrc')
   ),
-  'fileEditor.copy': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.gitStatus': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'fileEditor.searchFiles': checked(task('taskId'), project('projectId'), path('rootPath')),
+  'fileEditor.copy': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.gitStatus': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'fileEditor.searchFiles': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
   'fileEditor.showInFinder': checked(path('rootPath')),
-  'fileEditor.watch': checked(task('taskId'), project('projectId'), path('rootPath')),
-  'workspace.listRoots': checked(task('taskId'), project('projectId')),
-  'workspace.listDir': checked(task('taskId'), project('projectId'), path('path')),
-  'workspace.mkdir': checked(task('taskId'), project('projectId'), path('path')),
-  'workspace.setAllowedRoots': checked(task('taskId'), project('projectId')),
-  'workspace.resolveProjectPath': checked(task('taskId'), project('projectId')),
-  'workspace.setProjectPath': checked(task('taskId'), project('projectId'), path('path')),
-  'workspace.forgetProjectPath': checked(task('taskId'), project('projectId')),
-  'workspace.pathExists': checked(task('taskId'), project('projectId'), path('path')),
+  'fileEditor.watch': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('rootPath')
+  ),
+  'workspace.listRoots': checked(task('taskId'), project('projectId'), computer('computerId')),
+  'workspace.listDir': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('path')
+  ),
+  'workspace.mkdir': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('path')
+  ),
+  'workspace.setAllowedRoots': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId')
+  ),
+  'workspace.resolveProjectPath': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId')
+  ),
+  'workspace.setProjectPath': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('path')
+  ),
+  'workspace.forgetProjectPath': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId')
+  ),
+  'workspace.pathExists': checked(
+    task('taskId'),
+    project('projectId'),
+    computer('computerId'),
+    path('path')
+  ),
 
   // ── history, usage ──
   'history.listForTask': checked(task('taskId')),
@@ -1146,6 +1242,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'automations.onChanged': streamed(byActor),
   'computers.claim': none(COMPUTER),
   'computers.mintJoinToken': none(COMPUTER),
+  'computers.unrevoke': none(COMPUTER),
   // Events naming another user's task, session or project are dropped in the handler.
   'diagnostics.exportBundle': listed(SCOPED_IN_HANDLER),
   'diagnostics.getConfig': none(HUB_CONFIG),

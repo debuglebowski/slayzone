@@ -189,6 +189,22 @@ export class NoComputerAvailableError extends Error {
   }
 }
 
+/**
+ * What a request to a computer is FOR (T-19): the task or agent session it works on,
+ * or `null` when a caller names a computer directly with nothing behind it (the
+ * directory picker, the file editor) — then it is that caller's own request.
+ */
+export type ComputerWork = { readonly kind: 'task' | 'session'; readonly id: string } | null
+
+/**
+ * Asked before every request that starts work on, or reads from, a computer: a spawn,
+ * a warm adopt, git work for a task, a filesystem read or write. Throws to refuse,
+ * and then nothing reaches the computer. The hub decides (a computer works only for
+ * its owner — transport `computer-access.ts`); absent, nothing is asked, which is the
+ * hub without login (the desktop app's) and every test that predates it.
+ */
+export type ComputerWorkGate = (computerId: string, work: ComputerWork) => Promise<void>
+
 // ===========================================================================
 // Detach / reattach across a dropped computer connection
 // ===========================================================================
@@ -520,6 +536,8 @@ export interface RoutingPtyBackendOptions {
   /** Route a spawn to a computerId. `null` throws {@link NoComputerAvailableError} —
    *  there is no in-process fallback. */
   resolveComputerId: (spec: PtySpawnSpec) => string | null
+  /** Asked before a spawn (for its task) and an adopt (for its session). */
+  gate?: ComputerWorkGate
 }
 
 interface PtyEntry {
@@ -578,7 +596,7 @@ interface PtyEntry {
  * monotonic. Sessions are disposed on `pty.exit` and on computer loss/disconnect.
  */
 export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyBackend {
-  const { gateway, resolveComputerId } = options
+  const { gateway, resolveComputerId, gate } = options
   const sessions = new Map<string, PtyEntry>()
 
   function drain(entry: PtyEntry): void {
@@ -685,7 +703,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     computerId: string,
     sessionId: string,
     processName: string,
-    sealed: boolean
+    sealed: boolean,
+    /** The gate's answer for a spawn still being decided: input waits behind it (so it
+     *  never overtakes the spawn request) and is dropped when it refused. */
+    admitted: Promise<void> | null = null
   ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number | null) => void } {
     const key = sessionKey(computerId, sessionId)
     const dataEmitter = new BufferingEmitter<string>()
@@ -705,6 +726,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     }
     sessions.set(key, entry)
 
+    const send = (method: string, params: unknown): Promise<unknown> =>
+      admitted
+        ? admitted.then(() => gateway.request(computerId, method, params))
+        : gateway.request(computerId, method, params)
+
     // `null`, not 0 — the pid is UNKNOWN until the computer replies, and a
     // placeholder that reads as a number invites callers to treat it as one.
     let pid: number | null = null
@@ -722,22 +748,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           })
         ),
       write: (data: string): void => {
-        void gateway
-          .request(computerId, HubToComputerMethods.ptyWrite, { sessionId, data })
-          .catch(noop)
+        void send(HubToComputerMethods.ptyWrite, { sessionId, data }).catch(noop)
       },
       resize: (cols: number, rows: number): void => {
-        void gateway
-          .request(computerId, HubToComputerMethods.ptyResize, { sessionId, cols, rows })
-          .catch(noop)
+        void send(HubToComputerMethods.ptyResize, { sessionId, cols, rows }).catch(noop)
       },
       kill: (signal?: string): void => {
-        void gateway
-          .request(computerId, HubToComputerMethods.ptyKill, {
-            sessionId,
-            ...(signal ? { signal } : {})
-          })
-          .catch(noop)
+        void send(HubToComputerMethods.ptyKill, {
+          sessionId,
+          ...(signal ? { signal } : {})
+        }).catch(noop)
       }
     }
     return { entry, handle, setPid: (next) => (pid = next) }
@@ -775,6 +795,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     async adopt(computerId: string, warmId: string, sessionId: string, processName: string) {
+      // Before anything is tracked: a refused adopt leaves no session behind.
+      if (gate) await gate(computerId, { kind: 'session', id: sessionId })
       const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
       try {
         const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmAdopt, {
@@ -809,15 +831,26 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // computer-loss; signal may be a string like 'computer-lost') to the seam's
       // `{ exitCode: number; signal?: number }` — lossless for pty-manager, which
       // only reads `exitCode`.
-      const { entry, handle, setPid } = register(computerId, spec.sessionId, spec.file, false)
+      // The gate's answer for this spawn's task. The handle still comes back
+      // synchronously (pty-manager's local path needs that); the spawn request — and
+      // any input written meanwhile — waits behind it, and a refusal rejects
+      // `whenSpawned` without anything reaching the computer.
+      const admitted = gate ? gate(computerId, { kind: 'task', id: spec.taskId }) : null
+      const { entry, handle, setPid } = register(
+        computerId,
+        spec.sessionId,
+        spec.file,
+        false,
+        admitted
+      )
 
       // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
       // signal, so anything that needs to know the session really started awaits
       // this rather than sampling `pid` on a timer. Latency here is unbounded in
       // practice — a computer restoring a dozen sessions at once, or one across a
       // real network — and no hub-side deadline can second-guess it correctly.
-      const whenSpawned = gateway
-        .request(computerId, HubToComputerMethods.ptySpawn, {
+      const requestSpawn = () =>
+        gateway.request(computerId, HubToComputerMethods.ptySpawn, {
           sessionId: spec.sessionId,
           command: spec.file,
           args: spec.args,
@@ -831,22 +864,22 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           cols: spec.options.cols,
           rows: spec.options.rows
         })
-        .then(
-          (res) => {
-            const parsed = ptySpawnResultSchema.safeParse(res)
-            const spawnedPid = parsed.success ? parsed.data.pid : null
-            setPid(spawnedPid)
-            return { pid: spawnedPid }
-          },
-          (err: unknown) => {
-            // The computer refused the spawn: finalize (which emits the exit through
-            // the buffering emitter, so a not-yet-subscribed caller still gets it)
-            // AND propagate, so a caller awaiting confirmation sees the failure
-            // rather than a promise that never settles.
-            finalize(entry, null, 'spawn-failed')
-            throw err
-          }
-        )
+      const whenSpawned = (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
+        (res) => {
+          const parsed = ptySpawnResultSchema.safeParse(res)
+          const spawnedPid = parsed.success ? parsed.data.pid : null
+          setPid(spawnedPid)
+          return { pid: spawnedPid }
+        },
+        (err: unknown) => {
+          // The computer refused the spawn: finalize (which emits the exit through
+          // the buffering emitter, so a not-yet-subscribed caller still gets it)
+          // AND propagate, so a caller awaiting confirmation sees the failure
+          // rather than a promise that never settles.
+          finalize(entry, null, 'spawn-failed')
+          throw err
+        }
+      )
       // Keep the rejection handled here too — `whenSpawned` is optional in the
       // seam, so a backend consumer that ignores it must not trip an unhandled
       // rejection. Attaching this does not consume it for anyone else.
@@ -1121,6 +1154,8 @@ export interface RoutingChatBackendOptions {
   gateway: RoutingGateway
   /** Route a spawn to a computerId. `null` throws {@link NoComputerAvailableError}. */
   resolveComputerId: (spec: ChatSpawnSpec) => string | null
+  /** Asked before a spawn, for its task. */
+  gate?: ComputerWorkGate
 }
 
 /**
@@ -1138,12 +1173,13 @@ export interface RoutingChatBackendOptions {
  * handshake, request correlation — remains on the hub.
  */
 export function createRoutingChatBackend(options: RoutingChatBackendOptions): ChatBackend {
-  const { gateway, resolveComputerId } = options
+  const { gateway, resolveComputerId, gate } = options
 
   return {
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
       const computerId = resolveComputerId(spec)
       if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
+      if (gate) await gate(computerId, { kind: 'task', id: spec.taskId })
 
       const backend = createRoutingProcessBackend({
         gateway,
@@ -1278,6 +1314,8 @@ export interface RemoteWorktreeAdaptersOptions {
    * local — so a task whose agent ran on a computer got its worktree on the hub.
    */
   resolveComputerId: (taskId: string) => string | null | Promise<string | null>
+  /** Asked before every routed op, for its task. */
+  gate?: ComputerWorkGate
 }
 
 /**
@@ -1290,7 +1328,13 @@ export interface RemoteWorktreeAdaptersOptions {
 export function createRemoteWorktreeAdapters(
   options: RemoteWorktreeAdaptersOptions
 ): WorktreeExecAdapters {
-  const { gateway, local, resolveComputerId } = options
+  const { gateway, local, gate } = options
+  /** The task's computer, admitted by the gate before any op reaches it. */
+  const resolveComputerId = async (taskId: string): Promise<string | null> => {
+    const computerId = await options.resolveComputerId(taskId)
+    if (computerId != null && gate) await gate(computerId, { kind: 'task', id: taskId })
+    return computerId
+  }
 
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
@@ -1411,6 +1455,13 @@ export interface RemoteFsAdaptersOptions {
   local: LocalWorkspaceFs
   /** Mint a correlation id for a watch. Injected so tests are deterministic. */
   newWatchId?: () => string
+  /**
+   * Asked before every op that reaches a computer, as the caller's own request
+   * (`work: null`): these take a computer, not a task. The hub's own maintenance on
+   * connect (widening the local computer's roots, seeding its paths) uses an
+   * instance without one.
+   */
+  gate?: ComputerWorkGate
 }
 
 let watchSeq = 0
@@ -1425,15 +1476,18 @@ let watchSeq = 0
  * with the same `resolveExecComputer` the pty backend uses, and pass the result.
  */
 export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): WorkspaceFsAdapters {
-  const { gateway, local } = options
+  const { gateway, local, gate } = options
   const newWatchId = options.newWatchId ?? (() => `w${++watchSeq}`)
 
-  const req = <T>(
+  const req = async <T>(
     computerId: string,
     method: string,
     params: unknown,
     schema: { parse: (v: unknown) => T }
-  ): Promise<T> => gateway.request(computerId, method, params).then((res) => schema.parse(res))
+  ): Promise<T> => {
+    if (gate) await gate(computerId, null)
+    return gateway.request(computerId, method, params).then((res) => schema.parse(res))
+  }
 
   return {
     async listRoots(computerId) {
@@ -1672,8 +1726,12 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       gateway.events.on('computer-disconnected', onDisconnected)
       gateway.events.on('computer-lost', onDisconnected)
 
-      void gateway
-        .request(computerId, HubToComputerMethods.fsWatchStart, { watchId, rootPath })
+      // A refused watch never starts (recorded like any other failure below), and its
+      // stop is never sent either: nothing reaches a computer the gate refused.
+      const admitted = gate ? gate(computerId, null) : null
+      const start = () =>
+        gateway.request(computerId, HubToComputerMethods.fsWatchStart, { watchId, rootPath })
+      void (admitted ? admitted.then(start) : start())
         .then(() => {
           if (stopped) {
             void gateway
@@ -1699,11 +1757,11 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         gateway.events.off('fs.change', onChange)
         gateway.events.off('computer-disconnected', onDisconnected)
         gateway.events.off('computer-lost', onDisconnected)
-        void gateway
-          .request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
-          .catch(() => {
-            /* already gone */
-          })
+        const sendStop = () =>
+          gateway.request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
+        void (admitted ? admitted.then(sendStop) : sendStop()).catch(() => {
+          /* already gone, or never admitted */
+        })
       }
       return stop
     }

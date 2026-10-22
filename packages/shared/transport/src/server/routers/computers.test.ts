@@ -271,7 +271,7 @@ test('pty and chat resolve a task to the SAME computer at every precedence step'
  * (O-4). A user manages only their own. Through the real `appRouter`, so the role
  * gate and the procedure checks run exactly as on the hub.
  */
-test('T-15: an admin manages a private computer of another user but cannot bind work to it', async () => {
+test('T-15/T-19: an admin manages a private computer of another user but cannot bind work to it', async () => {
   setAuthGate(() => true)
   try {
     const bobs = await registerComputer(h.slayDb, {
@@ -303,17 +303,14 @@ test('T-15: an admin manages a private computer of another user but cannot bind 
     expect((await carol.list()).some((r) => r.id === bobs.id)).toBe(false)
     expect((await bob.list()).some((r) => r.id === bobs.id)).toBe(true)
 
-    // Binding work: refused to the admin exactly like to any other non-viewer.
-    expect(
-      (await refusal(admin.setTaskComputer({ taskId, computerId: bobs.id }))).includes(
-        'no such computer'
-      )
-    ).toBe(true)
-    expect(
-      (await refusal(admin.setProjectDefaultComputer({ projectId, computerId: bobs.id }))).includes(
-        'no such computer'
-      )
-    ).toBe(true)
+    // Binding work: refused to the admin exactly like to any other non-owner — the
+    // owner gate's NOT_FOUND on the computer id (T-19), even for the admin's own task.
+    expect(await refusal(admin.setTaskComputer({ taskId, computerId: bobs.id }))).toBe('Not found')
+    expect(await refusal(admin.setProjectDefaultComputer({ projectId, computerId: bobs.id }))).toBe(
+      'Not found'
+    )
+    // ...and the owner of the computer cannot bind it to someone else's task.
+    expect(await refusal(bob.setTaskComputer({ taskId, computerId: bobs.id }))).toBe('Not found')
 
     // Lifecycle of someone else's computer: admin only.
     expect(await refusal(carol.setVisibility({ computerId: bobs.id, visibility: 'hub' }))).toBe(
@@ -327,11 +324,53 @@ test('T-15: an admin manages a private computer of another user but cannot bind 
     expect(await refusal(admin.setVisibility({ computerId: bobs.id, visibility: 'private' }))).toBe(
       'ok'
     )
-    // The owner manages their own.
+    // Strictly private on a hub with login (O-6): nobody opens a computer up.
+    expect(await refusal(bob.setVisibility({ computerId: bobs.id, visibility: 'hub' }))).toBe(
+      'computers are private on a hub with login'
+    )
+    // Claiming is off on a hub with login, for the admin too.
+    expect((await refusal(admin.claim({ computerId: bobs.id }))).startsWith('claiming')).toBe(true)
+    // The owner manages their own — except undoing a revocation, the admin's alone.
     expect(await refusal(bob.revokeComputer({ computerId: bobs.id }))).toBe('ok')
+    expect(await refusal(bob.unrevoke({ computerId: bobs.id }))).toBe('FORBIDDEN:ADMIN_ONLY')
     expect(await refusal(admin.unrevoke({ computerId: bobs.id }))).toBe('ok')
     expect(await refusal(carol.delete({ computerId: bobs.id }))).toBe('FORBIDDEN:ADMIN_ONLY')
     expect(await refusal(admin.delete({ computerId: bobs.id }))).toBe('ok')
+    // A missing id reads the same to a user as someone else's, and as missing to an admin.
+    expect(await refusal(carol.revokeComputer({ computerId: 'no-such' }))).toBe(
+      'FORBIDDEN:ADMIN_ONLY'
+    )
+    expect(
+      (await refusal(admin.revokeComputer({ computerId: 'no-such' }))).includes('no such')
+    ).toBe(true)
+
+    // An unowned computer (T-19): the admin's to manage, nobody's to use or list.
+    const unowned = await registerComputer(h.slayDb, {
+      name: 'nobodys',
+      platform: 'linux-x64',
+      version: '0.35.0'
+    })
+    expect((await admin.list()).some((r) => r.id === unowned.id)).toBe(true)
+    expect((await bob.list()).some((r) => r.id === unowned.id)).toBe(false)
+    expect(await refusal(admin.setTaskComputer({ taskId, computerId: unowned.id }))).toBe(
+      'Not found'
+    )
+    expect(await refusal(bob.revokeComputer({ computerId: unowned.id }))).toBe(
+      'FORBIDDEN:ADMIN_ONLY'
+    )
+    expect(await refusal(admin.delete({ computerId: unowned.id }))).toBe('ok')
+
+    // The owner binds their own computer to their own work.
+    const alices = await registerComputer(h.slayDb, {
+      name: 'alice-box',
+      platform: 'linux-x64',
+      version: '0.35.0'
+    })
+    await h.slayDb.run(`UPDATE computers SET owner_user_id = 'alice' WHERE id = ?`, [alices.id])
+    const aliceAsUser = as('alice', 'user')
+    expect(await refusal(aliceAsUser.setTaskComputer({ taskId, computerId: alices.id }))).toBe('ok')
+    expect(await refusal(aliceAsUser.setTaskComputer({ taskId, computerId: null }))).toBe('ok')
+    await h.slayDb.run(`DELETE FROM computers WHERE id = ?`, [alices.id])
   } finally {
     setAuthGate(() => false)
     await h.slayDb.run(`UPDATE projects SET owner_user_id = NULL WHERE id = ?`, [projectId])

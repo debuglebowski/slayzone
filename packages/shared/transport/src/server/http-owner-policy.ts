@@ -194,7 +194,8 @@ const SIGNAL =
   "a refresh ping: carries no content, and is attributed to the caller (the security context the gate re-enters) so T-17's stream filter delivers it to the caller only"
 const DEEP_LINK =
   "the desktop app's own OAuth deep-link callback (app.auth.onCallback, a desktop-host event): names nothing a user owns"
-const COMPUTER = 'computers: ownership and visibility are T-19 (T-15 gates who manages one)'
+const COMPUTER =
+  "the computer roster: cut in the handler to the caller's own, or every one for an admin (management metadata; computer-access.ts, T-19)"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
 
