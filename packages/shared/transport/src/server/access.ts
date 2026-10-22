@@ -42,8 +42,8 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *
  *   project · task · tab (terminal/chat tab) · session (pty or agent runtime key)
  *   prompt · turn · artifact · artifactFolder · process · tag · template
- *   testCategory · testLabel · chatQueueItem · automationRun — each resolves to
- *   exactly one project through its row.
+ *   testCategory · testLabel · chatQueueItem · automationRun · automation — each
+ *   resolves to exactly one project through its row.
  *
  *   aiConfigItem   a project-scoped item → its project; a global library item is
  *                  hub-wide.
@@ -75,6 +75,7 @@ export type ResourceKind =
   | 'aiConfigItem'
   | 'projectGroup'
   | 'path'
+  | 'automation'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -94,7 +95,8 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'automationRun',
   'aiConfigItem',
   'projectGroup',
-  'path'
+  'path',
+  'automation'
 ]
 
 export interface OwnedResource {
@@ -359,7 +361,9 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
     WHERE r.id = ?`),
   aiConfigItem: resolveAiConfigItem,
   projectGroup: resolveProjectGroup,
-  path: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? [])
+  path: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? []),
+  // An automation rule (T-106): its project's, like its runs.
+  automation: viaProjectColumn('automations')
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

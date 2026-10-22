@@ -40,7 +40,9 @@
  * computers. The one place the role widens a view, `computers.list`, shows management
  * metadata only (see `computers/server/visibility.ts`).
  *
- * Ownership (whose project, task or session) is NOT decided here: T-17..T-19.
+ * Ownership (whose project, task or session) is NOT decided here: T-17..T-19. It is
+ * decided for `admin` items too (T-106): an admin automation call on another user's
+ * project answers not-found, like any user's would.
  *
  * @module transport/server/admin-policy
  */
@@ -93,8 +95,11 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
  *                                 registries the hub trusts. Installing, updating or
  *                                 unlinking a skill from one stays `user` (O-10).
  * `app.backup.*`                  backups of the whole hub database.
- * `app.exportImport.exportAll/import` (+ their path-taking `test*` twins)  the whole
- *                                 database out or in. `exportProject` stays `user`.
+ * `app.exportImport.import` (+ its path-taking `test*` twin)  a bundle into the
+ *                                 database. `exportAll` and `exportProject` are `user`:
+ *                                 on a hub with login each exports the caller's own
+ *                                 projects only (O-22, T-101); the whole hub is backed
+ *                                 up at server level, never through the app.
  * `testPanel.saveProfile/deleteProfile`  write the hub-wide `test_profiles` setting.
  *
  * ── open ────────────────────────────────────────────────────────────────────
@@ -242,10 +247,10 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'app.clipboard.readFilePaths': 'user',
   'app.clipboard.writeFilePaths': 'user',
   'app.dialog.showOpenDialog': 'user',
-  'app.exportImport.exportAll': 'admin',
+  'app.exportImport.exportAll': 'user',
   'app.exportImport.exportProject': 'user',
   'app.exportImport.import': 'admin',
-  'app.exportImport.testExportAllToPath': 'admin',
+  'app.exportImport.testExportAllToPath': 'user',
   'app.exportImport.testExportProjectToPath': 'user',
   'app.exportImport.testImportFromPath': 'admin',
   'app.exportImport.testSetTaskParent': 'user',

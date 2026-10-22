@@ -1,7 +1,9 @@
 /**
- * Which user content each `user` REST route and MCP tool touches, and how the owner
- * gates keep it to its owner on a hub that requires login (T-18) — the `/api/*` and
- * `/mcp` twin of `owner-policy.ts` (tRPC, T-17). Same marks, same decision:
+ * Which user content each `user` and `admin` REST route and MCP tool touches, and how
+ * the owner gates keep it to its owner on a hub that requires login (T-18) — the
+ * `/api/*` and `/mcp` twin of `owner-policy.ts` (tRPC, T-17). `admin` items are owner
+ * questions too (T-106): the role decides who may manage, never whose content. Same
+ * marks, same decision:
  *
  *   id-checked      the request names user content (`ids`). Every id must pass the
  *                   access function (`access.ts` `canAccess`) before the handler runs;
@@ -101,6 +103,8 @@ const session = ref('session', 'exact')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
+const automation = ref('automation', 'exact')
+const automationPrefix = ref('automation', 'prefix')
 
 const checked = (...ids: HttpIdRef[]): HttpOwnerRule => ({ mark: 'id-checked', ids })
 const listed = (output: HttpOutputFilter, scopedInHandler?: string): HttpOwnerRule => ({
@@ -191,6 +195,8 @@ const SIGNAL =
 const DEEP_LINK =
   "the desktop app's own OAuth deep-link callback (app.auth.onCallback, a desktop-host event): names nothing a user owns"
 const COMPUTER = 'computers: ownership and visibility are T-19 (T-15 gates who manages one)'
+const ACCOUNTS =
+  'hub accounts (email, name, role, disabled): what the admin manages; no project content'
 
 // ── REST ──────────────────────────────────────────────────────────────────────
 
@@ -376,7 +382,22 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/templates': checked(projectRef('body.project')),
   'DELETE /api/templates/:id': checked(templatePrefix('params.id')),
   'GET /api/templates/:id': checked(templatePrefix('params.id')),
-  'PATCH /api/templates/:id': checked(templatePrefix('params.id'))
+  'PATCH /api/templates/:id': checked(templatePrefix('params.id')),
+
+  // ── `admin` routes (T-106): management, never another user's content (O-6) ──
+  // Automations are their project's: an admin manages only those in its own projects.
+  'GET /api/automations': checked(projectRef('query.project')),
+  'POST /api/automations': checked(projectRef('body.project')),
+  'DELETE /api/automations/:id': checked(automationPrefix('params.id')),
+  'GET /api/automations/:id': checked(automationPrefix('params.id')),
+  'PATCH /api/automations/:id': checked(automationPrefix('params.id')),
+  'POST /api/automations/:id/run': checked(automation('params.id')),
+  'GET /api/automations/:id/runs': checked(automationPrefix('params.id')),
+  'POST /api/computers/join-token': none(COMPUTER),
+  'DELETE /api/hub/users': none(ACCOUNTS),
+  'GET /api/hub/users': none(ACCOUNTS),
+  'PATCH /api/hub/users': none(ACCOUNTS),
+  'POST /api/hub/users': none(ACCOUNTS)
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────

@@ -32,10 +32,10 @@ export function httpAccessRequest(userId: string | null): AccessRequest {
 // ── the per-request scope ─────────────────────────────────────────────────────
 
 /**
- * The scope of the `user` request being handled, set by the REST gate around each of
- * the route's handlers (`owner-routes.ts`). `resolve.ts` reads it so an id prefix or
- * a project name only ever matches the caller's own rows. Absent — a hub without
- * login, an `admin`/`open` route, a caller outside a route — nothing is restricted:
+ * The scope of the `user` or `admin` request being handled, set by the REST gate
+ * around each of the route's handlers (`owner-routes.ts`). `resolve.ts` reads it so an
+ * id prefix or a project name only ever matches the caller's own rows. Absent — a hub
+ * without login, an `open` route, a caller outside a route — nothing is restricted:
  * the gate has already decided every id such a request names.
  */
 const scopeStore = new AsyncLocalStorage<AccessScope>()
@@ -76,7 +76,8 @@ const PROJECT_OF: Partial<Record<ResourceKind, { table: string; project: string 
     project: '(SELECT t.project_id FROM tasks t WHERE t.id = artifact_folders.task_id)'
   },
   tag: { table: 'tags', project: 'project_id' },
-  template: { table: 'task_templates', project: 'project_id' }
+  template: { table: 'task_templates', project: 'project_id' },
+  automation: { table: 'automations', project: 'project_id' }
 }
 
 const KIND_OF_TABLE: Record<string, ResourceKind> = Object.fromEntries(
@@ -96,8 +97,8 @@ async function projectClause(
 
 /**
  * For `resolve.ts`: the clause that keeps a lookup on `table` to the current request's
- * projects. Empty outside a `user` request on a hub with login, and for a table that
- * holds no user content (`automations` belongs to an `admin` route).
+ * projects. Empty outside a guarded (`user` or `admin`) request on a hub with login,
+ * and for a table that holds no user content.
  */
 export async function ownedRowsClause(table: string): Promise<{ sql: string; params: string[] }> {
   const scope = currentOwnerScope()

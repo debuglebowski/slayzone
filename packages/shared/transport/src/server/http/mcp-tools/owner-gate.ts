@@ -6,6 +6,7 @@ import { createAccessScope } from '../../access'
 import { MCP_ADMIN_POLICY, type AccessClass } from '../../admin-policy'
 import { getAuthGate } from '../../app-deps'
 import { MCP_OWNER_POLICY, type HttpOwnerRule } from '../../http-owner-policy'
+import { isOwnerQuestion } from '../../owner-policy'
 import { auditOwnerDenied, firstDeniedRef, httpAccessRequest } from '../owner-scope'
 
 /**
@@ -17,7 +18,8 @@ import { auditOwnerDenied, firstDeniedRef, httpAccessRequest } from '../owner-sc
  * The caller is the MCP SDK's `authInfo` (`clientId` = the verified principal's user
  * id, set by `/mcp` from the hub's bearer gate, `mcpAuthInfo`). A refused call is a
  * tool error `Not found` — someone else's, missing and ownerless read the same —
- * plus one `authz.denied` line. An unmarked `user` tool is refused (fail closed). An
+ * plus one `authz.denied` line. Every tool but an `open` one is an owner question,
+ * `admin` ones included (T-106); an unmarked one is refused (fail closed). An
  * allowed call runs as its caller (the security context), so its refresh pings reach
  * the caller's streams only (T-17).
  *
@@ -55,7 +57,7 @@ export function withMcpOwnerGate(
         // The SDK passes the parsed arguments first (when the tool has a schema) and
         // `extra` (with `authInfo`) last.
         const gated = async (...args: unknown[]) => {
-          if (!getAuthGate() || classes[name] !== 'user') return handler(...args)
+          if (!getAuthGate() || !isOwnerQuestion(classes[name])) return handler(...args)
           const userId = callerOf(args[args.length - 1])
           const rule = policy[name]
           if (!rule) {

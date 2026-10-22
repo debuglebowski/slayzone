@@ -126,7 +126,8 @@ const OF_A: Record<ResourceKind, string> = {
   automationRun: 'runA',
   aiConfigItem: 'aiA',
   projectGroup: 'gA',
-  path: join(aWorktree, 'src', 'index.ts')
+  path: join(aWorktree, 'src', 'index.ts'),
+  automation: 'auA'
 }
 
 await describe('every kind: the owner, and nobody else', () => {

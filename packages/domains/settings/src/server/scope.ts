@@ -82,3 +82,10 @@ export function settingScope(key: string): SettingScope {
   if (HUB_KEYS.has(key) || HUB_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
   return 'user'
 }
+
+/** The project a project-keyed hub key (`ai_providers:<projectId>` …) belongs to, or
+ *  null for any other key. An export of one user's content (T-101) keeps only theirs. */
+export function settingProjectId(key: string): string | null {
+  const prefix = HUB_PREFIXES.find((p) => key.startsWith(p))
+  return prefix ? key.slice(prefix.length) || null : null
+}

@@ -22,6 +22,7 @@ import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import {
   getAgentLifecycleEvents,
   getAppDeps,
+  getAutomationsEvents,
   getChatDeps,
   getMenuEvents,
   getProcessesDeps,
@@ -190,6 +191,7 @@ export interface Owned {
   readonly projectGroup: string
   /** The task's worktree (an absolute path). */
   readonly path: string
+  readonly automation: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -214,7 +216,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     automationRun: id('automationRun'),
     aiConfigItem: id('aiConfigItem'),
     projectGroup: id('group'),
-    path: join(root, 'work', `${mark}_worktree`)
+    path: join(root, 'work', `${mark}_worktree`),
+    automation: id('automation')
   }
 }
 
@@ -339,14 +342,14 @@ export function seedOwned(dbPath: string, o: Owned): void {
     )
     run(
       `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES (?, ?, ?, '{}', '[]')`,
-      `${o.mark}_automation`,
+      o.automation,
       o.project,
       o.mark
     )
     run(
       `INSERT INTO automation_runs (id, automation_id) VALUES (?, ?)`,
       o.automationRun,
-      `${o.mark}_automation`
+      o.automation
     )
     run(
       `INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content)
@@ -509,7 +512,9 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'worktrees.onDiffChanged': (o) =>
     getGitWatcher().emit('git:diff-changed', { worktreePath: o.path }),
   'worktrees.onDiffWatchFailed': (o) =>
-    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path })
+    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path }),
+  // An `admin` subscription (T-106): a void signal, attributed to who caused it.
+  'automations.onChanged': (o) => asUser(o.userId, () => getAutomationsEvents().emit('changed'))
 }
 
 /** Subscriptions an owner's own `task.update` (a real mutation) produces events on. */

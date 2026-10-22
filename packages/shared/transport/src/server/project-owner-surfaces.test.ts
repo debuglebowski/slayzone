@@ -23,6 +23,7 @@ import { createTestHarness, describe, test, expect } from '../../../test-utils/i
 import { captureMcpServer } from '../../../test-utils/mcp-harness.js'
 import { mountRestApp } from '../../../test-utils/rest-harness.js'
 import { setNotifyEvents, type NotifyEventMap } from './app-deps'
+import { createAccessScope } from './access'
 import { buildExportImportOps } from './export-import'
 import { bindRestPrincipal } from './http/rest-api/principal'
 import { registerProjectsCrudRoutes } from './http/rest-api/projects/crud'
@@ -144,6 +145,15 @@ const imported = (result: { success: boolean; error?: string }): void => {
   if (!result.success) throw new Error(`import failed: ${result.error}`)
 }
 
+/** The importing request: its user; the scope only matters to an export. */
+const caller = (userId: string | null) => ({
+  userId,
+  scope: createAccessScope(h.slayDb, {
+    authRequired: userId !== null,
+    principal: userId ? { userId } : null
+  })
+})
+
 await describe('import', () => {
   test('import: imported projects belong to the importer, whatever the bundle says', async () => {
     const file = bundleFile([
@@ -152,7 +162,7 @@ await describe('import', () => {
       // Exported by a build from before ownership: no column at all.
       { id: 'src-2', name: 'import-legacy', color: '#333333' }
     ])
-    const ops = buildExportImportOps(h.slayDb, 'u-c', true)
+    const ops = buildExportImportOps(h.slayDb, caller('u-c'), true)
     imported(await ops.testImportFromPath!(file))
     expect(ownerByName('import-foreign')).toBe('u-c')
     expect(ownerByName('import-legacy')).toBe('u-c')
@@ -169,7 +179,7 @@ await describe('import', () => {
     const file = bundleFile([
       { id: 'src-3', name: 'import-desktop', color: '#444444', owner_user_id: 'u-other-hub' }
     ])
-    imported(await buildExportImportOps(h.slayDb, null, true).testImportFromPath!(file))
+    imported(await buildExportImportOps(h.slayDb, caller(null), true).testImportFromPath!(file))
     expect(ownerByName('import-desktop')).toBeNull()
   })
 })

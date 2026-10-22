@@ -1,8 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
-import express, { type Express } from 'express'
+import express, { type Express, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
+import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
+import { getAuthGate } from '../app-deps'
 import { registerRestApi } from './rest-api'
 import type { RestApiDeps } from './rest-api/types'
 import { registerMcpTools } from './mcp-tools'
@@ -11,6 +13,9 @@ import { restPrincipalOf } from './rest-api/principal'
 
 const SESSION_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 min
 const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
+
+/** The stable code of a refused or unknown MCP session on a hub with login (T-105). */
+export const MCP_SESSION_NOT_FOUND = 'MCP_SESSION_NOT_FOUND'
 
 function createMcpServer(deps: RestApiDeps): McpServer {
   const server = new McpServer({
@@ -46,6 +51,8 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
 
   const transports = new Map<string, StreamableHTTPServerTransport>()
   const sessionActivity = new Map<string, number>()
+  /** Who opened each session: the verified principal's user id, null without login. */
+  const sessionOwners = new Map<string, string | null>()
 
   function touchSession(sid: string): void {
     sessionActivity.set(sid, Date.now())
@@ -54,6 +61,42 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   function removeSession(sid: string): void {
     transports.delete(sid)
     sessionActivity.delete(sid)
+    sessionOwners.delete(sid)
+  }
+
+  /**
+   * The live session `req` names, if the caller may use it (T-105). On a hub with
+   * login a session belongs to the account that opened it: the session id is a
+   * handle, not a credential, and another account presenting it — to call tools on
+   * it, read its event stream or close it — is refused exactly like an unknown id
+   * (404 + {@link MCP_SESSION_NOT_FOUND}, which also tells an MCP client to start a
+   * new session), with one `authz.denied` line. Without login (the desktop app's
+   * hub) any live session id works, as before; an unknown one is the caller's 400.
+   */
+  function usableSession(
+    req: Request,
+    res: Response
+  ): StreamableHTTPServerTransport | 'refused' | null {
+    const sid = req.headers['mcp-session-id'] as string | undefined
+    const transport = sid ? transports.get(sid) : undefined
+    if (!getAuthGate()) return transport ?? null
+    if (!sid) return null
+    const caller = restPrincipalOf(req)?.userId ?? null
+    if (transport && caller !== null && sessionOwners.get(sid) === caller) return transport
+    if (transport) {
+      securityEvent({
+        event: 'authz.denied',
+        outcome: 'denied',
+        actor: caller,
+        ip: peerAddress(req),
+        route: routeOf(req.method, req.originalUrl ?? req.url),
+        targetKind: 'procedure',
+        targetId: 'mcp',
+        detail: { reason: 'not_owner', resource: 'mcp_session', status: 404 }
+      })
+    }
+    res.status(404).json({ error: 'Session not found', code: MCP_SESSION_NOT_FOUND })
+    return 'refused'
   }
 
   // Evict sessions idle > 30 min
@@ -80,19 +123,22 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
         (req as { auth?: ReturnType<typeof mcpAuthInfo> }).auth = mcpAuthInfo(principal)
       const sessionId = req.headers['mcp-session-id'] as string | undefined
 
-      if (sessionId && transports.has(sessionId)) {
+      const live = usableSession(req, res)
+      if (live === 'refused') return
+      if (sessionId && live) {
         touchSession(sessionId)
-        const transport = transports.get(sessionId)!
-        await transport.handleRequest(req, res, req.body)
+        await live.handleRequest(req, res, req.body)
         return
       }
 
       if (!sessionId && isInitializeRequest(req.body)) {
         const mcpServer = createMcpServer(deps)
+        const owner = principal?.userId ?? null
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid) => {
             transports.set(sid, transport)
+            sessionOwners.set(sid, owner)
             touchSession(sid)
           }
         })
@@ -119,10 +165,11 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   app.get('/mcp', async (req, res) => {
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined
-      if (sessionId && transports.has(sessionId)) {
+      const live = usableSession(req, res)
+      if (live === 'refused') return
+      if (sessionId && live) {
         touchSession(sessionId)
-        const transport = transports.get(sessionId)!
-        await transport.handleRequest(req, res)
+        await live.handleRequest(req, res)
         return
       }
       res.status(400).json({ error: 'Invalid session' })
@@ -135,9 +182,10 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   app.delete('/mcp', async (req, res) => {
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined
-      if (sessionId && transports.has(sessionId)) {
-        const transport = transports.get(sessionId)!
-        await transport.handleRequest(req, res)
+      const live = usableSession(req, res)
+      if (live === 'refused') return
+      if (sessionId && live) {
+        await live.handleRequest(req, res)
         removeSession(sessionId)
         return
       }
@@ -164,6 +212,7 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
       }
       transports.clear()
       sessionActivity.clear()
+      sessionOwners.clear()
     }
   }
 }

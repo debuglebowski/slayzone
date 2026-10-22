@@ -7,7 +7,8 @@ import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { buildExportImportOps } from '../export-import'
-import { ownedProjectIds } from '../owner-gate'
+import { createAccessScope } from '../access'
+import { accessRequestOf, ownedProjectIds } from '../owner-gate'
 import type { TrpcContext } from '../context'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
@@ -22,9 +23,17 @@ const anyInput = z.unknown()
 // (coexistence until the renderer drops IPC in slice 5).
 
 /** Export/import for one request. Imported projects belong to its user — null on
- *  a hub without login, where requests carry none. */
+ *  a hub without login, where requests carry none — and `exportAll` holds only what
+ *  its access scope allows (O-22: the caller's own content on a hub with login). */
 const exportImportOps = (ctx: TrpcContext, isTest = false) =>
-  buildExportImportOps(ctx.db, ctx.principal?.userId ?? null, isTest)
+  buildExportImportOps(
+    ctx.db,
+    {
+      userId: ctx.principal?.userId ?? null,
+      scope: createAccessScope(ctx.db, accessRequestOf(ctx))
+    },
+    isTest
+  )
 
 export const appLevelRouter = router({
   // Backup

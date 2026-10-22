@@ -139,6 +139,10 @@ run_test_electron_strict_loader packages/apps/hub/src/owner-checks-login-off.tes
 # login (ids, lists, artifact files, relayed hooks, admin), then login off.
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http-login-off.test.ts
+# Owner-check leftovers (T-101/T-105/T-106): own-content export, MCP sessions bound to
+# their opener, admin routes decided by owner — with login, then the desktop's hub.
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin-login-off.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
