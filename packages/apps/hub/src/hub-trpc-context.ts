@@ -21,6 +21,7 @@ import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Scope } from '@slayzone/transport/server'
+import { isBreakGlassToken } from './break-glass.js'
 import { isWebSessionToken, resolveWebSession } from './web-sessions.js'
 
 /**
@@ -96,6 +97,9 @@ export async function resolveConnectionPrincipal(
   if (!opts.hubAuthRequired) return null
   const token = opts.token
   if (typeof token !== 'string' || !token) return null
+  // A break-glass session is REST-only (rest-auth.ts `BREAK_GLASS_ROUTES`): the app
+  // router is the content surface, so `/trpc` never accepts one.
+  if (isBreakGlassToken(token)) return null
 
   if (isWebSessionToken(token)) {
     if (!opts.db) return null

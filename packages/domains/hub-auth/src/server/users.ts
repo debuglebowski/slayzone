@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { assertHubPasswordEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import type { HubRole } from '../shared/types'
-import { isDisabled, readRole } from './account'
+import { isBreakGlassEmail, isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
@@ -37,6 +37,12 @@ import { isPasswordSignInEnabled } from './password'
  * there is no first-admin promotion — the hub has no admin until someone signs in with
  * the app role — and {@link demoteNonEntraAdmins} removes admin from any account that
  * did not get it from Entra. Disable / enable work as everywhere.
+ *
+ * THE BREAK-GLASS ACCOUNT (./break-glass.ts) is listed like any other but managed only
+ * there: disable, enable and role changes refuse it (`protected`), `add` refuses its
+ * address, and it never counts as a human or an admin — in the invariants above, the
+ * first-admin promotion or {@link findFirstAdmin} — so an emergency session can neither
+ * be what lets the last real admin be disabled nor inherit the hub's unowned projects.
  *
  * @module hub-auth/users
  */
@@ -79,17 +85,19 @@ export interface CreatedHubUser {
 
 /**
  * Why `disableHubUser` declined, or 'ok'.
- *  - `protected` — the computer service user (see {@link disableHubUser});
+ *  - `protected` — the computer service user (see {@link disableHubUser}) or a
+ *    break-glass account (managed by ./break-glass.ts alone);
  *  - `last-user` — the last enabled human;
  *  - `last-admin` — the last enabled admin.
  */
 export type DisableHubUserResult = 'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'
 
-/** Why `enableHubUser` declined, or 'ok'. */
+/** Why `enableHubUser` declined, or 'ok'. `protected`: as for disable. */
 export type EnableHubUserResult = 'ok' | 'not-found' | 'protected'
 
 /**
- * Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin.
+ * Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin;
+ * a break-glass account's role is break-glass's own.
  * `sso-managed`: the hub has Entra sign-in, where roles come from the Entra app role.
  */
 export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'
@@ -175,6 +183,11 @@ export async function createHubUser(
     auditUser('user.create', 'denied', null, { reason: 'sso_managed', role: 'admin' })
     return { error: 'sso-managed' }
   }
+  // Break-glass addresses (v2's and v1's) belong to ./break-glass.ts alone.
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.create', 'denied', null, { reason: 'break_glass_reserved' })
+    return { error: 'exists' }
+  }
 
   const existing = await ctx.internalAdapter.findUserByEmail(email)
   if (existing) {
@@ -257,7 +270,8 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
     })
 }
 
-const isEnabled = (u: HubUserRow): boolean => u.disabledAt === null
+/** Enabled, and counted: a break-glass account is never a human or an admin here. */
+const isEnabled = (u: HubUserRow): boolean => u.disabledAt === null && !isBreakGlassEmail(u.email)
 const isEnabledAdmin = (u: HubUserRow): boolean => isEnabled(u) && u.role === 'admin'
 
 /** The human behind an email, with the full human list for the invariant checks;
@@ -286,7 +300,7 @@ async function findHuman(
  *  - `'protected'` — the computer service user. Its id is the `referenceId` on every
  *    computer API key; it has no sessions to stop, and flagging it would read as
  *    "computers are disabled". Nothing about the request looks dangerous, so the
- *    guard has to live here.
+ *    guard has to live here. Also a break-glass account: closing it is break-glass's.
  *  - `'last-user'` — the last enabled human. With signup disabled no one could sign
  *    in again, and no one could create an account except over loopback on the box.
  *  - `'last-admin'` — the last enabled admin.
@@ -298,6 +312,10 @@ export async function disableHubUser(
 ): Promise<DisableHubUserResult> {
   if (normalizeEmail(email) === COMPUTER_SERVICE_USER_EMAIL) {
     auditUser('user.disable', 'denied', null, { reason: 'protected' })
+    return 'protected'
+  }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.disable', 'denied', null, { reason: 'break_glass' })
     return 'protected'
   }
   const found = await findHuman(auth, email)
@@ -335,6 +353,10 @@ export async function enableHubUser(auth: HubAuth, email: string): Promise<Enabl
     auditUser('user.enable', 'denied', null, { reason: 'protected' })
     return 'protected'
   }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.enable', 'denied', null, { reason: 'break_glass' })
+    return 'protected'
+  }
   const found = await findHuman(auth, email)
   if (!found) {
     auditUser('user.enable', 'failure', null, { reason: 'not_found' })
@@ -360,6 +382,10 @@ export async function setHubUserRole(
 ): Promise<SetHubUserRoleResult> {
   if (normalizeEmail(email) === COMPUTER_SERVICE_USER_EMAIL) {
     auditUser('user.role_change', 'denied', null, { reason: 'protected', role })
+    return 'protected'
+  }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.role_change', 'denied', null, { reason: 'break_glass', role })
     return 'protected'
   }
   if (isEntraSsoAuth(auth)) {

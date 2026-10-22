@@ -797,6 +797,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
  * The last two are exempt from the hub's bearer gate and verify the caller
  * themselves (apps/hub `rest-auth.ts` `SELF_GUARDED`), so they also check the role
  * themselves; the shared gate never sees a principal for them.
+ * `PATCH /api/hub/computers`      revoke / unrevoke any computer (`slay hub computers`).
  *
  * ── open ────────────────────────────────────────────────────────────────────
  * `POST /api/auth/web-login`      how a browser obtains a session.
@@ -913,7 +914,9 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'POST /api/templates': 'user',
   'DELETE /api/templates/:id': 'user',
   'GET /api/templates/:id': 'user',
-  'PATCH /api/templates/:id': 'user'
+  'PATCH /api/templates/:id': 'user',
+  // Break-glass v2 (added): revoke / unrevoke any computer, the REST twin of the tRPC pair.
+  'PATCH /api/hub/computers': 'admin'
 }
 
 /**

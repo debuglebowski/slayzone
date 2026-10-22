@@ -48,7 +48,7 @@ export { ownerFilePath, readBootstrapOwner, type BootstrapOwnerFile }
 
 /**
  * Write `value` as JSON to `target`, 0600, atomically (tmp + rename). For a file that
- * holds a credential — this one, and the break-glass file (break-glass.ts).
+ * holds a credential — this one.
  */
 export async function writePrivateJsonFile(target: string, value: unknown): Promise<void> {
   await mkdir(dirname(target), { recursive: true })

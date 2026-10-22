@@ -207,6 +207,8 @@ export interface RestApiDeps {
     getGateway?: () => {
       listComputers: () => Array<{ computerId: string }>
       listUsableComputers: () => Array<{ computerId: string }>
+      /** Drop a live connection (`PATCH /api/hub/computers` revoking it). */
+      disconnect?: (computerId: string, reason: string) => void
     } | null
   }
   /**

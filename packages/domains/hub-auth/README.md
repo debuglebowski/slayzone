@@ -61,8 +61,11 @@ package. `bearer`, `jwt`, and `organization` still come from
   change or reset (`src/server/password.ts`: better-auth's email + password off,
   its password endpoints 404), and `createHubUser` refuses
   (`HUB_PASSWORD_DISABLED`). Password credentials already stored are kept.
-  Break-glass accounts (`src/server/break-glass.ts`): a temporary `user`
-  account while password sign-in is on beside Entra, closed when it is off.
+- Break-glass account (`src/server/break-glass.ts`): one synthetic
+  `break-glass@hub.slayzone.local` with no credential — `openBreakGlassAccount`
+  enables it as `admin`, `closeBreakGlassAccounts` disables it (and any v1
+  account) and revokes what it holds. The hub's break-glass (apps/hub
+  `break-glass.ts`) decides when; `users.ts` never changes or counts it.
 - `createAuthExpressApp(auth)` → express app serving `/api/auth/*` via
   `toNodeHandler`. Standalone or mountable at a host app's root. No body
   parser on purpose (better-auth consumes the raw body).
@@ -135,4 +138,4 @@ network, no app. Covers migrations, sign-up/sign-in via in-process
 `auth.api`, bearer-token verification, apiKey mint/verify/revoke, and
 organization create + member add. `entra.test.ts` drives the Entra flow end to
 end against a local fake issuer (own JWKS, signed tokens, an assertion-checking
-token endpoint). `password.test.ts` covers the password switch and break-glass accounts.
+token endpoint). `password.test.ts` covers the password switch, `break-glass.test.ts` the break-glass account.

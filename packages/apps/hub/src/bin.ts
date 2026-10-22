@@ -2,6 +2,7 @@ import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-promp
 import { securityEvent } from '@slayzone/platform/security-log'
 import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slayzone-config'
 import { bootRefusalRule } from './boot-rules.js'
+import { runBreakGlassCommand } from './break-glass-command.js'
 import { startServer } from './server.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
@@ -103,25 +104,35 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  // A boot rule's refusal is a security event: one audit line naming the rule
-  // (T-03). Any other boot failure is not, and stays on stderr only.
-  const rule = bootRefusalRule(err)
-  if (rule) {
-    securityEvent({
-      event: 'hub.boot',
-      outcome: 'denied',
-      level: 'error',
-      targetKind: 'hub',
-      detail: { rule }
-    })
-  }
-  process.stderr.write(
-    `[slayzone-server] fatal: ${err instanceof Error ? err.stack : String(err)}\n`
-  )
-  // stdout is asynchronous on a macOS pipe: let the audit line out before exiting.
-  // `exitCode` covers the loop draining on its own before either fires.
-  process.exitCode = 1
-  setTimeout(() => process.exit(1), 2_000).unref()
-  process.stdout.write('', () => process.exit(1))
-})
+// `slayzone-hub break-glass …` (break-glass-command.ts) is an operator command against
+// the RUNNING hub over its local socket: it starts no hub of its own.
+if (process.argv[2] === 'break-glass') {
+  void runBreakGlassCommand(process.argv.slice(3)).then((code) => {
+    // Exit explicitly: the hub's modules are loaded and may hold the loop open.
+    process.exitCode = code
+    process.stdout.write('', () => process.exit(code))
+  })
+} else {
+  main().catch((err) => {
+    // A boot rule's refusal is a security event: one audit line naming the rule
+    // (T-03). Any other boot failure is not, and stays on stderr only.
+    const rule = bootRefusalRule(err)
+    if (rule) {
+      securityEvent({
+        event: 'hub.boot',
+        outcome: 'denied',
+        level: 'error',
+        targetKind: 'hub',
+        detail: { rule }
+      })
+    }
+    process.stderr.write(
+      `[slayzone-server] fatal: ${err instanceof Error ? err.stack : String(err)}\n`
+    )
+    // stdout is asynchronous on a macOS pipe: let the audit line out before exiting.
+    // `exitCode` covers the loop draining on its own before either fires.
+    process.exitCode = 1
+    setTimeout(() => process.exit(1), 2_000).unref()
+    process.stdout.write('', () => process.exit(1))
+  })
+}

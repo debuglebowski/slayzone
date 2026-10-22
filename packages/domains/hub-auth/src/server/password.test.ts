@@ -1,15 +1,13 @@
 /**
- * The password switch (T-10) and break-glass accounts (O-9) against a REAL better-auth
- * instance on a throwaway node:sqlite file — no mocks.
+ * The password switch (T-10) against a REAL better-auth instance on a throwaway
+ * node:sqlite file — no mocks.
  *
  * With `enablePassword: false`: every password endpoint 404s over HTTP, an in-process
  * sign-in is refused, `createHubUser` refuses with `HUB_PASSWORD_DISABLED` and one
  * audit line, and a password credential written while the switch was on is KEPT but
- * cannot sign in — until the switch is on again. Break-glass: the account is `user`
- * (also on an Entra hub), signs in, and closing it disables it and revokes its sessions
- * even when it is the last enabled account.
+ * cannot sign in — until the switch is on again. (Break-glass is no longer part of the
+ * password switch: break-glass.test.ts.)
  */
-import { generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,14 +16,8 @@ import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHubAuth, type HubAuth } from './auth'
-import {
-  closeBreakGlassAccounts,
-  createBreakGlassAccount,
-  isBreakGlassEmail,
-  listOpenBreakGlassAccounts
-} from './break-glass'
 import { isPasswordSignInEnabled, PASSWORD_AUTH_ENDPOINTS } from './password'
-import { createHubUser, listHubUsers } from './users'
+import { createHubUser } from './users'
 
 const BASE_URL = 'http://127.0.0.1:9999'
 const SECRET = 'hub-auth-password-test-secret-at-least-32-chars'
@@ -52,24 +44,6 @@ const boot = (enablePassword?: boolean): Promise<HubAuth> =>
     baseURL: BASE_URL,
     secret: SECRET,
     ...(enablePassword === undefined ? {} : { enablePassword })
-  })
-
-/** An Entra hub. Nothing here signs in through Entra, so the key is never used. */
-const bootSso = (enablePassword: boolean): Promise<HubAuth> =>
-  createHubAuth({
-    dbPath,
-    baseURL: BASE_URL,
-    secret: SECRET,
-    enablePassword,
-    sso: {
-      tenantId: '11111111-2222-3333-4444-555555555555',
-      clientId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      credential: {
-        privateKey: generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey,
-        thumbprintS256: 'unused'
-      },
-      requireMfa: true
-    }
   })
 
 const post = (auth: HubAuth, path: string, body: unknown = {}) =>
@@ -168,101 +142,5 @@ describe('password switch off', () => {
       body: { email: alice.email, password: alice.password }
     })
     expect(signedIn.user.id).toBe(alice.id)
-  })
-})
-
-describe('break-glass accounts', () => {
-  it('recognises only its own addresses', () => {
-    expect(isBreakGlassEmail('break-glass-20261022-a1b2c3@hub.slayzone.local')).toBe(true)
-    expect(isBreakGlassEmail('Break-Glass-20261022-A1B2C3@hub.slayzone.local')).toBe(true)
-    expect(isBreakGlassEmail('owner@hub.slayzone.local')).toBe(false)
-    expect(isBreakGlassEmail('break-glass-x@example.com')).toBe(false)
-  })
-
-  it('on an Entra hub with password on: a `user` account that signs in, audited break_glass', async () => {
-    const auth = await bootSso(true)
-    audit.length = 0
-    const account = await createBreakGlassAccount(auth, new Date('2026-10-22T08:00:00Z'))
-    expect(account.role).toBe('user')
-    expect(account.email).toMatch(/^break-glass-20261022-[0-9a-f]{6}@hub\.slayzone\.local$/)
-    expect(audit).toEqual([
-      expect.objectContaining({
-        event: 'user.create',
-        outcome: 'success',
-        targetId: account.id,
-        detail: { role: 'user', reason: 'break_glass' }
-      })
-    ])
-    const signedIn = await auth.api.signInEmail({
-      body: { email: account.email, password: account.password }
-    })
-    expect(signedIn.user.id).toBe(account.id)
-    expect((await listOpenBreakGlassAccounts(auth)).map((u) => u.id)).toEqual([account.id])
-    // Never in an audit line: the address or the password.
-    const lines = JSON.stringify(audit)
-    expect(lines).not.toContain(account.email)
-    expect(lines).not.toContain(account.password)
-  })
-
-  it('a fresh address each time, so a closed one never collides', async () => {
-    const auth = await bootSso(true)
-    const a = await createBreakGlassAccount(auth)
-    const b = await createBreakGlassAccount(auth)
-    expect(a.email).not.toBe(b.email)
-  })
-
-  it('cannot be created with password sign-in off', async () => {
-    const auth = await bootSso(false)
-    const err = await createBreakGlassAccount(auth).catch((e: unknown) => e)
-    expect(isHubSwitchedOffError(err)).toBe(true)
-    expect(await listOpenBreakGlassAccounts(auth)).toEqual([])
-  })
-
-  it('closing disables it and revokes its sessions — even as the last account — and keeps every row', async () => {
-    const open = await bootSso(true)
-    const account = await createBreakGlassAccount(open)
-    await open.api.signInEmail({ body: { email: account.email, password: account.password } })
-    expect(count('session', 'userId = ?', account.id)).toBe(1)
-
-    const closing = await bootSso(false)
-    const revoked: string[] = []
-    audit.length = 0
-    const closed = await closeBreakGlassAccounts(closing, {
-      revokeExternalSessions: async (userId) => void revoked.push(userId)
-    })
-    expect(closed).toEqual([account.id])
-    expect(revoked).toEqual([account.id])
-    expect(count('session', 'userId = ?', account.id)).toBe(0)
-    expect(count('user', 'id = ?', account.id)).toBe(1)
-    expect(count('account', 'userId = ?', account.id)).toBe(1)
-    // One line for the account (and better-auth's own per-session revoke lines).
-    expect(audit.filter((l) => l.event === 'user.disable')).toEqual([
-      expect.objectContaining({
-        event: 'user.disable',
-        outcome: 'success',
-        targetId: account.id,
-        detail: { reason: 'break_glass_closed' }
-      })
-    ])
-    expect((await listHubUsers(closing)).find((u) => u.id === account.id)?.disabledAt).not.toBe(
-      null
-    )
-    // Idempotent: nothing left to close.
-    expect(await closeBreakGlassAccounts(closing)).toEqual([])
-
-    // Password on again: the closed account still cannot sign in (it is disabled).
-    const reopened = await bootSso(true)
-    await expect(
-      reopened.api.signInEmail({ body: { email: account.email, password: account.password } })
-    ).rejects.toThrow()
-  })
-
-  it('closing leaves every other account alone', async () => {
-    const auth = await boot(true)
-    const alice = await created(auth, 'alice@example.com')
-    await createBreakGlassAccount(auth)
-    await closeBreakGlassAccounts(auth)
-    const row = (await listHubUsers(auth)).find((u) => u.id === alice.id)
-    expect(row?.disabledAt).toBeNull()
   })
 })

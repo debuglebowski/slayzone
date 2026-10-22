@@ -75,6 +75,7 @@ import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
 import { registerComputersJoinTokenRoute } from './computers/join-token'
 import { registerComputersListRoute } from './computers/list'
 import { registerHubUsersRoutes } from './hub/users'
+import { registerHubComputersRoute } from './hub/computers'
 import { registerWebLoginRoute } from './hub/web-login'
 
 export type { RestApiDeps } from './types'
@@ -190,6 +191,8 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // only way to create an account now that public signup is closed. 503 where
   // hub-auth is absent (the Electron host) or its init failed.
   registerHubUsersRoutes(app, deps)
+  // Revoke / unrevoke a computer (`slay hub computers`, a break-glass session). Admin only.
+  registerHubComputersRoute(app, deps)
 
   // Scoped browser login. Gate-exempt (rest-auth.ts's AUTH_BOOTSTRAP_PATHS) —
   // a token-less browser must reach this to obtain one, same reasoning as

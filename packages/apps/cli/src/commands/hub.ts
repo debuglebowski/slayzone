@@ -50,6 +50,7 @@ import {
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
 import { deviceSignIn, postAuthJson, readSignInMethods, signedInEmail } from '../hub-sign-in'
 import { hubOwnerPasswordCommand } from './hub-owner-password'
+import { hubBreakGlassCommand, hubComputersCommand } from './hub-break-glass'
 import {
   ensureLogDir,
   fail,
@@ -1298,6 +1299,10 @@ export function hubCommand(): Command {
 
   // slay hub owner-password [name] — a reachable hub's first admin (T-11)
   cmd.addCommand(hubOwnerPasswordCommand())
+
+  // slay hub computers ls|revoke|unrevoke, slay hub break-glass start|end
+  cmd.addCommand(hubComputersCommand())
+  cmd.addCommand(hubBreakGlassCommand())
 
   return cmd
 }

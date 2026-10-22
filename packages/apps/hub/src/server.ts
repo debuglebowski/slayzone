@@ -35,7 +35,12 @@ import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
 import { backfillOwnership } from './ownership-backfill.js'
-import { applyBreakGlassAtBoot } from './break-glass'
+import { BREAK_GLASS_PATH, handleBreakGlassRequest } from './break-glass'
+import {
+  type HubAdminSocket,
+  resolveHubAdminSocketPath,
+  startHubAdminSocket
+} from './hub-admin-socket.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
 import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
@@ -171,26 +176,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // enforces auth. Off → inert pass-through (byte-identical).
   setAuthGate(() => hubAuthRequired)
 
-  // The password switch's boot step (T-10, break-glass.ts): with Entra sign-in on and
-  // `ENABLE_PASSWORD=1` the hub keeps one temporary password account for the operator
-  // (O-9); with `ENABLE_PASSWORD=0` it closes any it kept. No-op on the desktop app's
-  // hub. A failure is logged, never fatal: password sign-in is refused regardless.
-  if (hubAuth) {
-    try {
-      await applyBreakGlassAtBoot({
-        auth: hubAuth,
-        db,
-        dataRoot,
-        enablePassword: switches.enablePassword,
-        ssoActive: boot.ssoActive,
-        log: (m) => log(m),
-        revokeUser: (userId) => composition.userAccess.revokeUser(userId)
-      })
-    } catch (err) {
-      const message = `[slayzone] break-glass step failed: ${err instanceof Error ? err.message : String(err)}`
-      process.stderr.write(`${message}\n`)
-      log(message)
-    }
+  // Break-glass (break-glass.ts, O-9/O-23): close whatever an earlier run left open —
+  // its account (a crash mid-session), break-glass v1's password accounts and v1's
+  // `hub.break-glass.json` — before the hub serves anything. FATAL on failure: a hub that
+  // cannot close emergency access must not serve. Login-required hubs only; the desktop
+  // app's hub does no I/O here.
+  if (hubAuthRequired && hubAuth) {
+    await composition.breakGlass.closeAtBoot(dataRoot)
   }
 
   // A hub that requires login must not come up unusable by the operator who just
@@ -341,6 +333,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // was exactly that bug: the entire scoped web-session login path was
     // unreachable in a real running hub until this carve-out existed.
     const authPath = (req.url ?? '').split('?')[0]
+    // Break-glass redemption is OURS too (break-glass.ts), and only exists while
+    // break-glass does (login required); otherwise the path falls through unchanged.
+    if (authPath === BREAK_GLASS_PATH && composition.breakGlass.enabled()) {
+      handleBreakGlassRequest(composition.breakGlass, req, res)
+      return
+    }
     if (authApp && authPath.startsWith('/api/auth/') && authPath !== '/api/auth/web-login') {
       // The apiKey plugin's CLIENT routes are never served. `mintComputerApiKey`
       // calls `auth.api.createApiKey` in-process (the server branch), so nothing
@@ -386,6 +384,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     getPasswordEnabled: () => switches.enablePassword,
     getHubAuth: () => hubAuth,
     getDb: () => db,
+    getBreakGlass: () => composition.breakGlass,
     next: dispatchRequest
   })
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
@@ -586,15 +585,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
 
   // Audit (T-10): a hub that requires login records how it can be signed in to at each
-  // boot, so opening and closing break-glass (O-9: password on beside Entra) are both
-  // on the record. `warn` while it is open. Not on a hub with login off (the desktop
-  // app's), which has no sign-in.
+  // boot. Not on a hub with login off (the desktop app's), which has no sign-in.
+  // Break-glass is not a sign-in method here: it is opened while the hub runs, and
+  // audited as `auth.break_glass.*` (break-glass.ts).
   if (hubAuthRequired) {
-    const breakGlass = boot.ssoActive && switches.enablePassword
     securityEvent({
       event: 'hub.boot',
       outcome: 'success',
-      level: breakGlass ? 'warn' : 'info',
       actor: null,
       ip: null,
       route: null,
@@ -603,10 +600,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         methods: [
           ...(switches.enablePassword ? ['password'] : []),
           ...(boot.ssoActive ? ['sso'] : [])
-        ],
-        breakGlass
+        ]
       }
     })
+  }
+
+  // The break-glass channel (hub-admin-socket.ts): the operator's `slayzone-hub
+  // break-glass` reaches this running hub through it. Opened once the hub serves, on
+  // login-required hubs only. Unavailable (logged) rather than fatal: sign-in itself is
+  // untouched without it.
+  let adminSocket: HubAdminSocket | null = null
+  if (hubAuthRequired && hubAuth) {
+    const socketPath = resolveHubAdminSocketPath(dataRoot)
+    adminSocket = socketPath
+      ? await startHubAdminSocket({ socketPath, breakGlass: composition.breakGlass, log })
+      : null
+    if (!socketPath) log(`[slayzone] break-glass unavailable: no socket path under ${dataRoot}`)
   }
 
   // Boot canary: records THIS process's build identity so the running sidecar's
@@ -661,6 +670,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         } catch {
           /* ignore */
         }
+      }
+      // Break-glass ends with the process: no new grant, and an open session's account
+      // is closed now rather than at the next boot.
+      if (adminSocket) {
+        try {
+          await adminSocket.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        await composition.breakGlass.end('stop')
+      } catch (err) {
+        log(
+          `[slayzone] break-glass: closing at stop failed, the next boot closes it: ${err instanceof Error ? err.message : String(err)}`
+        )
       }
       mcpRest.dispose()
       try {

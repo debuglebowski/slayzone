@@ -19,8 +19,12 @@
  *     is on the public address, and it provisions no bootstrap owner.
  *   - password sign-in off (T-10): every password route 403s with the switch code and
  *     an audit line, no owner file and no password in the logs, a password account
- *     from before cannot sign in; break-glass (password on beside Entra, O-9) opens and
- *     closes with the switch, audited.
+ *     from before cannot sign in.
+ *   - break-glass v2 (O-9, O-23): the operator command on the box opens a grant over
+ *     the hub's local socket, the verifier redeems it once for an admin session that
+ *     revokes a computer and reads no content, the session ends at its TTL; a crash
+ *     mid-session is closed at the next boot, v1's file is removed, nothing secret lands
+ *     on disk. The desktop app's (login-off) hub has none of it.
  *
  * Isolation: every hub runs in its own throwaway SLAYZONE_ROOT with every inherited
  * SLAYZONE_ and ELECTRON_ prefixed env var scrubbed (a task terminal leaks the dial-side
@@ -33,7 +37,8 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
  *   packages/apps/hub/src/hub-boot.test.ts
  */
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
   existsSync,
@@ -140,6 +145,16 @@ function spawnHub(root: string, env: Record<string, string>): Proc {
         proc.kill('SIGTERM')
       })
   }
+}
+
+/** Run the built bin with `args` (an operator command, not a hub): exit code + output. */
+function runBin(args: string[]): { code: number | null; out: string } {
+  const r = spawnSync(ELECTRON_BIN, [HUB_BIN, ...args], {
+    env: { ...scrubbedEnv(), ELECTRON_RUN_AS_NODE: '1' },
+    encoding: 'utf8',
+    timeout: 30_000
+  })
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
 
 async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: string): Promise<T> {
@@ -458,6 +473,15 @@ async function main(): Promise<void> {
         assert(!existsSync(join(root, 'hub.owner.json')), 'no bootstrap owner without login')
         // A hub that only this machine reaches still generates its own secret.
         assert(existsSync(join(root, 'hub.state.json')), 'loopback hub may generate its secret')
+        // No break-glass on a login-off hub: no socket, the route is not ours, and the
+        // operator command refuses (exit 1, saying why).
+        assert(!existsSync(join(root, 'run', 'hub-admin.sock')), 'no break-glass socket')
+        const redeem = await postJson(`http://127.0.0.1:${port}/api/auth/break-glass`, {
+          verifier: 'x'.repeat(43)
+        })
+        assert(redeem.status === 404, `no break-glass route, got ${redeem.status}`)
+        const cmd = runBin(['break-glass', 'status', '--root', root])
+        assert(cmd.code === 1 && cmd.out.includes('does not require login'), cmd.out)
       } finally {
         await hub.stop()
       }
@@ -715,14 +739,13 @@ async function main(): Promise<void> {
           authDb.close()
         }
 
-        // The boot line: Entra only, not break-glass.
+        // The boot line: Entra only.
         const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
         assert(boot, 'hub.boot success line')
         assert(
           JSON.stringify(boot.detail.methods) === '["sso"]',
           `methods: ${JSON.stringify(boot.detail)}`
         )
-        assert(boot.detail.breakGlass === false, 'not break-glass')
         assert(!existsSync(join(root, 'hub.break-glass.json')), 'no break-glass file')
       } finally {
         await hub.stop()
@@ -778,7 +801,7 @@ async function main(): Promise<void> {
       }
     })
 
-    await test('break-glass (O-9): password on beside Entra opens a temporary account, off closes it, all audited', async () => {
+    await test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a computer, ends at its TTL; a crash closes at the next boot', async () => {
       const root = newRoot()
       const { certPath, keyPath } = writeSsoCert(root)
       const sso = {
@@ -786,98 +809,188 @@ async function main(): Promise<void> {
         SLAYZONE_HUB_SSO_CERT_PATH: certPath,
         SLAYZONE_HUB_SSO_KEY_PATH: keyPath
       }
-      const file = join(root, 'hub.break-glass.json')
+      const BREAK_GLASS = 'break-glass@hub.slayzone.local'
+      const accountRow = (): { role: string; disabledAt: unknown } | undefined => {
+        const authDb = new DatabaseSync(join(root, 'slayzone.auth.sqlite'))
+        try {
+          return authDb
+            .prepare('SELECT role, disabledAt FROM user WHERE email = ?')
+            .get(BREAK_GLASS) as { role: string; disabledAt: unknown } | undefined
+        } finally {
+          authDb.close()
+        }
+      }
+      const newVerifier = (): { verifier: string; challenge: string } => {
+        const verifier = randomBytes(32).toString('base64url')
+        return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') }
+      }
+      const secrets: string[] = []
+      // Break-glass v1 left its credentials file behind: boot removes it, unread.
+      const v1File = join(root, 'hub.break-glass.json')
+      writeFileSync(v1File, JSON.stringify({ password: 'v1-left-this-behind' }), { mode: 0o600 })
 
-      // 1. ENABLE_PASSWORD=1 + restart → a temporary account in a 0600 file.
-      const open = spawnHub(root, { ...sso, SLAYZONE_HUB_ENABLE_PASSWORD: '1' })
-      let bearer: string
-      let account: { email: string; password: string; userId: string }
+      const hub = spawnHub(root, sso)
+      let crashedToken = ''
       try {
-        const port = await bootAndGetPort(open)
+        const port = await bootAndGetPort(hub)
         const base = `http://127.0.0.1:${port}`
-        assert(existsSync(file), 'break-glass file written')
-        assert((statSync(file).mode & 0o777) === 0o600, 'file is 0600')
-        account = JSON.parse(readFileSync(file, 'utf8')) as typeof account
-        assert(!existsSync(join(root, 'hub.owner.json')), 'still no bootstrap owner (O-4)')
+        assert(!existsSync(v1File), 'v1 file removed at boot')
+        const socket = join(root, 'run', 'hub-admin.sock')
+        assert((statSync(socket).mode & 0o777) === 0o600, 'the channel is a 0600 socket')
+        // An enrolled computer, as the store holds one.
+        const appDb = new DatabaseSync(join(root, 'slayzone.data.sqlite'))
+        try {
+          appDb
+            .prepare(
+              `INSERT INTO computers (id, name, platform, version, capabilities_json, auth_key_id,
+                 last_seen_at, created_at, revoked_at) VALUES ('c-stolen', 'stolen', 'p', '0', '{}', NULL, ?, ?, NULL)`
+            )
+            .run(Date.now(), Date.now())
+        } finally {
+          appDb.close()
+        }
 
-        // 2. Use it: the CLI sign-in and the web login both work.
-        const signIn = await postJson(
-          `${base}/api/auth/sign-in/email`,
-          { email: account.email, password: account.password },
-          { origin: 'https://hub.example.com' }
-        )
-        assert(signIn.status === 200 && signIn.token, `sign-in, got ${signIn.status}`)
-        bearer = signIn.token
-        assert((signIn.json.user as { role?: string })?.role === 'user', 'role user, never admin')
-        const tasks = await fetch(`${base}/api/tasks`, {
-          headers: { authorization: `Bearer ${bearer}` }
-        })
-        assert(tasks.status === 200, `the bearer reaches the API, got ${tasks.status}`)
-        const web = await postJson(`${base}/api/auth/web-login`, {
-          email: account.email,
-          password: account.password
-        })
-        assert(web.status === 200, `web login, got ${web.status}`)
+        // 1. The laptop holds the verifier; the operator opens a grant on the box.
+        const first = newVerifier()
+        secrets.push(first.verifier)
+        const open = runBin([
+          'break-glass',
+          'open',
+          '--challenge',
+          first.challenge,
+          '--ttl',
+          '1m',
+          '--root',
+          root
+        ])
+        assert(open.code === 0, `open: ${open.out}`)
+        assert(open.out.includes('is open'), open.out)
+        assert(!open.out.includes(first.verifier), 'the command output holds no secret')
 
-        const lines = securityLines(open)
-        const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
+        // 2. Redeemed once.
+        const redeemed = await postJson(`${base}/api/auth/break-glass`, {
+          verifier: first.verifier
+        })
         assert(
-          boot?.level === 'warn' && boot.detail.breakGlass === true,
-          `boot line: ${JSON.stringify(boot)}`
+          redeemed.status === 200 && typeof redeemed.json.token === 'string',
+          `redeem: ${redeemed.status} ${JSON.stringify(redeemed.json)}`
         )
+        const token = redeemed.json.token as string
+        secrets.push(token)
+        const again = await postJson(`${base}/api/auth/break-glass`, { verifier: first.verifier })
+        assert(again.status === 403, `second use refused, got ${again.status}`)
+        const bearer = { authorization: `Bearer ${token}` }
+
+        // 3. An admin action; listed as the break-glass admin; no content.
+        const revoke = await fetch(`${base}/api/hub/computers`, {
+          method: 'PATCH',
+          headers: { ...bearer, 'content-type': 'application/json' },
+          body: JSON.stringify({ id: 'c-stolen', revoked: true })
+        })
+        assert(revoke.status === 200, `revoke: ${revoke.status} ${await revoke.text()}`)
+        const users = (await (
+          await fetch(`${base}/api/hub/users`, { headers: bearer })
+        ).json()) as {
+          data: Array<{ email: string; role: string; disabledAt: string | null }>
+        }
         assert(
-          lines.some(
-            (l) =>
-              l.event === 'user.create' &&
-              l.outcome === 'success' &&
-              l.detail.reason === 'break_glass'
-          ),
-          'user.create break_glass'
+          users.data.some((u) => u.email === BREAK_GLASS && u.role === 'admin' && !u.disabledAt),
+          `listed as the open break-glass admin: ${JSON.stringify(users.data)}`
         )
+        const tasks = await fetch(`${base}/api/tasks`, { headers: bearer })
+        assert(tasks.status === 403, `no content, got ${tasks.status}`)
+
+        // 4. The TTL ends it: token refused, account closed, audited.
+        await poll(
+          async () =>
+            (await fetch(`${base}/api/hub/users`, { headers: bearer })).status === 401
+              ? true
+              : null,
+          90_000,
+          'the session to expire'
+        )
+        await poll(
+          async () => (accountRow()?.disabledAt ? true : null),
+          10_000,
+          'the account to be closed'
+        )
+        assert(accountRow()?.role === 'user', 'back to user')
+        const lines = securityLines(hub)
+        const id = lines.find(
+          (l) => l.event === 'auth.break_glass.redeem' && l.outcome === 'success'
+        )?.actor
+        assert(typeof id === 'string', 'redeem line names the account')
+        for (const [event, check] of [
+          ['auth.break_glass.grant', (l: { level?: unknown }) => l.level === 'warn'],
+          ['auth.break_glass.use', (l: { actor?: unknown }) => l.actor === id],
+          ['computer.revoke', (l: { actor?: unknown }) => l.actor === id],
+          [
+            'auth.break_glass.end',
+            (l: { detail: Record<string, unknown> }) => l.detail.reason === 'expired'
+          ],
+          [
+            'auth.break_glass.end',
+            (l: { detail: Record<string, unknown> }) => l.detail.legacyFile === true
+          ]
+        ] as const) {
+          assert(
+            lines.some((l) => l.event === event && (check as (x: typeof l) => boolean)(l)),
+            `audit: ${event}`
+          )
+        }
+
+        // 5. A crash mid-session: open and redeem again, then kill the hub.
+        const second = newVerifier()
+        secrets.push(second.verifier)
         assert(
-          lines.some((l) => l.event === 'auth.signin' && l.outcome === 'success'),
-          'sign-in audited'
+          runBin(['break-glass', 'open', '--challenge', second.challenge, '--root', root]).code ===
+            0,
+          'second grant'
         )
-        const all = `${readLogs(root)}\n${open.logs.join('\n')}`
-        assert(!all.includes(account.password), 'the password is in no log')
-        assert(all.includes(file), 'the log names the file')
+        const r2 = await postJson(`${base}/api/auth/break-glass`, { verifier: second.verifier })
+        assert(r2.status === 200, `second redeem ${r2.status}`)
+        crashedToken = r2.json.token as string
+        secrets.push(crashedToken)
+        assert(!accountRow()?.disabledAt, 'open again')
+        hub.proc.kill('SIGKILL')
+        await hub.exit
       } finally {
-        await open.stop()
+        await hub.stop()
       }
 
-      // 3. ENABLE_PASSWORD=0 + restart → closed: disabled, sessions gone, file gone.
-      const closed = spawnHub(root, sso)
+      const after = spawnHub(root, sso)
       try {
-        const port = await bootAndGetPort(closed)
-        const base = `http://127.0.0.1:${port}`
-        assert(!existsSync(file), 'break-glass file deleted')
-        const tasks = await fetch(`${base}/api/tasks`, {
-          headers: { authorization: `Bearer ${bearer}` }
+        const port = await bootAndGetPort(after)
+        const res = await fetch(`http://127.0.0.1:${port}/api/hub/users`, {
+          headers: { authorization: `Bearer ${crashedToken}` }
         })
-        assert(tasks.status === 401, `its session is revoked, got ${tasks.status}`)
-        const signIn = await postJson(
-          `${base}/api/auth/sign-in/email`,
-          { email: account.email, password: account.password },
-          { origin: 'https://hub.example.com' }
-        )
+        assert(res.status === 401, `the crashed session is gone, got ${res.status}`)
+        assert(accountRow()?.disabledAt, 'closed at boot')
         assert(
-          signIn.status === 403 && signIn.json.code === 'HUB_PASSWORD_DISABLED',
-          `password sign-in refused by the switch, got ${signIn.status}`
-        )
-        const lines = securityLines(closed)
-        assert(
-          lines.some(
+          securityLines(after).some(
             (l) =>
-              l.event === 'user.disable' &&
-              l.targetId === account.userId &&
-              l.detail.reason === 'break_glass_closed'
+              l.event === 'auth.break_glass.end' &&
+              l.detail.stage === 'boot' &&
+              l.detail.accounts === 1
           ),
-          'user.disable break_glass_closed'
+          'boot end line'
         )
-        const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
-        assert(boot?.detail.breakGlass === false, 'closed boot line')
+        // Nothing secret on disk: no verifier or token in any file under ROOT.
+        const files: string[] = []
+        const walk = (dir: string): void => {
+          for (const e of readdirSync(dir, { withFileTypes: true })) {
+            const p = join(dir, e.name)
+            if (e.isDirectory()) walk(p)
+            else if (e.isFile()) files.push(p)
+          }
+        }
+        walk(root)
+        for (const f of files) {
+          const text = readFileSync(f).toString('latin1')
+          for (const s of secrets) assert(!text.includes(s), `${f} holds a break-glass secret`)
+        }
       } finally {
-        await closed.stop()
+        await after.stop()
       }
     })
 

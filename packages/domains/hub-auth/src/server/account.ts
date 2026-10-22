@@ -36,6 +36,26 @@ export function isDisabled(user: Record<string, unknown>): boolean {
   return user.disabledAt !== null && user.disabledAt !== undefined
 }
 
+/**
+ * The break-glass account's address (./break-glass.ts): ONE synthetic account, disabled
+ * whenever no break-glass session is open. `.local` is reserved (RFC 6762), so no
+ * mailbox and no Entra identity can hold it.
+ */
+export const BREAK_GLASS_EMAIL = 'break-glass@hub.slayzone.local'
+
+/** Break-glass v1's temporary password accounts (T-10): `break-glass-<day>-<hex>@…`. */
+const LEGACY_BREAK_GLASS_EMAIL = /^break-glass-[0-9a-z-]+@hub\.slayzone\.local$/
+
+/**
+ * Whether `email` is a break-glass account's: v2's, or one v1 left behind. Such an
+ * account is managed by break-glass alone — users.ts refuses to disable, enable or
+ * re-role it and never counts it as a human or an admin.
+ */
+export function isBreakGlassEmail(email: string): boolean {
+  const normalized = email.trim().toLowerCase()
+  return normalized === BREAK_GLASS_EMAIL || LEGACY_BREAK_GLASS_EMAIL.test(normalized)
+}
+
 /** What a session check needs to know about the account behind it. */
 export interface HubAccount {
   userId: string

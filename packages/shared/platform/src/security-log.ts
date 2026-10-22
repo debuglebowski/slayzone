@@ -125,7 +125,20 @@ export const SECURITY_EVENTS = [
   /** The signed-in user denied a request. */
   'auth.device.deny',
   /** A request expired before a token was issued (seen at poll, on the page, or swept). */
-  'auth.device.expire'
+  'auth.device.expire',
+  // Break-glass v2 (added): emergency admin access while sign-in is down (hub
+  // `break-glass.ts`, O-9/O-23). `detail.grantRef` correlates one grant's lines.
+  /** An operator on the hub machine opened a grant over the local socket (`success`,
+   *  `detail.osUser`), or was refused (`denied`: a session is already open). */
+  'auth.break_glass.grant',
+  /** The grant was redeemed (`success`, client address in `ip`), or a redemption was
+   *  refused (`denied`, `detail.reason`: none, expired, used, mismatch). */
+  'auth.break_glass.redeem',
+  /** One request a break-glass session made (`success`); a route it may not use is an
+   *  `authz.denied` line with `detail.reason: 'break_glass'`. */
+  'auth.break_glass.use',
+  /** A grant or session ended; `detail.reason`: expired, ended, stop, boot, replaced. */
+  'auth.break_glass.end'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]
