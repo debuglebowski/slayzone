@@ -129,6 +129,9 @@ run_test_electron_strict_loader packages/apps/hub/src/ws-origin.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
+# node-pty optional in the published hub (T-30): loaded on the first local spawn, never at
+# import; missing → a clear refusal at that spawn.
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/node-pty-optional.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
 # Hub↔computer install handshake — boots the built hub+computer bins, isolated (tmp
 # home/store, ports 0, scrubbed env), asserts the computer enrolls + the real
@@ -142,6 +145,8 @@ run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
 # non-zero before the hub touches its data dir; the defaults boot on loopback; a reachable
 # hub behind a public address boots with login + secret and mints a pin-less wss token.
 run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
+# The built hub boots with node-pty, bufferutil and utf-8-validate unresolvable (T-30).
+run_test_electron_strict_loader packages/apps/hub/src/optional-natives-boot.test.ts
 # Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
 # the credential a web login mints, distinct from a full better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts

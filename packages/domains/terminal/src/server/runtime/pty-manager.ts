@@ -1,4 +1,4 @@
-import * as pty from 'node-pty'
+import type * as pty from 'node-pty'
 import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
 import { randomUUID } from 'node:crypto'
@@ -20,7 +20,12 @@ import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
 // path. It reaches every agent through the injected backend, which routes to a
 // computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
-import { getPtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
+import {
+  getPtyBackend,
+  NodePtyUnavailableError,
+  type PtyHandle,
+  type PtySpawnSpec
+} from './pty-backend'
 import {
   assertHubProcessesEnabled,
   isHubSwitchedOffError
@@ -1727,8 +1732,14 @@ export async function createPty(
       } catch (err) {
         // Fallback for shells that reject login flag combinations (host only). A
         // switch refusal is policy, not a rejected flag: retrying would only refuse
-        // (and audit) a second time.
-        if (!canRetryInteractiveOnly || isHubSwitchedOffError(err)) throw err
+        // (and audit) a second time. Nor is a missing node-pty, which fails the same
+        // way twice.
+        if (
+          !canRetryInteractiveOnly ||
+          isHubSwitchedOffError(err) ||
+          err instanceof NodePtyUnavailableError
+        )
+          throw err
         usedArgs = initialArgs.filter((arg) => arg !== '-l')
         ptyProcess = spawn(spawnFile, usedArgs)
         usedFallback = true
