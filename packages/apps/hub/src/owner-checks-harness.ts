@@ -51,6 +51,7 @@ export interface InProcessHub {
 }
 
 const SECRET = 'owner-checks-test-signing-secret-0123456789-abcdef'
+const PUBLIC_ADDRESS = 'hub.example.com'
 
 /**
  * Boot the hub in this process. `login: false` is the desktop app's own hub exactly
@@ -69,7 +70,7 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
     SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
     ...(opts.login
       ? {
-          SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+          SLAYZONE_HUB_PUBLIC_ADDRESS: PUBLIC_ADDRESS,
           SLAYZONE_HUB_REQUIRE_LOGIN: '1',
           SLAYZONE_HUB_AUTH_SECRET: SECRET
         }
@@ -118,10 +119,11 @@ export async function signedInUser(
   })
   const body = (await created.json()) as { data: { id: string; password: string } }
   if (!created.ok) throw new Error(`create ${email}: ${created.status} ${JSON.stringify(body)}`)
-  // better-auth checks the Origin of a sign-in; the hub's auth base URL is trusted.
+  // better-auth checks the Origin of a sign-in; the hub's auth base URL is trusted —
+  // its public address (`https://`, composition.ts) since T-09.
   const signIn = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:8788' },
+    headers: { 'content-type': 'application/json', origin: `https://${PUBLIC_ADDRESS}` },
     body: JSON.stringify({ email, password: body.data.password })
   })
   const session = (await signIn.json()) as { token?: string }

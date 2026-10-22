@@ -839,6 +839,7 @@ export const artifactsTxns = {
         query: p.query,
         taskId: p.taskId,
         folderId: p.folderId,
+        projectIds: p.projectIds,
         titlesOnly: p.titlesOnly,
         contentOnly: p.contentOnly,
         regex: p.regex,

@@ -99,7 +99,8 @@ export {
 export {
   initWarmProcessManager,
   reapOrphanWarms,
-  teardownAllWarm
+  teardownAllWarm,
+  warmSessionPlacement
 } from './runtime/warm-process-manager'
 export {
   ptyEvents,

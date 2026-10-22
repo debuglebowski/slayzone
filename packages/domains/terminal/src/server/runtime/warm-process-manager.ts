@@ -255,6 +255,21 @@ export function teardownAllWarm(): void {
   tabCountsByWindow.clear()
 }
 
+/**
+ * Where a pooled (not yet adopted) warm agent runs: the project it was warmed for and
+ * the computer holding it. Null once it is adopted (its task then says whose it is),
+ * reaped, or unknown. The hub reads it to decide whose a pooled session's hooks are
+ * (T-18): an `agent_sessions` row in the pool has no task, hence no owner of its own.
+ */
+export function warmSessionPlacement(
+  sessionId: string
+): { projectId: string; computerId: string } | null {
+  for (const [projectId, handle] of warm) {
+    if (handle.sessionId === sessionId) return { projectId, computerId: handle.computerId }
+  }
+  return null
+}
+
 /** Test/diagnostic hook: current warm state per project. */
 export function getWarmStatus(): Record<string, WarmHandle['state']> {
   const out: Record<string, WarmHandle['state']> = {}

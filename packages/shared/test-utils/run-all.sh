@@ -135,6 +135,10 @@ run_test_electron_strict_loader packages/apps/hub/src/session-retention-boot.tes
 run_test_electron_strict_loader packages/shared/transport/src/server/access.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks-login-off.test.ts
+# Owner checks over REST, MCP and agent hooks (T-18): two users on a real hub with
+# login (ids, lists, artifact files, relayed hooks, admin), then login off.
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http-login-off.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -715,7 +719,9 @@ run_vitest_files "vitest (role gate)" \
 
 # The owner-check classification (T-17): every user procedure marked, exhaustively.
 run_vitest_files "vitest (owner checks)" \
-  packages/shared/transport/src/server/owner-policy.test.ts
+  packages/shared/transport/src/server/owner-policy.test.ts \
+  packages/shared/transport/src/server/http-owner-policy.test.ts \
+  packages/shared/transport/src/server/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150

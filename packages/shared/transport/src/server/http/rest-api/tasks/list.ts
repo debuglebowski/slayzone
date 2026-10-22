@@ -7,6 +7,7 @@ import {
 } from '@slayzone/projects/shared'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
+import { ownedProjectsClause } from '../../owner-scope'
 
 /**
  * GET /api/tasks — list tasks with the slay CLI's filters.
@@ -64,12 +65,16 @@ export function registerListTasksRoute(app: Express, deps: RestApiDeps): void {
 
       // Resolve status aliases against the target project's columns (CLI parity:
       // only when a --project narrows the board; otherwise built-in aliases only).
+      // On a hub with login: the caller's projects only (T-18), in the SQL itself so
+      // `limit` counts the caller's rows. Nothing on the desktop app's hub.
+      const owned = await ownedProjectsClause('p.id')
+
       if (status) {
         let listColumns: ColumnConfig[] | null = null
         if (project) {
           const row = await db.get<{ id: string }>(
-            `SELECT id FROM projects WHERE id = ? OR LOWER(name) LIKE ? LIMIT 1`,
-            [project, `%${project.toLowerCase()}%`]
+            `SELECT p.id FROM projects p WHERE (p.id = ? OR LOWER(p.name) LIKE ?)${owned.sql} LIMIT 1`,
+            [project, `%${project.toLowerCase()}%`, ...owned.params]
           )
           if (row) listColumns = await columnsFor(row.id)
         }
@@ -92,10 +97,10 @@ export function registerListTasksRoute(app: Express, deps: RestApiDeps): void {
         `SELECT ${TASK_JSON_COLUMNS}, p.name AS project_name
          FROM tasks t
          JOIN projects p ON t.project_id = p.id
-         WHERE ${conditions.join(' AND ')}
+         WHERE ${conditions.join(' AND ')}${owned.sql}
          ORDER BY t."order" ASC
          ${limitClause}`,
-        doneFilter ? params : [...params, limit]
+        doneFilter ? [...params, ...owned.params] : [...params, ...owned.params, limit]
       )
 
       let filteredTasks = tasks

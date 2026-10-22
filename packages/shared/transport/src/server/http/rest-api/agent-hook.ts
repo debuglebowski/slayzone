@@ -23,11 +23,15 @@ import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
+import { getAuthGate } from '../../app-deps'
+import { restPrincipalOf } from './principal'
+import { hookReporterMayTouch, type HookReporter } from './agent-hook-owner'
 
 // The bridge interface lives in ./types (capability slot on RestApiDeps); the
 // Electron host injects the live `@slayzone/terminal/electron` impl, tests
 // inject stubs. Re-exported here so existing importers keep working.
 export type { TerminalStateBridge } from './types'
+export type { HookReporter } from './agent-hook-owner'
 
 /**
  * Per-session claude agent TREE (see `@slayzone/terminal/server` → agent-tree.ts).
@@ -548,7 +552,12 @@ async function persistConversationId(
  *   - 'ok'      → 200 (processed).
  *   - 'unknown' → 204 (event derived but not mappable; never default to Stop).
  *   - 'bad'     → 400 (no usable identity in the envelope).
+ *   - 'denied'  → 404 (a hub with login: the reporter may not touch what the event
+ *                 names — see agent-hook-owner.ts; dropped with one audit line).
  * The ws relay consumer ignores the return (fire-and-forget).
+ *
+ * `reporter`: who reports the event — the REST principal, or the owner of the
+ * computer that relayed it. Read only on a hub with login, where it is required.
  *
  * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool). Must
  * stay cheap. The ONLY DB write is the once-per-session `SessionStart`
@@ -559,8 +568,9 @@ async function persistConversationId(
 export async function processAgentHook(
   body: unknown,
   deps: RestApiDeps,
-  bridge: TerminalStateBridge | undefined
-): Promise<'ok' | 'unknown' | 'bad'> {
+  bridge: TerminalStateBridge | undefined,
+  reporter?: HookReporter
+): Promise<'ok' | 'unknown' | 'bad' | 'denied'> {
   const parsed = PayloadSchema.safeParse(body)
   if (!parsed.success) return 'bad'
 
@@ -587,6 +597,20 @@ export async function processAgentHook(
         poolSessionTaskIdCache.set(hook.slaySessionId, bound)
       }
     }
+  }
+
+  // A hub with login: nothing below runs unless the reporter may touch the task and
+  // slay session this event names (T-18). The desktop app's hub skips the check.
+  if (
+    getAuthGate() &&
+    !(await hookReporterMayTouch(
+      deps.db,
+      reporter,
+      { taskId: resolvedTaskId, slaySessionId: hook.slaySessionId },
+      hook.hookEvent
+    ))
+  ) {
+    return 'denied'
   }
 
   const event: AgentLifecycleEvent = {
@@ -736,6 +760,8 @@ export async function processAgentHook(
  * relays to the hub over its already-authenticated ws channel. So the agent env
  * carries no per-agent bearer and the route trusts loopback, exactly as the
  * local path always has. Blast radius is renderer-side status updates + a chime.
+ * On a hub with login the bearer gate does apply, and the event is reported as the
+ * signed-in caller: it may only touch that caller's task or session (T-18).
  *
  * The actual work is `processAgentHook` (shared with the hub's ws-relay
  * consumer); this is a thin Express wrapper mapping its result to a status code.
@@ -753,7 +779,17 @@ export function registerAgentHookRoute(
   const jsonParser = express.json({ limit: '1mb' })
 
   app.post('/api/agent-hook', jsonParser, async (req, res) => {
-    const result = await processAgentHook(req.body, deps, bridge)
+    // On a hub with login the bearer gate bound the caller: the event is reported as
+    // them (agent-hook-owner.ts). Absent on the desktop app's hub, where nothing checks.
+    const principal = restPrincipalOf(req)
+    const result = await processAgentHook(req.body, deps, bridge, {
+      userId: principal?.userId ?? null,
+      computerId: null
+    })
+    if (result === 'denied') {
+      res.status(404).json({ ok: false, error: 'Not found' })
+      return
+    }
     if (result === 'bad') {
       res.status(400).json({ ok: false, error: 'unresolvable agent-hook envelope' })
       return
