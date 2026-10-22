@@ -174,6 +174,33 @@ test('restore rejects a filename escaping the backups dir', async () => {
   expect(trace.length).toBe(0)
 })
 
+test('delete/restore refuse a sibling sharing the dir prefix, the dir itself and NUL', async () => {
+  const o = ops()
+  // `<root>/backups-x` starts with `<root>/backups`: the old startsWith check let it by.
+  const sibling = path.join(dataRoot, 'backups-x')
+  fs.mkdirSync(sibling, { recursive: true })
+  fs.writeFileSync(path.join(sibling, 'keep.sqlite'), 'KEEP')
+  for (const filename of ['../backups-x/keep.sqlite', '', '.', 'a\0b']) {
+    let code: unknown
+    try {
+      await o.delete(filename)
+    } catch (err) {
+      code = (err as { code?: unknown }).code
+    }
+    expect(code).toBe('PATH_OUTSIDE_BASE')
+    code = undefined
+    try {
+      await o.restore(filename)
+    } catch (err) {
+      code = (err as { code?: unknown }).code
+    }
+    expect(code).toBe('PATH_OUTSIDE_BASE')
+  }
+  expect(fs.readFileSync(path.join(sibling, 'keep.sqlite'), 'utf8')).toBe('KEEP')
+  expect(fs.existsSync(path.join(dataRoot, 'backups'))).toBe(true)
+  expect(trace.length).toBe(0)
+})
+
 // --- Auto-backup retention (data-safety audit M3) -------------------------------------
 // v0.35.0 skipped cleanup entirely when the cap was 0 ("0 = unlimited", which is what the
 // Settings UI stores for Unlimited). The hub port lost that guard, so with Unlimited every
