@@ -12,12 +12,17 @@ import { cleanupTaskFull } from './shared.js'
  * Two passes:
  *  1. Hard-delete tasks soft-deleted >5 min ago in a previous session.
  *  2. Hard-delete orphaned temporary tasks: `is_temporary`, untouched >24h, AND
- *     absent from the persisted `viewState` tab list. PTY activity does NOT bump
+ *     absent from EVERY persisted `viewState` tab list. PTY activity does NOT bump
  *     `updated_at`, so the time gate alone would purge actively-used scratch
  *     terminals after a quit/restart; cross-checking viewState spares open temp
  *     tasks, while the 24h gate still catches true orphans (crash leaks, tabs
- *     closed without renderer cleanup). Corrupt/missing viewState falls back to
- *     a time-only purge.
+ *     closed without renderer cleanup). A corrupt viewState protects nothing (its
+ *     tasks fall back to the time-only rule), as before.
+ *
+ *     "Every" (T-16): the global `settings` row (a hub without login) AND each
+ *     user's row in `user_settings` (a hub with login, where `viewState` is per
+ *     user). Reading only the global row let one user's tabs decide which of
+ *     another user's temporary tasks were deleted.
  */
 export async function purgeStaleAndOrphanedTasks(db: SlayzoneDb): Promise<void> {
   // Pass 1 — stale soft-deleted tasks from previous sessions.
@@ -38,24 +43,8 @@ export async function purgeStaleAndOrphanedTasks(db: SlayzoneDb): Promise<void> 
     console.log(`Purged ${stale.length} soft-deleted task(s)`)
   }
 
-  // Pass 2 — orphaned temporary tasks (not present in persisted viewState).
-  const openTaskIds = new Set<string>()
-  try {
-    const row = (await db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()) as
-      | { value: string }
-      | undefined
-    if (row?.value) {
-      const parsed = JSON.parse(row.value) as { tabs?: Array<{ type?: string; taskId?: string }> }
-      for (const tab of parsed.tabs ?? []) {
-        if (tab?.type === 'task' && typeof tab.taskId === 'string') openTaskIds.add(tab.taskId)
-      }
-    }
-  } catch (err) {
-    console.warn(
-      '[task] Failed to read viewState for temp-task cleanup; falling back to time-only purge:',
-      err
-    )
-  }
+  // Pass 2 — orphaned temporary tasks (open in no persisted viewState).
+  const openTaskIds = await readOpenTaskIds(db)
   const staleTemp = (
     (await db
       .prepare(
@@ -89,4 +78,40 @@ export async function purgeStaleAndOrphanedTasks(db: SlayzoneDb): Promise<void> 
   if (reaped.changes > 0) {
     console.log(`Reaped ${reaped.changes} orphaned pooled agent session(s)`)
   }
+}
+
+/**
+ * Task ids open in any persisted `viewState`: the global row plus every user's.
+ * A row that fails to parse contributes nothing (logged); the others still count.
+ * A failed read contributes nothing at all — the time-only fallback.
+ */
+async function readOpenTaskIds(db: SlayzoneDb): Promise<Set<string>> {
+  const openTaskIds = new Set<string>()
+  let rows: { value: string }[]
+  try {
+    rows = (await db
+      .prepare(
+        `SELECT value FROM settings WHERE key = 'viewState'
+         UNION ALL
+         SELECT value FROM user_settings WHERE key = 'viewState'`
+      )
+      .all()) as { value: string }[]
+  } catch (err) {
+    console.warn(
+      '[task] Failed to read viewState for temp-task cleanup; falling back to time-only purge:',
+      err
+    )
+    return openTaskIds
+  }
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.value) as { tabs?: Array<{ type?: string; taskId?: string }> }
+      for (const tab of parsed.tabs ?? []) {
+        if (tab?.type === 'task' && typeof tab.taskId === 'string') openTaskIds.add(tab.taskId)
+      }
+    } catch (err) {
+      console.warn('[task] Unreadable viewState ignored by temp-task cleanup:', err)
+    }
+  }
+  return openTaskIds
 }

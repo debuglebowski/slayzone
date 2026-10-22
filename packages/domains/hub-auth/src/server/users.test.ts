@@ -22,6 +22,7 @@ import {
   createHubUser,
   disableHubUser,
   enableHubUser,
+  findFirstAdmin,
   listHubUsers,
   setHubUserRole,
   type CreatedHubUser
@@ -266,6 +267,28 @@ describe('setHubUserRole', () => {
   it('returns not-found for an unknown email', async () => {
     await create('alice@example.com')
     expect(await setHubUserRole(auth, 'nobody@example.com', 'admin')).toBe('not-found')
+  })
+})
+
+describe('findFirstAdmin', () => {
+  it('is null on a hub with no human account', async () => {
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
+    expect(await findFirstAdmin(auth)).toBeNull()
+  })
+
+  it('is the oldest enabled admin', async () => {
+    const alice = await create('alice@example.com')
+    await create('bob@example.com', undefined, 'admin')
+    await create('carol@example.com')
+    expect(await findFirstAdmin(auth)).toBe(alice.id)
+  })
+
+  it('skips a disabled admin and plain users', async () => {
+    await create('alice@example.com')
+    const bob = await create('bob@example.com', undefined, 'admin')
+    await create('carol@example.com')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('ok')
+    expect(await findFirstAdmin(auth)).toBe(bob.id)
   })
 })
 

@@ -166,9 +166,14 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
 // The actual remap/insert logic is a conditional read-modify-write that must
 // run atomically inside the DB worker — see `export-import-txns.ts`. Here we
 // just hand the bundle data to the named transaction and reshape the result.
-async function importBundle(db: SlayzoneDb, bundle: SlayExportBundle): Promise<ImportResult> {
+async function importBundle(
+  db: SlayzoneDb,
+  bundle: SlayExportBundle,
+  ownerUserId: string | null
+): Promise<ImportResult> {
   const result = await db.namedTxn('export-import:import', {
-    data: bundle.data
+    data: bundle.data,
+    ownerUserId
   } satisfies ImportTxnParams)
   return result
 }
@@ -216,7 +221,7 @@ async function handleExportProject(db: SlayzoneDb, projectId: string): Promise<E
   }
 }
 
-async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
+async function handleImport(db: SlayzoneDb, ownerUserId: string | null): Promise<ImportResult> {
   try {
     const openResult = await getAppDeps().dialogShowOpenDialog({
       title: 'Import',
@@ -235,7 +240,7 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
       return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
     }
 
-    const result = await importBundle(db, bundle)
+    const result = await importBundle(db, bundle, ownerUserId)
 
     getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
 
@@ -262,11 +267,20 @@ export type ExportImportOps = {
   ) => Promise<{ success: boolean; error?: string }>
 }
 
-export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImportOps {
+/**
+ * `ownerUserId`: who imported projects belong to — the request's user, or null on
+ * a hub without login. Required for the same reason as `createProject`'s: an
+ * import is a way to create projects, and every such way decides the owner.
+ */
+export function buildExportImportOps(
+  db: SlayzoneDb,
+  ownerUserId: string | null,
+  isTest = false
+): ExportImportOps {
   const ops: ExportImportOps = {
     exportAll: () => handleExportAll(db),
     exportProject: (projectId: string) => handleExportProject(db, projectId),
-    importBundle: () => handleImport(db)
+    importBundle: () => handleImport(db, ownerUserId)
   }
 
   // Test-only ops that bypass native file dialogs
@@ -298,7 +312,7 @@ export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImpo
         if (bundle.meta?.version !== EXPORT_VERSION) {
           return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
         }
-        const result = await importBundle(db, bundle)
+        const result = await importBundle(db, bundle, ownerUserId)
         getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
         return result
       } catch (e) {

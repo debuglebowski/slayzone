@@ -35,7 +35,7 @@ import {
   runWithSecurityContext,
   securityEvent
 } from '@slayzone/platform/security-log'
-import type { RestPrincipal } from '@slayzone/transport/server'
+import { bindRestPrincipal, type RestPrincipal } from '@slayzone/transport/server'
 import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions'
 
 /**
@@ -334,6 +334,9 @@ export function withRestAuth(opts: {
           )
           return
         }
+        // Route handlers read it back with `restPrincipalOf(req)` — who created a
+        // project, for one (T-16).
+        bindRestPrincipal(req, principal)
         admit(principal.userId)
       })
       .catch(() => {

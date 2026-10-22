@@ -21,6 +21,7 @@ export {
   disableHubUser,
   enableHubUser,
   ensureFirstAdmin,
+  findFirstAdmin,
   listHubUsers,
   setHubUserRole,
   type CreatedHubUser,

@@ -110,6 +110,12 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
+# Project ownership (T-16): the boot backfill over real hub-auth + app DB, and the
+# same through the real built hub against a v168 database (upgrade).
+run_test_electron_strict_loader packages/apps/hub/src/ownership-backfill.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/ownership-boot.test.ts
+# Every project-create surface (tRPC, REST, import; MCP has none) stores its owner.
+run_test_electron_strict_loader packages/shared/transport/src/server/project-owner-surfaces.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -244,6 +250,8 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
+# v169 project owner + per-user settings, on an empty and a populated v168 DB.
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -611,6 +619,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \
+  packages/domains/settings/src/server/scope.test.ts \
+  packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts \

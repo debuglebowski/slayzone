@@ -91,6 +91,7 @@ export {
   type McpRestAppHandle
 } from './http/mcp-server'
 export { registerRestApi, processAgentHook, evictAgentTree } from './http/rest-api'
+export { bindRestPrincipal, restPrincipalOf } from './http/rest-api/principal'
 export type {
   RestApiDeps,
   RestPrincipal,

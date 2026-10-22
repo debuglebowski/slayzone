@@ -74,6 +74,9 @@ export const SECURITY_EVENTS = [
   'computer.delete',
   'computer.claim',
   'computer.visibility.set',
+  /** T-16: at boot, projects with no owner (and the settings from before login) went
+   *  to the first admin; `detail` carries the counts. */
+  'project.owner.backfill',
   // Privileged hub → computer calls (computer-transport `hub-audit.ts`).
   'computer.pty.spawn',
   'computer.pty.kill',

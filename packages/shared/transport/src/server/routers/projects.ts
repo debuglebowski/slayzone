@@ -54,7 +54,8 @@ export const projectsRouter = router({
           'Start the local computer (Settings → Connections) or enroll one, then try again.'
       )
     }
-    return createProject(ctx.db, input as CreateProjectInput)
+    // Owner = the signed-in user; null on a hub without login (no principal).
+    return createProject(ctx.db, input as CreateProjectInput, ctx.principal?.userId ?? null)
   }),
 
   update: publicProcedure

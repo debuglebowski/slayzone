@@ -358,3 +358,16 @@ export async function ensureFirstAdmin(auth: HubAuth): Promise<string | null> {
   auditUser('user.role_change', 'success', first.id, { reason: 'first_admin', role: 'admin' })
   return first.id
 }
+
+/**
+ * The hub's first admin: its OLDEST enabled admin, or null when it has none (no
+ * humans yet). The account {@link ensureFirstAdmin} and the first
+ * {@link createHubUser} establish, so on a hub upgraded from a single-user install
+ * it is the person who was using it. Read-only.
+ *
+ * Used by the hub's ownership backfill (T-16): projects with no owner, and the
+ * per-user settings rows from before login, go to this account.
+ */
+export async function findFirstAdmin(auth: HubAuth): Promise<string | null> {
+  return (await listHubUsers(auth)).find(isEnabledAdmin)?.id ?? null
+}

@@ -6,6 +6,7 @@ import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { buildExportImportOps } from '../export-import'
+import type { TrpcContext } from '../context'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
 const isTestBuild = (): boolean => process.env.PLAYWRIGHT === '1'
@@ -17,6 +18,12 @@ const anyInput = z.unknown()
 // Every procedure delegates to the injected `AppDeps` (setAppDeps in the
 // Electron-main host); the same impls back the still-live IPC handlers
 // (coexistence until the renderer drops IPC in slice 5).
+
+/** Export/import for one request. Imported projects belong to its user — null on
+ *  a hub without login, where requests carry none. */
+const exportImportOps = (ctx: TrpcContext, isTest = false) =>
+  buildExportImportOps(ctx.db, ctx.principal?.userId ?? null, isTest)
+
 export const appLevelRouter = router({
   // Backup
   backup: router({
@@ -75,36 +82,36 @@ export const appLevelRouter = router({
   // The `test*` variants are no longer test-only in nature — they are just the
   // path-taking forms — but the gate stays so production can't be driven headless.
   exportImport: router({
-    exportAll: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).exportAll()),
+    exportAll: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).exportAll()),
     exportProject: publicProcedure
       .input(z.object({ projectId: z.string() }))
-      .mutation(({ ctx, input }) => buildExportImportOps(ctx.db).exportProject(input.projectId)),
-    import: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).importBundle()),
+      .mutation(({ ctx, input }) => exportImportOps(ctx).exportProject(input.projectId)),
+    import: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).importBundle()),
     testExportAllToPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportAllToPath
+        const fn = exportImportOps(ctx, isTestBuild()).testExportAllToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testExportProjectToPath: publicProcedure
       .input(z.object({ projectId: z.string(), filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportProjectToPath
+        const fn = exportImportOps(ctx, isTestBuild()).testExportProjectToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.projectId, input.filePath)
       }),
     testImportFromPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testImportFromPath
+        const fn = exportImportOps(ctx, isTestBuild()).testImportFromPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testSetTaskParent: publicProcedure
       .input(z.object({ taskId: z.string(), parentId: z.string().nullable() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testSetTaskParent
+        const fn = exportImportOps(ctx, isTestBuild()).testSetTaskParent
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.taskId, input.parentId)
       })
