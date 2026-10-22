@@ -28,11 +28,16 @@ function slayzoneRootDir(): string {
   return join(home, '.slayzone')
 }
 
+/**
+ * One hub's entry. An entry written by an older release may also hold
+ * `pinnedFingerprint` (the hub certificate pinned at enroll). It is never read: the
+ * hub no longer presents a certificate of its own, so the pin is meaningless. zod's
+ * default strip drops it on load, so such an entry keeps loading — the computer
+ * keeps its identity — and the next write of the file no longer carries it.
+ */
 export const storedComputerCredentialsSchema = z.object({
   computerId: z.string().min(1),
-  apiKey: z.string().min(1),
-  /** Pin recorded at enroll time (lowercase hex sha256 of the hub leaf DER). */
-  pinnedFingerprint: z.string().optional()
+  apiKey: z.string().min(1)
 })
 export type StoredComputerCredentials = z.infer<typeof storedComputerCredentialsSchema>
 

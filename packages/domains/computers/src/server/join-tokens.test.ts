@@ -26,7 +26,6 @@ const TTL = 60_000
 function mint(over: Partial<Parameters<typeof mintJoinToken>[1]> = {}) {
   return mintJoinToken(t.db, {
     hubUrl: 'https://hub.example:8443',
-    certFingerprint: 'sha256:ab:cd:ef',
     ttlMs: TTL,
     label: 'office-mac',
     now: NOW,
@@ -35,29 +34,52 @@ function mint(over: Partial<Parameters<typeof mintJoinToken>[1]> = {}) {
 }
 
 describe('mintJoinToken', () => {
-  it('returns a szjt1 token whose payload embeds hub URL + cert fingerprint', async () => {
+  it('returns a szjt1 token whose payload embeds the hub URL + a secret, and no pin', async () => {
     const minted = await mint()
     expect(minted.token.startsWith(`${JOIN_TOKEN_PREFIX}.`)).toBe(true)
 
     const payload = decodeJoinToken(minted.token)
     expect(payload).not.toBeNull()
     expect(payload!.hubUrl).toBe('https://hub.example:8443')
-    expect(payload!.certFingerprint).toBe('sha256:ab:cd:ef')
     expect(payload!.secret.length).toBeGreaterThanOrEqual(32)
+    // The wire shape itself: exactly these two fields, no certificate pin.
+    const raw = JSON.parse(
+      Buffer.from(minted.token.slice(JOIN_TOKEN_PREFIX.length + 1), 'base64url').toString('utf8')
+    ) as Record<string, unknown>
+    expect(Object.keys(raw).sort()).toEqual(['hubUrl', 'secret'])
 
     expect(minted.created_at).toBe(NOW)
     expect(minted.expires_at).toBe(NOW + TTL)
   })
 
-  it('carries an EMPTY certFingerprint when none is given (the hub has no cert to pin)', async () => {
-    const minted = await mint({ certFingerprint: undefined })
-    const payload = decodeJoinToken(minted.token)
-    expect(payload).not.toBeNull()
-    expect(payload!.hubUrl).toBe('https://hub.example:8443')
-    expect(payload!.certFingerprint).toBe('')
-    // Still a well-formed, redeemable token: the empty field decodes as a string.
-    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+  it('an unused token minted by an OLDER hub (carrying a certFingerprint pin) still redeems', async () => {
+    // What an older hub minted and an upgrade leaves in join_tokens: the old payload
+    // shape, stored the same way (sha256 of the whole token). The pin is ignored.
+    const legacy = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
+      JSON.stringify({
+        hubUrl: 'wss://hub.example/computers',
+        certFingerprint: 'ab'.repeat(32),
+        secret: 's'.repeat(43)
+      })
+    ).toString('base64url')}`
+    t.raw
+      .prepare(
+        `INSERT INTO join_tokens
+           (id, token_hash, label, created_at, expires_at, used_at, computer_id, minted_by_user_id)
+         VALUES ('legacy-1', ?, 'old-hub', ?, ?, NULL, NULL, NULL)`
+      )
+      .run(hashJoinToken(legacy), NOW, NOW + TTL)
+
+    expect(decodeJoinToken(legacy)).toEqual({
+      hubUrl: 'wss://hub.example/computers',
+      secret: 's'.repeat(43)
+    })
+    const verified = await verifyJoinToken(t.db, legacy, NOW + 1)
     expect(verified.ok).toBe(true)
+    if (verified.ok) {
+      expect(verified.tokenId).toBe('legacy-1')
+      expect(verified.payload).not.toHaveProperty('certFingerprint')
+    }
   })
 
   it('mints unique tokens (fresh secret each time)', async () => {
@@ -142,7 +164,7 @@ describe('verifyJoinToken', () => {
   it('rejects a well-formed token that was never minted here', async () => {
     await mint()
     const foreign = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
-      JSON.stringify({ hubUrl: 'https://x', certFingerprint: 'f', secret: 's' })
+      JSON.stringify({ hubUrl: 'https://x', secret: 's' })
     ).toString('base64url')}`
     expect(await verifyJoinToken(t.db, foreign, NOW)).toEqual({ ok: false, reason: 'unknown' })
   })

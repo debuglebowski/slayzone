@@ -70,7 +70,6 @@ function createMigratedDb(): { db: SlayzoneDb; close: () => void } {
 async function mintToken(db: SlayzoneDb, label = 'ci'): Promise<string> {
   const minted = await mintJoinToken(db, {
     hubUrl: 'https://hub.local:4141',
-    certFingerprint: 'sha256:deadbeef',
     ttlMs: 60_000,
     label
   })
@@ -196,7 +195,6 @@ async function main(): Promise<void> {
     await test('expired join token is rejected', async () => {
       const stale = await mintJoinToken(db, {
         hubUrl: 'https://hub.local:4141',
-        certFingerprint: 'sha256:deadbeef',
         ttlMs: 1,
         label: 'expired',
         now: 1000

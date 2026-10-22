@@ -3,10 +3,18 @@ import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
-import { assertPathAllowed, effectiveHubUrls, ENV_VARS, loadComputerConfig } from './config'
+import {
+  assertPathAllowed,
+  effectiveHubUrls,
+  ENV_VARS,
+  ignoredCertPinNotices,
+  loadComputerConfig
+} from './config'
 import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
-function mintToken(payload: JoinTokenPayload): string {
+/** Encode a token like the hub does. `certFingerprint` is the field an OLDER hub
+ *  still put in its tokens (a pin of its own certificate) — today's hub omits it. */
+function mintToken(payload: JoinTokenPayload & { certFingerprint?: string }): string {
   return `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`
 }
 
@@ -86,21 +94,16 @@ describe('loadComputerConfig', () => {
     expect(config.name).toBe('from-config')
   })
 
-  it('reads hubUrl/name/pinnedCertSha256 from the shared config', () => {
-    // The single <ROOT>/config.json carries the pin too (the former
-    // SLAYZONE_COMPUTER_CONFIG path-pointing env var is gone). Creds always derive
-    // from the ROOT anchor (`<ROOT>/computers`) — no credentialsDir knob.
+  it('reads hubUrl/name from the shared config', () => {
+    // The single <ROOT>/config.json (the former SLAYZONE_COMPUTER_CONFIG path-pointing
+    // env var is gone). Creds always derive from the ROOT anchor (`<ROOT>/computers`)
+    // — no credentialsDir knob.
     const config = loadComputerConfig(
       {},
-      {
-        hubUrl: 'wss://from-config.example/computers',
-        computerName: 'from-config',
-        pinnedCertSha256: 'a'.repeat(64)
-      }
+      { hubUrl: 'wss://from-config.example/computers', computerName: 'from-config' }
     )
     expect(config.hubUrl).toBe('wss://from-config.example/computers')
     expect(config.name).toBe('from-config')
-    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
   })
 
   it('env ADDRESS wins over the shared config full url', () => {
@@ -116,36 +119,21 @@ describe('loadComputerConfig', () => {
     expect(() => loadComputerConfig({})).toThrow(/SLAYZONE_HUB_ADDRESS/)
   })
 
-  it('is self-sufficient from a join token alone (hubUrl + pin extracted)', () => {
-    const token = mintToken({
-      hubUrl: 'wss://hub.example:8443/computers',
-      certFingerprint: 'a'.repeat(64),
-      secret: 's'
-    })
+  it('is self-sufficient from a join token alone (hubUrl extracted)', () => {
+    const token = mintToken({ hubUrl: 'wss://hub.example:8443/computers', secret: 's' })
     const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
     expect(config.hubUrl).toBe('wss://hub.example:8443/computers')
-    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
     expect(config.joinToken).toBe(token)
   })
 
-  it('lets an explicit env hubUrl + config pin override the join-token values', () => {
-    const token = mintToken({
-      hubUrl: 'wss://from-token/computers',
-      certFingerprint: 'a'.repeat(64),
-      secret: 's'
-    })
-    // hub address overrides via env; the pin has no env channel — config.json is
-    // its explicit override path and still beats the token-decoded fingerprint.
+  it('lets an explicit env hub address override the join-token url', () => {
+    const token = mintToken({ hubUrl: 'wss://from-token/computers', secret: 's' })
     // A non-loopback env authority composes wss:// (matches the token's TLS).
-    const config = loadComputerConfig(
-      {
-        [ENV_VARS.joinToken]: token,
-        [ENV_VARS.hubAddress]: 'override.example'
-      },
-      { pinnedCertSha256: 'b'.repeat(64) }
-    )
+    const config = loadComputerConfig({
+      [ENV_VARS.joinToken]: token,
+      [ENV_VARS.hubAddress]: 'override.example'
+    })
     expect(config.hubUrl).toBe('wss://override.example/computers')
-    expect(config.pinnedCertSha256).toBe('b'.repeat(64))
   })
 
   it('ignores a malformed join token for fallback (schema still reports missing address)', () => {
@@ -154,72 +142,64 @@ describe('loadComputerConfig', () => {
     )
   })
 
-  it('fails fast when an EXPLICIT config.json pin is set on a ws:// hub url (no silent downgrade)', () => {
-    expect(() =>
-      loadComputerConfig(
-        {},
-        { hubUrl: 'ws://hub.example/computers', pinnedCertSha256: 'a'.repeat(64) }
-      )
-    ).toThrow(/requires a wss:\/\/ hub url/)
-  })
-
-  it('does NOT fail when only the join-token pin lands on a ws:// url (soft auto path)', () => {
-    // A ws:// join token carries a fingerprint but the pin is NOT explicit — it is
-    // softly ignored downstream (startComputer), so config assembly must not throw.
-    const token = mintToken({
-      hubUrl: 'ws://127.0.0.1:9000/computers',
-      certFingerprint: 'a'.repeat(64),
-      secret: 's'
-    })
-    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('ws://127.0.0.1:9000/computers')
-    // The decoded pin is still present in config; startComputer drops it for ws://.
-    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
-  })
-
-  it('accepts an explicit config.json pin on a wss:// hub url', () => {
-    const config = loadComputerConfig(
-      { [ENV_VARS.hubAddress]: 'hub.example' },
-      { pinnedCertSha256: 'a'.repeat(64) }
-    )
-    expect(config.pinnedCertSha256).toBe('a'.repeat(64))
-  })
-
-  // --- pin-less join tokens (the hub no longer presents a certificate) -----------
-  // A token minted by the current hub carries an EMPTY certFingerprint. The computer
-  // must accept it: no pin, normal CA verification of the front end's certificate.
-  it('accepts a pin-less join token (empty fingerprint) — no pin, no schema failure', () => {
-    const token = mintToken({
-      hubUrl: 'wss://hub.example.com/computers',
-      certFingerprint: '',
-      secret: 's'
-    })
-    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('wss://hub.example.com/computers')
-    expect(config.pinnedCertSha256).toBeUndefined()
-    expect(config.joinToken).toBe(token)
-  })
-
-  it('accepts a pin-less join token for a loopback ws:// hub', () => {
-    const token = mintToken({
-      hubUrl: 'ws://127.0.0.1:51100/computers',
-      certFingerprint: '',
-      secret: 's'
-    })
-    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
-    expect(config.hubUrl).toBe('ws://127.0.0.1:51100/computers')
-    expect(config.pinnedCertSha256).toBeUndefined()
-  })
-
-  it('a pinned token from an OLDER hub still carries its pin', () => {
+  // --- certificate pins from an older release: ignored, never enforced ----------
+  // The hub no longer presents a certificate of its own, so a pin could only fail
+  // against the front end's. A computer enrolled before the change keeps working and
+  // the front end is verified against the trusted CAs; ignoredCertPinNotices says so.
+  it('a pinned join token from an OLDER hub still loads, and the pin is dropped', () => {
     const token = mintToken({
       hubUrl: 'wss://old-hub.example/computers',
       certFingerprint: 'c'.repeat(64),
       secret: 's'
     })
-    expect(loadComputerConfig({ [ENV_VARS.joinToken]: token }).pinnedCertSha256).toBe(
-      'c'.repeat(64)
+    const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
+    expect(config.hubUrl).toBe('wss://old-hub.example/computers')
+    expect(config.joinToken).toBe(token)
+    expect(config).not.toHaveProperty('pinnedCertSha256')
+  })
+
+  it('the interim shape (empty certFingerprint) and a pinned loopback ws:// token load too', () => {
+    const interim = mintToken({
+      hubUrl: 'wss://hub.example.com/computers',
+      certFingerprint: '',
+      secret: 's'
+    })
+    expect(loadComputerConfig({ [ENV_VARS.joinToken]: interim }).hubUrl).toBe(
+      'wss://hub.example.com/computers'
     )
+    const loopback = mintToken({
+      hubUrl: 'ws://127.0.0.1:9000/computers',
+      certFingerprint: 'a'.repeat(64),
+      secret: 's'
+    })
+    expect(loadComputerConfig({ [ENV_VARS.joinToken]: loopback }).hubUrl).toBe(
+      'ws://127.0.0.1:9000/computers'
+    )
+  })
+
+  it('ignoredCertPinNotices names a pinned token, whichever channel carried it', () => {
+    const pinned = mintToken({
+      hubUrl: 'wss://old-hub.example/computers',
+      certFingerprint: 'c'.repeat(64),
+      secret: 's'
+    })
+    const clean = mintToken({ hubUrl: 'wss://hub.example/computers', secret: 's' })
+    const [fromEnv] = ignoredCertPinNotices({ [ENV_VARS.joinToken]: pinned }, {}, [])
+    expect(fromEnv).toMatch(/ignoring the certificate pin in the join token/)
+    expect(ignoredCertPinNotices({}, { joinToken: pinned }, [])).toHaveLength(1)
+    // Env wins over the file, exactly as in loadComputerConfig: the token actually
+    // used is the clean one, so there is nothing to report.
+    expect(
+      ignoredCertPinNotices({ [ENV_VARS.joinToken]: clean }, { joinToken: pinned }, [])
+    ).toEqual([])
+    expect(ignoredCertPinNotices({ [ENV_VARS.joinToken]: clean }, {}, [])).toEqual([])
+    expect(ignoredCertPinNotices({}, {}, [])).toEqual([])
+  })
+
+  it('ignoredCertPinNotices names a pinnedCertSha256 left in computer.config.json', () => {
+    const notices = ignoredCertPinNotices({}, {}, ['pinnedCertSha256'])
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatch(/'pinnedCertSha256' in computer.config.json/)
   })
 
   // --- plaintext ws:// is for this machine only (A1) ----------------------------
@@ -233,11 +213,7 @@ describe('loadComputerConfig', () => {
   })
 
   it('rejects a plaintext ws:// hub url from a join token on a non-loopback host', () => {
-    const token = mintToken({
-      hubUrl: 'ws://10.0.0.5:51100/computers',
-      certFingerprint: '',
-      secret: 's'
-    })
+    const token = mintToken({ hubUrl: 'ws://10.0.0.5:51100/computers', secret: 's' })
     expect(() => loadComputerConfig({ [ENV_VARS.joinToken]: token })).toThrow(/wss:\/\//)
   })
 
@@ -399,29 +375,20 @@ describe('loadComputerConfig', () => {
       expect(config.joinToken).toBeUndefined()
     })
 
-    it('IGNORES a retired-name token for the hubUrl/pin fallback too', () => {
+    it('IGNORES a retired-name token for the hubUrl fallback too', () => {
       // The decode fallback reads the SAME resolved value, so a token supplied only
       // under the old name cannot smuggle in a hub url either: with no hubAddress
       // there is no hub source left and the schema reports it.
-      const token = mintToken({
-        hubUrl: 'wss://hub.example:8443/computers',
-        certFingerprint: 'a'.repeat(64),
-        secret: 's'
-      })
+      const token = mintToken({ hubUrl: 'wss://hub.example:8443/computers', secret: 's' })
       expect(() => loadComputerConfig({ SLAYZONE_RUNNER_JOIN_TOKEN: token })).toThrow(
         /SLAYZONE_HUB_ADDRESS/
       )
     })
 
-    it('is self-sufficient from the token alone (hubUrl + pin extracted)', () => {
-      const token = mintToken({
-        hubUrl: 'wss://hub.example:8443/computers',
-        certFingerprint: 'a'.repeat(64),
-        secret: 's'
-      })
+    it('is self-sufficient from the token alone (hubUrl extracted)', () => {
+      const token = mintToken({ hubUrl: 'wss://hub.example:8443/computers', secret: 's' })
       const config = loadComputerConfig({ [ENV_VARS.joinToken]: token })
       expect(config.hubUrl).toBe('wss://hub.example:8443/computers')
-      expect(config.pinnedCertSha256).toBe('a'.repeat(64))
       expect(config.joinToken).toBe(token)
     })
 

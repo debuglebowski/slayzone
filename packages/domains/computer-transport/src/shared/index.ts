@@ -1,5 +1,4 @@
 export * from './rpc'
 export * from './frames'
-export * from './pinning'
 export * from './events'
 export * from './ws-data'

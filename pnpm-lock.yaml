@@ -522,9 +522,6 @@ importers:
       '@slayzone/hub-auth':
         specifier: workspace:*
         version: link:../../domains/hub-auth
-      '@slayzone/hub-identity':
-        specifier: workspace:*
-        version: link:../../domains/hub-identity
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
@@ -987,6 +984,9 @@ importers:
         specifier: ^4
         version: 4.3.5
     devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
       '@types/node':
         specifier: ^22.19.1
         version: 22.19.7
@@ -1297,22 +1297,6 @@ importers:
       vitest:
         specifier: ^4.1.0
         version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
-
-  packages/domains/hub-identity:
-    dependencies:
-      '@peculiar/x509':
-        specifier: ^1.14.2
-        version: 1.14.3
-    devDependencies:
-      '@types/node':
-        specifier: ^22.19.7
-        version: 22.19.7
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/domains/integrations:
     dependencies:

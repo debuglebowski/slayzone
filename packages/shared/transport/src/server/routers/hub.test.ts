@@ -4,9 +4,9 @@
  *
  * Covers the graceful-degrade contract: `describe` must work with NO
  * HubDescribeDeps wired (plain local sidecar — multi_hub off), reporting
- * authRequired:false + the default switches (and a fingerprint that is always
- * null: the hub holds no certificate), and must reflect the wired deps + the
- * stored `hub_label` k/v when present.
+ * authRequired:false + the default switches (and no certificate fingerprint: the
+ * hub holds no certificate), and must reflect the wired deps + the stored
+ * `hub_label` k/v when present.
  *
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
@@ -24,7 +24,7 @@ setAppDeps({ appGetVersion: () => '9.9.9-test' } as unknown as AppDeps)
 test('hub.describe degrades gracefully with no deps wired (local sidecar)', async () => {
   const d = await caller.describe()
   expect(d.version).toBe('9.9.9-test')
-  expect(d.fingerprint).toBeNull()
+  expect('fingerprint' in d).toBe(false)
   expect(d.authRequired).toBe(false)
   // Unwired → the desktop app's defaults, so `describe` never lies about a hub that
   // never told it anything.
@@ -56,9 +56,9 @@ test('hub.describe reflects the wired deps (authRequired + every switch); never 
   const d = await caller.describe()
   expect(d.authRequired).toBe(true)
   expect(d.switches).toEqual(switches)
-  // The hub no longer terminates TLS, so it has no certificate to report. The key
-  // stays (older clients read it) but is always null.
-  expect(d.fingerprint).toBeNull()
+  // The hub never terminates TLS, so it has no certificate to report — the field is
+  // gone from the shape (no client ever read it).
+  expect('fingerprint' in d).toBe(false)
   // Reset so the unwired-default is not leaked into other suites in-process.
   setHubDescribeDeps({
     getAuthRequired: () => false,

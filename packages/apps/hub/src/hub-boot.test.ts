@@ -438,8 +438,8 @@ async function main(): Promise<void> {
         )
         const payload = JSON.parse(
           Buffer.from(minted.token.slice('szjt1.'.length), 'base64url').toString('utf8')
-        ) as { hubUrl: string; certFingerprint: string }
-        assert(payload.certFingerprint === '', 'the token carries no certificate pin')
+        ) as Record<string, unknown>
+        assert(!('certFingerprint' in payload), 'the token carries no certificate pin')
 
         // No TLS identity, and the signing secret was never written to disk.
         assert(!existsSync(join(root, 'identity')), 'no identity/ directory: the hub has no cert')

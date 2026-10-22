@@ -1,16 +1,18 @@
 /**
  * Dialer-focused loopback tests: reconnect backoff, dialer-side heartbeat
- * loss, malformed hub frames, and wss certificate pinning.
+ * loss, malformed hub frames, and wss certificate verification (CA chain +
+ * hostname, no pin).
  */
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
+import { createServer as createHttpsServer } from 'node:https'
 import type { AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { WebSocketServer } from 'ws'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { certSha256Fingerprint } from '../shared/pinning'
+import {
+  createTestCa,
+  trustTestCaInThisProcess,
+  type TestCa,
+  type TestLeaf
+} from '@slayzone/test-utils/test-ca'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 import { createMemoryCredentialStore } from './credential-store'
 import { HubDialer, type HubDialerOptions } from './hub-dialer'
@@ -199,68 +201,44 @@ describe('malformed frames from the hub', () => {
   })
 })
 
-describe('wss certificate pinning', () => {
-  function generateCert(dir: string): { certPem: string; keyPem: string } {
-    const keyPath = join(dir, 'key.pem')
-    const certPath = join(dir, 'cert.pem')
-    execFileSync(
-      'openssl',
-      [
-        'req',
-        '-x509',
-        '-newkey',
-        'rsa:2048',
-        '-nodes',
-        '-keyout',
-        keyPath,
-        '-out',
-        certPath,
-        '-days',
-        '1',
-        '-subj',
-        '/CN=localhost'
-      ],
-      { stdio: 'pipe' }
-    )
-    return { certPem: readFileSync(certPath, 'utf8'), keyPem: readFileSync(keyPath, 'utf8') }
-  }
+describe('wss certificate verification (CA chain + hostname, no pin)', () => {
+  // The hub's front end presents a CA-issued certificate; the dialer verifies it with
+  // Node's defaults. The test CA is trusted the normal way — added to this process's
+  // default CA store — never through an option on the dialer.
+  let ca: TestCa
+  let restoreCa: (() => void) | null = null
+  beforeAll(() => {
+    ca = createTestCa()
+  })
+  afterAll(() => ca.cleanup())
+  afterEach(() => {
+    restoreCa?.()
+    restoreCa = null
+  })
 
-  async function startTlsHub(): Promise<{
-    hub: LoopbackHub
-    https: HttpsServer
-    url: string
-    fingerprint: string
-  }> {
-    const dir = mkdtempSync(join(tmpdir(), 'computer-tls-'))
-    cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
-    const { certPem, keyPem } = generateCert(dir)
-    const https = createHttpsServer({ cert: certPem, key: keyPem })
+  async function startTlsHub(leaf: TestLeaf): Promise<{ hub: LoopbackHub; port: number }> {
+    const https = createHttpsServer({ cert: leaf.certPem, key: leaf.keyPem })
     await new Promise<void>((resolve) => https.listen(0, '127.0.0.1', resolve))
     cleanups.push(() => new Promise<void>((resolve) => https.close(() => resolve())))
     const hub = await startLoopbackHub({}, { server: https })
     cleanups.push(() => hub.close())
-    const port = (https.address() as AddressInfo).port
-    return {
-      hub,
-      https,
-      url: `wss://127.0.0.1:${port}`,
-      fingerprint: certSha256Fingerprint(certPem)
-    }
+    return { hub, port: (https.address() as AddressInfo).port }
   }
 
-  it('connects to a self-signed hub when the pin matches', async () => {
-    const { hub, url, fingerprint } = await startTlsHub()
-    const dialer = makeDialer(url, { pinnedCertSha256: fingerprint })
+  it('connects to a hub whose certificate chains to a trusted CA', async () => {
+    restoreCa = trustTestCaInThisProcess(ca.caPem)
+    const { hub, port } = await startTlsHub(ca.issueLeaf())
+    const dialer = makeDialer(`wss://localhost:${port}`)
     dialer.start()
     const connected = await dialer.events.once('connected')
     expect(connected.mode).toBe('enroll')
     expect(hub.gateway.listComputers()).toHaveLength(1)
   })
 
-  it('refuses the connection when the pin does not match', async () => {
-    const { hub, url, fingerprint } = await startTlsHub()
-    const wrongPin = (fingerprint[0] === 'a' ? 'b' : 'a') + fingerprint.slice(1)
-    const dialer = makeDialer(url, { pinnedCertSha256: wrongPin })
+  it('refuses a certificate no trusted CA issued, before sending any computer frame', async () => {
+    // Same leaf shape, but its CA is not trusted: no pin, no override can rescue it.
+    const { hub, port } = await startTlsHub(ca.issueLeaf())
+    const dialer = makeDialer(`wss://localhost:${port}`)
     const errorEvent = dialer.events.once('error')
     let connected = false
     dialer.events.on('connected', () => {
@@ -268,21 +246,21 @@ describe('wss certificate pinning', () => {
     })
     dialer.start()
     const { error } = await errorEvent
-    expect(error.message).toMatch(/fingerprint mismatch/)
+    expect(error.message).toMatch(/certificate/i)
     expect(connected).toBe(false)
     expect(hub.gateway.listComputers()).toHaveLength(0)
     await dialer.stop()
   })
 
-  it('rejects a pin on a plaintext ws:// url upfront', () => {
-    expect(
-      () =>
-        new HubDialer({
-          url: 'ws://127.0.0.1:1234',
-          identity: IDENTITY,
-          credentialStore: createMemoryCredentialStore(),
-          pinnedCertSha256: 'a'.repeat(64)
-        })
-    ).toThrow(/wss/)
+  it('refuses a trusted certificate issued for a different host name', async () => {
+    restoreCa = trustTestCaInThisProcess(ca.caPem)
+    const { hub, port } = await startTlsHub(ca.issueLeaf({ dnsNames: ['other.example'], ips: [] }))
+    const dialer = makeDialer(`wss://localhost:${port}`)
+    const errorEvent = dialer.events.once('error')
+    dialer.start()
+    const { error } = await errorEvent
+    expect(error.message).toMatch(/altnames|does not match/i)
+    expect(hub.gateway.listComputers()).toHaveLength(0)
+    await dialer.stop()
   })
 })

@@ -2,7 +2,8 @@
  * Computer-side hub dialer. Owns the single outbound WebSocket to the hub and
  * the full session lifecycle:
  *
- *  - dial `wss://hub/...` (optionally pinning the hub's TLS cert by sha256)
+ *  - dial `wss://hub/...` — the hub's front end certificate is verified the normal
+ *    way (CA chain + hostname, Node's trust store); nothing is pinned or relaxed
  *  - authenticate: `hello` with stored credentials, falling back to `enroll`
  *    with the join token (credentials are persisted via the injected store)
  *  - heartbeat loop — an unanswered heartbeat tears the socket down
@@ -15,9 +16,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type { PeerCertificate, TLSSocket } from 'node:tls'
 import WebSocket from 'ws'
-import type { ClientOptions } from 'ws'
 import { TypedEventEmitter } from '../shared/events'
 import {
   enrollResultSchema,
@@ -27,11 +26,6 @@ import {
   HubToComputerMethods,
   ComputerToHubMethods
 } from '../shared/frames'
-import {
-  certMatchesFingerprint,
-  certSha256FingerprintFromDer,
-  normalizeCertSha256Fingerprint
-} from '../shared/pinning'
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
 import { wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
@@ -99,8 +93,6 @@ export interface HubDialerOptions {
    * Absent → today's behavior exactly (no re-mint, refusal is fatal).
    */
   refreshJoinToken?: () => Promise<string | null>
-  /** Lowercase-hex sha256 of the hub leaf cert DER (colons tolerated). wss only. */
-  pinnedCertSha256?: string
   /**
    * Handle a hub→computer request; resolve with the result or throw an
    * `RpcError` to control the error code. When omitted, every request is
@@ -150,7 +142,6 @@ export class HubDialer {
 
   private readonly opts: HubDialerOptions
   private readonly log: (message: string, meta?: Record<string, unknown>) => void
-  private readonly pinnedFingerprint: string | null
 
   private stateValue: HubDialerState = 'stopped'
   private current: Connection | null = null
@@ -179,14 +170,6 @@ export class HubDialer {
     const protocol = new URL(opts.url).protocol
     if (protocol !== 'ws:' && protocol !== 'wss:') {
       throw new Error(`hub url must be ws:// or wss://, got '${opts.url}'`)
-    }
-    if (opts.pinnedCertSha256 !== undefined) {
-      if (protocol !== 'wss:') {
-        throw new Error('pinnedCertSha256 requires a wss:// hub url')
-      }
-      this.pinnedFingerprint = normalizeCertSha256Fingerprint(opts.pinnedCertSha256)
-    } else {
-      this.pinnedFingerprint = null
     }
   }
 
@@ -260,63 +243,15 @@ export class HubDialer {
     this.events.emit('state-change', { state })
   }
 
-  private buildWsOptions(): ClientOptions {
-    if (!this.pinnedFingerprint) return {}
-    const expected = this.pinnedFingerprint
-    const tlsOptions = {
-      // The pin *replaces* CA-chain trust — hubs present self-signed certs.
-      // NOTE: with rejectUnauthorized:false node records a checkServerIdentity
-      // failure in socket.authorizationError but does NOT abort the handshake,
-      // so the pin is ENFORCED in verifyPinnedCert() (ws 'upgrade' event) —
-      // this override only makes the failure observable early.
-      rejectUnauthorized: false,
-      checkServerIdentity: (_host: string, cert: PeerCertificate): Error | undefined => {
-        if (!cert?.raw) return new Error('hub presented no certificate')
-        if (!certMatchesFingerprint(expected, cert.raw)) {
-          const actual = certSha256FingerprintFromDer(cert.raw)
-          return new Error(
-            `hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`
-          )
-        }
-        return undefined
-      }
-    }
-    // @types/ws mistypes checkServerIdentity as `(…) => boolean` over CertMeta;
-    // ws forwards these straight to tls.connect, which expects the node:tls
-    // signature used above.
-    return tlsOptions as unknown as ClientOptions
-  }
-
-  /**
-   * Hard pin enforcement. Runs on the ws 'upgrade' event — after the TLS
-   * handshake and the (secret-free) HTTP upgrade request, but before 'open',
-   * so no computer frame (hello/enroll credentials) is ever sent to an unpinned
-   * peer. Returns false and tears the socket down on mismatch.
-   */
-  private verifyPinnedCert(ws: WebSocket, tlsSocket: TLSSocket): boolean {
-    const expected = this.pinnedFingerprint
-    if (!expected) return true
-    const cert =
-      typeof tlsSocket.getPeerCertificate === 'function' ? tlsSocket.getPeerCertificate() : null
-    const raw = cert && cert.raw ? cert.raw : null
-    if (raw && certMatchesFingerprint(expected, raw)) return true
-    const actual = raw ? certSha256FingerprintFromDer(raw) : 'no certificate'
-    const error = new Error(
-      `hub certificate fingerprint mismatch: expected ${expected}, got ${actual}`
-    )
-    this.log('computer dialer rejected hub certificate', { error: error.message })
-    this.events.emit('error', { error, fatal: false })
-    ws.terminate()
-    return false
-  }
-
   private connect(): void {
     this.retryTimer = null
     // Per-connection guard: a fresh attempt may legitimately need to re-mint again
     // (e.g. the hub was rebuilt between attempts), but within ONE attempt only once.
     this.triedTokenRefresh = false
     this.setState('connecting')
-    const ws = new WebSocket(this.opts.url, this.buildWsOptions())
+    // No TLS options: a wss:// hub is verified with Node's defaults (CA chain +
+    // hostname). There is deliberately no pin and no way to skip verification.
+    const ws = new WebSocket(this.opts.url)
     const conn: Connection = {
       ws,
       rpc: null as unknown as DuplexRpc,
@@ -338,11 +273,6 @@ export class HubDialer {
     })
     this.current = conn
 
-    if (this.pinnedFingerprint) {
-      ws.on('upgrade', (response) => {
-        this.verifyPinnedCert(ws, response.socket as TLSSocket)
-      })
-    }
     ws.on('open', () => {
       if (this.current === conn && !this.stopping) void this.authenticate(conn)
     })
@@ -505,8 +435,7 @@ export class HubDialer {
       try {
         await this.opts.credentialStore.save({
           computerId: result.computerId,
-          apiKey: result.apiKey,
-          ...(this.pinnedFingerprint ? { pinnedFingerprint: this.pinnedFingerprint } : {})
+          apiKey: result.apiKey
         })
       } catch (err) {
         // Persistence failure must not burn the freshly minted credentials

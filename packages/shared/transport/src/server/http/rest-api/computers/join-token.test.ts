@@ -73,7 +73,7 @@ await describe('POST /api/computers/join-token', () => {
       expect(payload).not.toBeNull()
       expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/computers')
       // The hub presents no certificate of its own, so the token carries no pin.
-      expect(payload!.certFingerprint).toBe('')
+      expect('certFingerprint' in payload!).toBe(false)
     } finally {
       await rest.close()
     }

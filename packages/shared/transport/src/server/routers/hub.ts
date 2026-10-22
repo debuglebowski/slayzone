@@ -33,10 +33,10 @@ export const hubRouter = router({
    * `switches` reports every per-hub switch (login, password, SSO, processes,
    * integrations). `label` is the stored display-name override or null.
    *
-   * `fingerprint` is always null: the hub no longer terminates TLS or presents a
-   * certificate of its own (a front end does), so there is nothing to pin. The
-   * field stays in the shape until the pin code in the clients is removed, so an
-   * older client that reads it sees "not pinned" instead of `undefined`.
+   * No certificate fingerprint: the hub never terminates TLS or presents a
+   * certificate of its own (a front end does), and clients verify that front end's
+   * certificate the normal way. The former always-null `fingerprint` field is gone;
+   * no client ever read it.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -44,7 +44,6 @@ export const hubRouter = router({
     return {
       label,
       version: getAppDeps().appGetVersion(),
-      fingerprint: null as string | null,
       authRequired: deps?.getAuthRequired() ?? false,
       switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS }
     }

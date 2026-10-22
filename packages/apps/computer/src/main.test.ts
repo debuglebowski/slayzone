@@ -83,45 +83,21 @@ describe('createHubRequestHandler dispatch table', () => {
   })
 })
 
-describe('startComputer cert-pin guard', () => {
+describe('startComputer TLS', () => {
   // Loopback port 0 keeps these hermetic: startComputer calls dialer.start() (a real
   // outbound connect attempt), so a routable/public-looking host would do real
   // network I/O. 127.0.0.1:0 fails fast + unref'd → no hang, no external traffic.
-  it('feeds the pin to the dialer on a wss:// hub url (constructor accepts it)', async () => {
-    const handle = startComputer(
-      {
-        ...testConfig,
-        hubUrl: 'wss://127.0.0.1:0/computers',
-        pinnedCertSha256: 'a'.repeat(64)
-      },
-      { credentialStore: memoryStore() }
-    )
-    try {
-      // The HubDialer constructor did not throw for a pin on wss:// → pin was fed
-      // through (it throws "pinnedCertSha256 requires a wss:// hub url" otherwise).
-      expect(handle.dialer).toBeDefined()
-    } finally {
-      await handle.stop()
+  it('starts a dialer for a wss:// and a ws:// hub url alike: there is no pin to feed', async () => {
+    // A wss:// hub's front end is verified against the trusted CAs by the dialer's
+    // defaults; nothing about TLS is configured here any more.
+    for (const hubUrl of ['wss://127.0.0.1:0/computers', 'ws://127.0.0.1:0/computers']) {
+      const handle = startComputer({ ...testConfig, hubUrl }, { credentialStore: memoryStore() })
+      try {
+        expect(handle.dialer).toBeDefined()
+      } finally {
+        await handle.stop()
+      }
     }
-  })
-
-  it('does NOT throw when a token-decoded pin lands on a ws:// hub url (guard drops it)', async () => {
-    // A pin reaching startComputer on a ws:// url can only be the join-token-decoded
-    // fingerprint (an EXPLICIT env/file pin on ws:// already fails in loadComputerConfig).
-    // The guard must strip it so a ws token stays usable for loopback/dev — without
-    // it the HubDialer constructor throws "pinnedCertSha256 requires a wss:// hub url".
-    let handle: ReturnType<typeof startComputer> | null = null
-    expect(() => {
-      handle = startComputer(
-        {
-          ...testConfig,
-          hubUrl: 'ws://127.0.0.1:0/computers',
-          pinnedCertSha256: 'a'.repeat(64)
-        },
-        { credentialStore: memoryStore() }
-      )
-    }).not.toThrow()
-    if (handle) await (handle as ReturnType<typeof startComputer>).stop()
   })
 })
 

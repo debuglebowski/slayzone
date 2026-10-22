@@ -23,7 +23,6 @@
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
-    "@slayzone/hub-identity": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",

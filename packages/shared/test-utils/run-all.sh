@@ -198,9 +198,12 @@ run_test packages/apps/cli/src/local-hub.test.ts
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
-# Computer /computers URL derivation (public address → wss, loopback → ws) + the cert-pin
-# seam that remains for tokens minted by an older hub.
+# Computer /computers URL derivation (public address → wss, loopback → ws).
 run_test packages/apps/hub/src/computer-tls-listener.test.ts
+# The built hub behind a TLS front end: CLI, computer and tRPC websocket verify its
+# CA-issued certificate with no pin; a cert swap drops nothing; an older pinned token
+# still enrolls (T-21).
+run_test_electron_strict_loader packages/apps/hub/src/tls-front-end.test.ts
 # The hub's boot rules as a pure function — one case per refusal (B1-B5, B7-B11, B13, B14).
 run_test packages/apps/hub/src/boot-rules.test.ts
 # Per-role hub.config.json/hub.state.json + computer.config.json (env>file>default,
@@ -598,7 +601,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
-  packages/apps/app/src/main/hub-cert-pinning.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/trpc.test.ts \
@@ -698,7 +700,6 @@ run_package_tests packages/domains/hub-auth @slayzone/hub-auth
 run_package_tests packages/shared/platform @slayzone/platform
 # Packages whose own `vitest run` was green but never aggregated (swept in 2026-10-22).
 run_package_tests packages/domains/task-artifacts @slayzone/task-artifacts
-run_package_tests packages/domains/hub-identity @slayzone/hub-identity
 run_package_tests packages/shared/layout @slayzone/layout
 run_package_tests packages/shared/markdown @slayzone/markdown
 run_package_tests packages/shared/shortcuts @slayzone/shortcuts

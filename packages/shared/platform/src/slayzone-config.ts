@@ -9,7 +9,7 @@
  *   `<ROOT>/hub.state.json`     — system-generated: computerTransportSecret (the hub-auth
  *                                 secret; auto-generated on first boot, never typed in)
  *   `<ROOT>/computer.config.json` — operator-set: joinToken, computerName, hubUrl,
- *                                 allowedRoots, pinnedCertSha256
+ *                                 allowedRoots
  *
  * (Computer credentials — `computer.state.json`, system-generated, rewritten on every
  * reconnect/rotation — are a separate concern owned entirely by
@@ -125,9 +125,16 @@ export interface ComputerConfig {
   hubUrls?: string[]
   /** Filesystem roots the computer may operate under. Locally-declared, never pushed from the hub. Defaults to `[<ROOT>]` when absent. */
   allowedRoots?: string[]
-  /** sha256 pin of the hub TLS leaf cert (lowercase hex). Normally the join token carries the pin instead. */
-  pinnedCertSha256?: string
 }
+
+/**
+ * `computer.config.json` keys an older release read and this one IGNORES (never
+ * coerced into {@link ComputerConfig}). `pinnedCertSha256` pinned the certificate an
+ * older hub served itself; the hub no longer does TLS, a front end does, and its
+ * certificate is verified the normal way. Listed so the computer can say it ignores
+ * one, rather than a stale key being dropped silently.
+ */
+export const IGNORED_COMPUTER_CONFIG_KEYS = ['pinnedCertSha256'] as const
 
 /** The dev fallback secret hard-coded in composition.ts. Standalone boots MUST
  *  resolve to something OTHER than this (env / file / generated). Exported so
@@ -251,8 +258,6 @@ function coerceComputerConfig(raw: Record<string, unknown>): ComputerConfig {
     const roots = raw.allowedRoots.filter((r): r is string => typeof r === 'string' && r.length > 0)
     if (roots.length > 0) cfg.allowedRoots = roots
   }
-  if (typeof raw.pinnedCertSha256 === 'string' && raw.pinnedCertSha256.length > 0)
-    cfg.pinnedCertSha256 = raw.pinnedCertSha256
   return cfg
 }
 
@@ -371,6 +376,17 @@ export function loadComputerConfigFile(path: string = getComputerConfigFilePath(
   if (raw) return coerceComputerConfig(raw)
   const legacy = readJsonObject(legacyConfigFilePathFor(path))
   return legacy ? coerceComputerConfig(legacy) : {}
+}
+
+/**
+ * Which {@link IGNORED_COMPUTER_CONFIG_KEYS} the computer config still sets — read
+ * from the same file {@link loadComputerConfigFile} reads (the legacy `config.json`
+ * when the new file is absent). Empty for a missing/corrupt file.
+ */
+export function ignoredComputerConfigKeys(path: string = getComputerConfigFilePath()): string[] {
+  const raw = readJsonObject(path) ?? readJsonObject(legacyConfigFilePathFor(path))
+  if (!raw) return []
+  return IGNORED_COMPUTER_CONFIG_KEYS.filter((key) => raw[key] !== undefined)
 }
 
 export function saveComputerConfigFile(

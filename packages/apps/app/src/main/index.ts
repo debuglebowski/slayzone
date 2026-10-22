@@ -88,7 +88,6 @@ import {
   LOCAL_HUB_ID
 } from './boot-config'
 import type { HubEntry } from '@slayzone/types'
-import { installHubCertPinning, setPinnedHubs } from './hub-cert-pinning'
 import { setHubTokenCipher, setHubToken, getAllHubTokens } from './hub-tokens'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -2567,9 +2566,9 @@ app
     // and the computer /computers wss URL is on an OS-assigned port main never learns.
     // So main waits for the sidecar to report ready, then mints a join token over
     // LOOPBACK REST (`POST /api/computers/join-token`, which wraps the same store
-    // logic as the computers tRPC proc + returns the wss computer URL). It injects that
-    // token + url into the computer env; the computer decodes the token → cert
-    // fingerprint → dials wss with pinning → enrolls. If minting fails after
+    // logic as the computers tRPC proc + returns the computer URL). It injects that
+    // token + url into the computer env; the computer decodes the token → dials the
+    // hub's loopback ws:// URL → enrolls. If minting fails after
     // retries the computer is left UNSPAWNED — boot never crashes; the user can
     // still enroll remote computers via the UI.
     if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_COMPUTER !== '1') {
@@ -2856,17 +2855,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       is.dev
     )
 
-    // Multi-hub: install the wss cert-pin verify proc on the renderer session.
-    // Only pinned remote-hub hosts are enforced; every other host defers to
-    // Chromium (empty pin map when single-hub → fully inert). The pin map is
-    // seeded on each app:get-hub-registry call (renderer fetches it at boot).
-    installHubCertPinning(session.defaultSession)
-    try {
-      const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
-      setPinnedHubs(resolveHubRegistry(cfg).filter((h) => h.kind === 'remote'))
-    } catch {
-      /* no registry yet — seeded lazily by app:get-hub-registry */
-    }
+    // No certificate verify proc: a remote hub's wss:// front end is verified by
+    // Chromium's own CA + hostname checks, like any other site. Nothing is pinned.
 
     // Block external app protocol launches from webviews by registering no-op handlers.
     // External protocol URLs (figma://, slack://, etc.) bypass will-navigate entirely —
@@ -3321,9 +3311,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           /* sidecar failed — leave url absent; renderer surfaces the toast */
         }
       }
-      // Multi-hub: refresh the main-process wss cert-pin map from the registry
-      // (remote hubs with a known fingerprint). No-op / empty when single-hub.
-      setPinnedHubs(hubs.filter((h) => h.kind === 'remote'))
       return { hubs, defaultHubId }
     })
     // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer

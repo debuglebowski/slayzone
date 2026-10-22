@@ -10,11 +10,11 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeJoinToken,
   JOIN_TOKEN_PREFIX,
-  type JoinTokenPayload
+  joinTokenCarriesCertPin
 } from '@slayzone/platform/join-token'
 
 /** Mint a token the same way the hub does (szjt1.<base64url(JSON)>). */
-function encode(payload: JoinTokenPayload): string {
+function encode(payload: Record<string, unknown>): string {
   return `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`
 }
 
@@ -27,24 +27,22 @@ function fakeDb(): SlayzoneDb {
 
 describe('decodeJoinToken', () => {
   it('round-trips a well-formed token', () => {
-    const payload: JoinTokenPayload = {
-      hubUrl: 'wss://hub.example:8443/computers',
-      certFingerprint: 'a'.repeat(64),
-      secret: 'c2VjcmV0'
-    }
+    const payload = { hubUrl: 'wss://hub.example:8443/computers', secret: 'c2VjcmV0' }
     expect(decodeJoinToken(encode(payload))).toEqual(payload)
   })
 
-  it('is byte-compatible with the hub minter payload shape', () => {
-    // Exactly what @slayzone/computers/server mintJoinToken emits.
+  it('decodes a token minted by an OLDER hub, ignoring its certificate pin', () => {
+    // The pre-removal shape: an older hub embedded a pin of its own self-signed
+    // certificate. It still decodes; the pin is dropped, never surfaced.
     const token = encode({
       hubUrl: 'wss://127.0.0.1:51099/computers',
       certFingerprint: 'deadbeef'.repeat(8),
       secret: Buffer.from('x'.repeat(32)).toString('base64url')
     })
-    const decoded = decodeJoinToken(token)
-    expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/computers')
-    expect(decoded?.certFingerprint).toBe('deadbeef'.repeat(8))
+    expect(decodeJoinToken(token)).toEqual({
+      hubUrl: 'wss://127.0.0.1:51099/computers',
+      secret: Buffer.from('x'.repeat(32)).toString('base64url')
+    })
   })
 
   it.each([
@@ -58,13 +56,13 @@ describe('decodeJoinToken', () => {
   })
 
   it('returns null when a required field is missing or wrong type', () => {
-    const noUrl = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
-      JSON.stringify({ certFingerprint: 'a'.repeat(64), secret: 's' })
-    ).toString('base64url')}`
+    const noUrl = `${JOIN_TOKEN_PREFIX}.${Buffer.from(JSON.stringify({ secret: 's' })).toString(
+      'base64url'
+    )}`
     expect(decodeJoinToken(noUrl)).toBeNull()
 
     const numericUrl = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
-      JSON.stringify({ hubUrl: 123, certFingerprint: 'a'.repeat(64), secret: 's' })
+      JSON.stringify({ hubUrl: 123, secret: 's' })
     ).toString('base64url')}`
     expect(decodeJoinToken(numericUrl)).toBeNull()
   })
@@ -80,16 +78,30 @@ describe('decodeJoinToken', () => {
     // fails here even though the local encode()-based tests above stay green.
     const minted = await mintJoinToken(fakeDb(), {
       hubUrl: 'wss://127.0.0.1:51099/computers',
-      certFingerprint: 'deadbeef'.repeat(8),
       ttlMs: 60_000,
       label: 'drift-guard'
     })
     const decoded = decodeJoinToken(minted.token)
     expect(decoded).not.toBeNull()
     expect(decoded?.hubUrl).toBe('wss://127.0.0.1:51099/computers')
-    expect(decoded?.certFingerprint).toBe('deadbeef'.repeat(8))
+    expect(joinTokenCarriesCertPin(minted.token)).toBe(false)
     // The minter injects a random 256-bit secret — decoded, non-empty, base64url.
     expect(typeof decoded?.secret).toBe('string')
     expect((decoded?.secret ?? '').length).toBeGreaterThan(0)
+  })
+})
+
+describe('joinTokenCarriesCertPin', () => {
+  it('is true only for a well-formed token that still carries a non-empty pin', () => {
+    const base = { hubUrl: 'wss://hub.example/computers', secret: 's' }
+    expect(joinTokenCarriesCertPin(encode({ ...base, certFingerprint: 'ab'.repeat(32) }))).toBe(
+      true
+    )
+    // The interim shape (pin field present but empty) and the current one carry no pin.
+    expect(joinTokenCarriesCertPin(encode({ ...base, certFingerprint: '' }))).toBe(false)
+    expect(joinTokenCarriesCertPin(encode(base))).toBe(false)
+    // A token that does not decode is never reported as pinned.
+    expect(joinTokenCarriesCertPin(encode({ certFingerprint: 'ab'.repeat(32) }))).toBe(false)
+    expect(joinTokenCarriesCertPin('garbage')).toBe(false)
   })
 })

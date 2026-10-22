@@ -203,36 +203,12 @@ export function startComputer(
       (isPrimary ? deps.credentialStore : undefined) ??
       createFileCredentialStore(hubHostFromUrl(hubUrl))
 
-    // Pinning is meaningless without TLS. An EXPLICIT pin on a ws:// url already
-    // failed loudly in loadComputerConfig, so a pin reaching here on ws:// can only
-    // be the join-token-decoded one (the auto path) — softly dropped so a ws token
-    // stays usable for loopback/dev. Evaluated PER HUB: one hub may be wss and
-    // another loopback ws.
-    const isSecureUrl = (() => {
-      try {
-        return new URL(hubUrl).protocol === 'wss:'
-      } catch {
-        return false
-      }
-    })()
-    const pinnedCertSha256 =
-      config.pinnedCertSha256 && isSecureUrl ? config.pinnedCertSha256 : undefined
-    if (config.pinnedCertSha256 && !isSecureUrl) {
-      log(
-        'ignoring token-decoded cert fingerprint on a non-wss hub url (pinning requires wss://)',
-        {
-          hubUrl
-        }
-      )
-    }
-
     let dispatch: HubRequestDispatch
     const dialer = new HubDialer({
       url: hubUrl,
       identity,
       credentialStore,
       ...(config.joinToken && isPrimary ? { joinToken: config.joinToken } : {}),
-      ...(pinnedCertSha256 ? { pinnedCertSha256 } : {}),
       onHubRequest: (method, params) => dispatch.handle(method, params),
       log
     })

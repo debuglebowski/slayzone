@@ -15,7 +15,7 @@ afterEach(() => {
   rmSync(baseDir, { recursive: true, force: true })
 })
 
-const CREDS = { computerId: 'computer-1', apiKey: 'key-abc', pinnedFingerprint: 'a'.repeat(64) }
+const CREDS = { computerId: 'computer-1', apiKey: 'key-abc' }
 
 describe('createFileCredentialStore', () => {
   it('round-trips credentials through the shared computer.state.json map', async () => {
@@ -65,6 +65,33 @@ describe('createFileCredentialStore', () => {
     await store.save(CREDS)
     await store.clear()
     await expect(stat(store.filePath)).rejects.toThrow()
+  })
+
+  it('an entry from an older release that still holds a pin keeps loading (pin dropped)', async () => {
+    // Older computers recorded the hub certificate they pinned at enroll. The entry
+    // must keep loading — it IS the computer's identity on that hub — and the pin is
+    // never handed back. The next write of the file no longer carries it, for this
+    // hub's entry or any other.
+    const { writeFile } = await import('node:fs/promises')
+    const filePath = credentialsFilePath(baseDir)
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        'hub.example': { ...CREDS, pinnedFingerprint: 'a'.repeat(64) },
+        'other.example': { computerId: 'computer-9', apiKey: 'key-9', pinnedFingerprint: 'b' }
+      }),
+      'utf8'
+    )
+    const store = createFileCredentialStore('hub.example', { baseDir })
+    expect(await store.load()).toEqual(CREDS)
+
+    await createFileCredentialStore('third.example', { baseDir }).save({
+      computerId: 'computer-3',
+      apiKey: 'key-3'
+    })
+    const raw = await readFile(filePath, 'utf8')
+    expect(raw).not.toContain('pinnedFingerprint')
+    expect(JSON.parse(raw)['other.example']).toEqual({ computerId: 'computer-9', apiKey: 'key-9' })
   })
 
   it('persists pretty JSON that a human can inspect', async () => {

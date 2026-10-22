@@ -384,7 +384,7 @@ async function main(): Promise<void> {
       // The hub collapses every enroll named `local-computer` onto one deterministic id
       // (the desktop app's co-located computer), so a second one would hijack that row.
       const fake = `szjt1.${Buffer.from(
-        JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', certFingerprint: 'ab', secret: 's' })
+        JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', secret: 's' })
       ).toString('base64url')}`
       const res = slayNoService(
         ['computer', 'create', 'local-computer', '--token', fake, '--root', rejectRoot],
@@ -423,11 +423,7 @@ async function main(): Promise<void> {
       )
       try {
         const fake = `szjt1.${Buffer.from(
-          JSON.stringify({
-            hubUrl: 'ws://127.0.0.1:1/computers',
-            certFingerprint: 'ab',
-            secret: 's'
-          })
+          JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', secret: 's' })
         ).toString('base64url')}`
         const res = slay(['computer', 'create', name, '--token', fake, '--root', rejectRoot], {
           root: rejectRoot
@@ -478,7 +474,7 @@ async function main(): Promise<void> {
 
     // ------------------------------------------------------------------- mint
     // `computer mint` is the ONLY place a computer's hub is chosen — the token embeds
-    // that hub's dial url + cert fingerprint, and `create` merely decodes it. These
+    // that hub's dial url, and `create` merely decodes it. These
     // cases run before the happy path on purpose: the token `create` then uses is
     // the one MINT produced, so a divergence between the CLI channel and the raw
     // REST one shows up as a failed enroll rather than passing unnoticed.
