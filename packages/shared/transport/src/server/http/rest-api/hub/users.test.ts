@@ -23,7 +23,12 @@ import express from 'express'
 import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
-import { hubUsersAuthDecision, isLoopbackAddress, registerHubUsersRoutes } from './users.js'
+import {
+  hubUsersAuthDecision,
+  isLoopbackAddress,
+  registerHubUsersRoutes,
+  SSO_MANAGED_ROLE_CODE
+} from './users.js'
 import type { RestApiDeps } from '../types.js'
 
 const SERVICE_EMAIL = 'computers@slayzone.internal'
@@ -216,6 +221,19 @@ await describe('POST /api/hub/users', () => {
   })
 })
 
+await describe('POST /api/hub/users on a hub with Entra sign-in', () => {
+  test('an admin account asked for: 409 with the stable code, not "already exists"', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      stubUsers({ create: async () => ({ ok: false as const, reason: 'sso-managed' as const }) }),
+      'POST',
+      { email: 'alice@example.com', role: 'admin' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe(SSO_MANAGED_ROLE_CODE)
+    expect(res.body.error.includes('already exists')).toBe(false)
+  })
+})
+
 await describe('GET /api/hub/users', () => {
   test('lists accounts', async () => {
     const rows = [
@@ -330,6 +348,18 @@ await describe('PATCH /api/hub/users', () => {
       expect(res.body.ok).toBe(false)
       expect(res.body.error.includes(text)).toBe(true)
     }
+  })
+
+  test('a role change on a hub with Entra sign-in: 409 with the stable code', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      recording('sso-managed' as never).users,
+      'PATCH',
+      { email: 'alice@example.com', role: 'admin' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.code).toBe(SSO_MANAGED_ROLE_CODE)
+    expect(res.body.error.includes('SlayZone.Admin')).toBe(true)
   })
 
   test('500 with a message when the domain layer throws', async () => {

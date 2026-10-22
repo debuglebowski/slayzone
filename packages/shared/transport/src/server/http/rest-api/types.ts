@@ -233,7 +233,8 @@ export interface RestApiDeps {
           ok: true
           user: { id: string; email: string; name: string; role: PrincipalRole; password: string }
         }
-      | { ok: false; reason: 'exists' }
+      /** `sso-managed`: an admin account asked for on a hub with Entra sign-in. */
+      | { ok: false; reason: 'exists' | 'sso-managed' }
     >
     list: () => Promise<HubUserListRow[]>
     /** Keeps every row; revokes the account's better-auth AND web sessions. */
@@ -241,10 +242,11 @@ export interface RestApiDeps {
       email: string
     ) => Promise<'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'>
     enable: (email: string) => Promise<'ok' | 'not-found' | 'protected'>
+    /** `sso-managed`: on a hub with Entra sign-in the role is the Entra app role. */
     setRole: (
       email: string,
       role: PrincipalRole
-    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin'>
+    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'>
   }
   /**
    * The hub's bearer-auth authority, for routes that accept an OFF-BOX caller who

@@ -32,3 +32,13 @@ export {
   type SetHubUserRoleResult
 } from './users'
 export { ACCOUNT_DISABLED_CODE, findHubAccount, type HubAccount } from './account'
+export {
+  ENTRA_ADMIN_ROLE,
+  ENTRA_PROVIDER_ID,
+  ENTRA_USER_ROLE,
+  entraAccountId,
+  isEntraSsoAuth,
+  loadEntraClientCredential,
+  type EntraClientCredential,
+  type EntraSsoConfig
+} from './entra'

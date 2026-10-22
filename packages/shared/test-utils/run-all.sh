@@ -621,7 +621,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
-  packages/shared/transport/src/server/trpc.test.ts
+  packages/shared/transport/src/server/trpc.test.ts \
+  packages/domains/hub-auth/src/server/entra.test.ts
 
 # Swept in 2026-10-22: vitest suites (jsdom / vi.mock) that no runner ran.
 run_vitest_files "vitest (swept-in suites)" \

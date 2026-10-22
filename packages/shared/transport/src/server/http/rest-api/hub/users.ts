@@ -43,6 +43,10 @@ import type { RestApiDeps } from '../types'
  * disable others, or make itself admin. A `user` gets 403 (`not_admin`). The
  * bootstrap owner is created admin, so the owner file keeps working on the box.
  *
+ * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
+ * role change, or `add` asking for an admin, answers 409 with the stable code
+ * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
  * ONE PATH, ONE ENTRY IN THE GATE. The bearer gate's `SELF_GUARDED` set
  * (`apps/hub/src/rest-auth.ts`) matches the pathname EXACTLY, so a
  * `PATCH /api/hub/users/:email` shape could not be exempted without teaching the
@@ -109,6 +113,20 @@ export function hubUsersAuthDecision(opts: {
 
 /** The internal identity that owns computer API keys — never operator-creatable. */
 const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
+
+/**
+ * Stable code of a role change (or an admin `add`) refused because the hub has Entra
+ * sign-in: there the role is the Entra app role, written at every sign-in (O-4).
+ */
+export const SSO_MANAGED_ROLE_CODE = 'SSO_MANAGED_ROLE'
+
+const SSO_MANAGED_ROLE = {
+  ok: false,
+  code: SSO_MANAGED_ROLE_CODE,
+  error:
+    'roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role ' +
+    'on the enterprise application — it applies at the account’s next sign-in'
+} as const
 
 const ROLES: readonly PrincipalRole[] = ['admin', 'user']
 const isRole = (value: unknown): value is PrincipalRole =>
@@ -226,7 +244,13 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ...(role === undefined ? {} : { role })
       })
       if (!result.ok) {
-        res.status(409).json({ ok: false, error: 'a user with that email already exists' })
+        res
+          .status(409)
+          .json(
+            result.reason === 'sso-managed'
+              ? SSO_MANAGED_ROLE
+              : { ok: false, error: 'a user with that email already exists' }
+          )
         return
       }
       res.json({ ok: true, data: result.user })
@@ -313,6 +337,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
               `refusing to ${change.role !== undefined ? 'demote' : 'disable'} the last enabled admin — ` +
               'make another account admin first (`slay hub users role <email> admin`)'
           })
+          return
+        case 'sso-managed':
+          res.status(409).json(SSO_MANAGED_ROLE)
           return
       }
     } catch (err) {
