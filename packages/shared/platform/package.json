@@ -22,6 +22,7 @@
     "./hub-switches": "./src/hub-switches.ts",
     "./hub-switch-refusal": "./src/hub-switch-refusal.ts",
     "./hub-owner-file": "./src/hub-owner-file.ts",
+    "./hub-auth-secret": "./src/hub-auth-secret.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",

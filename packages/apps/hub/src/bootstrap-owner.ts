@@ -19,17 +19,26 @@
  * written to a file and the log) or Entra sign-in on (O-4: an admin not from Entra) —
  * `server.ts` skips it, and `createHubUser` refuses an account with a password anyway.
  *
+ * ON A HUB OTHER MACHINES CAN REACH (B13) nothing is written and nothing secret is
+ * logged (T-11): the owner's password derives from `SLAYZONE_HUB_AUTH_SECRET`
+ * (`@slayzone/platform/hub-auth-secret`), which the operator already holds, and the log
+ * line only says how to get it (`slay hub owner-password`). There is no owner bearer
+ * on that box either: `slay` there signs in like any other client (`slay hub login`).
+ *
  * @module hub/bootstrap-owner
  */
 
 import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { createHubUser, listHubUsers, type HubAuth } from '@slayzone/hub-auth/server'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import {
+  BOOTSTRAP_OWNER_EMAIL,
   ownerFilePath,
   readBootstrapOwner,
   type BootstrapOwnerFile
 } from '@slayzone/platform/hub-owner-file'
+import { HUB_ADDRESS_ENV } from '@slayzone/platform/hub-switches'
 
 // Re-exported for existing consumers of this module (tests, install-handshake) —
 // the schema and reader now live in `@slayzone/platform/hub-owner-file` so the
@@ -63,28 +72,52 @@ function writeOwnerFile(dataRoot: string, file: BootstrapOwnerFile): Promise<voi
 /**
  * Ensure this standalone hub has an owner, creating one on first boot.
  *
- * Returns the owner, or null when one already existed (nothing was written) — so
- * the caller knows whether to print credentials, which must happen exactly once.
+ * `opts.derivePasswordFrom` is the auth secret of a hub other machines can reach: the
+ * owner's password derives from it and no file is written (see the module note). Set
+ * but empty throws: such a hub never falls back to the file.
+ * Without it (a hub only this machine reaches) the password is generated, written to
+ * the 0600 owner file with a bearer, and logged once.
+ *
+ * Returns the owner it created, or null when one already existed (nothing was
+ * written or logged) — credentials are announced exactly once.
  */
 export async function ensureBootstrapOwner(
   auth: HubAuth,
   dataRoot: string,
-  log: (message: string) => void = () => undefined
-): Promise<BootstrapOwnerFile | null> {
+  log: (message: string) => void = () => undefined,
+  opts: { derivePasswordFrom?: string } = {}
+): Promise<{ userId: string; email: string } | null> {
   const existing = await listHubUsers(auth)
   // Service accounts (the computer-transport principal) are not people and must
   // not count as "this hub already has an owner".
   const people = existing.filter((u) => !u.email.endsWith('.internal'))
   if (people.length > 0) return null
 
-  const email = 'owner@hub.slayzone.local'
+  // Present (even empty) = a reachable hub: derive, never fall back to a file. An
+  // empty secret throws here, before any account exists.
+  const derived = opts.derivePasswordFrom !== undefined
   // The hub's first admin (T-08).
-  const created = await createHubUser(auth, { email, name: 'Hub owner', role: 'admin' })
+  const created = await createHubUser(
+    auth,
+    { email: BOOTSTRAP_OWNER_EMAIL, name: 'Hub owner', role: 'admin' },
+    derived ? { password: deriveBootstrapOwnerPassword(opts.derivePasswordFrom ?? '') } : {}
+  )
   if ('error' in created) {
     // Raced with something else creating the same address. Not fatal: the hub has
     // an owner either way, which is the only postcondition that matters.
     log('[slayzone] hub owner already present — skipping bootstrap')
     return null
+  }
+
+  if (derived) {
+    // Where, never what: no password, no file.
+    log(
+      `[slayzone] This hub requires sign-in. A first admin was created: ${created.email}. ` +
+        `Its password derives from ${HUB_ADDRESS_ENV.authSecret} and is written nowhere; ` +
+        `with that variable set, \`slay hub owner-password | slay hub login <hub url> ` +
+        `--email ${created.email}\` signs in as it.`
+    )
+    return { userId: created.id, email: created.email }
   }
 
   // Sign in immediately so the file carries a usable bearer, not just credentials
@@ -116,5 +149,5 @@ export async function ensureBootstrapOwner(
       `  password: ${file.password}\n` +
       `Stored at ${ownerFilePath(dataRoot)} (0600). \`slay\` reads it automatically on this box.\n`
   )
-  return file
+  return { userId: file.userId, email: file.email }
 }

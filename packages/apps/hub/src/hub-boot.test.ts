@@ -12,7 +12,8 @@
  *   - a hub on loopback behind a public address (a same-box reverse proxy) with login
  *     and the secret in env: it serves plain http (no TLS of its own), needs a bearer,
  *     mints a `wss://<public address>/computers` join token with NO pin, creates no
- *     `identity/` directory and writes no `hub.state.json`;
+ *     `identity/` directory and writes no `hub.state.json` or `hub.owner.json` (its
+ *     owner's password derives from the secret, T-11);
  *   - a leftover `SLAYZONE_MODE` changes nothing;
  *   - a hub with Entra sign-in: its two sign-in routes pass the gate, its redirect URI
  *     is on the public address, and it provisions no bootstrap owner.
@@ -47,6 +48,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -484,10 +487,16 @@ async function main(): Promise<void> {
         const noBearer = await fetch(`http://127.0.0.1:${port}/api/tasks`)
         assert(noBearer.status === 401, `no bearer → 401, got ${noBearer.status}`)
 
-        // The bootstrap owner exists for the operator on this box.
-        const owner = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as {
-          token: string
-        }
+        // The bootstrap owner exists, with no file (T-11): its password derives from
+        // the auth secret, and it signs in like any client.
+        assert(!existsSync(join(root, 'hub.owner.json')), 'no hub.owner.json on a reachable hub')
+        const signIn = await postJson(
+          `http://127.0.0.1:${port}/api/auth/sign-in/email`,
+          { email: BOOTSTRAP_OWNER_EMAIL, password: deriveBootstrapOwnerPassword(secret) },
+          { origin: 'https://hub.example.com' }
+        )
+        assert(signIn.status === 200 && signIn.token, `owner sign-in, got ${signIn.status}`)
+        const owner = { token: signIn.token }
         const minted = await poll(
           async () => {
             const r = await fetch(`http://127.0.0.1:${port}/api/computers/join-token`, {
@@ -612,10 +621,10 @@ async function main(): Promise<void> {
         SLAYZONE_HUB_REQUIRE_LOGIN: '1',
         SLAYZONE_HUB_AUTH_SECRET: secret
       })
-      let owner: { email: string; password: string }
+      // A reachable hub: the owner's password derives from the secret (T-11).
+      const owner = { email: BOOTSTRAP_OWNER_EMAIL, password: deriveBootstrapOwnerPassword(secret) }
       try {
         const port = await bootAndGetPort(before)
-        owner = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as typeof owner
         // The public origin: better-auth's form-CSRF check wants an Origin from a fetch
         // client (node's fetch sends Sec-Fetch-Mode).
         const signIn = await postJson(

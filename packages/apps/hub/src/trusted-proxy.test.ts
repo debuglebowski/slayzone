@@ -39,6 +39,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -285,12 +287,9 @@ function waitAudit(
   )
 }
 
-function owner(hub: Hub): { email: string; password: string } {
-  const file = JSON.parse(readFileSync(join(hub.dataRoot, 'hub.owner.json'), 'utf8')) as {
-    email: string
-    password: string
-  }
-  return { email: file.email, password: file.password }
+/** Every hub here is reachable, so its owner has no file: the password derives from the secret (T-11). */
+function owner(_hub: Hub): { email: string; password: string } {
+  return { email: BOOTSTRAP_OWNER_EMAIL, password: deriveBootstrapOwnerPassword(SECRET) }
 }
 
 // --- the probes, run against one hub -----------------------------------------

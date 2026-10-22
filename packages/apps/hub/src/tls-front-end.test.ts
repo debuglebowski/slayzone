@@ -55,6 +55,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { connect as tlsConnect } from 'node:tls'
 import { fileURLToPath } from 'node:url'
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { createTestCa, trustTestCaInThisProcess, type TestLeaf } from '@slayzone/test-utils/test-ca'
 
 const require = createRequire(import.meta.url)
@@ -365,6 +368,7 @@ async function main(): Promise<void> {
     }) as unknown as { computers: { list: { query: () => Promise<ComputerRow[]> } } }
   }
 
+  const hubSecret = randomBytes(32).toString('hex')
   try {
     hub = spawnElectronChild(HUB_BIN, {
       ...scrubbedEnv(home),
@@ -372,7 +376,7 @@ async function main(): Promise<void> {
       SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
       SLAYZONE_HUB_PUBLIC_ADDRESS: publicHost,
       SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-      SLAYZONE_HUB_AUTH_SECRET: randomBytes(32).toString('hex')
+      SLAYZONE_HUB_AUTH_SECRET: hubSecret
     })
     const listen = await poll(
       async () => hub!.logs.find((l) => l.includes('listening on http://')) ?? null,
@@ -383,9 +387,28 @@ async function main(): Promise<void> {
     assert(m, `hub listening line parseable: ${listen}`)
     upstream.port = Number(m[1])
     const hubDbPath = m[2]!
-    const ownerToken = (
-      JSON.parse(readFileSync(join(hubRoot, 'hub.owner.json'), 'utf8')) as { token: string }
-    ).token
+    // A reachable hub keeps no owner file (T-11): the owner's password derives from the
+    // secret, and it signs in like any client.
+    assert(!existsSync(join(hubRoot, 'hub.owner.json')), 'no hub.owner.json on a reachable hub')
+    const ownerSignIn = await poll(
+      async () => {
+        const r = await fetch(`http://127.0.0.1:${upstream.port}/api/auth/sign-in/email`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: hubUrlFromAddr(publicHost, 'http')
+          },
+          body: JSON.stringify({
+            email: BOOTSTRAP_OWNER_EMAIL,
+            password: deriveBootstrapOwnerPassword(hubSecret)
+          })
+        })
+        return r.ok ? r : null
+      },
+      20_000,
+      'bootstrap owner sign-in'
+    )
+    const ownerToken = ownerSignIn.headers.get('set-auth-token')
     assert(ownerToken, 'bootstrap owner token present')
 
     await test('the hub serves plain http and created no identity/ directory', async () => {

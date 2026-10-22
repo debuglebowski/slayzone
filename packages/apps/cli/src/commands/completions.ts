@@ -15,7 +15,7 @@ complete -c slay -n '__fish_use_subcommand' -a 'update' -d 'Update globally npm-
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
-complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use login current forget users'
+complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use login current forget users owner-password'
 complete -c slay -n '__fish_seen_subcommand_from computer' -a 'ls mint create start stop rm restart logs'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
 complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
@@ -103,6 +103,7 @@ _slay() {
     'current:Show which hub this CLI targets'
     'forget:Drop the stored hub target'
     'users:Manage the accounts that can sign in to a hub'
+    'owner-password:Print the first admin password of a reachable hub'
   )
   local -a computer_commands
   computer_commands=(
@@ -184,7 +185,7 @@ _slay_completions() {
         COMPREPLY=( $(compgen -W "list view create update delete toggle run runs" -- "$cur") )
         ;;
       hub)
-        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use login current forget users" -- "$cur") )
+        COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use login current forget users owner-password" -- "$cur") )
         ;;
       computer)
         COMPREPLY=( $(compgen -W "ls mint create start stop rm restart logs" -- "$cur") )

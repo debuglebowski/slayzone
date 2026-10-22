@@ -12,14 +12,16 @@
  * Plus the SSO-hub role rules (users.ts) and the credential loader.
  */
 import { createHash, generateKeyPairSync, KeyObject, randomBytes, webcrypto } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { inspect } from 'node:util'
 import * as x509 from '@peculiar/x509'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
+import { symmetricDecrypt } from 'better-auth/crypto'
 import { decodeProtectedHeader, exportJWK, importX509, jwtVerify, SignJWT } from 'jose'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHubAuth, type HubAuth } from './auth'
@@ -108,6 +110,8 @@ class FakeEntra {
   server!: Server
   authority = ''
   readonly requests: TokenRequestRecord[] = []
+  /** Every token pair the token endpoint handed out for a code, in order. */
+  readonly issued: Array<{ access_token: string; refresh_token: string }> = []
   private readonly codes = new Map<
     string,
     { challenge: string; redirectUri: string; claims: IdClaims; signWith?: KeyObject }
@@ -249,11 +253,15 @@ class FakeEntra {
       send(400, { error: 'invalid_grant', error_description: 'AADSTS70008: bad code' })
       return
     }
+    const pair = {
+      access_token: `at-${randomBytes(6).toString('hex')}`,
+      refresh_token: `rt-${randomBytes(6).toString('hex')}`
+    }
+    this.issued.push(pair)
     send(200, {
       token_type: 'Bearer',
       scope: 'openid profile email offline_access',
-      access_token: `at-${randomBytes(6).toString('hex')}`,
-      refresh_token: `rt-${randomBytes(6).toString('hex')}`,
+      ...pair,
       expires_in: 3600,
       id_token: await this.idToken(issued.claims, issued.signWith)
     })
@@ -687,10 +695,73 @@ describe('Entra sign-in', () => {
       expect(text).not.toContain(form.client_assertion!.split('.')[2]!)
       if (form.code) expect(text).not.toContain(form.code)
     }
+    // The Entra tokens the hub received (T-11): no access or refresh token either.
+    expect(entra.issued.length).toBeGreaterThan(0)
+    for (const { access_token, refresh_token } of entra.issued) {
+      expect(text).not.toContain(access_token)
+      expect(text).not.toContain(refresh_token)
+    }
     expect(text).not.toMatch(/eyJ[\w-]+\.eyJ[\w-]+\./)
     // The credential itself prints as an opaque object.
     expect(inspect(credential)).not.toContain(keyBody.slice(0, 40))
     expect(JSON.stringify(credential)).not.toContain(keyBody.slice(0, 40))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// At rest (O-8, T-11): what the hub's own database file holds
+// ---------------------------------------------------------------------------
+
+describe('Entra tokens at rest', () => {
+  /** Every byte better-auth has written for this database: the file and its WAL. */
+  const dbBytes = (): Buffer =>
+    Buffer.concat(
+      [authDbPath, `${authDbPath}-wal`].filter((f) => existsSync(f)).map((f) => readFileSync(f))
+    )
+
+  it('O-8: the account row holds the refresh and access tokens encrypted with the auth secret, never in plaintext', async () => {
+    const user = await sessionUser(await signIn(assigned('olga-oid')))
+    const { access_token, refresh_token } = entra.issued.at(-1)!
+
+    // The raw row, read past better-auth: what is actually on disk.
+    const db = new DatabaseSync(authDbPath, { readOnly: true })
+    const row = db
+      .prepare('SELECT accessToken, refreshToken FROM account WHERE userId = ? AND providerId = ?')
+      .get(user!.id, ENTRA_PROVIDER_ID) as { accessToken: string; refreshToken: string }
+    db.close()
+    for (const [stored, plain] of [
+      [row.refreshToken, refresh_token],
+      [row.accessToken, access_token]
+    ] as const) {
+      expect(stored).toBeTruthy()
+      expect(stored).not.toContain(plain)
+      // The key is the auth secret (SLAYZONE_HUB_AUTH_SECRET on a hub): better-auth's
+      // XChaCha20-Poly1305 under SHA-256(secret). Any other key fails.
+      expect(await symmetricDecrypt({ key: SECRET, data: stored })).toBe(plain)
+      await expect(
+        symmetricDecrypt({ key: `${SECRET}-not-the-hub-secret`, data: stored })
+      ).rejects.toThrow()
+    }
+    // Nowhere else in the file either.
+    const bytes = dbBytes()
+    expect(bytes.includes(refresh_token)).toBe(false)
+    expect(bytes.includes(access_token)).toBe(false)
+  })
+
+  it("the JWT plugin's private signing key is stored encrypted with the auth secret", async () => {
+    const res = await auth.handler(new Request(`${BASE_URL}/api/auth/jwks`))
+    expect(res.status).toBe(200)
+    const db = new DatabaseSync(authDbPath, { readOnly: true })
+    const rows = db.prepare('SELECT privateKey FROM jwks').all() as Array<{ privateKey: string }>
+    db.close()
+    expect(rows.length).toBeGreaterThan(0)
+    for (const { privateKey } of rows) {
+      expect(privateKey).not.toMatch(/"d"\s*:|PRIVATE KEY/)
+      // Stored as a JSON string of the ciphertext.
+      const data = JSON.parse(privateKey) as string
+      const jwk = JSON.parse(await symmetricDecrypt({ key: SECRET, data })) as { d?: string }
+      expect(jwk.d).toBeTruthy()
+    }
   })
 })
 

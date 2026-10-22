@@ -18,6 +18,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { API_CSP, webShellCsp } from './security-headers.js'
 
 const require = createRequire(import.meta.url)
@@ -101,6 +103,30 @@ interface Hub {
   stop: () => Promise<void>
 }
 
+/** The bootstrap owner of a reachable hub: derived password, then a bearer. */
+async function signInOwner(
+  base: string,
+  publicAddress: string,
+  secret: string
+): Promise<Hub['owner']> {
+  const owner = { email: BOOTSTRAP_OWNER_EMAIL, password: deriveBootstrapOwnerPassword(secret) }
+  const res = await poll(
+    async () => {
+      const r = await fetch(`${base}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: `https://${publicAddress}` },
+        body: JSON.stringify(owner)
+      })
+      return r.ok ? r : null
+    },
+    20_000,
+    'bootstrap owner sign-in'
+  )
+  const token = res.headers.get('set-auth-token')
+  assert(token, 'sign-in answers a bearer')
+  return { ...owner, token }
+}
+
 /** Spawn a login-required hub on loopback, wait for /health and its bootstrap owner. */
 async function spawnHub(extraEnv: Record<string, string>): Promise<Hub> {
   const root = mkdtempSync(join(tmpdir(), 'slz-security-headers-'))
@@ -142,14 +168,19 @@ async function spawnHub(extraEnv: Record<string, string>): Promise<Hub> {
       15_000,
       'hub /health ok'
     )
-    const owner = await poll(
-      async () => {
-        const o = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as Hub['owner']
-        return o.token && o.email && o.password ? o : null
-      },
-      20_000,
-      'bootstrap owner file'
-    )
+    // A reachable hub (public address) keeps no owner file (T-11): its owner's password
+    // derives from the secret and it signs in like any client.
+    const secret = extraEnv.SLAYZONE_HUB_AUTH_SECRET
+    const owner = secret
+      ? await signInOwner(base, extraEnv.SLAYZONE_HUB_PUBLIC_ADDRESS ?? '', secret)
+      : await poll(
+          async () => {
+            const o = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as Hub['owner']
+            return o.token && o.email && o.password ? o : null
+          },
+          20_000,
+          'bootstrap owner file'
+        )
     return { base, root, owner, stop }
   } catch (err) {
     await stop()

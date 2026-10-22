@@ -150,6 +150,10 @@ run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
 # The built hub boots with node-pty, bufferutil and utf-8-validate unresolvable (T-30).
 run_test_electron_strict_loader packages/apps/hub/src/optional-natives-boot.test.ts
+# T-11: a reachable hub writes no generated secret under ROOT and logs none (known
+# values grepped in logs, stdout/stderr and every file); B17 + the loopback→reachable
+# upgrade keeps sessions and enrolled computers.
+run_test_electron_strict_loader packages/apps/hub/src/secrets-at-rest.test.ts
 # Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
 # the credential a web login mints, distinct from a full better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts

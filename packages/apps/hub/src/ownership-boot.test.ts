@@ -20,12 +20,14 @@
  *   packages/apps/hub/src/ownership-boot.test.ts
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { migrations } from '../../../shared/transport/src/db-bootstrap/index.js'
 
 const require = createRequire(import.meta.url)
@@ -279,21 +281,32 @@ async function main(): Promise<void> {
     await test('login on: after boot every existing project belongs to the first admin; REST stamps the creator', async () => {
       const root = newRoot()
       seedV168(root)
+      const secret = 'ownership-boot-test-signing-secret-0123456789'
       const hub = await bootHub(root, {
         ...LOOP,
         SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
         SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-        SLAYZONE_HUB_AUTH_SECRET: 'ownership-boot-test-signing-secret-0123456789'
+        SLAYZONE_HUB_AUTH_SECRET: secret
       })
       let ownerId = ''
       let createdId = ''
       try {
-        const owner = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as {
-          userId: string
-          token: string
+        // A reachable hub keeps no owner file (T-11): the owner signs in with the
+        // password derived from the secret.
+        const res = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: 'https://hub.example.com' },
+          body: JSON.stringify({
+            email: BOOTSTRAP_OWNER_EMAIL,
+            password: deriveBootstrapOwnerPassword(secret)
+          })
+        })
+        const owner = {
+          userId: ((await res.json()) as { user?: { id?: string } }).user?.id ?? '',
+          token: res.headers.get('set-auth-token') ?? ''
         }
         ownerId = owner.userId
-        assert(ownerId && owner.token, 'bootstrap owner provisioned')
+        assert(ownerId && owner.token, `bootstrap owner provisioned, sign-in ${res.status}`)
 
         const audit = hub.logs
           .filter((l) => l.startsWith('{"type":"security"'))

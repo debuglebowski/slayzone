@@ -13,7 +13,8 @@
  *                           B16 session retention is a whole number of days
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
- *   (B13)                   dev endpoint · B14 auth secret in env
+ *   (B13)                   dev endpoint · B14 auth secret in env · B17 it matches any
+ *                           secret this hub generated earlier (`assertKeptAuthSecret`)
  *   Login required:         B2 password or SSO on · B7 SSO settings complete (and
  *                           its certificate loads, `assertSsoCredential`) ·
  *                           B11 the auth database loads (`assertAuthLoaded`, once
@@ -33,6 +34,7 @@
  *
  * @module hub/boot-rules
  */
+import { createHash, timingSafeEqual } from 'node:crypto'
 import {
   LOOPBACK_HOSTS,
   assertLoopbackBind,
@@ -55,7 +57,7 @@ import {
 import { readTrustedProxies } from '@slayzone/platform/client-address'
 
 /**
- * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B15`), or
+ * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B17`), or
  * `config-file` for an unusable `hub.config.json`; the bin writes it into the
  * `hub.boot` audit line before it exits (T-03).
  */
@@ -329,6 +331,40 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
 
   const ssoActive = switches.requireLogin && switches.enableSso
   return { switches, sso, ssoActive, host, publicAddress, reachable }
+}
+
+/**
+ * B17 — a hub other machines can reach takes its auth secret from env (B14), but its
+ * ROOT may still hold the one it generated while only this machine reached it:
+ * `computerTransportSecret` in `hub.state.json` (or the legacy `config.json`). Such a
+ * hub reads that file for this check only and never writes it (T-11). A DIFFERENT value
+ * in env would silently sign every session out and leave the stored Entra tokens and
+ * the JWT signing key (both encrypted with it) unreadable, so it refuses instead. The
+ * same value boots; the caller tells the operator the file can go.
+ *
+ * Pure: the caller reads the file (standalone-config.ts). Neither value is ever put in
+ * the message. Returns `'kept'` when the file holds the env value, `'none'` when there
+ * is nothing to compare (not reachable, or no kept secret).
+ */
+export function assertKeptAuthSecret(input: {
+  reachable: boolean
+  envSecret: string | undefined
+  kept: string | undefined
+  keptPath: string
+}): 'none' | 'kept' {
+  const { reachable, envSecret, kept } = input
+  if (!reachable || !kept || !envSecret) return 'none'
+  const digest = (v: string): Buffer => createHash('sha256').update(v, 'utf8').digest()
+  if (timingSafeEqual(digest(envSecret), digest(kept))) return 'kept'
+  throw new HubBootRefusal(
+    'B17',
+    `[slayzone] ${HUB_ADDRESS_ENV.authSecret} differs from the computerTransportSecret this ` +
+      `hub generated in ${input.keptPath}. Booting with it would sign every session out and ` +
+      `leave the stored Entra tokens and the hub's JWT signing key unreadable. Set ` +
+      `${HUB_ADDRESS_ENV.authSecret} to the value in that file — or, to replace the secret ` +
+      `on purpose (everyone signs in again), delete the file. The hub only compares the ` +
+      `two; it never writes the file.`
+  )
 }
 
 /** A GUID as Entra writes tenant and client ids (case-insensitive). */

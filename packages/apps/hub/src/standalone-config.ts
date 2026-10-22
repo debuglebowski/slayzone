@@ -35,21 +35,33 @@
  * A hub that OTHER machines can reach (B13: non-loopback listen address, or a public
  * address) never generates one: it is left unset here and boot rule B14 refuses it,
  * so a signing key that protects every session and computer credential is never
- * written onto the hub's own disk by default.
+ * written onto the hub's own disk by default. It never READS that file for its secret
+ * either: a secret it generated earlier (it used to be loopback-only) is only compared
+ * with the env value — a different one refuses boot (B17), the same one boots and the
+ * file is named as safe to delete. Nothing is written (T-11).
  *
  * @module hub/standalone-config
  */
 
+import { existsSync } from 'node:fs'
+import { ownerFilePath } from '@slayzone/platform/hub-owner-file'
 import { HUB_ADDRESS_ENV, HUB_SSO_ENV, HUB_SWITCH_ENV } from '@slayzone/platform/hub-switches'
 import {
   HUB_CONFIG_SWITCH_KEYS,
   ensureHubAuthSecret,
   getHubConfigFilePath,
+  getSlayzoneHomeDir,
   loadHubConfigFile,
   loadHubConfigProblems,
+  readKeptHubAuthSecret,
   resolveHubName
 } from '@slayzone/platform/slayzone-config'
-import { assertHubBootRulesFromEnv, HubBootRefusal, peekHubReachability } from './boot-rules.js'
+import {
+  assertHubBootRulesFromEnv,
+  assertKeptAuthSecret,
+  HubBootRefusal,
+  peekHubReachability
+} from './boot-rules.js'
 
 /** True when the hub is running under the Electron host supervisor. */
 function isSupervised(): boolean {
@@ -128,7 +140,35 @@ export function applyStandaloneHubConfig(): void {
   // Every boot rule now, ahead of the one thing below that writes to disk (the
   // generated secret): a hub that is going to be refused must leave nothing behind.
   // `startServer` runs them again against the host it binds.
-  assertHubBootRulesFromEnv()
+  const boot = assertHubBootRulesFromEnv()
+
+  // A hub other machines can reach writes no generated secret (T-11), but its ROOT may
+  // hold ones it wrote while only this machine reached it. B17 compares the auth secret
+  // (read-only; a different one refuses boot), and the operator is told which files
+  // now only hold a secret on disk. Never deleted here: `slay` on this box may still
+  // read the owner file, and the operator decides.
+  if (boot.reachable) {
+    const kept = readKeptHubAuthSecret()
+    const leftovers: string[] = []
+    const same = assertKeptAuthSecret({
+      reachable: true,
+      envSecret: process.env[HUB_ADDRESS_ENV.authSecret],
+      kept: kept.secret,
+      keptPath: kept.path
+    })
+    if (same === 'kept') {
+      leftovers.push(`${kept.path} (the auth secret, now read from ${HUB_ADDRESS_ENV.authSecret})`)
+    }
+    const owner = ownerFilePath(getSlayzoneHomeDir())
+    if (existsSync(owner)) leftovers.push(`${owner} (the bootstrap owner's password and bearer)`)
+    if (leftovers.length > 0) {
+      process.stderr.write(
+        `[slayzone] other machines can reach this hub, so it no longer writes a generated ` +
+          `secret to disk. These files still hold one; delete them once nothing on this ` +
+          `machine needs them: ${leftovers.join('; ')}\n`
+      )
+    }
+  }
 
   // Hub-auth secret — security fix. Resolve env > state file > generate+persist and
   // set the env so composition.ts never reaches the shared dev constant in standalone.
