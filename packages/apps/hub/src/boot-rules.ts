@@ -9,7 +9,8 @@
  *
  *   Always:                 B4 every switch is 0|1 · B5 the hub never read the old
  *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
- *                           B15 trusted proxies are IPs/CIDRs
+ *                           B15 trusted proxies are IPs/CIDRs ·
+ *                           B16 session retention is a whole number of days
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
  *   (B13)                   dev endpoint · B14 auth secret in env
@@ -45,6 +46,7 @@ import {
   HubSwitchValueError,
   LEGACY_HUB_LISTEN_ENV,
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
+  readHubSessionRetentionDays,
   resolveHubSso,
   resolveHubSwitches,
   type HubSsoSettings,
@@ -154,7 +156,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -261,6 +263,11 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
       )
     }
   }
+
+  // B16 — the session retention period (T-23, session-retention.ts) is a whole number
+  // of days. A typo that fell back to "off" would keep what the operator meant to delete.
+  const retention = readHubSessionRetentionDays(env)
+  if (!retention.ok) throw new HubBootRefusal('B16', retention.message)
 
   const sso = resolveHubSso(env)
   if (switches.requireLogin) {

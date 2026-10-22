@@ -167,6 +167,7 @@ import { wireHostKillStamp } from './host-kill.js'
 import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
+import { startSessionRetention } from './session-retention.js'
 import { getDatabasePathFromEnv } from './db.js'
 import { resolveAuthDbPath } from './auth-db.js'
 import { createPtyEnricher } from '@slayzone/task-terminals/server'
@@ -503,6 +504,11 @@ export function composeServer(opts: {
       db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')")
     )
   }
+  // T-23: session content older than SLAYZONE_HUB_SESSION_RETENTION_DAYS goes, shortly
+  // after boot and then daily (session-retention.ts). Off by default — the desktop app's
+  // hub creates no timer. Started before the purge below so that, when on, its
+  // secure_delete zeroes what the purge frees too.
+  startSessionRetention({ db })
   bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
   // Repoint migrated icon rows (absolute legacy paths) at the copies the desktop
   // app placed in this root. No-op on a standalone hub / once already repointed.

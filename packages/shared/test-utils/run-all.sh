@@ -118,6 +118,9 @@ run_test_electron_strict_loader packages/apps/hub/src/ownership-backfill.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/ownership-boot.test.ts
 # Every project-create surface (tRPC, REST, import; MCP has none) stores its owner.
 run_test_electron_strict_loader packages/shared/transport/src/server/project-owner-surfaces.test.ts
+# Session retention (T-23): the sweep and its schedule, then through the built hub.
+run_test_electron_strict_loader packages/apps/hub/src/session-retention.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/session-retention-boot.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.

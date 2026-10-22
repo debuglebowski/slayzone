@@ -89,6 +89,13 @@ export const HUB_ADDRESS_ENV = {
 /** The old hub-side name of {@link HUB_ADDRESS_ENV.listen}. */
 export const LEGACY_HUB_LISTEN_ENV = 'SLAYZONE_HUB_ADDRESS'
 
+/**
+ * Days a hub keeps session content (T-23, hub `session-retention.ts`): a non-negative
+ * integer, `0` = kept until deleted. Not a switch, so not `0|1`; anything that is not a
+ * non-negative integer refuses boot (rule B16). Env only, no `hub.config.json` key.
+ */
+export const HUB_SESSION_RETENTION_DAYS_ENV = 'SLAYZONE_HUB_SESSION_RETENTION_DAYS'
+
 /** Extra browser origins the hub accepts on its websocket (comma-separated). */
 export const HUB_ALLOWED_WEB_ORIGINS_ENV = 'SLAYZONE_HUB_ALLOWED_WEB_ORIGINS'
 
@@ -108,6 +115,9 @@ export const HUB_TRUSTED_PROXIES_ENV = 'SLAYZONE_HUB_TRUSTED_PROXIES'
  *
  * Includes {@link LEGACY_HUB_LISTEN_ENV}: on a hub it is the retired listen name (B5),
  * while its dial-side meaning belongs to a computer / `slay`, never to a hub.
+ *
+ * Includes {@link HUB_SESSION_RETENTION_DAYS_ENV}: an inherited period would start
+ * deleting the desktop user's own session history.
  */
 export const HUB_PROCESS_ENV: readonly string[] = [
   ...Object.values(HUB_SWITCH_ENV),
@@ -116,7 +126,8 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   ...Object.values(HUB_ADDRESS_ENV),
   LEGACY_HUB_LISTEN_ENV,
   HUB_ALLOWED_WEB_ORIGINS_ENV,
-  HUB_TRUSTED_PROXIES_ENV
+  HUB_TRUSTED_PROXIES_ENV,
+  HUB_SESSION_RETENTION_DAYS_ENV
 ]
 
 /** Thrown for a malformed switch value (rule B4). */
@@ -197,4 +208,29 @@ export function resolveHubSso(env: NodeJS.ProcessEnv = process.env): HubSsoSetti
   if (certPath) out.certPath = certPath
   if (keyPath) out.keyPath = keyPath
   return out
+}
+
+/** Default of {@link HUB_SESSION_RETENTION_DAYS_ENV} = the desktop app's hub: no sweep. */
+export const HUB_SESSION_RETENTION_DEFAULT_DAYS = 0
+
+/**
+ * Read {@link HUB_SESSION_RETENTION_DAYS_ENV}. Unset → the default (off). Anything but
+ * decimal digits — blank, `-1`, `90d`, `1.5`, ` 90` — is not a period, and neither is a
+ * number past `Number.MAX_SAFE_INTEGER`; the caller refuses boot (B16) on `ok: false`.
+ * Exact like the switches: a value that silently fell back to "off" on a typo would keep
+ * content the operator meant to delete.
+ */
+export function readHubSessionRetentionDays(
+  env: NodeJS.ProcessEnv = process.env
+): { ok: true; days: number } | { ok: false; message: string } {
+  const raw = env[HUB_SESSION_RETENTION_DAYS_ENV]
+  if (raw === undefined) return { ok: true, days: HUB_SESSION_RETENTION_DEFAULT_DAYS }
+  const days = /^\d+$/.test(raw) ? Number(raw) : Number.NaN
+  if (Number.isSafeInteger(days)) return { ok: true, days }
+  return {
+    ok: false,
+    message:
+      `[slayzone] ${HUB_SESSION_RETENTION_DAYS_ENV} must be a whole number of days (0 = keep ` +
+      `session content until it is deleted), got '${raw}'.`
+  }
 }
