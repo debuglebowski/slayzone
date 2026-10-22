@@ -171,8 +171,8 @@ async function main(): Promise<void> {
       assert(res.status === 401, `expected 401, got ${res.status} (404 = the routing regression)`)
     })
 
-    let scopedToken = ''
-    await test('POST /api/auth/web-login with REAL credentials → 200 + scoped token + cookie', async () => {
+    let sessionCookie = ''
+    await test('POST /api/auth/web-login with REAL credentials → 200 + the scoped cookie, no token in the body', async () => {
       const res = await fetch(`http://127.0.0.1:${port}/api/auth/web-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,9 +181,14 @@ async function main(): Promise<void> {
       assert(res.status === 200, `expected 200, got ${res.status}`)
       const body = (await res.json()) as { ok: boolean; token?: string }
       assert(body.ok === true, 'ok=true')
-      assert(typeof body.token === 'string' && body.token.startsWith('szw_'), 'scoped token issued')
-      assert(Boolean(res.headers.get('set-cookie')), 'Set-Cookie header present')
-      scopedToken = body.token!
+      // T-13: the cookie is the only carrier — no script ever sees the token.
+      assert(body.token === undefined, 'no token in the body')
+      const setCookie = res.headers.get('set-cookie') ?? ''
+      assert(/^slayzone_web_session=szw_[^;]+;/.test(setCookie), `scoped cookie set: ${setCookie}`)
+      assert(setCookie.includes('HttpOnly') && setCookie.includes('SameSite=Lax'), 'HttpOnly, Lax')
+      // A loopback hub with no public address is plain http: no Secure flag.
+      assert(!setCookie.includes('Secure'), 'not Secure on a loopback hub')
+      sessionCookie = setCookie.split(';')[0]!
     })
 
     await test("better-auth's OWN /api/auth/sign-in/email still routes to authApp (carve-out is surgical)", async () => {
@@ -213,35 +218,62 @@ async function main(): Promise<void> {
     // structure exactly (assigning `wsClient` from within a nested callback
     // passed to `test()` confuses tsgo's narrowing of the outer `let` binding
     // by the time the `finally` block reads it).
+    //
+    // Like the web shell (T-13): NO connectionParams token — the browser sends the cookie
+    // with the upgrade, and the page's Origin with it. `ws` stands in for the browser.
     const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
     const superjson = (await import('superjson')).default
-    const ws = createWSClient({
-      url: `ws://127.0.0.1:${port}/trpc`,
-      connectionParams: async () => ({ token: scopedToken })
-    })
-    wsClient = ws
-    const rawClient = createTRPCClient({ links: [wsLink({ client: ws, transformer: superjson })] })
-    // Untyped test-only client (no AppRouter import here) — cast to the
-    // narrow shape each call actually needs.
-    const client = rawClient as unknown as {
-      hub: { describe: { query: () => Promise<{ authRequired: boolean }> } }
-      pty: { create: { mutate: (i: unknown) => Promise<unknown> } }
+    const { WebSocket: NodeWebSocket } = await import('ws')
+    /** A tRPC client whose socket carries the cookie and `origin`, as a browser's would. */
+    const cookieClient = (origin: string) => {
+      class BrowserLikeSocket extends NodeWebSocket {
+        constructor(url: string, protocols?: string | string[]) {
+          super(url, protocols, { headers: { cookie: sessionCookie, origin } })
+        }
+      }
+      const ws = createWSClient({
+        url: `ws://127.0.0.1:${port}/trpc`,
+        WebSocket: BrowserLikeSocket as unknown as typeof WebSocket
+      })
+      const raw = createTRPCClient({ links: [wsLink({ client: ws, transformer: superjson })] })
+      // Untyped test-only client (no AppRouter import here) — cast to the
+      // narrow shape each call actually needs.
+      return {
+        ws,
+        client: raw as unknown as {
+          hub: { describe: { query: () => Promise<{ authRequired: boolean }> } }
+          pty: { create: { mutate: (i: unknown) => Promise<unknown> } }
+        }
+      }
     }
+    const codeOf = async (p: Promise<unknown>): Promise<string> => {
+      try {
+        await p
+        return 'none'
+      } catch (err) {
+        return (err as { data?: { code?: string } }).data?.code ?? 'unknown'
+      }
+    }
+    const own = cookieClient(`http://127.0.0.1:${port}`)
+    wsClient = own.ws
+    const foreign = cookieClient('http://localhost:1')
 
-    await test('the scoped token actually authenticates a real tRPC connection', async () => {
+    await test('the cookie alone authenticates a real tRPC connection from the hub page', async () => {
       // Open procedure: works regardless.
-      const describe = await client.hub.describe.query()
+      const describe = await own.client.hub.describe.query()
       assert(describe.authRequired === true, 'standalone hub enforces auth')
 
-      // A `never`-scoped procedure must still be refused for a scoped session
-      // — the login route working must not silently widen what the token can do.
-      let rejected = false
-      try {
-        await client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' })
-      } catch {
-        rejected = true
-      }
-      assert(rejected, 'pty.create (never-scoped) rejected for a scoped session')
+      // A `never`-scoped procedure must still be refused for a scoped session — FORBIDDEN
+      // (a principal, the wrong scope), not UNAUTHORIZED: the cookie did authenticate,
+      // and the login route working must not silently widen what the session can do.
+      const code = await codeOf(own.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
+      assert(code === 'FORBIDDEN', `pty.create refused as FORBIDDEN, got ${code}`)
+    })
+
+    await test('the same cookie from another page (another localhost port) authenticates nothing', async () => {
+      const code = await codeOf(foreign.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
+      assert(code === 'UNAUTHORIZED', `no principal: UNAUTHORIZED, got ${code}`)
+      foreign.ws.close()
     })
   } finally {
     wsClient?.close()

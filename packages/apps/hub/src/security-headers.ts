@@ -57,8 +57,10 @@ export const GITHUB_AVATAR_ORIGINS = ['https://github.com', 'https://avatars.git
 /**
  * Entra sign-in. Chrome applies `form-action` to every redirect after a form POST,
  * so a sign-in started by a form that answers 302 to Entra would be blocked by
- * `'self'` alone. T-09 starts sign-in by `fetch` (no form), so this only keeps a
- * form-based button working.
+ * `'self'` alone. Neither T-09 nor the web shell starts one with a form: its "Sign in
+ * with Microsoft" is a link to `/api/auth/web-sso` (T-13), whose redirect chain no
+ * directive governs — Entra may hop to hosts of its own. This keeps a form-based start
+ * working too.
  */
 export const ENTRA_SIGN_IN_ORIGIN = 'https://login.microsoftonline.com'
 

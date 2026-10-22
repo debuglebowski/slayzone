@@ -126,6 +126,50 @@ export function wsOriginDecision(opts: WsOriginOptions): WsOriginDecision {
   return 'reject'
 }
 
+export interface CookieOriginOptions {
+  /** The request's `Origin` header (node hands back an array for a repeated one). */
+  origin: string | string[] | undefined
+  /** The request's `Host` header. */
+  host: string | undefined
+  /** See {@link WsOriginOptions.loopbackBind}. */
+  loopbackBind: boolean
+  /** {@link resolveAllowedWebOrigins}. */
+  allowedOrigins: readonly string[]
+}
+
+/**
+ * May a request authenticate by the web-session COOKIE (T-13) — a `/trpc` upgrade, a
+ * state-changing REST call, sign-out? Only when its `Origin` is the hub's own page:
+ *   - exactly one of `allowedOrigins` (the public address's origin, plus
+ *     `SLAYZONE_HUB_ALLOWED_WEB_ORIGINS`), or
+ *   - on a hub only this machine reaches, a loopback `http(s)` origin equal to the
+ *     request's own `Host` — same origin.
+ *
+ * Stricter than {@link wsOriginDecision}, on purpose. That admits a request with NO
+ * Origin (a native client: it carries no ambient credential) and the local-client
+ * shapes; here the cookie IS the ambient credential, attached by the browser to
+ * whatever asked. So a missing, `null`, repeated or unparseable Origin is refused (a
+ * browser sends one on all of these requests — its absence means the cookie did not
+ * come from the hub's page), and so is every local shape: `file:`, `chrome:`, and
+ * another `localhost` port, which is the same SITE, so a `SameSite=Lax` cookie rides
+ * along with its requests.
+ */
+export function cookieOriginDecision(opts: CookieOriginOptions): WsOriginDecision {
+  const { origin } = opts
+  if (typeof origin !== 'string' || !origin || origin === 'null') return 'reject'
+  if (opts.allowedOrigins.includes(origin)) return 'accept'
+  if (!opts.loopbackBind || !opts.host) return 'reject'
+  let u: URL
+  try {
+    u = new URL(origin)
+  } catch {
+    return 'reject'
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'reject'
+  if (!LOCAL_HOSTNAMES.has(u.hostname)) return 'reject'
+  return u.host === opts.host.toLowerCase() ? 'accept' : 'reject'
+}
+
 /**
  * The exact origins this hub accepts beyond the local-client ones.
  *

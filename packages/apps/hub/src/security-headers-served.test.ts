@@ -1,7 +1,7 @@
 /**
  * The security headers on a REAL spawned hub, through every handler that writes a
  * response: the web shell document and a hashed asset (`web-assets.ts`), better-auth
- * (`/api/auth/get-session`), our own `/api/auth/web-login` (answers a token), a REST
+ * (`/api/auth/get-session`), our own `/api/auth/web-login` (sets the session cookie), a REST
  * route, express's 404, `/trpc` over plain HTTP and `/health` (before the gate).
  * `security-headers.test.ts` covers the header logic itself.
  *
@@ -279,14 +279,17 @@ async function main(): Promise<void> {
     hubs.push(loopback)
     await checkHub('loopback hub', loopback, undefined)
 
-    await test('loopback hub: password sign-in answers its token with no-store', async () => {
+    await test('loopback hub: password sign-in sets its session cookie with no-store', async () => {
       const r = await fetch(`${loopback.base}/api/auth/web-login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin: loopback.base },
         body: JSON.stringify({ email: loopback.owner.email, password: loopback.owner.password })
       })
       assertEq(r.status, 200, `status (${await r.clone().text()})`)
-      assert(((await r.json()) as { token?: string }).token, 'answers a token')
+      assert(
+        (r.headers.get('set-cookie') ?? '').startsWith('slayzone_web_session=szw_'),
+        'sets the cookie'
+      )
       checkHeaders(r, { csp: API_CSP, cacheControl: 'no-store', hsts: null }, 'web-login')
     })
 

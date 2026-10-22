@@ -214,7 +214,7 @@ test.describe('web shell — real login-required hub, real browser', () => {
     expect(token).toBeNull()
   })
 
-  test('correct sign-in reaches /api/auth/web-login, stores a scoped token, and mounts the real app', async () => {
+  test('correct sign-in reaches /api/auth/web-login, sets the scoped cookie, and mounts the real app', async () => {
     context = await browser.newContext()
     const page = await context.newPage()
     await page.goto(`http://127.0.0.1:${hub.port}/`)
@@ -232,9 +232,9 @@ test.describe('web shell — real login-required hub, real browser', () => {
     // Real end-to-end proof the scoped session actually authenticates:
     // `useTasksData`'s mount effect wires this bridge unconditionally, on
     // every renderer-app consumer, the instant HomeView mounts — reaching it
-    // means the reloaded page found its stored token, `initTrpcClient`
-    // connected authed over the websocket, and the real app (not the login
-    // screen, not a crash boundary) rendered.
+    // means the reloaded page found its session (the hub's cookie), the
+    // websocket connected authed by that cookie, and the real app (not the
+    // login screen, not a crash boundary) rendered.
     await page.waitForFunction(
       () =>
         typeof (window as unknown as Record<string, unknown>).__slayzone_refreshData === 'function',
@@ -243,20 +243,20 @@ test.describe('web shell — real login-required hub, real browser', () => {
     )
     await expect(page.getByTestId('web-login-screen')).toHaveCount(0)
 
-    const token = await page.evaluate(() =>
-      window.localStorage.getItem('slayzone-web-session-token')
-    )
-    expect(token).toBeTruthy()
-    expect(token).toMatch(/^szw_/)
+    // T-13: the cookie is the ONLY carrier — nothing a script can read.
+    const stored = await page.evaluate(() => ({
+      local: window.localStorage.getItem('slayzone-web-session-token'),
+      session: window.sessionStorage.getItem('slayzone-web-session-token')
+    }))
+    expect(stored).toEqual({ local: null, session: null })
 
-    // Defense-in-depth check on the dual-credential design (Phase 1): the
-    // response also sets an HttpOnly `slayzone_web_session` cookie for `/api/*`
-    // REST, distinct from the token this page just read out of localStorage
-    // for `/trpc` (see web-login.ts / web-sessions.ts's WEB_SESSION_COOKIE_NAME).
     const cookies = await context.cookies()
     const sessionCookie = cookies.find((c) => c.name === 'slayzone_web_session')
     expect(sessionCookie?.value).toMatch(/^szw_/)
     expect(sessionCookie?.httpOnly).toBe(true)
-    expect(sessionCookie?.secure).toBe(true)
+    expect(sessionCookie?.sameSite).toBe('Lax')
+    // A loopback hub with no public address is plain http: not Secure (an https
+    // public address makes it Secure — web-sessions.ts `webSessionCookieSecure`).
+    expect(sessionCookie?.secure).toBe(false)
   })
 })

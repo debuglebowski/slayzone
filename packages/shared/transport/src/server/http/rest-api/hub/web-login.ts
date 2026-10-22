@@ -9,7 +9,7 @@ import type { RestApiDeps } from '../types'
  * credential a browser must never hold, per `web-sessions.ts`'s design. This
  * route calls the SAME check server-side, discards its result, and hands the
  * browser a scoped `web_sessions` token instead, set as an `HttpOnly` cookie
- * so client-side JS never touches it either.
+ * so client-side JS never touches it either (and never returned in the body).
  *
  * GATE-EXEMPT, deliberately: a browser with no credential at all must be able
  * to reach this route to obtain one — it is listed in `rest-auth.ts`'s
@@ -47,24 +47,12 @@ export function registerWebLoginRoute(app: Express, deps: RestApiDeps): void {
         res.status(401).json({ ok: false, error: 'invalid email or password' })
         return
       }
-      // HttpOnly: client-side JS never sees the token. Secure: never sent over
-      // plaintext http — this cookie is meaningless (and unsafe) on anything
-      // but a TLS-terminated origin, which is exactly what a browser-served
-      // hub requires. SameSite=Lax (not Strict): a link from Slack/email must
-      // still land signed in; the CSRF control is the request's Origin, not
-      // this attribute — see the future REST-side origin check this pairs
-      // with (ws-origin.ts already does the WS half).
-      res.setHeader(
-        'Set-Cookie',
-        `${result.cookieName}=${result.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${result.maxAgeSec}`
-      )
-      // The token is ALSO returned in the body, for a client that keeps its
-      // own tRPC WS connection (which authenticates via `connectionParams`,
-      // not a cookie) — see `resolveConnectionPrincipal`'s web-session branch.
-      // Returning it here is not a leak beyond the cookie: both channels
-      // exist specifically so this SAME browser tab can use either transport
-      // with the one credential it was just handed.
-      res.json({ ok: true, token: result.token })
+      // The session cookie is the ONLY place the browser keeps the token (T-13): it
+      // is not in the body, so no script ever holds it. `/trpc` and REST both read
+      // the cookie, each only from the hub's own page (`Origin`). Its flags are the
+      // hub's (`webSessionCookie`): HttpOnly, SameSite=Lax, Path=/, Secure on https.
+      res.setHeader('Set-Cookie', result.setCookie)
+      res.json({ ok: true })
     } catch (err) {
       res.status(500).json({
         ok: false,

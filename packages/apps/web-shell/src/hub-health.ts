@@ -1,24 +1,48 @@
-// Web shell — pre-boot auth-required probe.
+// Web shell — pre-boot probe: must this browser sign in, and how?
 //
 // `GET /health` is deliberately unauthenticated and PUBLIC (see health.ts's
 // own docstring: "a client has to learn it needs a token BEFORE it has one")
 // — read directly here, not via tRPC (no connection exists yet), so
 // `main.tsx` can decide whether to show `LoginScreen` or connect straight
-// through. This is what lets a SUPERVISED hub serve the web shell usefully:
-// `hubAuthRequired = !supervised` there, so it never verifies a bearer at
-// all — mirroring how desktop/CLI clients already connect to one with no
-// token (see server.ts's widened `remote || supervised` static-serving gate).
+// through. This is what lets a hub with login off serve the web shell usefully:
+// it never verifies a credential at all — mirroring how desktop/CLI clients
+// already connect to one with no token.
 //
-// FAILS CLOSED: any fetch/parse error resolves `true` (assume auth IS
-// required) — a transient health-check hiccup must never silently skip the
-// login screen against a hub that actually enforces auth.
-export async function fetchAuthRequired(): Promise<boolean> {
+// HOW (T-13): the switches /health reports. Password sign-in when
+// `enablePassword` is on; "Sign in with Microsoft" when Entra sign-in is
+// (`enableSso` with `requireLogin`, the hub's `ssoActive`).
+//
+// FAILS CLOSED: any fetch/parse error resolves `authRequired: true` with no
+// sign-in method — a transient health-check hiccup must never silently skip the
+// login screen against a hub that actually enforces auth; the screen says to
+// reload instead.
+
+export interface HubSignIn {
+  /** Must this browser sign in before it connects? */
+  authRequired: boolean
+  /** Sign-in methods the hub offers a browser. */
+  methods: { password: boolean; sso: boolean }
+}
+
+const UNKNOWN: HubSignIn = { authRequired: true, methods: { password: false, sso: false } }
+
+export async function fetchHubSignIn(): Promise<HubSignIn> {
   try {
     const res = await fetch('/health', { credentials: 'same-origin' })
-    if (!res.ok) return true
-    const body = (await res.json()) as { authRequired?: unknown }
-    return body.authRequired !== false
+    if (!res.ok) return UNKNOWN
+    const body = (await res.json()) as {
+      authRequired?: unknown
+      switches?: { requireLogin?: unknown; enablePassword?: unknown; enableSso?: unknown }
+    }
+    const sw = body.switches ?? {}
+    return {
+      authRequired: body.authRequired !== false,
+      methods: {
+        password: sw.enablePassword !== false,
+        sso: sw.enableSso === true && sw.requireLogin === true
+      }
+    }
   } catch {
-    return true
+    return UNKNOWN
   }
 }
