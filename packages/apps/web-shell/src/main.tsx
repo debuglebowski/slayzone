@@ -1,6 +1,8 @@
 // Web shell entry. Install window.api BEFORE the renderer module graph
 // evaluates (mirrors chromium-shell's main.tsx — @slayzone/settings' module-
 // eval read of `window.api` must happen after this assignment), then boot.
+// zod-jitless first: it must run before any module builds a zod schema.
+import './zod-jitless'
 import './main.css'
 import { createRoot } from 'react-dom/client'
 import { initTrpcClient, electronBootstrap } from '@slayzone/transport/client'
