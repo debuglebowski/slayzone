@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import { assertHubPasswordEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import type { HubRole } from '../shared/types'
 import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
+import { isPasswordSignInEnabled } from './password'
 
 /**
  * Operator-facing account management for a hub — the server half of
@@ -152,11 +154,18 @@ function normalizeEmail(email: string): string {
  * Returns `{ error: 'exists' }` rather than throwing on a duplicate: the email
  * column is unique, but a caught constraint violation is not reliably
  * distinguishable from other write failures, so the check is explicit.
+ *
+ * With password sign-in off (T-10) throws `HubSwitchedOffError`
+ * (`HUB_PASSWORD_DISABLED`) after one `user.create` denied line: no account gets a
+ * password nobody could use. `opts.reason` is written into the success line
+ * (`break_glass`, ./break-glass.ts).
  */
 export async function createHubUser(
   auth: HubAuth,
-  input: CreateHubUserInput
+  input: CreateHubUserInput,
+  opts: { reason?: 'break_glass' } = {}
 ): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' }> {
+  assertHubPasswordEnabled('user.create', { op: 'create' }, isPasswordSignInEnabled(auth))
   const ctx = await auth.$context
   const email = normalizeEmail(input.email)
   const sso = isEntraSsoAuth(auth)
@@ -209,7 +218,10 @@ export async function createHubUser(
     password: hash
   })
 
-  auditUser('user.create', 'success', created.id, { role })
+  auditUser('user.create', 'success', created.id, {
+    role,
+    ...(opts.reason ? { reason: opts.reason } : {})
+  })
   return { id: created.id, email: created.email, name: created.name, role, password }
 }
 

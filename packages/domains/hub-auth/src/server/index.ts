@@ -1,5 +1,12 @@
 export { createHubAuth, COMPUTER_KEY_PREFIX, type HubAuth, type HubAuthConfig } from './auth'
 export { createAuthExpressApp, type FetchHandlerAuth } from './app'
+export { isPasswordSignInEnabled, PASSWORD_AUTH_ENDPOINTS } from './password'
+export {
+  closeBreakGlassAccounts,
+  createBreakGlassAccount,
+  isBreakGlassEmail,
+  listOpenBreakGlassAccounts
+} from './break-glass'
 export {
   API_KEY_HEADER,
   getHubAuthContext,

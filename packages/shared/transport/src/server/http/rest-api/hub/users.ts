@@ -6,6 +6,7 @@ import { auditRouteRefusal } from '../route-audit'
 import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '../../../context'
 import type { RestApiDeps } from '../types'
+import { respondSwitchRefusal } from '../switch-refusal'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
@@ -47,6 +48,10 @@ import type { RestApiDeps } from '../types'
  * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
  * role change, or `add` asking for an admin, answers 409 with the stable code
  * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
+ * WITH PASSWORD SIGN-IN OFF (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10) `add` answers 403
+ * `HUB_PASSWORD_DISABLED`: every account it makes is a password account
+ * (hub-auth `createHubUser` refuses and writes the audit line). The rest is unchanged.
  *
  * ONE PATH, ONE ENTRY IN THE GATE. The bearer gate's `SELF_GUARDED` set
  * (`apps/hub/src/rest-auth.ts`) matches the pathname EXACTLY, so a
@@ -257,6 +262,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: result.user })
     } catch (err) {
+      if (respondSwitchRefusal(res, err)) return
       res.status(500).json({
         ok: false,
         error: 'failed to create user',
