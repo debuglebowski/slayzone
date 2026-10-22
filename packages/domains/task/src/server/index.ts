@@ -33,6 +33,7 @@ export {
   collectFolderAndDescendants
 } from './artifact-store'
 export type { ArtifactStore } from './artifact-store'
+export { artifactsDirOf, artifactTaskDir, artifactFilePathIn } from './artifact-paths'
 
 // Artifact downloads. Electron-free — the host-only steps (dialogs, reveal,
 // offscreen PDF/PNG render) are injected as ArtifactDownloadHost, which the

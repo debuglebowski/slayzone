@@ -15,6 +15,7 @@ import {
 import { randomUUID } from 'crypto'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { uniqueName } from '@slayzone/file-editor/shared'
+import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import {
   BlobStore,
   betterSqliteTxn,
@@ -35,6 +36,7 @@ import {
 } from '@slayzone/task-artifacts/server'
 import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task-artifacts/server'
 import type { ArtifactVersion, AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
+import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
 
 /**
  * Named-transaction adapters for task artifacts + their version history.
@@ -89,18 +91,13 @@ function wrapVersionError<T>(fn: () => T): T {
   }
 }
 
-function artifactsDirOf(dataDir: string): string {
-  return path.join(dataDir, 'artifacts')
-}
-
 function artifactFilePath(
   dataDir: string,
   taskId: string,
   artifactId: string,
   title: string
 ): string {
-  const ext = getExtensionFromTitle(title) || '.txt'
-  return path.join(artifactsDirOf(dataDir), taskId, `${artifactId}${ext}`)
+  return artifactFilePathIn(artifactsDirOf(dataDir), taskId, artifactId, title)
 }
 
 function selectArtifact(db: Database, id: string): Row {
@@ -287,6 +284,7 @@ export interface FolderGetOrCreateTxnParams {
 
 export const artifactsTxns = {
   'task-artifacts:create': (db: Database, p: CreateArtifactTxnParams): Row => {
+    assertPathSafeId(p.taskId, 'taskId')
     const blobStore = new BlobStore(p.dataDir)
     const versionTxn = betterSqliteTxn(db)
     const id = randomUUID()
@@ -392,13 +390,12 @@ export const artifactsTxns = {
     const taskId = existing.task_id as string
     const oldTitle = existing.title as string
     const newTitle = has('title') ? (p.title as string) : oldTitle
-    const artifactsDir = artifactsDirOf(p.dataDir)
     if (has('title')) {
       const oldExt = getExtensionFromTitle(oldTitle) || '.txt'
       const newExt = getExtensionFromTitle(newTitle) || '.txt'
       if (oldExt !== newExt) {
-        const oldPath = path.join(artifactsDir, taskId, `${p.id}${oldExt}`)
-        const newPath = path.join(artifactsDir, taskId, `${p.id}${newExt}`)
+        const oldPath = artifactFilePath(p.dataDir, taskId, p.id, oldTitle)
+        const newPath = artifactFilePath(p.dataDir, taskId, p.id, newTitle)
         if (existsSync(oldPath)) {
           try {
             renameSync(oldPath, newPath)
@@ -429,6 +426,7 @@ export const artifactsTxns = {
   },
 
   'task-artifacts:upload': (db: Database, p: UploadArtifactTxnParams): Row => {
+    assertPathSafeId(p.taskId, 'taskId')
     const blobStore = new BlobStore(p.dataDir)
     const versionTxn = betterSqliteTxn(db)
     const id = randomUUID()
@@ -460,6 +458,7 @@ export const artifactsTxns = {
   },
 
   'task-artifacts:pasteFiles': (db: Database, p: PasteFilesTxnParams): Row[] => {
+    assertPathSafeId(p.destTaskId, 'taskId')
     const blobStore = new BlobStore(p.dataDir)
     const versionTxn = betterSqliteTxn(db)
     const { sourcePaths, destTaskId, destFolderId } = p
@@ -544,6 +543,7 @@ export const artifactsTxns = {
   },
 
   'task-artifacts:uploadBlob': (db: Database, p: UploadBlobTxnParams): Row => {
+    assertPathSafeId(p.taskId, 'taskId')
     const blobStore = new BlobStore(p.dataDir)
     const versionTxn = betterSqliteTxn(db)
     const id = randomUUID()
@@ -596,6 +596,7 @@ export const artifactsTxns = {
     db: Database,
     p: UploadDirTxnParams
   ): { folders: Row[]; artifacts: Row[] } => {
+    assertPathSafeId(p.taskId, 'taskId')
     const versionTxn = betterSqliteTxn(db)
     const createdFolders: Row[] = []
     const createdArtifacts: Row[] = []

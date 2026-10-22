@@ -1,6 +1,5 @@
-import { join } from 'node:path'
 import { getStorageDir } from '@slayzone/platform'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server'
 
 // Data root for artifact files = the single storage dir (`<ROOT>/storage`,
 // derived from SLAYZONE_ROOT via platform.getStorageDir — same as the DB +
@@ -10,15 +9,15 @@ export function getArtifactsDataRoot(): string {
   return getStorageDir()
 }
 
-export const artifactsDir = join(getArtifactsDataRoot(), 'artifacts')
+export const artifactsDir = artifactsDirOf(getArtifactsDataRoot())
 
+// Both go through the task domain's one artifact-path helper, which refuses an id that
+// is not one plain path segment (`UnsafePathError`).
 export function getArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-  const ext = getExtensionFromTitle(title) || '.txt'
-  return join(artifactsDir, taskId, `${artifactId}${ext}`)
+  return artifactFilePathIn(artifactsDir, taskId, artifactId, title)
 }
 
 /** Env-lazy variant of {@link getArtifactFilePath} for the content routes. */
 export function resolveArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-  const ext = getExtensionFromTitle(title) || '.txt'
-  return join(getArtifactsDataRoot(), 'artifacts', taskId, `${artifactId}${ext}`)
+  return artifactFilePathIn(artifactsDirOf(getArtifactsDataRoot()), taskId, artifactId, title)
 }

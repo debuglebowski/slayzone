@@ -104,7 +104,10 @@ export const SECURITY_EVENTS = [
   /** T-07: an integration connect, provider call or sign-in start refused. */
   'integration.connect',
   /** T-23: the retention sweep ran; `detail` carries the row counts. */
-  'hub.retention.sweep'
+  'hub.retention.sweep',
+  /** T-104: an id that is not one plain path segment, or a path outside its base dir,
+   *  refused before any disk access (`safe-path.ts`); `detail.code`, `detail.kind`. */
+  'hub.path.refused'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]

@@ -67,6 +67,9 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # Artifact export routes after the inversion: served by the HUB against ctx.db,
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
+# T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
+# procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
+run_test_electron_strict_loader packages/shared/transport/src/server/path-ids.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
