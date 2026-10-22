@@ -31,8 +31,17 @@
  * @module transport/server/access
  */
 import { existsSync, realpathSync } from 'node:fs'
-import { basename, dirname, join, posix, resolve as resolvePath, sep, win32 } from 'node:path'
-import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  resolve as resolvePath,
+  sep,
+  win32
+} from 'node:path'
+import { HUB_SSO_ENV, type SlayzoneDb } from '@slayzone/platform'
 import { mayAccessProject, type ProjectOwnership } from '@slayzone/projects/server'
 import { agentSessionsEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
@@ -60,6 +69,10 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *                  code execution in that account: no admin, no sharing, and an unowned
  *                  one is nobody's (O-6). Managing one (list, rename, revoke) is wider —
  *                  the owner or an admin — and is decided in `computer-access.ts`.
+ *   pathTree       a directory and everything under it (a directory upload walks it,
+ *                  T-107): `path` for the directory, and refused when a root under it
+ *                  is one the request may not touch — the hub's own state, or a
+ *                  project root of a project it may not access.
  */
 export type ResourceKind =
   | 'project'
@@ -82,6 +95,7 @@ export type ResourceKind =
   | 'path'
   | 'automation'
   | 'computer'
+  | 'pathTree'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -103,7 +117,8 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'projectGroup',
   'path',
   'automation',
-  'computer'
+  'computer',
+  'pathTree'
 ]
 
 export interface OwnedResource {
@@ -123,11 +138,26 @@ export interface AccessRequest {
   /** The request's verified principal, or null when it carries none. */
   readonly principal: AccessPrincipal | null
   /**
-   * Directories holding the hub's own state (`SLAYZONE_ROOT`, the data root). A `path`
-   * inside one is nobody's to read or write. Optional: a caller that never resolves
-   * paths may omit it.
+   * Directories holding the hub's own state (`SLAYZONE_ROOT`, the data root), and its
+   * secret files outside them ({@link hubStateRoots}). A `path` inside one is nobody's
+   * to read or write. Optional: a caller that never resolves paths may omit it.
    */
   readonly hubRoots?: readonly string[]
+}
+
+/**
+ * `hubRoots` for this process: the hub's state directories, plus each secret it reads
+ * from a file that may live outside them — the Entra certificate and key
+ * (`SLAYZONE_HUB_SSO_CERT_PATH` / `_KEY_PATH`, env only). A root that is a file refuses
+ * that file, as a directory root refuses everything in it (T-107).
+ */
+export function hubStateRoots(
+  dirs: readonly (string | null | undefined)[],
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  return [...dirs, env[HUB_SSO_ENV.certPath], env[HUB_SSO_ENV.keyPath]].filter(
+    (r): r is string => !!r
+  )
 }
 
 /** What a resource resolved to. */
@@ -244,19 +274,24 @@ const isWindowsPath = (p: string): boolean => /^[a-zA-Z]:[\\/]/.test(p) || p.sta
 
 /** `abs` through symlinks: the deepest part of it that exists, plus the rest. A path
  *  that does not exist yet (a file about to be written) is judged by where its
- *  existing parent really is. */
+ *  existing parent really is. `abs` is NOT normalized first and the OS resolves it
+ *  (`realpathSync.native`; the JS one collapses `..` before reading links): `link/..`
+ *  is the parent of where `link` points, the directory a later open really reaches,
+ *  not the directory holding `link` (T-107). */
 function realpathOf(abs: string): string {
   let head = abs
   const tail: string[] = []
   for (;;) {
     try {
-      if (existsSync(head))
-        return tail.length ? join(realpathSync(head), ...tail.reverse()) : realpathSync(head)
+      if (existsSync(head)) {
+        const real = realpathSync.native(head)
+        return tail.length ? join(real, ...tail.reverse()) : real
+      }
     } catch {
-      return abs // unreadable: compare the lexical form
+      return resolvePath(abs) // unreadable: compare the lexical form
     }
     const parent = dirname(head)
-    if (parent === head) return abs
+    if (parent === head) return resolvePath(abs)
     tail.push(basename(head))
     head = parent
   }
@@ -278,7 +313,7 @@ function normalizePath(p: string, cached = false): string {
     const hit = rootForms.get(p)
     if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.form
   }
-  const abs = realpathOf(resolvePath(p))
+  const abs = realpathOf(isAbsolute(p) ? p : `${process.cwd()}${sep}${p}`)
   const form = abs.length > 1 ? abs.replace(/\/+$/, '') : abs
   if (cached) {
     if (rootForms.size > 20_000) rootForms.clear()
@@ -342,6 +377,30 @@ async function resolvePathResource(
   return depth < 0 ? HUB_WIDE : projectsOf(owners)
 }
 
+/**
+ * A directory and everything under it. What decides the directory decides here too,
+ * but a walk also reaches every root nested inside it — so the hub's own state there
+ * (a directory up the tree from `<ROOT>`, or holding the SSO key) or a project root
+ * the request may not access (another user's project nested in yours, their worktree)
+ * refuses the whole tree. Symlinks inside are not followed by the walk; one AT the
+ * directory is resolved like any `path`.
+ */
+async function resolvePathTree(
+  db: SlayzoneDb,
+  rawPath: string,
+  req: AccessRequest
+): Promise<Ownership> {
+  const hubRoots = req.hubRoots ?? []
+  const own = await resolvePathResource(db, rawPath, hubRoots)
+  if (own.status === 'none') return NONE
+  const dir = normalizePath(rawPath)
+  for (const raw of hubRoots) if (within(normalizePath(raw, true), dir)) return NONE
+  for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
+    if (within(normalizePath(row.root, true), dir) && !mayAccessProject(req, row)) return NONE
+  }
+  return own
+}
+
 // ── the resolvers ─────────────────────────────────────────────────────────────
 
 type Resolver = (db: SlayzoneDb, id: string, req: AccessRequest) => Promise<Ownership>
@@ -373,7 +432,8 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   automation: viaProjectColumn('automations'),
   // Its owner row stands in for a project's: it carries no members, so sharing (T-100)
   // never extends to a computer.
-  computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?')
+  computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?'),
+  pathTree: resolvePathTree
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

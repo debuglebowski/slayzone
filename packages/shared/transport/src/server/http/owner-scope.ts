@@ -15,7 +15,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { getSlayzoneHomeDir, getStorageDir, type SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
-import type { AccessRequest, AccessScope, ResourceKind } from '../access'
+import { hubStateRoots, type AccessRequest, type AccessScope, type ResourceKind } from '../access'
 import type { HttpIdRef } from '../http-owner-policy'
 
 /** The facts `canAccess` needs, for a REST or MCP caller on a hub with login. */
@@ -25,7 +25,7 @@ export function httpAccessRequest(userId: string | null): AccessRequest {
     principal: userId ? { userId } : null,
     // The hub's state dir and its storage (artifact files live under
     // `<storage>/artifacts/<taskId>`, which access.ts gives to that task).
-    hubRoots: [getStorageDir(), getSlayzoneHomeDir()].filter((r): r is string => !!r)
+    hubRoots: hubStateRoots([getStorageDir(), getSlayzoneHomeDir()])
   }
 }
 

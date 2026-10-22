@@ -101,6 +101,7 @@ const task = ref('task')
 const tab = ref('tab')
 const session = ref('session')
 const path = ref('path')
+const tree = ref('pathTree')
 const artifact = ref('artifact')
 const folder = ref('artifactFolder')
 const proc = ref('process')
@@ -610,7 +611,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     folder('destFolderId'),
     path('sourcePaths[]')
   ),
-  'artifacts.uploadDir': checked(task('taskId'), path('dirPath'), folder('parentFolderId')),
+  // A directory upload walks the whole tree: every root under it must be the caller's.
+  'artifacts.uploadDir': checked(task('taskId'), tree('dirPath'), folder('parentFolderId')),
   'artifacts.cleanupTask': checked(task('taskId')),
   'artifacts.versionsList': checked(artifact('artifactId')),
   'artifacts.versionsRead': checked(artifact('artifactId')),

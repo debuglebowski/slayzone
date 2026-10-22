@@ -28,6 +28,7 @@ import { getSlayzoneHomeDir } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
 import {
   createAccessScope,
+  hubStateRoots,
   type AccessRequest,
   type AccessScope,
   type OwnedResource
@@ -54,7 +55,7 @@ export function accessRequestOf(ctx: Pick<TrpcContext, 'principal' | 'dataRoot'>
   return {
     authRequired: getAuthGate(),
     principal: ctx.principal ? { userId: ctx.principal.userId } : null,
-    hubRoots: [ctx.dataRoot, getSlayzoneHomeDir()].filter((r): r is string => !!r)
+    hubRoots: hubStateRoots([ctx.dataRoot, getSlayzoneHomeDir()])
   }
 }
 

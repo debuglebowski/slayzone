@@ -16,6 +16,7 @@ import {
   RESOURCE_KINDS,
   canAccess,
   createAccessScope,
+  hubStateRoots,
   invalidateAccessCache,
   resource,
   type AccessRequest,
@@ -134,7 +135,8 @@ const OF_A: Record<ResourceKind, string> = {
   projectGroup: 'gA',
   path: join(aWorktree, 'src', 'index.ts'),
   automation: 'auA',
-  computer: 'cA'
+  computer: 'cA',
+  pathTree: aWorktree
 }
 
 await describe('every kind: the owner, and nobody else', () => {
@@ -194,7 +196,9 @@ await describe('missing and ownerless: refused to everyone on a hub with login',
     ['path', hubRoot, "the hub's state directory itself"],
     ['path', '', 'an empty path'],
     ['computer', 'cU', 'unowned computer (nobody recorded minting its token)'],
-    ['computer', 'nope', 'missing computer']
+    ['computer', 'nope', 'missing computer'],
+    ['pathTree', aRoot, "a tree holding another user's nested project"],
+    ['pathTree', base, "a tree holding the hub's state directory"]
   ]
   for (const [kind, id, what] of refused) {
     test(`${kind} — ${what}`, async () => {
@@ -245,6 +249,50 @@ await describe('how each kind finds its owner', () => {
     expect(await can(A, 'path', join(link, 'slayzone.data.sqlite'))).toBe(false)
     // …including a file that does not exist yet (about to be written through the link).
     expect(await can(A, 'path', join(link, 'planted', 'hub.config.json'))).toBe(false)
+  })
+  test('path: `..` after a symlink is where the OS goes, not where it is spelled (T-107)', async () => {
+    mkdirSync(join(hubRoot, 'sub'), { recursive: true })
+    const link = join(aRoot, 'sub-link')
+    symlinkSync(join(hubRoot, 'sub'), link)
+    // Spelled inside A's project; the OS walks the link, then `..`: the hub root.
+    expect(await can(A, 'path', `${link}/../slayzone.data.sqlite`)).toBe(false)
+    expect(await can(A, 'path', `${link}/../planted.json`)).toBe(false)
+    // …and back out of the hub root to A's own file is A's again.
+    expect(await can(A, 'path', `${link}/../../a-proj/README.md`)).toBe(true)
+  })
+  test('path: the SSO certificate and key are hub state wherever they live (T-107)', async () => {
+    const secrets = join(base, 'secrets')
+    mkdirSync(secrets, { recursive: true })
+    const key = join(secrets, 'sso-key.pem')
+    const cert = join(aRoot, 'sso-cert.pem') // even inside a user's project
+    writeFileSync(key, '')
+    writeFileSync(cert, '')
+    const hubRoots = hubStateRoots([hubRoot], {
+      SLAYZONE_HUB_SSO_KEY_PATH: key,
+      SLAYZONE_HUB_SSO_CERT_PATH: cert
+    })
+    const may = (id: string, kind: ResourceKind = 'path') =>
+      canAccess(db, { authRequired: true, principal: { userId: A }, hubRoots }, resource(kind, id))
+    expect(await may(key)).toBe(false)
+    expect(await may(cert)).toBe(false)
+    const link = join(aRoot, 'key-link.pem')
+    symlinkSync(key, link)
+    expect(await may(link)).toBe(false)
+    // The file, not its directory: a sibling stays what it was.
+    expect(await may(join(secrets, 'other.txt'))).toBe(true)
+    expect(await may(join(aRoot, 'README.md'))).toBe(true)
+    // …but a walk of the directory would reach the key.
+    expect(await may(secrets, 'pathTree')).toBe(false)
+    expect(hubStateRoots([hubRoot, null, undefined], {})).toEqual([hubRoot])
+  })
+  test('pathTree: refused when any root under it is one the caller may not touch', async () => {
+    expect(await can(A, 'pathTree', aWorktree)).toBe(true)
+    expect(await can(A, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // holds B's project
+    expect(await can(B, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // A's directory
+    expect(await can(B, 'pathTree', bNested)).toBe(true)
+    expect(await can(A, 'pathTree', join(base, 'elsewhere'))).toBe(true) // hub-wide, empty
+    expect(await can(A, 'pathTree', base)).toBe(false) // holds the hub root
+    expect(await can(A, 'pathTree', '/')).toBe(false)
   })
   test("path: inside nobody's project is hub-wide; an artifact file is its task's", async () => {
     expect(await can(A, 'path', join(base, 'elsewhere'))).toBe(true)

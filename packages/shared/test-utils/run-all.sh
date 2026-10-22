@@ -145,6 +145,9 @@ run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http-login-of
 # their opener, admin routes decided by owner — with login, then the desktop's hub.
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin-login-off.test.ts
+# Upload procedures never copy the hub's own files (DB, auth store, SSO key) or another
+# user's to a caller, and read nothing off the hub's disk with processes off (T-107).
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/upload-sources.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.

@@ -194,6 +194,8 @@ export interface Owned {
   readonly automation: string
   /** A computer the owner owns (T-19). */
   readonly computer: string
+  /** The same worktree, as a directory walked whole (T-107). */
+  readonly pathTree: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -220,7 +222,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     projectGroup: id('group'),
     path: join(root, 'work', `${mark}_worktree`),
     automation: id('automation'),
-    computer: id('computer')
+    computer: id('computer'),
+    pathTree: join(root, 'work', `${mark}_worktree`)
   }
 }
 
