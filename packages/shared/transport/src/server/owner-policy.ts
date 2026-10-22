@@ -1,12 +1,13 @@
 /**
- * Which user content each `user` tRPC procedure touches, and how the owner gate
- * (`owner-gate.ts`) keeps it to its owner on a hub that requires login (T-17).
+ * Which user content each `user` and `admin` tRPC procedure touches, and how the owner
+ * gate (`owner-gate.ts`) keeps it to its owner on a hub that requires login (T-17).
  *
  * SAME SHAPE AS `admin-policy.ts` and `scopes.ts`: one explicit flat map keyed by
  * procedure path, cross-checked against the LIVE router in `owner-policy.test.ts`. A
- * `user` procedure with no entry fails that test by name, and is refused at runtime
- * on a hub with login (fail closed). `admin` and `open` procedures are not owner
- * questions (T-15) and have no entry.
+ * procedure with no entry fails that test by name, and is refused at runtime on a hub
+ * with login (fail closed). `open` procedures are not owner questions and have no
+ * entry. `admin` ones are (T-106): the admin role decides who may MANAGE something,
+ * never whose content they may read (O-6), so they are marked like any other.
  *
  * Every entry carries one MARK:
  *
@@ -30,8 +31,15 @@
  */
 import { currentSecurityContext } from '@slayzone/platform/security-log'
 import type { AccessScope, OwnedResource, ResourceKind } from './access'
+import type { AccessClass } from './admin-policy'
 
 export type OwnerMark = 'id-checked' | 'list-filtered' | 'no-owned-input'
+
+/**
+ * Whether a procedure, route or tool of T-15 class `cls` is an owner question: every
+ * one but an `open` one. An unclassified one (undefined) is, so it fails closed.
+ */
+export const isOwnerQuestion = (cls: AccessClass | undefined): boolean => cls !== 'open'
 
 /**
  * Where ids sit in the raw input. Dotted segments; `x[]` is an array (of ids, or of
@@ -99,6 +107,7 @@ const tag = ref('tag')
 const template = ref('template')
 const aiItem = ref('aiConfigItem')
 const group = ref('projectGroup')
+const automation = ref('automation')
 
 const checked = (...ids: Ref[]): OwnerRule => ({ mark: 'id-checked', ids })
 const listed = (output: OutputFilter): OwnerRule => ({ mark: 'list-filtered', output })
@@ -297,6 +306,9 @@ const FEEDBACK = 'feedback threads to the SlayZone team: no owner column (hub-wi
 const TEST = 'test-only (PLAYWRIGHT=1); refused in production'
 const META = 'app or hub metadata'
 const HUB_HOST = "the hub host's own CLI config (~/.claude, ~/.codex …), not a project"
+const BACKUP =
+  "the hub's database backups (T-101, O-22): files on the hub's disk under its state directory, which no route serves (access.ts refuses that directory as a `path`); this answers their names and sizes only, and restore is refused off the desktop's own hub"
+const IMPORT = 'creates projects owned by the caller from a bundle the hub opens; reads nothing'
 
 // ── the policy ────────────────────────────────────────────────────────────────
 
@@ -402,6 +414,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.screenshot.captureView': none(HOST),
   'app.leaderboard.getLocalStats': listed(SCOPED_IN_HANDLER),
   'app.exportImport.exportProject': checked(project('projectId')),
+  // O-22: the caller's own projects only (export-import.ts scopes the query); the
+  // whole hub is backed up at server level, never through the app.
+  'app.exportImport.exportAll': listed(SCOPED_IN_HANDLER),
+  'app.exportImport.testExportAllToPath': then(checked(path('filePath')), SCOPED_IN_HANDLER),
   'app.exportImport.testExportProjectToPath': checked(project('projectId'), path('filePath')),
   'app.exportImport.testSetTaskParent': checked(task('taskId'), task('parentId')),
   'app.usage.fetch': none(HOST),
@@ -1073,7 +1089,44 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.getGhUser': checked(path('repoPath')),
   'worktrees.editPrComment': checked(path('repoPath')),
   'worktrees.onDiffChanged': streamed(on('worktreePath', 'path')),
-  'worktrees.onDiffWatchFailed': streamed(on('worktreePath', 'path'))
+  'worktrees.onDiffWatchFailed': streamed(on('worktreePath', 'path')),
+
+  // ── `admin` procedures (T-106): management, never another user's content (O-6) ──
+  'aiConfig.marketplace.addRegistry': none(LIBRARY),
+  'aiConfig.marketplace.removeRegistry': none(LIBRARY),
+  'aiConfig.marketplace.toggleRegistry': none(LIBRARY),
+  'app.backup.create': none(BACKUP),
+  'app.backup.delete': none(BACKUP),
+  'app.backup.getSettings': none(BACKUP),
+  'app.backup.list': none(BACKUP),
+  'app.backup.rename': none(BACKUP),
+  'app.backup.restore': none(BACKUP),
+  'app.backup.revealInFinder': none(BACKUP),
+  'app.backup.setSettings': none(BACKUP),
+  'app.exportImport.import': none(IMPORT),
+  // Reads a file on the hub host: not one inside someone else's project or the hub's state.
+  'app.exportImport.testImportFromPath': checked(path('filePath')),
+  // Automations are their project's: an admin manages only those in its own projects.
+  'automations.getByProject': checked(project('projectId')),
+  'automations.get': checked(automation('id')),
+  'automations.create': { ...checked(project('project_id')), needsOne: ['project_id'] },
+  'automations.update': checked(automation('id')),
+  'automations.delete': checked(automation('id')),
+  'automations.toggle': checked(automation('id')),
+  'automations.reorder': checked(automation('ids[]')),
+  'automations.getRuns': checked(automation('automationId')),
+  'automations.runManual': checked(automation('id')),
+  'automations.clearRuns': checked(automation('automationId')),
+  'automations.onChanged': streamed(byActor),
+  'computers.claim': none(COMPUTER),
+  'computers.mintJoinToken': none(COMPUTER),
+  // Events naming another user's task, session or project are dropped in the handler.
+  'diagnostics.exportBundle': listed(SCOPED_IN_HANDLER),
+  'diagnostics.getConfig': none(HUB_CONFIG),
+  'diagnostics.setConfig': none(HUB_CONFIG),
+  'hub.setLabel': none(HUB_CONFIG),
+  'testPanel.saveProfile': none(`${HUB_CONFIG}: test profiles (a hub-wide setting)`),
+  'testPanel.deleteProfile': none(`${HUB_CONFIG}: test profiles (a hub-wide setting)`)
 }
 
 // ── reading ids out of a raw input ────────────────────────────────────────────

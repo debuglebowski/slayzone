@@ -32,6 +32,7 @@ import Database from 'better-sqlite3'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   MCP_OWNER_POLICY,
+  REST_ADMIN_POLICY,
   REST_OWNER_POLICY,
   createAccessScope,
   type HttpIdRef,
@@ -358,6 +359,17 @@ async function main(): Promise<void> {
             const req = requestFor(key, rule, ref, A, B)
             const r = await rest(hub, token, req)
             const d = denials(before)
+            if (who === 'B' && REST_ADMIN_POLICY[key] === 'admin') {
+              // An `admin` route refuses B by role (403 ADMIN_ONLY) before any id is
+              // read; the admin, next, by owner (T-106).
+              if (
+                r.status !== 403 ||
+                d[0]?.detail.reason !== 'not_admin' ||
+                r.text.includes(A.mark)
+              )
+                failures.push(`B ${key} ${ref.at}: ${r.status} ${r.text.slice(0, 120)}`)
+              continue
+            }
             // The admin owns no companion either: its refusal may come at another id.
             const ok =
               r.status === 404 &&

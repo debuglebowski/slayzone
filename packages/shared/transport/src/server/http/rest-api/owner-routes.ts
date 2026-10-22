@@ -10,6 +10,7 @@ import {
   type HttpOutputFilter,
   type HttpOwnerRule
 } from '../../http-owner-policy'
+import { isOwnerQuestion } from '../../owner-policy'
 import {
   auditOwnerDenied,
   firstDeniedRef,
@@ -26,7 +27,9 @@ import { restPrincipalOf } from './principal'
  * `register*Route` receives, so each route gets {@link ownerRouteGuard} for its own
  * `METHOD path` — the key `REST_OWNER_POLICY` marks — right after the role guard.
  *
- * On a hub with login, for a `user` route:
+ * On a hub with login, for a `user` or `admin` route (T-106: the admin role manages,
+ * it never reads another user's content — an admin's automation request on another
+ * user's project is decided like anyone's):
  *
  *   before the handler  every id the request names (params, query, body; per the
  *                       policy) must be the caller's: someone else's, missing or
@@ -103,8 +106,8 @@ export function ownerRouteGuard(
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req, res, next) => {
     if (!getAuthGate()) return next()
-    // `admin` and `open` routes are T-15's: no owner question.
-    if (classes[key] !== 'user') return next()
+    // `open` routes are T-15's: no owner question. Every other one is.
+    if (!isOwnerQuestion(classes[key])) return next()
     const principal = restPrincipalOf(req)
     const audit = (
       reason: 'not_owner' | 'owner_unclassified' | 'no_principal',
@@ -127,7 +130,11 @@ export function ownerRouteGuard(
       return
     }
     // The hub's bearer gate admits no `/api/*` user route without one; fail closed.
+    // The exception names no user content: a route that verifies its caller itself
+    // (`/api/hub/users`, `/api/computers/join-token`: the bearer gate binds no
+    // principal there, see apps/hub rest-auth.ts `SELF_GUARDED`).
     if (!principal) {
+      if (rule.mark === 'no-owned-input') return next()
       audit('no_principal')
       notFound(res)
       return

@@ -27,6 +27,7 @@
 import Database from 'better-sqlite3'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
+  TRPC_ADMIN_POLICY,
   TRPC_OWNER_POLICY,
   appRouter,
   checkOwnership,
@@ -69,6 +70,8 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 type ProcType = 'query' | 'mutation' | 'subscription'
 const PROCS = appRouter._def.procedures as unknown as Record<string, { _def: { type: ProcType } }>
 const typeOf = (path: string): ProcType => PROCS[path]!._def.type
+/** An `admin` procedure (T-15): a user is refused by role before any id is read. */
+const adminOnly = (path: string): boolean => TRPC_ADMIN_POLICY[path] === 'admin'
 
 // ── inputs, generated from the policy ────────────────────────────────────────
 
@@ -239,6 +242,14 @@ async function main(): Promise<void> {
       await test(`${who} gets NOT_FOUND + one authz.denied line for A's id on every case`, async () => {
         const wrong: string[] = []
         for (const c of cases) {
+          if (actor !== adminId && adminOnly(c.path)) {
+            // B is refused by role (FORBIDDEN, ADMIN_ONLY) whoever's id it names; the
+            // admin, below, by owner (T-106).
+            const res = await call(client, c.path, c.input(A, B))
+            if (res.error?.code !== 'FORBIDDEN') wrong.push(`${c.path}: ${JSON.stringify(res)}`)
+            if (leaks(res.data)) wrong.push(`${c.path}: answered with A's data`)
+            continue
+          }
           const before = deniedLines(c.path, actor).length
           const res = await call(client, c.path, c.input(A, actor === adminId ? A : B))
           const after = deniedLines(c.path, actor).length
@@ -372,8 +383,9 @@ async function main(): Promise<void> {
     })
 
     // ── 3. live streams ──
+    // `admin` subscriptions (automations.onChanged, a void signal): owner-checks-admin.test.ts.
     const streamPaths = Object.entries(TRPC_OWNER_POLICY)
-      .filter(([, r]) => r.events)
+      .filter(([path, r]) => r.events && !adminOnly(path))
       .map(([path]) => path)
       .sort()
     await test(`every filtered subscription has an event source here (${streamPaths.length})`, () => {

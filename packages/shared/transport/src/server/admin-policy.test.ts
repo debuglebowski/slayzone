@@ -147,7 +147,7 @@ describe('classification: the admin items the hub needs', () => {
     'aiConfig.marketplace.removeRegistry',
     'aiConfig.marketplace.toggleRegistry',
     'app.backup.restore',
-    'app.exportImport.exportAll',
+    'app.exportImport.import',
     'testPanel.saveProfile'
   ]
   for (const path of admin) {
@@ -173,7 +173,10 @@ describe('classification: the admin items the hub needs', () => {
     // Per-user settings must stay writable, or nobody can save their own view state.
     'settings.set',
     'settings.get',
-    'app.exportImport.exportProject'
+    'app.exportImport.exportProject',
+    // O-22 (T-101): every user exports their own content; nobody the whole hub.
+    'app.exportImport.exportAll',
+    'app.exportImport.testExportAllToPath'
   ]
   for (const path of user) {
     test(`${path} is user`, () => expect(TRPC_ADMIN_POLICY[path]).toBe('user'))
@@ -253,7 +256,7 @@ describe('tRPC, on a hub that requires login', () => {
 
   const ADMIN_PATHS = ofClass(TRPC_ADMIN_POLICY, 'admin')
 
-  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(34))
+  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(32))
 
   for (const path of ADMIN_PATHS) {
     test(`${path}: a user account is FORBIDDEN (ADMIN_ONLY, one audit line); an admin passes`, async () => {

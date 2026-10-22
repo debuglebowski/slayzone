@@ -14,11 +14,11 @@
  * Inert without login (`getAuthGate()` false — the desktop app's hub): returns before
  * reading the policy, so every procedure there is byte-identical to before.
  *
- * Only `user` procedures are owner questions. `admin` and `open` ones are T-15's and
- * pass; so does one T-15 never classified, which its gate already keeps to admins (and
- * `admin-policy.test.ts` keeps from existing). A `user` procedure with no owner rule is
- * REFUSED here, so one added without a decision fails closed at runtime as well as in
- * `owner-policy.test.ts`.
+ * `user` AND `admin` procedures are owner questions (T-106): the admin role decides
+ * who may manage, never whose content (O-6), so an admin procedure that names a
+ * project's automation is decided like any other id. Only `open` ones pass. A procedure
+ * with no owner rule — one T-15 never classified included — is REFUSED here, so one
+ * added without a decision fails closed at runtime as well as in `owner-policy.test.ts`.
  *
  * @module transport/server/owner-gate
  */
@@ -39,6 +39,7 @@ import {
   DROP,
   TRPC_OWNER_POLICY,
   hasOneOf,
+  isOwnerQuestion,
   resourcesIn,
   type EventFilter,
   type OwnerRule,
@@ -115,7 +116,7 @@ export interface OwnerCheck {
 
 /**
  * Before the handler. Null when there is nothing to enforce: a hub without login, or
- * an `admin`/`open` procedure. Throws the refusal.
+ * an `open` procedure. Throws the refusal.
  */
 export async function checkOwnership(opts: {
   ctx: TrpcContext
@@ -124,8 +125,7 @@ export async function checkOwnership(opts: {
   getRawInput: () => Promise<unknown>
 }): Promise<OwnerCheck | null> {
   if (!getAuthGate()) return null
-  const cls = TRPC_ADMIN_POLICY[opts.path]
-  if (cls !== 'user') return null
+  if (!isOwnerQuestion(TRPC_ADMIN_POLICY[opts.path])) return null
   const rule = TRPC_OWNER_POLICY[opts.path]
   if (!rule) throw refuse(opts.path, 'owner_unclassified')
   // The auth gate has already refused a call without a principal on this hub.

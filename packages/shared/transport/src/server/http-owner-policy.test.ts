@@ -2,14 +2,15 @@
  * The owner-check classification for REST routes and MCP tools (T-18), against the
  * LIVE registrations:
  *
- *   - exhaustiveness: every `user` REST route and MCP tool (T-15's admin-policy.ts) is
- *     marked id-checked, list-filtered or no-owned-input, nothing else is, and nothing
- *     marked is gone — an unmarked new one fails here by name;
+ *   - exhaustiveness: every `user` and `admin` REST route and MCP tool (T-15's
+ *     admin-policy.ts; `admin` ones since T-106) is marked id-checked, list-filtered or
+ *     no-owned-input, nothing else is, and nothing marked is gone — an unmarked new one
+ *     fails here by name;
  *   - each mark carries what the gate needs, a `params.x` id is a segment of its
  *     route's path, and an MCP id is an argument of its tool's schema, so a typo cannot
  *     silently check nothing;
- *   - at runtime an unmarked `user` route or tool is refused on a hub with login (fail
- *     closed), and a hub without login (the desktop app's) reads no rule at all;
+ *   - at runtime an unmarked `user` or `admin` route or tool is refused on a hub with
+ *     login (fail closed), and a hub without login (the desktop app's) reads no rule;
  *   - reading ids out of a request refuses what is not an id.
  *
  * The decisions themselves run on a real hub in `apps/hub/src/owner-checks-http.test.ts`.
@@ -19,6 +20,7 @@ import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { setAuthGate } from './app-deps'
 import { MCP_ADMIN_POLICY, REST_ADMIN_POLICY } from './admin-policy'
 import { MCP_OWNER_POLICY, REST_OWNER_POLICY, type HttpOwnerRule } from './http-owner-policy'
+import { isOwnerQuestion } from './owner-policy'
 import { registerRestApi } from './http/rest-api'
 import { restRouteKey } from './http/rest-api/admin-routes'
 import { ownerRouteGuard } from './http/rest-api/owner-routes'
@@ -63,9 +65,12 @@ function liveMcpTools(): Map<string, Record<string, unknown>> {
   return tools
 }
 
-const LIVE_REST_USER = liveRestKeys().filter((k) => REST_ADMIN_POLICY[k] === 'user')
+/** The owner questions: every `user` and `admin` item (T-106), never an `open` one. */
+const LIVE_REST_USER = liveRestKeys().filter((k) => isOwnerQuestion(REST_ADMIN_POLICY[k]))
 const MCP_TOOLS = liveMcpTools()
-const LIVE_MCP_USER = [...MCP_TOOLS.keys()].filter((t) => MCP_ADMIN_POLICY[t] === 'user').sort()
+const LIVE_MCP_USER = [...MCP_TOOLS.keys()]
+  .filter((t) => isOwnerQuestion(MCP_ADMIN_POLICY[t]))
+  .sort()
 
 const unmarked = (live: string[], policy: Record<string, HttpOwnerRule>): string[] =>
   live.filter((k) => !(k in policy))
@@ -81,13 +86,13 @@ describe('exhaustiveness', () => {
     ['MCP tool', LIVE_MCP_USER, MCP_OWNER_POLICY]
   ]
   for (const [label, live, policy] of surfaces) {
-    test(`every live user ${label} is marked`, () => {
+    test(`every live user/admin ${label} is marked`, () => {
       const missing = unmarked(live, policy)
       expect(missing, `unmarked (add to http-owner-policy.ts): ${missing.join(', ')}`).toEqual([])
     })
-    test(`nothing but live user ${label}s is marked`, () => {
+    test(`nothing but live user/admin ${label}s is marked`, () => {
       const extra = Object.keys(policy).filter((k) => !live.includes(k))
-      expect(extra, `not a live user ${label}: ${extra.join(', ')}`).toEqual([])
+      expect(extra, `not a live user/admin ${label}: ${extra.join(', ')}`).toEqual([])
     })
   }
 
@@ -102,8 +107,12 @@ describe('exhaustiveness', () => {
 
   test('the surface is the size the policy was written against', () => {
     // Floors, not pins: the registrations above are the real ones.
-    expect(LIVE_REST_USER.length).toBeGreaterThan(90)
+    expect(LIVE_REST_USER.length).toBeGreaterThan(100)
     expect(LIVE_MCP_USER.length).toBe(8)
+    // Every admin route is among them (T-106): the 12 T-15 counted.
+    expect(
+      Object.keys(REST_OWNER_POLICY).filter((k) => REST_ADMIN_POLICY[k] === 'admin')
+    ).toHaveLength(12)
   })
 })
 
@@ -221,9 +230,21 @@ describe('REST guard at runtime', () => {
     expect(lines[0]!.detail.reason).toBe('owner_unclassified')
   })
 
-  test('admin and open routes are not owner questions', async () => {
+  test('an admin route is an owner question (T-106); an open one is not', async () => {
     setAuthGate(() => true)
-    expect((await runGuard('GET /x', {}, { 'GET /x': 'admin' })).next).toBe(true)
+    // Unmarked: refused like a user route — the admin role is no way around the owner.
+    const admin = await runGuard('GET /x', {}, { 'GET /x': 'admin' })
+    expect(admin.next).toBe(false)
+    expect(admin.status).toBe(403)
+    expect(
+      (
+        await runGuard(
+          'GET /x',
+          { 'GET /x': { mark: 'no-owned-input', why: 'w' } },
+          { 'GET /x': 'admin' }
+        )
+      ).next
+    ).toBe(true)
     expect((await runGuard('GET /x', {}, { 'GET /x': 'open' })).next).toBe(true)
   })
 

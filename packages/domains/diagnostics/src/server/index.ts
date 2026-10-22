@@ -9,6 +9,7 @@ export {
   normalizeClientError,
   normalizeClientEvent,
   buildExportBundle,
+  summarizeExportEvents,
   redactValue,
   buildPayloadJson,
   clearConfigCache,
