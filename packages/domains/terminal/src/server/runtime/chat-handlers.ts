@@ -366,16 +366,22 @@ async function buildHydrateOpts(
       // we spawned, `foreign-observed` when it doesn't (manual --resume in PTY).
       // Foreign rows are stored for audit but never honored by
       // getCurrentConversationId, so the bug class is closed structurally.
-      void data.recordConversation({
-        taskId: opts.taskId,
-        mode: opts.mode,
-        conversationId,
-        origin,
-        legacyJsonField: 'chatConversationId'
-      })
+      // Caught: nobody awaits this, and the write fails when the task is gone (its
+      // foreign key) — unheard, that rejection ended the hub's process (T-102).
+      data
+        .recordConversation({
+          taskId: opts.taskId,
+          mode: opts.mode,
+          conversationId,
+          origin,
+          legacyJsonField: 'chatConversationId'
+        })
+        .catch((err) => console.error('[chat-handlers] recordConversation failed:', err))
     },
     onInvalidResume: () => {
-      void data.clearChatConversationId(opts.taskId, opts.mode)
+      data
+        .clearChatConversationId(opts.taskId, opts.mode)
+        .catch((err) => console.error('[chat-handlers] clearChatConversationId failed:', err))
     }
   }
 }

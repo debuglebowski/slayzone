@@ -23,6 +23,28 @@ const AI_ACTION_TIMEOUT_MS = 5 * 60_000
 const MAX_RUNS_PER_AUTOMATION = 100
 
 /**
+ * Engine work runs off the caller's stack (event listeners, the cron timer), so a
+ * failure there has nobody to answer to. It is logged and dropped, never left
+ * floating: an automation row is client-written config (`automations.create` stores
+ * it as sent), and one rejection with no handler ends the hub's process (T-102).
+ */
+function detach(work: Promise<unknown>, what: string): void {
+  work.catch((err: unknown) => {
+    console.warn(
+      `[automations] ${what} failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+  })
+}
+
+/** A row whose stored config the engine cannot read (a trigger, condition or action of
+ *  the wrong shape) is skipped, so the automations after it still fire. */
+function skipRow(id: string, err: unknown): void {
+  console.warn(
+    `[automations] skipped automation ${id}: ${err instanceof Error ? err.message : String(err)}`
+  )
+}
+
+/**
  * Structural cross-domain completion-event bus. The Electron host passes
  * `ipcMain` verbatim (tags handlers emit `db:taskTags:setForTask:done` on it);
  * the standalone server passes its own EventEmitter-backed bus. Keeps this
@@ -79,36 +101,46 @@ export class AutomationEngine {
     // --- Task status change ---
     taskEvents.on('task:updated', ({ taskId, projectId, oldStatus }) => {
       if (oldStatus === undefined) return
-      void (async () => {
-        const row = await this.db.get<{ status: string }>('SELECT status FROM tasks WHERE id = ?', [
-          taskId
-        ])
-        if (!row) return
-        if (oldStatus === row.status) return
+      detach(
+        (async () => {
+          const row = await this.db.get<{ status: string }>(
+            'SELECT status FROM tasks WHERE id = ?',
+            [taskId]
+          )
+          if (!row) return
+          if (oldStatus === row.status) return
 
-        await this.handleEvent({
-          type: 'task_status_change',
-          taskId,
-          projectId,
-          oldStatus,
-          newStatus: row.status,
-          depth: this.currentDepth
-        })
-      })()
+          await this.handleEvent({
+            type: 'task_status_change',
+            taskId,
+            projectId,
+            oldStatus,
+            newStatus: row.status,
+            depth: this.currentDepth
+          })
+        })(),
+        'task status change'
+      )
     })
 
     // --- Task created ---
     taskEvents.on('task:created', ({ taskId, projectId }) => {
-      void this.handleEvent({ type: 'task_created', taskId, projectId, depth: 0 })
+      detach(
+        this.handleEvent({ type: 'task_created', taskId, projectId, depth: 0 }),
+        'task created'
+      )
     })
 
     // --- Task archived ---
     taskEvents.on('task:archived', ({ taskId, projectId }) => {
-      void (async () => {
-        const exists = await this.db.get('SELECT 1 FROM tasks WHERE id = ?', [taskId])
-        if (!exists) return
-        await this.handleEvent({ type: 'task_archived', taskId, projectId, depth: 0 })
-      })()
+      detach(
+        (async () => {
+          const exists = await this.db.get('SELECT 1 FROM tasks WHERE id = ?', [taskId])
+          if (!exists) return
+          await this.handleEvent({ type: 'task_archived', taskId, projectId, depth: 0 })
+        })(),
+        'task archived'
+      )
     })
 
     // --- Task tag changed ---
@@ -119,27 +151,30 @@ export class AutomationEngine {
       // ipcMain-shaped payload: a leading event arg (null on the sidecar bus),
       // then the tags handler's own (taskId, tagIds).
       const [, taskId, tagIds] = args as [unknown, string, string[]]
-      void (async () => {
-        const task = await this.db.get<{ project_id: string }>(
-          'SELECT project_id FROM tasks WHERE id = ?',
-          [taskId]
-        )
-        if (task)
-          await this.handleEvent({
-            type: 'task_tag_changed',
-            taskId,
-            projectId: task.project_id,
-            tagIds,
-            depth: 0
-          })
-      })()
+      detach(
+        (async () => {
+          const task = await this.db.get<{ project_id: string }>(
+            'SELECT project_id FROM tasks WHERE id = ?',
+            [taskId]
+          )
+          if (task)
+            await this.handleEvent({
+              type: 'task_tag_changed',
+              taskId,
+              projectId: task.project_id,
+              tagIds,
+              depth: 0
+            })
+        })(),
+        'task tags changed'
+      )
     })
 
     // --- Cron ---
-    this.cronInterval = setInterval(() => void this.tickCron(), 60_000)
+    this.cronInterval = setInterval(() => detach(this.tickCron(), 'cron tick'), 60_000)
 
     // Catch up on missed cron fires after offline period (app closed, sleep, etc.)
-    void this.runCatchup()
+    detach(this.runCatchup(), 'cron catch-up')
   }
 
   /**
@@ -159,22 +194,33 @@ export class AutomationEngine {
     nowFloor.setSeconds(0, 0)
 
     for (const row of rows) {
-      const automation = parseAutomationRow(row)
-      const expression = automation.trigger_config.params.expression as string | undefined
-      if (!expression || !row.last_run_at) continue
+      // One malformed row must not stop the rest (see `skipRow`).
+      try {
+        this.catchUp(row, nowFloor)
+      } catch (err) {
+        skipRow(row.id, err)
+      }
+    }
+  }
 
-      // SQLite stores datetime('now') as 'YYYY-MM-DD HH:MM:SS' (UTC, no zone).
-      const lastRun = new Date(row.last_run_at.replace(' ', 'T') + 'Z')
-      if (Number.isNaN(lastRun.getTime())) continue
-      if (lastRun >= nowFloor) continue
+  private catchUp(row: AutomationRow, nowFloor: Date): void {
+    const automation = parseAutomationRow(row)
+    const expression = automation.trigger_config.params.expression as string | undefined
+    if (!expression || !row.last_run_at) return
 
-      // Walk back minute-by-minute from previous minute to (lastRun, exclusive).
-      // Stop at first match — we coalesce all missed fires into one run.
-      const cursor = new Date(nowFloor)
-      cursor.setMinutes(cursor.getMinutes() - 1)
-      while (cursor > lastRun) {
-        if (cronMatches(expression, cursor)) {
-          void this.executeAutomation(
+    // SQLite stores datetime('now') as 'YYYY-MM-DD HH:MM:SS' (UTC, no zone).
+    const lastRun = new Date(row.last_run_at.replace(' ', 'T') + 'Z')
+    if (Number.isNaN(lastRun.getTime())) return
+    if (lastRun >= nowFloor) return
+
+    // Walk back minute-by-minute from previous minute to (lastRun, exclusive).
+    // Stop at first match — we coalesce all missed fires into one run.
+    const cursor = new Date(nowFloor)
+    cursor.setMinutes(cursor.getMinutes() - 1)
+    while (cursor > lastRun) {
+      if (cronMatches(expression, cursor)) {
+        detach(
+          this.executeAutomation(
             automation,
             {
               type: 'cron',
@@ -184,11 +230,12 @@ export class AutomationEngine {
               catchup: true
             },
             0
-          )
-          break
-        }
-        cursor.setMinutes(cursor.getMinutes() - 1)
+          ),
+          `automation ${automation.id}`
+        )
+        break
       }
+      cursor.setMinutes(cursor.getMinutes() - 1)
     }
   }
 
@@ -206,19 +253,26 @@ export class AutomationEngine {
     )) as AutomationRow[]
 
     for (const row of rows) {
-      const automation = parseAutomationRow(row)
-      const expression = automation.trigger_config.params.expression as string | undefined
-      if (expression && cronMatches(expression, now)) {
-        void this.executeAutomation(
-          automation,
-          {
-            type: 'cron',
-            projectId: automation.project_id,
-            cronExpression: expression,
-            depth: 0
-          },
-          0
-        )
+      try {
+        const automation = parseAutomationRow(row)
+        const expression = automation.trigger_config.params.expression as string | undefined
+        if (expression && cronMatches(expression, now)) {
+          detach(
+            this.executeAutomation(
+              automation,
+              {
+                type: 'cron',
+                projectId: automation.project_id,
+                cronExpression: expression,
+                depth: 0
+              },
+              0
+            ),
+            `automation ${automation.id}`
+          )
+        }
+      } catch (err) {
+        skipRow(row.id, err)
       }
     }
   }
@@ -233,13 +287,16 @@ export class AutomationEngine {
       [event.projectId]
     )
 
-    const automations = rows.map(parseAutomationRow)
-
-    for (const automation of automations) {
-      if (this.matchesTrigger(automation, event)) {
-        if (await this.evaluateConditions(automation, event)) {
-          void this.executeAutomation(automation, event, depth)
+    for (const row of rows) {
+      try {
+        const automation = parseAutomationRow(row)
+        if (this.matchesTrigger(automation, event)) {
+          if (await this.evaluateConditions(automation, event)) {
+            detach(this.executeAutomation(automation, event, depth), `automation ${automation.id}`)
+          }
         }
+      } catch (err) {
+        skipRow(row.id, err)
       }
     }
   }

@@ -68,12 +68,17 @@ const seedDead: ProcessRow = {
   auto_restart: 0,
   pid: 6666
 }
+// Set to make insert/update reject, as the database does for a NOT NULL column or a
+// project/task that does not exist.
+let refuseWrites: Error | null = null
 const fake: ProcessPersistence = {
   loadAll: async () => [seededRow, seedMatching, seedMismatched, seedDead],
   insert: async (p) => {
+    if (refuseWrites) throw refuseWrites
     inserts.push(p)
   },
   update: async (p) => {
+    if (refuseWrites) throw refuseWrites
     updates.push(p)
   },
   remove: async (id) => {
@@ -171,7 +176,7 @@ async function main(): Promise<void> {
   setProcessBackend(null) // restore localProcessBackend for the rest of the suite
 
   // --- create → insert ---
-  const id = createProcess('proj-a', 'task-1', 'dev server', 'echo hi', '/tmp', false)
+  const id = await createProcess('proj-a', 'task-1', 'dev server', 'echo hi', '/tmp', false)
   assert(inserts.length === 1, 'createProcess persists exactly one insert')
   const ins = inserts[0]
   assert(
@@ -186,7 +191,10 @@ async function main(): Promise<void> {
   )
 
   // --- update → update (merged in-memory state, not just the patch) ---
-  assert(updateProcess(id, { label: 'renamed', autoRestart: true }), 'updateProcess returns true')
+  assert(
+    await updateProcess(id, { label: 'renamed', autoRestart: true }),
+    'updateProcess returns true'
+  )
   assert(updates.length === 1, 'updateProcess persists exactly one update')
   const upd = updates[0]
   assert(
@@ -199,8 +207,39 @@ async function main(): Promise<void> {
       upd.taskId === 'task-1',
     'update receives merged state (patched + untouched fields)'
   )
-  assert(!updateProcess('nope', { label: 'x' }), 'updateProcess unknown id returns false')
+  assert(!(await updateProcess('nope', { label: 'x' })), 'updateProcess unknown id returns false')
   assert(updates.length === 1, 'unknown-id update persists nothing')
+
+  // --- a write the database refuses fails the call, never floats (T-102) ---
+  refuseWrites = new Error('FOREIGN KEY constraint failed')
+  const listed = listAllProcesses().length
+  const createErr = await createProcess('proj-a', 'gone', 'x', 'echo x', '/tmp', false).then(
+    () => null,
+    (e: unknown) => e
+  )
+  assert(createErr === refuseWrites, 'refused insert: createProcess rejects with the DB error')
+  assert(listAllProcesses().length === listed, 'refused insert: nothing registered')
+  const updateErr = await updateProcess(id, { taskId: 'gone' }).then(
+    () => null,
+    (e: unknown) => e
+  )
+  assert(updateErr === refuseWrites, 'refused update: updateProcess rejects with the DB error')
+  assert(
+    listAllProcesses().find((p) => p.id === id)?.taskId === 'task-1',
+    'refused update: the live record is unchanged'
+  )
+  refuseWrites = null
+
+  // --- a patch sets only the editable fields; undefined leaves one as it is ---
+  assert(
+    await updateProcess(id, { pid: 1, logBuffer: 'x', label: undefined } as never),
+    'update with non-editable keys answers true'
+  )
+  const patched = listAllProcesses().find((p) => p.id === id)
+  assert(
+    patched?.pid === null && Array.isArray(patched.logBuffer) && patched.label === 'renamed',
+    'pid and logBuffer untouched, undefined label kept'
+  )
 
   // --- kill → remove (after in-memory delete) ---
   assert(killProcess(id), 'killProcess returns true')

@@ -764,13 +764,22 @@ async function createWorktreeForTask(
     })
   }
 
-  // Fire-and-forget: don't block task creation on setup script
-  void runtimeAdapters.worktrees.runWorktreeSetupScript(
-    taskId,
-    worktreePath,
-    repoPath,
-    sourceBranch
-  )
+  // Fire-and-forget: don't block task creation on setup script. Caught: a routed run
+  // rejects (a script past the RPC timeout, a computer that went away), and unheard
+  // that rejection ended the hub's process (T-102).
+  runtimeAdapters.worktrees
+    .runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
+    .catch((err: unknown) => {
+      runtimeAdapters.recordDiagnosticEvent({
+        level: 'warn',
+        source: 'task',
+        event: 'task.auto_worktree_setup_failed',
+        taskId,
+        projectId,
+        message: err instanceof Error ? err.message : String(err),
+        payload: { worktreePath }
+      })
+    })
 }
 
 /**

@@ -54,6 +54,10 @@ export interface ProcessInfo {
   processTitle: string | null
 }
 
+/** What a client may set on a process (create, update); the rest is the manager's. */
+const EDITABLE_FIELDS = ['label', 'command', 'cwd', 'autoRestart', 'taskId', 'projectId'] as const
+type EditableField = (typeof EDITABLE_FIELDS)[number]
+
 interface ManagedProcess extends ProcessInfo {
   handle: ProcHandle | null
   titlePollTimer: ReturnType<typeof setInterval> | null
@@ -544,25 +548,16 @@ async function sweepAllHistoryOnBoot(): Promise<void> {
   await Promise.allSettled(Array.from(processes.values()).map((p) => reapKnownHistory(p)))
 }
 
-export function createProcess(
-  projectId: string | null,
-  taskId: string | null,
-  label: string,
-  command: string,
-  cwd: string,
-  autoRestart: boolean
-): string {
-  assertHubProcessesEnabled('hub.process.spawn', { op: 'create', detail: { taskId, projectId } })
-  const id = randomUUID()
-  const proc: ManagedProcess = {
+/** A process row the manager has not registered yet: created, not running. */
+function newManagedProcess(
+  id: string,
+  fields: Pick<ProcessInfo, EditableField>,
+  status: ProcessStatus
+): ManagedProcess {
+  return {
     id,
-    taskId,
-    projectId,
-    label,
-    command,
-    cwd,
-    autoRestart,
-    status: 'stopped',
+    ...fields,
+    status,
     pid: null,
     exitCode: null,
     logBuffer: [],
@@ -574,8 +569,33 @@ export function createProcess(
     titlePollTimer: null,
     oscTitleSet: false
   }
+}
+
+/**
+ * Persist a client-supplied row and only then register it. Awaited, never `void`: a
+ * row the database refuses (a NOT NULL column, a project or task that does not
+ * exist) fails THIS call with that error. Floated, its rejection had no handler,
+ * and an unhandled rejection ends the hub's process (T-102).
+ */
+async function persistNew(proc: ManagedProcess): Promise<void> {
+  const { id, taskId, projectId, label, command, cwd, autoRestart } = proc
+  await persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
   processes.set(id, proc)
-  void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
+}
+
+export async function createProcess(
+  projectId: string | null,
+  taskId: string | null,
+  label: string,
+  command: string,
+  cwd: string,
+  autoRestart: boolean
+): Promise<string> {
+  assertHubProcessesEnabled('hub.process.spawn', { op: 'create', detail: { taskId, projectId } })
+  const id = randomUUID()
+  await persistNew(
+    newManagedProcess(id, { taskId, projectId, label, command, cwd, autoRestart }, 'stopped')
+  )
   return id
 }
 
@@ -590,28 +610,12 @@ export async function spawnProcess(
   assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn', detail: { taskId, projectId } })
   if (isShuttingDown) throw new Error('Cannot spawn process while app is shutting down.')
   const id = randomUUID()
-  const proc: ManagedProcess = {
+  const proc = newManagedProcess(
     id,
-    taskId,
-    projectId,
-    label,
-    command,
-    cwd,
-    autoRestart,
-    status: 'running',
-    pid: null,
-    exitCode: null,
-    logBuffer: [],
-    handle: null,
-    startedAt: new Date().toISOString(),
-    restartCount: 0,
-    spawnedAt: null,
-    processTitle: null,
-    titlePollTimer: null,
-    oscTitleSet: false
-  }
-  processes.set(id, proc)
-  void persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
+    { taskId, projectId, label, command, cwd, autoRestart },
+    'running'
+  )
+  await persistNew(proc)
   // proc.pid is always null and history always empty here (id is freshly
   // minted) — a no-op today, kept for symmetry with restartProcess in case a
   // future caller ever reuses an id.
@@ -621,25 +625,33 @@ export async function spawnProcess(
   return id
 }
 
-export function updateProcess(
+/**
+ * Apply a client's edit. Only the editable fields are copied (never `Object.assign` of
+ * the patch: that let a client write the live record's pid, log buffer or handle), an
+ * `undefined` leaves a field as it is, and the row is persisted before the live record
+ * changes. Awaited for the same reason as `persistNew`: a database refusal (a project
+ * or task that does not exist) fails this call and leaves the process untouched.
+ */
+export async function updateProcess(
   id: string,
-  updates: Partial<
-    Pick<ProcessInfo, 'label' | 'command' | 'cwd' | 'autoRestart' | 'taskId' | 'projectId'>
-  >
-): boolean {
+  updates: Partial<Pick<ProcessInfo, EditableField>>
+): Promise<boolean> {
   assertHubProcessesEnabled('hub.process.spawn', { op: 'update', detail: { processId: id } })
   const proc = processes.get(id)
   if (!proc) return false
-  Object.assign(proc, updates)
-  void persistence?.update({
-    id,
-    taskId: proc.taskId,
-    projectId: proc.projectId,
+  const next: Pick<ProcessInfo, EditableField> = {
     label: proc.label,
     command: proc.command,
     cwd: proc.cwd,
-    autoRestart: proc.autoRestart
-  })
+    autoRestart: proc.autoRestart,
+    taskId: proc.taskId,
+    projectId: proc.projectId
+  }
+  for (const key of EDITABLE_FIELDS) {
+    if (updates[key] !== undefined) Object.assign(next, { [key]: updates[key] })
+  }
+  await persistence?.update({ id, ...next })
+  Object.assign(proc, next)
   return true
 }
 

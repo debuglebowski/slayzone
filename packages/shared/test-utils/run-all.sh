@@ -99,6 +99,9 @@ run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.
 run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
 # Hub-local exec and project files refused with processes switched off (T-06).
 run_test_electron_strict_loader packages/apps/hub/src/local-exec-refusals.test.ts
+# A bad processes.* input is a clean error, never a hub exit (T-102): the built hub with
+# processes on (desktop, login) and off (Normain).
+run_test_electron_strict_loader packages/apps/hub/src/processes-bad-input.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts

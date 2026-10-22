@@ -219,6 +219,23 @@ async function main(): Promise<void> {
   assert(!/PATHLEN:0:/.test(envLine()), 'sanitize keeps a non-empty PATH for a run process')
   killProcess(idE)
 
+  // === a cwd that does not exist (T-102): spawn reports it as an 'error' event after
+  //     returning; unheard, that threw out of this process. Now: a log line + error. ===
+  const idX = await spawnProcess('proj', 'task', 'X', 'echo never', '/no/such/dir-t102', false)
+  const failLine = (): boolean =>
+    logs.some(
+      (l) => l.id === idX && l.line.includes('failed to start') && l.line.includes('ENOENT')
+    )
+  const erroredX = (): boolean => statuses.some((s) => s.id === idX && s.status === 'error')
+  const deadlineX = Date.now() + 5000
+  while (Date.now() < deadlineX && !(failLine() && erroredX())) {
+    await delay(50)
+  }
+  assert(failLine(), 'missing cwd: the reason is logged (failed to start … ENOENT)')
+  assert(erroredX(), 'missing cwd: status error, and this process is still running')
+  assert(listAllProcesses().find((p) => p.id === idX)?.pid === null, 'missing cwd: no pid recorded')
+  killProcess(idX)
+
   console.log('process-backend seam: all passed')
   process.exit(0)
 }
