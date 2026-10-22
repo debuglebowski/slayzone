@@ -10,6 +10,8 @@
  *                                       computer is unaffected.
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS=0  no integration connect, no stored provider
  *                                       credential, no provider call, no sign-in start.
+ *   SLAYZONE_HUB_ENABLE_PASSWORD=0      no password sign-in, sign-up, change or reset,
+ *                                       no account with a generated password (T-10).
  *
  * ONE SHAPE FOR EVERY REFUSAL. A chokepoint calls `assertHub*Enabled`, which writes one
  * `denied` audit line and throws {@link HubSwitchedOffError}: a stable `code` and one
@@ -34,6 +36,7 @@ export type HubSwitchedOffCode =
   | 'HUB_PROCESSES_DISABLED'
   | 'HUB_INTEGRATIONS_DISABLED'
   | 'NO_COMPUTER_CONNECTED'
+  | 'HUB_PASSWORD_DISABLED'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
@@ -42,13 +45,15 @@ const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_INTEGRATIONS_DISABLED: `Integrations are switched off on this hub (${HUB_SWITCH_ENV.enableIntegrations}=0).`,
   NO_COMPUTER_CONNECTED:
     'Connect a computer: this hub does not read project files or run git, gh or other ' +
-    `commands itself (${HUB_SWITCH_ENV.enableProcesses}=0).`
+    `commands itself (${HUB_SWITCH_ENV.enableProcesses}=0).`,
+  HUB_PASSWORD_DISABLED: `Password sign-in is switched off on this hub (${HUB_SWITCH_ENV.enablePassword}=0).`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED: HUB_SWITCH_ENV.enableProcesses,
   HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations,
-  NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses
+  NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses,
+  HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -84,6 +89,11 @@ export function hubIntegrationsEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return resolveHubSwitches(env).enableIntegrations
 }
 
+/** `SLAYZONE_HUB_ENABLE_PASSWORD` — may anyone sign in, or get an account, with a password? */
+export function hubPasswordEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveHubSwitches(env).enablePassword
+}
+
 /** What was refused, for the audit line. Ids and short codes only — never a command. */
 export interface HubRefusal {
   /** Short name of the refused operation, e.g. `create`, `pty.spawn`, `save`. */
@@ -92,7 +102,12 @@ export interface HubRefusal {
 }
 
 function refuse(
-  event: 'hub.process.spawn' | 'automation.run_command' | 'integration.connect' | 'hub.local_exec',
+  event:
+    | 'hub.process.spawn'
+    | 'automation.run_command'
+    | 'integration.connect'
+    | 'hub.local_exec'
+    | HubPasswordEvent,
   code: HubSwitchedOffCode,
   refusal: HubRefusal
 ): never {
@@ -135,4 +150,25 @@ export function assertHubIntegrationsEnabled(refusal: HubRefusal): void {
  */
 export function assertHubLocalExecEnabled(refusal: HubRefusal): void {
   if (!hubProcessesEnabled()) refuse('hub.local_exec', 'NO_COMPUTER_CONNECTED', refusal)
+}
+
+/**
+ * The audit event of a refused password operation (T-10): `auth.signin` for a password
+ * check (sign-in, the web login, verify-password), `auth.password.change` for a
+ * change or reset, `user.create` for an account that would get a password.
+ */
+export type HubPasswordEvent = 'auth.signin' | 'auth.password.change' | 'user.create'
+
+/**
+ * Throw {@link HubSwitchedOffError} (`HUB_PASSWORD_DISABLED`) after one audit line when
+ * password sign-in is off (T-10). `enabled` defaults to the env switch; hub-auth passes
+ * what its own better-auth instance was built with, the hub's REST gate its boot
+ * switches — the same value in a running hub, from the one place each already holds.
+ */
+export function assertHubPasswordEnabled(
+  event: HubPasswordEvent,
+  refusal: HubRefusal,
+  enabled: boolean = hubPasswordEnabled()
+): void {
+  if (!enabled) refuse(event, 'HUB_PASSWORD_DISABLED', refusal)
 }

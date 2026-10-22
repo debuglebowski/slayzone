@@ -468,8 +468,15 @@ async function hubSignIn(baseUrl: string, email: string, password: string): Prom
     fail(`Could not reach the hub at ${baseUrl}.`)
   }
   if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { code?: unknown; error?: unknown }
+    const code = body.code
+    // The hub has no password sign-in at all (T-10) — say so, not "check the password".
+    if (code === 'HUB_PASSWORD_DISABLED') {
+      fail(
+        `Sign-in refused: ${typeof body.error === 'string' ? body.error : 'password sign-in is off on this hub'}`
+      )
+    }
     // Only reachable with the right password (better-auth checks it first).
-    const code = ((await res.json().catch(() => ({}))) as { code?: unknown }).code
     if (code === 'ACCOUNT_DISABLED') {
       fail(
         'Sign-in refused: this account is disabled on the hub. An operator can enable it ' +

@@ -16,6 +16,10 @@
  *   - a leftover `SLAYZONE_MODE` changes nothing;
  *   - a hub with Entra sign-in: its two sign-in routes pass the gate, its redirect URI
  *     is on the public address, and it provisions no bootstrap owner.
+ *   - password sign-in off (T-10): every password route 403s with the switch code and
+ *     an audit line, no owner file and no password in the logs, a password account
+ *     from before cannot sign in; break-glass (password on beside Entra, O-9) opens and
+ *     closes with the switch, audited.
  *
  * Isolation: every hub runs in its own throwaway SLAYZONE_ROOT with every inherited
  * SLAYZONE_ and ELECTRON_ prefixed env var scrubbed (a task terminal leaks the dial-side
@@ -41,6 +45,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
@@ -227,6 +232,67 @@ async function bootAndGetPort(hub: Proc): Promise<number> {
   return port
 }
 
+/** The audit lines (T-03) a hub wrote to stdout. */
+function securityLines(
+  hub: Proc
+): Array<Record<string, unknown> & { detail: Record<string, unknown> }> {
+  return hub.logs
+    .filter((l) => l.startsWith('{"type":"security"'))
+    .map((l) => JSON.parse(l) as Record<string, unknown> & { detail: Record<string, unknown> })
+}
+
+/** An RSA certificate + key for the hub's Entra client assertion (openssl: CI + macOS). */
+function writeSsoCert(root: string): { certPath: string; keyPath: string } {
+  const certPath = join(root, 'sso-cert.pem')
+  const keyPath = join(root, 'sso-key.pem')
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=slayzone-hub-boot-test',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath
+    ],
+    { stdio: 'ignore' }
+  )
+  return { certPath, keyPath }
+}
+
+/** Everything under `<root>/logs`, concatenated. */
+function readLogs(root: string): string {
+  const dir = join(root, 'logs')
+  if (!existsSync(dir)) return ''
+  return readdirSync(dir)
+    .map((n) => readFileSync(join(dir, n), 'utf8'))
+    .join('\n')
+}
+
+/** The shape of a generated password (hub-auth users.ts: 16 random bytes, base64url). */
+const GENERATED_PASSWORD = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])/
+
+async function postJson(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; json: Record<string, unknown>; token: string | null }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body)
+  })
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  return { status: res.status, json, token: res.headers.get('set-auth-token') }
+}
+
 async function main(): Promise<void> {
   console.log('\nhub boot rules, driven through the real built hub\n')
   ensureBuilt()
@@ -237,12 +303,13 @@ async function main(): Promise<void> {
     SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com'
   }
   const TENANT = '11111111-2222-3333-4444-555555555555'
-  /** The Normain shape: loopback behind a TLS front end, login, Entra sign-in. */
+  /** The Normain shape: loopback behind a TLS front end, login, Entra sign-in only. */
   const SSO_HUB = {
     ...LOOP,
     SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
     SLAYZONE_HUB_REQUIRE_LOGIN: '1',
     SLAYZONE_HUB_AUTH_SECRET: 'c-test-only-signing-secret-0123456789abcdef',
+    SLAYZONE_HUB_ENABLE_PASSWORD: '0',
     SLAYZONE_HUB_ENABLE_SSO: '1',
     SLAYZONE_HUB_SSO_TENANT_ID: TENANT,
     SLAYZONE_HUB_SSO_CLIENT_ID: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -468,27 +535,7 @@ async function main(): Promise<void> {
       const root = newRoot()
       // An RSA certificate for the hub's client assertion. openssl ships on the CI
       // runner (ubuntu) and macOS; node:crypto cannot issue a certificate.
-      const certPath = join(root, 'sso-cert.pem')
-      const keyPath = join(root, 'sso-key.pem')
-      execFileSync(
-        'openssl',
-        [
-          'req',
-          '-x509',
-          '-newkey',
-          'rsa:2048',
-          '-nodes',
-          '-days',
-          '1',
-          '-subj',
-          '/CN=slayzone-hub-boot-test',
-          '-keyout',
-          keyPath,
-          '-out',
-          certPath
-        ],
-        { stdio: 'ignore' }
-      )
+      const { certPath, keyPath } = writeSsoCert(root)
       const keyBody = readFileSync(keyPath, 'utf8').split('\n').slice(1, -2).join('')
       const hub = spawnHub(root, {
         ...SSO_HUB,
@@ -548,6 +595,280 @@ async function main(): Promise<void> {
         assert(!out.includes(keyBody.slice(0, 40)), 'the private key never reaches the log')
       } finally {
         await hub.stop()
+      }
+    })
+
+    // --- password sign-in off (T-10) ------------------------------------------
+    await test('password off beside Entra: password routes 403 + audited, no owner file, no password in logs, an old credential cannot sign in', async () => {
+      const root = newRoot()
+      const { certPath, keyPath } = writeSsoCert(root)
+      const secret = SSO_HUB.SLAYZONE_HUB_AUTH_SECRET
+
+      // Before: the same ROOT as a password hub. Its bootstrap owner signs in with a
+      // password, as today — that credential is what must stop working below.
+      const before = spawnHub(root, {
+        ...LOOP,
+        SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+        SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+        SLAYZONE_HUB_AUTH_SECRET: secret
+      })
+      let owner: { email: string; password: string }
+      try {
+        const port = await bootAndGetPort(before)
+        owner = JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as typeof owner
+        // The public origin: better-auth's form-CSRF check wants an Origin from a fetch
+        // client (node's fetch sends Sec-Fetch-Mode).
+        const signIn = await postJson(
+          `http://127.0.0.1:${port}/api/auth/sign-in/email`,
+          { email: owner.email, password: owner.password },
+          { origin: 'https://hub.example.com' }
+        )
+        assert(
+          signIn.status === 200 && signIn.token,
+          `password hub: sign-in works, got ${signIn.status} ${JSON.stringify(signIn.json)}`
+        )
+      } finally {
+        await before.stop()
+      }
+
+      const hub = spawnHub(root, {
+        ...SSO_HUB,
+        SLAYZONE_HUB_SSO_CERT_PATH: certPath,
+        SLAYZONE_HUB_SSO_KEY_PATH: keyPath
+      })
+      try {
+        const port = await bootAndGetPort(hub)
+        const base = `http://127.0.0.1:${port}`
+        const health = (await (await fetch(`${base}/health`)).json()) as {
+          switches?: Record<string, boolean>
+        }
+        assert(health.switches?.enablePassword === false, 'enablePassword reported off')
+
+        const refused: Array<[string, unknown, string]> = [
+          [
+            '/api/auth/sign-in/email',
+            { email: owner.email, password: owner.password },
+            'auth.signin'
+          ],
+          [
+            '/api/auth/sign-up/email',
+            { email: 'x@example.com', password: 'p'.repeat(16), name: 'x' },
+            'user.create'
+          ],
+          ['/api/auth/web-login', { email: owner.email, password: owner.password }, 'auth.signin'],
+          [
+            '/api/auth/change-password',
+            { currentPassword: 'a'.repeat(16), newPassword: 'b'.repeat(16) },
+            'auth.password.change'
+          ],
+          ['/api/auth/request-password-reset', { email: owner.email }, 'auth.password.change']
+        ]
+        for (const [path, body] of refused) {
+          // With the public origin, so a 403 can only be the switch's.
+          const r = await postJson(`${base}${path}`, body, { origin: 'https://hub.example.com' })
+          assert(r.status === 403, `${path} → 403, got ${r.status} ${JSON.stringify(r.json)}`)
+          assert(
+            r.json.code === 'HUB_PASSWORD_DISABLED',
+            `${path} stable code: ${JSON.stringify(r.json)}`
+          )
+          assert(!r.token, `${path} issued no token`)
+        }
+        const lines = securityLines(hub)
+        for (const [path, , event] of refused) {
+          const op = path.slice('/api/auth/'.length)
+          assert(
+            lines.some(
+              (l) =>
+                l.event === event &&
+                l.outcome === 'denied' &&
+                l.detail.op === op &&
+                l.detail.code === 'HUB_PASSWORD_DISABLED'
+            ),
+            `audit line for ${path}`
+          )
+        }
+        // Entra sign-in is untouched.
+        const start = await postJson(
+          `${base}/api/auth/sign-in/social`,
+          { provider: 'microsoft', callbackURL: '/', disableRedirect: true },
+          { origin: 'https://hub.example.com' }
+        )
+        assert(start.status === 200, `sign-in/social still open, got ${start.status}`)
+
+        // The credential is still in the database — kept, just unusable.
+        const authDb = new DatabaseSync(join(root, 'slayzone.auth.sqlite'))
+        try {
+          const { n } = authDb
+            .prepare("SELECT count(*) AS n FROM account WHERE providerId = 'credential'")
+            .get() as { n: number }
+          assert(n >= 1, 'the password credential row is kept')
+        } finally {
+          authDb.close()
+        }
+
+        // The boot line: Entra only, not break-glass.
+        const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
+        assert(boot, 'hub.boot success line')
+        assert(
+          JSON.stringify(boot.detail.methods) === '["sso"]',
+          `methods: ${JSON.stringify(boot.detail)}`
+        )
+        assert(boot.detail.breakGlass === false, 'not break-glass')
+        assert(!existsSync(join(root, 'hub.break-glass.json')), 'no break-glass file')
+      } finally {
+        await hub.stop()
+      }
+    })
+
+    await test('password off, fresh ROOT: no owner file, no generated password in any log', async () => {
+      const root = newRoot()
+      const { certPath, keyPath } = writeSsoCert(root)
+      const hub = spawnHub(root, {
+        ...SSO_HUB,
+        SLAYZONE_HUB_SSO_CERT_PATH: certPath,
+        SLAYZONE_HUB_SSO_KEY_PATH: keyPath
+      })
+      try {
+        await bootAndGetPort(hub)
+        assert(!existsSync(join(root, 'hub.owner.json')), 'no hub.owner.json')
+        assert(!existsSync(join(root, 'hub.break-glass.json')), 'no hub.break-glass.json')
+        const all = `${readLogs(root)}\n${hub.logs.join('\n')}`
+        assert(!/password:/i.test(all), 'no "password:" line')
+        const shaped = all.match(GENERATED_PASSWORD)
+        assert(!shaped, `no generated-password-shaped string, found '${shaped?.[0]}'`)
+      } finally {
+        await hub.stop()
+      }
+    })
+
+    await test('password off on a login-off hub: `slay hub users add` (POST /api/hub/users) 403s with the code + audit', async () => {
+      const root = newRoot()
+      const hub = spawnHub(root, { ...LOOP, SLAYZONE_HUB_ENABLE_PASSWORD: '0' })
+      try {
+        const port = await bootAndGetPort(hub)
+        const r = await postJson(`http://127.0.0.1:${port}/api/hub/users`, {
+          email: 'new@example.com'
+        })
+        assert(r.status === 403, `403, got ${r.status} ${JSON.stringify(r.json)}`)
+        assert(r.json.code === 'HUB_PASSWORD_DISABLED', `code: ${JSON.stringify(r.json)}`)
+        const signIn = await postJson(`http://127.0.0.1:${port}/api/auth/sign-in/email`, {
+          email: 'new@example.com',
+          password: 'p'.repeat(16)
+        })
+        assert(signIn.status === 403, `sign-in 403 on a login-off hub too, got ${signIn.status}`)
+        const line = securityLines(hub).find(
+          (l) => l.event === 'user.create' && l.outcome === 'denied'
+        )
+        assert(line?.detail.code === 'HUB_PASSWORD_DISABLED', 'user.create denied line')
+        assert(
+          !securityLines(hub).some((l) => l.event === 'hub.boot'),
+          'no boot line with login off'
+        )
+      } finally {
+        await hub.stop()
+      }
+    })
+
+    await test('break-glass (O-9): password on beside Entra opens a temporary account, off closes it, all audited', async () => {
+      const root = newRoot()
+      const { certPath, keyPath } = writeSsoCert(root)
+      const sso = {
+        ...SSO_HUB,
+        SLAYZONE_HUB_SSO_CERT_PATH: certPath,
+        SLAYZONE_HUB_SSO_KEY_PATH: keyPath
+      }
+      const file = join(root, 'hub.break-glass.json')
+
+      // 1. ENABLE_PASSWORD=1 + restart → a temporary account in a 0600 file.
+      const open = spawnHub(root, { ...sso, SLAYZONE_HUB_ENABLE_PASSWORD: '1' })
+      let bearer: string
+      let account: { email: string; password: string; userId: string }
+      try {
+        const port = await bootAndGetPort(open)
+        const base = `http://127.0.0.1:${port}`
+        assert(existsSync(file), 'break-glass file written')
+        assert((statSync(file).mode & 0o777) === 0o600, 'file is 0600')
+        account = JSON.parse(readFileSync(file, 'utf8')) as typeof account
+        assert(!existsSync(join(root, 'hub.owner.json')), 'still no bootstrap owner (O-4)')
+
+        // 2. Use it: the CLI sign-in and the web login both work.
+        const signIn = await postJson(
+          `${base}/api/auth/sign-in/email`,
+          { email: account.email, password: account.password },
+          { origin: 'https://hub.example.com' }
+        )
+        assert(signIn.status === 200 && signIn.token, `sign-in, got ${signIn.status}`)
+        bearer = signIn.token
+        assert((signIn.json.user as { role?: string })?.role === 'user', 'role user, never admin')
+        const tasks = await fetch(`${base}/api/tasks`, {
+          headers: { authorization: `Bearer ${bearer}` }
+        })
+        assert(tasks.status === 200, `the bearer reaches the API, got ${tasks.status}`)
+        const web = await postJson(`${base}/api/auth/web-login`, {
+          email: account.email,
+          password: account.password
+        })
+        assert(web.status === 200, `web login, got ${web.status}`)
+
+        const lines = securityLines(open)
+        const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
+        assert(
+          boot?.level === 'warn' && boot.detail.breakGlass === true,
+          `boot line: ${JSON.stringify(boot)}`
+        )
+        assert(
+          lines.some(
+            (l) =>
+              l.event === 'user.create' &&
+              l.outcome === 'success' &&
+              l.detail.reason === 'break_glass'
+          ),
+          'user.create break_glass'
+        )
+        assert(
+          lines.some((l) => l.event === 'auth.signin' && l.outcome === 'success'),
+          'sign-in audited'
+        )
+        const all = `${readLogs(root)}\n${open.logs.join('\n')}`
+        assert(!all.includes(account.password), 'the password is in no log')
+        assert(all.includes(file), 'the log names the file')
+      } finally {
+        await open.stop()
+      }
+
+      // 3. ENABLE_PASSWORD=0 + restart → closed: disabled, sessions gone, file gone.
+      const closed = spawnHub(root, sso)
+      try {
+        const port = await bootAndGetPort(closed)
+        const base = `http://127.0.0.1:${port}`
+        assert(!existsSync(file), 'break-glass file deleted')
+        const tasks = await fetch(`${base}/api/tasks`, {
+          headers: { authorization: `Bearer ${bearer}` }
+        })
+        assert(tasks.status === 401, `its session is revoked, got ${tasks.status}`)
+        const signIn = await postJson(
+          `${base}/api/auth/sign-in/email`,
+          { email: account.email, password: account.password },
+          { origin: 'https://hub.example.com' }
+        )
+        assert(
+          signIn.status === 403 && signIn.json.code === 'HUB_PASSWORD_DISABLED',
+          `password sign-in refused by the switch, got ${signIn.status}`
+        )
+        const lines = securityLines(closed)
+        assert(
+          lines.some(
+            (l) =>
+              l.event === 'user.disable' &&
+              l.targetId === account.userId &&
+              l.detail.reason === 'break_glass_closed'
+          ),
+          'user.disable break_glass_closed'
+        )
+        const boot = lines.find((l) => l.event === 'hub.boot' && l.outcome === 'success')
+        assert(boot?.detail.breakGlass === false, 'closed boot line')
+      } finally {
+        await closed.stop()
       }
     })
 

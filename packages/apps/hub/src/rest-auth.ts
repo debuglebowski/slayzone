@@ -27,7 +27,17 @@
  */
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
-import { ENTRA_PROVIDER_ID, verifySession } from '@slayzone/hub-auth/server'
+import {
+  ENTRA_PROVIDER_ID,
+  PASSWORD_AUTH_ENDPOINTS,
+  verifySession
+} from '@slayzone/hub-auth/server'
+import {
+  assertHubPasswordEnabled,
+  type HubPasswordEvent,
+  HubSwitchedOffError,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   peerAddress,
@@ -75,6 +85,10 @@ export type RestAuthAction = 'allow' | 'verify'
  * Matching is EXACT, so `/api/auth/sign-in/email/extra` inherits nothing. Adding
  * a route here is a security decision: it makes that route reachable by anyone
  * who can reach the hub.
+ *
+ * With password sign-in off (T-10) the two password routes are not in the list
+ * ({@link PASSWORD_BOOTSTRAP_PATHS}) — and never get this far: {@link withRestAuth}
+ * refuses every password route first ({@link passwordRouteRefusal}).
  */
 const AUTH_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/email',
@@ -82,6 +96,62 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/get-session',
   '/api/auth/web-login'
 ])
+
+/** The members of {@link AUTH_BOOTSTRAP_PATHS} that sign in with a password. */
+const PASSWORD_BOOTSTRAP_PATHS = new Set<string>(['/api/auth/sign-in/email', '/api/auth/web-login'])
+
+/**
+ * Every route that takes, checks, sets or resets a password (T-10): better-auth's
+ * (hub-auth `PASSWORD_AUTH_ENDPOINTS`, under its `/api/auth` base) plus our
+ * `web-login`, with the audit event a refusal writes. Plus the
+ * `/api/auth/reset-password/<token>` link route, matched by prefix.
+ */
+const PASSWORD_ROUTES = new Map<string, HubPasswordEvent>([
+  ...Object.entries(PASSWORD_AUTH_ENDPOINTS).map(
+    ([path, event]) => [`/api/auth${path}`, event] as [string, HubPasswordEvent]
+  ),
+  ['/api/auth/web-login', 'auth.signin']
+])
+const PASSWORD_RESET_LINK_PREFIX = '/api/auth/reset-password/'
+
+/** A password route refused because password sign-in is off: its audit event and name. */
+export interface PasswordRouteRefusal {
+  event: HubPasswordEvent
+  /** The route below `/api/auth/`, e.g. `sign-in/email` (the audit line's `op`). */
+  op: string
+  /** The path as the audit line records it (a reset token replaced by `:token`). */
+  route: string
+}
+
+/**
+ * With password sign-in off (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10): is `url` a
+ * password route? Then {@link withRestAuth} answers it 403 `HUB_PASSWORD_DISABLED`
+ * with one audit line — on EVERY hub, login on or off, bearer or none, before the gate
+ * and before better-auth (which would 404 it anyway, hub-auth `password.ts`). Null
+ * with the switch on, or for any other route. Pure.
+ *
+ * 403 with a stable code rather than 404: an attempt at a password sign-in on a hub
+ * where there is none is exactly what the audit trail should show, the existing
+ * switch refusals answer the same way, and a client can say why (the web shell shows
+ * the message; `slay hub login` names the switch) instead of a bare "not found".
+ */
+export function passwordRouteRefusal(
+  url: string | undefined,
+  passwordEnabled: boolean
+): PasswordRouteRefusal | null {
+  if (passwordEnabled || !url) return null
+  const path = url.split('?')[0]
+  const event = PASSWORD_ROUTES.get(path)
+  if (event) return { event, op: path.slice('/api/auth/'.length), route: path }
+  // The link route carries a reset token in its path: never written to the audit line.
+  return path.startsWith(PASSWORD_RESET_LINK_PREFIX)
+    ? {
+        event: 'auth.password.change',
+        op: 'reset-password/:token',
+        route: `${PASSWORD_RESET_LINK_PREFIX}:token`
+      }
+    : null
+}
 
 /**
  * The Entra sign-in routes (T-09), open ONLY on a hub with Entra sign-in on — on any
@@ -140,6 +210,8 @@ export interface RestAuthActionOptions {
   hubAuthRequired: boolean
   /** Whether Entra sign-in is on (`HubBootSettings.ssoActive`). Opens {@link SSO_BOOTSTRAP_PATHS}. */
   ssoActive?: boolean
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD`; default on. Off closes {@link PASSWORD_BOOTSTRAP_PATHS}. */
+  passwordEnabled?: boolean
   /** The raw request url (`req.url`), query string included. */
   url: string | undefined
 }
@@ -168,7 +240,12 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   const path = opts.url.split('?')[0]
   if (path !== MCP_PATH && !path.startsWith('/api/')) return 'allow'
   if (SELF_GUARDED.has(path)) return 'allow'
-  if (AUTH_BOOTSTRAP_PATHS.has(path)) return 'allow'
+  if (
+    AUTH_BOOTSTRAP_PATHS.has(path) &&
+    (opts.passwordEnabled !== false || !PASSWORD_BOOTSTRAP_PATHS.has(path))
+  ) {
+    return 'allow'
+  }
   if (opts.ssoActive === true && SSO_BOOTSTRAP_PATHS.has(path)) return 'allow'
   return 'verify'
 }
@@ -285,6 +362,8 @@ export function withRestAuth(opts: {
   getHubAuthRequired: () => boolean
   /** Entra sign-in on: its two routes pass the gate (see {@link SSO_BOOTSTRAP_PATHS}). */
   getSsoActive?: () => boolean
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD`; absent = on. Off: {@link passwordRouteRefusal}. */
+  getPasswordEnabled?: () => boolean
   getHubAuth: () => HubAuth | null
   /** Needed to resolve a `szw_` web-session token — null on a host with no
    *  such table available (there is none today; kept optional for callers
@@ -321,9 +400,37 @@ export function withRestAuth(opts: {
       })
       deny(res, code, message)
     }
+    const passwordEnabled = opts.getPasswordEnabled?.() !== false
+    const passwordRefusal = passwordRouteRefusal(req.url, passwordEnabled)
+    if (passwordRefusal) {
+      // The switch-refusal shape (hub-switch-refusal.ts): one `denied` line, then 403
+      // `{ ok: false, error, code }` like every other switched-off operation.
+      const auditRoute = `${req.method ?? 'GET'} ${passwordRefusal.route}`
+      const thrown = runWithSecurityContext({ actor: null, ip, route: auditRoute }, () => {
+        try {
+          assertHubPasswordEnabled(
+            passwordRefusal.event,
+            { op: passwordRefusal.op, detail: { method: 'password' } },
+            false
+          )
+          return null
+        } catch (err) {
+          return err
+        }
+      })
+      const off = isHubSwitchedOffError(thrown)
+        ? thrown
+        : new HubSwitchedOffError('HUB_PASSWORD_DISABLED')
+      if (!res.headersSent) {
+        res.writeHead(403, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: off.message, code: off.code }))
+      }
+      return
+    }
     const action = restAuthAction({
       hubAuthRequired: opts.getHubAuthRequired(),
       ssoActive: opts.getSsoActive?.() === true,
+      passwordEnabled,
       url: req.url
     })
     if (action === 'allow') {

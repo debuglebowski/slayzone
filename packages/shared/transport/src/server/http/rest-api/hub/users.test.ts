@@ -23,6 +23,7 @@ import express from 'express'
 import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
+import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import {
   hubUsersAuthDecision,
   isLoopbackAddress,
@@ -231,6 +232,25 @@ await describe('POST /api/hub/users on a hub with Entra sign-in', () => {
     expect(res.status).toBe(409)
     expect(res.body.code).toBe(SSO_MANAGED_ROLE_CODE)
     expect(res.body.error.includes('already exists')).toBe(false)
+  })
+})
+
+await describe('POST /api/hub/users with password sign-in off (T-10)', () => {
+  test('403 with the switch code and message, not a 500', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      stubUsers({
+        create: async () => {
+          // What hub-auth's createHubUser throws (after its own audit line).
+          throw new HubSwitchedOffError('HUB_PASSWORD_DISABLED')
+        }
+      }),
+      'POST',
+      { email: 'alice@example.com' }
+    )
+    expect(res.status).toBe(403)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.code).toBe('HUB_PASSWORD_DISABLED')
+    expect(res.body.error.includes('SLAYZONE_HUB_ENABLE_PASSWORD=0')).toBe(true)
   })
 })
 

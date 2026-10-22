@@ -145,6 +145,9 @@ run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
 # Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
 # the credential a web login mints, distinct from a full better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
+# Password sign-in off (T-10): every password route 403s with the switch code before the
+# gate; break-glass (O-9) opens/closes with the switch over real hub-auth + app DB.
+run_test_electron_strict_loader packages/apps/hub/src/password-switch.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -642,7 +645,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
   packages/shared/transport/src/server/trpc.test.ts \
-  packages/domains/hub-auth/src/server/entra.test.ts
+  packages/domains/hub-auth/src/server/entra.test.ts \
+  packages/domains/hub-auth/src/server/password.test.ts
 
 # Swept in 2026-10-22: vitest suites (jsdom / vi.mock) that no runner ran.
 run_vitest_files "vitest (swept-in suites)" \

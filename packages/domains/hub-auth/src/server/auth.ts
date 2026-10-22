@@ -15,6 +15,7 @@ import {
   entraUserCreateBefore,
   syncEntraRole
 } from './entra'
+import { PASSWORD_AUTH_ENDPOINTS } from './password'
 import { demoteNonEntraAdmins, ensureFirstAdmin } from './users'
 
 export interface HubAuthConfig {
@@ -38,6 +39,13 @@ export interface HubAuthConfig {
    * every hub without `SLAYZONE_HUB_ENABLE_SSO=1` + login required.
    */
   sso?: EntraSsoConfig
+  /**
+   * `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10, ./password.ts). Default on: the desktop app's
+   * hub and every hub that does not set it to 0. Off: no password sign-in, sign-up,
+   * change or reset, and no account with a generated password; existing password
+   * credentials are kept but cannot be used.
+   */
+  enablePassword?: boolean
 }
 
 /** Prefix minted computer API keys start with (SlayZone computer). */
@@ -53,6 +61,7 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
   let findUser = (_userId: string): Promise<Record<string, unknown> | null> =>
     Promise.reject(new Error('[hub-auth] user lookup used before the instance was built'))
   const refuseDisabled = refuseDisabledSessions((userId) => findUser(userId))
+  const passwordOn = config.enablePassword !== false
   const auth = betterAuth({
     baseURL: config.baseURL,
     secret: config.secret,
@@ -75,7 +84,11 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // loopback-only `/api/hub/users` route that backs `slay hub users add` — a
     // shell on the hub box is the credential, exactly as for
     // `POST /api/computers/join-token`.
-    emailAndPassword: { enabled: true, disableSignUp: true },
+    //
+    // With the password switch off (T-10) email + password is off altogether and its
+    // endpoints are not served (404) — see ./password.ts.
+    emailAndPassword: { enabled: passwordOn, disableSignUp: true },
+    ...(passwordOn ? {} : { disabledPaths: Object.keys(PASSWORD_AUTH_ENDPOINTS) }),
     // Account model (T-08), see ./account.ts. `input: false` on both: neither
     // sign-up nor `/update-user` may set them (better-auth answers
     // FIELD_NOT_ALLOWED); only ./users.ts writes them. `getMigrations` adds the
