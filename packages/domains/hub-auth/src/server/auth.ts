@@ -7,7 +7,14 @@ import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
 import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
-import { ensureFirstAdmin } from './users'
+import {
+  type EntraSsoConfig,
+  entraSso,
+  entraUserCreateAfter,
+  entraUserCreateBefore,
+  syncEntraRole
+} from './entra'
+import { demoteNonEntraAdmins, ensureFirstAdmin } from './users'
 
 export interface HubAuthConfig {
   /**
@@ -15,10 +22,21 @@ export interface HubAuthConfig {
    * This is hub-auth's OWN database — never the app's SlayzoneDb.
    */
   dbPath: string
-  /** Public base URL the auth endpoints are served under (e.g. `http://127.0.0.1:4141`). */
+  /**
+   * Public base URL the auth endpoints are served under (e.g. `https://hub.example.com`).
+   * Entra's redirect URI is built from it (`<baseURL>/api/auth/callback/microsoft`), and
+   * its origin is trusted for browser requests.
+   */
   baseURL: string
   /** Secret used for session-cookie signing and hashing. */
   secret: string
+  /** Further browser origins better-auth trusts (callback URLs, CSRF origin check). */
+  trustedOrigins?: string[]
+  /**
+   * Entra ID sign-in (T-09, ./entra.ts). Absent = no SSO: the desktop app's hub and
+   * every hub without `SLAYZONE_HUB_ENABLE_SSO=1` + login required.
+   */
+  sso?: EntraSsoConfig
 }
 
 /** Prefix minted computer API keys start with (SlayZone computer). */
@@ -33,9 +51,11 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
   // betterAuth() has returned. Until then it fails closed.
   let findUser = (_userId: string): Promise<Record<string, unknown> | null> =>
     Promise.reject(new Error('[hub-auth] user lookup used before the instance was built'))
+  const refuseDisabled = refuseDisabledSessions((userId) => findUser(userId))
   const auth = betterAuth({
     baseURL: config.baseURL,
     secret: config.secret,
+    ...(config.trustedOrigins?.length ? { trustedOrigins: config.trustedOrigins } : {}),
     // node:sqlite handle — better-auth's kysely adapter wraps it in its own
     // NodeSqliteDialect. Chosen over better-sqlite3: this repo rebuilds
     // better-sqlite3 against Electron's ABI, which breaks plain-node
@@ -66,6 +86,17 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         disabledAt: { type: 'date', required: false, input: false }
       }
     },
+    // OAuth accounts (only Entra's, ./entra.ts; inert on a hub without SSO). An Entra
+    // identity is the `account` row keyed on `<oid>.<tid>` and is NEVER linked to an
+    // existing user by email: Entra's `email` claim is mutable and not proof of
+    // ownership, so implicit linking would let whoever gets an address hijack the
+    // account that holds it. A sign-in whose email already belongs to another account
+    // is refused (`account_not_linked`). The refresh token kept on the row (O-8) is
+    // encrypted with the auth secret.
+    account: {
+      accountLinking: { enabled: false },
+      encryptOAuthTokens: true
+    },
     // Hard guarantee: never phone home (better-auth telemetry is opt-in, we
     // still pin it off).
     telemetry: { enabled: false },
@@ -73,10 +104,18 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // change. See ./audit.ts.
     hooks: { after: auditAuthResponse },
     databaseHooks: {
+      // The Entra hooks act only inside an Entra callback whose ID token passed the
+      // checks (request-scoped, see entra.ts); everywhere else they return untouched.
+      user: { create: { before: entraUserCreateBefore, after: entraUserCreateAfter } },
       session: {
         create: {
-          // A disabled account gets no session, whichever route asked for one.
-          before: refuseDisabledSessions((userId) => findUser(userId)),
+          // A disabled account gets no session, whichever route asked for one. Then an
+          // Entra sign-in sets the role its token carries — in that order, so a refused
+          // sign-in changes nothing.
+          before: async (session, ctx) => {
+            await refuseDisabled(session, ctx)
+            await syncEntraRole(session, ctx)
+          },
           after: auditDatabaseHooks.session.create.after
         },
         delete: auditDatabaseHooks.session.delete
@@ -115,7 +154,8 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         // `verifyApiKey` are the real controls. Written explicitly rather than left
         // default because the default is a footgun for this key class.
         rateLimit: { enabled: false }
-      })
+      }),
+      ...(config.sso ? [entraSso(config.sso)] : [])
     ]
   })
   findUser = async (userId) =>
@@ -132,8 +172,10 @@ export type HubAuth = ReturnType<typeof buildAuth>
  * Create the hub-auth better-auth instance backed by its own sqlite file and
  * bring that file's schema up to date via better-auth's own migration
  * mechanism (`getMigrations` from `better-auth/db/migration`) — NOT the app's
- * migration registry. Then {@link ensureFirstAdmin}: a hub upgraded from before
- * the `role` column makes its oldest account admin.
+ * migration registry. Then the admin boot step: {@link ensureFirstAdmin} (a hub
+ * upgraded from before the `role` column makes its oldest account admin), or on a hub
+ * with Entra sign-in {@link demoteNonEntraAdmins} (admin comes only from the Entra app
+ * role there, O-4).
  */
 export async function createHubAuth(config: HubAuthConfig): Promise<HubAuth> {
   mkdirSync(dirname(config.dbPath), { recursive: true })
@@ -142,6 +184,7 @@ export async function createHubAuth(config: HubAuthConfig): Promise<HubAuth> {
   const auth = buildAuth(config, database)
   const { runMigrations } = await getMigrations(auth.options)
   await runMigrations()
-  await ensureFirstAdmin(auth)
+  if (config.sso) await demoteNonEntraAdmins(auth)
+  else await ensureFirstAdmin(auth)
   return auth
 }

@@ -4,6 +4,7 @@ import type { HubRole } from '../shared/types'
 import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
+import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
 
 /**
  * Operator-facing account management for a hub — the server half of
@@ -28,6 +29,13 @@ import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
  * least one ENABLED admin. The guards below refuse any change that breaks either;
  * {@link ensureFirstAdmin} establishes the second on a hub upgraded from before roles.
  *
+ * ON A HUB WITH ENTRA SIGN-IN (O-4) the role is not managed here at all: it comes from
+ * the Entra app role `SlayZone.Admin`, written at every sign-in (entra.ts).
+ * Manual role changes refuse (`sso-managed`), an account created here is never admin,
+ * there is no first-admin promotion — the hub has no admin until someone signs in with
+ * the app role — and {@link demoteNonEntraAdmins} removes admin from any account that
+ * did not get it from Entra. Disable / enable work as everywhere.
+ *
  * @module hub-auth/users
  */
 
@@ -47,7 +55,10 @@ export interface CreateHubUserInput {
   email: string
   /** Display name. Defaults to the email's local part. */
   name?: string
-  /** Defaults to `'admin'` when the hub has no enabled admin yet, else `'user'`. */
+  /**
+   * Defaults to `'admin'` when the hub has no enabled admin yet, else `'user'`. On a hub
+   * with Entra sign-in: always `'user'`, and `'admin'` is refused (`sso-managed`).
+   */
   role?: HubRole
 }
 
@@ -75,8 +86,11 @@ export type DisableHubUserResult = 'ok' | 'not-found' | 'protected' | 'last-user
 /** Why `enableHubUser` declined, or 'ok'. */
 export type EnableHubUserResult = 'ok' | 'not-found' | 'protected'
 
-/** Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin. */
-export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin'
+/**
+ * Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin.
+ * `sso-managed`: the hub has Entra sign-in, where roles come from the Entra app role.
+ */
+export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'
 
 export interface DisableHubUserOptions {
   /**
@@ -142,9 +156,14 @@ function normalizeEmail(email: string): string {
 export async function createHubUser(
   auth: HubAuth,
   input: CreateHubUserInput
-): Promise<CreatedHubUser | { error: 'exists' }> {
+): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' }> {
   const ctx = await auth.$context
   const email = normalizeEmail(input.email)
+  const sso = isEntraSsoAuth(auth)
+  if (sso && input.role === 'admin') {
+    auditUser('user.create', 'denied', null, { reason: 'sso_managed', role: 'admin' })
+    return { error: 'sso-managed' }
+  }
 
   const existing = await ctx.internalAdapter.findUserByEmail(email)
   if (existing) {
@@ -173,8 +192,9 @@ export async function createHubUser(
   // The first account on a hub with no enabled admin is the admin, so the
   // "at least one enabled admin" invariant holds from the first account on rather
   // than only after the next boot's `ensureFirstAdmin`.
-  const role: HubRole =
-    input.role ?? ((await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin')
+  const role: HubRole = sso
+    ? 'user'
+    : (input.role ?? ((await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin'))
   // emailVerified: true — a DELIBERATE divergence from sign-up's `false`. This hub
   // configures no mail sender, so a verification mail can never be sent and the
   // account would be permanently unverifiable. Marking an operator-created account
@@ -314,7 +334,10 @@ export async function enableHubUser(auth: HubAuth, email: string): Promise<Enabl
 
 /**
  * Set an account's role. Refuses to demote the last enabled admin, and the service
- * user in either direction (it is never admin). Nothing enforces the role yet.
+ * user in either direction (it is never admin). On a hub with Entra sign-in refuses
+ * every change (`sso-managed`): the role there is the Entra app role, rewritten at each
+ * sign-in, so a manual change would be silently undone — or silently outlive the
+ * removal of the app role.
  */
 export async function setHubUserRole(
   auth: HubAuth,
@@ -324,6 +347,11 @@ export async function setHubUserRole(
   if (normalizeEmail(email) === COMPUTER_SERVICE_USER_EMAIL) {
     auditUser('user.role_change', 'denied', null, { reason: 'protected', role })
     return 'protected'
+  }
+  if (isEntraSsoAuth(auth)) {
+    const target = (await findHuman(auth, email))?.target.id ?? null
+    auditUser('user.role_change', 'denied', target, { reason: 'sso_managed', role })
+    return 'sso-managed'
   }
   const found = await findHuman(auth, email)
   if (!found) {
@@ -342,14 +370,40 @@ export async function setHubUserRole(
 }
 
 /**
+ * Boot step on a hub with Entra sign-in (from `createHubAuth`, instead of
+ * {@link ensureFirstAdmin}): every admin that has no Entra account becomes `user`, one
+ * `user.role_change` line each (reason `not_entra`). Such an admin can only predate the
+ * switch to SSO (the bootstrap owner, an account from `slay hub users add`), and since
+ * manual role changes refuse on this hub it could otherwise never be demoted. Admins
+ * WITH an Entra account keep what their last sign-in wrote. Returns the demoted ids.
+ */
+export async function demoteNonEntraAdmins(auth: HubAuth): Promise<string[]> {
+  const ctx = await auth.$context
+  const demoted: string[] = []
+  for (const user of await listHubUsers(auth)) {
+    if (user.role !== 'admin') continue
+    const accounts = await ctx.internalAdapter.findAccounts(user.id)
+    if (accounts.some((a) => a.providerId === ENTRA_PROVIDER_ID)) continue
+    await ctx.internalAdapter.updateUser(user.id, { role: 'user' })
+    auditUser('user.role_change', 'success', user.id, { reason: 'not_entra', role: 'user' })
+    demoted.push(user.id)
+  }
+  return demoted
+}
+
+/**
  * Boot step (from `createHubAuth`): a hub that has enabled humans but no enabled
  * admin makes its OLDEST enabled human admin, with one `user.role_change` line
  * (reason `first_admin`). In practice this acts once — on the first boot after the
  * `role` column was added — because from then on `createHubUser` and the guards
  * above keep an enabled admin. A hub with no humans is left alone. Returns the
  * promoted user's id, or null when nothing changed.
+ *
+ * Never on a hub with Entra sign-in: admin there comes only from the Entra app role,
+ * so such a hub has no admin until someone signs in holding it (O-4).
  */
 export async function ensureFirstAdmin(auth: HubAuth): Promise<string | null> {
+  if (isEntraSsoAuth(auth)) return null
   const enabled = (await listHubUsers(auth)).filter(isEnabled)
   if (enabled.length === 0 || enabled.some(isEnabledAdmin)) return null
   const first = enabled[0]!

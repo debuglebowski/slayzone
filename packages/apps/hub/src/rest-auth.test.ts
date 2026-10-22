@@ -41,7 +41,13 @@ import {
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { restPrincipalOf, type RestPrincipal } from '@slayzone/transport/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import { restAuthAction, verifyRestBearer, withRestAuth, parseCookieHeader } from './rest-auth.js'
+import {
+  type RestAuthAction,
+  restAuthAction,
+  verifyRestBearer,
+  withRestAuth,
+  parseCookieHeader
+} from './rest-auth.js'
 import { mintWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 
 let passed = 0
@@ -265,6 +271,38 @@ async function main(): Promise<void> {
     ]) {
       assertEq(remoteWan(url), 'verify', `non-bootstrap /api/auth route gated: ${url}`)
     }
+  })
+
+  // Entra sign-in (T-09): exactly two routes open, and only on a hub with SSO on.
+  await test('Entra sign-in: start + callback open only when SSO is on, by exact path', () => {
+    const sso = (url: string): RestAuthAction =>
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, url })
+    for (const url of ['/api/auth/sign-in/social', '/api/auth/callback/microsoft']) {
+      assertEq(remoteWan(url), 'verify', `SSO off: ${url} stays gated`)
+      assertEq(sso(url), 'allow', `SSO on: ${url} open`)
+      assertEq(sso(`${url}?code=x&state=y`), 'allow', `SSO on: query ignored on ${url}`)
+    }
+    for (const url of [
+      // Another provider's callback, and prefix confusion around the open ones.
+      '/api/auth/callback/google',
+      '/api/auth/callback/microsoft/extra',
+      '/api/auth/callback',
+      '/api/auth/sign-in/social/extra',
+      // better-auth's other OAuth routes need a session or are unused.
+      '/api/auth/link-social',
+      '/api/auth/refresh-token',
+      '/api/auth/get-access-token',
+      '/api/auth/account-info',
+      '/api/auth/error',
+      '/api/auth/api-key/create'
+    ]) {
+      assertEq(sso(url), 'verify', `SSO on: ${url} stays gated`)
+    }
+    assertEq(
+      restAuthAction({ hubAuthRequired: false, ssoActive: true, url: '/api/tasks' }),
+      'allow',
+      'login off: SSO changes nothing'
+    )
   })
 
   await test('computer join-token stays open (its own loopback guard is the protection)', () => {

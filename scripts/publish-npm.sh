@@ -148,7 +148,7 @@ Switches (`0` or `1`; anything else refuses to start), each also a boolean in
 | --- | --- | --- |
 | `SLAYZONE_HUB_REQUIRE_LOGIN` | `0` | every client must sign in |
 | `SLAYZONE_HUB_ENABLE_PASSWORD` | `1` | email + password sign-in |
-| `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CLIENT_SECRET`) |
+| `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CERT_PATH`, `_KEY_PATH` and a public address; `SLAYZONE_HUB_SSO_REQUIRE_MFA`, default `1`) |
 | `SLAYZONE_HUB_ENABLE_PROCESSES` | `1` | hub-local processes |
 | `SLAYZONE_HUB_ENABLE_INTEGRATIONS` | `1` | Linear / GitHub |
 

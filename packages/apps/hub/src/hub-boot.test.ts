@@ -13,7 +13,9 @@
  *     and the secret in env: it serves plain http (no TLS of its own), needs a bearer,
  *     mints a `wss://<public address>/computers` join token with NO pin, creates no
  *     `identity/` directory and writes no `hub.state.json`;
- *   - a leftover `SLAYZONE_MODE` changes nothing.
+ *   - a leftover `SLAYZONE_MODE` changes nothing;
+ *   - a hub with Entra sign-in: its two sign-in routes pass the gate, its redirect URI
+ *     is on the public address, and it provisions no bootstrap owner.
  *
  * Isolation: every hub runs in its own throwaway SLAYZONE_ROOT with every inherited
  * SLAYZONE_ and ELECTRON_ prefixed env var scrubbed (a task terminal leaks the dial-side
@@ -234,6 +236,17 @@ async function main(): Promise<void> {
     SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:0',
     SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com'
   }
+  const TENANT = '11111111-2222-3333-4444-555555555555'
+  /** The Normain shape: loopback behind a TLS front end, login, Entra sign-in. */
+  const SSO_HUB = {
+    ...LOOP,
+    SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+    SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+    SLAYZONE_HUB_AUTH_SECRET: 'c-test-only-signing-secret-0123456789abcdef',
+    SLAYZONE_HUB_ENABLE_SSO: '1',
+    SLAYZONE_HUB_SSO_TENANT_ID: TENANT,
+    SLAYZONE_HUB_SSO_CLIENT_ID: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+  }
 
   try {
     // --- refusals ----------------------------------------------------------
@@ -326,9 +339,23 @@ async function main(): Promise<void> {
         ...LOOP,
         SLAYZONE_HUB_REQUIRE_LOGIN: '1',
         SLAYZONE_HUB_ENABLE_SSO: '1',
-        SLAYZONE_HUB_SSO_TENANT_ID: 't'
+        SLAYZONE_HUB_SSO_TENANT_ID: TENANT
       },
-      ['SLAYZONE_HUB_SSO_CLIENT_ID', 'SLAYZONE_HUB_SSO_CLIENT_SECRET']
+      [
+        'SLAYZONE_HUB_SSO_CLIENT_ID',
+        'SLAYZONE_HUB_SSO_CERT_PATH',
+        'SLAYZONE_HUB_SSO_KEY_PATH',
+        'SLAYZONE_HUB_PUBLIC_ADDRESS'
+      ]
+    )
+    await assertRefused(
+      'B7: an SSO certificate that cannot be read refuses boot before any boot work',
+      {
+        ...SSO_HUB,
+        SLAYZONE_HUB_SSO_CERT_PATH: join(tmpdir(), 'slz-hub-boot-no-such-cert.pem'),
+        SLAYZONE_HUB_SSO_KEY_PATH: join(tmpdir(), 'slz-hub-boot-no-such-key.pem')
+      },
+      ['SLAYZONE_HUB_SSO_CERT_PATH / SLAYZONE_HUB_SSO_KEY_PATH', 'ENOENT']
     )
 
     // --- the defaults, on loopback -----------------------------------------
@@ -424,6 +451,96 @@ async function main(): Promise<void> {
           .filter((n) => statSync(join(root, n)).isFile())
           .some((n) => readFileSync(join(root, n)).includes(secret))
         assert(!stateless, 'the secret appears in no file under ROOT')
+      } finally {
+        await hub.stop()
+      }
+    })
+
+    // --- Entra sign-in (T-09) -------------------------------------------------
+    // Nothing here reaches Microsoft: starting a sign-in only BUILDS the authorize URL,
+    // and the callback is driven with an error, which never redeems a code.
+    await test('a hub with Entra sign-in boots: start + callback open, redirect URI on the public address, no owner', async () => {
+      const root = newRoot()
+      // An RSA certificate for the hub's client assertion. openssl ships on the CI
+      // runner (ubuntu) and macOS; node:crypto cannot issue a certificate.
+      const certPath = join(root, 'sso-cert.pem')
+      const keyPath = join(root, 'sso-key.pem')
+      execFileSync(
+        'openssl',
+        [
+          'req',
+          '-x509',
+          '-newkey',
+          'rsa:2048',
+          '-nodes',
+          '-days',
+          '1',
+          '-subj',
+          '/CN=slayzone-hub-boot-test',
+          '-keyout',
+          keyPath,
+          '-out',
+          certPath
+        ],
+        { stdio: 'ignore' }
+      )
+      const keyBody = readFileSync(keyPath, 'utf8').split('\n').slice(1, -2).join('')
+      const hub = spawnHub(root, {
+        ...SSO_HUB,
+        SLAYZONE_HUB_SSO_CERT_PATH: certPath,
+        SLAYZONE_HUB_SSO_KEY_PATH: keyPath
+      })
+      try {
+        const port = await bootAndGetPort(hub)
+        const base = `http://127.0.0.1:${port}`
+        const health = (await (await fetch(`${base}/health`)).json()) as {
+          switches?: Record<string, boolean>
+        }
+        assert(health.switches?.enableSso === true, 'enableSso reported')
+
+        // Start: open with no bearer, answers Entra's authorize URL for THIS tenant,
+        // PKCE, offline_access, and Entra sends the browser back to the PUBLIC address.
+        const start = await fetch(`${base}/api/auth/sign-in/social`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: 'https://hub.example.com' },
+          body: JSON.stringify({ provider: 'microsoft', callbackURL: '/', disableRedirect: true })
+        })
+        assert(
+          start.status === 200,
+          `sign-in/social open, got ${start.status}: ${await start.clone().text()}`
+        )
+        const url = new URL(((await start.json()) as { url: string }).url)
+        assert(
+          url.origin + url.pathname ===
+            `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/authorize`,
+          `single-tenant authorize endpoint, got ${url.origin + url.pathname}`
+        )
+        assert(
+          url.searchParams.get('redirect_uri') ===
+            'https://hub.example.com/api/auth/callback/microsoft',
+          `redirect URI on the public address, got ${url.searchParams.get('redirect_uri')}`
+        )
+        assert(url.searchParams.get('code_challenge_method') === 'S256', 'PKCE')
+        assert(url.searchParams.get('scope')?.includes('offline_access'), 'offline_access')
+
+        // Callback: reachable with no bearer (it 302s to the error page here, since the
+        // state is unknown) — the gate does not answer 401.
+        const callback = await fetch(
+          `${base}/api/auth/callback/microsoft?error=access_denied&state=nope`,
+          { redirect: 'manual' }
+        )
+        assert(callback.status === 302, `callback reachable, got ${callback.status}`)
+        // Every other better-auth OAuth route stays behind the bearer.
+        for (const path of ['/api/auth/link-social', '/api/auth/callback/google']) {
+          const r = await fetch(`${base}${path}`, { method: 'POST' })
+          assert(r.status === 401, `${path} gated, got ${r.status}`)
+        }
+
+        // No bootstrap owner: admin comes from the Entra app role only.
+        assert(!existsSync(join(root, 'hub.owner.json')), 'no bootstrap owner on an SSO hub')
+        const out = hub.logs.join('\n')
+        assert(!out.includes('A first user was created'), 'no owner credentials printed')
+        assert(!out.includes(keyBody.slice(0, 40)), 'the private key never reaches the log')
       } finally {
         await hub.stop()
       }

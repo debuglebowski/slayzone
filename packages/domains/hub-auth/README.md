@@ -50,6 +50,13 @@ package. `bearer`, `jwt`, and `organization` still come from
 - `createHubAuth({ dbPath, baseURL, secret })` → better-auth instance with
   plugins `bearer`, `jwt`, `organization`, `apiKey` (metadata enabled,
   key prefix `szr_`). Telemetry pinned off.
+- `createHubAuth({ ..., sso })` → adds Entra ID sign-in (`src/server/entra.ts`):
+  single tenant, code flow + PKCE, the hub authenticating with a certificate
+  (signed client assertion, no secret), the ID token verified and checked
+  (`tid`, `oid`, app role `SlayZone.User`/`SlayZone.Admin`, `amr` contains
+  `mfa`), identity keyed `<oid>.<tid>` on the `account` row, role written from
+  the app role at every sign-in. `loadEntraClientCredential({ certPath,
+  keyPath })` reads the PEM pair.
 - `createAuthExpressApp(auth)` → express app serving `/api/auth/*` via
   `toNodeHandler`. Standalone or mountable at a host app's root. No body
   parser on purpose (better-auth consumes the raw body).
@@ -120,4 +127,6 @@ create index "apikey_key_idx" on "apikey" ("key");
 `pnpm --filter @slayzone/hub-auth test` — vitest, temp-dir sqlite, no
 network, no app. Covers migrations, sign-up/sign-in via in-process
 `auth.api`, bearer-token verification, apiKey mint/verify/revoke, and
-organization create + member add.
+organization create + member add. `entra.test.ts` drives the Entra flow end to
+end against a local fake issuer (own JWKS, signed tokens, an assertion-checking
+token endpoint).

@@ -49,13 +49,31 @@ export const HUB_SWITCH_DEFAULTS: Readonly<HubSwitches> = {
   enableIntegrations: true
 }
 
-/** SSO settings (not switches, but `ENABLE_SSO=1` is refused without them — B7). */
+/**
+ * SSO settings (not switches, but `ENABLE_SSO=1` is refused without them — B7).
+ *
+ * The hub proves itself to Entra with a CERTIFICATE (a signed client assertion,
+ * `private_key_jwt`), never a client secret: the two paths name a PEM certificate and
+ * its PEM private key (one file holding both may be named twice). Paths only — the key
+ * itself never travels through env, `hub.config.json` or a log line.
+ */
 export const HUB_SSO_ENV = {
   tenantId: 'SLAYZONE_HUB_SSO_TENANT_ID',
   clientId: 'SLAYZONE_HUB_SSO_CLIENT_ID',
-  /** Secret — env only, never read from `hub.config.json`, never logged. */
-  clientSecret: 'SLAYZONE_HUB_SSO_CLIENT_SECRET'
+  /** PEM certificate registered on the Entra app (its SHA-256 thumbprint goes in each assertion). Env only. */
+  certPath: 'SLAYZONE_HUB_SSO_CERT_PATH',
+  /** PEM private key of that certificate (RSA, unencrypted). Env only. */
+  keyPath: 'SLAYZONE_HUB_SSO_KEY_PATH',
+  /** `0|1`, default `1`: refuse a sign-in whose ID token's `amr` does not contain `mfa`. */
+  requireMfa: 'SLAYZONE_HUB_SSO_REQUIRE_MFA'
 } as const
+
+/**
+ * The client-secret setting T-02 reserved. Never read: Entra sign-in uses the
+ * certificate above (B7 refuses a hub that still sets it, so nobody believes a secret
+ * is in use). Kept in {@link HUB_PROCESS_ENV} so a parent still clears it.
+ */
+export const RETIRED_HUB_SSO_CLIENT_SECRET_ENV = 'SLAYZONE_HUB_SSO_CLIENT_SECRET'
 
 /** The names the hub reads for where it listens / how others reach it. */
 export const HUB_ADDRESS_ENV = {
@@ -88,6 +106,7 @@ export const HUB_ALLOWED_WEB_ORIGINS_ENV = 'SLAYZONE_HUB_ALLOWED_WEB_ORIGINS'
 export const HUB_PROCESS_ENV: readonly string[] = [
   ...Object.values(HUB_SWITCH_ENV),
   ...Object.values(HUB_SSO_ENV),
+  RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   ...Object.values(HUB_ADDRESS_ENV),
   LEGACY_HUB_LISTEN_ENV,
   HUB_ALLOWED_WEB_ORIGINS_ENV
@@ -144,21 +163,31 @@ export function isHubLoginRequired(env: NodeJS.ProcessEnv = process.env): boolea
 export interface HubSsoSettings {
   tenantId?: string
   clientId?: string
-  clientSecret?: string
+  certPath?: string
+  keyPath?: string
+  /** {@link HUB_SSO_ENV.requireMfa}; on unless set to exactly `0`. */
+  requireMfa: boolean
 }
 
-/** Read the SSO settings from env; blank counts as unset. */
+/**
+ * Read the SSO settings from env; blank counts as unset. A `REQUIRE_MFA` value other
+ * than `0` / `1` throws {@link HubSwitchValueError} (rule B4), like a switch.
+ */
 export function resolveHubSso(env: NodeJS.ProcessEnv = process.env): HubSsoSettings {
   const pick = (name: string): string | undefined => {
     const v = env[name]?.trim()
     return v ? v : undefined
   }
-  const out: HubSsoSettings = {}
+  const out: HubSsoSettings = {
+    requireMfa: parseSwitchValue(HUB_SSO_ENV.requireMfa, env[HUB_SSO_ENV.requireMfa]) ?? true
+  }
   const tenantId = pick(HUB_SSO_ENV.tenantId)
   const clientId = pick(HUB_SSO_ENV.clientId)
-  const clientSecret = pick(HUB_SSO_ENV.clientSecret)
+  const certPath = pick(HUB_SSO_ENV.certPath)
+  const keyPath = pick(HUB_SSO_ENV.keyPath)
   if (tenantId) out.tenantId = tenantId
   if (clientId) out.clientId = clientId
-  if (clientSecret) out.clientSecret = clientSecret
+  if (certPath) out.certPath = certPath
+  if (keyPath) out.keyPath = keyPath
   return out
 }
