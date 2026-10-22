@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterAll } from 'vitest'
 import {
   toElectronAccelerator,
   matchesShortcut,
@@ -11,6 +11,17 @@ import {
   getBlockedWebPanelKeys,
   type ElectronInput
 } from './index'
+
+// Written against macOS bindings (mod = Cmd). Pin the platform before anything caches
+// it, so these cases mean the same thing on the Linux CI runner; restored afterwards.
+const realPlatform = vi.hoisted(() => {
+  const real = process.platform
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+  return real
+})
+afterAll(() => {
+  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
+})
 
 describe('toElectronAccelerator', () => {
   it('converts mod+n', () => {

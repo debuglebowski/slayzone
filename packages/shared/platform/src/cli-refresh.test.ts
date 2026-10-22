@@ -108,15 +108,18 @@ describe('refreshWindowsCliIn', () => {
     expect(readFileSync(join(binDir, 'slay.js'), 'utf8')).toBe('// OLD')
   })
 
-  test.runIf(canDenyWrite)('a write that fails is reported, never thrown, and the old copy survives', () => {
-    const { srcJs, binDir } = setup()
-    writeFileSync(join(binDir, 'slay.cmd'), 'x')
-    writeFileSync(join(binDir, 'slay.js'), '// OLD')
-    chmodSync(binDir, 0o555) // cannot create the temp file
-    const r = refreshWindowsCliIn(srcJs, binDir)
-    chmodSync(binDir, 0o755)
-    expect(r.status).toBe('failed')
-    expect(readFileSync(join(binDir, 'slay.js'), 'utf8')).toBe('// OLD')
-    expect(readdirSync(binDir).sort()).toEqual(['slay.cmd', 'slay.js'])
-  })
+  test.runIf(canDenyWrite)(
+    'a write that fails is reported, never thrown, and the old copy survives',
+    () => {
+      const { srcJs, binDir } = setup()
+      writeFileSync(join(binDir, 'slay.cmd'), 'x')
+      writeFileSync(join(binDir, 'slay.js'), '// OLD')
+      chmodSync(binDir, 0o555) // cannot create the temp file
+      const r = refreshWindowsCliIn(srcJs, binDir)
+      chmodSync(binDir, 0o755)
+      expect(r.status).toBe('failed')
+      expect(readFileSync(join(binDir, 'slay.js'), 'utf8')).toBe('// OLD')
+      expect(readdirSync(binDir).sort()).toEqual(['slay.cmd', 'slay.js'])
+    }
+  )
 })

@@ -88,7 +88,9 @@ test('wrapped shell does NOT lower an already-higher soft limit', () => {
 })
 
 test('quotes args with spaces correctly', () => {
-  const r = wrapShellWithUlimit('/bin/zsh', ['-c', 'echo "hi there"'])
+  // /bin/sh, not zsh: the case is the quoting through the wrapper, and only sh is on
+  // every machine that runs this (Linux CI images ship without zsh).
+  const r = wrapShellWithUlimit('/bin/sh', ['-c', 'echo "hi there"'])
   // Script should roundtrip-safe quote the embedded args
   // Run it and check echo output
   const out = execFileSync(r.file, r.args, { encoding: 'utf8' }).trim()

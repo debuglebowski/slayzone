@@ -63,7 +63,10 @@ try {
 
     // Copied into new storage:
     // The legacy source keeps the old name; the copy lands under the renamed main DB.
-    check('prod DB copied', readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB')
+    check(
+      'prod DB copied',
+      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB'
+    )
     check('legacy name NOT created in storage', !existsSync(join(storage, 'slayzone.sqlite')))
     check(
       'wal + shm copied',
@@ -204,7 +207,10 @@ try {
     const { old, storage } = setup()
     writeFileSync(join(old, 'slayzone.sqlite'), 'DB')
     ensureStorageDir(old, storage, true)
-    check('first run copies DB', readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'DB')
+    check(
+      'first run copies DB',
+      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'DB'
+    )
     // Simulate the running prod app writing a NEW blob to the shared dir afterward.
     mkdirSync(join(old, 'blobs', 'ff'), { recursive: true })
     writeFileSync(join(old, 'blobs', 'ff', 'laterblob'), 'LATER')

@@ -3,9 +3,15 @@ import { describe, it, expect } from 'vitest'
 import React from 'react'
 import { afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { TooltipProvider } from '@slayzone/ui'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 
 afterEach(cleanup)
+
+// The header action renders a Tooltip, which needs the provider the app mounts at the root.
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <TooltipProvider>{children}</TooltipProvider>
+)
 
 describe('TaskSettingsPanel', () => {
   it('switches to activity and back from the header action', () => {
@@ -14,7 +20,8 @@ describe('TaskSettingsPanel', () => {
         taskId="task-1"
         renderDefaultContent={() => <div>Settings body</div>}
         renderHistoryContent={() => <div>History body</div>}
-      />
+      />,
+      { wrapper }
     )
 
     expect(screen.getByText('View activity')).toBeDefined()
@@ -33,7 +40,8 @@ describe('TaskSettingsPanel', () => {
         taskId="task-1"
         renderDefaultContent={() => <div>Settings body</div>}
         renderHistoryContent={() => <div>History body</div>}
-      />
+      />,
+      { wrapper }
     )
 
     fireEvent.click(screen.getByText('View activity'))
@@ -57,7 +65,8 @@ describe('TaskSettingsPanel', () => {
         taskId="task-1"
         renderDefaultContent={() => <div>Settings body</div>}
         renderHistoryContent={() => <div>History body</div>}
-      />
+      />,
+      { wrapper }
     )
 
     expect(screen.getByText('Settings body')).toBeDefined()

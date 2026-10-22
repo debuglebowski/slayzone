@@ -1,6 +1,6 @@
 /**
  * Automation history integration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ../../../../shared/test-utils/loader.ts src/main/history.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ../../../../shared/test-utils/loader.ts src/server/history.test.ts
  */
 import {
   createTestHarness,
@@ -9,6 +9,7 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine } from './engine.js'
+import { taskEvents } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 
@@ -38,7 +39,9 @@ const ipcMain = {
   handlers: h.ipcMain.handlers
 }
 
-const engine = new AutomationEngine(h.db, () => {})
+// Engine runs on the async SlayzoneDb proxy (h.slayDb); fixtures + assertions read the
+// same connection via raw h.db (as in engine.test.ts).
+const engine = new AutomationEngine(h.slayDb, () => {})
 engine.start(ipcMain as never)
 
 function createAutomation(command: string): string {
@@ -71,7 +74,7 @@ await describe('automation history', () => {
 
     const automationId = createAutomation('printf success')
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    ipcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await sleep(200)
 
     const run = h.db
@@ -111,7 +114,7 @@ await describe('automation history', () => {
       'i=0; while [ $i -lt 4505 ]; do printf a; i=$((i+1)); done; printf boom >&2; exit 1'
     const automationId = createAutomation(longOutputCommand)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    ipcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await sleep(200)
 
     const run = h.db

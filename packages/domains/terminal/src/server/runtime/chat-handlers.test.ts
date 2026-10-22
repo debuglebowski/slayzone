@@ -18,6 +18,7 @@ import Database from 'better-sqlite3'
 import { registerChatHandlers } from './chat-handlers'
 import * as mgr from './chat-transport-manager'
 import { persistChatEvent } from '../chat-events-store'
+import { createSlayzoneDbAdapter } from '../../../../../shared/test-utils/ipc-harness.js'
 
 let passed = 0
 let failed = 0
@@ -135,7 +136,10 @@ await test('chat:reset spawns fresh (no --resume) even when DB has stored chatCo
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   // Pre-seed: eager start that DOES --resume the stored id (mirrors what
   // happens when the user explicitly clicks Restart, or sends their first
@@ -151,14 +155,18 @@ await test('chat:reset spawns fresh (no --resume) even when DB has stored chatCo
   expect(spawnArgsLog[0].includes('--resume')).toBeTruthy()
 
   // Persist some chat events for this tab.
-  persistChatEvent(db, tabId, 0, {
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
     kind: 'turn-init',
     sessionId: 'old-stored-sid',
     model: 'opus',
     cwd: '/tmp',
     tools: []
   })
-  persistChatEvent(db, tabId, 1, { kind: 'assistant-text', messageId: 'm', text: 'hi' })
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 1, {
+    kind: 'assistant-text',
+    messageId: 'm',
+    text: 'hi'
+  })
   const evCountBefore = db
     .prepare('SELECT COUNT(*) AS c FROM chat_events WHERE tab_id = ?')
     .get(tabId) as { c: number }
@@ -223,7 +231,7 @@ await test('chat:reset still wipes events + clears conv id when no live session 
     taskId,
     JSON.stringify({ [mode]: { chatConversationId: 'stale-sid' } })
   )
-  persistChatEvent(db, tabId, 0, {
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
     kind: 'turn-init',
     sessionId: 'stale-sid',
     model: 'opus',
@@ -240,7 +248,10 @@ await test('chat:reset still wipes events + clears conv id when no live session 
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   // Reset on a tab whose session is NOT in the in-memory map (e.g. after app restart
   // before any panel mount). Must not throw; must still clear DB state. Reset is
@@ -279,7 +290,10 @@ await test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=o
   db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   // Resolution reads `~/.claude/settings.json` on the host. Result is one of
   // the three concrete aliases — never `'default'`. We assert the union, not
@@ -300,7 +314,10 @@ await test('chat:getModel returns stored value', async () => {
   )
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   const got = (await ipc.invoke('chat:getModel', taskId, mode)) as string
   expect(got).toBe('opus')
@@ -320,7 +337,10 @@ await test('chat:getModel falls back to account default for unknown / legacy sto
   )
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   const got = (await ipc.invoke('chat:getModel', taskId, mode)) as string
   expect(['opus', 'sonnet', 'haiku'].includes(got)).toBe(true)
@@ -348,7 +368,10 @@ await test('chat:setModel persists to provider_config + respawns with --model fl
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   // Initial eager start — no model stored. We always emit --model now, picking
   // the account default from `~/.claude/settings.json` (or DEFAULT_CHAT_MODEL).
@@ -392,7 +415,10 @@ await test('chat:setModel rejects invalid model id', async () => {
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   let threw = false
   try {
@@ -428,7 +454,10 @@ await test('chat:start reads stored chatModel and adds --model on cold spawn', a
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   await ipc.invoke('chat:start', { tabId, taskId, mode, cwd: '/tmp', providerFlagsOverride: null })
   expect(spawnArgsLog.length).toBe(1)
@@ -464,7 +493,10 @@ await test('explicit providerFlagsOverride suppresses --model injection', async 
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   await ipc.invoke('chat:start', {
     tabId,
@@ -501,7 +533,10 @@ await test('chat:hydrate does NOT spawn a subprocess', async () => {
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   const info = (await ipc.invoke('chat:hydrate', {
     tabId,
@@ -540,7 +575,10 @@ await test('chat:send triggers lazy spawn on a hydrated session', async () => {
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   await ipc.invoke('chat:hydrate', {
     tabId,
@@ -581,7 +619,10 @@ await test('chat:hydrate twice is idempotent — only one skeleton, zero spawns'
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   await ipc.invoke('chat:hydrate', {
     tabId,
@@ -611,7 +652,7 @@ await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', asy
     taskId,
     JSON.stringify({ [mode]: { chatConversationId: 'old-sid' } })
   )
-  persistChatEvent(db, tabId, 0, {
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
     kind: 'turn-init',
     sessionId: 'old-sid',
     model: 'opus',
@@ -632,7 +673,10 @@ await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', asy
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   await ipc.invoke('chat:reset', { tabId, taskId, mode, cwd: '/tmp', providerFlagsOverride: null })
 
@@ -676,7 +720,10 @@ await test('chat:setMode pre-spawn persists DB without spawning', async () => {
   })
 
   const ipc = createMockIpcMain()
-  registerChatHandlers(ipc as unknown as Parameters<typeof registerChatHandlers>[0], db)
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db)
+  )
 
   // Hydrate skeleton.
   await ipc.invoke('chat:hydrate', {

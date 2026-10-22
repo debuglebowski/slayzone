@@ -90,7 +90,8 @@ function seedEverything(
   const visit = (t: string): void => {
     if (state.has(t)) return
     state.set(t, 'visiting')
-    for (const fk of fks.get(t) ?? []) if (fk.table !== t && tables.includes(fk.table)) visit(fk.table)
+    for (const fk of fks.get(t) ?? [])
+      if (fk.table !== t && tables.includes(fk.table)) visit(fk.table)
     state.set(t, 'done')
     order.push(t)
   }
@@ -115,12 +116,12 @@ function seedEverything(
           const parentCols = db.pragma(`table_info(${q(fk.table)})`) as Col[]
           const target = fk.to ?? parentCols.find((p) => p.pk === 1)?.name
           const parent = target
-            ? (db.prepare(`SELECT ${q(target)} AS v FROM ${q(fk.table)} LIMIT 1 OFFSET ?`).get(i - 1) as
-                | { v: unknown }
-                | undefined) ??
+            ? ((db
+                .prepare(`SELECT ${q(target)} AS v FROM ${q(fk.table)} LIMIT 1 OFFSET ?`)
+                .get(i - 1) as { v: unknown } | undefined) ??
               (db.prepare(`SELECT ${q(target)} AS v FROM ${q(fk.table)} LIMIT 1`).get() as
                 | { v: unknown }
-                | undefined)
+                | undefined))
             : undefined
           if (parent) {
             names.push(q(c.name))
@@ -193,7 +194,8 @@ test('no seeded table lost a row (or vanished without a successor)', () => {
       continue
     }
     const now = count(db, home)
-    if (now < n) problems.push(`${t}${home === t ? '' : ` → ${home}`}: ${n} rows seeded, ${now} left`)
+    if (now < n)
+      problems.push(`${t}${home === t ? '' : ` → ${home}`}: ${n} rows seeded, ${now} left`)
   }
   if (problems.length) throw new Error(problems.join('\n    '))
 })

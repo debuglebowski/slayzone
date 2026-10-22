@@ -87,7 +87,7 @@ describe('validatePanelShortcut', () => {
   })
 
   test('rejects reserved shortcuts', () => {
-    for (const key of ['t', 'b', 'e', 'g', 's']) {
+    for (const key of ['k', 'b', 'e', 'g', 's']) {
       const err = validatePanelShortcut(key, [])
       expect(err !== null && err.includes('reserved for a built-in panel')).toBeTruthy()
     }

@@ -48,7 +48,10 @@ const SENTINEL = '.project-icons-migrated'
   ensureProjectIcons({ sources: [userData], hubRoot })
 
   check('icon copied', readFileSync(join(hubRoot, 'project-icons', 'p1.png'), 'utf8') === 'PNG1')
-  check('second icon copied', readFileSync(join(hubRoot, 'project-icons', 'p2.svg'), 'utf8') === 'SVG2')
+  check(
+    'second icon copied',
+    readFileSync(join(hubRoot, 'project-icons', 'p2.svg'), 'utf8') === 'SVG2'
+  )
   check(
     'source PRESERVED (copy-only)',
     readFileSync(join(userData, 'project-icons', 'p1.png'), 'utf8') === 'PNG1' &&

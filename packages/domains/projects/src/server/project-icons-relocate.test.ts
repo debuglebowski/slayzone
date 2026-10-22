@@ -8,7 +8,12 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import {
+  createTestHarness,
+  test,
+  expect,
+  describe
+} from '../../../../shared/test-utils/ipc-harness.js'
 import { relocateProjectIcons } from './project-store.js'
 
 const h = await createTestHarness()
@@ -23,9 +28,10 @@ function addProject(id: string, iconPath: string | null): void {
     .run(id, id, iconPath)
 }
 function row(id: string): { icon_image_path: string | null; updated_at: string } {
-  return h.db
-    .prepare('SELECT icon_image_path, updated_at FROM projects WHERE id = ?')
-    .get(id) as { icon_image_path: string | null; updated_at: string }
+  return h.db.prepare('SELECT icon_image_path, updated_at FROM projects WHERE id = ?').get(id) as {
+    icon_image_path: string | null
+    updated_at: string
+  }
 }
 
 await describe('relocateProjectIcons', async () => {

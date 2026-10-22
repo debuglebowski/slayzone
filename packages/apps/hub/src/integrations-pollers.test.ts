@@ -28,7 +28,10 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 type Started = { sync: unknown[]; discovery: unknown[]; ticks: { sync: number; discovery: number } }
 
 /** Fake pollers that really tick, so `stop()` is observable as "ticking stops". */
-function fakes(intervalMs = 5): { started: Started; fns: Parameters<typeof startIntegrationPollers>[0]['fns'] } {
+function fakes(intervalMs = 5): {
+  started: Started
+  fns: Parameters<typeof startIntegrationPollers>[0]['fns']
+} {
   const started: Started = { sync: [], discovery: [], ticks: { sync: 0, discovery: 0 } }
   return {
     started,

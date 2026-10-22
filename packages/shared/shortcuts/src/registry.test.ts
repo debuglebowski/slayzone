@@ -1,5 +1,16 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest'
 import { ShortcutRegistry } from './registry'
+
+// Written against macOS bindings (mod = Cmd). Pin the platform before anything caches
+// it, so these cases mean the same thing on the Linux CI runner; restored afterwards.
+const realPlatform = vi.hoisted(() => {
+  const real = process.platform
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+  return real
+})
+afterAll(() => {
+  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
+})
 
 function makeKeyEvent(overrides: Partial<KeyboardEvent>): KeyboardEvent {
   return {

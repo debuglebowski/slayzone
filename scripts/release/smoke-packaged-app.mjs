@@ -40,9 +40,10 @@ if (!input) {
 function locate(dir) {
   const abs = path.resolve(dir)
   // A parent such as `dist/mac-arm64` holding the .app.
-  const app = existsSync(abs) && !abs.endsWith('.app')
-    ? readdirSync(abs).find((f) => f.endsWith('.app'))
-    : undefined
+  const app =
+    existsSync(abs) && !abs.endsWith('.app')
+      ? readdirSync(abs).find((f) => f.endsWith('.app'))
+      : undefined
   const root = app ? path.join(abs, app) : abs
   if (existsSync(path.join(root, 'Contents', 'Resources'))) {
     const macos = path.join(root, 'Contents', 'MacOS')
@@ -136,7 +137,9 @@ if (have('hub/bin.cjs')) {
     else await sleep(100)
   }
   if (port === null) {
-    fail(`hub never reported listening (exit=${exited}) — ${log.trim().split('\n').slice(-3).join(' | ')}`)
+    fail(
+      `hub never reported listening (exit=${exited}) — ${log.trim().split('\n').slice(-3).join(' | ')}`
+    )
   } else {
     pass(`hub listening on :${port}`)
     try {
@@ -158,7 +161,12 @@ if (have('hub/bin.cjs')) {
 console.log('\n4. packaged computer loads')
 if (have('computer/bin.cjs')) {
   const child = spawn(exe, [path.join(resources, 'computer', 'bin.cjs')], {
-    env: { ...baseEnv, SLAYZONE_SUPERVISED: '1', SLAYZONE_ROOT: root, SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' },
+    env: {
+      ...baseEnv,
+      SLAYZONE_SUPERVISED: '1',
+      SLAYZONE_ROOT: root,
+      SLAYZONE_HUB_ADDRESS: '127.0.0.1:1'
+    },
     // stdin stays OPEN, as the supervisor leaves it: a supervised child treats a closed
     // stdin as "my parent died" and exits.
     stdio: ['pipe', 'pipe', 'pipe']
@@ -170,7 +178,10 @@ if (have('computer/bin.cjs')) {
   child.kill('SIGKILL')
   const missing = /Cannot find module|MODULE_NOT_FOUND/.test(log)
   if (missing) {
-    const line = log.trim().split('\n').find((l) => /Cannot find module/.test(l))
+    const line = log
+      .trim()
+      .split('\n')
+      .find((l) => /Cannot find module/.test(l))
     fail(`computer bundle failed to load — ${line}`)
   } else {
     pass('computer bundle loaded without a module-resolution error')

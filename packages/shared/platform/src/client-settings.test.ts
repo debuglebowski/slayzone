@@ -96,7 +96,11 @@ test('file is named client.config.json (the <role>.config.json convention)', () 
 test('beta client-settings.json is adopted on read; the old file is left byte-identical', () => {
   const d = freshDir()
   const legacy = path.join(d, 'client-settings.json')
-  const bytes = JSON.stringify({ theme: 'light', labs: { loopMode: true }, fromFuture: { keep: 1 } })
+  const bytes = JSON.stringify({
+    theme: 'light',
+    labs: { loopMode: true },
+    fromFuture: { keep: 1 }
+  })
   fs.writeFileSync(legacy, bytes)
   const got = readClientSettings(d)
   expect(got.theme).toBe('light')

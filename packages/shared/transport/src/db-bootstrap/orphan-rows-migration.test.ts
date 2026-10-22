@@ -106,7 +106,11 @@ test('every reachable row still crosses over; the orphan is not carried into age
     ).map((r) => r.id)
     expectEqual(ids, ['r1', 'r2'])
     expectEqual(
-      (db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE id = 'orphan1'").get() as { n: number }).n,
+      (
+        db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE id = 'orphan1'").get() as {
+          n: number
+        }
+      ).n,
       0
     )
   } finally {
@@ -132,7 +136,11 @@ test('a clean v145 database is unaffected (same sessions, nothing dropped)', () 
   try {
     seedTaskWithLedger(db)
     runMigrations(db)
-    const n = (db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE task_id = 't1'").get() as { n: number }).n
+    const n = (
+      db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE task_id = 't1'").get() as {
+        n: number
+      }
+    ).n
     expectEqual(n, 2)
     expectEqual(db.pragma('user_version', { simple: true }), LATEST)
   } finally {

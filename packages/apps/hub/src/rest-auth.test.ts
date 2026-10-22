@@ -327,8 +327,11 @@ async function main(): Promise<void> {
 
   // ── verifyRestBearer against a REAL better-auth session ───────────────────
   const tmpDir = mkdtempSync(join(tmpdir(), 'hub-rest-auth-'))
+  // One path for createHubAuth and the direct flag flips below: two literals drifted
+  // apart once (the auth DB rename) and the flips silently hit an empty new file.
+  const authDbPath = join(tmpDir, 'slayzone.auth.sqlite')
   const auth: HubAuth = await createHubAuth({
-    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
+    dbPath: authDbPath,
     baseURL: 'http://127.0.0.1:9999',
     secret: 'hub-rest-auth-test-secret-at-least-32-chars-long'
   })
@@ -497,7 +500,7 @@ async function main(): Promise<void> {
       verifyRestBearer(auth, db, { authorization: `Bearer ${token}` })
     /** Flag the account directly, leaving its sessions in place (the "exists anyway" case). */
     const setDisabled = (userId: string, disabled: boolean): void => {
-      const authDb = new DatabaseSync(join(tmpDir, 'hub-auth.sqlite'))
+      const authDb = new DatabaseSync(authDbPath)
       authDb
         .prepare('UPDATE user SET disabledAt = ? WHERE id = ?')
         .run(disabled ? new Date().toISOString() : null, userId)

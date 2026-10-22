@@ -58,7 +58,9 @@ test('moves -wal, -shm and -journal together with the main file', () => {
   expect(read(d, 'b.sqlite-wal')).toBe('WAL')
   expect(read(d, 'b.sqlite-shm')).toBe('SHM')
   expect(read(d, 'b.sqlite-journal')).toBe('JRN')
-  expect(['a.sqlite', 'a.sqlite-wal', 'a.sqlite-shm', 'a.sqlite-journal'].some((n) => has(d, n))).toBe(false)
+  expect(
+    ['a.sqlite', 'a.sqlite-wal', 'a.sqlite-shm', 'a.sqlite-journal'].some((n) => has(d, n))
+  ).toBe(false)
 })
 
 test('an existing target always wins and neither file is touched', () => {
@@ -77,7 +79,9 @@ test('nothing to rename is a no-op (fresh install, or already migrated)', () => 
   const d = tmp()
   expect(adoptRenamedDatabase(d, 'a.sqlite', 'b.sqlite')).toBe('no-source')
   expect(fs.readdirSync(d)).toHaveLength(0)
-  expect(adoptRenamedDatabase(path.join(d, 'does-not-exist'), 'a.sqlite', 'b.sqlite')).toBe('no-source')
+  expect(adoptRenamedDatabase(path.join(d, 'does-not-exist'), 'a.sqlite', 'b.sqlite')).toBe(
+    'no-source'
+  )
 })
 
 test('is idempotent: a second call changes nothing', () => {

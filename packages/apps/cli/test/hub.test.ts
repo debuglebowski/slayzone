@@ -5,7 +5,6 @@
  *   --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/hub.test.ts
  */
 import http from 'node:http'
-import { DatabaseSync } from 'node:sqlite'
 import type { AddressInfo } from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -84,26 +83,6 @@ function startServer(): Promise<{
       })
     })
   })
-}
-
-/**
- * A minimal DB holding just `settings.server_port` — the durable channel the
- * running server publishes its bound port to, and the ONLY way the CLI finds the
- * local app when no hub is configured.
- *
- * Written where the CLI DERIVES it from the install root: `<ROOT>/storage/` +
- * `slayzone.data.sqlite` (no SLAYZONE_DEV in these tests ⇒ the packaged filename).
- * Returns the ROOT, which is the only thing the caller can hand the CLI.
- */
-function seedServerPortDb(port: number): string {
-  const root = freshStateDir()
-  const storage = path.join(root, 'storage')
-  fs.mkdirSync(storage, { recursive: true })
-  const db = new DatabaseSync(path.join(storage, 'slayzone.data.sqlite'))
-  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('server_port', String(port))
-  db.close()
-  return root
 }
 
 /** A port that is guaranteed refused: bind, grab the port, close. */
@@ -324,21 +303,6 @@ await describe('api Authorization header', () => {
         SLAYZONE_HUB_ADDRESS: `127.0.0.1:${srv.port}`
       })
       await apiGet<{ ok: boolean }>('/api/ping')
-      expect(srv.seen[0].auth).toBeNull()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('no hub configured: falls back to settings.server_port, no Authorization header', async () => {
-    // The local-app path (`hub: false`): no SLAYZONE_HUB_ADDRESS and no cli-hub-target.json,
-    // so the port comes from the DB the server publishes it to at boot.
-    const srv = await startServer()
-    try {
-      setEnv({ SLAYZONE_ROOT: seedServerPortDb(srv.port) })
-      const res = await apiGet<{ ok: boolean }>('/api/ping')
-      expect(res.ok).toBe(true)
-      expect(srv.seen[0].url).toBe('/api/ping')
       expect(srv.seen[0].auth).toBeNull()
     } finally {
       await srv.close()

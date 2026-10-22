@@ -146,9 +146,14 @@ async function makeLegacyStore(dir: string, legacyName: string, newName: string)
   }
 }
 
-const marker = async (db: { get: (sql: string) => Promise<unknown> }): Promise<string | undefined> =>
-  ((await db.get("SELECT value FROM settings WHERE key = 'marker'")) as { value: string } | undefined)
-    ?.value
+const marker = async (db: {
+  get: (sql: string) => Promise<unknown>
+}): Promise<string | undefined> =>
+  (
+    (await db.get("SELECT value FROM settings WHERE key = 'marker'")) as
+      | { value: string }
+      | undefined
+  )?.value
 
 for (const [dev, legacyName, newName] of [
   [false, 'slayzone.sqlite', 'slayzone.data.sqlite'],

@@ -70,7 +70,10 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 
   // Source keeps the legacy name; the copy lands under the renamed main DB.
   check('DB copied', readFileSync(join(hubRoot, 'slayzone.dev.data.sqlite'), 'utf8') === 'DEVDB')
-  check('legacy name NOT created in the hub root', !existsSync(join(hubRoot, 'slayzone.dev.sqlite')))
+  check(
+    'legacy name NOT created in the hub root',
+    !existsSync(join(hubRoot, 'slayzone.dev.sqlite'))
+  )
   check(
     'wal + shm copied',
     existsSync(join(hubRoot, 'slayzone.dev.data.sqlite-wal')) &&
@@ -186,10 +189,7 @@ function setup(): { legacyRoot: string; hubRoot: string; computerRoot: string } 
 
   ensureChannelScopedStorage({ legacyRoot, hubRoot, computerRoot, packaged: false })
 
-  check(
-    'hub slice completed independently',
-    existsSync(join(hubRoot, 'slayzone.dev.data.sqlite'))
-  )
+  check('hub slice completed independently', existsSync(join(hubRoot, 'slayzone.dev.data.sqlite')))
   check(
     'computer slice completed independently (empty state, no legacy creds)',
     Object.keys(readState(computerRoot)).length === 0

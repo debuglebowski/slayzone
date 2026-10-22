@@ -47,6 +47,7 @@ import {
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { detectBackend } from '@slayzone/platform/service-unit'
 
 // Package roots are derived from the REPO root rather than this file's own URL:
 // the CLI package typechecks as CommonJS (see its tsconfig `module`), where
@@ -1121,9 +1122,22 @@ async function main(): Promise<void> {
     })
 
     await test('start on an unknown name points at create', async () => {
+      // Without a user service manager (Linux with no systemd user bus — CI containers)
+      // nothing is ever registered, so `start` explains that instead of "No hub named".
+      // Both branches must point at `create`. The no-manager one is forced here so it
+      // is covered on every platform; the natural one is whatever this machine has.
+      const forced = slay(['hub', 'start', `${NAME_PREFIX}ghost`], {
+        root: rootA,
+        env: { SLZ_FORCE_NO_SERVICE: '1' }
+      })
+      assert(forced.status !== 0, 'non-zero exit (no service manager)')
+      assert(/no user service manager/i.test(forced.stderr), `said why: ${forced.stderr}`)
+      assert(/hub create/i.test(forced.stderr), `pointed at create: ${forced.stderr}`)
+
       const res = slay(['hub', 'start', `${NAME_PREFIX}ghost`], { root: rootA })
+      const expected = detectBackend() === 'none' ? /no user service manager/i : /No hub named/i
       assert(res.status !== 0, 'non-zero exit')
-      assert(/No hub named/i.test(res.stderr), `said it does not exist: ${res.stderr}`)
+      assert(expected.test(res.stderr), `said it does not exist: ${res.stderr}`)
       assert(/hub create/i.test(res.stderr), `pointed at create: ${res.stderr}`)
     })
 

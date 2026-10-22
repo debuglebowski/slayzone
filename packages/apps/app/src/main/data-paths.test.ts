@@ -61,7 +61,10 @@ try {
     initStorageDir(userData, true, true)
     check('v0.35.0 DB lands at the new name', read(join(hub, 'slayzone.data.sqlite')) === 'V035-DB')
     check('its WAL comes with it', read(join(hub, 'slayzone.data.sqlite-wal')) === 'V035-WAL')
-    check('the legacy name is NOT created in the hub root', !existsSync(join(hub, 'slayzone.sqlite')))
+    check(
+      'the legacy name is NOT created in the hub root',
+      !existsSync(join(hub, 'slayzone.sqlite'))
+    )
     check('v0.35.0 source is untouched', read(join(userData, 'slayzone.sqlite')) === 'V035-DB')
   }
 
@@ -81,7 +84,10 @@ try {
     )
     check('its WAL moved with it', read(join(hub, 'slayzone.data.sqlite-wal')) === 'BETA-WAL')
     check('the old name is gone from the hub root', !existsSync(join(hub, 'slayzone.sqlite')))
-    check('userData source is untouched', read(join(userData, 'slayzone.sqlite')) === 'STALE-USERDATA')
+    check(
+      'userData source is untouched',
+      read(join(userData, 'slayzone.sqlite')) === 'STALE-USERDATA'
+    )
   }
 
   // --- beta.4-12: flat ~/.slayzone/storage ------------------------------------------
@@ -91,7 +97,10 @@ try {
     writeFileSync(join(flat, 'slayzone.sqlite'), 'FLAT-DB')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'OLDER-USERDATA')
     initStorageDir(userData, true, true)
-    check('flat beta DB wins (newest source) at the new name', read(join(hub, 'slayzone.data.sqlite')) === 'FLAT-DB')
+    check(
+      'flat beta DB wins (newest source) at the new name',
+      read(join(hub, 'slayzone.data.sqlite')) === 'FLAT-DB'
+    )
     check('flat source is untouched', read(join(flat, 'slayzone.sqlite')) === 'FLAT-DB')
   }
 
@@ -103,9 +112,18 @@ try {
     writeFileSync(join(userData, 'slayzone.dev.sqlite'), 'DEV-STALE')
     writeFileSync(join(userData, 'slayzone.sqlite'), 'PROD-DB-MUST-NOT-MOVE')
     initStorageDir(userData, false, true)
-    check('dev DB adopted under slayzone.dev.data.sqlite', read(join(hub, 'slayzone.dev.data.sqlite')) === 'DEV-LIVE')
-    check('dev never takes the prod DB', !existsSync(join(hub, 'slayzone.data.sqlite')) && !existsSync(join(hub, 'slayzone.sqlite')))
-    check('prod source untouched by the dev channel', read(join(userData, 'slayzone.sqlite')) === 'PROD-DB-MUST-NOT-MOVE')
+    check(
+      'dev DB adopted under slayzone.dev.data.sqlite',
+      read(join(hub, 'slayzone.dev.data.sqlite')) === 'DEV-LIVE'
+    )
+    check(
+      'dev never takes the prod DB',
+      !existsSync(join(hub, 'slayzone.data.sqlite')) && !existsSync(join(hub, 'slayzone.sqlite'))
+    )
+    check(
+      'prod source untouched by the dev channel',
+      read(join(userData, 'slayzone.sqlite')) === 'PROD-DB-MUST-NOT-MOVE'
+    )
   }
 
   // --- fresh install: nothing invented ------------------------------------------------
@@ -129,9 +147,15 @@ try {
     check('without the lock the hub root is still returned', target === hub, target)
     check('without the lock nothing is copied', !existsSync(join(hub, 'slayzone.data.sqlite')))
     check('without the lock not even the hub root is created', !existsSync(hub))
-    check('without the lock the source is untouched', read(join(userData, 'slayzone.sqlite')) === 'V035-DB')
+    check(
+      'without the lock the source is untouched',
+      read(join(userData, 'slayzone.sqlite')) === 'V035-DB'
+    )
     initStorageDir(userData, true, true)
-    check('the next launch that DOES hold the lock imports it', read(join(hub, 'slayzone.data.sqlite')) === 'V035-DB')
+    check(
+      'the next launch that DOES hold the lock imports it',
+      read(join(hub, 'slayzone.data.sqlite')) === 'V035-DB'
+    )
   }
   {
     const { userData, hub } = setup('stable')
@@ -140,7 +164,8 @@ try {
     initStorageDir(userData, true, false)
     check(
       'without the lock a live hub root is not renamed under its owner',
-      read(join(hub, 'slayzone.sqlite')) === 'LIVE-BETA-DB' && !existsSync(join(hub, 'slayzone.data.sqlite'))
+      read(join(hub, 'slayzone.sqlite')) === 'LIVE-BETA-DB' &&
+        !existsSync(join(hub, 'slayzone.data.sqlite'))
     )
   }
 
@@ -151,7 +176,10 @@ try {
     initStorageDir(userData, true, true)
     writeFileSync(join(hub, 'slayzone.data.sqlite'), 'NEW-WORK') // the user has since used the app
     initStorageDir(userData, true, true)
-    check('a second boot never touches the live DB', read(join(hub, 'slayzone.data.sqlite')) === 'NEW-WORK')
+    check(
+      'a second boot never touches the live DB',
+      read(join(hub, 'slayzone.data.sqlite')) === 'NEW-WORK'
+    )
   }
 } finally {
   if (prevRoot === undefined) delete process.env.SLAYZONE_ROOT

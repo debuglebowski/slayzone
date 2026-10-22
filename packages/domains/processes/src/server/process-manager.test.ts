@@ -118,8 +118,7 @@ async function main(): Promise<void> {
   const realPid = real.pid
   assert(realPid !== undefined, 'test setup: real detached process has a pid')
 
-  let capturedRealExit: ((e: { code: number | null; signal: string | null }) => void) | null =
-    null
+  let capturedRealExit: ((e: { code: number | null; signal: string | null }) => void) | null = null
   const realPidHandle: ProcHandle = {
     pid: realPid,
     onData: () => ({ dispose() {} }),
