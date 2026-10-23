@@ -34,6 +34,7 @@ import type {
   BrowserShortcutPayload,
   BrowserCreateTaskFromLinkIntent
 } from '@slayzone/types'
+import type { FindJoinTokenAccount } from './join-token-policy'
 
 /**
  * Backup ops — injected by the composition root rather than built in the router.
@@ -881,6 +882,12 @@ export type ComputersDeps = {
   /** ws(s)://host:port/computers URL a join token embeds for the computer to dial.
    *  Null until the computer listener's port is bound. */
   getHubUrl: () => string | null
+  /**
+   * The person a join token is minted FOR, by account id or email (T-20,
+   * `join-token-policy.ts`). Wired by the hub over hub-auth; consulted only on a hub
+   * with login, where a mint without it fails rather than guessing an owner.
+   */
+  findAccount?: FindJoinTokenAccount
 }
 
 let computersDeps: ComputersDeps | null = null

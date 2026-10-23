@@ -82,8 +82,8 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
  *
  * ── admin ───────────────────────────────────────────────────────────────────
  * `hub.setLabel`                  the hub's name, shown to every user.
- * `computers.mintJoinToken`       enrollment secrets: only an admin mints (O-5). The
- *                                 TTL and named-user policy is T-20.
+ * `computers.mintJoinToken`       enrollment secrets: only an admin mints (O-5), for a
+ *                                 named user, at most 1 hour (`join-token-policy.ts`, T-20).
  * `computers.claim`               assigning an unowned computer an owner (and refused
  *                                 outright on a hub with login, T-19).
  * `computers.unrevoke`            re-trusting a revoked computer's credential: the

@@ -4,6 +4,7 @@ import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '../../context'
+import type { FindJoinTokenAccount } from '../../join-token-policy'
 import type { Scope } from '../../scopes'
 
 /**
@@ -210,6 +211,9 @@ export interface RestApiDeps {
       /** Drop a live connection (`PATCH /api/hub/computers` revoking it). */
       disconnect?: (computerId: string, reason: string) => void
     } | null
+    /** Who a join token is for, by account id or email (T-20) — the same lookup
+     *  `computers.mintJoinToken` uses (`ComputersDeps.findAccount`). */
+    findAccount?: FindJoinTokenAccount
   }
   /**
    * Operator account management, powering the `/api/hub/users` routes behind

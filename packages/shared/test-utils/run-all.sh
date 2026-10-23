@@ -240,6 +240,8 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycl
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_test packages/apps/cli/src/commands/update.test.ts
+# `slay computer mint --for` / `--ttl` cap against a fake hub (T-20). Pure Node.
+run_test packages/apps/cli/src/commands/computer-mint.test.ts
 run_test packages/apps/cli/src/local-hub.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts

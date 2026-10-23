@@ -12,6 +12,7 @@ import { isPathAllowed } from './scopes'
 import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
 import { checkOwnership, ownedResult } from './owner-gate'
+import { isJoinTokenRefusedError } from './join-token-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -25,7 +26,9 @@ const t = initTRPC.context<TrpcContext>().create({
       // A role refusal (T-15) carries `ADMIN_ONLY` the same way.
       ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
       // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
-      ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {})
+      ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A refused join-token mint (T-20): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
+      ...(isJoinTokenRefusedError(error.cause) ? { appCode: error.cause.code } : {})
     }
   })
 })

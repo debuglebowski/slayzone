@@ -98,6 +98,13 @@ test('computers.mintJoinToken: returns a decodable szjt1 token embedding the hub
   // the token the mint dialog already displays in full. Also brings this proc's
   // shape in line with the REST route, which has always returned it.
   expect(minted.hubUrl).toBe('ws://127.0.0.1:8788/computers')
+  // Login off (no auth gate — the desktop app's hub): minted for nobody, as before
+  // T-20, so the computer that redeems it is unowned.
+  expect(
+    h.db
+      .prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?')
+      .get(minted.id)
+  ).toEqual({ minted_by_user_id: null, owner_user_id: null })
 })
 
 test('computers.setProjectDefaultComputer + setTaskComputer + resolveTaskComputer', async () => {
@@ -375,4 +382,109 @@ test('T-15/T-19: an admin manages a private computer of another user but cannot 
     setAuthGate(() => false)
     await h.slayDb.run(`UPDATE projects SET owner_user_id = NULL WHERE id = ?`, [projectId])
   }
+})
+
+/**
+ * T-20 (O-5) through the real `appRouter`, on a hub with login: only an admin mints
+ * (the role gate, with its audit line), always FOR a named, enabled user who owns the
+ * computer, for at most 1 hour. Each refusal is BAD_REQUEST with a stable `appCode`
+ * and one `computer.join_token.mint` denied line; nothing is minted.
+ */
+test('T-20: an admin mints only for a named, enabled user, at most 1 hour; a user cannot mint', async () => {
+  setAuthGate(() => true)
+  const accounts: Record<string, { userId: string; disabled: boolean }> = {
+    'bob@example.com': { userId: 'bob', disabled: false },
+    bob: { userId: 'bob', disabled: false },
+    dave: { userId: 'dave', disabled: true }
+  }
+  setComputersDeps({ ...fakeDeps, findAccount: async (ref) => accounts[ref] ?? null })
+  const audit: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+  const tokens = () =>
+    (h.db.prepare('SELECT COUNT(*) AS n FROM join_tokens').get() as { n: number }).n
+  try {
+    const as = (userId: string, role: 'admin' | 'user') =>
+      appRouter.createCaller({ ...ctx, principal: { userId, role, scopes: ['full'] } }).computers
+    const admin = as('alice', 'admin')
+    const refusal = async (p: Promise<unknown>): Promise<string> =>
+      p.then(
+        () => 'ok',
+        (e: { code?: string; cause?: { name?: string; code?: string } }) =>
+          `${e.code}:${e.cause?.name === 'AdminOnlyError' ? 'ADMIN_ONLY' : e.cause?.code}`
+      )
+    const before = tokens()
+
+    expect(await refusal(as('carol', 'user').mintJoinToken({ label: 'x', forUser: 'bob' }))).toBe(
+      'FORBIDDEN:ADMIN_ONLY'
+    )
+    expect(await refusal(admin.mintJoinToken({ label: 'x' }))).toBe(
+      'BAD_REQUEST:JOIN_TOKEN_OWNER_REQUIRED'
+    )
+    expect(await refusal(admin.mintJoinToken({ label: 'x', forUser: 'nobody@example.com' }))).toBe(
+      'BAD_REQUEST:JOIN_TOKEN_OWNER_UNKNOWN'
+    )
+    expect(await refusal(admin.mintJoinToken({ label: 'x', forUser: 'dave' }))).toBe(
+      'BAD_REQUEST:JOIN_TOKEN_OWNER_DISABLED'
+    )
+    expect(
+      await refusal(admin.mintJoinToken({ label: 'x', forUser: 'bob', ttlMs: 2 * 60 * 60_000 }))
+    ).toBe('BAD_REQUEST:JOIN_TOKEN_TTL_TOO_LONG')
+    expect(tokens()).toBe(before)
+    // The stable code reaches a client as `data.appCode`, as ADMIN_ONLY does.
+    const err = await admin.mintJoinToken({ label: 'x' }).catch((e: unknown) => e)
+    audit.pop()
+    const shape = appRouter._def._config.errorFormatter({
+      error: err,
+      type: 'mutation',
+      path: 'computers.mintJoinToken',
+      input: undefined,
+      ctx: undefined,
+      shape: { message: 'x', code: -32600, data: { code: 'BAD_REQUEST' } }
+    } as never) as { data: { appCode?: string } }
+    expect(shape.data.appCode).toBe('JOIN_TOKEN_OWNER_REQUIRED')
+
+    const minted = await admin.mintJoinToken({ label: 'bob-laptop', forUser: 'bob@example.com' })
+    expect(minted.expiresAt - minted.createdAt).toBe(15 * 60_000)
+    expect(
+      h.db
+        .prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?')
+        .get(minted.id)
+    ).toEqual({ minted_by_user_id: 'alice', owner_user_id: 'bob' })
+
+    expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
+      'authz.denied:denied:carol',
+      'computer.join_token.mint:denied:alice',
+      'computer.join_token.mint:denied:alice',
+      'computer.join_token.mint:denied:alice',
+      'computer.join_token.mint:denied:alice',
+      'computer.join_token.mint:success:alice'
+    ])
+    expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
+      'not_admin',
+      'JOIN_TOKEN_OWNER_REQUIRED',
+      'JOIN_TOKEN_OWNER_UNKNOWN',
+      'JOIN_TOKEN_OWNER_DISABLED',
+      'JOIN_TOKEN_TTL_TOO_LONG',
+      undefined
+    ])
+    expect(audit[5]!.detail).toEqual({ label: 'bob-laptop', ttlMs: 15 * 60_000, owner: 'bob' })
+    expect(audit[5]!.route).toBe('trpc computers.mintJoinToken')
+    const all = JSON.stringify(audit)
+    expect(all.includes(minted.token)).toBe(false)
+    expect(all.includes(decodeJoinToken(minted.token)!.secret)).toBe(false)
+    expect(all.includes('bob@example.com')).toBe(false)
+  } finally {
+    setAuthGate(() => false)
+    setComputersDeps(fakeDeps)
+    setSecurityLogSink()
+  }
+
+  // Login off again: naming a user is refused rather than silently ignored.
+  let code: string | undefined
+  await caller
+    .mintJoinToken({ label: 'x', forUser: 'bob' })
+    .catch((e: { cause?: { code?: string } }) => {
+      code = e.cause?.code
+    })
+  expect(code).toBe('JOIN_TOKEN_OWNER_UNSUPPORTED')
 })

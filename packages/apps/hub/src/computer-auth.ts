@@ -28,9 +28,11 @@ import {
 } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
+  auditJoinTokenRedeemRefused,
   deterministicLocalComputerId,
   getComputer,
   hashJoinToken,
+  recordJoinTokenRedeemed,
   registerOrReplaceComputer,
   setComputerOwner,
   registerComputer,
@@ -127,6 +129,51 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     }
   }
 
+  /** Mint the computer's API key and write its row, owned by `ownerUserId`. */
+  const enrollComputer = async (
+    computerId: string,
+    isLocal: boolean,
+    ownerUserId: string | null,
+    at: number,
+    params: Parameters<ComputerAuthAdapters['verifyEnrollment']>[0]
+  ): Promise<Awaited<ReturnType<typeof mintComputerApiKey>>> => {
+    // Mint the key BEFORE registering — the store persists `auth_key_id` only at
+    // write time, so the key id must be known first.
+    const minted = await mintComputerApiKey(auth, { computerId, name: params.name })
+    if (isLocal) {
+      await registerOrReplaceComputer(db, {
+        id: computerId,
+        name: params.name,
+        platform: params.platform,
+        version: params.version,
+        capabilities: toCapabilityMap(params.capabilities),
+        authKeyId: minted.keyId,
+        now: at
+      })
+      // A computer process runs as exactly one OS account, so it belongs to exactly
+      // one SlayZone user. The join token carried who it is for — the only path from
+      // "an admin minted it" to "a machine enrolled" — and null stays null rather
+      // than attributing the machine to a guess.
+      await setComputerOwner(db, computerId, ownerUserId)
+      // One-time (idempotent) collapse of any pre-fix duplicate local rows: retire
+      // every OTHER row sharing the local name. No-op once collapsed. Identity-only
+      // (by name) — never status-based, never touches a remote computer.
+      await retireStaleLocalComputers(db, { name: params.name, keepComputerId: computerId })
+    } else {
+      await registerComputer(db, {
+        id: computerId,
+        name: params.name,
+        platform: params.platform,
+        version: params.version,
+        capabilities: toCapabilityMap(params.capabilities),
+        authKeyId: minted.keyId,
+        now: at
+      })
+      await setComputerOwner(db, computerId, ownerUserId)
+    }
+    return minted
+  }
+
   const verifyEnrollment: ComputerAuthAdapters['verifyEnrollment'] = async (params) => {
     const at = now()
     sweepExpired(at)
@@ -143,10 +190,14 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
         `join token rejected: ${verified.reason}`
       )
     }
-    // The computer would belong to whoever minted the token: not to an account that has
-    // since been disabled (T-12), nor to one that does not exist. A token minted with
-    // login off names nobody and is unaffected.
-    if (verified.mintedByUserId !== null && !(await isActiveAccount(verified.mintedByUserId))) {
+    // The computer belongs to the user the token was minted FOR (T-20), whoever is
+    // redeeming it — the enrolling machine proves no identity of its own, and the
+    // admin who minted it is not the owner. Not to an account that has since been
+    // disabled (T-12), nor to one that does not exist. A token minted with login off
+    // names nobody and is unaffected.
+    const ownerUserId = verified.ownerUserId
+    if (ownerUserId !== null && !(await isActiveAccount(ownerUserId))) {
+      auditJoinTokenRedeemRefused(verified.tokenId, 'owner_disabled', 'denied')
       throw new RpcError(
         ComputerTransportErrorCodes.unauthorized,
         'join token rejected: its account is disabled'
@@ -162,40 +213,16 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     const isLocal = localComputerName !== undefined && params.name === localComputerName
     const computerId = isLocal ? deterministicLocalComputerId(params.name) : randomUUID()
 
-    // Mint the key BEFORE registering — the store persists `auth_key_id` only at
-    // write time, so the key id must be known first.
-    const minted = await mintComputerApiKey(auth, { computerId, name: params.name })
-    if (isLocal) {
-      await registerOrReplaceComputer(db, {
-        id: computerId,
-        name: params.name,
-        platform: params.platform,
-        version: params.version,
-        capabilities: toCapabilityMap(params.capabilities),
-        authKeyId: minted.keyId,
-        now: at
-      })
-      // A computer process runs as exactly one OS account, so it belongs to exactly
-      // one SlayZone user. The join token carried who minted it — the only path
-      // from "a user clicked mint" to "a machine enrolled" — and null stays null
-      // rather than attributing the machine to a guess.
-      await setComputerOwner(db, computerId, verified.mintedByUserId)
-      // One-time (idempotent) collapse of any pre-fix duplicate local rows: retire
-      // every OTHER row sharing the local name. No-op once collapsed. Identity-only
-      // (by name) — never status-based, never touches a remote computer.
-      await retireStaleLocalComputers(db, { name: params.name, keepComputerId: computerId })
-    } else {
-      await registerComputer(db, {
-        id: computerId,
-        name: params.name,
-        platform: params.platform,
-        version: params.version,
-        capabilities: toCapabilityMap(params.capabilities),
-        authKeyId: minted.keyId,
-        now: at
-      })
-      await setComputerOwner(db, computerId, verified.mintedByUserId)
+    // The token is spent from here on: a throw below leaves it used with no computer,
+    // so say so in the redeem line rather than leaving the claim unexplained.
+    let minted: Awaited<ReturnType<typeof mintComputerApiKey>>
+    try {
+      minted = await enrollComputer(computerId, isLocal, ownerUserId, at, params)
+    } catch (err) {
+      auditJoinTokenRedeemRefused(verified.tokenId, 'enroll_failed')
+      throw err
     }
+    await recordJoinTokenRedeemed(db, { tokenId: verified.tokenId, computerId, ownerUserId })
 
     grace.set(key, { computerId, apiKey: minted.key, expiresAt: at + graceMs })
     if (params.hostId) {

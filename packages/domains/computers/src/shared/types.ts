@@ -47,6 +47,8 @@ export interface JoinToken {
   used_at: number | null
   /** Computer that eventually enrolled with this token. */
   computer_id: string | null
-  /** User who minted it; becomes that computer's owner at enroll. NULL = unowned. */
+  /** User who minted it. Kept for the record; the owner is `owner_user_id` (T-20). */
   minted_by_user_id?: string | null
+  /** User it is for; becomes the redeemed computer's owner. NULL = unowned (login off). */
+  owner_user_id?: string | null
 }

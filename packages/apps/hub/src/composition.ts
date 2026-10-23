@@ -156,7 +156,7 @@ import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import type { HubSsoBootConfig } from './boot-rules.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
 
-import { createHubUsersCapability } from './hub-users.js'
+import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin } from './web-sessions.js'
@@ -325,6 +325,8 @@ export function composeServer(opts: {
   // later unit reads these after `computersReady` to mount the gateway in server.ts.
   let computerGatewayRef: HubComputerGateway | null = null
   let hubAuthRef: HubAuth | null = null
+  // Who a join token is for (T-20), read through the late-bound ref above.
+  const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
@@ -1229,7 +1231,9 @@ export function composeServer(opts: {
       // Same late-bound ref the tRPC `computers.list` reads, so the REST twin
       // (`GET /api/computers`, what `slay computer ls` calls) can never report a
       // different connection status than the app's Computers tab.
-      getGateway: () => computerGatewayRef
+      getGateway: () => computerGatewayRef,
+      // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
+      findAccount: joinTokenAccounts
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
@@ -1366,6 +1370,9 @@ export function composeServer(opts: {
   setComputersDeps({
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
+    // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
+    // only on a hub with login. The REST twin reads the same function.
+    findAccount: joinTokenAccounts,
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and

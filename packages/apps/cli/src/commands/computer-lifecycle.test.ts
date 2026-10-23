@@ -65,6 +65,7 @@ import {
   writeUnit,
   type ServiceBackend
 } from '@slayzone/platform/service-unit'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
 import { readServiceLogTail } from '../service'
 
@@ -305,7 +306,9 @@ async function mintToken(port: number, root: string, label: string): Promise<str
           'content-type': 'application/json',
           authorization: `Bearer ${ownerToken}`
         },
-        body: JSON.stringify({ label })
+        // T-20: on a hub with login a token is minted FOR a named user — here the
+        // bootstrap owner, who then owns the computer.
+        body: JSON.stringify({ label, forUser: BOOTSTRAP_OWNER_EMAIL })
       })
       if (r.status !== 200) return null
       return (await r.json()) as { token: string }
@@ -483,9 +486,10 @@ async function main(): Promise<void> {
     await mintToken(hub.port, hub.root, `${NAME_PREFIX}warmup`)
 
     await test('mint --json prints a decodable token for the addressed hub', async () => {
-      const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {
-        root: rejectRoot
-      })
+      const res = slay(
+        ['--hub', String(hub.port), 'computer', 'mint', '--json', '--for', BOOTSTRAP_OWNER_EMAIL],
+        { root: rejectRoot }
+      )
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
       const out = JSON.parse(res.stdout) as { token: string; hubUrl: string }
       assert(out.token.startsWith('szjt1.'), `szjt1 token, got ${out.token.slice(0, 12)}…`)
@@ -498,9 +502,18 @@ async function main(): Promise<void> {
     })
 
     await test('mint warns that a loopback hub token is same-machine only', async () => {
-      const res = slay(['--hub', String(hub.port), 'computer', 'mint', `${NAME_PREFIX}warn`], {
-        root: rejectRoot
-      })
+      const res = slay(
+        [
+          '--hub',
+          String(hub.port),
+          'computer',
+          'mint',
+          `${NAME_PREFIX}warn`,
+          '--for',
+          BOOTSTRAP_OWNER_EMAIL
+        ],
+        { root: rejectRoot }
+      )
       assertEq(res.status, 0, `exited 0 (stderr: ${res.stderr})`)
       // A hub with no public address always embeds loopback. Silence here is how an operator
       // carries a dead token to another machine and gets no explanation.
@@ -518,12 +531,21 @@ async function main(): Promise<void> {
       assert(/Invalid --ttl/.test(res.stderr), `names the bad flag: ${res.stderr}`)
     })
 
-    // The token the happy path uses comes from the CLI, closing the loop: if
-    // `computer mint` and the raw REST mint ever disagree, the enroll below fails.
-    const token = await (async () => {
+    await test('mint on a hub with login refuses without --for and says how (T-20)', async () => {
       const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {
         root: rejectRoot
       })
+      assert(res.status !== 0, 'exited non-zero')
+      assert(/--for <email>/.test(res.stderr), `names --for: ${res.stderr}`)
+    })
+
+    // The token the happy path uses comes from the CLI, closing the loop: if
+    // `computer mint` and the raw REST mint ever disagree, the enroll below fails.
+    const token = await (async () => {
+      const res = slay(
+        ['--hub', String(hub.port), 'computer', 'mint', '--json', '--for', BOOTSTRAP_OWNER_EMAIL],
+        { root: rejectRoot }
+      )
       assertEq(res.status, 0, `mint for the happy path exited 0 (stderr: ${res.stderr})`)
       return (JSON.parse(res.stdout) as { token: string }).token
     })()
