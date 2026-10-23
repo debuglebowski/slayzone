@@ -10,6 +10,7 @@ import {
   describe
 } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
+import { bindRestPrincipal } from '../principal.js'
 import { registerPanelsCrudRoutes } from './crud.js'
 
 const h = await createTestHarness()
@@ -149,5 +150,54 @@ await describe('/api/panels', () => {
   })
 })
 
+// T-16: `panel_config` is per user. A request with a user (the hub's bearer gate
+// binds it; stood in for here by a header) reads and writes its own copy; a request
+// without one (a hub without login) keeps the global row the tests above used.
+const userApp = express()
+userApp.use(express.json())
+userApp.use((req, _res, next) => {
+  const user = req.headers['x-test-user']
+  if (typeof user === 'string')
+    bindRestPrincipal(req, { userId: user, role: 'user', scopes: ['full'] })
+  next()
+})
+registerPanelsCrudRoutes(userApp, { db: h.slayDb, notifyRenderer: () => {} })
+const userRest = await mountRestApp(userApp)
+const call = async <T>(method: string, path: string, user?: string, body?: unknown) => {
+  const res = await fetch(`${userRest.url}${path}`, {
+    method,
+    headers: {
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...(user ? { 'x-test-user': user } : {})
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  })
+  return { status: res.status, body: (await res.json()) as T }
+}
+
+await describe('/api/panels per user', () => {
+  test("a user's custom panel is theirs: not another user's, not the global config", async () => {
+    const created = await call<OneResponse>('POST', '/api/panels', 'user-a', {
+      name: 'A only',
+      url: 'https://a.example.com'
+    })
+    expect(created.status).toBe(200)
+    const has = async (user?: string) =>
+      (await call<ListResponse>('GET', '/api/panels', user)).body.data.some(
+        (p) => p.name === 'A only'
+      )
+    expect(await has('user-a')).toBe(true)
+    expect(await has('user-b')).toBe(false)
+    expect(await has(undefined)).toBe(false)
+    const row = h.db
+      .prepare(
+        `SELECT count(*) AS n FROM user_settings WHERE user_id = 'user-a' AND key = 'panel_config'`
+      )
+      .get() as { n: number }
+    expect(row.n).toBe(1)
+  })
+})
+
+await userRest.close()
 await rest.close()
 h.cleanup()

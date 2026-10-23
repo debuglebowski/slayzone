@@ -268,7 +268,9 @@ export function HomeView(): React.JSX.Element {
       projectId: selectedProjectId,
       title: `Terminal ${next}`,
       status: getDefaultStatus(project?.columns_config),
-      isTemporary: true
+      isTemporary: true,
+      // Opened right below — lets the hub hand it the project's warm agent.
+      openAfterCreate: true
     })
     if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
     data.setTasks((prev) => [task, ...prev])

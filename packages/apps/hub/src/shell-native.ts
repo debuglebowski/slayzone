@@ -4,9 +4,14 @@
 // `shell.showItemInFolder`. The Chromium-fork sidecar has no Electron host, so
 // we do them directly with per-OS commands (plain Node, no native deps). Covers
 // the Git + Editor panels' "Reveal in Finder" / "Open" actions.
+//
+// Each one execs or probes on the hub's own machine, so each is refused first on a
+// hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06): there is nobody at that machine
+// to see a window open, and a path probe would answer about the hub's disk.
 import { execFile } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 function openCommand(p: string): [string, string[]] {
   switch (process.platform) {
@@ -34,6 +39,7 @@ function revealCommand(p: string): [string, string[]] {
 
 /** Open a file/folder with the OS default handler. Resolves '' on success, else an error string. */
 export function openPath(absPath: string): Promise<string> {
+  assertHubLocalExecEnabled({ op: 'shell.open_path' })
   return new Promise((resolve) => {
     const [cmd, args] = openCommand(absPath)
     execFile(cmd, args, (err) => resolve(err ? String(err.message ?? err) : ''))
@@ -48,6 +54,7 @@ export function openPath(absPath: string): Promise<string> {
  * all accept URLs. Resolves '' on success, else an error string.
  */
 export function openExternal(url: string): Promise<string> {
+  assertHubLocalExecEnabled({ op: 'shell.open_external' })
   return new Promise((resolve) => {
     const [cmd, args] = openCommand(url)
     execFile(cmd, args, (err) => resolve(err ? String(err.message ?? err) : ''))
@@ -61,6 +68,7 @@ export function openExternal(url: string): Promise<string> {
  * whole Suspense load on the fork; implement it natively instead.
  */
 export function pathExists(absPath: string): Promise<boolean> {
+  assertHubLocalExecEnabled({ op: 'fs.pathExists' })
   return access(absPath).then(
     () => true,
     () => false
@@ -69,6 +77,7 @@ export function pathExists(absPath: string): Promise<boolean> {
 
 /** Reveal + select a path in the OS file manager. Fire-and-forget. */
 export function showItemInFolder(absPath: string): void {
+  assertHubLocalExecEnabled({ op: 'shell.show_item' })
   const [cmd, args] = revealCommand(absPath)
   execFile(cmd, args, () => {
     /* best-effort reveal */

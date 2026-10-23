@@ -24,6 +24,7 @@ import {
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { homedir } from 'os'
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
 import { electronApp, is } from '@electron-toolkit/utils'
@@ -81,6 +82,9 @@ import { attachRendererCsp } from './renderer-csp'
 import {
   probeRemoteHealth,
   hubLogin,
+  hubDeviceCode,
+  isHubOwnPage,
+  waitForHubDeviceToken,
   readBootConfig,
   writeBootSettings,
   resolveHubRegistry,
@@ -88,7 +92,6 @@ import {
   LOCAL_HUB_ID
 } from './boot-config'
 import type { HubEntry } from '@slayzone/types'
-import { installHubCertPinning, setPinnedHubs } from './hub-cert-pinning'
 import { setHubTokenCipher, setHubToken, getAllHubTokens } from './hub-tokens'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -395,7 +398,13 @@ import {
 } from '@slayzone/settings/theme'
 import { getClientRoot } from '@slayzone/platform'
 import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
+import { convexAddressFromUrl } from '@slayzone/platform/hub-convex'
 import { migrateClientSettings } from './client-settings-migration'
+
+// Inlined by electron.vite.config.ts (main `define`) from the SAME `VITE_CONVEX_URL` the
+// renderer is built with, so the hub is handed exactly the deployment the renderer names.
+declare const __SLAYZONE_CONVEX_URL__: string | undefined
+const BUILD_CONVEX_URL = typeof __SLAYZONE_CONVEX_URL__ === 'string' ? __SLAYZONE_CONVEX_URL__ : ''
 
 /**
  * One-shot latch for the Linux CLI-symlink warning. Client-scoped by nature —
@@ -432,7 +441,6 @@ async function markCliMigrationDialogShownLocally(): Promise<boolean> {
   return true
 }
 import {
-  wireWarmWindowCleanup,
   killAllPtys,
   shutdownAllPtys,
   killPtysByTaskId,
@@ -447,7 +455,6 @@ import {
   broadcastRespawnRequest,
   setReinstallHooks,
   beginTerminalShutdown,
-  teardownAllWarm,
   ptyEvents
 } from '@slayzone/terminal/electron'
 import { setOnTaskReachedTerminalHandler } from '@slayzone/terminal/server'
@@ -982,8 +989,6 @@ function shutdownSubprocessesForQuit(): Promise<void> {
   quitSubprocessCleanupPromise = (async () => {
     try {
       beginTerminalShutdown()
-      // Kill held warm shells and suppress re-arm before the pty sweep runs.
-      teardownAllWarm()
     } catch (err) {
       console.error('[main] quit subprocess cleanup failed in beginTerminalShutdown:', err)
     }
@@ -1956,9 +1961,6 @@ app
     // subscription and native OS theme changes derive from this one bus.
     wireNativeThemeBridge()
     const usageOps = buildUsageOps()
-    // Warm-process tab-count cleanup on window death — covers both the IPC and
-    // tRPC push paths (registered before any renderer window is created).
-    wireWarmWindowCleanup(app)
     logBoot('terminal runtime wired')
 
     setupFloatingGlobalAgentPanel(() => currentOverrides, { enableIpcHandlers: isPlaywright })
@@ -2447,6 +2449,9 @@ app
               // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
               // so the Diagnostics "Database" row can name the file.
               dbPath: getDatabasePath(),
+              // T-99: the Convex deployment THIS build's renderer signs in against. The
+              // hub starts GitHub sign-in only against it, never a URL a client names.
+              convexAddress: convexAddressFromUrl(BUILD_CONVEX_URL),
               env: {
                 ...process.env,
                 // The sidecar IS this app's hub, so hand it this app's own
@@ -2567,9 +2572,9 @@ app
     // and the computer /computers wss URL is on an OS-assigned port main never learns.
     // So main waits for the sidecar to report ready, then mints a join token over
     // LOOPBACK REST (`POST /api/computers/join-token`, which wraps the same store
-    // logic as the computers tRPC proc + returns the wss computer URL). It injects that
-    // token + url into the computer env; the computer decodes the token → cert
-    // fingerprint → dials wss with pinning → enrolls. If minting fails after
+    // logic as the computers tRPC proc + returns the computer URL). It injects that
+    // token + url into the computer env; the computer decodes the token → dials the
+    // hub's loopback ws:// URL → enrolls. If minting fails after
     // retries the computer is left UNSPAWNED — boot never crashes; the user can
     // still enroll remote computers via the UI.
     if (!isRemoteMode && process.env.SLAYZONE_E2E_NO_COMPUTER !== '1') {
@@ -2856,17 +2861,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       is.dev
     )
 
-    // Multi-hub: install the wss cert-pin verify proc on the renderer session.
-    // Only pinned remote-hub hosts are enforced; every other host defers to
-    // Chromium (empty pin map when single-hub → fully inert). The pin map is
-    // seeded on each app:get-hub-registry call (renderer fetches it at boot).
-    installHubCertPinning(session.defaultSession)
-    try {
-      const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
-      setPinnedHubs(resolveHubRegistry(cfg).filter((h) => h.kind === 'remote'))
-    } catch {
-      /* no registry yet — seeded lazily by app:get-hub-registry */
-    }
+    // No certificate verify proc: a remote hub's wss:// front end is verified by
+    // Chromium's own CA + hostname checks, like any other site. Nothing is pinned.
 
     // Block external app protocol launches from webviews by registering no-op handlers.
     // External protocol URLs (figma://, slack://, etc.) bypass will-navigate entirely —
@@ -3321,9 +3317,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           /* sidecar failed — leave url absent; renderer surfaces the toast */
         }
       }
-      // Multi-hub: refresh the main-process wss cert-pin map from the registry
-      // (remote hubs with a known fingerprint). No-op / empty when single-hub.
-      setPinnedHubs(hubs.filter((h) => h.kind === 'remote'))
       return { hubs, defaultHubId }
     })
     // Per-hub bearer tokens (safeStorage-encrypted, main-only). The renderer
@@ -3358,6 +3351,63 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: false as const, error: result.error }
       }
     )
+    // Sign in to a remote hub with Entra (T-14, device sign-in): no password in the app.
+    // `start` asks the hub for a code and opens its approval page in the SYSTEM browser
+    // (only when the page is on the hub's own host); the dialog shows the code; `wait`
+    // polls until the person approved there and stores the bearer like `app:hub-login`.
+    // One flow per dialog, keyed by an id the renderer holds; `cancel` stops polling.
+    const deviceFlows = new Map<
+      string,
+      {
+        hubId: string
+        url: string
+        code: { deviceCode: string; expiresInSec: number; intervalSec: number }
+        abort: AbortController
+      }
+    >()
+    ipcMain.handle(
+      'app:hub-device-login-start',
+      async (_event, payload: { hubId: string; url: string }) => {
+        const code = await hubDeviceCode(payload.url)
+        if (!code.ok) return code
+        const flowId = randomUUID()
+        deviceFlows.set(flowId, {
+          hubId: payload.hubId,
+          url: payload.url,
+          code,
+          abort: new AbortController()
+        })
+        const opened = isHubOwnPage(payload.url, code.verificationUri)
+        if (opened) void shell.openExternal(code.verificationUri)
+        return {
+          ok: true as const,
+          flowId,
+          userCode: code.userCode,
+          verificationUri: code.verificationUri,
+          opened
+        }
+      }
+    )
+    ipcMain.handle('app:hub-device-login-wait', async (_event, payload: { flowId: string }) => {
+      const flow = deviceFlows.get(payload.flowId)
+      if (!flow) return { ok: false as const, error: 'No sign-in in progress' }
+      try {
+        const result = await waitForHubDeviceToken(flow.url, flow.code, {
+          signal: flow.abort.signal
+        })
+        if (!result.ok) return result
+        setHubToken(getClientStateRoot(), flow.hubId, result.token, getLegacyClientStateRoot())
+        return { ok: true as const }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        deviceFlows.delete(payload.flowId)
+      }
+    })
+    ipcMain.handle('app:hub-device-login-cancel', (_event, payload: { flowId: string }) => {
+      deviceFlows.get(payload.flowId)?.abort.abort()
+      return { ok: true as const }
+    })
     // Writes the pre-boot config file. Throws on an unnormalizable URL.
     ipcMain.handle(
       'app:set-boot-settings',

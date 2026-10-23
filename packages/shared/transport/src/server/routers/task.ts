@@ -8,11 +8,12 @@ import {
   isHonoredConversation,
   deleteSession,
   InvalidTaskUpdateError,
+  type OpDeps,
   type TaskEventMap
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
-import { getTaskOps, getTaskOnMutation } from '../app-deps'
+import { getTaskBus, getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are
@@ -25,12 +26,21 @@ const updateInput = z.unknown() as unknown as z.ZodType<UpdateTaskInput>
 
 const ops = (): ReturnType<typeof getTaskOps> => getTaskOps()
 
-// Per-call OpDeps for the mutating procedures. No in-process IPC `:done` bus (ops
-// guard `ipcMain?.emit(...)`), but the host injects `onMutation` (notifyTasksChanged)
-// via `setTaskDeps`, so every tRPC mutation fires the same `notify.onTasksChanged`
-// renderer-refresh signal the legacy IPC handlers emit. A given renderer call uses
-// one transport (tRPC OR IPC), so this fires exactly once per mutation.
-const deps = (): { onMutation?: () => void } => ({ onMutation: getTaskOnMutation() })
+// Per-call OpDeps for the mutating procedures, all injected by the host via
+// `setTaskDeps`:
+//   - `ipcMain`: the hub's task bus, so the `db:tasks:*:done` events reach their
+//     listeners (integration push) for the renderer's mutations as they do for
+//     REST and MCP;
+//   - `onMutation` (notifyTasksChanged): the `notify.onTasksChanged` renderer
+//     refresh. A given renderer call uses one transport (tRPC OR IPC), so each fires
+//     exactly once per mutation;
+//   - the warm pool's reserve, for `create` (the renderer is the only caller that
+//     opens what it creates).
+const deps = (): Pick<OpDeps, 'ipcMain' | 'onMutation' | 'reserveWarmTaskId'> => ({
+  ipcMain: getTaskBus(),
+  onMutation: getTaskOnMutation(),
+  reserveWarmTaskId: getTaskReserveWarmTaskId()
+})
 
 // An update that breaks a task invariant (unknown status, bad priority) is the
 // caller's fault — surface it as BAD_REQUEST, not INTERNAL_SERVER_ERROR.
@@ -279,10 +289,13 @@ export const taskRouter = router({
 
   // --- Subscription ---
   // Fires on any task mutation. Replaces the renderer's `tasks:changed` polling once
-  // it cuts over (slice 5). Emits `void` — subscribers refetch.
+  // it cuts over (slice 5). Subscribers refetch. Emits the changed task's ids (it
+  // emitted nothing before; no client reads the value) so the owner gate can send
+  // each user only their own projects' changes (T-17).
   onChanged: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const handler = (): void => emit.next()
+    observable<{ taskId: string; projectId: string }>((emit) => {
+      const handler = (e: { taskId: string; projectId: string }): void =>
+        emit.next({ taskId: e.taskId, projectId: e.projectId })
       const events: (keyof TaskEventMap)[] = [
         'task:created',
         'task:archived',

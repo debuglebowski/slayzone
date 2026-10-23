@@ -205,6 +205,7 @@ function synthProject(entry: {
     lock_config: null,
     icon_letters: null,
     icon_image_path: null,
+    owner_user_id: null,
     sort_order: 0,
     created_at: nowIso(),
     updated_at: nowIso()

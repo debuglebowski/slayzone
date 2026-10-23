@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
 import { getDefaultStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import { insertTaskRow } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 
@@ -153,39 +154,38 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
 
       const providerConfig = await buildProviderConfig(db)
       const id = randomUUID()
-      const now = new Date().toISOString()
+      // Last on the board.
+      const { maxOrder } = (await db.get<{ maxOrder: number }>(
+        `SELECT COALESCE(MAX("order"), 0) AS maxOrder FROM tasks WHERE project_id = ?`,
+        [parent.project_id]
+      )) ?? { maxOrder: 0 }
 
       try {
-        await db.run(
-          `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, provider_config,
-             claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-             external_id, external_provider,
-             "order", created_at, updated_at, is_temporary)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = ?),
-             ?, ?, 0)`,
-          [
-            id,
-            parent.project_id,
-            parent.id,
-            body.title,
-            typeof body.description === 'string' ? body.description : null,
-            status,
-            priority,
-            terminalMode,
-            JSON.stringify(providerConfig),
-            providerConfig['claude-code']?.flags ?? '',
-            providerConfig['codex']?.flags ?? '',
-            providerConfig['cursor-agent']?.flags ?? '',
-            providerConfig['gemini']?.flags ?? '',
-            providerConfig['opencode']?.flags ?? '',
-            externalId ?? null,
-            externalId ? (externalProvider ?? null) : null,
-            parent.project_id,
-            now,
-            now
-          ]
-        )
+        // The shared insert, so the subtask gets its `task.created` history entry.
+        await insertTaskRow(db, {
+          id,
+          projectId: parent.project_id,
+          parentId: parent.id,
+          title: body.title,
+          description: typeof body.description === 'string' ? body.description : null,
+          descriptionFormat: 'markdown',
+          assignee: null,
+          status: status ?? getDefaultStatus(parentColumns),
+          priority,
+          dueDate: null,
+          terminalMode,
+          providerConfig,
+          isTemporary: false,
+          repoName: null,
+          dangerouslySkipPermissions: false,
+          panelVisibility: null,
+          panelSizes: null,
+          browserTabs: null,
+          webPanelUrls: null,
+          externalId: externalId ?? null,
+          externalProvider: externalProvider ?? null,
+          order: maxOrder + 1
+        })
       } catch (err) {
         // External-id UNIQUE race: another writer created the same subtask —
         // return theirs (CLI parity).

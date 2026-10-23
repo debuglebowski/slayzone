@@ -47,7 +47,10 @@ for (const sw of [
   'SLAYZONE_HUB_ENABLE_PROCESSES',
   'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
   'SLAYZONE_HUB_SSO_TENANT_ID',
-  'SLAYZONE_HUB_SSO_CLIENT_ID'
+  'SLAYZONE_HUB_SSO_CLIENT_ID',
+  'SLAYZONE_HUB_SSO_CERT_PATH',
+  'SLAYZONE_HUB_SSO_KEY_PATH',
+  'SLAYZONE_HUB_SSO_REQUIRE_MFA'
 ]) {
   check(`${sw} is infra`, ENV_MANIFEST[sw] === 'infra')
 }
@@ -68,6 +71,11 @@ check(
 check(
   'SLAYZONE_RUNNER_JOIN_TOKEN is retired (absent from manifest)',
   !('SLAYZONE_RUNNER_JOIN_TOKEN' in ENV_MANIFEST)
+)
+// T-23: describes THIS hub, like the switches; a terminal-started hub must not inherit it.
+check(
+  'SLAYZONE_HUB_SESSION_RETENTION_DAYS is infra',
+  ENV_MANIFEST.SLAYZONE_HUB_SESSION_RETENTION_DAYS === 'infra'
 )
 check('SLAYZONE_TASK_ID is identity', ENV_MANIFEST.SLAYZONE_TASK_ID === 'identity')
 check('SLAYZONE_RELEASE_CHANNEL is global', ENV_MANIFEST.SLAYZONE_RELEASE_CHANNEL === 'global')
@@ -127,6 +135,13 @@ check(
   'SLAYZONE_HOOK_CONTEXT is retired (absent from manifest → stripped)',
   !('SLAYZONE_HOOK_CONTEXT' in ENV_MANIFEST)
 )
+// Warm-pool agents named themselves by session id before they booted with a task id.
+// Every agent has SLAYZONE_TASK_ID now, so the session id is retired: unlisted, it is
+// stripped, and a stale inherited one can never point a terminal at another task.
+check(
+  'SLAYZONE_SESSION_ID is retired (absent from manifest)',
+  !('SLAYZONE_SESSION_ID' in ENV_MANIFEST)
+)
 
 // ── sanitizeSpawnEnv behavior ────────────────────────────────────────────────
 const base: NodeJS.ProcessEnv = {
@@ -164,6 +179,8 @@ const base: NodeJS.ProcessEnv = {
   SLAYZONE_HOOK_CONTEXT: '{"v":1,"taskId":"task-A"}',
   // retired pre-rename join-token name — likewise unmanifested → stripped
   SLAYZONE_RUNNER_JOIN_TOKEN: 'jointoken-retired',
+  // retired warm-agent session id — likewise unmanifested → stripped
+  SLAYZONE_SESSION_ID: 'pool-sess-A',
   // unmanifested SLAYZONE_* — must be stripped (fail closed)
   SLAYZONE_FUTURE_SECRET: 'oops',
   // non-prefixed infra — must be stripped
@@ -186,6 +203,7 @@ check('keeps global SLAYZONE_RELEASE_CHANNEL', out.SLAYZONE_RELEASE_CHANNEL === 
 check('keeps install anchor SLAYZONE_ROOT', out.SLAYZONE_ROOT === '/home/dev/.slayzone')
 check('keeps install selector SLAYZONE_DEV', out.SLAYZONE_DEV === '1')
 
+check('strips retired SLAYZONE_SESSION_ID (fail closed)', !('SLAYZONE_SESSION_ID' in out))
 check('strips secret SLAYZONE_HUB_TOKEN', !('SLAYZONE_HUB_TOKEN' in out))
 check('strips secret SLAYZONE_HUB_JOIN_TOKEN', !('SLAYZONE_HUB_JOIN_TOKEN' in out))
 check(

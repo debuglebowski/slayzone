@@ -3,8 +3,10 @@ import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
+import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '../../../context'
 import type { RestApiDeps } from '../types'
+import { respondSwitchRefusal } from '../switch-refusal'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
@@ -42,6 +44,14 @@ import type { RestApiDeps } from '../types'
  * account is `role: 'admin'`. Any signed-in account could otherwise add accounts,
  * disable others, or make itself admin. A `user` gets 403 (`not_admin`). The
  * bootstrap owner is created admin, so the owner file keeps working on the box.
+ *
+ * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
+ * role change, or `add` asking for an admin, answers 409 with the stable code
+ * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
+ * WITH PASSWORD SIGN-IN OFF (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10) `add` answers 403
+ * `HUB_PASSWORD_DISABLED`: every account it makes is a password account
+ * (hub-auth `createHubUser` refuses and writes the audit line). The rest is unchanged.
  *
  * ONE PATH, ONE ENTRY IN THE GATE. The bearer gate's `SELF_GUARDED` set
  * (`apps/hub/src/rest-auth.ts`) matches the pathname EXACTLY, so a
@@ -110,6 +120,20 @@ export function hubUsersAuthDecision(opts: {
 /** The internal identity that owns computer API keys — never operator-creatable. */
 const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
 
+/**
+ * Stable code of a role change (or an admin `add`) refused because the hub has Entra
+ * sign-in: there the role is the Entra app role, written at every sign-in (O-4).
+ */
+export const SSO_MANAGED_ROLE_CODE = 'SSO_MANAGED_ROLE'
+
+const SSO_MANAGED_ROLE = {
+  ok: false,
+  code: SSO_MANAGED_ROLE_CODE,
+  error:
+    'roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role ' +
+    'on the enterprise application — it applies at the account’s next sign-in'
+} as const
+
 const ROLES: readonly PrincipalRole[] = ['admin', 'user']
 const isRole = (value: unknown): value is PrincipalRole =>
   typeof value === 'string' && (ROLES as readonly string[]).includes(value)
@@ -157,7 +181,8 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ok: false,
         error:
           'hub user management needs an admin account — an admin can grant it with ' +
-          '`slay hub users role <email> admin`'
+          '`slay hub users role <email> admin`',
+        code: ADMIN_ONLY
       })
       return null
     }
@@ -226,11 +251,18 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ...(role === undefined ? {} : { role })
       })
       if (!result.ok) {
-        res.status(409).json({ ok: false, error: 'a user with that email already exists' })
+        res
+          .status(409)
+          .json(
+            result.reason === 'sso-managed'
+              ? SSO_MANAGED_ROLE
+              : { ok: false, error: 'a user with that email already exists' }
+          )
         return
       }
       res.json({ ok: true, data: result.user })
     } catch (err) {
+      if (respondSwitchRefusal(res, err)) return
       res.status(500).json({
         ok: false,
         error: 'failed to create user',
@@ -295,7 +327,12 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         case 'protected':
           res.status(409).json({
             ok: false,
-            error: `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity, not an account`
+            error:
+              email.toLowerCase() === COMPUTER_SERVICE_USER_EMAIL
+                ? `${COMPUTER_SERVICE_USER_EMAIL} is the internal computer service identity, not an account`
+                : // The other protected kind: a break-glass account (hub-auth break-glass.ts).
+                  `${email} is the break-glass account — only \`slayzone-hub break-glass\` on the ` +
+                  'hub machine opens or ends it'
           })
           return
         case 'last-user':
@@ -313,6 +350,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
               `refusing to ${change.role !== undefined ? 'demote' : 'disable'} the last enabled admin — ` +
               'make another account admin first (`slay hub users role <email> admin`)'
           })
+          return
+        case 'sso-managed':
+          res.status(409).json(SSO_MANAGED_ROLE)
           return
       }
     } catch (err) {

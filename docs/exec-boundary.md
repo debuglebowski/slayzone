@@ -73,6 +73,27 @@ requirement — not silently on the hub:
 - creating or removing a worktree
 - git probes against a workspace path
 
+## Hubs with processes switched off (T-06)
+
+On a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (the shared Normain hub) the hub never
+holds or touches project data. Every hub-local path above that is not hub storage —
+the zero-computer fallbacks (workspace fs, `gh`, the default worktree adapters) and the
+calls that never route yet (the git panel's `worktrees.*`, turn snapshots, file and
+autocomplete scans, shell probes, `slay init`, the OS opener) — refuses with
+`NO_COMPUTER_CONNECTED` ("Connect a computer") and one `hub.local_exec` audit line.
+Hub storage (`hubPathExists`, `removeArtifactDir`) and worktree colors stay; colors
+on such a hub stay empty because their detection runs git.
+
+The uploads that copy a path the client names off the hub's disk — `artifacts.upload`,
+`artifacts.uploadDir`, `projects.uploadIcon`, and `artifacts.pasteFiles` from anywhere
+but the hub's own artifact store — refuse the same way (T-107); bytes sent by the client
+(`artifacts.uploadBlob`, `POST /api/tasks/:id/artifacts`) never touch a client path.
+
+The desktop keeps every path above: its hub runs with the switch at `1`, and it
+depends on the hub-local git panel and on the fallback until its local computer
+enrolls. `pnpm lint:server-boundary` (`scripts/check-hub-exec-imports.mjs`) fails on a
+new process-spawning import in hub-bundled code that is not refused and allowlisted.
+
 ## Still undecided
 
 - **Background processes**: routing them means an async `doSpawn`, and they ignore a

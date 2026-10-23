@@ -27,6 +27,10 @@ import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import {
+  assertHubLocalExecEnabled,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
+import {
   removeWorktree,
   createWorktree,
   runWorktreeSetupScript,
@@ -41,6 +45,7 @@ import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   resolveWorktreeBasePathTemplate
 } from '@slayzone/worktrees/shared'
+import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 
 /**
  * The board's task ordering, defined once and interpolated by every list query
@@ -180,6 +185,19 @@ export interface TaskRuntimeAdapters {
 }
 
 /**
+ * The workspace ops below run on the hub's own disk, so each refuses first (as a
+ * rejection) on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06) — this default is
+ * live before the hub installs the routing adapter, and stays live if that init
+ * fails. Colors and the two hub-storage ops are hub-owned and stay.
+ */
+const onHubDisk =
+  <A extends unknown[], R>(op: string, fn: (...args: A) => R | Promise<R>) =>
+  async (...args: A): Promise<R> => {
+    assertHubLocalExecEnabled({ op: `worktree.${op}` })
+    return fn(...args)
+  }
+
+/**
  * Default exec adapters wrap today's direct imports 1:1 — the build-time
  * dependency on `@slayzone/worktrees/server` intentionally REMAINS this wave.
  * The seam (not the import) is what a later wave rebinds to a computer-backed
@@ -189,18 +207,25 @@ export interface TaskRuntimeAdapters {
 export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
   // so a routing impl can resolve which computer the work belongs to.
-  createWorktree: (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
-    createWorktree(repoPath, worktreePath, branch, sourceBranch),
-  removeWorktree: (_taskId, projectPath, worktreePath) => removeWorktree(projectPath, worktreePath),
-  runWorktreeSetupScript: (_taskId, worktreePath, repoPath, sourceBranch) =>
-    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch),
-  copyIgnoredFiles: (_taskId, repoPath, worktreePath, behavior, customPaths) =>
-    copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths),
-  getCurrentBranch: (_taskId, repoPath) => getCurrentBranch(repoPath),
-  isGitRepo: (_taskId, path) => isGitRepo(path),
+  createWorktree: onHubDisk('create', (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
+    createWorktree(repoPath, worktreePath, branch, sourceBranch)
+  ),
+  removeWorktree: onHubDisk('remove', (_taskId, projectPath, worktreePath) =>
+    removeWorktree(projectPath, worktreePath)
+  ),
+  runWorktreeSetupScript: onHubDisk('setup', (_taskId, worktreePath, repoPath, sourceBranch) =>
+    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
+  ),
+  copyIgnoredFiles: onHubDisk(
+    'copy_ignored',
+    (_taskId, repoPath, worktreePath, behavior, customPaths) =>
+      copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths)
+  ),
+  getCurrentBranch: onHubDisk('branch', (_taskId, repoPath) => getCurrentBranch(repoPath)),
+  isGitRepo: onHubDisk('is_git_repo', (_taskId, path) => isGitRepo(path)),
   getWorktreeColor,
   ensureProjectWorktreeColors,
-  pathExists: (_taskId, p) => existsSync(p),
+  pathExists: onHubDisk('path_exists', (_taskId, p) => existsSync(p)),
   hubPathExists: (p) => existsSync(p),
   removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
 }
@@ -475,11 +500,13 @@ export async function cleanupTaskFull(
   taskId: string,
   batchIds: string[] = [taskId]
 ): Promise<void> {
+  // Resolved first: an id that is not one plain path segment (`..` named the data dir)
+  // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
+  // is the single source of truth for the storage dir (<ROOT>/storage).
+  const artifactsBaseDir = artifactTaskDir(artifactsDirOf(runtimeAdapters.getDataRoot()), taskId)
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
-  // Clean up artifact files on disk. getDataRoot() is the single source of truth
-  // for the storage dir (the app wires it to getStorageDir() = <ROOT>/storage).
-  const artifactsBaseDir = path.join(runtimeAdapters.getDataRoot(), 'artifacts', taskId)
+  // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
   if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
@@ -539,7 +566,10 @@ function parseBooleanSetting(value: string | null | undefined): boolean {
   return value === '1' || value.toLowerCase() === 'true'
 }
 
-async function isAutoCreateWorktreeEnabled(db: SlayzoneDb, projectId: string): Promise<boolean> {
+export async function isAutoCreateWorktreeEnabled(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<boolean> {
   const projectRow = await db.get<{ auto_create_worktree_on_task_create: number | null }>(
     'SELECT auto_create_worktree_on_task_create FROM projects WHERE id = ?',
     [projectId]
@@ -572,7 +602,12 @@ export async function maybeAutoCreateWorktree(
   try {
     await createWorktreeForTask(db, taskId, projectId, taskTitle, repoName)
   } catch (err) {
-    if (err instanceof Error && err.name === 'NoComputerAvailableError') {
+    // A hub with processes switched off refuses the hub-local fallback the same way
+    // (`NO_COMPUTER_CONNECTED`, T-06) — same skip, never a failed create.
+    if (
+      (err instanceof Error && err.name === 'NoComputerAvailableError') ||
+      (isHubSwitchedOffError(err) && err.code === 'NO_COMPUTER_CONNECTED')
+    ) {
       runtimeAdapters.recordDiagnosticEvent({
         level: 'warn',
         source: 'task',
@@ -732,13 +767,22 @@ async function createWorktreeForTask(
     })
   }
 
-  // Fire-and-forget: don't block task creation on setup script
-  void runtimeAdapters.worktrees.runWorktreeSetupScript(
-    taskId,
-    worktreePath,
-    repoPath,
-    sourceBranch
-  )
+  // Fire-and-forget: don't block task creation on setup script. Caught: a routed run
+  // rejects (a script past the RPC timeout, a computer that went away), and unheard
+  // that rejection ended the hub's process (T-102).
+  runtimeAdapters.worktrees
+    .runWorktreeSetupScript(taskId, worktreePath, repoPath, sourceBranch)
+    .catch((err: unknown) => {
+      runtimeAdapters.recordDiagnosticEvent({
+        level: 'warn',
+        source: 'task',
+        event: 'task.auto_worktree_setup_failed',
+        taskId,
+        projectId,
+        message: err instanceof Error ? err.message : String(err),
+        payload: { worktreePath }
+      })
+    })
 }
 
 /**
@@ -1374,4 +1418,15 @@ export interface OpDeps {
    *  router injects ops with `{}` deps). Emit sites guard with `?.`. */
   ipcMain?: { emit(channel: string, ...args: unknown[]): boolean }
   onMutation?: () => void
+  /**
+   * The warm pool's `reserveWarmTaskId` (terminal domain). Injected rather than
+   * imported because terminal depends on task, never the reverse. Wired only where
+   * the pool runs (the hub) for the renderer's create; absent everywhere else, which
+   * simply means no task takes a warm agent's id.
+   */
+  reserveWarmTaskId?: (criteria: {
+    projectId: string
+    mode: string
+    flags: string | null
+  }) => Promise<string | null>
 }

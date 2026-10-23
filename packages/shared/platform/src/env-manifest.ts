@@ -64,14 +64,16 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // (name by what the value IS). `_SECRET` = a key you HOLD and sign with, vs
   // `_TOKEN` = a bearer you PRESENT (SLAYZONE_HUB_TOKEN above).
   SLAYZONE_HUB_AUTH_SECRET: 'secret',
-  // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url, the hub's
-  // TLS cert fingerprint, and a secret verified against the hub's `join_tokens`
+  // Hub-scoped by VALUE: the hub mints it, and it embeds the hub's url and a
+  // secret verified against the hub's `join_tokens`
   // row. `mintJoinToken` binds it to NO computer (computer_id stays NULL until
   // redemption), so any computer can redeem any unused token — there is no computer in
   // the value to name. Rule 2 (name by what the value IS, not who reads it).
   SLAYZONE_HUB_JOIN_TOKEN: 'secret',
-  // Entra OIDC client secret (SSO). Env only — never read from hub.config.json,
-  // never logged, never in a terminal.
+  // Retired before it was ever read: Entra sign-in authenticates with a certificate
+  // (SLAYZONE_HUB_SSO_CERT_PATH / _KEY_PATH below), and boot refuses a hub that still
+  // sets this (B7). Still classified `secret` so a leftover value never reaches a
+  // terminal or a log.
   SLAYZONE_HUB_SSO_CLIENT_SECRET: 'secret',
   // Per-boot bearer the desktop's `/cap` listener requires on every connection
   // (desktop-bridge-server.ts `verifyClient`). Loopback is NOT trusted there —
@@ -93,6 +95,9 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ADDRESS: 'infra',
   SLAYZONE_HUB_LISTEN_ADDRESS: 'infra', // hub-only; where the hub listens
   SLAYZONE_HUB_PUBLIC_ADDRESS: 'infra', // hub-only; how other machines reach it, written into join tokens
+  // Hub-only; the front ends (IPs/CIDRs, comma-separated) whose X-Forwarded-For names
+  // the client (client-address.ts). Not `_ADDRESS`: these are networks, not an authority.
+  SLAYZONE_HUB_TRUSTED_PROXIES: 'infra',
   // Per-hub switches (0|1) replacing SLAYZONE_MODE. Infra: they describe THIS hub
   // process, so a task terminal must not inherit them (a hub started from one would
   // otherwise pick up its parent's switches by accident).
@@ -103,10 +108,23 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'infra',
   SLAYZONE_HUB_SSO_TENANT_ID: 'infra',
   SLAYZONE_HUB_SSO_CLIENT_ID: 'infra',
+  // Paths to the Entra client certificate and its private key, and the MFA switch.
+  // Infra, not secret: a path is not the key (the file's own permissions protect it),
+  // but a task terminal must still never inherit a hub's SSO wiring.
+  SLAYZONE_HUB_SSO_CERT_PATH: 'infra',
+  SLAYZONE_HUB_SSO_KEY_PATH: 'infra',
+  SLAYZONE_HUB_SSO_REQUIRE_MFA: 'infra',
   // Operator-facing hub name (`slay hub ls`/`stop` address a hub by it). Infra,
   // not global: it identifies THIS hub process, so inheriting it into a task
   // terminal — which may target a different hub entirely — would mislabel.
   SLAYZONE_HUB_NAME: 'infra',
+  // Days THIS hub keeps session content (T-23, hub session-retention.ts); 0 = off, the
+  // default. Infra like the switches: a hub started from a task terminal must not
+  // inherit its parent's period and start deleting.
+  SLAYZONE_HUB_SESSION_RETENTION_DAYS: 'infra',
+  // The Convex deployment (host[:port]) the hub starts GitHub sign-in against — never
+  // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
+  SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect
@@ -141,7 +159,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // --- identity: per-task/agent; overlay re-adds the correct value per spawn ---
   SLAYZONE_TASK_ID: 'identity',
   SLAYZONE_PROJECT_ID: 'identity',
-  SLAYZONE_SESSION_ID: 'identity',
+  // `SLAYZONE_SESSION_ID` (a warm agent's pre-task identity) is RETIRED and
+  // deliberately unlisted: warm agents boot with SLAYZONE_TASK_ID now.
   SLAYZONE_AGENT_ID: 'identity',
   SLAYZONE_AGENT_HOOK_URL: 'identity',
   // Pairs with _HOOK_URL (where to post / who is posting). The pre-v4 name

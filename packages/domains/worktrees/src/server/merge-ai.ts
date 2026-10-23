@@ -1,5 +1,5 @@
-import { spawn } from 'child_process'
 import { homedir, platform } from 'os'
+import { hubSpawn } from './exec-async'
 
 export async function runAiCommand(mode: 'claude-code' | 'codex', prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -10,7 +10,7 @@ export async function runAiCommand(mode: 'claude-code' | 'codex', prompt: string
         ? ['--print', '--allow-dangerously-skip-permissions', prompt]
         : [prompt]
 
-    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = hubSpawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     let error = ''
 

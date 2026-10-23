@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { isPathSafeId } from '@slayzone/platform/safe-path'
 import { BlobStore } from './blob-store'
 import { betterSqliteTxn, type DbLike } from './db'
 import {
@@ -157,6 +158,11 @@ function seedInitialVersionsInWorker(
   const setCurrent = db.prepare('UPDATE task_artifacts SET current_version_id = ? WHERE id = ?')
 
   for (const row of needsSeed) {
+    // Ids are file names here; a row whose id is not one plain segment has no file.
+    if (!isPathSafeId(row.task_id) || !isPathSafeId(row.id)) {
+      skippedMissing++
+      continue
+    }
     const ext = getExtensionFromTitle(row.title) || '.txt'
     const filePath = join(artifactsDir, row.task_id, `${row.id}${ext}`)
     if (!existsSync(filePath)) {

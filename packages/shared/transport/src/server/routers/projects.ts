@@ -9,7 +9,7 @@ import {
   reorderProjects
 } from '@slayzone/projects/server'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 import { getComputersDepsOrNull } from '../app-deps'
 
 const createProjectInput = z.object({
@@ -54,7 +54,8 @@ export const projectsRouter = router({
           'Start the local computer (Settings → Connections) or enroll one, then try again.'
       )
     }
-    return createProject(ctx.db, input as CreateProjectInput)
+    // Owner = the signed-in user; null on a hub without login (no principal).
+    return createProject(ctx.db, input as CreateProjectInput, ctx.principal?.userId ?? null)
   }),
 
   update: publicProcedure
@@ -65,7 +66,9 @@ export const projectsRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(({ ctx, input }) => deleteProject(ctx.db, input.id, iconsDir(ctx.dataRoot))),
 
-  uploadIcon: publicProcedure
+  // Copies a client-named path off the hub's disk: refused on a hub with processes
+  // switched off, which holds no project files (T-06, T-107).
+  uploadIcon: hubLocalProcedure
     .input(z.object({ projectId: z.string(), sourcePath: z.string() }))
     .mutation(({ ctx, input }) =>
       uploadProjectIcon(ctx.db, iconsDir(ctx.dataRoot), input.projectId, input.sourcePath)

@@ -1,4 +1,6 @@
-import * as pty from 'node-pty'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+import type * as pty from 'node-pty'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { wrapShellWithUlimit } from '../shell-env'
 
@@ -145,9 +147,61 @@ export function spawnLocalPty(
   options: pty.IPtyForkOptions,
   transport: boolean
 ): pty.IPty {
-  if (transport) return pty.spawn(file, args, options)
+  const { spawn } = loadNodePty()
+  if (transport) return spawn(file, args, options)
   const wrapped = wrapShellWithUlimit(file, args)
-  return pty.spawn(wrapped.file, wrapped.args, options)
+  return spawn(wrapped.file, wrapped.args, options)
+}
+
+/**
+ * A local spawn on a hub whose node-pty is missing or does not load. node-pty is an
+ * OPTIONAL dependency of the published `@slayzone/hub` (T-30): `npm install` skips it
+ * when it cannot be built (no compiler), and a hub with
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` never spawns locally anyway.
+ */
+export class NodePtyUnavailableError extends Error {
+  readonly code = 'NODE_PTY_UNAVAILABLE'
+
+  constructor(cause: unknown) {
+    super(
+      'Terminals and agents cannot start in this hub process: node-pty is not installed ' +
+        `or does not load here (${cause instanceof Error ? cause.message : String(cause)}). ` +
+        'It is an optional dependency of @slayzone/hub, skipped when it cannot be built. ' +
+        'Run them on a connected computer, or reinstall the hub where node-pty builds.',
+      { cause }
+    )
+    this.name = 'NodePtyUnavailableError'
+  }
+}
+
+let nodePty: typeof pty | undefined
+
+/**
+ * node-pty, loaded on the first local spawn rather than at import. An import-time load
+ * is a top-level `require` in the hub's CJS bundle, which kills the boot of a hub that
+ * has no node-pty — including one that would never spawn (processes off). Not cached on
+ * failure, so a later spawn retries.
+ */
+function loadNodePty(): typeof pty {
+  if (nodePty) return nodePty
+  try {
+    nodePty =
+      typeof require === 'function'
+        ? // CJS bundle (the hub): esbuild keeps this call where it is, external, so it
+          // resolves at first use — from the bundle's node_modules or NODE_PATH (the
+          // desktop's packaged sidecar) exactly like the import it replaces.
+          (require('node-pty') as typeof pty)
+        : // Unbundled ESM source (tests under tsx/vitest): no `require` in scope, and
+          // `import.meta` is off limits — the hub's CJS bundle compiles this file too,
+          // where esbuild warns about it and empties it. Resolve from the entry script
+          // instead: in this repo it sits below the hoisted root node_modules.
+          (createRequire(process.argv[1] ?? join(process.cwd(), 'index.js'))(
+            'node-pty'
+          ) as typeof pty)
+  } catch (err) {
+    throw new NodePtyUnavailableError(err)
+  }
+  return nodePty
 }
 
 /** Default backend: spawn in-process via node-pty. The returned raw IPty is a

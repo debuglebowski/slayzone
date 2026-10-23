@@ -28,6 +28,7 @@ import {
   isBareAuthority,
   parseHubAddress
 } from '@slayzone/platform/hub-addr'
+import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { updateHubConfigFile } from '@slayzone/platform/slayzone-config'
 import {
   detectBackend,
@@ -47,6 +48,9 @@ import {
   writeHubConfig
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
+import { deviceSignIn, postAuthJson, readSignInMethods, signedInEmail } from '../hub-sign-in'
+import { hubOwnerPasswordCommand } from './hub-owner-password'
+import { hubBreakGlassCommand, hubComputersCommand } from './hub-break-glass'
 import {
   ensureLogDir,
   fail,
@@ -454,22 +458,25 @@ async function readPasswordFromStdin(): Promise<string> {
  * header the bearer plugin sets, falling back to a `token` field in the body. That
  * route is deliberately gate-exempt (`AUTH_BOOTSTRAP_PREFIX`) — it has to be
  * reachable without a credential, or a hub could never be authenticated at all.
+ * Sent with `postAuthJson`, not `fetch`: see `../hub-sign-in` (MISSING_OR_NULL_ORIGIN).
  */
 async function hubSignIn(baseUrl: string, email: string, password: string): Promise<string> {
   let res: Response
   try {
-    res = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-      signal: AbortSignal.timeout(10_000)
-    })
+    res = await postAuthJson(`${baseUrl}/api/auth/sign-in/email`, { email, password })
   } catch {
     fail(`Could not reach the hub at ${baseUrl}.`)
   }
   if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { code?: unknown; error?: unknown }
+    const code = body.code
+    // The hub has no password sign-in at all (T-10) — say so, not "check the password".
+    if (code === 'HUB_PASSWORD_DISABLED') {
+      fail(
+        `Sign-in refused: ${typeof body.error === 'string' ? body.error : 'password sign-in is off on this hub'}`
+      )
+    }
     // Only reachable with the right password (better-auth checks it first).
-    const code = ((await res.json().catch(() => ({}))) as { code?: unknown }).code
     if (code === 'ACCOUNT_DISABLED') {
       fail(
         'Sign-in refused: this account is disabled on the hub. An operator can enable it ' +
@@ -875,12 +882,22 @@ export function hubCommand(): Command {
           // and a first boot that fails (a taken port) must not swallow the one step
           // that makes the deployment usable. The config is already on disk at this
           // point, so the instruction is valid whether or not the hub comes up.
+          //
+          // A reachable hub writes no owner file (T-11): its first admin's password
+          // derives from the auth secret, which this unit holds, so sign in as it first.
+          const hubUrl = hubUrlFromAddr(publicAddress, 'http')
           console.log('')
-          console.log('This hub requires sign-in and public signup is closed, so create the')
-          console.log('first account on THIS machine — there is no other way in:')
-          console.log(`  slay hub users add <email> --hub ${name}`)
+          console.log('This hub requires sign-in and public signup is closed. Its first admin,')
+          console.log(
+            `${BOOTSTRAP_OWNER_EMAIL}, has a password derived from SLAYZONE_HUB_AUTH_SECRET.`
+          )
+          console.log('Sign in as it, then create accounts:')
+          console.log(
+            `  slay hub owner-password ${name} | slay hub login ${hubUrl} --email ${BOOTSTRAP_OWNER_EMAIL}`
+          )
+          console.log('  slay hub users add <email>')
           console.log('Then, from another machine:')
-          console.log(`  slay hub login ${hubUrlFromAddr(publicAddress, 'http')} --email <email>`)
+          console.log(`  slay hub login ${hubUrl} --email <email>`)
           console.log('')
         }
 
@@ -1139,34 +1156,66 @@ export function hubCommand(): Command {
   // needs one — so without this the only way to get a token was to read it out of
   // the desktop app's encrypted store by hand. This exchanges an account for one,
   // then stores it exactly as `use` does (0600 cli-hub-target.json).
+  //
+  // Which way is the hub's answer (`/health` switches), never a guess: a hub with
+  // Entra sign-in gets device sign-in (browser + MFA, no password here, T-14) unless
+  // `--email` asks for a password; a password hub needs `--email`.
   cmd
     .command('login <url>')
     .description('Sign in to a hub and store its bearer token for this CLI')
-    .requiredOption('--email <email>', 'Account email (see `slay hub users ls`)')
+    .option(
+      '--email <email>',
+      'Sign in with this account and a password (see `slay hub users ls`). ' +
+        'Omit on a hub with Microsoft sign-in: you approve in a browser instead'
+    )
     .option('--password <password>', 'Account password (omit to read from stdin)')
-    .action(async (rawUrl: string, opts: { email: string; password?: string }) => {
-      const url = normalizeHubUrl(rawUrl)
-      if (!url) fail(`Invalid hub URL (expected an http(s) URL): ${rawUrl}`)
-      // Prefer a piped password over an argv one: argv lands in the shell history
-      // and in `ps` output. Named `--password` still exists for scripts that
-      // already hold the secret in an env var.
-      const password = opts.password ?? (await readPasswordFromStdin())
-      if (!password) {
-        fail(
-          'No password given. Pass --password, or pipe it:\n' +
-            `  echo '<password>' | slay hub login ${rawUrl} --email ${opts.email}`
-        )
+    .option('--no-browser', 'Microsoft sign-in: print the page, do not try to open a browser')
+    .action(
+      async (rawUrl: string, opts: { email?: string; password?: string; browser: boolean }) => {
+        const url = normalizeHubUrl(rawUrl)
+        if (!url) fail(`Invalid hub URL (expected an http(s) URL): ${rawUrl}`)
+        const methods = await readSignInMethods(url)
+        let token: string
+        let who: string
+        if (opts.email === undefined) {
+          if (!methods.sso) {
+            fail(
+              `${url} signs in with an email and password:\n` +
+                `  echo '<password>' | slay hub login ${rawUrl} --email <email>`
+            )
+          }
+          token = await deviceSignIn(url, { openBrowser: opts.browser })
+          who = (await signedInEmail(url, token)) ?? 'your Microsoft account'
+        } else {
+          if (!methods.password) {
+            fail(
+              `Password sign-in is off on ${url}. Sign in through Microsoft instead:\n` +
+                `  slay hub login ${rawUrl}`
+            )
+          }
+          // Prefer a piped password over an argv one: argv lands in the shell history
+          // and in `ps` output. Named `--password` still exists for scripts that
+          // already hold the secret in an env var.
+          const password = opts.password ?? (await readPasswordFromStdin())
+          if (!password) {
+            fail(
+              'No password given. Pass --password, or pipe it:\n' +
+                `  echo '<password>' | slay hub login ${rawUrl} --email ${opts.email}`
+            )
+          }
+          token = await hubSignIn(url, opts.email, password)
+          who = opts.email
+        }
+        const configPath = writeHubConfig(url, token)
+        console.log(`Signed in to ${url} as ${who}.`)
+        console.log(`Token stored: ${configPath}`)
+        if (process.env.SLAYZONE_HUB_TOKEN) {
+          console.error(
+            'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
+          )
+        }
       }
-      const token = await hubSignIn(url, opts.email, password)
-      const configPath = writeHubConfig(url, token)
-      console.log(`Signed in to ${url} as ${opts.email}.`)
-      console.log(`Token stored: ${configPath}`)
-      if (process.env.SLAYZONE_HUB_TOKEN) {
-        console.error(
-          'Note: SLAYZONE_HUB_TOKEN is set in the environment and takes precedence over this config.'
-        )
-      }
-    })
+    )
 
   // slay hub current
   cmd
@@ -1247,6 +1296,13 @@ export function hubCommand(): Command {
 
   // slay hub users add|ls|disable|enable|role
   cmd.addCommand(hubUsersCommand())
+
+  // slay hub owner-password [name] — a reachable hub's first admin (T-11)
+  cmd.addCommand(hubOwnerPasswordCommand())
+
+  // slay hub computers ls|revoke|unrevoke, slay hub break-glass start|end
+  cmd.addCommand(hubComputersCommand())
+  cmd.addCommand(hubBreakGlassCommand())
 
   return cmd
 }

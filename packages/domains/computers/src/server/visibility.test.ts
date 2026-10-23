@@ -9,8 +9,10 @@ import {
   assertComputerVisible,
   claimComputer,
   grantComputerAccess,
+  isComputerOwnedBy,
   isComputerVisible,
   listVisibleComputerIds,
+  ownsEveryComputerOnHost,
   revokeComputerAccess,
   setComputerVisibility
 } from './visibility'
@@ -31,11 +33,13 @@ const own = async (id: string, userId: string): Promise<void> => {
 }
 
 describe('visibility', () => {
-  // Every row is unowned today — v161 deliberately did not backfill. Hiding them
-  // would strand every existing install behind a claim nobody knows to perform.
-  it('shows an UNOWNED computer to everyone', async () => {
+  // T-19: the hub cannot know whose machine an unowned computer is, so it is nobody's
+  // to use. An admin still sees it to manage it, and a hub without login sees all.
+  it("an UNOWNED computer is nobody's, but an admin manages it", async () => {
     const c = await add('legacy')
-    expect(await isComputerVisible(t.db, c, { userId: 'anyone' })).toBe(true)
+    expect(await isComputerVisible(t.db, c, { userId: 'anyone' })).toBe(false)
+    expect(await isComputerVisible(t.db, c, { userId: 'anyone', isHubAdmin: true })).toBe(true)
+    expect(await isComputerVisible(t.db, c, { userId: null })).toBe(true)
   })
 
   it('hides an owned private computer from other users', async () => {
@@ -45,18 +49,20 @@ describe('visibility', () => {
     expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(false)
   })
 
-  it('shows an owned computer to everyone once visibility is hub', async () => {
+  // O-6, T-19: strictly private. Neither stored knob opens a computer to anyone else.
+  it('visibility hub opens nothing', async () => {
     const c = await add('shared-box')
     await own(c, 'alice')
     await setComputerVisibility(t.db, c, 'hub')
-    expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(true)
+    expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(false)
+    expect(await isComputerVisible(t.db, c, { userId: 'alice' })).toBe(true)
   })
 
-  it('honours an explicit grant, and its removal', async () => {
+  it('a grant opens nothing', async () => {
     const c = await add('mine')
     await own(c, 'alice')
     await grantComputerAccess(t.db, { computerId: c, userId: 'bob', grantedByUserId: 'alice' })
-    expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(true)
+    expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(false)
     await revokeComputerAccess(t.db, c, 'bob')
     expect(await isComputerVisible(t.db, c, { userId: 'bob' })).toBe(false)
   })
@@ -133,5 +139,29 @@ describe('resolveTaskComputerIdOrDefault', () => {
     ).toBeNull()
     // No viewer = supervised hub, where filtering would be wrong.
     expect(await resolveTaskComputerIdOrDefault(t.db, taskId, connected)).toBe(c)
+  })
+})
+
+// T-15: a user may manage (revoke, delete, re-scope, rename) only what they own.
+describe('ownership, for the role gate', () => {
+  it("isComputerOwnedBy: only the owner; an unowned or absent computer is no one's", async () => {
+    const c = await add('mine')
+    expect(await isComputerOwnedBy(t.db, c, 'alice')).toBe(false)
+    await own(c, 'alice')
+    expect(await isComputerOwnedBy(t.db, c, 'alice')).toBe(true)
+    expect(await isComputerOwnedBy(t.db, c, 'bob')).toBe(false)
+    expect(await isComputerOwnedBy(t.db, 'no-such-id', 'alice')).toBe(false)
+  })
+
+  it('ownsEveryComputerOnHost: every computer on the machine, and at least one', async () => {
+    const a = await add('a')
+    const b = await add('b')
+    await t.db.run(`UPDATE computers SET host_id = 'h1' WHERE id IN (?, ?)`, [a, b])
+    await own(a, 'alice')
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'alice')).toBe(false)
+    await own(b, 'alice')
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'alice')).toBe(true)
+    expect(await ownsEveryComputerOnHost(t.db, 'h1', 'bob')).toBe(false)
+    expect(await ownsEveryComputerOnHost(t.db, 'no-such-host', 'alice')).toBe(false)
   })
 })

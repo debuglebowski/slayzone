@@ -276,9 +276,11 @@ async function attachComputerToHub(opts: {
   credentialsDir: string
   allowedRoots: string
   name: string
+  /** Who the computer is for (T-20): a hub with login mints only for a named user. */
+  forUser: string
 }): Promise<HubComputer> {
   const minted = (await withHubClient(opts.hubUrl, (c) =>
-    c.computers.mintJoinToken.mutate({ label: opts.name })
+    c.computers.mintJoinToken.mutate({ label: opts.name, forUser: opts.forUser })
   )) as { token: string }
   const payload = JSON.parse(
     Buffer.from(minted.token.slice(minted.token.indexOf('.') + 1), 'base64url').toString('utf8')
@@ -371,7 +373,8 @@ function attachDefaultComputer(hub: SecondHub, storeDir: string): Promise<HubCom
     rootDir: path.join(storeDir, 'computer-root'),
     credentialsDir: path.join(storeDir, 'computer-creds'),
     allowedRoots: storeDir,
-    name: 'e2e-remote-hub-computer'
+    name: 'e2e-remote-hub-computer',
+    forUser: hub.email
   })
 }
 

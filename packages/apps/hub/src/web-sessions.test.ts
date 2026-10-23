@@ -24,7 +24,17 @@ import {
   hashWebSessionToken,
   WEB_SESSION_TOKEN_PREFIX,
   WEB_SESSION_IDLE_MS,
-  WEB_SESSION_ABSOLUTE_MS
+  WEB_SESSION_ABSOLUTE_MS,
+  SSO_WEB_SESSION_LIFETIME,
+  DEFAULT_WEB_SESSION_LIFETIME,
+  hasLiveWebSession,
+  webSessionLifetimeFor,
+  webSessionCookie,
+  clearWebSessionCookie,
+  webSessionCookieSecure,
+  mintBrowserWebSession,
+  revokeWebSessionToken,
+  WEB_SESSION_COOKIE_NAME
 } from './web-sessions.js'
 
 const h = await createTestHarness()
@@ -136,6 +146,63 @@ await describe('idle refresh, capped at the absolute ceiling', () => {
   })
 })
 
+await describe('lifetime on a hub with Entra sign-in (O-8, T-12): 7 days absolute', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const sso = SSO_WEB_SESSION_LIFETIME
+
+  test('the lifetimes: SSO 7 days absolute; every other hub unchanged (7 idle / 30)', () => {
+    expect(sso).toEqual({ idleMs: 7 * DAY, absoluteMs: 7 * DAY })
+    expect(DEFAULT_WEB_SESSION_LIFETIME).toEqual({ idleMs: 7 * DAY, absoluteMs: 30 * DAY })
+    expect(webSessionLifetimeFor(null)).toBe(DEFAULT_WEB_SESSION_LIFETIME)
+  })
+
+  test('use does not extend it, and it ends exactly 7 days after minting', async () => {
+    const created = 50_000_000
+    const minted = await mintWebSession(h.slayDb, {
+      userId: 'u-sso',
+      scopes: ['read'],
+      lifetime: sso,
+      now: created
+    })
+    expect(minted.expiresAt).toBe(created + 7 * DAY)
+    expect((await verifyWebSessionToken(h.slayDb, minted.token, created + 6 * DAY, sso)).ok).toBe(
+      true
+    )
+    const row = await h.slayDb.get<{ expires_at: number }>(
+      `SELECT expires_at FROM web_sessions WHERE id = ?`,
+      [minted.id]
+    )
+    expect(row!.expires_at).toBe(created + 7 * DAY) // not slid
+    const late = await verifyWebSessionToken(h.slayDb, minted.token, created + 7 * DAY, sso)
+    expect(late.ok).toBe(false)
+    if (!late.ok) expect(late.reason).toBe('expired')
+  })
+
+  test('a row minted under the 30-day ceiling ends at 7 days once the hub has Entra sign-in', async () => {
+    const created = 60_000_000
+    const minted = await mintWebSession(h.slayDb, {
+      userId: 'u-old',
+      scopes: ['read'],
+      now: created
+    })
+    // Kept alive by use under the old lifetime...
+    expect((await verifyWebSessionToken(h.slayDb, minted.token, created + 6 * DAY)).ok).toBe(true)
+    // ...but past 7 days from minting it no longer verifies under the SSO one.
+    const result = await verifyWebSessionToken(h.slayDb, minted.token, created + 8 * DAY, sso)
+    expect(result.ok).toBe(false)
+  })
+
+  test('hasLiveWebSession: unrevoked, unexpired, within the absolute limit', async () => {
+    const now = 70_000_000
+    await mintWebSession(h.slayDb, { userId: 'u-live', scopes: ['read'], lifetime: sso, now })
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + DAY)).toBe(true)
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + 7 * DAY)).toBe(false)
+    expect(await hasLiveWebSession(h.slayDb, 'u-nobody', sso, now)).toBe(false)
+    await revokeAllWebSessions(h.slayDb, 'u-live')
+    expect(await hasLiveWebSession(h.slayDb, 'u-live', sso, now + DAY)).toBe(false)
+  })
+})
+
 await describe('listWebSessions / revokeAllWebSessions', () => {
   test('lists only live (unrevoked) sessions for a user, newest first', async () => {
     const a = await mintWebSession(h.slayDb, { userId: 'u8', scopes: ['read'], now: 1000 })
@@ -194,6 +261,77 @@ await describe('audit (T-03)', () => {
         detail: { count: 1 }
       })
       expect(JSON.stringify(audit)).not.toContain(minted.token)
+    } finally {
+      setSecurityLogSink()
+    }
+  })
+})
+
+await describe('the browser cookie (T-13)', () => {
+  test('Secure exactly when the public address is https: set and not loopback', () => {
+    expect(webSessionCookieSecure('hub.normain.com')).toBe(true)
+    expect(webSessionCookieSecure('hub.normain.com:8443')).toBe(true)
+    expect(webSessionCookieSecure('10.0.0.5:8765')).toBe(true)
+    expect(webSessionCookieSecure(undefined)).toBe(false)
+    expect(webSessionCookieSecure('127.0.0.1:8765')).toBe(false)
+    expect(webSessionCookieSecure('localhost:8765')).toBe(false)
+    expect(webSessionCookieSecure('[::1]:8765')).toBe(false)
+  })
+
+  test('HttpOnly, SameSite=Lax, Path=/, Max-Age; Secure only when asked', () => {
+    const https = webSessionCookie('szw_t', { secure: true, maxAgeSec: 604800 })
+    expect(https).toBe(
+      `${WEB_SESSION_COOKIE_NAME}=szw_t; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=604800`
+    )
+    const loopback = webSessionCookie('szw_t', { secure: false, maxAgeSec: 60 })
+    expect(loopback).toBe(
+      `${WEB_SESSION_COOKIE_NAME}=szw_t; Path=/; HttpOnly; SameSite=Lax; Max-Age=60`
+    )
+    expect(clearWebSessionCookie({ secure: true })).toBe(
+      `${WEB_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0`
+    )
+    expect(clearWebSessionCookie({ secure: false })).toBe(
+      `${WEB_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+    )
+  })
+
+  test('mintBrowserWebSession: scoped row + its cookie, lifetime as Max-Age (https vs loopback)', async () => {
+    const https = await mintBrowserWebSession(null, h.slayDb, 'u-cookie', { secure: true })
+    expect(https.setCookie).toBe(
+      webSessionCookie(https.token, { secure: true, maxAgeSec: WEB_SESSION_IDLE_MS / 1000 })
+    )
+    const verified = await verifyWebSessionToken(h.slayDb, https.token)
+    expect(verified.ok && verified.scopes).toEqual(['read', 'tasks', 'agent'])
+    const loopback = await mintBrowserWebSession(null, h.slayDb, 'u-cookie', { secure: false })
+    expect(loopback.setCookie.includes('Secure')).toBe(false)
+    expect(loopback.setCookie.includes('HttpOnly')).toBe(true)
+  })
+
+  test('mintBrowserWebSession revokes the session the browser cookie still names', async () => {
+    const first = await mintBrowserWebSession(null, h.slayDb, 'u-replace', { secure: false })
+    const second = await mintBrowserWebSession(null, h.slayDb, 'u-replace', {
+      secure: false,
+      replacing: first.token
+    })
+    expect((await verifyWebSessionToken(h.slayDb, first.token)).ok).toBe(false)
+    expect((await verifyWebSessionToken(h.slayDb, second.token)).ok).toBe(true)
+  })
+
+  test('revokeWebSessionToken: revokes as the token user, null when nothing is live', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    try {
+      const minted = await mintWebSession(h.slayDb, { userId: 'u-out', scopes: ['read'] })
+      expect(await revokeWebSessionToken(h.slayDb, minted.token)).toEqual({
+        id: minted.id,
+        userId: 'u-out'
+      })
+      expect(await revokeWebSessionToken(h.slayDb, minted.token)).toBe(null)
+      expect(await revokeWebSessionToken(h.slayDb, 'szw_unknown')).toBe(null)
+      const revoke = audit.filter((l) => l.event === 'auth.web_session.revoke')
+      expect(revoke.length).toBe(1)
+      expect(revoke[0]!.actor).toBe('u-out')
+      expect(revoke[0]!.outcome).toBe('success')
     } finally {
       setSecurityLogSink()
     }

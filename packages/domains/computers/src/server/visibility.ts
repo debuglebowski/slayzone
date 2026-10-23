@@ -1,23 +1,22 @@
 /**
- * Who may see and use a computer.
+ * Who may see and use a computer — the store-level (SQL) form.
  *
  * A computer is one OS user's environment: its `$HOME`, its credentials, its
  * ptys. Binding a task to someone else's computer is therefore CODE EXECUTION in
- * that person's account — which is why this is enforced in the STORE and not in a
- * router. Every mutation that accepts a computer id goes through
- * {@link assertComputerVisible}; a check that lives one layer up is a check the
- * next caller forgets.
+ * that person's account.
  *
- * The predicate, in one place so it cannot drift between the list and the guard:
+ * On a hub, requests are decided by T-17's `canAccess` on the `computer` resource
+ * (transport `computer-access.ts`, T-19): its owner, nobody else; an admin manages
+ * (lists, renames, revokes) but never uses one. The predicate here is the same rule
+ * as SQL, for store queries that take a viewer:
  *
- *   unowned            — visible to everyone. Every row is unowned today (v161
- *                        deliberately did not backfill), and hiding them would
- *                        strand existing installs behind a claim nobody knows to
- *                        perform. `claimComputer` is how that ends.
- *   owner              — always
- *   visibility = 'hub' — any authenticated user on this hub
- *   explicit grant     — a row in `computer_grants`
- *   hub admin          — org-level role, not a notion invented here
+ *   owner              — always, and nobody else (O-6: strictly private). An
+ *                        unowned computer is nobody's; `visibility = 'hub'` and
+ *                        `computer_grants` open nothing (they stay stored, inert).
+ *   hub admin          — every computer, and only for MANAGEMENT: see
+ *                        {@link ComputerViewer.isHubAdmin}
+ *   no user            — everything: a hub without login (the desktop app's) has
+ *                        one human and no identities.
  *
  * @module computers/server/visibility
  */
@@ -28,6 +27,15 @@ export interface ComputerViewer {
   /** Null = unauthenticated. Only reachable on a supervised hub, where the
    *  Electron host owns the process and there is exactly one user. */
   userId: string | null
+  /**
+   * The viewer is a hub admin AND is managing computers: listing them, revoking,
+   * deleting, changing visibility. Sees every computer for that.
+   *
+   * NEVER set it for a guard that puts work on a computer or reads from one
+   * (binding a task, spawning, browsing files): an admin manages accounts and
+   * machines and has no read path to anyone's sessions, prompts, files or computers
+   * (O-4). Such a guard uses the plain viewer, where an admin is a user like any other.
+   */
   isHubAdmin?: boolean
 }
 
@@ -43,16 +51,7 @@ export function visibilityClause(viewer: ComputerViewer): { sql: string; params:
   // would break the desktop app for no gain.
   if (!viewer.userId) return { sql: '1 = 1', params: [] }
   if (viewer.isHubAdmin) return { sql: '1 = 1', params: [] }
-  return {
-    sql: `(
-      owner_user_id IS NULL
-      OR owner_user_id = ?
-      OR visibility = 'hub'
-      OR EXISTS (SELECT 1 FROM computer_grants g
-                  WHERE g.computer_id = computers.id AND g.user_id = ?)
-    )`,
-    params: [viewer.userId, viewer.userId]
-  }
+  return { sql: 'owner_user_id = ?', params: [viewer.userId] }
 }
 
 export async function listVisibleComputerIds(
@@ -96,6 +95,34 @@ export async function assertComputerVisible(
   if (!(await isComputerVisible(db, computerId, viewer))) {
     throw new Error('no such computer, or you do not have access to it')
   }
+}
+
+/** Whether `userId` owns the computer. An unowned or absent computer is owned by no one. */
+export async function isComputerOwnedBy(
+  db: SlayzoneDb,
+  computerId: string,
+  userId: string
+): Promise<boolean> {
+  const row = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM computers WHERE id = ? AND owner_user_id = ?`,
+    [computerId, userId]
+  )
+  return (row?.n ?? 0) > 0
+}
+
+/** Whether `userId` owns every computer on a machine (`host_id`), and there is one. */
+export async function ownsEveryComputerOnHost(
+  db: SlayzoneDb,
+  hostId: string,
+  userId: string
+): Promise<boolean> {
+  const row = await db.get<{ total: number; mine: number }>(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN owner_user_id = ? THEN 1 ELSE 0 END), 0) AS mine
+       FROM computers WHERE host_id = ?`,
+    [userId, hostId]
+  )
+  return (row?.total ?? 0) > 0 && row?.total === row?.mine
 }
 
 /** Take ownership of an unowned computer. Never reassigns an owned one. */

@@ -7,7 +7,10 @@
  * for the design this implements. Sign-in itself is scoped: `mintWebSession`
  * is called AFTER better-auth's own `signInEmail` has already succeeded and
  * been discarded (see the `/api/auth/web-login` route), so the full session
- * that authenticated the human never leaves this process.
+ * that authenticated the human never leaves this process. Entra sign-in (T-13,
+ * `/api/auth/web-sso`) cannot keep it in: better-auth's callback sets its session
+ * cookie (HttpOnly) for the one redirect back to the hub, which ends that session
+ * as it mints the scoped one (hub-auth `web-sign-in.ts`).
  *
  * TOKEN FORMAT: `szw_<43 chars base64url>` (32 random bytes). The `szw_`
  * prefix is load-bearing at the resolver: `resolveConnectionPrincipal` and the
@@ -21,8 +24,14 @@
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { securityEvent } from '@slayzone/platform/security-log'
-import { findHubAccount, type HubAuth } from '@slayzone/hub-auth/server'
+import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
+import { isLoopbackAuthority } from '@slayzone/platform/hub-addr'
+import {
+  currentSecurityContext,
+  runAsSecurityActor,
+  securityEvent
+} from '@slayzone/platform/security-log'
+import { findHubAccount, type HubAuth, isEntraSsoAuth } from '@slayzone/hub-auth/server'
 import type { HubRole } from '@slayzone/hub-auth'
 import type { Scope } from '@slayzone/transport/server'
 
@@ -38,14 +47,27 @@ export const DEFAULT_WEB_LOGIN_SCOPES: readonly Scope[] = ['read', 'tasks', 'age
 export const WEB_SESSION_TOKEN_PREFIX = 'szw_'
 
 /**
- * The cookie a browser session's token rides in. `HttpOnly; Secure;
- * SameSite=Lax; Path=/` — set by the login route, read by the REST bearer
- * resolver. `Lax` (not `Strict`) so a link from Slack/email lands signed in;
- * the CSRF control for state-changing requests is the WS/HTTP origin check
- * (`ws-origin.ts` and its future REST-side counterpart), not the cookie's
- * SameSite attribute alone.
+ * The cookie a browser session's token rides in — the ONLY place the web shell keeps it
+ * (T-13): nothing in `localStorage`, and `/trpc` and REST both read it. Built by
+ * {@link webSessionCookie} (`HttpOnly; SameSite=Lax; Path=/`, `Secure` on an https
+ * hub), set by the two sign-ins (`/api/auth/web-login`, `/api/auth/web-sso`), read by
+ * `verifyRestBearer` and the `/trpc` context, cleared by `/api/auth/web-logout`.
+ *
+ * `Lax`, not `Strict`: sign-in through Entra is a chain of top-level redirects that
+ * starts on login.microsoftonline.com, and `Strict` withholds the cookie from every
+ * request in a navigation another site started (that chain, a link from Teams or mail).
+ * `Lax` still keeps it off every cross-site subresource request, form POST, fetch and
+ * WebSocket handshake — the forgeable ones. The CSRF control itself is the request's
+ * `Origin`: a cookie authenticates a `/trpc` socket or a state-changing request only
+ * from the hub's own page (ws-origin.ts `cookieOriginDecision`), never SameSite alone.
  */
 export const WEB_SESSION_COOKIE_NAME = 'slayzone_web_session'
+
+/** `POST`: is this browser's web-session cookie live? (web-session-routes.ts) */
+export const WEB_SESSION_STATUS_PATH = '/api/auth/web-session'
+
+/** `POST`: end this browser's web session and clear its cookie (web-session-routes.ts). */
+export const WEB_LOGOUT_PATH = '/api/auth/web-logout'
 
 /** Default lifetime for a freshly-minted web session (7 days), and the
  *  absolute ceiling `refreshWebSession` will never extend past (30 days from
@@ -53,6 +75,69 @@ export const WEB_SESSION_COOKIE_NAME = 'slayzone_web_session'
  *  used token must still die eventually). */
 export const WEB_SESSION_IDLE_MS = 7 * 24 * 60 * 60 * 1000
 export const WEB_SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * How long a web session lives: `idleMs` after its last use, and never past
+ * `absoluteMs` after it was minted.
+ */
+export interface WebSessionLifetime {
+  idleMs: number
+  absoluteMs: number
+}
+
+/** Every hub without Entra sign-in (the desktop app's included): unchanged, 7 days idle
+ *  within 30 days. */
+export const DEFAULT_WEB_SESSION_LIFETIME: WebSessionLifetime = {
+  idleMs: WEB_SESSION_IDLE_MS,
+  absoluteMs: WEB_SESSION_ABSOLUTE_MS
+}
+
+/**
+ * A hub with Entra sign-in (O-8, T-12): 7 days ABSOLUTE — use does not extend it. No
+ * shorter idle limit: a leaver is ended by disabling (which revokes) or by the hourly
+ * Entra re-check, not by a browser going quiet, and a daily sign-in would only add
+ * friction.
+ */
+export const SSO_WEB_SESSION_LIFETIME: WebSessionLifetime = {
+  idleMs: 7 * 24 * 60 * 60 * 1000,
+  absoluteMs: 7 * 24 * 60 * 60 * 1000
+}
+
+/** The lifetime web sessions get on the hub `auth` belongs to. */
+export function webSessionLifetimeFor(auth: HubAuth | null): WebSessionLifetime {
+  return auth && isEntraSsoAuth(auth) ? SSO_WEB_SESSION_LIFETIME : DEFAULT_WEB_SESSION_LIFETIME
+}
+
+/**
+ * Is the web-session cookie `Secure`? Exactly when the hub's public address is https:
+ * set and not loopback (rule A1, the test HSTS uses in security-headers.ts). A hub
+ * nobody else reaches is served over plain http, where a browser may refuse a `Secure`
+ * cookie — and where nothing leaves the machine.
+ */
+export function webSessionCookieSecure(publicAddress: string | undefined): boolean {
+  return publicAddress !== undefined && !isLoopbackAuthority(publicAddress)
+}
+
+/** Seconds a fresh session's cookie lives: as long as the session can (T-12). */
+export function webSessionCookieMaxAgeSec(lifetime: WebSessionLifetime): number {
+  return Math.floor(Math.min(lifetime.idleMs, lifetime.absoluteMs) / 1000)
+}
+
+const cookieAttributes = (secure: boolean): string =>
+  `Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`
+
+/** The `Set-Cookie` value that carries a web session (see {@link WEB_SESSION_COOKIE_NAME}). */
+export function webSessionCookie(
+  token: string,
+  opts: { secure: boolean; maxAgeSec: number }
+): string {
+  return `${WEB_SESSION_COOKIE_NAME}=${token}; ${cookieAttributes(opts.secure)}; Max-Age=${opts.maxAgeSec}`
+}
+
+/** The `Set-Cookie` value that removes it (same attributes, so the browser matches it). */
+export function clearWebSessionCookie(opts: { secure: boolean }): string {
+  return `${WEB_SESSION_COOKIE_NAME}=; ${cookieAttributes(opts.secure)}; Max-Age=0`
+}
 
 export interface WebSessionRow {
   id: string
@@ -69,6 +154,8 @@ export interface MintWebSessionInput {
   userId: string
   scopes: readonly Scope[]
   label?: string | null
+  /** Default {@link DEFAULT_WEB_SESSION_LIFETIME}. */
+  lifetime?: WebSessionLifetime
   /** Clock override for tests. */
   now?: number
 }
@@ -102,7 +189,8 @@ export async function mintWebSession(
   const now = input.now ?? Date.now()
   const token = `${WEB_SESSION_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
   const id = randomUUID()
-  const expiresAt = now + WEB_SESSION_IDLE_MS
+  const lifetime = input.lifetime ?? DEFAULT_WEB_SESSION_LIFETIME
+  const expiresAt = now + Math.min(lifetime.idleMs, lifetime.absoluteMs)
   await db.run(
     `INSERT INTO web_sessions
        (id, user_id, token_hash, scopes_json, label, created_at, expires_at, revoked_at)
@@ -134,26 +222,32 @@ export type VerifyWebSessionResult =
 
 /**
  * Verify a token and, on success, slide its idle expiry forward — capped at
- * `WEB_SESSION_ABSOLUTE_MS` from ORIGINAL `created_at`, never from the refresh
- * itself, so a continuously-used stolen token still dies within 30 days.
+ * `lifetime.absoluteMs` from ORIGINAL `created_at`, never from the refresh
+ * itself, so a continuously-used stolen token still dies within 30 days (7 on a hub
+ * with Entra sign-in, where idle = absolute and nothing slides).
  *
- * Fails CLOSED on anything but a clean hit: unknown hash, `revoked_at` set, or
- * past `expires_at` are all `ok: false` — never throws, matching the fail-quiet
- * shape `verifySession`/`verifyRestBearer` already establish for this codebase.
+ * Fails CLOSED on anything but a clean hit: unknown hash, `revoked_at` set, past
+ * `expires_at`, or older than the absolute limit (a row minted under a longer one, on
+ * a hub that has since turned Entra sign-in on) are all `ok: false` — never throws,
+ * matching the fail-quiet shape `verifySession`/`verifyRestBearer` already establish
+ * for this codebase. This checks the ROW only; {@link resolveWebSession} also checks
+ * the account behind it.
  */
 export async function verifyWebSessionToken(
   db: SlayzoneDb,
   token: string,
-  now = Date.now()
+  now = Date.now(),
+  lifetime: WebSessionLifetime = DEFAULT_WEB_SESSION_LIFETIME
 ): Promise<VerifyWebSessionResult> {
   const row = await db.get<WebSessionRow>(`SELECT * FROM web_sessions WHERE token_hash = ?`, [
     hashWebSessionToken(token)
   ])
   if (!row) return { ok: false, reason: 'unknown' }
   if (row.revoked_at !== null) return { ok: false, reason: 'revoked' }
-  if (row.expires_at <= now) return { ok: false, reason: 'expired' }
+  const ceiling = row.created_at + lifetime.absoluteMs
+  if (row.expires_at <= now || ceiling <= now) return { ok: false, reason: 'expired' }
 
-  const slidExpiry = Math.min(now + WEB_SESSION_IDLE_MS, row.created_at + WEB_SESSION_ABSOLUTE_MS)
+  const slidExpiry = Math.min(now + lifetime.idleMs, ceiling)
   if (slidExpiry > row.expires_at) {
     // Best-effort refresh — a write failure here must not fail the request
     // that is already legitimately authenticated by the row just read.
@@ -196,11 +290,30 @@ export async function resolveWebSession(
   db: SlayzoneDb,
   token: string
 ): Promise<WebSessionPrincipal | null> {
-  const result = await verifyWebSessionToken(db, token)
+  const result = await verifyWebSessionToken(db, token, Date.now(), webSessionLifetimeFor(auth))
   if (!result.ok || !auth) return null
   const account = await findHubAccount(auth, result.userId)
   if (!account || account.disabled) return null
   return { userId: result.userId, role: account.role, scopes: result.scopes }
+}
+
+/**
+ * True when the user holds a web session that would still verify (the Entra re-check
+ * asks only about accounts somebody is signed in to).
+ */
+export async function hasLiveWebSession(
+  db: SlayzoneDb,
+  userId: string,
+  lifetime: WebSessionLifetime = DEFAULT_WEB_SESSION_LIFETIME,
+  now = Date.now()
+): Promise<boolean> {
+  const row = await db.get<{ id: string }>(
+    `SELECT id FROM web_sessions
+     WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? AND created_at > ?
+     LIMIT 1`,
+    [userId, now, now - lifetime.absoluteMs]
+  )
+  return row !== undefined
 }
 
 export async function listWebSessions(db: SlayzoneDb, userId: string): Promise<WebSessionRow[]> {
@@ -231,6 +344,53 @@ export async function revokeWebSession(
   return result.changes > 0
 }
 
+/**
+ * Revoke the session a token names: a browser signing out, or replacing its session at
+ * a new sign-in. Audited as the token's own user. Null when no live (unrevoked) row has
+ * that token — nothing to end.
+ */
+export async function revokeWebSessionToken(
+  db: SlayzoneDb,
+  token: string,
+  now = Date.now()
+): Promise<{ id: string; userId: string } | null> {
+  const row = await db.get<Pick<WebSessionRow, 'id' | 'user_id'>>(
+    `SELECT id, user_id FROM web_sessions WHERE token_hash = ? AND revoked_at IS NULL`,
+    [hashWebSessionToken(token)]
+  )
+  if (!row) return null
+  await runAsSecurityActor(row.user_id, () => revokeWebSession(db, row.id, now))
+  return { id: row.id, userId: row.user_id }
+}
+
+/**
+ * A browser's sign-in — password (`webLogin`) or Entra (`/api/auth/web-sso`): mint its
+ * scoped session with this hub's lifetime ({@link DEFAULT_WEB_LOGIN_SCOPES}, never
+ * `full`) and build the cookie that carries it. `replacing`: the token the browser's
+ * cookie still holds, whose row is revoked — the cookie is about to be overwritten, and
+ * that session would otherwise stay live, unseen, until it expires.
+ */
+export async function mintBrowserWebSession(
+  auth: HubAuth | null,
+  db: SlayzoneDb,
+  userId: string,
+  opts: { secure: boolean; replacing?: string | null }
+): Promise<{ id: string; token: string; setCookie: string }> {
+  if (opts.replacing && isWebSessionToken(opts.replacing)) {
+    await revokeWebSessionToken(db, opts.replacing)
+  }
+  const lifetime = webSessionLifetimeFor(auth)
+  const minted = await mintWebSession(db, { userId, scopes: DEFAULT_WEB_LOGIN_SCOPES, lifetime })
+  return {
+    id: minted.id,
+    token: minted.token,
+    setCookie: webSessionCookie(minted.token, {
+      secure: opts.secure,
+      maxAgeSec: webSessionCookieMaxAgeSec(lifetime)
+    })
+  }
+}
+
 /** Revoke every live session for a user — "log out everywhere". */
 export async function revokeAllWebSessions(
   db: SlayzoneDb,
@@ -252,7 +412,7 @@ export async function revokeAllWebSessions(
 }
 
 export type WebLoginResult =
-  | { ok: true; token: string; cookieName: string; maxAgeSec: number }
+  | { ok: true; token: string; setCookie: string }
   | { ok: false; error: string }
 
 /**
@@ -276,21 +436,24 @@ export async function webLogin(
   auth: HubAuth | null,
   db: SlayzoneDb,
   email: string,
-  password: string
+  password: string,
+  /** The cookie's `Secure` flag ({@link webSessionCookieSecure}). */
+  opts: { secure: boolean } = { secure: true }
 ): Promise<WebLoginResult> {
   if (!auth) return { ok: false, error: 'hub-auth unavailable' }
   let userId: string
   try {
-    const signedIn = await auth.api.signInEmail({ body: { email, password } })
+    // The caller's client address (T-22) — this runs inside the request's audit
+    // context — so the session row better-auth writes carries it, like an HTTP sign-in.
+    const ip = currentSecurityContext()?.ip
+    const signedIn = await auth.api.signInEmail({
+      body: { email, password },
+      ...(ip ? { headers: new Headers({ [CLIENT_ADDRESS_HEADER]: ip }) } : {})
+    })
     userId = signedIn.user.id
   } catch {
     return { ok: false, error: 'invalid email or password' }
   }
-  const minted = await mintWebSession(db, { userId, scopes: DEFAULT_WEB_LOGIN_SCOPES })
-  return {
-    ok: true,
-    token: minted.token,
-    cookieName: WEB_SESSION_COOKIE_NAME,
-    maxAgeSec: Math.floor(WEB_SESSION_IDLE_MS / 1000)
-  }
+  const minted = await mintBrowserWebSession(auth, db, userId, opts)
+  return { ok: true, token: minted.token, setCookie: minted.setCookie }
 }

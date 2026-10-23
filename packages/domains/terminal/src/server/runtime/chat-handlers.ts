@@ -1,5 +1,6 @@
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
   hydrateSession,
@@ -365,16 +366,22 @@ async function buildHydrateOpts(
       // we spawned, `foreign-observed` when it doesn't (manual --resume in PTY).
       // Foreign rows are stored for audit but never honored by
       // getCurrentConversationId, so the bug class is closed structurally.
-      void data.recordConversation({
-        taskId: opts.taskId,
-        mode: opts.mode,
-        conversationId,
-        origin,
-        legacyJsonField: 'chatConversationId'
-      })
+      // Caught: nobody awaits this, and the write fails when the task is gone (its
+      // foreign key) — unheard, that rejection ended the hub's process (T-102).
+      data
+        .recordConversation({
+          taskId: opts.taskId,
+          mode: opts.mode,
+          conversationId,
+          origin,
+          legacyJsonField: 'chatConversationId'
+        })
+        .catch((err) => console.error('[chat-handlers] recordConversation failed:', err))
     },
     onInvalidResume: () => {
-      void data.clearChatConversationId(opts.taskId, opts.mode)
+      data
+        .clearChatConversationId(opts.taskId, opts.mode)
+        .catch((err) => console.error('[chat-handlers] clearChatConversationId failed:', err))
     }
   }
 }
@@ -916,11 +923,22 @@ export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
       return created
     },
 
-    listSkills: (cwd: string): Promise<SkillInfo[]> => listSkills(cwd),
+    // The three autocomplete scans read `cwd` and `~/.claude` on THIS machine:
+    // refused on a hub with processes switched off (T-06), like the file scan below.
+    listSkills: async (cwd: string): Promise<SkillInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.skills' })
+      return listSkills(cwd)
+    },
 
-    listCommands: (cwd: string): Promise<CommandInfo[]> => listCommands(cwd),
+    listCommands: async (cwd: string): Promise<CommandInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.commands' })
+      return listCommands(cwd)
+    },
 
-    listAgents: (cwd: string): Promise<AgentInfo[]> => listAgents(cwd),
+    listAgents: async (cwd: string): Promise<AgentInfo[]> => {
+      assertHubLocalExecEnabled({ op: 'chat.agents' })
+      return listAgents(cwd)
+    },
 
     listFiles: (cwd: string, query: string, limit?: number): Promise<FileMatch[]> =>
       listProjectFiles(cwd, query, limit ?? 50),

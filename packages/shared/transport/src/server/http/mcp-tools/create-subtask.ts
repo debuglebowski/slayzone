@@ -1,29 +1,20 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import { updateTask } from '@slayzone/task/server'
+import { insertTaskRow, updateTask } from '@slayzone/task/server'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
-import {
-  resolveCurrentTaskId,
-  getProjectColumns,
-  getAllowedStatusesText,
-  buildDefaultProviderConfig
-} from './shared'
+import { getProjectColumns, getAllowedStatusesText, buildDefaultProviderConfig } from './shared'
 import type { McpToolsDeps } from './types'
 
 export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
     'create_subtask',
-    "Create a subtask under a parent task. Prefer calling get_current_task_id first, then pass that as parent_task_id. In task terminals, you can source parent_task_id from local $SLAYZONE_TASK_ID. If that's empty (pre-warmed agent), pass session_id from $SLAYZONE_SESSION_ID instead.",
+    'Create a subtask under a parent task. Prefer calling get_current_task_id first, then pass that as parent_task_id. In task terminals, you can source parent_task_id from local $SLAYZONE_TASK_ID.',
     {
       parent_task_id: z
         .string()
         .optional()
         .describe('Parent task ID (recommended: pass $SLAYZONE_TASK_ID)'),
-      session_id: z
-        .string()
-        .optional()
-        .describe('Fallback when $SLAYZONE_TASK_ID is empty — pass $SLAYZONE_SESSION_ID instead'),
       title: z.string().describe('Subtask title'),
       description: z.string().nullable().optional().describe('Subtask description (null to clear)'),
       status: z
@@ -39,23 +30,13 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       assignee: z.string().nullable().optional().describe('Assignee name (null to clear)'),
       due_date: z.string().nullable().optional().describe('Due date ISO string (null to clear)')
     },
-    async ({
-      parent_task_id,
-      session_id,
-      due_date,
-      title,
-      description,
-      status,
-      priority,
-      assignee
-    }) => {
-      const resolvedParentId = await resolveCurrentTaskId(deps.db, parent_task_id, session_id)
-      if (!resolvedParentId) {
+    async ({ parent_task_id, due_date, title, description, status, priority, assignee }) => {
+      if (!parent_task_id) {
         return {
           content: [
             {
               type: 'text' as const,
-              text: 'No parent task ID available. Pass parent_task_id (from $SLAYZONE_TASK_ID) or session_id (from $SLAYZONE_SESSION_ID).'
+              text: 'No parent task ID available. Pass parent_task_id (from $SLAYZONE_TASK_ID).'
             }
           ],
           isError: true
@@ -64,7 +45,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
 
       const parent = (await deps.db
         .prepare('SELECT id, project_id, terminal_mode FROM tasks WHERE id = ?')
-        .get(resolvedParentId)) as
+        .get(parent_task_id)) as
         | { id: string; project_id: string; terminal_mode: string | null }
         | undefined
 
@@ -73,7 +54,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
           content: [
             {
               type: 'text' as const,
-              text: `Parent task ${resolvedParentId} not found`
+              text: `Parent task ${parent_task_id} not found`
             }
           ],
           isError: true
@@ -105,40 +86,34 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       }
       const initialStatus = status ?? getDefaultStatus(projectColumns)
 
-      await deps.db
-        .prepare(`
-        INSERT INTO tasks (
-          id, project_id, parent_id, title, description, assignee,
-          status, priority, due_date, terminal_mode, provider_config,
-          claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-          is_temporary
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-        .run(
-          id,
-          parent.project_id,
-          parent.id,
-          title,
-          description ?? null,
-          assignee ?? null,
-          initialStatus,
-          priority ?? 3,
-          due_date ?? null,
-          terminalMode,
-          JSON.stringify(providerConfig),
-          providerConfig['claude-code']?.flags ?? '',
-          providerConfig.codex?.flags ?? '',
-          providerConfig['cursor-agent']?.flags ?? '',
-          providerConfig.gemini?.flags ?? '',
-          providerConfig.opencode?.flags ?? '',
-          0
-        )
+      // The shared insert, so the subtask gets its `task.created` history entry.
+      await insertTaskRow(deps.db, {
+        id,
+        projectId: parent.project_id,
+        parentId: parent.id,
+        title,
+        description: description ?? null,
+        descriptionFormat: 'markdown',
+        assignee: assignee ?? null,
+        status: initialStatus,
+        priority: priority ?? 3,
+        dueDate: due_date ?? null,
+        terminalMode,
+        providerConfig,
+        isTemporary: false,
+        repoName: null,
+        dangerouslySkipPermissions: false,
+        panelVisibility: null,
+        panelSizes: null,
+        browserTabs: null,
+        webPanelUrls: null
+      })
 
       const created = await updateTask(deps.db, { id })
       if (!created) {
         return {
           content: [
-            { type: 'text' as const, text: `Failed to create subtask under ${resolvedParentId}` }
+            { type: 'text' as const, text: `Failed to create subtask under ${parent_task_id}` }
           ],
           isError: true
         }

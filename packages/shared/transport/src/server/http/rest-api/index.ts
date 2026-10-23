@@ -1,5 +1,7 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
+import { withAdminGate } from './admin-routes'
+import { withOwnerGate } from './owner-routes'
 import { registerNotifyRoute } from './notify'
 import { registerAgentHookRoute } from './agent-hook'
 // Re-exported so the hub composition root can feed a computer-RELAYED agent-hook
@@ -69,15 +71,19 @@ import { registerBrowserNewTabRoute } from './browser/new-tab'
 import { registerTabsCreateRoute } from './tabs/create'
 import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
-import { registerResolveSessionTaskRoute } from './sessions/resolve-task'
 import { registerComputersJoinTokenRoute } from './computers/join-token'
 import { registerComputersListRoute } from './computers/list'
 import { registerHubUsersRoutes } from './hub/users'
+import { registerHubComputersRoute } from './hub/computers'
 import { registerWebLoginRoute } from './hub/web-login'
 
 export type { RestApiDeps } from './types'
 
-export function registerRestApi(app: Express, deps: RestApiDeps): void {
+export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
+  // Every route below gets the account-role guard for its own `METHOD path` (T-15),
+  // then the owner guard (T-18): a `user` route touches only the caller's content.
+  const app = withOwnerGate(withAdminGate(rawApp), deps.db)
+
   // Notify
   registerNotifyRoute(app, deps)
 
@@ -172,9 +178,6 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerTabsSplitRoute(app, deps)
   registerTabsRenameRoute(app, deps)
 
-  // Agent sessions (pool: session → bound task resolution for the slay CLI)
-  registerResolveSessionTaskRoute(app, deps)
-
   // Computers (hub/computer split): loopback join-token mint for the MAIN process's
   // boot-time local-computer auto-enroll. 503 only if the computer init failed.
   registerComputersJoinTokenRoute(app, deps)
@@ -184,6 +187,8 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // only way to create an account now that public signup is closed. 503 where
   // hub-auth is absent (the Electron host) or its init failed.
   registerHubUsersRoutes(app, deps)
+  // Revoke / unrevoke a computer (`slay hub computers`, a break-glass session). Admin only.
+  registerHubComputersRoute(app, deps)
 
   // Scoped browser login. Gate-exempt (rest-auth.ts's AUTH_BOOTSTRAP_PATHS) —
   // a token-less browser must reach this to obtain one, same reasoning as

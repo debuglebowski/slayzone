@@ -10,7 +10,10 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { checkCliInstalled } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
+import {
+  assertHubIntegrationsEnabled,
+  assertHubLocalExecEnabled
+} from '@slayzone/platform/hub-switch-refusal'
 import {
   setTaskDeps,
   setIntegrationOps,
@@ -29,6 +32,7 @@ import {
   setComputersDeps,
   setWorkspaceDeps,
   requestGithubSignInStart,
+  hubGithubSignInConvexUrl,
   evictAgentTree,
   type AppDeps,
   type NotifyEventMap,
@@ -89,6 +93,7 @@ import {
   broadcastRespawnRequest,
   initWarmProcessManager,
   reapOrphanWarms,
+  reserveWarmTaskId,
   onGlobalStateChange,
   hasSessionUserInput,
   configureTransport,
@@ -142,19 +147,34 @@ import {
   createRemoteWorktreeAdapters,
   type HubComputerGateway
 } from '@slayzone/computer-transport/server'
-import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
-import { createHubUsersCapability } from './hub-users.js'
+import {
+  createHubAuth,
+  type EntraClientCredential,
+  type EntraSsoConfig,
+  type HubAuth
+} from '@slayzone/hub-auth/server'
+import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import type { HubSsoBootConfig } from './boot-rules.js'
+import { resolveAllowedWebOrigins } from './ws-origin.js'
+
+import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
+import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
-import { webLogin } from './web-sessions.js'
+import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
-import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/computers/server'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
+import { createComputerPlacement } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireHostKillStamp } from './host-kill.js'
 import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
+import { startSessionRetention } from './session-retention.js'
+import { startSsoRecheck } from './sso-recheck.js'
+import { createTrpcConnectionRegistry, type TrpcConnectionRegistry } from './trpc-connections.js'
+import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.js'
 import { getDatabasePathFromEnv } from './db.js'
 import { resolveAuthDbPath } from './auth-db.js'
 import { createPtyEnricher } from '@slayzone/task-terminals/server'
@@ -226,6 +246,13 @@ export type ServerComposition = {
    *  after it binds its port, which happens AFTER composeServer returns — so it's a
    *  late-bound setter, not a constructor arg. */
   setComputerListenerInfo: (info: { hubUrl: string }) => void
+  /** Authenticated `/trpc` sockets by account (T-12): server.ts tracks them, revoking
+   *  an account closes them. */
+  trpcConnections: TrpcConnectionRegistry
+  /** Ends what an account holds outside hub-auth (T-12, user-access.ts). */
+  userAccess: UserAccessRevoker
+  /** Emergency admin access while sign-in is down (break-glass.ts). */
+  breakGlass: BreakGlass
 }
 
 export function composeServer(opts: {
@@ -238,6 +265,21 @@ export function composeServer(opts: {
    *  REST routes that self-guard (join-token, hub users) demand a bearer, so they
    *  can never disagree with the outer gate about whether this hub authenticates. */
   requireLogin: boolean
+  /**
+   * `SLAYZONE_HUB_PUBLIC_ADDRESS` (`host[:port]`): where browsers and Entra reach
+   * this hub. Becomes hub-auth's base URL. Unset = the loopback constant (below).
+   */
+  publicAddress?: string
+  /** Entra sign-in, when on (`assertSsoCredential` in boot-rules.ts). */
+  sso?: HubSsoBootConfig<EntraClientCredential> | null
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
+  enablePassword?: boolean
+  /**
+   * Flood limits on (T-26): better-auth's rate limiter (hub-auth `rate-limit.ts`) and the
+   * unauthenticated `/computers` caps (computer-transport `hub-gateway.ts`). Required, so
+   * no caller can forget to decide; `server.ts` passes `boot.reachable`.
+   */
+  floodLimits: boolean
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -284,6 +326,8 @@ export function composeServer(opts: {
   // later unit reads these after `computersReady` to mount the gateway in server.ts.
   let computerGatewayRef: HubComputerGateway | null = null
   let hubAuthRef: HubAuth | null = null
+  // Who a join token is for (T-20), read through the late-bound ref above.
+  const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
@@ -379,9 +423,9 @@ export function composeServer(opts: {
   setAuthEvents(authEvents)
 
   // --- Task ops --------------------------------------------------------------
-  // Completion-event bus the task ops emit on (Electron host: ipcMain). Nothing
-  // subscribes here yet — the engine's tag-trigger listener attaches in
-  // standalone mode only, when the engine is started (slice 7).
+  // Completion-event bus the task ops emit `db:tasks:*:done` on — handed to every
+  // caller of the ops (tRPC via setTaskDeps, REST, MCP). Listeners: integration push
+  // and the automation engine's tag trigger, both wired below.
   const taskBus = new EventEmitter()
   // Base task runtime adapters (no worktrees override → the task server's local
   // git/fs default stays bound). Extracted so the computer-routing path can re-supply a
@@ -405,7 +449,9 @@ export function composeServer(opts: {
   // callers (integrations sync/pull) must tear them down here — the Electron
   // host's handler only sees its own (empty) session maps post-cutover.
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
-  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer })
+  // The warm pool runs here (initWarmProcessManager below), so this is the one host
+  // where a task created to be opened at once can take a warm agent's id.
+  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer, reserveWarmTaskId, bus: taskBus })
 
   // Conversation self-heal + authoritative resolver. `createPty` runs in THIS
   // process post-slice-9, so the healer/resolver seams it calls must be wired
@@ -484,6 +530,11 @@ export function composeServer(opts: {
       db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')")
     )
   }
+  // T-23: session content older than SLAYZONE_HUB_SESSION_RETENTION_DAYS goes, shortly
+  // after boot and then daily (session-retention.ts). Off by default — the desktop app's
+  // hub creates no timer. Started before the purge below so that, when on, its
+  // secure_delete zeroes what the purge frees too.
+  startSessionRetention({ db })
   bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
   // Repoint migrated icon rows (absolute legacy paths) at the copies the desktop
   // app placed in this root. No-op on a standalone hub / once already repointed.
@@ -540,8 +591,9 @@ export function composeServer(opts: {
   })
   // Computer resolution for exec routing: a task's explicit binding, else the
   // connected default computer (sole connected, else the one named
-  // DEFAULT_LOCAL_COMPUTER_NAME; several unnamed → refuse to guess). `null` means
-  // "run in-process", which every routing backend below handles as a local spawn.
+  // DEFAULT_LOCAL_COMPUTER_NAME; several unnamed → refuse to guess). On a hub with
+  // login only the work owner's computers count, and every request is gated on that
+  // again on its way out (T-19, ./computer-placement.ts).
   //
   // Deliberately simple: the reconnect grace + last-known-computer cache that used to
   // live here existed only to keep the no-fallback invariant from failing spawns
@@ -550,28 +602,29 @@ export function composeServer(opts: {
   // (plan phases A→D) this is replaced by a single `listUsableComputers()` authority
   // on the gateway, not by re-adding these.
   let execGateway: HubComputerGateway | null = null
-  const resolveExecComputer = (specComputerId: string | null | undefined): string | null => {
-    if (specComputerId != null) return specComputerId
+  const placement = createComputerPlacement({
+    db,
+    requireLogin: opts.requireLogin,
     // `listUsableComputers`, NOT `listComputers`: usable = authenticated + heard from
     // inside the heartbeat window. An open-but-silent socket would otherwise be
     // picked and every dispatch to it would hang until the watchdog reaped it.
-    const usable = execGateway?.listUsableComputers() ?? []
-    if (usable.length === 0) return null
-    if (usable.length === 1) return usable[0].computerId
-    const local = usable.find((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
-    return local ? local.computerId : null
+    usable: () => execGateway?.listUsableComputers() ?? []
+  })
+  const resolveExecComputer = placement.forSpec
+  /** `rows` whose project this computer's owner owns — every row without login. */
+  const ownProjects = async <T extends { id: string }>(
+    computerId: string,
+    rows: readonly T[]
+  ): Promise<T[]> => {
+    if (!opts.requireLogin) return [...rows]
+    const out: T[] = []
+    for (const row of rows) if (await placement.servesProject(computerId, row.id)) out.push(row)
+    return out
   }
   /** Effective computer for a task: explicit binding, else connected default. */
-  const resolveComputerForTask = async (taskId: string): Promise<string | null> =>
-    resolveExecComputer(await resolveTaskComputerId(db, taskId))
+  const resolveComputerForTask = placement.forTask
   /** Same, for a project — its default binding, else the connected default. */
-  const resolveComputerForProject = async (projectId: string): Promise<string | null> => {
-    const row = await db.get<{ default_computer_id?: string | null }>(
-      'SELECT default_computer_id FROM projects WHERE id = ?',
-      [projectId]
-    )
-    return resolveExecComputer(row?.default_computer_id ?? null)
-  }
+  const resolveComputerForProject = placement.forProject
 
   // Inject computer-aware spawn lookups BEFORE createPtyOps (which captures the
   // lookups at construction). Only `resolveComputerId` is overridden; the mode-row /
@@ -934,13 +987,17 @@ export function composeServer(opts: {
       authGithubSystemSignIn: async (input: { convexUrl: string; redirectTo: string }) => {
         // Backstop for the router's check: no Convex POST, no browser open.
         assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
+        // The browser opens on THIS machine (xdg-open): not on a hub that runs nothing
+        // itself (T-06). Checked before the Convex POST, not swallowed by the catch.
+        assertHubLocalExecEnabled({ op: 'shell.open_external', detail: { provider: 'github' } })
         try {
           if (!input?.convexUrl) return { ok: false as const, error: 'Convex URL is required' }
           if (input.redirectTo !== 'slayzone://auth/callback') {
             return { ok: false as const, error: `Unsupported redirect URI: ${input.redirectTo}` }
           }
           const start = await requestGithubSignInStart(
-            input.convexUrl,
+            // T-99 backstop: only this hub's own Convex, never a client-named host.
+            hubGithubSignInConvexUrl(input.convexUrl),
             input.redirectTo,
             'chromium-sidecar'
           )
@@ -1124,6 +1181,22 @@ export function composeServer(opts: {
   ptyEvents.on('replacing', (sessionId) => evictAgentTree(sessionId))
   ptyEvents.on('exit', (sessionId) => evictAgentTree(sessionId))
 
+  // T-12: disabling an account (or an Entra refusal) also ends its web sessions, its
+  // open /trpc sockets and its computers — see user-access.ts.
+  const trpcConnections = createTrpcConnectionRegistry()
+  const userAccess = createUserAccessRevoker({
+    db,
+    getGateway: () => computerGatewayRef,
+    connections: trpcConnections
+  })
+  // Break-glass (break-glass.ts): off unless login is required; closing its account
+  // revokes everything the account holds, like disabling any other (T-12).
+  const breakGlass = createBreakGlass({
+    getAuth: () => hubAuthRef,
+    requireLogin: opts.requireLogin,
+    revokeUser: (userId) => userAccess.revokeUser(userId)
+  })
+
   // --- REST deps (capability slots; absent → 501) ------------------------------
   const restDeps: RestApiDeps = {
     db,
@@ -1161,7 +1234,9 @@ export function composeServer(opts: {
       // Same late-bound ref the tRPC `computers.list` reads, so the REST twin
       // (`GET /api/computers`, what `slay computer ls` calls) can never report a
       // different connection status than the app's Computers tab.
-      getGateway: () => computerGatewayRef
+      getGateway: () => computerGatewayRef,
+      // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
+      findAccount: joinTokenAccounts
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
@@ -1173,9 +1248,9 @@ export function composeServer(opts: {
     // constructed. `ready` is therefore a function, never a captured value — and it
     // stays false permanently if `createHubAuth` threw (that failure is swallowed
     // into a diagnostic), which the route surfaces as a 503 naming
-    // `computer.init_failed`. Disabling also revokes the account's web sessions in
-    // THIS db (see hub-users.ts).
-    hubUsers: createHubUsersCapability(() => hubAuthRef, db),
+    // `computer.init_failed`. Disabling also revokes the account's web sessions,
+    // sockets and computers (see user-access.ts).
+    hubUsers: createHubUsersCapability(() => hubAuthRef, userAccess),
     // Bearer authority for routes that self-guard rather than sitting behind the
     // outer gate — `POST /api/computers/join-token` (so `slay computer mint` can
     // target a hub on another machine) and `/api/hub/users` (so `slay hub users …`
@@ -1195,7 +1270,8 @@ export function composeServer(opts: {
     // there exactly as before.
     restAuth: {
       required: () => opts.requireLogin && hubAuthRef !== null,
-      verifyBearer: (headers, cookies) => verifyRestBearer(hubAuthRef, db, headers, cookies)
+      verifyBearer: (headers, cookies) =>
+        verifyRestBearer(hubAuthRef, db, headers, cookies, breakGlass)
     },
     // Scoped browser login. Absent only when hub-auth failed to init — a hub with
     // login off has no meaningful login to offer, but the slot itself does not
@@ -1203,7 +1279,10 @@ export function composeServer(opts: {
     // against such a hub's loopback listener, and doing so should behave the same
     // as any other hub's login.
     webLogin: {
-      login: (email, password) => webLogin(hubAuthRef, db, email, password)
+      login: (email, password) =>
+        webLogin(hubAuthRef, db, email, password, {
+          secure: webSessionCookieSecure(opts.publicAddress)
+        })
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's
@@ -1297,6 +1376,9 @@ export function composeServer(opts: {
   setComputersDeps({
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
+    // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
+    // only on a hub with login. The REST twin reads the same function.
+    findAccount: joinTokenAccounts,
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -1334,16 +1416,33 @@ export function composeServer(opts: {
   setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
   computersReady = (async () => {
+    const sso: EntraSsoConfig | undefined = opts.sso ?? undefined
     const hubAuth = await createHubAuth({
       dbPath: resolveAuthDbPath(dataRoot),
-      // better-auth baseURL: a fixed loopback constant. Computers authenticate via
-      // api-key/bearer (not cookies/redirects), so this is internal plumbing and
-      // never needs an operator override — the SLAYZONE_COMPUTER_TRANSPORT_BASE_URL
-      // env knob was inlined.
-      baseURL: 'http://127.0.0.1:8788',
-      secret: hubAuthSecret
+      // better-auth baseURL. A hub other machines reach is addressed by its public
+      // address (`https://` unless the host is loopback, rule A1): it is where Entra
+      // redirects back to (`<baseURL>/api/auth/callback/microsoft`, registered on the
+      // app) and the origin browsers send. Without one — the desktop app's hub and
+      // every loopback-only hub — a fixed loopback constant, as before: computers
+      // authenticate by api-key/bearer, never by cookies or redirects, so nothing
+      // there reads it.
+      baseURL: opts.publicAddress
+        ? hubUrlFromAddr(opts.publicAddress, 'http')
+        : 'http://127.0.0.1:8788',
+      // The same browser origins the /trpc origin guard accepts (the public origin plus
+      // SLAYZONE_HUB_ALLOWED_WEB_ORIGINS), for better-auth's callback-URL and CSRF
+      // checks. Empty on the desktop app's hub (its parent clears both variables).
+      trustedOrigins: resolveAllowedWebOrigins(),
+      secret: hubAuthSecret,
+      ...(sso ? { sso } : {}),
+      // Off: no password sign-in or account with a password (hub-auth password.ts).
+      ...(opts.enablePassword === false ? { enablePassword: false } : {}),
+      rateLimit: opts.floodLimits
     })
     hubAuthRef = hubAuth
+    // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
+    // (sso-recheck.ts). No-op without SSO — the desktop app's hub creates no timer.
+    startSsoRecheck({ auth: hubAuth, sso, db, revoker: userAccess })
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
     // which enroll name is the co-located auto-spawned computer so it collapses to
     // ONE deterministic-id row instead of orphaning one per boot. MUST match the
@@ -1360,9 +1459,11 @@ export function composeServer(opts: {
     let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> =
       async () => undefined
     let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
-    const computerGateway = createHubComputerGateway(
-      createComputerAuthAdapters({ db, auth: hubAuth, localComputerName })
-    )
+    const computerGateway = createHubComputerGateway({
+      ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
+      // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
+      ...(opts.floodLimits ? {} : { floodLimits: false as const })
+    })
     computerGatewayRef = computerGateway
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its
@@ -1385,7 +1486,8 @@ export function composeServer(opts: {
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
-        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
+        gate: placement.gate
       })
     )
     // Warm agents are the COMPUTER's processes, so they outlive a hub or sidecar
@@ -1417,7 +1519,8 @@ export function composeServer(opts: {
     configureTransport({
       backend: createRoutingChatBackend({
         gateway: computerGateway,
-        resolveComputerId: (spec) => resolveExecComputer(spec.computerId)
+        resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
+        gate: placement.gate
       })
     })
     // Re-configure with a COMPLETE object (shallow-merge over defaults): re-supply
@@ -1433,6 +1536,7 @@ export function composeServer(opts: {
         // computer had its worktree created on the hub, leaving the agent with a cwd
         // that does not exist on its own machine.
         resolveComputerId: (taskId) => resolveComputerForTask(taskId),
+        gate: placement.gate,
         local: defaultWorktreeExecAdapters
       })
     })
@@ -1442,9 +1546,12 @@ export function composeServer(opts: {
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.
     setGhExecutor(async (args, opts) => {
-      const computerId = resolveExecComputer(null)
+      // The caller's own computer on a hub with login (T-19): `gh` speaks as the
+      // machine's account, which must never be someone else's.
+      const computerId = await placement.forCaller()
       // No computer = this hub's own disk is the only one, so its own `gh` is the
-      // only meaningful identity. Falls through to the local executor.
+      // only meaningful identity. Falls through to the local executor — which refuses
+      // on a hub with processes switched off (T-06): there, no computer = no `gh`.
       if (computerId == null || !opts.cwd) return runGhLocally(args, opts)
       const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
         args,
@@ -1460,9 +1567,20 @@ export function composeServer(opts: {
     // is the entire point: the picker must browse the filesystem the agent will
     // actually get. Serving these from the hub is what made a task on a remote
     // computer report "No repository path configured" for a path that existed.
+    const localWorkspaceFs = createLocalWorkspaceFs()
+    // The hub's own maintenance on connect (below): the computer is named by the
+    // gateway event, not by a caller, and what it is handed is cut to its owner's
+    // projects (T-19).
     const workspaceFs = createRemoteFsAdapters({
       gateway: computerGateway,
-      local: createLocalWorkspaceFs()
+      local: localWorkspaceFs
+    })
+    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): gated as the
+    // caller's own request on a hub with login (T-19).
+    const userWorkspaceFs = createRemoteFsAdapters({
+      gateway: computerGateway,
+      local: localWorkspaceFs,
+      gate: placement.gate
     })
     // The supervised local computer defaults its jail to `[homedir()]`, but the
     // desktop app that used to do this work had no jail at all — so routing the
@@ -1474,13 +1592,15 @@ export function composeServer(opts: {
       if (computerName !== localComputerName) return
       try {
         const { roots } = await workspaceFs.listRoots(computerId)
-        const rows = await db.all<{ path: string | null }>(
-          'SELECT DISTINCT path FROM projects WHERE path IS NOT NULL'
+        // On the owner's behalf only: a project of anyone else's never widens this
+        // computer's jail (T-19). Every project without login.
+        const rows = await ownProjects(
+          computerId,
+          await db.all<{ id: string; path: string | null }>(
+            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+          )
         )
-        const additions = missingRootsForProjects(
-          rows.map((r) => r.path),
-          roots
-        )
+        const additions = missingRootsForProjects([...new Set(rows.map((r) => r.path))], roots)
         if (additions.length === 0) return
         const applied = await workspaceFs.setAllowedRoots(computerId, [...roots, ...additions])
         recordDiagnosticEvent({
@@ -1510,8 +1630,13 @@ export function composeServer(opts: {
     seedLocalProjectPaths = async (computerId: string, computerName: string): Promise<void> => {
       if (computerName !== localComputerName) return
       try {
-        const rows = await db.all<{ id: string; path: string | null }>(
-          'SELECT id, path FROM projects WHERE path IS NOT NULL'
+        // The owner's projects only, like the roots above: another user's project id
+        // and path never reach this computer (T-19).
+        const rows = await ownProjects(
+          computerId,
+          await db.all<{ id: string; path: string | null }>(
+            'SELECT id, path FROM projects WHERE path IS NOT NULL'
+          )
         )
         if (rows.length === 0) return
         const outcome = await seedProjectPaths(rows, {
@@ -1553,10 +1678,17 @@ export function composeServer(opts: {
         )
         const parsed = projectListResultSchema.safeParse(listed)
         if (!parsed.success) return
+        // A computer places only its owner's projects (T-19): a report naming anyone
+        // else's would make paths on it resolve to their project (access.ts `path`).
         await recordComputerProjectPaths(
           db,
           computerId,
-          parsed.data.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
+          (
+            await ownProjects(
+              computerId,
+              parsed.data.projects.map((p) => ({ id: p.projectId, path: p.path }))
+            )
+          ).map((p) => ({ projectId: p.id, path: p.path }))
         )
       } catch (err) {
         // A computer too old to answer `project.list`, or one that dropped
@@ -1572,15 +1704,10 @@ export function composeServer(opts: {
       }
     }
     setWorkspaceDeps({
-      fs: workspaceFs,
-      resolveComputer: async ({ computerId, taskId, projectId }) => {
-        // An id the user explicitly chose wins — the create-project flow picks a
-        // computer before any task or project row exists to resolve from.
-        if (computerId != null) return resolveExecComputer(computerId)
-        if (taskId != null) return resolveComputerForTask(taskId)
-        if (projectId != null) return resolveComputerForProject(projectId)
-        return resolveExecComputer(null)
-      },
+      fs: userWorkspaceFs,
+      // An explicit computer (the caller's own, with login), else the task's, else the
+      // project's, else the caller's default — see ./computer-placement.ts.
+      resolveComputer: (target) => placement.forTarget(target),
       // No computer at all = this hub's own disk, which for a supervised hub IS the
       // desktop's. Otherwise only the co-spawned local computer shares a machine
       // with the user; every remote one is somewhere they cannot see.
@@ -1615,6 +1742,9 @@ export function composeServer(opts: {
     computersReady,
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
-    }
+    },
+    trpcConnections,
+    userAccess,
+    breakGlass
   }
 }

@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs'
 import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertPathSafeId, containedPath, isPathSafeId } from '@slayzone/platform/safe-path'
 import type { ColumnConfig, CreateProjectInput, Project, UpdateProjectInput } from '../shared'
 import { parseColumnsConfig, prepareProjectCreate, validateColumns } from '../shared'
 
@@ -13,7 +14,8 @@ const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.s
  * from `ctx.dataRoot`.
  */
 function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
-  if (!existsSync(iconsDir)) return
+  // Not an id (`''` matched every dotfile): no project's icon, nothing to remove.
+  if (!isPathSafeId(projectId) || !existsSync(iconsDir)) return
   for (const entry of readdirSync(iconsDir)) {
     if (entry.startsWith(`${projectId}.`)) {
       try {
@@ -70,7 +72,18 @@ export async function listAllProjects(db: SlayzoneDb): Promise<Project[]> {
   return rows.map((row) => parseProject(row)!)
 }
 
-export async function createProject(db: SlayzoneDb, data: CreateProjectInput): Promise<Project> {
+/**
+ * `ownerUserId` is the user the request came from: `ctx.principal.userId` (tRPC)
+ * or the bound REST principal, and null on a hub without login, where requests
+ * carry no user. Deliberately a separate, REQUIRED argument rather than a field of
+ * the client-supplied input: a client never chooses the owner, and a new create
+ * path cannot compile without deciding it.
+ */
+export async function createProject(
+  db: SlayzoneDb,
+  data: CreateProjectInput,
+  ownerUserId: string | null
+): Promise<Project> {
   const prepared = prepareProjectCreate(data)
   const row = await db.namedTxn('projects:create', {
     id: prepared.id,
@@ -79,9 +92,22 @@ export async function createProject(db: SlayzoneDb, data: CreateProjectInput): P
     path: prepared.path,
     columnsConfigJson: prepared.columnsConfigJson,
     createdAt: prepared.createdAt,
-    updatedAt: prepared.updatedAt
+    updatedAt: prepared.updatedAt,
+    ownerUserId
   })
   return parseProject(row)!
+}
+
+/**
+ * Give every project with no owner to `ownerUserId`. Returns how many changed.
+ * Idempotent: once nothing is unowned this is a no-op. The hub's boot backfill
+ * (`apps/hub/src/ownership-backfill.ts`) is the only caller — it decides WHO.
+ */
+export async function assignUnownedProjects(db: SlayzoneDb, ownerUserId: string): Promise<number> {
+  const result = await db.run('UPDATE projects SET owner_user_id = ? WHERE owner_user_id IS NULL', [
+    ownerUserId
+  ])
+  return result.changes
 }
 
 export async function updateProject(
@@ -197,7 +223,10 @@ export async function deleteProject(
   iconsDir: string
 ): Promise<boolean> {
   const result = await db.run('DELETE FROM projects WHERE id = ?', [id])
+  // A per-user key (see `settingScope`): global on a hub without login, one row
+  // per user otherwise — clear both.
   await db.run('DELETE FROM settings WHERE key = ?', [`commit_graph:project:${id}`])
+  await db.run('DELETE FROM user_settings WHERE key = ?', [`commit_graph:project:${id}`])
   unlinkProjectIconFiles(iconsDir, id)
   return result.changes > 0
 }
@@ -212,9 +241,10 @@ export async function uploadProjectIcon(
   if (!ALLOWED_ICON_EXTS.has(ext)) {
     throw new Error(`Unsupported icon extension: ${ext}`)
   }
+  // The id is the file name: one plain segment, inside iconsDir (`UnsafePathError`).
+  const destPath = containedPath(iconsDir, `${assertPathSafeId(projectId, 'projectId')}${ext}`)
   mkdirSync(iconsDir, { recursive: true })
   unlinkProjectIconFiles(iconsDir, projectId)
-  const destPath = path.join(iconsDir, `${projectId}${ext}`)
   copyFileSync(sourcePath, destPath)
 
   await db.run(

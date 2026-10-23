@@ -142,7 +142,12 @@ function clearProviderConversationIds(providerConfig: string | null): string | n
   }
 }
 
-function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
+function importBundle(
+  db: Database,
+  data: SlayExportData,
+  ownerUserId: string | null,
+  projectIds: readonly string[] | null
+): ImportTxnResult {
   const remap = new Map<string, string>()
 
   // Generate new UUIDs for all entities with `id` columns
@@ -153,21 +158,33 @@ function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
   for (const sel of data.ai_config_project_selections)
     remap.set(sel.id as string, crypto.randomUUID())
 
+  // On a hub with login only the importer's own projects are looked at (T-101): an
+  // imported task is never tagged with another user's tag, and a name collision with
+  // another user's project neither renames the import nor says that project exists.
+  // `projectIds` null (no login) = every row, as before.
+  const own = (column: string): string =>
+    projectIds === null ? '' : ` AND ${column} IN (${projectIds.map(() => '?').join(', ')})`
+  const ownArgs = projectIds ?? []
+  const ownTag = db.prepare(`SELECT id FROM tags WHERE name = ?${own('project_id')}`)
+  const takenName = db.prepare(`SELECT id FROM projects WHERE name = ?${own('id')}`)
+
   // Tags: reuse existing by name, new UUID otherwise
   for (const tag of data.tags) {
-    const existing = db.prepare('SELECT id FROM tags WHERE name = ?').get(tag.name as string) as
-      | { id: string }
-      | undefined
+    const existing = ownTag.get(tag.name as string, ...ownArgs) as { id: string } | undefined
     remap.set(tag.id as string, existing ? existing.id : crypto.randomUUID())
   }
 
   // Handle project name collisions — loop until unique
   for (const p of data.projects) {
     let name = p.name as string
-    while (db.prepare('SELECT id FROM projects WHERE name = ?').get(name)) {
+    while (takenName.get(name, ...ownArgs)) {
       name = `${name} (imported)`
     }
     p.name = name
+    // The importer owns what they import. Whatever the bundle says (a user id on
+    // the hub it was exported from, or nothing at all from a build before
+    // ownership) means nothing here.
+    p.owner_user_id = ownerUserId
   }
 
   // Clean non-portable task fields
@@ -266,6 +283,14 @@ function importBundle(db: Database, data: SlayExportData): ImportTxnResult {
 
 export interface ImportTxnParams {
   data: SlayExportData
+  /** The importing user (hub-auth id), or null on a hub without login. */
+  ownerUserId: string | null
+  /**
+   * The projects the importer may access (`accessibleProjectIds`), the only ones an
+   * existing tag or project name is matched against; null on a hub without login =
+   * every project, as before.
+   */
+  projectIds: string[] | null
 }
 
 export interface SetTaskParentTxnParams {
@@ -275,7 +300,7 @@ export interface SetTaskParentTxnParams {
 
 export const exportImportTxns = {
   'export-import:import': (db: Database, p: ImportTxnParams): ImportTxnResult =>
-    importBundle(db, p.data),
+    importBundle(db, p.data, p.ownerUserId, p.projectIds),
 
   // Test-only: set parent_id directly. Allows tests to simulate stale (orphan)
   // FKs by temporarily disabling FK checks for this single statement. Must not

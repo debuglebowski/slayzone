@@ -1,4 +1,3 @@
-import { spawnSync, spawn } from 'child_process'
 import { platform } from 'os'
 import {
   existsSync,
@@ -40,7 +39,14 @@ import type {
   WorktreeSubmoduleResult
 } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
-import { execAsync, execGit, execGitFileList, trimOutput } from './exec-async'
+import {
+  execAsync,
+  execGit,
+  execGitFileList,
+  hubSpawn,
+  hubSpawnSync,
+  trimOutput
+} from './exec-async'
 
 export async function isGitRepo(repoPath: string): Promise<boolean> {
   try {
@@ -167,7 +173,7 @@ export function runWorktreeSetupScript(
   const env = setupScriptEnv(worktreePath, repoPath, sourceBranch)
 
   return new Promise((resolve) => {
-    const child = spawn(scriptPath, [], {
+    const child = hubSpawn(scriptPath, [], {
       cwd: worktreePath,
       stdio: ['pipe', 'pipe', 'pipe'],
       env
@@ -241,7 +247,7 @@ export function runWorktreeSetupScriptSync(
   const startedAt = Date.now()
   const env = setupScriptEnv(worktreePath, repoPath, sourceBranch)
 
-  const result = spawnSync(scriptPath, [], {
+  const result = hubSpawnSync(scriptPath, [], {
     cwd: worktreePath,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -293,7 +299,7 @@ export function initSubmodules(
   const startedAt = Date.now()
 
   return new Promise((resolve) => {
-    const child = spawn('git', ['submodule', 'update', '--init', '--recursive'], {
+    const child = hubSpawn('git', ['submodule', 'update', '--init', '--recursive'], {
       cwd: worktreePath,
       stdio: ['pipe', 'pipe', 'pipe']
     })
@@ -362,7 +368,7 @@ export function initSubmodulesSync(worktreePath: string): WorktreeSubmoduleResul
   }
 
   const startedAt = Date.now()
-  const result = spawnSync('git', ['submodule', 'update', '--init', '--recursive'], {
+  const result = hubSpawnSync('git', ['submodule', 'update', '--init', '--recursive'], {
     cwd: worktreePath,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -520,7 +526,7 @@ type IgnoredCopyEntry =
  */
 async function isPathFullyIgnored(repoPath: string, relPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn('git', ['check-ignore', '--quiet', '--', relPath], {
+    const child = hubSpawn('git', ['check-ignore', '--quiet', '--', relPath], {
       cwd: repoPath,
       stdio: 'ignore'
     })
@@ -605,7 +611,7 @@ async function clonefileCopy(src: string, dst: string, isDir: boolean): Promise<
   const useClone = process.platform === 'darwin'
   if (useClone) {
     const code = await new Promise<number | null>((resolve) => {
-      const child = spawn('cp', ['-cR', src, dst], { stdio: 'ignore' })
+      const child = hubSpawn('cp', ['-cR', src, dst], { stdio: 'ignore' })
       child.on('close', (c) => resolve(c))
       child.on('error', () => resolve(1))
     })

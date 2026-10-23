@@ -1,0 +1,305 @@
+{
+  "$comment": "Reviewed decisions for production-dependency advisories (not applicable, or accepted until a date). Read by scripts/ci/audit-check.mjs: an advisory missing here, or past its expiry, fails the audit job. Re-review on expiry; remove ids the job reports as stale.",
+  "entries": [
+    {
+      "packages": ["@modelcontextprotocol/sdk"],
+      "reason": "APPLIES, accepted for now: one request to /mcp can exhaust hub memory. Only authenticated callers reach /mcp (and only local processes on the desktop hub, which binds 127.0.0.1). The fix (1.32.0) was published 2026-10-02, so the 30-day minimumReleaseAge holds it back until 2026-11-01; Renovate opens the bump then.",
+      "reviewed": "2026-10-22",
+      "expires": "2026-11-02",
+      "advisories": ["GHSA-46jr-4wx8-v453"]
+    },
+    {
+      "packages": ["@modelcontextprotocol/sdk", "ajv"],
+      "reason": "MCP SDK client-side (OAuth client, redirects), experimental-tasks and SDK bearer-auth advisories: we run only an McpServer over streamable HTTP behind our own bearer gate. ajv: the $data option is not used.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-22jm-h49p-29qw",
+        "GHSA-2g4f-4pwh-qvx6",
+        "GHSA-6prh-2h8m-c8cw",
+        "GHSA-6qxp-vccf-f47h",
+        "GHSA-rvq5-wwqv-78pq"
+      ]
+    },
+    {
+      "packages": ["electron"],
+      "reason": "Fixed only in Electron >= 42; the 41 line gets no further patches. Clears with the Electron major upgrade.",
+      "reviewed": "2026-10-22",
+      "expires": "2026-12-22",
+      "advisories": [
+        "GHSA-2p8c-gr87-2676",
+        "GHSA-3qxv-5xgr-q7w9",
+        "GHSA-98mx-cjp9-gchm",
+        "GHSA-997q-gvvc-jwmx",
+        "GHSA-fw47-9c62-h3vw",
+        "GHSA-h3v5-h239-pg29",
+        "GHSA-x562-297c-g43g"
+      ]
+    },
+    {
+      "packages": ["protobufjs", "@protobufjs/utf8", "@opentelemetry/core", "fflate", "dompurify"],
+      "reason": "Inside posthog-js: protobufjs/OpenTelemetry only load posthog's own fixed schemas, fflate only compresses, and dompurify 3.3.1 is posthog's pinned copy (our sanitizer uses ^3.4.15). Clears when posthog-js is bumped.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-2pr8-phx7-x9h3",
+        "GHSA-39q2-94rc-95cp",
+        "GHSA-55q2-fjhq-7xh7",
+        "GHSA-6688-9rhm-gjv2",
+        "GHSA-66ff-xgx4-vchm",
+        "GHSA-685m-2w69-288q",
+        "GHSA-75px-5xx7-5xc7",
+        "GHSA-76mc-f452-cxcm",
+        "GHSA-8988-4f7v-96qf",
+        "GHSA-c2j3-45gr-mqc4",
+        "GHSA-c6gr-qvv4-5v3f",
+        "GHSA-cg2g-xh64-v4q7",
+        "GHSA-cj63-jhhr-wcxv",
+        "GHSA-cjmm-f4jc-qw8r",
+        "GHSA-cmwh-pvxp-8882",
+        "GHSA-crv5-9vww-q3g8",
+        "GHSA-f38q-mgvj-vph7",
+        "GHSA-fx83-v9x8-x52w",
+        "GHSA-gvmj-g25r-r7wr",
+        "GHSA-h7mw-gpvr-xq4m",
+        "GHSA-h8r8-wccr-v5f2",
+        "GHSA-hpcv-96wg-7vj8",
+        "GHSA-j3f2-48v5-ccww",
+        "GHSA-jggg-4jg4-v7c6",
+        "GHSA-jvwf-75h9-cwgg",
+        "GHSA-mrv2-3pqr-j5jr",
+        "GHSA-p98j-92pf-mc4p",
+        "GHSA-px8p-9vwx-vf98",
+        "GHSA-q6x5-8v7m-xcrf",
+        "GHSA-r47g-fvhr-h676",
+        "GHSA-rp9w-3fw7-7cwq",
+        "GHSA-v2wj-7wpq-c8vv",
+        "GHSA-v9jr-rg53-9pgp",
+        "GHSA-vxr8-fq34-vvx9",
+        "GHSA-wcpc-wj8m-hjx6",
+        "GHSA-x4vx-rjvf-j5p4",
+        "GHSA-xq3m-2v4x-88gg"
+      ]
+    },
+    {
+      "packages": ["hono", "@hono/node-server", "express-rate-limit", "ip-address", "fast-uri"],
+      "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic, JSX, CORS, cookie or JWT code); the rate-limit/IP code is in the SDK auth router, which we do not mount; no URI-based security decisions.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-26pp-8wgv-hjvm",
+        "GHSA-2gcr-mfcq-wcc3",
+        "GHSA-3hrh-pfw6-9m5x",
+        "GHSA-458j-xx4x-4375",
+        "GHSA-46wh-pxpv-q5gq",
+        "GHSA-4c8g-83qw-93j6",
+        "GHSA-5pq2-9x2x-5p6w",
+        "GHSA-69xw-7hcm-h432",
+        "GHSA-79qm-7rj5-m7r9",
+        "GHSA-7p8r-x3mc-p8w7",
+        "GHSA-88fw-hqm2-52qc",
+        "GHSA-8j4g-w8fx-2239",
+        "GHSA-92pp-h63x-v22m",
+        "GHSA-9vqf-7f2p-gf9v",
+        "GHSA-crvj-82cr-hjcx",
+        "GHSA-f23p-vx2j-j53r",
+        "GHSA-f577-qrjj-4474",
+        "GHSA-f65p-4m7j-42xc",
+        "GHSA-frvp-7c67-39w9",
+        "GHSA-g6gw-c38x-mqfc",
+        "GHSA-gq3j-xvxp-8hrf",
+        "GHSA-gqvv-2mrq-wpjv",
+        "GHSA-h3mg-xc3c-68pw",
+        "GHSA-hm8q-7f3q-5f36",
+        "GHSA-hrr3-gc8f-f4qj",
+        "GHSA-hvrm-45r6-mjfj",
+        "GHSA-hxh3-vqpv-xpqv",
+        "GHSA-j6c9-x7qj-28xf",
+        "GHSA-j6r3-76f7-8jcv",
+        "GHSA-jqff-g426-hqxp",
+        "GHSA-mwp4-54f8-5fhr",
+        "GHSA-p6xx-57qc-3wxr",
+        "GHSA-p77w-8qqv-26rm",
+        "GHSA-q3j6-qgpj-74h6",
+        "GHSA-q5qw-h33p-qvwr",
+        "GHSA-qp7p-654g-cw7p",
+        "GHSA-qw65-cvwx-89v3",
+        "GHSA-r5rp-j6wh-rvv4",
+        "GHSA-rpw4-54j3-4h4q",
+        "GHSA-rv63-4mwf-qqc2",
+        "GHSA-rxp7-6hxx-x8q5",
+        "GHSA-v2hh-gcrm-f6hx",
+        "GHSA-v2v4-37r5-5v8g",
+        "GHSA-v39h-62p7-jpjc",
+        "GHSA-v8w9-8mx6-g223",
+        "GHSA-w62v-xxxg-mg59",
+        "GHSA-wc8c-qw6v-h7f6",
+        "GHSA-wgpf-jwqj-8h8p",
+        "GHSA-wmmm-f939-6g9c",
+        "GHSA-wwfh-h76j-fc44",
+        "GHSA-xf4j-xp2r-rqqx",
+        "GHSA-xgm2-5f3f-mvvc",
+        "GHSA-xpcf-pg52-r92g",
+        "GHSA-xrhx-7g5j-rcj5"
+      ]
+    },
+    {
+      "packages": ["proxy-addr", "path-to-regexp", "qs", "body-parser"],
+      "reason": "Express internals: `trust proxy` is never set (re-check if it ever is); no route uses sequential optional groups or multiple wildcards; Express 5's default query parser is not qs; no urlencoded parser; body limits are valid.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-27v5-c462-wpq7",
+        "GHSA-4mjr-xmp4-gh2g",
+        "GHSA-j3q9-mxjg-w52f",
+        "GHSA-jqcg-44mw-7w3h",
+        "GHSA-q8mj-m7cp-5q26",
+        "GHSA-v422-hmwv-36x6",
+        "GHSA-x5fp-wj9c-mxmx"
+      ]
+    },
+    {
+      "packages": ["@auth/core"],
+      "reason": "Convex auth (convex/auth.ts) uses the GitHub OAuth provider only: no email provider, no getToken() call, a single OAuth provider.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-7rqj-j65f-68wh", "GHSA-x445-f3h2-j279", "GHSA-xmf8-cvqr-rfgj"]
+    },
+    {
+      "packages": ["builder-util-runtime", "js-yaml"],
+      "reason": "Via electron-updater: the update feed is public GitHub releases sent without a token, and the YAML it parses is our own release metadata. Our own js-yaml is ^4.3.2.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-2883-xcg3-v3hh",
+        "GHSA-52cp-r559-cp3m",
+        "GHSA-5p4m-2wfm-xmqj",
+        "GHSA-h67p-54hq-rp68",
+        "GHSA-p2f4-r6v6-j797"
+      ]
+    },
+    {
+      "packages": ["ws"],
+      "reason": "ws 8.18.0 is pinned by convex; the Convex client only connects to Convex's own servers, so the hostile peer would have to be Convex. Our own ws is ^8.21.3.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-58qx-3vcg-4xpx", "GHSA-96hv-2xvq-fx4p"]
+    },
+    {
+      "packages": [
+        "vite",
+        "vitest",
+        "@vitest/mocker",
+        "rollup",
+        "postcss",
+        "esbuild",
+        "source-map-js",
+        "nanoid"
+      ],
+      "reason": "Counted as production only because better-auth lists vitest as an optional peer; dev tooling in practice. Our Vite dev servers bind localhost, and the dev-server advisories need --host.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-28wg-ghj8-5hjv",
+        "GHSA-2v37-7h3g-55p8",
+        "GHSA-4w7w-66w2-5vf9",
+        "GHSA-587h-7wmj-h5pm",
+        "GHSA-68fv-2mgg-jv7q",
+        "GHSA-698v-4r3x-3vcv",
+        "GHSA-6g55-p6wh-862q",
+        "GHSA-82fw-gwwq-j7x9",
+        "GHSA-9jrq-w75r-8gcw",
+        "GHSA-fx2h-pf6j-xcff",
+        "GHSA-fxqj-rqcc-2cmp",
+        "GHSA-g7r4-m6w7-qqqr",
+        "GHSA-mw96-cpmx-2vgc",
+        "GHSA-p9ff-h696-f583",
+        "GHSA-qx2v-qp2m-jg93",
+        "GHSA-qxg6-89mg-rqv8",
+        "GHSA-r28c-9q8g-f849",
+        "GHSA-r825-w8mm-5pxw",
+        "GHSA-rq7h-c2jc-7f22",
+        "GHSA-v2wj-q39q-566r",
+        "GHSA-v6wh-96g9-6wx3",
+        "GHSA-xwg4-73v4-xw9w"
+      ]
+    },
+    {
+      "packages": ["postcss-selector-parser"],
+      "reason": "Via @tailwindcss/typography: runs at build time on our own CSS.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-rj75-hqrm-r3gf"]
+    },
+    {
+      "packages": ["lodash-es", "js-cookie", "decode-uri-component", "colord", "katex"],
+      "reason": "Via @lobehub/icons / @lobehub/ui: we deep-import 6 icon components, which do not load these.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-238p-pmpm-9mq7",
+        "GHSA-2wm5-q62r-hmrv",
+        "GHSA-f23m-r3pf-42rh",
+        "GHSA-qjx8-664m-686j",
+        "GHSA-r5fr-rjxr-66jc",
+        "GHSA-vcc3-ghjq-m6fr"
+      ]
+    },
+    {
+      "packages": ["minimatch", "brace-expansion", "lodash"],
+      "reason": "Via archiver in the CLI zip export: no glob patterns are passed.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": [
+        "GHSA-23c5-xmqv-rm74",
+        "GHSA-3jxr-9vmj-r5cp",
+        "GHSA-3ppc-4f35-3m26",
+        "GHSA-6j4f-fj2g-mc7p",
+        "GHSA-7r86-cg39-jmmj",
+        "GHSA-f23m-r3pf-42rh",
+        "GHSA-f886-m6hf-6m8v",
+        "GHSA-mh99-v99m-4gvg",
+        "GHSA-q2hr-2g5m-vwhr",
+        "GHSA-qhr7-859c-m2p7",
+        "GHSA-r5fr-rjxr-66jc",
+        "GHSA-rgw5-rvv9-x895",
+        "GHSA-xxjr-mmjv-4gpg"
+      ]
+    },
+    {
+      "packages": ["diff"],
+      "reason": "task-artifacts uses createPatch/structuredPatch; the DoS is in parsePatch/applyPatch.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-73rr-hh4g-fpgx"]
+    },
+    {
+      "packages": ["posix"],
+      "reason": "The crash needs an argument whose toString is not a function; only our own calls reach it.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-27mx-gchc-6xjp"]
+    },
+    {
+      "packages": ["defu"],
+      "reason": "better-auth merges its own config objects; the pollution needs attacker-controlled input as the first argument.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-737v-mqg7-c878"]
+    },
+    {
+      "packages": ["picomatch"],
+      "reason": "test-panel matches the user's own configured patterns.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-3v7f-55p6-f55p", "GHSA-c2c7-rcm5-vvqj"]
+    },
+    {
+      "packages": ["protocol-buffers-schema"],
+      "reason": "Via pbf's .proto compiler; electron-chrome-web-store only uses pbf's runtime decoder on the CRX header.",
+      "reviewed": "2026-10-22",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-j452-xhg8-qg39"]
+    }
+  ]
+}

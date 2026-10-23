@@ -2,10 +2,14 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { hubGithubSignInConvexUrl } from '../auth-github'
 import { router, publicProcedure } from '../trpc'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { buildExportImportOps } from '../export-import'
+import { createAccessScope } from '../access'
+import { accessRequestOf, ownedProjectIds } from '../owner-gate'
+import type { TrpcContext } from '../context'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
 const isTestBuild = (): boolean => process.env.PLAYWRIGHT === '1'
@@ -17,6 +21,20 @@ const anyInput = z.unknown()
 // Every procedure delegates to the injected `AppDeps` (setAppDeps in the
 // Electron-main host); the same impls back the still-live IPC handlers
 // (coexistence until the renderer drops IPC in slice 5).
+
+/** Export/import for one request. Imported projects belong to its user — null on
+ *  a hub without login, where requests carry none — and `exportAll` holds only what
+ *  its access scope allows (O-22: the caller's own content on a hub with login). */
+const exportImportOps = (ctx: TrpcContext, isTest = false) =>
+  buildExportImportOps(
+    ctx.db,
+    {
+      userId: ctx.principal?.userId ?? null,
+      scope: createAccessScope(ctx.db, accessRequestOf(ctx))
+    },
+    isTest
+  )
+
 export const appLevelRouter = router({
   // Backup
   backup: router({
@@ -64,7 +82,11 @@ export const appLevelRouter = router({
   // process asked the Electron host to run a query against the database THIS
   // process owns; standalone hubs got a fail-loud stub instead of a leaderboard.
   leaderboard: router({
-    getLocalStats: publicProcedure.query(({ ctx }) => getLocalLeaderboardStats(ctx.db))
+    // Summed over the caller's projects only, on a hub with login (T-17).
+    getLocalStats: publicProcedure.query(async ({ ctx }) => {
+      const projectIds = await ownedProjectIds(ctx)
+      return getLocalLeaderboardStats(ctx.db, projectIds ? { projectIds } : null)
+    })
   }),
 
   // Export/Import — reads and writes ctx.db. Was seven AppDeps slots, i.e. this
@@ -75,36 +97,36 @@ export const appLevelRouter = router({
   // The `test*` variants are no longer test-only in nature — they are just the
   // path-taking forms — but the gate stays so production can't be driven headless.
   exportImport: router({
-    exportAll: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).exportAll()),
+    exportAll: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).exportAll()),
     exportProject: publicProcedure
       .input(z.object({ projectId: z.string() }))
-      .mutation(({ ctx, input }) => buildExportImportOps(ctx.db).exportProject(input.projectId)),
-    import: publicProcedure.mutation(({ ctx }) => buildExportImportOps(ctx.db).importBundle()),
+      .mutation(({ ctx, input }) => exportImportOps(ctx).exportProject(input.projectId)),
+    import: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).importBundle()),
     testExportAllToPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportAllToPath
+        const fn = exportImportOps(ctx, isTestBuild()).testExportAllToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testExportProjectToPath: publicProcedure
       .input(z.object({ projectId: z.string(), filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testExportProjectToPath
+        const fn = exportImportOps(ctx, isTestBuild()).testExportProjectToPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.projectId, input.filePath)
       }),
     testImportFromPath: publicProcedure
       .input(z.object({ filePath: z.string() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testImportFromPath
+        const fn = exportImportOps(ctx, isTestBuild()).testImportFromPath
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.filePath)
       }),
     testSetTaskParent: publicProcedure
       .input(z.object({ taskId: z.string(), parentId: z.string().nullable() }))
       .mutation(({ ctx, input }) => {
-        const fn = buildExportImportOps(ctx.db, isTestBuild()).testSetTaskParent
+        const fn = exportImportOps(ctx, isTestBuild()).testSetTaskParent
         if (!fn) throw new Error('test-only handler unavailable in production')
         return fn(input.taskId, input.parentId)
       })
@@ -249,7 +271,12 @@ export const appLevelRouter = router({
     // GitHub's authorize page itself.
     githubSystemSignIn: publicProcedure.input(anyInput).mutation(({ input }) => {
       assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
-      return getAppDeps().authGithubSystemSignIn(input as never)
+      // T-99: the host POSTs only to THIS hub's Convex deployment. A client `convexUrl`
+      // naming another host (or a hub with none configured) is refused here, before the
+      // host is asked; what the host gets is the hub's own value, never the client's.
+      const req = typeof input === 'object' && input !== null ? input : {}
+      const convexUrl = hubGithubSignInConvexUrl((req as { convexUrl?: unknown }).convexUrl)
+      return getAppDeps().authGithubSystemSignIn({ ...req, convexUrl } as never)
     }),
     // Chromium-fork OAuth callback relay. The C++ shell forwards the
     // `slayzone://auth/callback` deep-link to the sidecar (auth:deep-link), the

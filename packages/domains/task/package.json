@@ -30,7 +30,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
-    "@milkdown/core": "^7.19.2",
+    "@milkdown/core": "^7.22.1",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
@@ -60,7 +60,7 @@
     "zod": "^4.3.5"
   },
   "peerDependencies": {
-    "electron": "^41.0.0",
+    "electron": "^41.10.7",
     "react": "^19.0.0"
   },
   "devDependencies": {

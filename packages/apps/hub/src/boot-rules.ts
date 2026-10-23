@@ -8,11 +8,15 @@
  * `server.ts` keeps only the wiring, the way `rest-auth.ts` and `ws-origin.ts` do.
  *
  *   Always:                 B4 every switch is 0|1 · B5 the hub never read the old
- *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port]
+ *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
+ *                           B15 trusted proxies are IPs/CIDRs ·
+ *                           B16 session retention is a whole number of days
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
- *   (B13)                   dev endpoint · B14 auth secret in env
- *   Login required:         B2 password or SSO on · B7 SSO settings complete ·
+ *   (B13)                   dev endpoint · B14 auth secret in env · B17 it matches any
+ *                           secret this hub generated earlier (`assertKeptAuthSecret`)
+ *   Login required:         B2 password or SSO on · B7 SSO settings complete (and
+ *                           its certificate loads, `assertSsoCredential`) ·
  *                           B11 the auth database loads (`assertAuthLoaded`, once
  *                           the database has been opened)
  *
@@ -30,6 +34,7 @@
  *
  * @module hub/boot-rules
  */
+import { createHash, timingSafeEqual } from 'node:crypto'
 import {
   LOOPBACK_HOSTS,
   assertLoopbackBind,
@@ -42,14 +47,17 @@ import {
   HUB_SWITCH_ENV,
   HubSwitchValueError,
   LEGACY_HUB_LISTEN_ENV,
+  RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
+  readHubSessionRetentionDays,
   resolveHubSso,
   resolveHubSwitches,
   type HubSsoSettings,
   type HubSwitches
 } from '@slayzone/platform/hub-switches'
+import { readTrustedProxies } from '@slayzone/platform/client-address'
 
 /**
- * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B14`), or
+ * A boot rule refused to start the hub. `rule` is the plan's number (`B1`…`B17`), or
  * `config-file` for an unusable `hub.config.json`; the bin writes it into the
  * `hub.boot` audit line before it exits (T-03).
  */
@@ -75,6 +83,12 @@ export function bootRefusalRule(err: unknown): string | null {
 export interface HubBootSettings {
   switches: HubSwitches
   sso: HubSsoSettings
+  /**
+   * Entra sign-in is ON: login required AND `ENABLE_SSO=1`, with B7 passed. The one
+   * flag every SSO-only rule keys on (the callback route, the role rules, no bootstrap
+   * owner). `ENABLE_SSO=1` on a hub without login is inert, like B2/B7 there.
+   */
+  ssoActive: boolean
   /** The host the hub binds. */
   host: string
   /** `SLAYZONE_HUB_PUBLIC_ADDRESS`, trimmed; undefined when unset or blank. */
@@ -144,7 +158,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B9, B1, B3, B10, B14, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -178,6 +192,12 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
         `derived from the host: a loopback host is http/ws, any other host is https/wss.`
     )
   }
+
+  // B15 — the front ends whose X-Forwarded-For names the client (T-22,
+  // client-address.ts) are IPs and CIDRs, every one. Dropping a typo would quietly
+  // record the front end as every user; `/0` would let any client name itself.
+  const trustedProxies = readTrustedProxies(env)
+  if (!trustedProxies.ok) throw new HubBootRefusal('B15', trustedProxies.message)
 
   // B9 — started by the desktop app ⇒ listens on loopback (login is off there).
   if (supervised) {
@@ -246,6 +266,11 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     }
   }
 
+  // B16 — the session retention period (T-23, session-retention.ts) is a whole number
+  // of days. A typo that fell back to "off" would keep what the operator meant to delete.
+  const retention = readHubSessionRetentionDays(env)
+  if (!retention.ok) throw new HubBootRefusal('B16', retention.message)
+
   const sso = resolveHubSso(env)
   if (switches.requireLogin) {
     // B2 — login with no way to sign in locks everyone out, the operator included.
@@ -258,11 +283,17 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
       )
     }
     // B7 — SSO needs its settings. Checked all-at-once so one boot lists every gap.
+    // The public address is one of them: Entra redirects back to
+    // https://<public address>/api/auth/callback/microsoft, which must be registered on
+    // the app and must not move. Whether the certificate actually loads is the second
+    // half of B7, checked in server.ts (it reads files; this module does no I/O).
     if (switches.enableSso) {
       const missing: string[] = []
       if (!sso.tenantId) missing.push(HUB_SSO_ENV.tenantId)
       if (!sso.clientId) missing.push(HUB_SSO_ENV.clientId)
-      if (!sso.clientSecret) missing.push(HUB_SSO_ENV.clientSecret)
+      if (!sso.certPath) missing.push(HUB_SSO_ENV.certPath)
+      if (!sso.keyPath) missing.push(HUB_SSO_ENV.keyPath)
+      if (publicAddress === undefined) missing.push(HUB_ADDRESS_ENV.public)
       if (missing.length > 0) {
         throw new HubBootRefusal(
           'B7',
@@ -270,10 +301,119 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
             `${missing.join(', ')}.`
         )
       }
+      // Single tenant: every ID token's `tid` and issuer are compared against this
+      // value, and Entra writes them as GUIDs — a domain name or `common` would
+      // refuse every sign-in, so it refuses the boot instead.
+      const notGuid = [
+        [HUB_SSO_ENV.tenantId, sso.tenantId],
+        [HUB_SSO_ENV.clientId, sso.clientId]
+      ].filter(([, v]) => !GUID.test(v ?? ''))
+      if (notGuid.length > 0) {
+        throw new HubBootRefusal(
+          'B7',
+          `[slayzone] ${notGuid.map(([k, v]) => `${k} must be a GUID, got '${v}'`).join('; ')}. ` +
+            `Use the Directory (tenant) ID and Application (client) ID from the app ` +
+            `registration's Overview page.`
+        )
+      }
+      // The hub authenticates to Entra with a certificate only. A leftover secret
+      // would read as "configured" while nothing uses it.
+      if (trimmed(env[RETIRED_HUB_SSO_CLIENT_SECRET_ENV]) !== undefined) {
+        throw new HubBootRefusal(
+          'B7',
+          `[slayzone] ${RETIRED_HUB_SSO_CLIENT_SECRET_ENV} is not used: the hub signs in to ` +
+            `Entra with a certificate (${HUB_SSO_ENV.certPath} + ${HUB_SSO_ENV.keyPath}). ` +
+            `Unset it, and delete the client secret from the app registration.`
+        )
+      }
     }
   }
 
-  return { switches, sso, host, publicAddress, reachable }
+  const ssoActive = switches.requireLogin && switches.enableSso
+  return { switches, sso, ssoActive, host, publicAddress, reachable }
+}
+
+/**
+ * B17 — a hub other machines can reach takes its auth secret from env (B14), but its
+ * ROOT may still hold the one it generated while only this machine reached it:
+ * `computerTransportSecret` in `hub.state.json` (or the legacy `config.json`). Such a
+ * hub reads that file for this check only and never writes it (T-11). A DIFFERENT value
+ * in env would silently sign every session out and leave the stored Entra tokens and
+ * the JWT signing key (both encrypted with it) unreadable, so it refuses instead. The
+ * same value boots; the caller tells the operator the file can go.
+ *
+ * Pure: the caller reads the file (standalone-config.ts). Neither value is ever put in
+ * the message. Returns `'kept'` when the file holds the env value, `'none'` when there
+ * is nothing to compare (not reachable, or no kept secret).
+ */
+export function assertKeptAuthSecret(input: {
+  reachable: boolean
+  envSecret: string | undefined
+  kept: string | undefined
+  keptPath: string
+}): 'none' | 'kept' {
+  const { reachable, envSecret, kept } = input
+  if (!reachable || !kept || !envSecret) return 'none'
+  const digest = (v: string): Buffer => createHash('sha256').update(v, 'utf8').digest()
+  if (timingSafeEqual(digest(envSecret), digest(kept))) return 'kept'
+  throw new HubBootRefusal(
+    'B17',
+    `[slayzone] ${HUB_ADDRESS_ENV.authSecret} differs from the computerTransportSecret this ` +
+      `hub generated in ${input.keptPath}. Booting with it would sign every session out and ` +
+      `leave the stored Entra tokens and the hub's JWT signing key unreadable. Set ` +
+      `${HUB_ADDRESS_ENV.authSecret} to the value in that file — or, to replace the secret ` +
+      `on purpose (everyone signs in again), delete the file. The hub only compares the ` +
+      `two; it never writes the file.`
+  )
+}
+
+/** A GUID as Entra writes tenant and client ids (case-insensitive). */
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** What Entra sign-in runs with, once B7 has passed in full. */
+export interface HubSsoBootConfig<C> {
+  /** Lowercased: Entra writes `tid` and `aud` lowercase. */
+  tenantId: string
+  clientId: string
+  requireMfa: boolean
+  credential: C
+}
+
+/**
+ * B7, second half: the certificate and its private key load. Null when Entra sign-in
+ * is off. `load` does the reading (server.ts passes hub-auth's
+ * `loadEntraClientCredential`), so this module stays free of I/O and of hub-auth.
+ * Runs in `startServer` right after {@link assertHubBootRules}, before the hub opens
+ * its database — an unreadable or mismatched key refuses the boot, it does not
+ * surface as every sign-in failing. The message names paths, never file contents.
+ */
+export function assertSsoCredential<C>(
+  boot: HubBootSettings,
+  load: (paths: { certPath: string; keyPath: string }) => C
+): HubSsoBootConfig<C> | null {
+  if (!boot.ssoActive) return null
+  const { tenantId, clientId, certPath, keyPath, requireMfa } = boot.sso
+  // B7 guarantees all four once SSO is active.
+  if (!tenantId || !clientId || !certPath || !keyPath) {
+    throw new HubBootRefusal('B7', '[slayzone] SSO settings incomplete')
+  }
+  let credential: C
+  try {
+    credential = load({ certPath, keyPath })
+  } catch (err) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${HUB_SSO_ENV.certPath} / ${HUB_SSO_ENV.keyPath}: ` +
+        `${err instanceof Error ? err.message : String(err)}. Point them at the PEM ` +
+        `certificate uploaded to the Entra app registration and its unencrypted RSA key.`
+    )
+  }
+  return {
+    tenantId: tenantId.toLowerCase(),
+    clientId: clientId.toLowerCase(),
+    requireMfa,
+    credential
+  }
 }
 
 /**

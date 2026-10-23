@@ -18,10 +18,17 @@ export {
 } from './store'
 export {
   JOIN_TOKEN_PREFIX,
+  DEFAULT_JOIN_TOKEN_TTL_MS,
+  MAX_JOIN_TOKEN_TTL_MS,
+  JOIN_TOKEN_TTL_TOO_LONG,
+  JoinTokenTtlError,
+  isAllowedJoinTokenTtl,
   hashJoinToken,
   decodeJoinToken,
   mintJoinToken,
   verifyJoinToken,
+  auditJoinTokenRedeemRefused,
+  recordJoinTokenRedeemed,
   type JoinTokenPayload,
   type MintJoinTokenInput,
   type MintedJoinToken,
@@ -46,6 +53,8 @@ export {
 export {
   assertComputerVisible,
   isComputerVisible,
+  isComputerOwnedBy,
+  ownsEveryComputerOnHost,
   listVisibleComputerIds,
   visibilityClause,
   claimComputer,

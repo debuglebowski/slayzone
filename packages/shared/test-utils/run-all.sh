@@ -67,11 +67,16 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # Artifact export routes after the inversion: served by the HUB against ctx.db,
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
+# T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
+# procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
+run_test_electron_strict_loader packages/shared/transport/src/server/path-ids.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/computer-auth.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
 run_test_electron_strict_loader packages/apps/hub/src/local-computer-roots.test.ts
+# T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
+run_test_electron_strict_loader packages/apps/hub/src/computer-placement.test.ts
 # `projects.path` is being deleted; this is the one-time hand-off of its values to
 # the local computer. It must never overwrite a mapping the user re-pointed, and
 # must never record a path that is not on that machine.
@@ -94,6 +99,11 @@ run_test_electron_strict_loader packages/apps/hub/src/integrations-push.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/integrations-pollers.test.ts
 # Processes / integrations switched off (T-04, T-05, T-07), end to end over tRPC.
 run_test_electron_strict_loader packages/apps/hub/src/switch-refusals.test.ts
+# Hub-local exec and project files refused with processes switched off (T-06).
+run_test_electron_strict_loader packages/apps/hub/src/local-exec-refusals.test.ts
+# A bad processes.* input is a clean error, never a hub exit (T-102): the built hub with
+# processes on (desktop, login) and off (Normain).
+run_test_electron_strict_loader packages/apps/hub/src/processes-bad-input.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_test_electron_strict_loader packages/apps/hub/src/backup.test.ts
@@ -107,9 +117,37 @@ run_test_electron_strict_loader packages/apps/hub/src/tab-flag-recorders.test.ts
 run_test_electron_strict_loader packages/apps/hub/src/hub-trpc-context.test.ts
 # Account commands over real hub-auth + app DB: disable revokes BOTH session classes.
 run_test_electron_strict_loader packages/apps/hub/src/hub-users.test.ts
+# Leavers + session lifetimes (T-12): disable ends bearer, szw_, open sockets and owned
+# computers, keeps every row; the hourly Entra re-check through fake timers + fake Entra.
+run_test_electron_strict_loader packages/apps/hub/src/leavers.test.ts
 # HTTP twin of the above — /api/* + /mcp bearer gate (exemptions, no loopback bypass,
 # fail-closed) driven over a real listener with a real better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/rest-auth.test.ts
+# Project ownership (T-16): the boot backfill over real hub-auth + app DB, and the
+# same through the real built hub against a v168 database (upgrade).
+run_test_electron_strict_loader packages/apps/hub/src/ownership-backfill.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/ownership-boot.test.ts
+# Every project-create surface (tRPC, REST, import; MCP has none) stores its owner.
+run_test_electron_strict_loader packages/shared/transport/src/server/project-owner-surfaces.test.ts
+# Session retention (T-23): the sweep and its schedule, then through the built hub.
+run_test_electron_strict_loader packages/apps/hub/src/session-retention.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/session-retention-boot.test.ts
+# Owner checks (T-17): the one access function over a real DB, then two users on a real
+# hub with login (ids, lists, live streams, admin) and the desktop's hub with login off.
+run_test_electron_strict_loader packages/shared/transport/src/server/access.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-login-off.test.ts
+# Owner checks over REST, MCP and agent hooks (T-18): two users on a real hub with
+# login (ids, lists, artifact files, relayed hooks, admin), then login off.
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-http-login-off.test.ts
+# Owner-check leftovers (T-101/T-105/T-106): own-content export, MCP sessions bound to
+# their opener, admin routes decided by owner — with login, then the desktop's hub.
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/owner-checks-admin-login-off.test.ts
+# Upload procedures never copy the hub's own files (DB, auth store, SSO key) or another
+# user's to a caller, and read nothing off the hub's disk with processes off (T-107).
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/upload-sources.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -118,6 +156,9 @@ run_test_electron_strict_loader packages/apps/hub/src/ws-origin.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
+# node-pty optional in the published hub (T-30): loaded on the first local spawn, never at
+# import; missing → a clear refusal at that spawn.
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/node-pty-optional.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/computers.test.ts
 # Hub↔computer install handshake — boots the built hub+computer bins, isolated (tmp
 # home/store, ports 0, scrubbed env), asserts the computer enrolls + the real
@@ -131,9 +172,18 @@ run_test_electron_strict_loader packages/apps/hub/src/web-assets-served.test.ts
 # non-zero before the hub touches its data dir; the defaults boot on loopback; a reachable
 # hub behind a public address boots with login + secret and mints a pin-less wss token.
 run_test_electron_strict_loader packages/apps/hub/src/hub-boot.test.ts
+# The built hub boots with node-pty, bufferutil and utf-8-validate unresolvable (T-30).
+run_test_electron_strict_loader packages/apps/hub/src/optional-natives-boot.test.ts
+# T-11: a reachable hub writes no generated secret under ROOT and logs none (known
+# values grepped in logs, stdout/stderr and every file); B17 + the loopback→reachable
+# upgrade keeps sessions and enrolled computers.
+run_test_electron_strict_loader packages/apps/hub/src/secrets-at-rest.test.ts
 # Scoped browser sessions (mint/verify/revoke over a real migrated SlayzoneDb) —
 # the credential a web login mints, distinct from a full better-auth session.
 run_test_electron_strict_loader packages/apps/hub/src/web-sessions.test.ts
+# Password sign-in off (T-10): every password route 403s with the switch code before the
+# gate; break-glass (O-9) opens/closes with the switch over real hub-auth + app DB.
+run_test_electron_strict_loader packages/apps/hub/src/password-switch.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts
 run_test packages/domains/task/src/shared/conversation-heal.test.ts
@@ -161,6 +211,8 @@ run_test packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
 # (plans/hub-lifecycle-and-discovery.md P1).
 run_test packages/apps/hub/src/health.test.ts
+# A closed window's warm-pool tab counts are dropped (after a reconnect grace).
+run_test packages/apps/hub/src/warm-window-sockets.test.ts
 run_test packages/apps/hub/src/web-assets.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
 run_test packages/shared/platform/src/hub-port-block.test.ts
@@ -175,6 +227,11 @@ run_test packages/shared/platform/src/service-unit.test.ts
 # launchd/systemd unit is ever installed by the suite. Electron ABI (the hub
 # bundle needs better-sqlite3) → strict loader.
 run_test_electron_strict_loader packages/apps/cli/src/commands/hub-lifecycle.test.ts
+# Device sign-in (T-14): `slay hub login` against the REAL built hub with Entra sign-in
+# on and password off (local fake Entra), browser approval with MFA, bearer on REST,
+# denial, no token without MFA, audit; plus the CLI's password path (no more
+# MISSING_OR_NULL_ORIGIN). Electron ABI (hub bundle) → strict loader.
+run_test_electron_strict_loader packages/apps/hub/src/hub-device-sign-in.test.ts
 # `slay computer` end-to-end: boots a REAL hub in a temp root, mints a join token over
 # its loopback REST channel, then drives `computer create` through the built CLI and
 # asserts the computer ENROLLS (a computer has no /health to probe — its own
@@ -185,14 +242,19 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycl
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_test packages/apps/cli/src/commands/update.test.ts
+# `slay computer mint --for` / `--ttl` cap against a fake hub (T-20). Pure Node.
+run_test packages/apps/cli/src/commands/computer-mint.test.ts
 run_test packages/apps/cli/src/local-hub.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
 run_test packages/apps/hub/src/remote-mcp-env-provider.test.ts
-# Computer /computers URL derivation (public address → wss, loopback → ws) + the cert-pin
-# seam that remains for tokens minted by an older hub.
+# Computer /computers URL derivation (public address → wss, loopback → ws).
 run_test packages/apps/hub/src/computer-tls-listener.test.ts
+# The built hub behind a TLS front end: CLI, computer and tRPC websocket verify its
+# CA-issued certificate with no pin; a cert swap drops nothing; an older pinned token
+# still enrolls (T-21).
+run_test_electron_strict_loader packages/apps/hub/src/tls-front-end.test.ts
 # The hub's boot rules as a pure function — one case per refusal (B1-B5, B7-B11, B13, B14).
 run_test packages/apps/hub/src/boot-rules.test.ts
 # Per-role hub.config.json/hub.state.json + computer.config.json (env>file>default,
@@ -244,6 +306,8 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/codex
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
+# v169 project owner + per-user settings, on an empty and a populated v168 DB.
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -279,14 +343,24 @@ run_test packages/shared/platform/src/device-status-queries.test.ts
 run_test packages/shared/platform/src/hub-addr.test.ts
 # Security audit events on stdout (T-03).
 run_test packages/shared/platform/src/security-log.test.ts
+# Real client IP behind a trusted front end (T-22): the resolver, then the built hub.
+run_test packages/shared/platform/src/client-address.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/trusted-proxy.test.ts
 # Switch refusals: one audit line + one error shape per refusal.
 run_test packages/shared/platform/src/hub-switch-refusal.test.ts
+# The hub's own Convex deployment (T-99): address parsing, the desktop hand-over, and
+# the gate that refuses a client-named Convex host; then end to end over tRPC with
+# fetch stubbed — refused means nothing was sent.
+run_test packages/shared/platform/src/hub-convex.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/convex-sign-in.test.ts
 # Sidecar socket path derives from SLAYZONE_ROOT (<ROOT>/run), override + length fallback.
 run_test packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
 run_test_electron_strict_loader packages/apps/hub/src/computer-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
+# T-19: the REST computer roster is the caller's own (every one for an admin).
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/computers/list.test.ts
 # Loopback operator account routes (`slay hub users`). no_loader: the routes never
 # touch the DB (the hubUsers capability is stubbed), so no Electron-ABI harness.
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.test.ts
@@ -453,8 +527,6 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/arti
 # run host-side; asserts the CLI's exact result shape + flag semantics.
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
-# Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
-run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
@@ -529,6 +601,7 @@ run_test packages/domains/task-terminals/src/client/chat/autocomplete/ranking.te
 run_test packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_test packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/create-project-guard.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_test packages/domains/task/src/shared/handoff.test.ts
 run_test packages/domains/task/src/shared/panel-config.test.ts
 run_test packages/domains/task/src/shared/reparent-validation.test.ts
@@ -570,8 +643,6 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 
 # Known-red suites, skipped visibly with the reason and owner instead of failing every run.
-skip_suite packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
-  "fails at HEAD (2 of 4 tests: the transition spy is never called). TODO(T-01): fix the test, then move it into the vitest run below"
 skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context). TODO(T-01): fix the test, then register it with the other migration suites"
 
@@ -588,7 +659,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
-  packages/apps/app/src/main/hub-cert-pinning.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/trpc.test.ts \
@@ -611,8 +681,11 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \
+  packages/domains/settings/src/server/scope.test.ts \
+  packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
+  packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-execution.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-roundtrip.test.ts \
@@ -621,7 +694,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
-  packages/shared/transport/src/server/trpc.test.ts
+  packages/shared/transport/src/server/trpc.test.ts \
+  packages/domains/hub-auth/src/server/entra.test.ts \
+  packages/domains/hub-auth/src/server/password.test.ts
 
 # Swept in 2026-10-22: vitest suites (jsdom / vi.mock) that no runner ran.
 run_vitest_files "vitest (swept-in suites)" \
@@ -648,6 +723,18 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/shared/suspense/src/suspense-cache.test.tsx \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \
   packages/shared/transport/src/txns/txns.test.ts
+
+# The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
+# hub's open REST routes.
+run_vitest_files "vitest (role gate)" \
+  packages/shared/transport/src/server/admin-policy.test.ts \
+  packages/apps/hub/src/admin-authz.test.ts
+
+# The owner-check classification (T-17): every user procedure marked, exhaustively.
+run_vitest_files "vitest (owner checks)" \
+  packages/shared/transport/src/server/owner-policy.test.ts \
+  packages/shared/transport/src/server/http-owner-policy.test.ts \
+  packages/shared/transport/src/server/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
@@ -679,11 +766,35 @@ run_package_tests packages/domains/hub-auth @slayzone/hub-auth
 run_package_tests packages/shared/platform @slayzone/platform
 # Packages whose own `vitest run` was green but never aggregated (swept in 2026-10-22).
 run_package_tests packages/domains/task-artifacts @slayzone/task-artifacts
-run_package_tests packages/domains/hub-identity @slayzone/hub-identity
 run_package_tests packages/shared/layout @slayzone/layout
 run_package_tests packages/shared/markdown @slayzone/markdown
 run_package_tests packages/shared/shortcuts @slayzone/shortcuts
 run_package_tests packages/shared/ui @slayzone/ui
+
+# Security headers on every hub response (T-25): the header logic, and the built hub
+# through each handler (shell, assets, better-auth, REST, 404, /trpc, /health).
+run_test packages/apps/hub/src/security-headers.test.ts
+run_test_electron_strict_loader packages/apps/hub/src/security-headers-served.test.ts
+
+# Break-glass v2 (O-9/O-23): grant over the local socket, one-time redemption, the REST
+# allowlist, TTL / end / boot closing, over real hub-auth + app DB; and the computer
+# revoke route it uses (hub-auth's account half runs in its package suite).
+run_test_electron_strict_loader packages/apps/hub/src/break-glass.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/hub/computers.test.ts
+
+# Flood limits (T-26): the hub's front-door limits (web-login, break-glass redemption,
+# /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.
+run_test packages/apps/hub/src/flood-limits.test.ts
+
+# Web shell sign-in and sign-out through Entra (T-13): the session routes over real
+# hub-auth + app DB, and the shell's cookie-only session (hub-auth's web sign-in runs in
+# its package suite above).
+run_test_electron_strict_loader packages/apps/hub/src/web-session-routes.test.ts
+run_vitest_files "vitest (web shell session, T-13)" \
+  packages/apps/web-shell/src/web-session-storage.test.ts \
+  packages/apps/web-shell/src/web-session.test.ts \
+  packages/apps/web-shell/src/sign-in-error.test.ts \
+  packages/apps/web-shell/src/LoginScreen.test.tsx
 
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner

@@ -47,6 +47,7 @@ import {
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { detectBackend } from '@slayzone/platform/service-unit'
 
 // Package roots are derived from the REPO root rather than this file's own URL:
@@ -891,7 +892,7 @@ async function main(): Promise<void> {
     await test('create --public-address persists the reachable shape to hub.config.json', async () => {
       const remoteRoot = join(TMP, 'remote-cfg')
       mkdirSync(remoteRoot, { recursive: true })
-      slay(
+      const created = slay(
         [
           'hub',
           'create',
@@ -921,6 +922,25 @@ async function main(): Promise<void> {
         !JSON.stringify(cfg).includes(SECRET.SLAYZONE_HUB_AUTH_SECRET),
         'the auth secret is not in hub.config.json'
       )
+      // A reachable hub keeps no owner file (T-11): the way in is the derived password.
+      assert(
+        created.stdout.includes(`slay hub owner-password ${NAME_PREFIX}remote | slay hub login`),
+        `says how to sign in as the first admin: ${created.stdout}`
+      )
+    })
+
+    await test('owner-password prints the derived owner password, and only it, on stdout', async () => {
+      const res = slay(['hub', 'owner-password'], { env: SECRET })
+      assertEq(res.status, 0, `exit (${res.stderr})`)
+      assertEq(
+        res.stdout,
+        `${deriveBootstrapOwnerPassword(SECRET.SLAYZONE_HUB_AUTH_SECRET)}\n`,
+        'stdout is the password alone, ready to pipe into `slay hub login`'
+      )
+      const none = slay(['hub', 'owner-password'], { env: { SLZ_FORCE_NO_SERVICE: '1' } })
+      assert(none.status !== 0, 'no secret → refused')
+      assert(/SLAYZONE_HUB_AUTH_SECRET/.test(none.stderr), `names the variable: ${none.stderr}`)
+      assertEq(none.stdout, '', 'prints nothing to pipe')
     })
 
     await test('create --public-address REFUSES without SLAYZONE_HUB_AUTH_SECRET, writing nothing', async () => {

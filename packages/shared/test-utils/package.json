@@ -15,6 +15,7 @@
     "./event-spy": "./event-spy.ts",
     "./rest-harness": "./rest-harness.ts",
     "./mcp-harness": "./mcp-harness.ts",
-    "./mock-electron": "./mock-electron.ts"
+    "./mock-electron": "./mock-electron.ts",
+    "./test-ca": "./test-ca.ts"
   }
 }

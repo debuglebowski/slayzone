@@ -11,7 +11,7 @@
  *     --experimental-loader ./packages/shared/test-utils/loader.ts \
  *     packages/apps/hub/src/ws-origin.test.ts
  */
-import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 
 let passed = 0
 let failed = 0
@@ -229,6 +229,69 @@ test('the env override adds origins and drops junk defensively', () => {
 
 test('no configuration at all yields an EMPTY allowlist (never a wildcard)', () => {
   assertEq(resolveAllowedWebOrigins({}).length, 0, 'nothing configured ⇒ nothing extra allowed')
+})
+
+// ── the web-session cookie (T-13) ─────────────────────────────────────────────
+console.log('\nweb-session cookie: Origin must be the hub page')
+const HUB_ORIGIN = 'https://hub.normain.com'
+const PUBLIC = { loopbackBind: false, allowedOrigins: [HUB_ORIGIN], host: 'hub.normain.com' }
+const LOCAL = { loopbackBind: true, allowedOrigins: [], host: '127.0.0.1:8765' }
+
+test('a reachable hub: only its own public origin authenticates by cookie', () => {
+  assertEq(cookieOriginDecision({ origin: HUB_ORIGIN, ...PUBLIC }), 'accept', 'own origin')
+  for (const origin of [
+    'https://evil.example',
+    'https://hub.normain.com.evil.example',
+    'http://hub.normain.com',
+    'http://localhost:8765',
+    'null',
+    'file://',
+    'chrome://slayzone'
+  ]) {
+    assertEq(cookieOriginDecision({ origin, ...PUBLIC }), 'reject', `${origin} refused`)
+  }
+})
+
+test('a MISSING Origin never authenticates by cookie (unlike wsOriginDecision)', () => {
+  for (const shape of [PUBLIC, LOCAL]) {
+    assertEq(cookieOriginDecision({ origin: undefined, ...shape }), 'reject', 'no Origin')
+    assertEq(cookieOriginDecision({ origin: '', ...shape }), 'reject', 'blank Origin')
+  }
+  assertEq(
+    wsOriginDecision({ origin: undefined, requireLogin: true, loopbackBind: false }),
+    'accept',
+    'the socket itself still opens for a native client — it just gets no cookie principal'
+  )
+})
+
+test('a repeated or unparseable Origin is refused', () => {
+  assertEq(cookieOriginDecision({ origin: [HUB_ORIGIN, HUB_ORIGIN], ...PUBLIC }), 'reject', 'array')
+  assertEq(cookieOriginDecision({ origin: 'not a url', ...LOCAL }), 'reject', 'junk')
+})
+
+test('a local hub: same origin as the request Host only — not another localhost port', () => {
+  assertEq(cookieOriginDecision({ origin: 'http://127.0.0.1:8765', ...LOCAL }), 'accept', 'same')
+  assertEq(
+    cookieOriginDecision({ origin: 'http://localhost:8765', ...LOCAL, host: 'LOCALHOST:8765' }),
+    'accept',
+    'Host compared case-insensitively'
+  )
+  for (const origin of ['http://127.0.0.1:3000', 'http://localhost:8765', 'null', 'file://']) {
+    assertEq(cookieOriginDecision({ origin, ...LOCAL }), 'reject', `${origin} refused`)
+  }
+  assertEq(
+    cookieOriginDecision({ origin: 'http://127.0.0.1:8765', ...LOCAL, host: undefined }),
+    'reject',
+    'no Host, no same-origin claim'
+  )
+})
+
+test('a non-local hub never matches on Host (a rebinding or proxied name)', () => {
+  assertEq(
+    cookieOriginDecision({ origin: 'https://other.example', ...PUBLIC, host: 'other.example' }),
+    'reject',
+    'Host is attacker-influenced; only the configured origins count off-box'
+  )
 })
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

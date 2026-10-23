@@ -312,6 +312,17 @@ Project-scoped only (no scratch/projectless warming in v1).
 
 ### Slice 4 — path B: TRUE agent pre-warm (DECIDED)
 
+> **REPLACED (2026-10-22): the session→task identity below is gone.** A warm agent
+> now boots with a pre-minted task id (`SLAYZONE_TASK_ID`, in its hook context too)
+> instead of `SLAYZONE_SESSION_ID`. A task created to be opened right away takes
+> that id (`reserveWarmTaskId`, from task create) and its first spawn adopts the
+> agent (`claimWarmShell` by task id). So the CLI session fallback, the
+> `GET /api/session/:sessionId/task` route, the MCP `session_id` arg,
+> `getBoundTaskId` and the hook's `slaySessionId` are removed. Cost: the pool only
+> serves a task created and opened in one go. The pre-booted agent, the pooled
+> `agent_sessions` row, the conversation confirm and `bindSessionToTask` stay. See
+> `warm-process-manager.ts`. Kept below for history.
+
 The existing pool warms a bare **shell** and `exec claude` only at adopt (so
 `SLAYZONE_TASK_ID` is set at launch). Path B pre-warms the **agent** (claude
 booted, MCP up, idle) so assignment is instant. The blocker: agent task identity

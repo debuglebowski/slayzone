@@ -98,7 +98,7 @@ function getCommandLine(pid: number): Promise<string | null> {
  * stdout/stderr are decoded to strings here — the pre-seam `handleProcessData`
  * did `data.toString()` first thing, so decoding at the seam is byte-identical.
  */
-function makeLocalHandle(child: ChildProcess): ProcHandle {
+function makeLocalHandle(child: ChildProcess, cwd: string): ProcHandle {
   const dataSubs = new Set<(chunk: string, stream: 'stdout' | 'stderr') => void>()
   const exitSubs = new Set<(e: { code: number | null; signal: string | null }) => void>()
 
@@ -112,6 +112,21 @@ function makeLocalHandle(child: ChildProcess): ProcHandle {
   })
   child.on('exit', (code, signal) => {
     for (const cb of [...exitSubs]) cb({ code, signal })
+  })
+  // An 'error' event with no listener throws, outside any caller: a cwd that does not
+  // exist (or a missing shell) is reported that way, after `spawn()` returned, and it
+  // ended the hub's process (T-102). A process that never started gets no 'exit', so
+  // it is reported as one: its reason as output, then an exit with no code, which the
+  // manager shows like any failed command. An error once it did start (it has a pid)
+  // is followed by its own 'exit'.
+  child.on('error', (err) => {
+    if (child.pid !== undefined) {
+      console.warn(`[processes] child ${child.pid}: ${err.message}`)
+      return
+    }
+    const line = `[failed to start: ${err.message} (cwd ${cwd})]\n`
+    for (const cb of [...dataSubs]) cb(line, 'stderr')
+    for (const cb of [...exitSubs]) cb({ code: null, signal: null })
   })
 
   return {
@@ -160,7 +175,7 @@ export const localProcessBackend: ProcessBackend = {
     if (enrichedPath) env.PATH = enrichedPath
     if (spec.env) Object.assign(env, spec.env)
     const child = spawn(file, args, { cwd: spec.cwd, env, detached: !isWin })
-    return makeLocalHandle(child)
+    return makeLocalHandle(child, spec.cwd)
   },
   getCommandLine,
   killByPid(pid: number, sig?: string) {

@@ -15,6 +15,11 @@ const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) =>
 const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
 const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
 const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => void>()
+// The warm pool's view of a task id: a warm agent that booted with it and has not
+// been adopted yet. Defaults to none — every agent is an ordinary one.
+const unadoptedWarmAgentSpy = vi.fn<
+  (taskId: string) => { sessionId: string; projectId: string; computerId: string } | null
+>(() => null)
 
 // isHookDrivenMode comes from the (electron-free) terminal server entry, but
 // importing it for real would pull the adapter registry into vitest — mock it.
@@ -35,7 +40,8 @@ vi.mock('@slayzone/terminal/server', async () => {
     createAgentTree: agentTree.createAgentTree,
     resolveState: agentTree.resolveState,
     subagentIdOf: agentTree.subagentIdOf,
-    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS
+    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS,
+    unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
   }
 })
 
@@ -51,12 +57,6 @@ vi.mock('@slayzone/diagnostics/server', () => ({
 const recordConversationSpy = vi.fn()
 const confirmSessionConversationSpy = vi.fn()
 const findPendingSpawnSpy = vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
-// Warm-pool-adopted-session → taskId lookup (the "resolve taskId from
-// slaySessionId" fallback). Defaults to "not bound yet"; tests override with
-// mockResolvedValueOnce/mockResolvedValue as needed.
-const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(() =>
-  Promise.resolve(null)
-)
 // In-band `/clear` path: the current honored conversation (the id being rotated
 // away from) + the ownership lookup that proves slay spawned the process holding
 // it. Both default to "nothing known", so every pre-existing test keeps taking
@@ -86,7 +86,6 @@ vi.mock('@slayzone/task/server', () => ({
   getCurrentConversationId: (db: unknown, taskId: string, mode: string) =>
     getCurrentConversationIdSpy(db, taskId, mode),
   confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
-  getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId),
   markSessionFirstTurn: (db: unknown, conversationId: string) =>
     markSessionFirstTurnSpy(db, conversationId)
 }))
@@ -170,7 +169,8 @@ describe('POST /api/agent-hook', () => {
     recordConversationSpy.mockReset()
     confirmSessionConversationSpy.mockReset()
     findPendingSpawnSpy.mockReset()
-    getBoundTaskIdSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReturnValue(null)
     getCurrentConversationIdSpy.mockReset()
     findOwnedSpawnForConversationSpy.mockReset()
     markSessionFirstTurnSpy.mockReset()
@@ -182,7 +182,6 @@ describe('POST /api/agent-hook', () => {
     findSessionSpy.mockReturnValue(null)
     transitionSpy.mockReturnValue(true)
     markActiveSpy.mockReturnValue(true)
-    getBoundTaskIdSpy.mockResolvedValue(null)
     // Default: slay launched the agent without pre-minting a session id → the
     // first observed id is accepted as fresh ('slay-spawned-fresh').
     findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
@@ -810,15 +809,22 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('POOLED agent SessionStart (slaySessionId, no taskId) → confirms conversation by session', async () => {
-    // Pre-warmed pooled agent has no task yet but carries SLAYZONE_SESSION_ID.
-    // Capture keys off the runtime session id, not the task (agent-sessions B).
+  // --- Warm agents ---------------------------------------------------------
+  // A warm agent boots with the id of a task that is created later, if ever. Until
+  // a terminal adopts it, its hooks name a task with no terminal (and maybe no row),
+  // so the route treats them as pool hooks: the conversation is confirmed on the
+  // agent's pooled session, and nothing task-scoped runs.
+
+  const WARM = { sessionId: 'pool-sess-1', projectId: 'p1', computerId: 'computer-1' }
+
+  test('unadopted warm agent SessionStart → confirms its conversation on the pooled session', async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) => (taskId === 'reserved-1' ? WARM : null))
     const srv = await startServer()
     try {
       await postJson(srv.port, {
         agentId: 'claude-code',
         hookEvent: 'SessionStart',
-        slaySessionId: 'pool-sess-1',
+        taskId: 'reserved-1',
         sessionId: '33333333-3333-4333-8333-333333333333'
       })
       expect(confirmSessionConversationSpy).toHaveBeenCalledTimes(1)
@@ -826,7 +832,8 @@ describe('POST /api/agent-hook', () => {
         sessionId: 'pool-sess-1',
         observedConversationId: '33333333-3333-4333-8333-333333333333'
       })
-      // Task-keyed path is NOT taken for a pooled (taskless) agent.
+      // The task-keyed ledger is NOT written: the task may not exist, and the
+      // adoption bind is what hands this conversation to it.
       expect(recordConversationSpy).not.toHaveBeenCalled()
       expect(findPendingSpawnSpy).not.toHaveBeenCalled()
     } finally {
@@ -834,73 +841,62 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  // --- Warm-pool-adopted session → state machine via DB-resolved taskId -----
-  // A warm-pool-adopted session's hook payload never carries `taskId` (its env
-  // vars were fixed before the task existed) — only `slaySessionId`. Without
-  // the fallback, the "Drive the PTY state machine" block's `taskId` gate
-  // silently drops every hook forever, so the loading spinner never appears.
-
-  test('warm-pool-adopted session (no taskId, bound in DB) → resolves taskId + drives state machine', async () => {
-    getBoundTaskIdSpy.mockResolvedValue('resolved-task-1')
-    findSessionSpy.mockReturnValue('resolved-task-1:resolved-task-1')
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'UserPromptSubmit',
-        slaySessionId: 'pool-sess-A'
-      })
-      expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-sess-A')
-      expect(findSessionSpy).toHaveBeenCalledWith('resolved-task-1', 'claude-code')
-      expect(transitionSpy).toHaveBeenCalledWith(
-        'resolved-task-1:resolved-task-1',
-        'running',
-        'UserPromptSubmit'
-      )
-      // The lifecycle event must carry the resolved taskId too — renderer
-      // consumers key agent:lifecycle by task.
-      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
-      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ taskId: 'resolved-task-1' })
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('warm-pool-adopted session → taskId lookup is cached (no repeat DB hit)', async () => {
-    getBoundTaskIdSpy.mockResolvedValue('resolved-task-2')
-    findSessionSpy.mockReturnValue('resolved-task-2:resolved-task-2')
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'UserPromptSubmit',
-        slaySessionId: 'pool-sess-B'
-      })
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'Stop',
-        slaySessionId: 'pool-sess-B'
-      })
-      expect(getBoundTaskIdSpy).toHaveBeenCalledTimes(1)
-      expect(findSessionSpy).toHaveBeenCalledTimes(2)
-      expect(findSessionSpy).toHaveBeenNthCalledWith(2, 'resolved-task-2', 'claude-code')
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('warm-pool session not yet bound (getBoundTaskId → null) → hook is a safe no-op', async () => {
+  test('unadopted warm agent: no lifecycle event, no state machine (no terminal holds it yet)', async () => {
+    unadoptedWarmAgentSpy.mockReturnValue(WARM)
+    findSessionSpy.mockReturnValue('reserved-1:reserved-1')
     const srv = await startServer()
     try {
       const res = await postJson(srv.port, {
         agentId: 'claude-code',
         hookEvent: 'UserPromptSubmit',
-        slaySessionId: 'pool-sess-unbound'
+        taskId: 'reserved-1'
+      })
+      expect(res.status).toBe(200)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+      expect(findSessionSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).not.toHaveBeenCalled()
+      expect(confirmSessionConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('adopted warm agent: its task id drives the state machine like any agent', async () => {
+    // Once adopted the pool no longer knows it — the hooks are its task's.
+    findSessionSpy.mockReturnValue('adopted-1:adopted-1')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'adopted-1'
+      })
+      expect(unadoptedWarmAgentSpy).toHaveBeenCalledWith('adopted-1')
+      expect(transitionSpy).toHaveBeenCalledWith(
+        'adopted-1:adopted-1',
+        'running',
+        'UserPromptSubmit'
+      )
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ taskId: 'adopted-1' })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('a slaySessionId from an agent booted by an older build is ignored', async () => {
+    // Agents booted before warm agents carried a task id had only a session id.
+    // There is no session → task lookup any more; such a hook names no task.
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        slaySessionId: 'pool-sess-legacy'
       })
       expect(res.status).toBe(200)
       expect(findSessionSpy).not.toHaveBeenCalled()
       expect(transitionSpy).not.toHaveBeenCalled()
-      expect(markActiveSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1473,21 +1469,23 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('ctx envelope: slaySessionId (pooled agent) resolved from the blob', async () => {
-    getBoundTaskIdSpy.mockResolvedValue('bound-from-ctx')
-    findSessionSpy.mockReturnValue('bound-from-ctx:bound-from-ctx')
+  test("ctx envelope: a warm agent's reserved taskId routes its SessionStart to the pool", async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) =>
+      taskId === 'reserved-ctx'
+        ? { sessionId: 'pool-ctx-1', projectId: 'p1', computerId: 'c1' }
+        : null
+    )
     const srv = await startServer()
     try {
       await postJson(srv.port, {
-        ctx: { v: 1, slaySessionId: 'pool-ctx-1', agentId: 'claude-code' },
-        raw: { hook_event_name: 'UserPromptSubmit' }
+        ctx: { v: 1, taskId: 'reserved-ctx', projectId: 'p1', agentId: 'claude-code' },
+        raw: { hook_event_name: 'SessionStart', session_id: '44444444-4444-4444-8444-444444444444' }
       })
-      expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-ctx-1')
-      expect(transitionSpy).toHaveBeenCalledWith(
-        'bound-from-ctx:bound-from-ctx',
-        'running',
-        'UserPromptSubmit'
-      )
+      expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
+        sessionId: 'pool-ctx-1',
+        observedConversationId: '44444444-4444-4444-8444-444444444444'
+      })
+      expect(recordConversationSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }

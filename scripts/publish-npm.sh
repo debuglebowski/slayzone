@@ -4,7 +4,9 @@
 # @slayzone/cli to npm.
 #
 # hub + computer are install-time-rebuild packages (native addons); the CLI has no
-# native deps and publishes as a plain self-contained bundle.
+# native deps and publishes as a plain self-contained bundle. Of the hub's natives only
+# better-sqlite3 is required: node-pty, bufferutil and utf-8-validate are OPTIONAL, so
+# the hub installs and boots on a machine with no compiler (T-30).
 #
 # WHY THIS SCRIPT EXISTS / HOW TO RUN:
 #   npm publish is an outward-facing, effectively-irreversible action that needs
@@ -66,38 +68,51 @@ pnpm --filter @slayzone/cli build
 # --- rewrite each package.json into a publishable, install-time-rebuild manifest ---
 # The bundle already inlines workspace deps; published deps = ONLY native externals.
 #
-# publish_manifest <pkgdir> <pubname> <bin> <entry> <desc> [native-dep...]
+# publish_manifest <pkgdir> <pubname> <bin> <entry> <desc> [native-dep...] [--optional native-dep...]
 #   entry — the bundle the bin points at, relative to the package root. The hub
 #           and computer emit dist/bin.cjs; the CLI emits dist/slay.js.
 #   native-dep... — may be EMPTY (the CLI has no native deps). Under `set -u`,
 #           bash 3.2 (which macOS still ships) treats `"${arr[@]}"` on an empty
 #           array as an unbound variable, so the args are passed through "$@"
 #           directly rather than via an intermediate array.
+#   --optional — the natives after it go to `optionalDependencies`: npm still tries
+#           to build them, and drops them instead of failing the install when it
+#           cannot. Only for natives the bundle loads lazily or in a try/catch.
 publish_manifest() {
   local pkgdir="$1" pubname="$2" bin="$3" entry="$4" desc="$5"; shift 5
   node -e '
     const fs=require("fs"), path=require("path");
     const [dir,name,bin,entry,version,desc,...natives]=process.argv.slice(1);
     const src=JSON.parse(fs.readFileSync(path.join(dir,"package.json"),"utf8"));
-    const deps={};
-    for(const n of natives) deps[n]=src.dependencies[n];
+    const deps={}, optional={};
+    let into=deps;
+    for(const n of natives){
+      if(n==="--optional"){ into=optional; continue; }
+      into[n]=src.dependencies[n];
+    }
     const out={
       name, version, description: desc, license:"GPL-3.0-only", private:false,
       type:"module", bin:{[bin]:entry}, main:entry,
       files:["dist/","README.md"], engines:{node:">=24"},
       repository:{type:"git",url:"git+https://github.com/debuglebowski/slayzone.git"},
-      dependencies: deps
+      dependencies: deps,
+      ...(Object.keys(optional).length ? { optionalDependencies: optional } : {})
     };
     fs.writeFileSync(path.join(dir,"package.json"), JSON.stringify(out,null,2)+"\n");
     console.log("   manifest:", name+"@"+version, "bin:", entry,
-      "deps:", Object.keys(deps).join(", ") || "(none)");
+      "deps:", Object.keys(deps).join(", ") || "(none)",
+      ...(Object.keys(optional).length ? ["optional:", Object.keys(optional).join(", ")] : []));
   ' "$pkgdir" "$pubname" "$bin" "$entry" "$VERSION" "$desc" "$@"
 }
 
 echo "==> Rewriting publish manifests"
+# The hub's DB needs better-sqlite3. node-pty is required only on a hub-local pty
+# spawn (never with SLAYZONE_HUB_ENABLE_PROCESSES=0) and ws loads its two accelerators
+# in a try/catch, so those three are optional (T-30). The computer keeps node-pty
+# required: spawning ptys is its job.
 publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
   "SlayZone hub — headless server (DB, routers, auth, computer gateway)" \
-  better-sqlite3 node-pty bufferutil utf-8-validate
+  better-sqlite3 --optional node-pty bufferutil utf-8-validate
 publish_manifest packages/apps/computer "@slayzone/computer" slayzone-computer ./dist/bin.cjs \
   "SlayZone computer — remote execution node (pty, git, fs, processes)" \
   node-pty bufferutil utf-8-validate
@@ -148,7 +163,7 @@ Switches (`0` or `1`; anything else refuses to start), each also a boolean in
 | --- | --- | --- |
 | `SLAYZONE_HUB_REQUIRE_LOGIN` | `0` | every client must sign in |
 | `SLAYZONE_HUB_ENABLE_PASSWORD` | `1` | email + password sign-in |
-| `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CLIENT_SECRET`) |
+| `SLAYZONE_HUB_ENABLE_SSO` | `0` | Entra sign-in (needs `SLAYZONE_HUB_SSO_TENANT_ID`, `_CLIENT_ID`, `_CERT_PATH`, `_KEY_PATH` and a public address; `SLAYZONE_HUB_SSO_REQUIRE_MFA`, default `1`) |
 | `SLAYZONE_HUB_ENABLE_PROCESSES` | `1` | hub-local processes |
 | `SLAYZONE_HUB_ENABLE_INTEGRATIONS` | `1` | Linear / GitHub |
 
@@ -249,6 +264,10 @@ grep -qx 'package/dist/web/index.html' <<<"$HUB_FILES" \
 grep -qE '^package/dist/web/assets/[^/]+\.js$' <<<"$HUB_FILES" \
   || pack_fail "hub tarball has no package/dist/web/assets/*.js (web UI not built)"
 echo "   ✓ hub tarball carries the web UI ($(grep -c '^package/dist/web/' <<<"$HUB_FILES") of $(wc -l <<<"$HUB_FILES" | tr -d ' ') files, $(du -h "$HUB_TGZ" | cut -f1))"
+
+# What a machine with no compiler gets: the hub without its optional natives must
+# install and boot (T-30). Fails the run, like every smoke below.
+bash scripts/smoke-hub-no-natives.sh "$HUB_TGZ" || { echo "Aborting before publish."; exit 1; }
 
 # --- SMOKE: install BOTH tarballs under PLAIN NODE (proves the ABI rebuild) and
 #     drive the full deploy handshake: boot hub → mint join token → boot computer →

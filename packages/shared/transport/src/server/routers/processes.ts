@@ -3,44 +3,53 @@ import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '../trpc'
 import { getProcessesDeps } from '../app-deps'
 
-const anyInput = z.unknown()
+/** Far past any real value (a label is a tab title, a command one shell line, a cwd a
+ *  path, Windows long paths included): only a client sending junk reaches them. */
+const LABEL_MAX = 500
+const COMMAND_MAX = 32_768
+const CWD_MAX = 32_768
+
+const nonBlank = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((s) => s.trim().length > 0, { message: 'must not be blank' })
+
+/**
+ * The fields a client sets on a process. Validated here, before the process manager:
+ * a missing label once reached its database insert, whose floated rejection ended the
+ * hub's process (T-102). Strict, so `update` cannot write anything else onto the
+ * manager's live record (its pid, log buffer, handle). `cwd` may be empty (the
+ * renderer sends `''` when it has none); the ids are checked by the owner gate (T-17).
+ */
+const processFields = {
+  projectId: z.string().min(1).nullable(),
+  taskId: z.string().min(1).nullable(),
+  label: nonBlank(LABEL_MAX),
+  command: nonBlank(COMMAND_MAX),
+  cwd: z.string().max(CWD_MAX),
+  autoRestart: z.boolean()
+}
+const newProcessInput = z.strictObject(processFields)
+const processUpdates = z.strictObject(processFields).partial()
 
 // Processes router — lifecycle ops + 4 streaming subscriptions over the injected
 // `processEvents` TypedEmitter. Same ops/emitter back the still-live IPC handlers
 // (coexistence until the renderer drops IPC in slice 5).
 export const processesRouter = router({
-  create: publicProcedure.input(anyInput).mutation(({ input }) => {
-    const i = input as {
-      projectId: string | null
-      taskId: string | null
-      label: string
-      command: string
-      cwd: string
-      autoRestart: boolean
-    }
-    return getProcessesDeps().create(
-      i.projectId,
-      i.taskId,
-      i.label,
-      i.command,
-      i.cwd,
-      i.autoRestart
-    )
-  }),
-  spawn: publicProcedure.input(anyInput).mutation(({ input }) => {
-    const i = input as {
-      projectId: string | null
-      taskId: string | null
-      label: string
-      command: string
-      cwd: string
-      autoRestart: boolean
-    }
-    return getProcessesDeps().spawn(i.projectId, i.taskId, i.label, i.command, i.cwd, i.autoRestart)
-  }),
+  create: publicProcedure
+    .input(newProcessInput)
+    .mutation(({ input: i }) =>
+      getProcessesDeps().create(i.projectId, i.taskId, i.label, i.command, i.cwd, i.autoRestart)
+    ),
+  spawn: publicProcedure
+    .input(newProcessInput)
+    .mutation(({ input: i }) =>
+      getProcessesDeps().spawn(i.projectId, i.taskId, i.label, i.command, i.cwd, i.autoRestart)
+    ),
   update: publicProcedure
-    .input(z.object({ processId: z.string(), updates: anyInput }))
-    .mutation(({ input }) => getProcessesDeps().update(input.processId, input.updates as never)),
+    .input(z.object({ processId: z.string(), updates: processUpdates }))
+    .mutation(({ input }) => getProcessesDeps().update(input.processId, input.updates)),
   stop: publicProcedure
     .input(z.object({ processId: z.string() }))
     .mutation(({ input }) => getProcessesDeps().stop(input.processId)),

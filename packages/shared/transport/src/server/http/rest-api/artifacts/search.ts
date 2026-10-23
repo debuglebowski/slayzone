@@ -3,6 +3,7 @@ import { createArtifactStore } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
+import { ownedProjectIdsOrAll } from '../../owner-scope'
 
 /**
  * GET /api/artifacts/search — the hub half of `slay tasks artifacts search`.
@@ -101,6 +102,9 @@ export function registerArtifactsSearchRoute(app: Express, deps: RestApiDeps): v
         query,
         taskId,
         folderId,
+        // On a hub with login only the caller's projects are scanned (T-18): results,
+        // `scannedCount` and the skipped-large titles name nobody else's artifacts.
+        projectIds: await ownedProjectIdsOrAll(),
         titlesOnly,
         contentOnly,
         regex: queryString(req.query.regex) != null,

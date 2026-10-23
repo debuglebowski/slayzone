@@ -23,7 +23,13 @@ import express from 'express'
 import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
-import { hubUsersAuthDecision, isLoopbackAddress, registerHubUsersRoutes } from './users.js'
+import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import {
+  hubUsersAuthDecision,
+  isLoopbackAddress,
+  registerHubUsersRoutes,
+  SSO_MANAGED_ROLE_CODE
+} from './users.js'
 import type { RestApiDeps } from '../types.js'
 
 const SERVICE_EMAIL = 'computers@slayzone.internal'
@@ -216,6 +222,38 @@ await describe('POST /api/hub/users', () => {
   })
 })
 
+await describe('POST /api/hub/users on a hub with Entra sign-in', () => {
+  test('an admin account asked for: 409 with the stable code, not "already exists"', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      stubUsers({ create: async () => ({ ok: false as const, reason: 'sso-managed' as const }) }),
+      'POST',
+      { email: 'alice@example.com', role: 'admin' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe(SSO_MANAGED_ROLE_CODE)
+    expect(res.body.error.includes('already exists')).toBe(false)
+  })
+})
+
+await describe('POST /api/hub/users with password sign-in off (T-10)', () => {
+  test('403 with the switch code and message, not a 500', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      stubUsers({
+        create: async () => {
+          // What hub-auth's createHubUser throws (after its own audit line).
+          throw new HubSwitchedOffError('HUB_PASSWORD_DISABLED')
+        }
+      }),
+      'POST',
+      { email: 'alice@example.com' }
+    )
+    expect(res.status).toBe(403)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.code).toBe('HUB_PASSWORD_DISABLED')
+    expect(res.body.error.includes('SLAYZONE_HUB_ENABLE_PASSWORD=0')).toBe(true)
+  })
+})
+
 await describe('GET /api/hub/users', () => {
   test('lists accounts', async () => {
     const rows = [
@@ -316,7 +354,14 @@ await describe('PATCH /api/hub/users', () => {
   test('maps each refusal to a status and a reason', async () => {
     const cases = [
       ['not-found', { disabled: true }, 404, 'no user with email'],
-      ['protected', { disabled: true }, 409, SERVICE_EMAIL],
+      ['protected', { disabled: true, email: SERVICE_EMAIL }, 409, 'computer service identity'],
+      // The other protected account: break-glass's (hub-auth break-glass.ts).
+      [
+        'protected',
+        { disabled: true, email: 'break-glass@hub.slayzone.local' },
+        409,
+        'slayzone-hub break-glass'
+      ],
       ['last-user', { disabled: true }, 409, 'last enabled account'],
       ['last-admin', { disabled: true }, 409, 'disable the last enabled admin'],
       ['last-admin', { role: 'user' }, 409, 'demote the last enabled admin']
@@ -330,6 +375,18 @@ await describe('PATCH /api/hub/users', () => {
       expect(res.body.ok).toBe(false)
       expect(res.body.error.includes(text)).toBe(true)
     }
+  })
+
+  test('a role change on a hub with Entra sign-in: 409 with the stable code', async () => {
+    const res = await call<{ ok: boolean; code: string; error: string }>(
+      recording('sso-managed' as never).users,
+      'PATCH',
+      { email: 'alice@example.com', role: 'admin' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.code).toBe(SSO_MANAGED_ROLE_CODE)
+    expect(res.body.error.includes('SlayZone.Admin')).toBe(true)
   })
 
   test('500 with a message when the domain layer throws', async () => {
@@ -525,9 +582,15 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
         ['PATCH', { email: 'self@example.com', role: 'admin' }],
         ['DELETE', { email: 'other@example.com' }]
       ] as const) {
-        const res = await call<{ ok: boolean; error: string }>(users, method, body, restAuth)
+        const res = await call<{ ok: boolean; error: string; code?: string }>(
+          users,
+          method,
+          body,
+          restAuth
+        )
         expect(res.status).toBe(403)
         expect(res.body.error.includes('needs an admin account')).toBe(true)
+        expect(res.body.code).toBe('ADMIN_ONLY')
       }
     } finally {
       setSecurityLogSink()
@@ -537,7 +600,7 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
     for (const line of audit) {
       expect(line.event).toBe('authz.denied')
       expect(line.actor).toBe('u-user')
-      expect(line.detail).toEqual({ reason: 'not_admin', status: 403 })
+      expect(line.detail).toEqual({ reason: 'not_admin', status: 403, code: 'ADMIN_ONLY' })
     }
   })
 

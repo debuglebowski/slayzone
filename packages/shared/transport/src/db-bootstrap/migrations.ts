@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
+import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'
 import {
   parseSkillFrontmatter,
@@ -2274,6 +2275,9 @@ export const migrations: Migration[] = [
       // poisoning surface). Backfill via git for existing rows; rows whose
       // repo can't be reached stay NULL → filter treats as stale (drops).
       db.exec(`ALTER TABLE agent_turns ADD COLUMN head_sha_at_snap TEXT`)
+      // A hub with processes switched off runs no git (T-06): rows stay NULL, which
+      // the list-time filter already treats as stale.
+      if (!hubProcessesEnabled()) return
       const rows = db
         .prepare(`SELECT id, worktree_path, snapshot_sha FROM agent_turns`)
         .all() as Array<{ id: string; worktree_path: string; snapshot_sha: string }>
@@ -3850,6 +3854,61 @@ export const migrations: Migration[] = [
           PRIMARY KEY (process_id, pid)
         );
         CREATE INDEX IF NOT EXISTS idx_process_pids_process ON process_pids(process_id);
+      `)
+    }
+  },
+  {
+    version: 169,
+    up: (db) => {
+      // Who owns a project, and per-user settings (T-16).
+      //
+      // `projects.owner_user_id` is the root of ownership on a hub with several
+      // users. Tasks hang off a project, and terminal tabs, chat, artifacts and
+      // agent prompts off a task, all through NOT NULL foreign keys — so they
+      // inherit the owner through that chain instead of carrying a copy that
+      // could drift. A LOOSE reference to a hub-auth user id, like
+      // `web_sessions.user_id` (v166): the users live in the auth database, so
+      // nothing here can enforce it.
+      //
+      // NULL = no owner recorded: every project that exists today, and every
+      // project created on a hub without login (the desktop app's), where no user
+      // is attached to the request. Not backfilled here, because this database
+      // cannot see the users; a hub that requires login assigns unowned projects
+      // to its first admin at boot (`apps/hub/src/ownership-backfill.ts`).
+      //
+      // `user_settings`: settings rows that are one person's state (open tabs,
+      // layout, filters) rather than the hub's. Same loose `user_id`. Used only
+      // for a request that carries a user; a hub without login keeps every key
+      // in `settings`, exactly as before. Which key is which: `settingScope` in
+      // `@slayzone/settings/server`. The `key` index serves the boot purge, which
+      // reads every user's `viewState`.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN owner_user_id TEXT;
+        CREATE INDEX idx_projects_owner_user_id ON projects(owner_user_id);
+
+        CREATE TABLE user_settings (
+          user_id TEXT NOT NULL,
+          key     TEXT NOT NULL,
+          value   TEXT NOT NULL,
+          PRIMARY KEY (user_id, key)
+        );
+        CREATE INDEX idx_user_settings_key ON user_settings(key);
+      `)
+    }
+  },
+  {
+    version: 170,
+    up: (db) => {
+      // Who a join token is FOR (T-20): the user the computer that redeems it will
+      // belong to. On a hub with login only an admin mints, always naming that user,
+      // so the minter (`minted_by_user_id`, kept for the record) is no longer the
+      // owner. Same loose hub-auth user id as v162.
+      //
+      // Backfilled from the minter: before this the minter WAS the owner, and an
+      // unused token minted then must still enroll its computer for the same user.
+      db.exec(`
+        ALTER TABLE join_tokens ADD COLUMN owner_user_id TEXT;
+        UPDATE join_tokens SET owner_user_id = minted_by_user_id;
       `)
     }
   }

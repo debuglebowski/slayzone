@@ -23,7 +23,6 @@
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
-    "@slayzone/hub-identity": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
@@ -44,7 +43,7 @@
     "node-pty": "^1.1.0",
     "superjson": "^2.2.1",
     "utf-8-validate": "^6.0.6",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@slayzone/test-utils": "workspace:*",

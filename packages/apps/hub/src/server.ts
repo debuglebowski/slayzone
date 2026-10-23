@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { WebSocketServer } from 'ws'
+import { type WebSocket, WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
   appRouter,
@@ -10,8 +10,18 @@ import {
   setHubDescribeDeps,
   setAuthGate
 } from '@slayzone/transport/server'
-import { beginTerminalShutdown } from '@slayzone/terminal/server'
-import { createAuthExpressApp } from '@slayzone/hub-auth/server'
+import {
+  beginTerminalShutdown,
+  clearWindowTabCounts,
+  teardownAllWarm
+} from '@slayzone/terminal/server'
+import {
+  createAuthExpressApp,
+  createDevicePage,
+  createWebSignIn,
+  ENTRA_AUTHORITY,
+  loadEntraClientCredential
+} from '@slayzone/hub-auth/server'
 import {
   bindInHubPortBlock,
   ensureDataRoot,
@@ -21,7 +31,7 @@ import {
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
-import { assertAuthLoaded, assertHubBootRules } from './boot-rules.js'
+import { assertAuthLoaded, assertHubBootRules, assertSsoCredential } from './boot-rules.js'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
@@ -29,15 +39,42 @@ import { handleHealth, type HealthState } from './health.js'
 import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
+import { backfillOwnership } from './ownership-backfill.js'
+import { BREAK_GLASS_PATH, handleBreakGlassRequest } from './break-glass'
+import {
+  type HubAdminSocket,
+  resolveHubAdminSocketPath,
+  startHubAdminSocket
+} from './hub-admin-socket.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
-import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
-import { withRestAuth } from './rest-auth.js'
+import {
+  connectionToken,
+  parseWindowIdFromUrl,
+  resolveConnectionPrincipal
+} from './hub-trpc-context.js'
+import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
-import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { createWebSessionRoutes } from './web-session-routes.js'
+import {
+  mintBrowserWebSession,
+  WEB_SESSION_COOKIE_NAME,
+  webSessionCookieSecure
+} from './web-sessions.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
-import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
+import { routeOf, securityEvent } from '@slayzone/platform/security-log'
+import {
+  adoptClientAddress,
+  clientAddress,
+  NO_TRUSTED_PROXIES,
+  readTrustedProxies,
+  trustedProxiesBootWarning
+} from '@slayzone/platform/client-address'
 import type { ServerHandle, StartServerConfig } from './index.js'
+import { withSecurityHeaders } from './security-headers.js'
+import { createWarmWindowSockets } from './warm-window-sockets.js'
+import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -58,7 +95,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
 
   // Every rule that refuses to start the hub runs HERE, before it creates its data
   // directory, opens its database or binds a port — see boot-rules.ts for the
-  // rules (B1–B14) and the reasoning behind each. A refusal throws a message that
+  // rules (B1–B15) and the reasoning behind each. A refusal throws a message that
   // names the variable to change.
   //
   // `SLAYZONE_SUPERVISED` keeps only the meaning "started by the desktop app" (hub
@@ -72,6 +109,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     devSqlEnabled: isDevSqlEnabled()
   })
   const { switches } = boot
+  // B7, second half: Entra sign-in's certificate and key load — still before the hub
+  // has created anything. Null unless SSO is on (login required + ENABLE_SSO=1).
+  const sso = assertSsoCredential(boot, loadEntraClientCredential)
 
   const dataRoot = cfg.storeDir ?? ensureDataRoot()
   const log = createLogger(dataRoot)
@@ -99,6 +139,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     dataRoot,
     standalone: !supervised,
     requireLogin: switches.requireLogin,
+    publicAddress: boot.publicAddress,
+    sso,
+    enablePassword: switches.enablePassword,
+    // Flood limits (T-26): better-auth's limiter and the /computers caps. On exactly
+    // where other machines can reach this hub; never on the desktop app's (B1/B9 keep a
+    // login-off, supervised hub on loopback with no public address).
+    floodLimits: boot.reachable,
     diagnosticsDb
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
@@ -118,6 +165,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // RAW request body reaches better-auth — mcpRest applies `express.json()`,
   // which would consume the body before better-auth sees it.
   const authApp = hubAuth ? createAuthExpressApp(hubAuth) : null
+  // Device sign-in's approval page (T-14, hub-auth `device-page.ts`): `/device`, where a
+  // person approves a CLI/desktop sign-in after signing in through Entra. Entra hubs
+  // only; everywhere else `/device` falls through to the web shell / 404 as before.
+  const devicePage =
+    hubAuth && boot.ssoActive
+      ? createDevicePage(hubAuth, { signInOrigin: new URL(ENTRA_AUTHORITY).origin })
+      : null
   if (computerGateway) log('computer transport ready (gateway + hub-auth loaded)')
 
   // Multi-hub: wire the client-facing `hub.describe` deps so a connecting client
@@ -143,14 +197,37 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // enforces auth. Off → inert pass-through (byte-identical).
   setAuthGate(() => hubAuthRequired)
 
+  // Break-glass (break-glass.ts, O-9/O-23): close whatever an earlier run left open —
+  // its account (a crash mid-session), break-glass v1's password accounts and v1's
+  // `hub.break-glass.json` — before the hub serves anything. FATAL on failure: a hub that
+  // cannot close emergency access must not serve. Login-required hubs only; the desktop
+  // app's hub does no I/O here.
+  if (hubAuthRequired && hubAuth) {
+    await composition.breakGlass.closeAtBoot(dataRoot)
+  }
+
   // A hub that requires login must not come up unusable by the operator who just
   // started it. Creates the first user on first boot only, prints the credentials
-  // once, and leaves them in a 0600 file `slay` reads on this box. (A generated
-  // password is a password sign-in; skipping this when `ENABLE_PASSWORD=0` belongs
-  // to the work that enforces that switch.)
-  if (hubAuthRequired && hubAuth) {
+  // once, and leaves them in a 0600 file `slay` reads on this box.
+  //
+  // Not with password sign-in off (T-10): a generated password nobody could use, in a
+  // file and in the log. Not on a hub with Entra sign-in either: its accounts come
+  // from Entra and admin only from the `SlayZone.Admin` app role (O-4), so an owner
+  // minted here would be exactly the admin that rule excludes. Users sign in through
+  // Entra; the first admin is whoever first signs in holding the app role. (A hub
+  // that requires login with password off has Entra on — B2 — so the first condition
+  // only restates the second there; it is the one that names the switch.)
+  //
+  // A hub other machines can reach writes and logs no generated secret (T-11): its
+  // owner's password derives from the auth secret B14 put in env, and no file is kept.
+  if (hubAuthRequired && hubAuth && switches.enablePassword && !boot.ssoActive) {
     try {
-      await ensureBootstrapOwner(hubAuth, dataRoot, (m) => log(m))
+      await ensureBootstrapOwner(
+        hubAuth,
+        dataRoot,
+        (m) => log(m),
+        boot.reachable ? { derivePasswordFrom: process.env.SLAYZONE_HUB_AUTH_SECRET ?? '' } : {}
+      )
     } catch (err) {
       // A hub with no owner is still a correctly-secured hub — the operator can
       // add one with `slay hub users add`. Do not fail the boot over convenience.
@@ -158,6 +235,19 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         `[slayzone] could not provision a bootstrap owner: ${err instanceof Error ? err.message : String(err)}`
       )
     }
+  }
+
+  // T-16: unowned projects (an upgrade, or created while login was off) and the
+  // pre-login settings rows go to the first admin — after the accounts above are
+  // settled, before the hub listens. No-op without login, and once done.
+  try {
+    await backfillOwnership({ db, hubAuth, requireLogin: hubAuthRequired, log })
+  } catch (err) {
+    // Unowned projects are refused to every user, never shown to all, so a failed
+    // pass loses nothing; the next boot retries.
+    log(
+      `[ownership] backfill failed, retried next boot: ${err instanceof Error ? err.message : String(err)}`
+    )
   }
 
   // Chromium-fork OAuth deep-link bridge. The C++ shell forwards
@@ -215,6 +305,77 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // (clients) and `/computers` (computers) ride the ONE listener below, demuxed by
   // path.
 
+  // Who the client is (T-22): the TCP peer, unless the peer is a front end listed in
+  // SLAYZONE_HUB_TRUSTED_PROXIES — then the client that front end names in
+  // X-Forwarded-For (the rule is in client-address.ts). Resolved ONCE, first thing, for
+  // every request and every upgrade below, and read back with `clientAddress(req)` by
+  // everything that records it: the audit context (tRPC, REST, `/api/auth/*`), the
+  // computer gateway, better-auth (through CLIENT_ADDRESS_HEADER) and rate limits.
+  // B15 validated the list. Empty = trust nobody = the peer (the desktop app's hub).
+  const trustedProxiesRead = readTrustedProxies(process.env)
+  const trustedProxies = trustedProxiesRead.ok ? trustedProxiesRead.value : NO_TRUSTED_PROXIES
+  // The front-door flood limits (flood-limits.ts): web-login, break-glass redemption and
+  // /trpc upgrades, per client address. Same switch as the limits composeServer wired.
+  const floodGuard = createHubFloodGuard({ enabled: boot.reachable })
+  const trustedProxiesWarning = trustedProxiesBootWarning(boot.publicAddress, trustedProxies)
+  if (trustedProxiesWarning) {
+    process.stderr.write(`${trustedProxiesWarning}\n`)
+    log(trustedProxiesWarning)
+  }
+
+  // Which page a browser request comes from. `loopbackBind` means "reachable ONLY from
+  // this machine": it listens on loopback AND publishes no public address. The second
+  // half matters — a loopback hub behind a same-box reverse proxy is the internet's
+  // browser, and must not be handed the local-client allowances (file://, chrome://,
+  // "null", localhost). A hub other machines can reach accepts only its own configured
+  // public origin (plus SLAYZONE_HUB_ALLOWED_WEB_ORIGINS).
+  const loopbackBind = !boot.reachable
+  const allowedWsOrigins = resolveAllowedWebOrigins()
+  // The web shell's session cookie (T-13) authenticates a `/trpc` socket or a
+  // state-changing request only from the hub's own page — see ws-origin.ts.
+  const isCookieOriginAllowed = (req: IncomingMessage): boolean =>
+    cookieOriginDecision({
+      origin: req.headers.origin,
+      host: req.headers.host,
+      loopbackBind,
+      allowedOrigins: allowedWsOrigins
+    }) === 'accept'
+  // `Secure` exactly when the public address is https (web-sessions.ts).
+  const secureCookie = webSessionCookieSecure(boot.publicAddress)
+  // The web shell's session routes (status, sign-out) — login-required hubs only, so
+  // the desktop app's hub serves none of it (those paths reach better-auth's 404 there).
+  const webSessionRoutes =
+    hubAuthRequired && hubAuth
+      ? createWebSessionRoutes({
+          getAuth: () => hubAuth,
+          db,
+          secureCookie,
+          isCookieOriginAllowed,
+          // The sockets that rode the ended session close now, not at the next sweep.
+          onSignedOut: () => {
+            void composition.trpcConnections.revalidateAll().catch(() => {
+              /* the periodic sweep (trpc-connections.ts) still closes them */
+            })
+          }
+        })
+      : null
+  // The web shell's sign-in through Entra (T-13, hub-auth `web-sign-in.ts`): Entra hubs
+  // only, like the device page. It mints the browser's scoped session; the cookie the
+  // browser still holds names the session that replaces.
+  const webSignIn =
+    hubAuth && boot.ssoActive
+      ? createWebSignIn(hubAuth, {
+          mint: async (userId, req) => [
+            (
+              await mintBrowserWebSession(hubAuth, db, userId, {
+                secure: secureCookie,
+                replacing: parseCookieHeader(req.headers)[WEB_SESSION_COOKIE_NAME]
+              })
+            ).setCookie
+          ]
+        })
+      : null
+
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
   // supervised) + `/api/auth/*` → hub-auth (RAW body) + /api/* + /mcp via express.
@@ -249,6 +410,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // was exactly that bug: the entire scoped web-session login path was
     // unreachable in a real running hub until this carve-out existed.
     const authPath = (req.url ?? '').split('?')[0]
+    // Break-glass redemption is OURS too (break-glass.ts), and only exists while
+    // break-glass does (login required); otherwise the path falls through unchanged.
+    if (authPath === BREAK_GLASS_PATH && composition.breakGlass.enabled()) {
+      handleBreakGlassRequest(composition.breakGlass, req, res)
+      return
+    }
+    // The web shell's session routes and Entra sign-in are OURS too (T-13). Null on a
+    // hub without them, so their paths fall through unchanged.
+    if (webSessionRoutes?.(req, res)) return
+    if (webSignIn?.(req, res)) return
     if (authApp && authPath.startsWith('/api/auth/') && authPath !== '/api/auth/web-login') {
       // The apiKey plugin's CLIENT routes are never served. `mintComputerApiKey`
       // calls `auth.api.createApiKey` in-process (the server branch), so nothing
@@ -281,34 +452,40 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // `main.tsx` skips `LoginScreen` and connects with no token whenever `/health`
     // reports `authRequired: false`, the same "just connect" shape desktop/CLI
     // clients use against a login-less hub.
+    // Outside `/api`, so the gate let it through like the web shell: the page checks its
+    // own session (a fresh Entra one, from the cookie) and the forms' Origin.
+    if (devicePage?.(req, res)) return
     if (handleWebAssets(WEB_ROOT, req, res)) return
     mcpRest.app(req, res)
   }
   const gatedDispatch = withRestAuth({
     getHubAuthRequired: () => hubAuthRequired,
+    getSsoActive: () => boot.ssoActive,
+    // Off: every password route answers 403 HUB_PASSWORD_DISABLED before the gate (T-10).
+    getPasswordEnabled: () => switches.enablePassword,
     getHubAuth: () => hubAuth,
     getDb: () => db,
+    getBreakGlass: () => composition.breakGlass,
+    isCookieOriginAllowed,
     next: dispatchRequest
   })
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
+    adoptClientAddress(req, trustedProxies)
     // /health answers BEFORE the gate: a liveness probe has no credentials, and
     // it must keep answering even when auth is misconfigured.
     if (handleHealth(state, req, res)) return
+    if (floodGuard.refuseRequest(req, res)) return
     gatedDispatch(req, res)
   }
-  const httpServer = createServer(handleRequest)
+  // Every response gets the security headers here, whichever handler writes it.
+  const httpServer = createServer(
+    withSecurityHeaders(handleRequest, { publicAddress: boot.publicAddress })
+  )
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
-  // The decision is a pure, unit-tested function; this is only the wiring.
-  //
-  // `loopbackBind` means "reachable ONLY from this machine": it listens on loopback
-  // AND publishes no public address. The second half matters — a loopback hub behind
-  // a same-box reverse proxy is the internet's browser, and must not be handed the
-  // local-client allowances (file://, chrome://, "null", localhost). A hub that
-  // other machines can reach accepts only no-Origin (non-browser) callers plus its
-  // own configured public origin.
-  const loopbackBind = !boot.reachable
-  const allowedWsOrigins = resolveAllowedWebOrigins()
+  // The decision is a pure, unit-tested function; this is only the wiring. A hub that
+  // other machines can reach accepts only no-Origin (non-browser) callers plus its own
+  // configured public origin (`loopbackBind` / `allowedWsOrigins`, defined above).
   const isAllowedWsOrigin = (origin: string | undefined): boolean =>
     wsOriginDecision({
       origin,
@@ -329,8 +506,16 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const wss = new WebSocketServer({ noServer: true })
   const computerWss = computerGateway ? new WebSocketServer({ noServer: true }) : null
   httpServer.on('upgrade', (req, socket, head) => {
+    adoptClientAddress(req, trustedProxies)
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
+      // Flood limits first (T-26, flood-limits.ts): cheapest, and they bound the audit
+      // lines a flood of refused origins below could write.
+      const admission = floodGuard.admitTrpcUpgrade(req)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
@@ -341,7 +526,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           event: 'authz.denied',
           outcome: 'denied',
           actor: null,
-          ip: peerAddress(req),
+          ip: clientAddress(req),
           route: routeOf(req.method, req.url),
           detail: { reason: 'origin', origin: origin ?? null }
         })
@@ -349,24 +534,42 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         socket.destroy()
         return
       }
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        admission.track(ws)
+        wss.emit('connection', ws, req)
+      })
     } else if (pathname === '/computers' && computerWss && computerGateway) {
+      // Unauthenticated-socket caps (T-26, hub-gateway.ts `admitUpgrade`), asked before
+      // the upgrade so a refused one allocates nothing. Inert where the hub turned them
+      // off (`floodLimits` above). `handleUpgrade` calls back in this same tick, so the
+      // gateway's count cannot move between the answer and the adoption.
+      const peer = { ip: clientAddress(req) }
+      const admission = computerGateway.admitUpgrade(peer)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       computerWss.handleUpgrade(req, socket, head, (ws) =>
-        computerGateway.handleConnection(ws, { ip: peerAddress(req) })
+        computerGateway.handleConnection(ws, peer)
       )
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
       socket.destroy()
     }
   })
+  // A window's warm-pool tab counts are dropped once its last socket is gone for good
+  // (a closed window never reports empty counts) — see warm-window-sockets.ts.
+  const warmWindowSockets = createWarmWindowSockets({ clearWindow: clearWindowTabCounts })
   // createContext verifies the bearer only when this hub enforces auth
   // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
   // principal stays null, no verify → byte-identical to trusted loopback.
   const createTrpcContext = async ({
     req,
+    res,
     info
   }: {
     req: IncomingMessage
+    res?: WebSocket
     info?: { connectionParams?: Record<string, string | undefined> | null }
   }) => {
     // windowId (?windowId=N) → ctx.windowId. Required by claimSession +
@@ -376,16 +579,48 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // whole warm-agent pool silently never fired. The renderer already sends it
     // (see main.tsx withWindowId).
     const windowId = parseWindowIdFromUrl(req.url)
+    // The window's warm-pool tab counts live only as long as the window does.
+    if (windowId != null && res) warmWindowSockets.track(windowId, res)
     // Verify the bearer token from tRPC connectionParams when this hub enforces
     // auth. An invalid/absent token → principal stays null; individual procedures
     // gate on ctx.principal via the auth gate (an authed hub still accepts the
     // connection but attributes it). See hub-trpc-context.ts for the decision.
-    const principal = await resolveConnectionPrincipal({
-      hubAuthRequired,
-      hubAuth,
-      db,
-      token: info?.connectionParams?.token
-    })
+    //
+    // The credential: the connectionParams token, else the web shell's session cookie
+    // from the hub's own page only (T-13, `connectionToken`). Login off: neither is read.
+    const presented = hubAuthRequired
+      ? connectionToken({
+          connectionParamsToken: info?.connectionParams?.token,
+          cookies: parseCookieHeader(req.headers),
+          cookieOriginAllowed: isCookieOriginAllowed(req)
+        })
+      : null
+    if (presented?.cookieRefused) {
+      securityEvent({
+        event: 'authz.denied',
+        outcome: 'denied',
+        actor: null,
+        ip: clientAddress(req),
+        route: routeOf(req.method, req.url),
+        detail: { reason: 'cookie_origin', origin: req.headers.origin ?? null }
+      })
+    }
+    const resolve = () =>
+      resolveConnectionPrincipal({
+        hubAuthRequired,
+        hubAuth,
+        db,
+        token: presented?.token
+      })
+    const principal = await resolve()
+    // T-12: the principal is resolved once per socket, so the socket is tracked by its
+    // account — revoking the account closes it, and its credential is re-resolved
+    // periodically (trpc-connections.ts). Login off: no principal, nothing tracked.
+    if (principal && res) {
+      composition.trpcConnections.track(res, principal.userId, async () => {
+        return (await resolve())?.userId ?? null
+      })
+    }
     return {
       db,
       dataRoot,
@@ -470,6 +705,40 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   await claimServerPort(db, host, actualPort, log)
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
 
+  // Audit (T-10): a hub that requires login records how it can be signed in to at each
+  // boot. Not on a hub with login off (the desktop app's), which has no sign-in.
+  // Break-glass is not a sign-in method here: it is opened while the hub runs, and
+  // audited as `auth.break_glass.*` (break-glass.ts).
+  if (hubAuthRequired) {
+    securityEvent({
+      event: 'hub.boot',
+      outcome: 'success',
+      actor: null,
+      ip: null,
+      route: null,
+      targetKind: 'hub',
+      detail: {
+        methods: [
+          ...(switches.enablePassword ? ['password'] : []),
+          ...(boot.ssoActive ? ['sso'] : [])
+        ]
+      }
+    })
+  }
+
+  // The break-glass channel (hub-admin-socket.ts): the operator's `slayzone-hub
+  // break-glass` reaches this running hub through it. Opened once the hub serves, on
+  // login-required hubs only. Unavailable (logged) rather than fatal: sign-in itself is
+  // untouched without it.
+  let adminSocket: HubAdminSocket | null = null
+  if (hubAuthRequired && hubAuth) {
+    const socketPath = resolveHubAdminSocketPath(dataRoot)
+    adminSocket = socketPath
+      ? await startHubAdminSocket({ socketPath, breakGlass: composition.breakGlass, log })
+      : null
+    if (!socketPath) log(`[slayzone] break-glass unavailable: no socket path under ${dataRoot}`)
+  }
+
   // Boot canary: records THIS process's build identity so the running sidecar's
   // code is visible in the diagnostics DB (plans/sidecar-staleness.md). Also the
   // proof that sidecar diagnostics persistence is wired (composeServer bound the
@@ -515,6 +784,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()
+      // Kill the pool's pre-booted agents (billable, and nothing can adopt them once
+      // this hub is gone) and stop it re-arming, before the gateway below closes.
+      teardownAllWarm()
       state.ready = false
       if (sidecarSocket) {
         try {
@@ -522,6 +794,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         } catch {
           /* ignore */
         }
+      }
+      // Break-glass ends with the process: no new grant, and an open session's account
+      // is closed now rather than at the next boot.
+      if (adminSocket) {
+        try {
+          await adminSocket.close()
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        await composition.breakGlass.end('stop')
+      } catch (err) {
+        log(
+          `[slayzone] break-glass: closing at stop failed, the next boot closes it: ${err instanceof Error ? err.message : String(err)}`
+        )
       }
       mcpRest.dispose()
       try {

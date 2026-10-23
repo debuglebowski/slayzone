@@ -4,7 +4,7 @@
  *
  *   env var  >  <ROOT>/computer.config.json  >  default
  *
- * (plus the join-token embedded hubUrl/cert as the lowest fallback). Env still
+ * (plus the join-token embedded hubUrl as the lowest fallback). Env still
  * wins so operators / the supervised host can override per boot. There is no
  * separate `SLAYZONE_COMPUTER_CONFIG` path-pointing knob — one derived config file.
  *
@@ -17,11 +17,12 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
+  ignoredComputerConfigKeys,
   loadComputerConfigFile,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
-import { decodeJoinToken } from '@slayzone/platform/join-token'
+import { decodeJoinToken, joinTokenCarriesCertPin } from '@slayzone/platform/join-token'
 
 export const computerConfigSchema = z.object({
   /** `ws://` or `wss://` hub computer endpoint. */
@@ -51,9 +52,7 @@ export const computerConfigSchema = z.object({
   /** Filesystem roots this computer may operate under (fs./git. commands). */
   allowedRoots: z.array(z.string().min(1)),
   /** Capability tags advertised at enrollment. */
-  capabilities: z.array(z.string().min(1)),
-  /** sha256 pin of the hub TLS leaf cert (lowercase hex; colons tolerated). */
-  pinnedCertSha256: z.string().min(1).optional()
+  capabilities: z.array(z.string().min(1))
 })
 export type ComputerConfig = z.infer<typeof computerConfigSchema>
 
@@ -67,8 +66,8 @@ export const ENV_VARS = {
   // into terminals, so outside the collision).
   hubAddress: 'SLAYZONE_HUB_ADDRESS',
   // HUB_-prefixed because the token is hub-scoped BY VALUE, not by reader: the hub
-  // mints it and it embeds the hub's `wss://…/computers` url, the hub's TLS cert
-  // fingerprint, and a secret checked against the hub's `join_tokens` row.
+  // mints it and it embeds the hub's `wss://…/computers` url and a secret checked
+  // against the hub's `join_tokens` row.
   // `mintJoinToken` binds it to NO computer (computer_id is NULL until redemption), so
   // any computer can redeem any unused token — the old `SLAYZONE_RUNNER_JOIN_TOKEN`
   // named its CONSUMER, which is what CLAUDE.md rule 2 forbids. `_TOKEN` suffix +
@@ -86,9 +85,8 @@ export const ENV_VARS = {
   // <ROOT>/computer.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
   // computer NAME likewise has no env channel — it derives from SUPERVISED (→
   // DEFAULT_LOCAL_COMPUTER_NAME) or computer.config.json `computerName`, else the hostname.
-  // The cert pin has NO env channel either: it arrives via the join token (auto
-  // path) or <ROOT>/computer.config.json `pinnedCertSha256` (explicit standalone path).
-  // Never a bare env var — a fingerprint is never fished out of ambient env.
+  // There is no certificate pin on any channel: a wss:// hub's front end is verified
+  // the normal way (see ignoredCertPinNotices).
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
@@ -171,14 +169,13 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
   if (shared.computerName !== undefined) out.name = shared.computerName
   // The FS path-jail — locally-declared only, never sourced from hub-pushed data.
   if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
-  if (shared.pinnedCertSha256 !== undefined) out.pinnedCertSha256 = shared.pinnedCertSha256
   return out
 }
 
 /**
  * Assemble the effective config. Precedence (low→high):
  *   defaults ← <ROOT>/computer.config.json ← environment
- * (with the join-token embedded hubUrl/cert as the lowest fallback). Throws with
+ * (with the join-token embedded hubUrl as the lowest fallback). Throws with
  * a readable message when required fields are missing.
  *
  * `shared` defaults to reading `<ROOT>/computer.config.json` ONLY for a STANDALONE
@@ -202,13 +199,13 @@ export function loadComputerConfig(
 ): ComputerConfig {
   const fromShared = fromSharedConfig(shared)
 
-  // A join token is self-sufficient: it embeds the hub's `wss://…/computers` URL and
-  // the cert fingerprint to pin. Decode it and use those as the LOWEST-precedence
-  // fallback for hubUrl + pinnedCertSha256, so `SLAYZONE_HUB_JOIN_TOKEN=… computer` works
-  // with no other config. An explicit hubUrl / pin (file or env) still wins, so an
-  // operator can point a token at a different endpoint or override the pin. A
-  // malformed token decodes to null → no fallback (schema then reports the missing
-  // hubUrl, exactly as before).
+  // A join token is self-sufficient: it embeds the hub's `wss://…/computers` URL.
+  // Decode it and use that as the LOWEST-precedence fallback for hubUrl, so
+  // `SLAYZONE_HUB_JOIN_TOKEN=… computer` works with no other config. An explicit hubUrl
+  // (file or env) still wins, so an operator can point a token at a different
+  // endpoint. A malformed token decodes to null → no fallback (schema then reports
+  // the missing hubUrl, exactly as before). A pin an older hub put in the token is
+  // ignored (decodeJoinToken drops it; ignoredCertPinNotices reports it).
   //
   // Env precedence: env > computer.config.json. Resolved ONCE here so the token-decode
   // fallback and the `joinToken` field can never disagree about which channel won.
@@ -235,19 +232,7 @@ export function loadComputerConfig(
     // fallback in bin.ts. No env channel either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
-    ...(fromToken
-      ? {
-          hubUrl: fromToken.hubUrl,
-          // A token minted by the current hub carries an EMPTY fingerprint: the hub
-          // no longer presents a certificate of its own, so there is nothing to pin
-          // and the front end's certificate is verified the normal way. An empty
-          // string must read as "no pin", never reach the schema (min(1)) and fail
-          // the whole config. A token from an older hub still carries a real pin.
-          ...(fromToken.certFingerprint !== ''
-            ? { pinnedCertSha256: fromToken.certFingerprint }
-            : {})
-        }
-      : {}),
+    ...(fromToken ? { hubUrl: fromToken.hubUrl } : {}),
     // <ROOT>/computer.config.json — base under env (spread after). The single config file.
     ...fromShared,
     ...(hubUrlFromEnv !== undefined ? { hubUrl: hubUrlFromEnv } : {}),
@@ -261,20 +246,6 @@ export function loadComputerConfig(
       .join('; ')
     throw new Error(
       `invalid computer configuration (${issues}). Set ${ENV_VARS.hubAddress} (and ${ENV_VARS.joinToken} for first contact) or a <ROOT>/computer.config.json.`
-    )
-  }
-
-  // Fail-fast on an EXPLICITLY-configured pin (computer.config.json `pinnedCertSha256`)
-  // against a plaintext ws:// hub: pinning is meaningless without TLS, and silently
-  // dropping it would downgrade an operator who asked for pinning to an unpinned
-  // connection. A pin that came ONLY from the join token (the auto path) is NOT
-  // explicit — it is softly ignored downstream (startComputer) when the resolved url
-  // is ws://, so a ws token stays usable for loopback/dev without a hard failure.
-  const explicitPin = fromShared.pinnedCertSha256
-  if (explicitPin !== undefined && urlProtocol(result.data.hubUrl) === 'ws:') {
-    throw new Error(
-      `config pinnedCertSha256 requires a wss:// hub url; ` +
-        `got '${result.data.hubUrl}'. Pinning has no effect without TLS — use a wss:// url or drop the pin.`
     )
   }
 
@@ -296,6 +267,47 @@ export function loadComputerConfig(
     }
   }
   return result.data
+}
+
+/**
+ * Certificate pins an older release enforced and this one IGNORES, one notice each.
+ *
+ * The hub never terminates TLS, so there is no hub certificate left to pin: a
+ * `wss://` hub is reached through a front end whose certificate is verified the
+ * normal way (CA chain + hostname, against Node's trust store). A pin still sitting
+ * in a join token from an older hub, or in `computer.config.json`, could only ever
+ * fail against that certificate. It is ignored rather than refused, so a computer
+ * enrolled before the change keeps working against a CA-fronted hub; and it is
+ * reported here, so the move from pinning to CA verification is never silent.
+ * Verification itself is never relaxed — there is no switch that skips it.
+ *
+ * Same sources and precedence as {@link loadComputerConfig}: the join token from
+ * env, else from the config file, and the file only for a standalone computer.
+ */
+export function ignoredCertPinNotices(
+  env: Env = process.env,
+  shared: ComputerConfigFile = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
+    ? loadComputerConfigFile()
+    : {},
+  ignoredFileKeys: readonly string[] = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
+    ? ignoredComputerConfigKeys()
+    : []
+): string[] {
+  const notices: string[] = []
+  const joinToken = env[ENV_VARS.joinToken] ?? shared.joinToken
+  if (joinToken && joinTokenCarriesCertPin(joinToken)) {
+    notices.push(
+      'ignoring the certificate pin in the join token (minted by an older hub): ' +
+        "the hub's certificate is verified against the trusted CAs instead"
+    )
+  }
+  if (ignoredFileKeys.includes('pinnedCertSha256')) {
+    notices.push(
+      "ignoring 'pinnedCertSha256' in computer.config.json: certificate pinning was removed and " +
+        "the hub's certificate is verified against the trusted CAs instead — delete the key"
+    )
+  }
+  return notices
 }
 
 /** Parse a url's protocol (`ws:` / `wss:` / …), or `null` if malformed. */

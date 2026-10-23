@@ -1,9 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import { assertHubPasswordEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import type { HubRole } from '../shared/types'
-import { isDisabled, readRole } from './account'
+import { isBreakGlassEmail, isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
+import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
+import { isPasswordSignInEnabled } from './password'
 
 /**
  * Operator-facing account management for a hub — the server half of
@@ -28,6 +31,19 @@ import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
  * least one ENABLED admin. The guards below refuse any change that breaks either;
  * {@link ensureFirstAdmin} establishes the second on a hub upgraded from before roles.
  *
+ * ON A HUB WITH ENTRA SIGN-IN (O-4) the role is not managed here at all: it comes from
+ * the Entra app role `SlayZone.Admin`, written at every sign-in (entra.ts).
+ * Manual role changes refuse (`sso-managed`), an account created here is never admin,
+ * there is no first-admin promotion — the hub has no admin until someone signs in with
+ * the app role — and {@link demoteNonEntraAdmins} removes admin from any account that
+ * did not get it from Entra. Disable / enable work as everywhere.
+ *
+ * THE BREAK-GLASS ACCOUNT (./break-glass.ts) is listed like any other but managed only
+ * there: disable, enable and role changes refuse it (`protected`), `add` refuses its
+ * address, and it never counts as a human or an admin — in the invariants above, the
+ * first-admin promotion or {@link findFirstAdmin} — so an emergency session can neither
+ * be what lets the last real admin be disabled nor inherit the hub's unowned projects.
+ *
  * @module hub-auth/users
  */
 
@@ -47,7 +63,10 @@ export interface CreateHubUserInput {
   email: string
   /** Display name. Defaults to the email's local part. */
   name?: string
-  /** Defaults to `'admin'` when the hub has no enabled admin yet, else `'user'`. */
+  /**
+   * Defaults to `'admin'` when the hub has no enabled admin yet, else `'user'`. On a hub
+   * with Entra sign-in: always `'user'`, and `'admin'` is refused (`sso-managed`).
+   */
   role?: HubRole
 }
 
@@ -66,24 +85,29 @@ export interface CreatedHubUser {
 
 /**
  * Why `disableHubUser` declined, or 'ok'.
- *  - `protected` — the computer service user (see {@link disableHubUser});
+ *  - `protected` — the computer service user (see {@link disableHubUser}) or a
+ *    break-glass account (managed by ./break-glass.ts alone);
  *  - `last-user` — the last enabled human;
  *  - `last-admin` — the last enabled admin.
  */
 export type DisableHubUserResult = 'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'
 
-/** Why `enableHubUser` declined, or 'ok'. */
+/** Why `enableHubUser` declined, or 'ok'. `protected`: as for disable. */
 export type EnableHubUserResult = 'ok' | 'not-found' | 'protected'
 
-/** Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin. */
-export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin'
+/**
+ * Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin;
+ * a break-glass account's role is break-glass's own.
+ * `sso-managed`: the hub has Entra sign-in, where roles come from the Entra app role.
+ */
+export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'
 
 export interface DisableHubUserOptions {
   /**
-   * Revoke the account's sessions held OUTSIDE hub-auth's database — the hub's
-   * scoped web sessions (`web_sessions` in the app DB, which this package cannot
-   * reach). Called after the account is flagged and its better-auth sessions are
-   * gone.
+   * Revoke what the account holds OUTSIDE hub-auth's database, which this package
+   * cannot reach — on the hub (T-12, `user-access.ts`): its scoped web sessions
+   * (`web_sessions` in the app DB), its open `/trpc` sockets and its computers. Called
+   * after the account is flagged and its better-auth sessions are gone.
    */
   revokeExternalSessions?: (userId: string) => Promise<unknown>
 }
@@ -138,13 +162,32 @@ function normalizeEmail(email: string): string {
  * Returns `{ error: 'exists' }` rather than throwing on a duplicate: the email
  * column is unique, but a caught constraint violation is not reliably
  * distinguishable from other write failures, so the check is explicit.
+ *
+ * With password sign-in off (T-10) throws `HubSwitchedOffError`
+ * (`HUB_PASSWORD_DISABLED`) after one `user.create` denied line: no account gets a
+ * password nobody could use. `opts.reason` is written into the success line
+ * (`break_glass`, ./break-glass.ts). `opts.password` replaces the generated one: the
+ * bootstrap owner of a reachable hub, whose password derives from the auth secret so
+ * that nothing is written to disk (T-11). Never from a request body.
  */
 export async function createHubUser(
   auth: HubAuth,
-  input: CreateHubUserInput
-): Promise<CreatedHubUser | { error: 'exists' }> {
+  input: CreateHubUserInput,
+  opts: { reason?: 'break_glass'; password?: string } = {}
+): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' }> {
+  assertHubPasswordEnabled('user.create', { op: 'create' }, isPasswordSignInEnabled(auth))
   const ctx = await auth.$context
   const email = normalizeEmail(input.email)
+  const sso = isEntraSsoAuth(auth)
+  if (sso && input.role === 'admin') {
+    auditUser('user.create', 'denied', null, { reason: 'sso_managed', role: 'admin' })
+    return { error: 'sso-managed' }
+  }
+  // Break-glass addresses (v2's and v1's) belong to ./break-glass.ts alone.
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.create', 'denied', null, { reason: 'break_glass_reserved' })
+    return { error: 'exists' }
+  }
 
   const existing = await ctx.internalAdapter.findUserByEmail(email)
   if (existing) {
@@ -152,16 +195,16 @@ export async function createHubUser(
     return { error: 'exists' }
   }
 
-  const password = generatePassword()
-  // Fail LOUD if the generated length ever falls outside better-auth's configured
+  const password = opts.password ?? generatePassword()
+  // Fail LOUD if the password's length ever falls outside better-auth's configured
   // bounds: silently minting an account whose password the sign-in route rejects
-  // would be a mystery to debug. Only reachable if the config or the generator
+  // would be a mystery to debug. Only reachable if the config or a generator
   // changes, which is exactly when we want to hear about it.
   const { minPasswordLength, maxPasswordLength } = ctx.password.config
   if (password.length < minPasswordLength || password.length > maxPasswordLength) {
     throw new Error(
-      `[hub-auth] generated password length ${password.length} is outside the configured ` +
-        `bounds ${minPasswordLength}–${maxPasswordLength} — adjust generatePassword()`
+      `[hub-auth] password length ${password.length} is outside the configured ` +
+        `bounds ${minPasswordLength}–${maxPasswordLength} — adjust its generator`
     )
   }
 
@@ -173,8 +216,9 @@ export async function createHubUser(
   // The first account on a hub with no enabled admin is the admin, so the
   // "at least one enabled admin" invariant holds from the first account on rather
   // than only after the next boot's `ensureFirstAdmin`.
-  const role: HubRole =
-    input.role ?? ((await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin')
+  const role: HubRole = sso
+    ? 'user'
+    : (input.role ?? ((await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin'))
   // emailVerified: true — a DELIBERATE divergence from sign-up's `false`. This hub
   // configures no mail sender, so a verification mail can never be sent and the
   // account would be permanently unverifiable. Marking an operator-created account
@@ -189,7 +233,10 @@ export async function createHubUser(
     password: hash
   })
 
-  auditUser('user.create', 'success', created.id, { role })
+  auditUser('user.create', 'success', created.id, {
+    role,
+    ...(opts.reason ? { reason: opts.reason } : {})
+  })
   return { id: created.id, email: created.email, name: created.name, role, password }
 }
 
@@ -206,24 +253,49 @@ export async function listHubUsers(auth: HubAuth): Promise<HubUserRow[]> {
     field: 'createdAt',
     direction: 'asc'
   })
-  return users
-    .filter((u) => u.email !== COMPUTER_SERVICE_USER_EMAIL)
-    .map((u) => {
-      const row = u as typeof u & Record<string, unknown>
-      return {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        role: readRole(row.role),
-        disabledAt: isDisabled(row)
-          ? new Date(row.disabledAt as string | Date).toISOString()
-          : null,
-        createdAt: new Date(u.createdAt).toISOString()
-      }
-    })
+  return users.filter((u) => u.email !== COMPUTER_SERVICE_USER_EMAIL).map(toHubUserRow)
 }
 
-const isEnabled = (u: HubUserRow): boolean => u.disabledAt === null
+/** An adapter user row as {@link HubUserRow}. */
+function toHubUserRow(u: {
+  id: string
+  email: string
+  name: string
+  createdAt: Date | string
+}): HubUserRow {
+  const row = u as typeof u & Record<string, unknown>
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: readRole(row.role),
+    disabledAt: isDisabled(row) ? new Date(row.disabledAt as string | Date).toISOString() : null,
+    createdAt: new Date(u.createdAt).toISOString()
+  }
+}
+
+/**
+ * The person `ref` names — an account id, or an email in any case — disabled or not.
+ * Null for no such account, and for the two accounts that are not a person: the
+ * computer service user and a break-glass account. Used to name the owner of a join
+ * token (T-20), which a computer only a machine or an emergency session "owns" would
+ * make meaningless.
+ */
+export async function findHubUser(auth: HubAuth, ref: string): Promise<HubUserRow | null> {
+  const wanted = ref.trim()
+  if (!wanted) return null
+  const ctx = await auth.$context
+  const user = wanted.includes('@')
+    ? ((await ctx.internalAdapter.findUserByEmail(normalizeEmail(wanted)))?.user ?? null)
+    : await ctx.internalAdapter.findUserById(wanted)
+  if (!user || user.email === COMPUTER_SERVICE_USER_EMAIL || isBreakGlassEmail(user.email)) {
+    return null
+  }
+  return toHubUserRow(user)
+}
+
+/** Enabled, and counted: a break-glass account is never a human or an admin here. */
+const isEnabled = (u: HubUserRow): boolean => u.disabledAt === null && !isBreakGlassEmail(u.email)
 const isEnabledAdmin = (u: HubUserRow): boolean => isEnabled(u) && u.role === 'admin'
 
 /** The human behind an email, with the full human list for the invariant checks;
@@ -252,7 +324,7 @@ async function findHuman(
  *  - `'protected'` — the computer service user. Its id is the `referenceId` on every
  *    computer API key; it has no sessions to stop, and flagging it would read as
  *    "computers are disabled". Nothing about the request looks dangerous, so the
- *    guard has to live here.
+ *    guard has to live here. Also a break-glass account: closing it is break-glass's.
  *  - `'last-user'` — the last enabled human. With signup disabled no one could sign
  *    in again, and no one could create an account except over loopback on the box.
  *  - `'last-admin'` — the last enabled admin.
@@ -264,6 +336,10 @@ export async function disableHubUser(
 ): Promise<DisableHubUserResult> {
   if (normalizeEmail(email) === COMPUTER_SERVICE_USER_EMAIL) {
     auditUser('user.disable', 'denied', null, { reason: 'protected' })
+    return 'protected'
+  }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.disable', 'denied', null, { reason: 'break_glass' })
     return 'protected'
   }
   const found = await findHuman(auth, email)
@@ -301,6 +377,10 @@ export async function enableHubUser(auth: HubAuth, email: string): Promise<Enabl
     auditUser('user.enable', 'denied', null, { reason: 'protected' })
     return 'protected'
   }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.enable', 'denied', null, { reason: 'break_glass' })
+    return 'protected'
+  }
   const found = await findHuman(auth, email)
   if (!found) {
     auditUser('user.enable', 'failure', null, { reason: 'not_found' })
@@ -314,7 +394,10 @@ export async function enableHubUser(auth: HubAuth, email: string): Promise<Enabl
 
 /**
  * Set an account's role. Refuses to demote the last enabled admin, and the service
- * user in either direction (it is never admin). Nothing enforces the role yet.
+ * user in either direction (it is never admin). On a hub with Entra sign-in refuses
+ * every change (`sso-managed`): the role there is the Entra app role, rewritten at each
+ * sign-in, so a manual change would be silently undone — or silently outlive the
+ * removal of the app role.
  */
 export async function setHubUserRole(
   auth: HubAuth,
@@ -324,6 +407,15 @@ export async function setHubUserRole(
   if (normalizeEmail(email) === COMPUTER_SERVICE_USER_EMAIL) {
     auditUser('user.role_change', 'denied', null, { reason: 'protected', role })
     return 'protected'
+  }
+  if (isBreakGlassEmail(email)) {
+    auditUser('user.role_change', 'denied', null, { reason: 'break_glass', role })
+    return 'protected'
+  }
+  if (isEntraSsoAuth(auth)) {
+    const target = (await findHuman(auth, email))?.target.id ?? null
+    auditUser('user.role_change', 'denied', target, { reason: 'sso_managed', role })
+    return 'sso-managed'
   }
   const found = await findHuman(auth, email)
   if (!found) {
@@ -342,14 +434,40 @@ export async function setHubUserRole(
 }
 
 /**
+ * Boot step on a hub with Entra sign-in (from `createHubAuth`, instead of
+ * {@link ensureFirstAdmin}): every admin that has no Entra account becomes `user`, one
+ * `user.role_change` line each (reason `not_entra`). Such an admin can only predate the
+ * switch to SSO (the bootstrap owner, an account from `slay hub users add`), and since
+ * manual role changes refuse on this hub it could otherwise never be demoted. Admins
+ * WITH an Entra account keep what their last sign-in wrote. Returns the demoted ids.
+ */
+export async function demoteNonEntraAdmins(auth: HubAuth): Promise<string[]> {
+  const ctx = await auth.$context
+  const demoted: string[] = []
+  for (const user of await listHubUsers(auth)) {
+    if (user.role !== 'admin') continue
+    const accounts = await ctx.internalAdapter.findAccounts(user.id)
+    if (accounts.some((a) => a.providerId === ENTRA_PROVIDER_ID)) continue
+    await ctx.internalAdapter.updateUser(user.id, { role: 'user' })
+    auditUser('user.role_change', 'success', user.id, { reason: 'not_entra', role: 'user' })
+    demoted.push(user.id)
+  }
+  return demoted
+}
+
+/**
  * Boot step (from `createHubAuth`): a hub that has enabled humans but no enabled
  * admin makes its OLDEST enabled human admin, with one `user.role_change` line
  * (reason `first_admin`). In practice this acts once — on the first boot after the
  * `role` column was added — because from then on `createHubUser` and the guards
  * above keep an enabled admin. A hub with no humans is left alone. Returns the
  * promoted user's id, or null when nothing changed.
+ *
+ * Never on a hub with Entra sign-in: admin there comes only from the Entra app role,
+ * so such a hub has no admin until someone signs in holding it (O-4).
  */
 export async function ensureFirstAdmin(auth: HubAuth): Promise<string | null> {
+  if (isEntraSsoAuth(auth)) return null
   const enabled = (await listHubUsers(auth)).filter(isEnabled)
   if (enabled.length === 0 || enabled.some(isEnabledAdmin)) return null
   const first = enabled[0]!
@@ -357,4 +475,17 @@ export async function ensureFirstAdmin(auth: HubAuth): Promise<string | null> {
   await ctx.internalAdapter.updateUser(first.id, { role: 'admin' })
   auditUser('user.role_change', 'success', first.id, { reason: 'first_admin', role: 'admin' })
   return first.id
+}
+
+/**
+ * The hub's first admin: its OLDEST enabled admin, or null when it has none (no
+ * humans yet). The account {@link ensureFirstAdmin} and the first
+ * {@link createHubUser} establish, so on a hub upgraded from a single-user install
+ * it is the person who was using it. Read-only.
+ *
+ * Used by the hub's ownership backfill (T-16): projects with no owner, and the
+ * per-user settings rows from before login, go to this account.
+ */
+export async function findFirstAdmin(auth: HubAuth): Promise<string | null> {
+  return (await listHubUsers(auth)).find(isEnabledAdmin)?.id ?? null
 }

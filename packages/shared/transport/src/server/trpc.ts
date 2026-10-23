@@ -1,10 +1,18 @@
 import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
 import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
-import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import {
+  assertHubLocalExecEnabled,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
+import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
 import { isPathAllowed } from './scopes'
+import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
+import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
+import { checkOwnership, ownedResult } from './owner-gate'
+import { isJoinTokenRefusedError } from './join-token-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -14,7 +22,13 @@ const t = initTRPC.context<TrpcContext>().create({
     ...shape,
     data: {
       ...shape.data,
-      ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {})
+      ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A role refusal (T-15) carries `ADMIN_ONLY` the same way.
+      ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
+      // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
+      ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A refused join-token mint (T-20): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
+      ...(isJoinTokenRefusedError(error.cause) ? { appCode: error.cause.code } : {})
     }
   })
 })
@@ -98,6 +112,39 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
+ * Account-role gate (T-15) — see `admin-policy.ts`. A non-admin account calling an
+ * `admin` procedure (or an unclassified one: fail closed) gets FORBIDDEN with
+ * `data.appCode: 'ADMIN_ONLY'` and one `authz.denied` line.
+ *
+ * Inert when the auth gate is off, exactly like the scope gate: the desktop app's
+ * own hub (`SLAYZONE_HUB_REQUIRE_LOGIN=0`) has no principal and no role, so it keeps
+ * full access. On an enforcing hub `authGate` already refused a null principal.
+ *
+ * Runs before the scope gate: both refuse with FORBIDDEN, and either order admits
+ * exactly the calls that pass both.
+ */
+const adminGate = t.middleware(({ ctx, next, path }) => {
+  if (!getAuthGate()) return next()
+  if (!roleAllows(TRPC_ADMIN_POLICY[path], ctx.principal?.role ?? 'user')) {
+    throw adminOnlyTrpcError(path)
+  }
+  return next()
+})
+
+/**
+ * Owner gate (T-17) — see `owner-gate.ts`. On a hub with login, every id a `user`
+ * procedure's input names must belong to the caller (else NOT_FOUND + one
+ * `authz.denied` line), and lists and subscriptions are cut to the caller's rows. Inert
+ * when the auth gate is off, like the gates above.
+ */
+const ownerGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) => {
+  const check = await checkOwnership({ ctx, path, type, getRawInput })
+  const result = await next()
+  if (!check || !result.ok) return result
+  return { ...result, data: await ownedResult(check, result.data) }
+})
+
+/**
  * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
  * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
  * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
@@ -116,7 +163,24 @@ const switchRefusal = t.middleware(async ({ next }) => {
 })
 
 /**
- * Default procedure — auth-gated on an authed hub, then scope-gated. All app
+ * An id that is not one plain path segment, or a path outside its base dir, is refused
+ * deep in a domain (`@slayzone/platform/safe-path`, T-104) before any disk access.
+ * Surface it as BAD_REQUEST with the same message, not INTERNAL_SERVER_ERROR.
+ */
+const unsafePathRefusal = t.middleware(async ({ next }) => {
+  const result = await next()
+  if (!result.ok && isUnsafePathError(result.error.cause)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  return result
+})
+
+/**
+ * Default procedure — auth-gated on an authed hub, then role- and scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
  * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
@@ -124,8 +188,25 @@ const switchRefusal = t.middleware(async ({ next }) => {
 export const publicProcedure = t.procedure
   .use(securityContext)
   .use(authGate)
+  .use(adminGate)
   .use(scopeGate)
+  .use(ownerGate)
   .use(switchRefusal)
+  .use(unsafePathRefusal)
+
+/**
+ * A procedure that works on the hub's OWN disk — git, `gh` probes, the OS opener,
+ * project files — with no computer route (the git panel today). Refused up front,
+ * with the same FORBIDDEN + `NO_COMPUTER_CONNECTED` a refusal deeper down gets, when
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06): such a hub never touches project data.
+ * Up front because several of these helpers swallow errors into a default (`false`,
+ * `[]`), which would hide the refusal from the client. The exec seams refuse too, so
+ * a caller that skips this gate still spawns nothing.
+ */
+export const hubLocalProcedure = publicProcedure.use(({ next, path }) => {
+  assertHubLocalExecEnabled({ op: path })
+  return next()
+})
 
 /**
  * Ungated procedure for pre-auth discovery ONLY (`hub.describe`) — the client

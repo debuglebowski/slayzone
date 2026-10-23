@@ -3,6 +3,8 @@ import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
+import { ADMIN_ONLY } from '../../../admin-policy'
+import { decideJoinTokenMint } from '../../../join-token-policy'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -55,9 +57,13 @@ import type { RestApiDeps } from '../types'
  * tighter than the outer gate WAS before this fix. Removing the exemption would
  * make the outer gate 401 an off-box request before this handler runs, hiding
  * both the 503 (listener not yet bound) and the 401/403 distinction below.
+ *
+ * WHO THE TOKEN IS FOR, and for how long (T-20): `join-token-policy.ts`, shared with
+ * `computers.mintJoinToken`. On a hub with login the body names the owner
+ * (`forUser`: account id or email, an enabled account) — refused with 400 and a
+ * stable `code` otherwise; without login, no owner, as before. `ttlMs` over 1 hour is
+ * a 400 everywhere. The admin is only the minter.
  */
-
-const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches computersRouter)
 
 /**
  * True for IPv4/IPv6 loopback, incl. the IPv4-mapped-IPv6 form node reports.
@@ -72,7 +78,7 @@ const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes (matches computersRo
 export const isLoopbackAddress = isLoopbackPeer
 
 /** What to do with a mint request, once its peer + credential are known. */
-export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized'
+export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized' | 'not-admin'
 
 /**
  * Decide whether a caller may mint. Pure, so the off-box AND proxied-loopback
@@ -89,14 +95,19 @@ export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized'
  *   credential problem (fixable by signing in / reading the owner file), not a
  *   policy one (fixable only by moving machines) — conflating the two sends
  *   operators to the wrong fix.
+ * - a valid full bearer whose account is not admin → `not-admin` (403, code
+ *   `ADMIN_ONLY`): only an admin mints (T-15, O-5), as on `computers.mintJoinToken`.
  */
 export function joinTokenAuthDecision(opts: {
   loopback: boolean
   authRequired: boolean
   bearerOk: boolean
+  /** That session's account has `role: 'admin'`. */
+  admin: boolean
 }): JoinTokenAuthOutcome {
   if (!opts.authRequired) return opts.loopback ? 'mint' : 'forbid'
-  return opts.bearerOk ? 'mint' : 'unauthorized'
+  if (!opts.bearerOk) return 'unauthorized'
+  return opts.admin ? 'mint' : 'not-admin'
 }
 
 export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
@@ -116,7 +127,8 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     // cookies passed here, only the header, and only a `full` principal counts.
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
-    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk })
+    const admin = principal?.role === 'admin'
+    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk, admin })
     if (decision !== 'mint') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({
@@ -133,6 +145,13 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
       })
       return
     }
+    if (decision === 'not-admin') {
+      res.status(403).json({
+        error: 'minting a computer join token needs a hub admin account',
+        code: ADMIN_ONLY
+      })
+      return
+    }
     if (!deps.computers) {
       res.status(503).json({ error: 'computer listener not ready — no join token available' })
       return
@@ -143,26 +162,44 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
       return
     }
 
-    const body = (req.body ?? {}) as { label?: unknown; ttlMs?: unknown }
+    const body = (req.body ?? {}) as { label?: unknown; ttlMs?: unknown; forUser?: unknown }
     const label =
       typeof body.label === 'string' && body.label.length > 0 ? body.label : 'local-computer'
+    // A malformed lifetime means the default, as it always has; a well-formed one over
+    // the cap is refused by the policy below.
     const ttlMs =
       typeof body.ttlMs === 'number' && Number.isInteger(body.ttlMs) && body.ttlMs > 0
         ? body.ttlMs
-        : DEFAULT_JOIN_TOKEN_TTL_MS
+        : undefined
+    const forUser = typeof body.forUser === 'string' ? body.forUser : undefined
 
     try {
-      // As the verified caller, so the mint's audit line names them. Ownership is
-      // unchanged: this path still mints with no `mintedByUserId` (T-19).
-      const minted = await runAsSecurityActor(principal?.userId ?? null, () =>
-        storeMintJoinToken(deps.db, {
-          hubUrl,
+      // As the verified caller, so every audit line below names them — the minter, not
+      // the owner. Null only on a hub without login, where nobody is signed in.
+      const outcome = await runAsSecurityActor(principal?.userId ?? null, async () => {
+        const decision = await decideJoinTokenMint({
+          loginRequired: authRequired,
+          forUser,
           ttlMs,
-          label
+          findAccount: deps.computers?.findAccount
         })
-      )
+        if (!decision.ok) return decision
+        const minted = await storeMintJoinToken(deps.db, {
+          hubUrl,
+          ttlMs: decision.ttlMs,
+          label,
+          mintedByUserId: principal?.userId ?? null,
+          // The named user (T-20), or null on a hub without login: an unowned computer.
+          ownerUserId: decision.ownerUserId
+        })
+        return { ok: true as const, token: minted.token }
+      })
+      if (!outcome.ok) {
+        res.status(400).json({ error: outcome.error.message, code: outcome.error.code })
+        return
+      }
       // Return the token + the computer URL the computer should dial.
-      res.json({ token: minted.token, hubUrl })
+      res.json({ token: outcome.token, hubUrl })
     } catch (err) {
       res.status(500).json({
         error: 'failed to mint join token',

@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { SettingsService, settingProjectId } from '@slayzone/settings/server'
+import type { AccessScope } from './access'
 import type {
   ImportTxnParams,
   SetTaskParentTxnParams,
@@ -62,7 +64,25 @@ interface ImportResult {
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-async function exportAll(db: SlayzoneDb): Promise<SlayExportBundle> {
+/**
+ * Who is exporting or importing: the request's user and access scope.
+ *
+ * O-22 (T-101): on a hub with login "everything" is the CALLER's everything — their
+ * projects (through `canAccess`, so sharing widens it with no change here), what hangs
+ * off them, the hub-wide AI-config library and registries every user sees, and their
+ * own view of the settings. Nobody — the admin included — exports another user's rows;
+ * the whole hub is backed up at server level, never through the app. Without login
+ * (the desktop app's hub) the scope does not enforce and the export is the whole
+ * database, exactly as before.
+ */
+export interface ExportImportCaller {
+  /** Who imported projects belong to: the request's user, or null on a hub without login. */
+  readonly userId: string | null
+  readonly scope: AccessScope
+}
+
+async function exportAll(db: SlayzoneDb, caller: ExportImportCaller): Promise<SlayExportBundle> {
+  const projectIds = await caller.scope.accessibleProjectIds()
   return {
     meta: {
       version: EXPORT_VERSION,
@@ -71,20 +91,79 @@ async function exportAll(db: SlayzoneDb): Promise<SlayExportBundle> {
       scope: 'all',
       dbVersion: DB_VERSION
     },
-    data: {
-      projects: (await db.all('SELECT * FROM projects')) as Row[],
-      tasks: (await db.all('SELECT * FROM tasks')) as Row[],
-      tags: (await db.all('SELECT * FROM tags')) as Row[],
-      task_tags: (await db.all('SELECT * FROM task_tags')) as Row[],
-      task_dependencies: (await db.all('SELECT * FROM task_dependencies')) as Row[],
-      terminal_tabs: (await db.all('SELECT * FROM terminal_tabs')) as Row[],
-      ai_config_items: (await db.all('SELECT * FROM ai_config_items')) as Row[],
-      ai_config_project_selections: (await db.all(
-        'SELECT * FROM ai_config_project_selections'
-      )) as Row[],
-      ai_config_sources: (await db.all('SELECT * FROM ai_config_sources')) as Row[],
-      settings: (await db.all('SELECT * FROM settings')) as Row[]
-    }
+    data:
+      projectIds === null ? await wholeDatabase(db) : await ownRows(db, projectIds, caller.userId)
+  }
+}
+
+/** Every row of every exported table: a hub without login. */
+async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
+  return {
+    projects: (await db.all('SELECT * FROM projects')) as Row[],
+    tasks: (await db.all('SELECT * FROM tasks')) as Row[],
+    tags: (await db.all('SELECT * FROM tags')) as Row[],
+    task_tags: (await db.all('SELECT * FROM task_tags')) as Row[],
+    task_dependencies: (await db.all('SELECT * FROM task_dependencies')) as Row[],
+    terminal_tabs: (await db.all('SELECT * FROM terminal_tabs')) as Row[],
+    ai_config_items: (await db.all('SELECT * FROM ai_config_items')) as Row[],
+    ai_config_project_selections: (await db.all(
+      'SELECT * FROM ai_config_project_selections'
+    )) as Row[],
+    ai_config_sources: (await db.all('SELECT * FROM ai_config_sources')) as Row[],
+    settings: (await db.all('SELECT * FROM settings')) as Row[]
+  }
+}
+
+/**
+ * The rows of `projectIds` (the caller's) and what hangs off them. A row linking to
+ * something outside them — a dependency on another user's task, a tag of another
+ * project — is left out, like `exportProject` does. Settings: the caller's own view
+ * (hub-wide keys and their own per-user ones; never `internal` ones, another user's,
+ * or a project-keyed one of a project not theirs).
+ */
+async function ownRows(
+  db: SlayzoneDb,
+  projectIds: readonly string[],
+  userId: string | null
+): Promise<SlayExportData> {
+  const ids = [...projectIds]
+  const inProjects = `(${ids.map(() => '?').join(', ')})`
+  const ownTasks = `SELECT id FROM tasks WHERE project_id IN ${inProjects}`
+  const ownTags = `SELECT id FROM tags WHERE project_id IN ${inProjects}`
+  const all = (sql: string, params: unknown[] = ids): Promise<Row[]> =>
+    db.all(sql, params) as Promise<Row[]>
+  const settings = userId
+    ? Object.entries(await SettingsService.forDatabase(db).forUser(userId).getAll())
+        .filter(([key]) => {
+          const project = settingProjectId(key)
+          return project === null || ids.includes(project)
+        })
+        .map(([key, value]) => ({ key, value }))
+    : []
+  return {
+    projects: await all(`SELECT * FROM projects WHERE id IN ${inProjects}`),
+    tasks: await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`),
+    tags: await all(`SELECT * FROM tags WHERE project_id IN ${inProjects}`),
+    task_tags: await all(
+      `SELECT * FROM task_tags WHERE task_id IN (${ownTasks}) AND tag_id IN (${ownTags})`,
+      [...ids, ...ids]
+    ),
+    task_dependencies: await all(
+      `SELECT * FROM task_dependencies
+        WHERE task_id IN (${ownTasks}) AND blocks_task_id IN (${ownTasks})`,
+      [...ids, ...ids]
+    ),
+    terminal_tabs: await all(`SELECT * FROM terminal_tabs WHERE task_id IN (${ownTasks})`),
+    // A global library item (no project) is hub-wide: every user sees it (access.ts).
+    ai_config_items: await all(
+      `SELECT * FROM ai_config_items WHERE project_id IS NULL OR project_id IN ${inProjects}`
+    ),
+    ai_config_project_selections: await all(
+      `SELECT * FROM ai_config_project_selections WHERE project_id IN ${inProjects}`
+    ),
+    // The skill registries: hub-wide, listed to every user.
+    ai_config_sources: await all('SELECT * FROM ai_config_sources', []),
+    settings
   }
 }
 
@@ -166,9 +245,15 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
 // The actual remap/insert logic is a conditional read-modify-write that must
 // run atomically inside the DB worker — see `export-import-txns.ts`. Here we
 // just hand the bundle data to the named transaction and reshape the result.
-async function importBundle(db: SlayzoneDb, bundle: SlayExportBundle): Promise<ImportResult> {
+async function importBundle(
+  db: SlayzoneDb,
+  bundle: SlayExportBundle,
+  caller: ExportImportCaller
+): Promise<ImportResult> {
   const result = await db.namedTxn('export-import:import', {
-    data: bundle.data
+    data: bundle.data,
+    ownerUserId: caller.userId,
+    projectIds: await caller.scope.accessibleProjectIds()
   } satisfies ImportTxnParams)
   return result
 }
@@ -198,9 +283,9 @@ async function doExport(bundle: SlayExportBundle): Promise<ExportResult> {
   return { success: true, path: saveResult.filePath }
 }
 
-async function handleExportAll(db: SlayzoneDb): Promise<ExportResult> {
+async function handleExportAll(db: SlayzoneDb, caller: ExportImportCaller): Promise<ExportResult> {
   try {
-    const bundle = await exportAll(db)
+    const bundle = await exportAll(db, caller)
     return await doExport(bundle)
   } catch (e) {
     return { success: false, error: String(e) }
@@ -216,7 +301,7 @@ async function handleExportProject(db: SlayzoneDb, projectId: string): Promise<E
   }
 }
 
-async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
+async function handleImport(db: SlayzoneDb, caller: ExportImportCaller): Promise<ImportResult> {
   try {
     const openResult = await getAppDeps().dialogShowOpenDialog({
       title: 'Import',
@@ -235,7 +320,7 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
       return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
     }
 
-    const result = await importBundle(db, bundle)
+    const result = await importBundle(db, bundle, caller)
 
     getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
 
@@ -262,18 +347,28 @@ export type ExportImportOps = {
   ) => Promise<{ success: boolean; error?: string }>
 }
 
-export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImportOps {
+/**
+ * `caller.userId`: who imported projects belong to — the request's user, or null on
+ * a hub without login. Required for the same reason as `createProject`'s: an
+ * import is a way to create projects, and every such way decides the owner.
+ * `caller.scope`: what `exportAll` may hold (see {@link ExportImportCaller}).
+ */
+export function buildExportImportOps(
+  db: SlayzoneDb,
+  caller: ExportImportCaller,
+  isTest = false
+): ExportImportOps {
   const ops: ExportImportOps = {
-    exportAll: () => handleExportAll(db),
+    exportAll: () => handleExportAll(db, caller),
     exportProject: (projectId: string) => handleExportProject(db, projectId),
-    importBundle: () => handleImport(db)
+    importBundle: () => handleImport(db, caller)
   }
 
   // Test-only ops that bypass native file dialogs
   if (isTest) {
     ops.testExportAllToPath = async (filePath: string) => {
       try {
-        const bundle = await exportAll(db)
+        const bundle = await exportAll(db, caller)
         fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
         return { success: true, path: filePath }
       } catch (e) {
@@ -298,7 +393,7 @@ export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImpo
         if (bundle.meta?.version !== EXPORT_VERSION) {
           return { success: false, error: `Unsupported export version: ${bundle.meta?.version}` }
         }
-        const result = await importBundle(db, bundle)
+        const result = await importBundle(db, bundle, caller)
         getNotifyEvents().emit('tasks-changed') // tRPC notify.onTasksChanged source
         return result
       } catch (e) {

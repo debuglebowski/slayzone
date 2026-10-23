@@ -13,7 +13,11 @@
  *     endpoint context, when there is one, says which.
  *
  * A sign-in refused because the account is disabled is logged once, by the session
- * guard in `account.ts` (outcome `denied`), not again here.
+ * guard in `account.ts` (outcome `denied`), not again here. Likewise an Entra sign-in
+ * refused by the hub's own ID-token checks is logged once, by `entra.ts`, with its
+ * reason; the callback line here covers success and every OTHER failure (state
+ * mismatch, a code Entra would not redeem, an email already held by another account,
+ * an error Entra itself returned).
  *
  * The client address and route come from the request context the hub's REST gate
  * sets (`runWithSecurityContext`); better-auth itself is handed none.
@@ -29,6 +33,7 @@ import { createHmac } from 'node:crypto'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import { createAuthMiddleware } from 'better-auth/api'
 import { ACCOUNT_DISABLED_CODE } from './account'
+import { ENTRA_PROVIDER_ID, entraSignIn } from './entra'
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
   typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined
@@ -55,6 +60,56 @@ export function subjectRef(secret: string, email: string): string {
 /** The endpoints whose outcome is logged here; anything else passes untouched. */
 const PASSWORD_PATHS = new Set(['/change-password', '/set-password', '/reset-password'])
 
+/** The `error` code of the redirect a failed OAuth callback answers with, or null. */
+function redirectError(returned: unknown): string | null {
+  const headers = asRecord(returned)?.headers as { get?: (name: string) => string | null }
+  const location = typeof headers?.get === 'function' ? headers.get('location') : null
+  if (!location) return null
+  try {
+    return new URL(location, 'http://hub.invalid').searchParams.get('error')
+  } catch {
+    return null
+  }
+}
+
+/** Entra's own error for a user who is not assigned to the app ("assignment required"). */
+const AADSTS_NOT_ASSIGNED = 'AADSTS50105'
+
+/** One line for an Entra callback, unless entra.ts or the session guard already wrote it. */
+async function auditEntraCallback(
+  query: Record<string, unknown> | undefined,
+  context: Record<string, unknown>
+): Promise<void> {
+  const userId = str(asRecord(asRecord(context.newSession)?.user)?.id)
+  if (userId) {
+    securityEvent({
+      event: 'auth.signin',
+      outcome: 'success',
+      actor: userId,
+      detail: { method: 'sso' }
+    })
+    return
+  }
+  // Refused by the ID-token checks: entra.ts wrote the line, with the reason.
+  if ((await entraSignIn())?.verdict?.ok === false) return
+  const error = redirectError(context.returned)
+  if (error === ACCOUNT_DISABLED_CODE) return
+  // An error Entra sent back (the user cancelled, or is not assigned to the app).
+  const fromEntra = str(query?.error)
+  const aadsts = /AADSTS\d+/.exec(String(query?.error_description ?? ''))?.[0] ?? null
+  const unassigned = aadsts === AADSTS_NOT_ASSIGNED
+  securityEvent({
+    event: 'auth.signin',
+    outcome: unassigned ? 'denied' : 'failure',
+    actor: null,
+    detail: {
+      method: 'sso',
+      reason: unassigned ? 'unassigned' : (fromEntra ?? error ?? 'unknown').slice(0, 80),
+      ...(aadsts ? { aadsts } : {})
+    }
+  })
+}
+
 /** `hooks.after`: one line per sign-in or password change. Never throws, never alters the response. */
 export const auditAuthResponse = createAuthMiddleware(async (ctx) => {
   try {
@@ -78,6 +133,11 @@ export const auditAuthResponse = createAuthMiddleware(async (ctx) => {
             }
           : { method: 'password' }
       })
+      return
+    }
+    if (path.startsWith('/callback/') && asRecord(ctx.params)?.id === ENTRA_PROVIDER_ID) {
+      // A POST (form_post) only re-dispatches to the GET, which writes the line.
+      if (ctx.method !== 'POST') await auditEntraCallback(asRecord(ctx.query), context)
       return
     }
     if (PASSWORD_PATHS.has(path)) {

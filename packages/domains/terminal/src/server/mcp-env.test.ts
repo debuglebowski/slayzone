@@ -117,17 +117,17 @@ const REMOTE: RemoteMcpEnv = {
   )
 }
 
-// 1b. Pooled (taskless) spawn → ctx carries slaySessionId + projectId, no taskId.
+// 1b. Warm (pooled) spawn → its reserved task id + an explicit project id (there is
+// no task row to derive the project from yet), and never a session id.
 {
-  const env = await buildMcpEnv(null, undefined, 'claude-code', 'sess-123', 'proj-9')
-  assert(
-    'SLAYZONE_AGENT_HOOK_CONTEXT' in env,
-    'pooled spawn still sets SLAYZONE_AGENT_HOOK_CONTEXT'
-  )
+  const env = await buildMcpEnv(null, 'reserved-task-1', 'claude-code', 'proj-9')
+  assert(env.SLAYZONE_TASK_ID === 'reserved-task-1', 'warm agent knows its task id')
+  assert(env.SLAYZONE_PROJECT_ID === 'proj-9', 'explicit project id wins without a task row')
+  assert(!('SLAYZONE_SESSION_ID' in env), 'no agent is ever given a session id')
   const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
-  assert(ctx.slaySessionId === 'sess-123', 'ctx carries slaySessionId for a pooled agent')
+  assert(ctx.taskId === 'reserved-task-1', 'ctx carries the reserved taskId')
   assert(ctx.projectId === 'proj-9', 'ctx carries projectId')
-  assert(ctx.taskId === undefined, 'ctx has no taskId for a taskless pooled spawn')
+  assert(!('slaySessionId' in ctx), 'ctx carries no slaySessionId')
 }
 
 // 1c. Non-hook-capable mode → NO ctx blob (the blob only rides the hook env).
@@ -142,7 +142,7 @@ const REMOTE: RemoteMcpEnv = {
 // 2. Local, explicit `remote = null` → identical to omitting it entirely.
 {
   const a = await buildMcpEnv(null, 'task-2', 'claude-code')
-  const b = await buildMcpEnv(null, 'task-2', 'claude-code', undefined, undefined, null)
+  const b = await buildMcpEnv(null, 'task-2', 'claude-code', undefined, null)
   assert(JSON.stringify(a) === JSON.stringify(b), 'remote=null must equal remote omitted')
 }
 
@@ -174,7 +174,7 @@ const REMOTE: RemoteMcpEnv = {
     ['plain shell (no mode)', await buildMcpEnv(null, undefined, undefined)],
     [
       'remote non-hook mode',
-      await buildMcpEnv(null, 'task-3b', 'some-unknown-mode' as never, undefined, undefined, REMOTE)
+      await buildMcpEnv(null, 'task-3b', 'some-unknown-mode' as never, undefined, REMOTE)
     ]
   ] as const) {
     assert(
@@ -194,7 +194,7 @@ const REMOTE: RemoteMcpEnv = {
 
 // 4. Remote hook-capable → agent id + ROOT + ctx blob; NO hub env, NO hook URL.
 {
-  const env = await buildMcpEnv(null, 'task-r1', 'claude-code', undefined, undefined, REMOTE)
+  const env = await buildMcpEnv(null, 'task-r1', 'claude-code', undefined, REMOTE)
   assertNoHubEnv(env, 'remote (agent posts to computer loopback)')
   assert(!('SLAYZONE_HUB_TOKEN' in env), 'remote must NOT inject a bearer (loopback is unauthed)')
   assert(
@@ -211,7 +211,7 @@ const REMOTE: RemoteMcpEnv = {
 // 5. Remote hook env matches local hook env for identity (no hub-specific keys).
 {
   const local = await buildMcpEnv(null, 'task-same', 'claude-code')
-  const remote = await buildMcpEnv(null, 'task-same', 'claude-code', undefined, undefined, REMOTE)
+  const remote = await buildMcpEnv(null, 'task-same', 'claude-code', undefined, REMOTE)
   // Same identity blob + agent id. Two deliberate differences, both loopback-shaped
   // and neither an identity field: local carries the hook URL (remote defers to the
   // computer overlay) and local carries the hub authority (remote must not — it would
@@ -228,14 +228,7 @@ const REMOTE: RemoteMcpEnv = {
 
 // 6. Remote non-hook-capable → nothing hook-related, no hub env.
 {
-  const env = await buildMcpEnv(
-    null,
-    'task-r3',
-    'some-unknown-mode' as never,
-    undefined,
-    undefined,
-    REMOTE
-  )
+  const env = await buildMcpEnv(null, 'task-r3', 'some-unknown-mode' as never, undefined, REMOTE)
   assertNoHubEnv(env, 'non-hook remote')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook remote mode')
   assert(!('SLAYZONE_AGENT_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')

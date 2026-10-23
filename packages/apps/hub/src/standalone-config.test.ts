@@ -9,7 +9,7 @@
  *
  * Run with: npx tsx packages/apps/hub/src/standalone-config.test.ts
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
@@ -119,14 +119,23 @@ test('env WINS over hub.config.json (does not overwrite a set env)', () => {
 
 // ── the switches: file booleans become the 0|1 env channel ───────────────────
 test('hub.config.json switches seed the env as 0|1', () => {
-  // SSO on needs its client secret, which only env can supply (B7).
-  withIsolatedEnv({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 'sso-secret' }, () => {
+  // SSO on needs its certificate + key paths, which only env supplies, and a public
+  // address (B7) — which makes the hub reachable, so the auth secret too (B14).
+  const SSO_ENV = {
+    SLAYZONE_HUB_SSO_CERT_PATH: '/run/sso/cert.pem',
+    SLAYZONE_HUB_SSO_KEY_PATH: '/run/sso/key.pem',
+    SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+    SLAYZONE_HUB_AUTH_SECRET: 'a-long-random-secret'
+  }
+  const TENANT = '11111111-2222-3333-4444-555555555555'
+  const CLIENT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+  withIsolatedEnv(SSO_ENV, () => {
     saveHubConfigFile({
       requireLogin: true,
       enablePassword: false,
       enableSso: true,
-      ssoTenantId: 'tenant-1',
-      ssoClientId: 'client-1',
+      ssoTenantId: TENANT,
+      ssoClientId: CLIENT,
       enableProcesses: false,
       enableIntegrations: false
     })
@@ -136,8 +145,8 @@ test('hub.config.json switches seed the env as 0|1', () => {
     assertEq(process.env.SLAYZONE_HUB_ENABLE_SSO, '1', 'enableSso true → 1')
     assertEq(process.env.SLAYZONE_HUB_ENABLE_PROCESSES, '0', 'enableProcesses false → 0')
     assertEq(process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS, '0', 'enableIntegrations false → 0')
-    assertEq(process.env.SLAYZONE_HUB_SSO_TENANT_ID, 'tenant-1', 'ssoTenantId')
-    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, 'client-1', 'ssoClientId')
+    assertEq(process.env.SLAYZONE_HUB_SSO_TENANT_ID, TENANT, 'ssoTenantId')
+    assertEq(process.env.SLAYZONE_HUB_SSO_CLIENT_ID, CLIENT, 'ssoClientId')
   })
 })
 
@@ -373,6 +382,77 @@ test('a reachable hub does NOT read a persisted state-file secret either: env or
     const msg = throwsFrom(() => applyStandaloneHubConfig())
     assert(msg !== null && /SLAYZONE_HUB_AUTH_SECRET is required/.test(msg), String(msg))
     assert(process.env.SLAYZONE_HUB_AUTH_SECRET === undefined, 'the state file is not a source')
+  })
+})
+
+// ── B17 (T-11): a secret this hub generated earlier is compared, never written ──
+/** Run `fn`, returning what it wrote to stderr (and its refusal, if any). */
+function captureStderr(fn: () => void): { stderr: string; refusal: string | null } {
+  const chunks: string[] = []
+  const original = process.stderr.write.bind(process.stderr)
+  process.stderr.write = ((chunk: unknown) => {
+    chunks.push(String(chunk))
+    return true
+  }) as typeof process.stderr.write
+  try {
+    return { refusal: throwsFrom(fn), stderr: chunks.join('') }
+  } finally {
+    process.stderr.write = original
+  }
+}
+
+test('B17: a reachable hub whose state file holds THE SAME secret boots, file untouched, named as deletable', () => {
+  withIsolatedEnv({ ...REACH_OK, SLAYZONE_HUB_AUTH_SECRET: 'kept-and-in-env' }, () => {
+    saveHubStateFile({ computerTransportSecret: 'kept-and-in-env' })
+    const before = readFileSync(getHubStateFilePath(), 'utf8')
+    const { stderr, refusal } = captureStderr(() => applyStandaloneHubConfig())
+    assertEq(refusal, null, 'boots')
+    assertEq(readFileSync(getHubStateFilePath(), 'utf8'), before, 'state file untouched')
+    assert(stderr.includes(getHubStateFilePath()), `names the file: ${stderr}`)
+    assert(!stderr.includes('kept-and-in-env'), 'never prints the secret')
+  })
+})
+
+test('B17: a reachable hub whose state file holds a DIFFERENT secret is refused, file untouched', () => {
+  withIsolatedEnv({ ...REACH_OK, SLAYZONE_HUB_AUTH_SECRET: 'the-new-env-secret' }, () => {
+    saveHubStateFile({ computerTransportSecret: 'the-old-file-secret' })
+    const before = readFileSync(getHubStateFilePath(), 'utf8')
+    const { refusal } = captureStderr(() => applyStandaloneHubConfig())
+    assert(refusal !== null, 'refused')
+    assert(refusal.includes('differs from the computerTransportSecret'), refusal)
+    assert(refusal.includes(getHubStateFilePath()), 'names the file')
+    assert(!/the-(new-env|old-file)-secret/.test(refusal), 'neither value in the message')
+    assertEq(readFileSync(getHubStateFilePath(), 'utf8'), before, 'state file untouched')
+  })
+})
+
+test('B17 reads the legacy config.json the same way, and names that file', () => {
+  withIsolatedEnv({ ...REACH_OK, SLAYZONE_HUB_AUTH_SECRET: 'env' }, (home) => {
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ computerTransportSecret: 'legacy' }))
+    const { refusal } = captureStderr(() => applyStandaloneHubConfig())
+    assert(refusal?.includes(join(home, 'config.json')), String(refusal))
+  })
+})
+
+test('a reachable hub names a leftover hub.owner.json as deletable, and leaves it', () => {
+  withIsolatedEnv({ ...REACH_OK, SLAYZONE_HUB_AUTH_SECRET: 'env' }, (home) => {
+    const owner = join(home, 'hub.owner.json')
+    writeFileSync(owner, '{"password":"left-from-before"}')
+    const { stderr, refusal } = captureStderr(() => applyStandaloneHubConfig())
+    assertEq(refusal, null, 'boots')
+    assert(stderr.includes(owner), `names the owner file: ${stderr}`)
+    assert(!stderr.includes('left-from-before'), 'never prints its content')
+    assert(existsSync(owner), 'not deleted')
+  })
+})
+
+test('a loopback hub with an env secret never compares (unchanged: env wins, no warning)', () => {
+  withIsolatedEnv({ SLAYZONE_HUB_AUTH_SECRET: 'env-pin' }, () => {
+    saveHubStateFile({ computerTransportSecret: 'file' })
+    const { stderr, refusal } = captureStderr(() => applyStandaloneHubConfig())
+    assertEq(refusal, null, 'boots')
+    assertEq(process.env.SLAYZONE_HUB_AUTH_SECRET, 'env-pin', 'env wins')
+    assertEq(stderr, '', 'no warning')
   })
 })
 

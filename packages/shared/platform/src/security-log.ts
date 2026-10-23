@@ -14,8 +14,8 @@
  *    "detail":{"method":"password","reason":"INVALID_EMAIL_OR_PASSWORD"}}
  *
  * Every field is always present (null when unknown) so a log query sees one shape.
- * `ip` is the TCP peer address: behind a front end that is the front end, until the
- * hub trusts its `X-Forwarded-For` (T-22).
+ * `ip` is the client address (`client-address.ts`, T-22): the TCP peer, or behind a
+ * front end listed in `SLAYZONE_HUB_TRUSTED_PROXIES` the client it forwarded.
  *
  * WHAT NEVER GOES IN A LINE: passwords, tokens, cookies, secrets, prompts, terminal
  * bytes, file content, email addresses. Callers pass ids and short codes; `detail`
@@ -33,12 +33,13 @@
  * {@link securityEvent} fills any field its caller leaves `undefined` from there.
  * An explicit `null` stays null.
  *
- * Lean leaf (node:async_hooks only), also the `@slayzone/platform/security-log`
- * subpath.
+ * Lean leaf (node builtins and `client-address.ts` only), also the
+ * `@slayzone/platform/security-log` subpath.
  *
  * @module platform/security-log
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { clientAddress } from './client-address'
 
 /**
  * Every event name. A call site can only emit one of these, so the catalogue in
@@ -74,6 +75,9 @@ export const SECURITY_EVENTS = [
   'computer.delete',
   'computer.claim',
   'computer.visibility.set',
+  /** T-16: at boot, projects with no owner (and the settings from before login) went
+   *  to the first admin; `detail` carries the counts. */
+  'project.owner.backfill',
   // Privileged hub → computer calls (computer-transport `hub-audit.ts`).
   'computer.pty.spawn',
   'computer.pty.kill',
@@ -86,20 +90,60 @@ export const SECURITY_EVENTS = [
   'computer.gh',
   'computer.allowed_roots.set',
   'computer.shutdown',
-  /** A boot rule refused to start the hub (hub `boot-rules.ts`). */
+  /** `denied`: a boot rule refused to start the hub (hub `boot-rules.ts`). `success`: a
+   *  hub that requires login started; `detail.methods` = how it can be signed in to (T-10). */
   'hub.boot',
   // Switch refusals (`hub-switch-refusal.ts`); `detail.op` names what was refused.
   /** T-04: a hub-local process, terminal or agent refused (`SLAYZONE_HUB_ENABLE_PROCESSES=0`). */
   'hub.process.spawn',
   /** T-05: an automation action that execs on the hub (`run_command`, `ai`) refused, at save or at run. */
   'automation.run_command',
-  // Reserved for later work — named now so those call sites cannot invent names.
-  /** T-06: hub-local file/git/exec refused ("connect a computer"). */
+  /** T-06: hub-local file/git/gh/exec refused ("connect a computer", `NO_COMPUTER_CONNECTED`). */
   'hub.local_exec',
+  // Reserved for later work — named now so those call sites cannot invent names.
   /** T-07: an integration connect, provider call or sign-in start refused. */
   'integration.connect',
   /** T-23: the retention sweep ran; `detail` carries the row counts. */
-  'hub.retention.sweep'
+  'hub.retention.sweep',
+  /** T-104: an id that is not one plain path segment, or a path outside its base dir,
+   *  refused before any disk access (`safe-path.ts`); `detail.code`, `detail.kind`. */
+  'hub.path.refused',
+  // T-12 (added): the hourly Entra re-check (hub-auth `entra-recheck.ts`).
+  /** `denied`: Entra refused an account's refresh token (or it holds no app role any
+   *  more) and its sessions were revoked; `failure` (level info, once per outage): Entra
+   *  could not be asked, sessions kept; `success`: asking works again. */
+  'auth.sso.recheck',
+  // Device sign-in (T-14, hub-auth `device.ts`): CLI/desktop sign-in approved in a
+  // browser. The token itself is an `auth.signin` line with `detail.method: 'device'`.
+  // `detail.requestRef` correlates one request's lines; no code is ever written.
+  /** A device code issued (`success`) or refused (`denied`: unknown client, too many pending). */
+  'auth.device.code',
+  /** A user code on the approval page that matches nothing (`failure`), or the lockout (`denied`). */
+  'auth.device.user_code',
+  /** The signed-in user approved a request (`success`), or was refused approving it (`denied`). */
+  'auth.device.approve',
+  /** The signed-in user denied a request. */
+  'auth.device.deny',
+  /** A request expired before a token was issued (seen at poll, on the page, or swept). */
+  'auth.device.expire',
+  // Break-glass v2 (added): emergency admin access while sign-in is down (hub
+  // `break-glass.ts`, O-9/O-23). `detail.grantRef` correlates one grant's lines.
+  /** An operator on the hub machine opened a grant over the local socket (`success`,
+   *  `detail.osUser`), or was refused (`denied`: a session is already open). */
+  'auth.break_glass.grant',
+  /** The grant was redeemed (`success`, client address in `ip`), or a redemption was
+   *  refused (`denied`, `detail.reason`: none, expired, used, mismatch). */
+  'auth.break_glass.redeem',
+  /** One request a break-glass session made (`success`); a route it may not use is an
+   *  `authz.denied` line with `detail.reason: 'break_glass'`. */
+  'auth.break_glass.use',
+  /** A grant or session ended; `detail.reason`: expired, ended, stop, boot, replaced. */
+  'auth.break_glass.end',
+  // T-26 (added): flood limits on a hub other machines can reach (`rate-limit.ts`).
+  /** A request, upgrade or socket refused by a flood limit (`denied`). At most one line
+   *  per limit and client address per minute, however many were refused; `detail.limit`
+   *  names the limit, `detail.max`/`windowSec` its size. */
+  'hub.rate_limit'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]
@@ -251,13 +295,18 @@ export function currentSecurityContext(): SecurityContext | undefined {
   return contextStore.getStore()
 }
 
-/** The TCP peer of a request (an `IncomingMessage` or anything shaped like one). */
-export function peerAddress(
+/**
+ * The audit `ip` of a request (an `IncomingMessage` or anything shaped like one): its
+ * client address as the hub resolved it at the front door, else the TCP peer.
+ *
+ * @deprecated Same function as `clientAddress` from `@slayzone/platform/client-address`
+ * — use that. Kept under this name (T-22) so the call sites that already audit with it
+ * (`trpc.ts`, `route-audit.ts`, hub `rest-auth.ts`, and those in open PRs) record the
+ * real client without each being edited.
+ */
+export const peerAddress: (
   req: { socket?: { remoteAddress?: string | undefined } | null } | null | undefined
-): string | null {
-  const addr = req?.socket?.remoteAddress
-  return typeof addr === 'string' && addr ? addr : null
-}
+) => string | null = clientAddress
 
 /** `METHOD /path` without the query string, which can carry codes. */
 export function routeOf(method: string | undefined, url: string | undefined): string {

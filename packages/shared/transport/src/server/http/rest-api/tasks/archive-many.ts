@@ -4,6 +4,7 @@ import { archiveManyTasksOp } from '@slayzone/task/server'
 import { archiveManyInputSchema } from '@slayzone/task/shared'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
+import { respondUnsafePath } from '../unsafe-path'
 
 export function registerArchiveManyTaskRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks/archive-many', async (req, res) => {
@@ -27,6 +28,7 @@ export function registerArchiveManyTaskRoute(app: Express, deps: RestApiDeps): v
       })
       res.json({ ok: true, data: null })
     } catch (err) {
+      if (respondUnsafePath(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

@@ -18,7 +18,9 @@
  */
 
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
+import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { FileWatchEvent } from '@slayzone/file-editor/server'
 import type { SearchFilesOptions } from '@slayzone/file-editor/shared'
 import { router, publicProcedure } from '../trpc'
@@ -165,10 +167,21 @@ export const fileEditorRouter = router({
       observable<FileWatchEvent>((emit) => {
         let dispose: (() => void) | null = null
         let cancelled = false
-        void resolve(input).then((computerId) => {
-          if (cancelled) return
-          dispose = fs().watch(computerId, input.rootPath, (e) => emit.next(e))
-        })
+        resolve(input)
+          .then((computerId) => {
+            if (cancelled) return
+            dispose = fs().watch(computerId, input.rootPath, (e) => emit.next(e))
+          })
+          .catch((err: unknown) => {
+            // The stream's own error. Floated, a refusal here (processes off and no
+            // computer connected) had no handler and ended the hub's process (T-102).
+            if (cancelled) return
+            emit.error(
+              isHubSwitchedOffError(err)
+                ? new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err })
+                : err
+            )
+          })
         return () => {
           cancelled = true
           dispose?.()

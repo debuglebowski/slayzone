@@ -6,7 +6,6 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "dist",
     "types": ["node"]
   },
   "include": ["src", "../../shared/types/src/txn-registry.d.ts"]

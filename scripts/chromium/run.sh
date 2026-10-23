@@ -76,6 +76,22 @@ if [[ "${SLAYZONE_NO_SIDECAR:-0}" != "1" ]]; then
   HUB_PORT=8766
   SLAYZONE_HUB_LISTEN_ADDRESS="$HUB_HOST:$HUB_PORT"
   export SLAYZONE_HUB_LISTEN_ADDRESS
+  # The Convex deployment the sidecar starts GitHub sign-in against (T-99): the hub
+  # never POSTs to a URL the client names, so tell it the one the fork's renderer was
+  # built with — VITE_CONVEX_URL from the env or the root .env (the shell's vite reads
+  # root env), as host[:port]. An inherited SLAYZONE_HUB_CONVEX_ADDRESS wins; none =
+  # leaderboard sign-in is refused with a message naming the variable.
+  if [[ -z "${SLAYZONE_HUB_CONVEX_ADDRESS:-}" ]]; then
+    convex_url="${VITE_CONVEX_URL:-}"
+    if [[ -z "$convex_url" && -f "$REPO_ROOT/.env" ]]; then
+      convex_url="$(sed -n 's/^[[:space:]]*VITE_CONVEX_URL[[:space:]]*=[[:space:]]*//p' "$REPO_ROOT/.env" | tail -1 | tr -d "\"'\r")"
+    fi
+    convex_addr="${convex_url#*://}"
+    convex_addr="${convex_addr%%/*}"
+    if [[ -n "$convex_addr" ]]; then
+      export SLAYZONE_HUB_CONVEX_ADDRESS="$convex_addr"
+    fi
+  fi
   SIDECAR_LOG="$RUNTIME_DIR/sidecar.log"
   ELECTRON_BIN="$REPO_ROOT/node_modules/.bin/electron"
   SERVER_BIN="$REPO_ROOT/packages/apps/hub/dist/bin.cjs"

@@ -9,6 +9,15 @@ export {
   type PrincipalScope,
   type ProcedureScope
 } from './scopes'
+export {
+  ADMIN_ONLY,
+  CONDITIONAL_ADMIN,
+  MCP_ADMIN_POLICY,
+  REST_ADMIN_POLICY,
+  TRPC_ADMIN_POLICY,
+  roleAllows,
+  type AccessClass
+} from './admin-policy'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
 export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
 export {
@@ -40,6 +49,7 @@ export {
 export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
 export {
   requestGithubSignInStart,
+  hubGithubSignInConvexUrl,
   parseAuthCallbackUrl,
   type GithubSignInStart
 } from './auth-github'
@@ -91,6 +101,7 @@ export {
   type McpRestAppHandle
 } from './http/mcp-server'
 export { registerRestApi, processAgentHook, evictAgentTree } from './http/rest-api'
+export { bindRestPrincipal, restPrincipalOf } from './http/rest-api/principal'
 export type {
   RestApiDeps,
   RestPrincipal,
@@ -101,3 +112,43 @@ export type {
   BrowserAccess,
   ArtifactExportAccess
 } from './http/rest-api/types'
+// Owner checks (T-17): the ONE access function, the tRPC classification and its gate.
+export {
+  canAccess,
+  createAccessScope,
+  invalidateAccessCache,
+  resolveOwnership,
+  resource,
+  RESOURCE_KINDS,
+  type AccessRequest,
+  type AccessScope,
+  type OwnedResource,
+  type Ownership,
+  type ResourceKind
+} from './access'
+export {
+  TRPC_OWNER_POLICY,
+  isCustomRef,
+  type OwnerMark,
+  type OwnerRule,
+  type Ref as OwnerRef
+} from './owner-policy'
+export { accessRequestOf, checkOwnership, isNotOwnedError } from './owner-gate'
+// Owner checks on REST, MCP and agent hooks (T-18): the classification and the hook rule.
+export {
+  REST_OWNER_POLICY,
+  MCP_OWNER_POLICY,
+  type HttpIdRef,
+  type HttpOwnerRule
+} from './http-owner-policy'
+export type { HookReporter } from './http/rest-api/agent-hook-owner'
+// Computers (T-19): use = the owner (canAccess `computer`), manage = the owner or an
+// admin, serve = the work's owner.
+export {
+  computerOwnerOf,
+  computerServes,
+  filterManagedComputers,
+  mayManageComputer,
+  mayUseComputer,
+  type ComputerManagerRequest
+} from './computer-access'

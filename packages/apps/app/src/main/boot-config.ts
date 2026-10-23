@@ -18,7 +18,7 @@ import type { HubEntry } from '@slayzone/types'
 
 export type ServerMode = 'local' | 'remote'
 
-/** Stable sentinel id for the co-located sidecar hub (never a fingerprint). */
+/** Stable sentinel id for the co-located sidecar hub. */
 export const LOCAL_HUB_ID = 'local'
 /**
  * Fixed id assigned to a pre-multi-hub single-remote server when it is migrated
@@ -69,6 +69,12 @@ export type HealthProbeResult = {
    * must treat undefined as "unknown", not as "no auth needed".
    */
   authRequired?: boolean
+  /**
+   * How the hub lets people sign in, from its `/health` switches: `sso` = Entra (the
+   * app signs in through the browser, device sign-in), `password` = email + password.
+   * Undefined when the hub is too old to report switches (treat as password-only).
+   */
+  signIn?: { sso: boolean; password: boolean }
 }
 
 export type HubLoginResult = { ok: true; token: string } | { ok: false; error: string }
@@ -116,7 +122,9 @@ export function toHealthUrl(wsUrl: string): string {
  * Validates + normalizes one persisted REMOTE hub entry. Returns null for any
  * shape we won't trust (missing id/url, unnormalizable url, wrong kind) so a
  * hand-edited or partially-written file can't inject a broken hub. The local
- * hub is never persisted, so `kind` must be `'remote'` here.
+ * hub is never persisted, so `kind` must be `'remote'` here. A `fingerprint` an
+ * older release kept per hub (a certificate pin) is dropped: remote hubs are
+ * verified the normal way, and the next write no longer carries it.
  */
 function sanitizeHubEntry(raw: unknown): HubEntry | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -132,7 +140,6 @@ function sanitizeHubEntry(raw: unknown): HubEntry | null {
     label: typeof o.label === 'string' && o.label ? o.label : o.id,
     url
   }
-  if (typeof o.fingerprint === 'string' && o.fingerprint) entry.fingerprint = o.fingerprint
   return entry
 }
 
@@ -350,14 +357,24 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
           return
         }
         try {
-          const parsed = JSON.parse(body) as { ok?: boolean; authRequired?: boolean }
+          const parsed = JSON.parse(body) as {
+            ok?: boolean
+            authRequired?: boolean
+            switches?: { enableSso?: unknown; enablePassword?: unknown }
+          }
           // `authRequired` is served to every caller (see hub/src/health.ts), so
           // it survives an off-box probe — which is the case that matters, since
           // an off-box hub is the one that gates. Absent on older hubs → left
           // undefined rather than coerced to false.
           const authRequired =
             typeof parsed.authRequired === 'boolean' ? parsed.authRequired : undefined
-          if (parsed.ok === true) resolve({ ok: true, normalizedUrl, authRequired })
+          const signIn = parsed.switches
+            ? {
+                sso: parsed.switches.enableSso === true,
+                password: parsed.switches.enablePassword !== false
+              }
+            : undefined
+          if (parsed.ok === true) resolve({ ok: true, normalizedUrl, authRequired, signIn })
           else resolve({ ok: false, normalizedUrl, error: 'Server is not ready', authRequired })
         } catch {
           resolve({ ok: false, normalizedUrl, error: 'Not a SlayZone server (bad /health body)' })
@@ -450,4 +467,189 @@ export function hubLogin(
     req.write(payload)
     req.end()
   })
+}
+
+// ------------------------------------------------------------------ device sign-in
+//
+// A hub with Entra sign-in (T-14): the app never takes a password for it. It asks the
+// hub for a device code (RFC 8628), opens the hub's `/device` page in the SYSTEM
+// browser — where the person signs in through Entra with MFA and approves — and polls
+// for the bearer. Same flow as `slay hub login`; only remote hubs ever get here (the
+// local hub has login off and no sign-in at all). Plain `http(s).request` like
+// `hubLogin`: no Fetch Metadata, so better-auth treats it as the non-browser client it is.
+
+/** The client id the desktop app identifies as (the hub's approval page names it). */
+export const DESKTOP_DEVICE_CLIENT_ID = 'slayzone-desktop'
+
+const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
+
+export type HubDeviceCode = {
+  deviceCode: string
+  /** As the person reads it, `ABCD-EFGH`. */
+  userCode: string
+  /** The page to open (with the code filled in). */
+  verificationUri: string
+  expiresInSec: number
+  intervalSec: number
+}
+
+/** Maps the canonical ws URL to a path on the hub's http(s) origin. */
+function toHubHttpUrl(wsUrl: string, pathname: string): string {
+  const url = new URL(wsUrl)
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+  url.pathname = pathname
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function postJsonMain(
+  url: string,
+  body: unknown,
+  timeoutMs: number
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const payload = JSON.stringify(body)
+  const request = url.startsWith('https:') ? https.request : http.request
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: 'POST',
+        timeout: timeoutMs,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        let text = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => {
+          if (text.length < 65536) text += chunk
+        })
+        res.on('end', () => {
+          let json: Record<string, unknown> = {}
+          try {
+            const parsed = JSON.parse(text) as unknown
+            if (parsed && typeof parsed === 'object') json = parsed as Record<string, unknown>
+          } catch {
+            // Not JSON: the status says what happened.
+          }
+          resolve({ status: res.statusCode ?? 0, json })
+        })
+      }
+    )
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)))
+    req.end(payload)
+  })
+}
+
+/** Ask a hub for a device code. */
+export async function hubDeviceCode(
+  rawUrl: string,
+  timeoutMs = 10000
+): Promise<({ ok: true } & HubDeviceCode) | { ok: false; error: string }> {
+  const normalizedUrl = normalizeRemoteUrl(rawUrl)
+  if (!normalizedUrl) return { ok: false, error: 'Invalid hub URL' }
+  let res: { status: number; json: Record<string, unknown> }
+  try {
+    res = await postJsonMain(
+      toHubHttpUrl(normalizedUrl, '/api/auth/device/code'),
+      { client_id: DESKTOP_DEVICE_CLIENT_ID },
+      timeoutMs
+    )
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  const j = res.json
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const deviceCode = str(j.device_code)
+  const userCode = str(j.user_code)
+  const page = str(j.verification_uri_complete) || str(j.verification_uri)
+  if (res.status !== 200 || !deviceCode || !userCode || !page) {
+    const why = str(j.error_description)
+    return {
+      ok: false,
+      error: `The hub did not start a sign-in (HTTP ${res.status})${why ? `: ${why}` : ''}`
+    }
+  }
+  return {
+    ok: true,
+    deviceCode,
+    userCode: `${userCode.slice(0, 4)}-${userCode.slice(4)}`,
+    verificationUri: page,
+    expiresInSec: typeof j.expires_in === 'number' ? j.expires_in : 600,
+    intervalSec: typeof j.interval === 'number' ? Math.max(5, j.interval) : 5
+  }
+}
+
+/**
+ * True when the hub's approval page is on the hub's own host — the only page the app
+ * opens in the browser by itself. Anything else is shown for the person to judge.
+ */
+export function isHubOwnPage(rawUrl: string, page: string): boolean {
+  const normalizedUrl = normalizeRemoteUrl(rawUrl)
+  if (!normalizedUrl) return false
+  try {
+    const target = new URL(page)
+    return (
+      (target.protocol === 'https:' || target.protocol === 'http:') &&
+      target.host === new URL(normalizedUrl).host
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Poll until the person approved (→ the bearer), denied, or the code expired. RFC 8628
+ * §3.5: wait `interval` between polls, 5s more after each `slow_down`. A network error
+ * is retried until the code's own expiry. `signal` stops it (the dialog was closed).
+ */
+export async function waitForHubDeviceToken(
+  rawUrl: string,
+  code: Pick<HubDeviceCode, 'deviceCode' | 'expiresInSec' | 'intervalSec'>,
+  opts: { signal?: AbortSignal; sleep?: (ms: number) => Promise<void> } = {}
+): Promise<HubLoginResult> {
+  const normalizedUrl = normalizeRemoteUrl(rawUrl)
+  if (!normalizedUrl) return { ok: false, error: 'Invalid hub URL' }
+  const tokenUrl = toHubHttpUrl(normalizedUrl, '/api/auth/device/token')
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  let intervalMs = code.intervalSec * 1000
+  const deadline = Date.now() + code.expiresInSec * 1000
+  while (Date.now() < deadline + intervalMs) {
+    await sleep(intervalMs)
+    if (opts.signal?.aborted) return { ok: false, error: 'Sign-in cancelled' }
+    let res: { status: number; json: Record<string, unknown> }
+    try {
+      res = await postJsonMain(
+        tokenUrl,
+        {
+          grant_type: DEVICE_GRANT,
+          device_code: code.deviceCode,
+          client_id: DESKTOP_DEVICE_CLIENT_ID
+        },
+        10000
+      )
+    } catch {
+      continue
+    }
+    const { error, access_token: token } = res.json
+    if (res.status === 200 && typeof token === 'string' && token) return { ok: true, token }
+    if (error === 'authorization_pending') continue
+    if (error === 'slow_down') {
+      intervalMs += 5000
+      continue
+    }
+    if (error === 'access_denied') return { ok: false, error: 'Sign-in was denied in the browser' }
+    if (error === 'expired_token') return { ok: false, error: 'The sign-in code expired' }
+    if (res.json.code === 'ACCOUNT_DISABLED') {
+      return { ok: false, error: 'This account is disabled on the hub' }
+    }
+    const why =
+      typeof res.json.error_description === 'string' ? `: ${res.json.error_description}` : ''
+    return { ok: false, error: `Sign-in failed (HTTP ${res.status})${why}` }
+  }
+  return { ok: false, error: 'The sign-in code expired' }
 }

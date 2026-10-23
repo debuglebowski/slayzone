@@ -20,8 +20,18 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { createHubAuth, type HubAuth } from '@slayzone/hub-auth/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createHubUsersCapability } from './hub-users.js'
+import { createTrpcConnectionRegistry } from './trpc-connections.js'
+import { createUserAccessRevoker } from './user-access.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, type WebSessionRow } from './web-sessions.js'
+
+/** The hub's revocation outside hub-auth (T-12), with no computer gateway. */
+const revokerFor = (db: SlayzoneDb) =>
+  createUserAccessRevoker({
+    db,
+    getGateway: () => null,
+    connections: createTrpcConnectionRegistry()
+  })
 
 let passed = 0
 let failed = 0
@@ -60,7 +70,7 @@ async function main(): Promise<void> {
   })
   const harness = await createTestHarness()
   const db: SlayzoneDb = harness.slayDb
-  const users = createHubUsersCapability(() => auth, db)
+  const users = createHubUsersCapability(() => auth, revokerFor(db))
 
   /** Row counts per hub-auth table for one user. */
   const authRows = (userId: string): string => {
@@ -161,7 +171,7 @@ async function main(): Promise<void> {
     })
 
     await test('not ready: ready() false, create throws, the rest answer not-found / []', async () => {
-      const notReady = createHubUsersCapability(() => null, db)
+      const notReady = createHubUsersCapability(() => null, revokerFor(db))
       assertEq(notReady.ready(), false, 'not ready')
       let threw = false
       try {

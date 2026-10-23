@@ -30,9 +30,9 @@ function ids(list: Array<{ id: string }>): string[] {
 }
 
 // Two projects, each with a project-scoped process, plus one task-scoped process.
-const projA = createProcess('proj-a', null, 'a dev', 'echo a', '/tmp', false)
-const projB = createProcess('proj-b', null, 'b dev', 'echo b', '/tmp', false)
-const taskProc = createProcess('proj-a', 'task-1', 'task dev', 'echo t', '/tmp', false)
+const projA = await createProcess('proj-a', null, 'a dev', 'echo a', '/tmp', false)
+const projB = await createProcess('proj-b', null, 'b dev', 'echo b', '/tmp', false)
+const taskProc = await createProcess('proj-a', 'task-1', 'task dev', 'echo t', '/tmp', false)
 
 // Task view: own task's processes + its project's project-scoped ones.
 assert(

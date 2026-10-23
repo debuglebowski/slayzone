@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { listTurnsForWorktree } from './db'
 import {
   diffIsEmptyCached,
@@ -107,6 +108,9 @@ export async function listAgentTurnsForWorktree(
   worktreePath: string
 ): Promise<AgentTurnRange[]> {
   if (!worktreePath) return []
+  // Resolves and runs git on a path on the hub's own disk: refused on a hub with
+  // processes switched off (T-06), before the realpath probe.
+  assertHubLocalExecEnabled({ op: 'git.turns' })
   const path = canonical(worktreePath)
   const raw = await listTurnsForWorktree(db, path)
   return filterAndRethread(path, raw)

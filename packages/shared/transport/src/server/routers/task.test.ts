@@ -28,6 +28,7 @@
  *
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
+import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -206,6 +207,61 @@ test('create: falls back to inbox when project columns config is invalid', async
 // ===========================================================================
 // db:tasks:get
 // ===========================================================================
+test('create: openAfterCreate takes the id of the warm agent the host wired in', async () => {
+  // The hub wires the warm pool's reserve via setTaskDeps; the router must hand it to
+  // the create op, or no task ever adopts a warm agent.
+  const reservedId = crypto.randomUUID()
+  const asked: Array<{ projectId: string; mode: string }> = []
+  setTaskDeps({
+    ops: taskOps,
+    reserveWarmTaskId: async (c) => {
+      asked.push(c)
+      return reservedId
+    }
+  })
+  try {
+    const t = await createTask('Terminal 1', { isTemporary: true, openAfterCreate: true })
+    expect(t.id).toBe(reservedId)
+    expect(asked.length).toBe(1)
+    expect(asked[0].projectId).toBe(projectId)
+  } finally {
+    setTaskDeps({ ops: taskOps })
+  }
+})
+
+test('mutations emit their completion events on the host-wired task bus', async () => {
+  // The hub's integration push (Linear/GitHub) and other listeners hang off this
+  // bus, which REST and MCP already hand to the ops. Without it, a task created or
+  // edited in the app never reached its provider.
+  const bus = new EventEmitter()
+  const seen: Array<[string, unknown]> = []
+  for (const channel of [
+    'db:tasks:create:done',
+    'db:tasks:update:done',
+    'db:tasks:archive:done',
+    'db:tasks:unarchive:done'
+  ]) {
+    bus.on(channel, (_e: unknown, taskId: unknown) => seen.push([channel, taskId]))
+  }
+  setTaskDeps({ ops: taskOps, bus })
+  try {
+    const t = await createTask('Bus task')
+    await up({ id: t.id, title: 'Bus task renamed' })
+    await caller.archive({ id: t.id })
+    await caller.unarchive({ id: t.id })
+    expect(JSON.stringify(seen)).toBe(
+      JSON.stringify([
+        ['db:tasks:create:done', t.id],
+        ['db:tasks:update:done', t.id],
+        ['db:tasks:archive:done', t.id],
+        ['db:tasks:unarchive:done', t.id]
+      ])
+    )
+  } finally {
+    setTaskDeps({ ops: taskOps })
+  }
+})
+
 test('get: returns task by id', async () => {
   const created = await createTask('GetMe')
   const t = await caller.get({ id: created.id })

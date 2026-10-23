@@ -333,8 +333,16 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     SLAYZONE_HUB_SSO_TENANT_ID: 'inherited-tenant',
     SLAYZONE_HUB_SSO_CLIENT_ID: 'inherited-client',
     SLAYZONE_HUB_SSO_CLIENT_SECRET: 'inherited-sso-secret',
+    SLAYZONE_HUB_SSO_CERT_PATH: '/inherited/sso-cert.pem',
+    SLAYZONE_HUB_SSO_KEY_PATH: '/inherited/sso-key.pem',
+    SLAYZONE_HUB_SSO_REQUIRE_MFA: 'perhaps',
     SLAYZONE_HUB_AUTH_SECRET: 'inherited-auth-secret',
-    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com'
+    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com',
+    SLAYZONE_HUB_TRUSTED_PROXIES: '0.0.0.0/0',
+    // A shared hub's period: inherited, it would delete the desktop user's sessions.
+    SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90',
+    // Inherited, the hub would start GitHub sign-in against someone else's host (T-99).
+    SLAYZONE_HUB_CONVEX_ADDRESS: 'metadata.internal'
   }
   // The list under test must be the WHOLE hub-side surface, not what this test
   // remembers: a hub variable added to the platform list without a case here is a
@@ -363,6 +371,28 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     assertEq(env.SLAYZONE_HUB_REQUIRE_LOGIN, '0', 'login switch is the app’s own')
     // Unrelated environment still flows through.
     assertEq(env.SLAYZONE_SUPERVISED, '1', 'still marked as started by the desktop app')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test("the app's own Convex deployment reaches the hub, never an inherited one", async () => {
+  const dir = mkTmp()
+  const dump = path.join(dir, 'child-env.json')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_ENV_DUMP_FILE: dump, SLAYZONE_HUB_CONVEX_ADDRESS: 'metadata.internal' },
+    { healthPollIntervalMs: 40 },
+    { convexAddress: 'happy-animal-123.convex.cloud' }
+  )
+  try {
+    await handle.waitForReady()
+    const env = JSON.parse(fs.readFileSync(dump, 'utf8')) as Record<string, string | undefined>
+    assertEq(
+      env.SLAYZONE_HUB_CONVEX_ADDRESS,
+      'happy-animal-123.convex.cloud',
+      'the hub signs in against the deployment the renderer was built for'
+    )
   } finally {
     await handle.stop()
   }

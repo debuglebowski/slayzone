@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { createProject, updateProject } from '@slayzone/projects/server'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
 import type { RestApiDeps } from '../types'
+import { restPrincipalOf } from '../principal'
 import { isResolveFailure, resolveProjectRef } from '../resolve'
 
 /**
@@ -38,7 +39,8 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       input.columnsConfig = body.columnsConfig as CreateProjectInput['columnsConfig']
     }
     try {
-      const project = await createProject(deps.db, input)
+      // Owner = the signed-in user; null on a hub without login (no principal).
+      const project = await createProject(deps.db, input, restPrincipalOf(req)?.userId ?? null)
       deps.notifyRenderer()
       res.json({ ok: true, data: project })
     } catch (err) {

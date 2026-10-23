@@ -2,10 +2,16 @@ import { createHash } from 'node:crypto'
 import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  DEFAULT_JOIN_TOKEN_TTL_MS,
   JOIN_TOKEN_PREFIX,
+  JoinTokenTtlError,
+  MAX_JOIN_TOKEN_TTL_MS,
+  auditJoinTokenRedeemRefused,
   decodeJoinToken,
   hashJoinToken,
+  isAllowedJoinTokenTtl,
   mintJoinToken,
+  recordJoinTokenRedeemed,
   verifyJoinToken
 } from './join-tokens'
 import { createMigratedDb, type TestDb } from './test-db'
@@ -26,7 +32,6 @@ const TTL = 60_000
 function mint(over: Partial<Parameters<typeof mintJoinToken>[1]> = {}) {
   return mintJoinToken(t.db, {
     hubUrl: 'https://hub.example:8443',
-    certFingerprint: 'sha256:ab:cd:ef',
     ttlMs: TTL,
     label: 'office-mac',
     now: NOW,
@@ -35,29 +40,52 @@ function mint(over: Partial<Parameters<typeof mintJoinToken>[1]> = {}) {
 }
 
 describe('mintJoinToken', () => {
-  it('returns a szjt1 token whose payload embeds hub URL + cert fingerprint', async () => {
+  it('returns a szjt1 token whose payload embeds the hub URL + a secret, and no pin', async () => {
     const minted = await mint()
     expect(minted.token.startsWith(`${JOIN_TOKEN_PREFIX}.`)).toBe(true)
 
     const payload = decodeJoinToken(minted.token)
     expect(payload).not.toBeNull()
     expect(payload!.hubUrl).toBe('https://hub.example:8443')
-    expect(payload!.certFingerprint).toBe('sha256:ab:cd:ef')
     expect(payload!.secret.length).toBeGreaterThanOrEqual(32)
+    // The wire shape itself: exactly these two fields, no certificate pin.
+    const raw = JSON.parse(
+      Buffer.from(minted.token.slice(JOIN_TOKEN_PREFIX.length + 1), 'base64url').toString('utf8')
+    ) as Record<string, unknown>
+    expect(Object.keys(raw).sort()).toEqual(['hubUrl', 'secret'])
 
     expect(minted.created_at).toBe(NOW)
     expect(minted.expires_at).toBe(NOW + TTL)
   })
 
-  it('carries an EMPTY certFingerprint when none is given (the hub has no cert to pin)', async () => {
-    const minted = await mint({ certFingerprint: undefined })
-    const payload = decodeJoinToken(minted.token)
-    expect(payload).not.toBeNull()
-    expect(payload!.hubUrl).toBe('https://hub.example:8443')
-    expect(payload!.certFingerprint).toBe('')
-    // Still a well-formed, redeemable token: the empty field decodes as a string.
-    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+  it('an unused token minted by an OLDER hub (carrying a certFingerprint pin) still redeems', async () => {
+    // What an older hub minted and an upgrade leaves in join_tokens: the old payload
+    // shape, stored the same way (sha256 of the whole token). The pin is ignored.
+    const legacy = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
+      JSON.stringify({
+        hubUrl: 'wss://hub.example/computers',
+        certFingerprint: 'ab'.repeat(32),
+        secret: 's'.repeat(43)
+      })
+    ).toString('base64url')}`
+    t.raw
+      .prepare(
+        `INSERT INTO join_tokens
+           (id, token_hash, label, created_at, expires_at, used_at, computer_id, minted_by_user_id)
+         VALUES ('legacy-1', ?, 'old-hub', ?, ?, NULL, NULL, NULL)`
+      )
+      .run(hashJoinToken(legacy), NOW, NOW + TTL)
+
+    expect(decodeJoinToken(legacy)).toEqual({
+      hubUrl: 'wss://hub.example/computers',
+      secret: 's'.repeat(43)
+    })
+    const verified = await verifyJoinToken(t.db, legacy, NOW + 1)
     expect(verified.ok).toBe(true)
+    if (verified.ok) {
+      expect(verified.tokenId).toBe('legacy-1')
+      expect(verified.payload).not.toHaveProperty('certFingerprint')
+    }
   })
 
   it('mints unique tokens (fresh secret each time)', async () => {
@@ -83,6 +111,59 @@ describe('mintJoinToken', () => {
       expect(value === minted.token, `column ${key} must not hold the token`).toBe(false)
       expect(value.includes(secret), `column ${key} must not leak the secret`).toBe(false)
     }
+  })
+})
+
+describe('lifetime cap (T-20)', () => {
+  it('is 1 hour; the default (15 minutes) is under it', () => {
+    expect(MAX_JOIN_TOKEN_TTL_MS).toBe(60 * 60_000)
+    expect(DEFAULT_JOIN_TOKEN_TTL_MS).toBeLessThanOrEqual(MAX_JOIN_TOKEN_TTL_MS)
+    expect(isAllowedJoinTokenTtl(MAX_JOIN_TOKEN_TTL_MS)).toBe(true)
+    for (const bad of [MAX_JOIN_TOKEN_TTL_MS + 1, 2 * 60 * 60_000, 0, -1, 1.5, Number.NaN]) {
+      expect(isAllowedJoinTokenTtl(bad), String(bad)).toBe(false)
+    }
+  })
+
+  it('refuses to mint a longer token and writes nothing', async () => {
+    await expect(mint({ ttlMs: 2 * 60 * 60_000 })).rejects.toBeInstanceOf(JoinTokenTtlError)
+    await expect(mint({ ttlMs: 2 * 60 * 60_000 })).rejects.toMatchObject({
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect(t.raw.prepare('SELECT COUNT(*) AS n FROM join_tokens').get()).toEqual({ n: 0 })
+  })
+
+  it('mints one of exactly 1 hour', async () => {
+    const minted = await mint({ ttlMs: MAX_JOIN_TOKEN_TTL_MS })
+    expect(minted.expires_at - minted.created_at).toBe(MAX_JOIN_TOKEN_TTL_MS)
+  })
+})
+
+describe('owner (T-20)', () => {
+  it('records who it is for apart from who minted it, and verify hands back the owner', async () => {
+    const minted = await mint({ mintedByUserId: 'admin-1', ownerUserId: 'bob' })
+    const row = t.raw
+      .prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?')
+      .get(minted.id)
+    expect(row).toEqual({ minted_by_user_id: 'admin-1', owner_user_id: 'bob' })
+    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+    expect(verified.ok && verified.ownerUserId).toBe('bob')
+  })
+
+  it('a token for nobody (login off) verifies as unowned', async () => {
+    const verified = await verifyJoinToken(t.db, (await mint()).token, NOW + 1)
+    expect(verified.ok && verified.ownerUserId).toBeNull()
+  })
+
+  it('recordJoinTokenRedeemed records the computer the token enrolled', async () => {
+    const minted = await mint({ ownerUserId: 'bob' })
+    await recordJoinTokenRedeemed(t.db, {
+      tokenId: minted.id,
+      computerId: 'c-1',
+      ownerUserId: 'bob'
+    })
+    expect(
+      t.raw.prepare('SELECT computer_id FROM join_tokens WHERE id = ?').get(minted.id)
+    ).toEqual({ computer_id: 'c-1' })
   })
 })
 
@@ -142,7 +223,7 @@ describe('verifyJoinToken', () => {
   it('rejects a well-formed token that was never minted here', async () => {
     await mint()
     const foreign = `${JOIN_TOKEN_PREFIX}.${Buffer.from(
-      JSON.stringify({ hubUrl: 'https://x', certFingerprint: 'f', secret: 's' })
+      JSON.stringify({ hubUrl: 'https://x', secret: 's' })
     ).toString('base64url')}`
     expect(await verifyJoinToken(t.db, foreign, NOW)).toEqual({ ok: false, reason: 'unknown' })
   })
@@ -169,10 +250,10 @@ describe('audit (T-03)', () => {
   })
   afterEach(() => setSecurityLogSink())
 
-  it('mint writes computer.join_token.mint with the minter, never the token', async () => {
+  it('mint writes computer.join_token.mint with the minter and the owner, never the token', async () => {
     const minted = await runWithSecurityContext(
       { actor: 'ctx-user', ip: '203.0.113.5', route: 'trpc computers.mintJoinToken' },
-      () => mint({ mintedByUserId: 'user-1' })
+      () => mint({ mintedByUserId: 'user-1', ownerUserId: 'bob' })
     )
     expect(audit).toEqual([
       expect.objectContaining({
@@ -182,25 +263,36 @@ describe('audit (T-03)', () => {
         ip: '203.0.113.5',
         targetKind: 'join_token',
         targetId: minted.id,
-        detail: expect.objectContaining({ ttlMs: TTL, label: 'office-mac' })
+        detail: { ttlMs: TTL, label: 'office-mac', owner: 'bob' }
       })
     ])
     expect(JSON.stringify(audit)).not.toContain(minted.token)
     expect(JSON.stringify(audit)).not.toContain(decodeJoinToken(minted.token)!.secret)
   })
 
-  it('redeem writes computer.join_token.redeem: success once, then failure with the reason', async () => {
-    const minted = await mint({ mintedByUserId: 'user-1' })
+  it('redeem writes computer.join_token.redeem: success once (with the computer), then failure with the reason', async () => {
+    const minted = await mint({ mintedByUserId: 'user-1', ownerUserId: 'bob' })
     audit.length = 0
-    await verifyJoinToken(t.db, minted.token, NOW + 1)
+    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+    // The claim alone writes nothing: the success line waits for the computer.
+    expect(audit).toEqual([])
+    await runWithSecurityContext({ actor: null, ip: '198.51.100.7', route: 'WS /computers' }, () =>
+      recordJoinTokenRedeemed(t.db, {
+        tokenId: verified.ok ? verified.tokenId : '',
+        computerId: 'c-1',
+        ownerUserId: 'bob'
+      })
+    )
     await verifyJoinToken(t.db, minted.token, NOW + 2)
     await verifyJoinToken(t.db, 'szjt1.garbage', NOW + 3)
+    auditJoinTokenRedeemRefused(minted.id, 'owner_disabled', 'denied')
     expect(audit).toEqual([
       expect.objectContaining({
         event: 'computer.join_token.redeem',
         outcome: 'success',
+        ip: '198.51.100.7',
         targetId: minted.id,
-        detail: expect.objectContaining({ mintedBy: 'user-1' })
+        detail: { computerId: 'c-1', owner: 'bob' }
       }),
       expect.objectContaining({
         event: 'computer.join_token.redeem',
@@ -213,6 +305,12 @@ describe('audit (T-03)', () => {
         outcome: 'failure',
         targetId: null,
         detail: expect.objectContaining({ reason: 'malformed' })
+      }),
+      expect.objectContaining({
+        event: 'computer.join_token.redeem',
+        outcome: 'denied',
+        targetId: minted.id,
+        detail: { reason: 'owner_disabled' }
       })
     ])
     expect(JSON.stringify(audit)).not.toContain(minted.token)

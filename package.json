@@ -13,11 +13,15 @@
     "overrides": {
       "zod": "^4",
       "d3-shape>d3-path": "^3.1.0",
-      "node-abi": "^4.28.0"
+      "node-abi": "^4.28.0",
+      "electron-chrome-web-store>adm-zip": "^0.6.1",
+      "prosemirror-view": "^1.42.3",
+      "prosemirror-model": "^1.25.12"
     },
     "patchedDependencies": {
       "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
-      "posix@4.2.0": "patches/posix@4.2.0.patch"
+      "posix@4.2.0": "patches/posix@4.2.0.patch",
+      "app-builder-lib@26.15.2": "patches/app-builder-lib@26.15.2.patch"
     }
   },
   "scripts": {
@@ -39,9 +43,11 @@
     "build:linux": "pnpm --filter @slayzone/app build:linux",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm lint:versions && pnpm lint:theme && pnpm lint:server-boundary && pnpm lint:trpc-deps && pnpm lint:window-api && pnpm lint:e2e-guardrails && pnpm lint:format && pnpm lint:biome && pnpm lint:eslint && pnpm test:unit:registered",
+    "audit:check": "node scripts/ci/audit-check.mjs",
+    "audit:age": "node scripts/ci/release-age-check.mjs",
     "lint:versions": "node scripts/sync-versions.mjs --check",
     "sync-versions": "node scripts/sync-versions.mjs",
-    "lint:server-boundary": "bash scripts/check-server-electron-free.sh",
+    "lint:server-boundary": "bash scripts/check-server-electron-free.sh && node scripts/check-hub-exec-imports.mjs",
     "lint:trpc-deps": "bash scripts/check-trpc-stable-deps.sh",
     "lint:window-api": "bash scripts/check-renderer-window-api.sh",
     "lint:e2e-guardrails": "node scripts/check-e2e-guardrails.mjs",
@@ -72,8 +78,8 @@
     "@auth/core": "^0.37.4",
     "@biomejs/biome": "^2.4.15",
     "@convex-dev/auth": "^0.0.90",
+    "@slayzone/tsgo": "workspace:*",
     "@types/node": "^22.19.7",
-    "@typescript/native-preview": "beta",
     "changelogen": "^0.6.2",
     "convex": "^1.32.0",
     "eslint": "^9.39.4",
@@ -88,7 +94,7 @@
     "typescript-eslint": "^8.59.3"
   },
   "engines": {
-    "node": ">=20",
+    "node": ">=24",
     "pnpm": ">=9"
   },
   "version": "0.36.0-beta.18",

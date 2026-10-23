@@ -1,12 +1,17 @@
 /**
- * Refusals for work a hub switch turned off (T-04, T-05, T-07).
+ * Refusals for work a hub switch turned off (T-04, T-05, T-06, T-07).
  *
  *   SLAYZONE_HUB_ENABLE_PROCESSES=0     the hub runs nothing itself: no background
  *                                       process, no automation command (`run_command`,
  *                                       `ai`), no terminal or agent spawned in its own
- *                                       process. Work routed to a computer is unaffected.
+ *                                       process (T-04/05), and no git, `gh`, shell probe,
+ *                                       OS opener or project-file access on its own disk
+ *                                       (T-06, "connect a computer"). Work routed to a
+ *                                       computer is unaffected.
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS=0  no integration connect, no stored provider
  *                                       credential, no provider call, no sign-in start.
+ *   SLAYZONE_HUB_ENABLE_PASSWORD=0      no password sign-in, sign-up, change or reset,
+ *                                       no account with a generated password (T-10).
  *
  * ONE SHAPE FOR EVERY REFUSAL. A chokepoint calls `assertHub*Enabled`, which writes one
  * `denied` audit line and throws {@link HubSwitchedOffError}: a stable `code` and one
@@ -19,26 +24,45 @@
  * nothing to cache. Defaults are on, so a process that never sets these (the desktop
  * app's hub, tests) behaves exactly as before.
  *
- * Lean leaf (hub-switches + security-log only), also the
+ * Lean leaf (hub-switches + hub-convex + security-log only), also the
  * `@slayzone/platform/hub-switch-refusal` subpath.
  *
  * @module platform/hub-switch-refusal
  */
-import { HUB_SWITCH_ENV, resolveHubSwitches } from './hub-switches'
+import { HUB_CONVEX_ADDRESS_ENV, HUB_SWITCH_ENV, resolveHubSwitches } from './hub-switches'
 import { securityEvent } from './security-log'
+import { convexOriginOf, hubConvexOrigin } from './hub-convex'
 
-export type HubSwitchedOffCode = 'HUB_PROCESSES_DISABLED' | 'HUB_INTEGRATIONS_DISABLED'
+export type HubSwitchedOffCode =
+  | 'HUB_PROCESSES_DISABLED'
+  | 'HUB_INTEGRATIONS_DISABLED'
+  | 'NO_COMPUTER_CONNECTED'
+  | 'HUB_PASSWORD_DISABLED'
+  | 'HUB_CONVEX_NOT_CONFIGURED'
+  | 'HUB_CONVEX_MISMATCH'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
     'This hub does not run processes, automation commands, terminals or agents itself ' +
     `(${HUB_SWITCH_ENV.enableProcesses}=0).`,
-  HUB_INTEGRATIONS_DISABLED: `Integrations are switched off on this hub (${HUB_SWITCH_ENV.enableIntegrations}=0).`
+  HUB_INTEGRATIONS_DISABLED: `Integrations are switched off on this hub (${HUB_SWITCH_ENV.enableIntegrations}=0).`,
+  NO_COMPUTER_CONNECTED:
+    'Connect a computer: this hub does not read project files or run git, gh or other ' +
+    `commands itself (${HUB_SWITCH_ENV.enableProcesses}=0).`,
+  HUB_PASSWORD_DISABLED: `Password sign-in is switched off on this hub (${HUB_SWITCH_ENV.enablePassword}=0).`,
+  HUB_CONVEX_NOT_CONFIGURED: `GitHub sign-in is off on this hub: no Convex deployment is configured (${HUB_CONVEX_ADDRESS_ENV}).`,
+  HUB_CONVEX_MISMATCH:
+    'This hub starts GitHub sign-in only against its own Convex deployment ' +
+    `(${HUB_CONVEX_ADDRESS_ENV}); the request named another.`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED: HUB_SWITCH_ENV.enableProcesses,
-  HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations
+  HUB_INTEGRATIONS_DISABLED: HUB_SWITCH_ENV.enableIntegrations,
+  NO_COMPUTER_CONNECTED: HUB_SWITCH_ENV.enableProcesses,
+  HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword,
+  HUB_CONVEX_NOT_CONFIGURED: HUB_CONVEX_ADDRESS_ENV,
+  HUB_CONVEX_MISMATCH: HUB_CONVEX_ADDRESS_ENV
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -74,6 +98,11 @@ export function hubIntegrationsEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return resolveHubSwitches(env).enableIntegrations
 }
 
+/** `SLAYZONE_HUB_ENABLE_PASSWORD` — may anyone sign in, or get an account, with a password? */
+export function hubPasswordEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveHubSwitches(env).enablePassword
+}
+
 /** What was refused, for the audit line. Ids and short codes only — never a command. */
 export interface HubRefusal {
   /** Short name of the refused operation, e.g. `create`, `pty.spawn`, `save`. */
@@ -82,7 +111,12 @@ export interface HubRefusal {
 }
 
 function refuse(
-  event: 'hub.process.spawn' | 'automation.run_command' | 'integration.connect',
+  event:
+    | 'hub.process.spawn'
+    | 'automation.run_command'
+    | 'integration.connect'
+    | 'hub.local_exec'
+    | HubPasswordEvent,
   code: HubSwitchedOffCode,
   refusal: HubRefusal
 ): never {
@@ -113,4 +147,63 @@ export function assertHubProcessesEnabled(
  */
 export function assertHubIntegrationsEnabled(refusal: HubRefusal): void {
   if (!hubIntegrationsEnabled()) refuse('integration.connect', 'HUB_INTEGRATIONS_DISABLED', refusal)
+}
+
+/**
+ * Throw {@link HubSwitchedOffError} (`NO_COMPUTER_CONNECTED`) after one `hub.local_exec`
+ * audit line when `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06). Called at every point where
+ * the hub would touch its OWN disk or exec on its own machine for project work: git,
+ * `gh`, login-shell probes, the OS opener, the local workspace filesystem — including
+ * each fallback that used to run here when no computer was resolved. Such a hub never
+ * holds or touches project data; computers do.
+ */
+export function assertHubLocalExecEnabled(refusal: HubRefusal): void {
+  if (!hubProcessesEnabled()) refuse('hub.local_exec', 'NO_COMPUTER_CONNECTED', refusal)
+}
+
+/**
+ * The audit event of a refused password operation (T-10): `auth.signin` for a password
+ * check (sign-in, the web login, verify-password), `auth.password.change` for a
+ * change or reset, `user.create` for an account that would get a password.
+ */
+export type HubPasswordEvent = 'auth.signin' | 'auth.password.change' | 'user.create'
+
+/**
+ * Throw {@link HubSwitchedOffError} (`HUB_PASSWORD_DISABLED`) after one audit line when
+ * password sign-in is off (T-10). `enabled` defaults to the env switch; hub-auth passes
+ * what its own better-auth instance was built with, the hub's REST gate its boot
+ * switches — the same value in a running hub, from the one place each already holds.
+ */
+export function assertHubPasswordEnabled(
+  event: HubPasswordEvent,
+  refusal: HubRefusal,
+  enabled: boolean = hubPasswordEnabled()
+): void {
+  if (!enabled) refuse(event, 'HUB_PASSWORD_DISABLED', refusal)
+}
+
+/**
+ * The Convex URL a GitHub sign-in start may POST to: this hub's OWN deployment
+ * ({@link HUB_CONVEX_ADDRESS_ENV}), never one a client names (T-99, `hub-convex.ts`).
+ *
+ * Returns that origin when `clientUrl` names the same one. Otherwise throws
+ * {@link HubSwitchedOffError} after one `integration.connect` audit line, before anything
+ * is sent: `HUB_CONVEX_NOT_CONFIGURED` when the hub has none, `HUB_CONVEX_MISMATCH` when
+ * the client named another (or nothing usable) — the requested origin goes in the line.
+ */
+export function assertHubConvexSignInUrl(
+  clientUrl: unknown,
+  refusal: HubRefusal,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const own = hubConvexOrigin(env)
+  if (own === null) refuse('integration.connect', 'HUB_CONVEX_NOT_CONFIGURED', refusal)
+  const requested = convexOriginOf(clientUrl)
+  if (requested !== own) {
+    refuse('integration.connect', 'HUB_CONVEX_MISMATCH', {
+      ...refusal,
+      detail: { ...refusal.detail, requestedOrigin: requested }
+    })
+  }
+  return own
 }

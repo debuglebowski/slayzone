@@ -1,5 +1,11 @@
+import { realpathSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
+import {
+  assertHubLocalExecEnabled,
+  hubProcessesEnabled
+} from '@slayzone/platform/hub-switch-refusal'
 import {
   createArtifactStore,
   artifactWatcherEvents,
@@ -18,7 +24,7 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
@@ -61,6 +67,33 @@ const versionRef = z.union([z.number(), z.string()])
 
 const store = (dataRoot: string): ReturnType<typeof createArtifactStore> =>
   createArtifactStore(dataRoot)
+
+const realOrResolved = (p: string): string => {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return resolve(p)
+  }
+}
+
+/**
+ * `upload`, `uploadDir` and `pasteFiles` copy a path the CLIENT names off the hub's
+ * own disk (T-107). The owner gate has decided the path is the caller's; on a hub with
+ * processes switched off (T-06) that is not enough, because such a hub holds no
+ * project files: the path is a file on the client's machine the hub cannot read, or
+ * one of the hub's own. `upload` and `uploadDir` are `hubLocalProcedure`s (refused
+ * outright); a paste may still copy hub storage — another artifact's file under
+ * `<data root>/artifacts/`, which is how copy/paste and duplicate work — and nothing
+ * else, before anything is read.
+ */
+function assertPasteSourcesAreHubStorage(dataRoot: string, sources: unknown): void {
+  if (hubProcessesEnabled()) return
+  const artifacts = realOrResolved(join(dataRoot, 'artifacts')) + sep
+  for (const src of Array.isArray(sources) ? sources : []) {
+    if (typeof src !== 'string' || !realOrResolved(src).startsWith(artifacts))
+      assertHubLocalExecEnabled({ op: 'artifacts.pasteFiles' })
+  }
+}
 
 // Host-only steps of a download (save sheet, directory picker, downloads dir, reveal,
 // offscreen PDF/PNG render) come from the AppDeps capability bridge. Previously these
@@ -121,7 +154,9 @@ export const artifactsRouter = router({
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifactMtime(ctx.db, input.id)),
 
   // --- Binary uploads (bytes via superjson) ---
-  upload: publicProcedure
+  // `upload`/`uploadDir` read a client-named path off the hub's disk (see
+  // assertPasteSourcesAreHubStorage); `uploadBlob` carries the bytes and never does.
+  upload: hubLocalProcedure
     .input(uploadInput)
     .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifact(ctx.db, input)),
 
@@ -129,11 +164,12 @@ export const artifactsRouter = router({
     .input(uploadBlobInput)
     .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifactBlob(ctx.db, input)),
 
-  pasteFiles: publicProcedure
-    .input(pasteFilesInput)
-    .mutation(({ ctx, input }) => store(ctx.dataRoot).pasteArtifactFiles(ctx.db, input)),
+  pasteFiles: publicProcedure.input(pasteFilesInput).mutation(({ ctx, input }) => {
+    assertPasteSourcesAreHubStorage(ctx.dataRoot, input.sourcePaths)
+    return store(ctx.dataRoot).pasteArtifactFiles(ctx.db, input)
+  }),
 
-  uploadDir: publicProcedure
+  uploadDir: hubLocalProcedure
     .input(uploadDirInput)
     .mutation(({ ctx, input }) => store(ctx.dataRoot).uploadArtifactDir(ctx.db, input)),
 

@@ -1,5 +1,9 @@
 import type { Express } from 'express'
 import { listComputers as storeListComputers } from '@slayzone/computers/server'
+import { getAuthGate } from '../../../app-deps'
+import { filterManagedComputers } from '../../../computer-access'
+import { httpAccessRequest } from '../../owner-scope'
+import { restPrincipalOf } from '../principal'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -17,14 +21,26 @@ import type { RestApiDeps } from '../types'
  * `cli/src/hub-request.ts`) and has no tRPC client, exactly as `join-token` found.
  *
  * NOT loopback-gated, unlike minting: a token is a bearer credential, whereas this is
- * the same non-secret roster the app's Computers tab already renders to any connected
- * client. It rides the shared REST bearer gate (`withRestAuth`), so an auth-enforcing
- * hub still requires a session; a loopback hub answers its own machine as before.
+ * the same non-secret roster the app's Computers tab renders. It rides the shared REST
+ * bearer gate (`withRestAuth`), so an auth-enforcing hub still requires a session; a
+ * loopback hub answers its own machine as before.
+ *
+ * On a hub with login the roster is the caller's own computers, or every one for an
+ * admin (management metadata) — the same cut as `computers.list` (T-19).
  */
 export function registerComputersListRoute(app: Express, deps: RestApiDeps): void {
-  app.get('/api/computers', async (_req, res) => {
+  app.get('/api/computers', async (req, res) => {
     try {
-      const rows = await storeListComputers(deps.db)
+      const principal = restPrincipalOf(req)
+      const rows = await filterManagedComputers(
+        deps.db,
+        {
+          ...httpAccessRequest(principal?.userId ?? null),
+          authRequired: getAuthGate(),
+          role: principal?.role ?? null
+        },
+        await storeListComputers(deps.db)
+      )
       // Live status comes from the gateway when it is wired. An un-wired gateway
       // (init failed, or still coming up) must degrade to "known but not connected"
       // rather than 503: the roster is still the truthful answer to "what computers

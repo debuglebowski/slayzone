@@ -27,7 +27,18 @@
  */
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { HubAuth } from '@slayzone/hub-auth/server'
-import { verifySession } from '@slayzone/hub-auth/server'
+import {
+  ENTRA_PROVIDER_ID,
+  PASSWORD_AUTH_ENDPOINTS,
+  verifySession,
+  WEB_SIGN_IN_PATH
+} from '@slayzone/hub-auth/server'
+import {
+  assertHubPasswordEnabled,
+  type HubPasswordEvent,
+  HubSwitchedOffError,
+  isHubSwitchedOffError
+} from '@slayzone/platform/hub-switch-refusal'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   peerAddress,
@@ -35,8 +46,15 @@ import {
   runWithSecurityContext,
   securityEvent
 } from '@slayzone/platform/security-log'
-import type { RestPrincipal } from '@slayzone/transport/server'
-import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions'
+import { bindRestPrincipal, type RestPrincipal } from '@slayzone/transport/server'
+import { BREAK_GLASS_PATH, type BreakGlass, isBreakGlassToken } from './break-glass'
+import {
+  isWebSessionToken,
+  resolveWebSession,
+  WEB_LOGOUT_PATH,
+  WEB_SESSION_COOKIE_NAME,
+  WEB_SESSION_STATUS_PATH
+} from './web-sessions'
 
 /**
  * What to do with an inbound HTTP request:
@@ -59,7 +77,7 @@ export type RestAuthAction = 'allow' | 'verify'
  * reads. Enumerating what is genuinely needed is the only version of this that
  * stays correct when a dependency adds a route.
  *
- * The four below are exactly what `hubSignIn` (CLI) and a browser session need:
+ * The first four are exactly what `hubSignIn` (CLI) and a browser session need:
  *   - `sign-in/email`  — obtain a FULL session. Sign-UP is deliberately absent;
  *                        `emailAndPassword.disableSignUp` also refuses it at the
  *                        source, so this is belt-and-braces.
@@ -71,16 +89,121 @@ export type RestAuthAction = 'allow' | 'verify'
  *                        server-side and discards the full session it returns,
  *                        so a browser never holds `full` for even one request.
  *                        See `web-sessions.ts` for why that distinction exists.
+ *   - `break-glass`    — OURS (break-glass.ts): redeem an operator's grant for a
+ *                        break-glass session. Answers 404 unless break-glass is on
+ *                        (login required); without a grant opened on the hub machine
+ *                        and the verifier that matches it, it answers 403.
+ *   - `web-session`, `web-logout` — OURS (web-session-routes.ts, T-13): is this
+ *                        browser's web-session cookie live, and end it. Like
+ *                        `sign-out`, reachable holding a session the hub may already
+ *                        consider dead; both act only on the cookie the request carries
+ *                        and only from the hub's own page (`Origin`).
  *
  * Matching is EXACT, so `/api/auth/sign-in/email/extra` inherits nothing. Adding
  * a route here is a security decision: it makes that route reachable by anyone
  * who can reach the hub.
+ *
+ * With password sign-in off (T-10) the two password routes are not in the list
+ * ({@link PASSWORD_BOOTSTRAP_PATHS}) — and never get this far: {@link withRestAuth}
+ * refuses every password route first ({@link passwordRouteRefusal}).
  */
 const AUTH_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/email',
   '/api/auth/sign-out',
   '/api/auth/get-session',
-  '/api/auth/web-login'
+  '/api/auth/web-login',
+  BREAK_GLASS_PATH,
+  WEB_SESSION_STATUS_PATH,
+  WEB_LOGOUT_PATH
+])
+
+/** The members of {@link AUTH_BOOTSTRAP_PATHS} that sign in with a password. */
+const PASSWORD_BOOTSTRAP_PATHS = new Set<string>(['/api/auth/sign-in/email', '/api/auth/web-login'])
+
+/**
+ * Every route that takes, checks, sets or resets a password (T-10): better-auth's
+ * (hub-auth `PASSWORD_AUTH_ENDPOINTS`, under its `/api/auth` base) plus our
+ * `web-login`, with the audit event a refusal writes. Plus the
+ * `/api/auth/reset-password/<token>` link route, matched by prefix.
+ */
+const PASSWORD_ROUTES = new Map<string, HubPasswordEvent>([
+  ...Object.entries(PASSWORD_AUTH_ENDPOINTS).map(
+    ([path, event]) => [`/api/auth${path}`, event] as [string, HubPasswordEvent]
+  ),
+  ['/api/auth/web-login', 'auth.signin']
+])
+const PASSWORD_RESET_LINK_PREFIX = '/api/auth/reset-password/'
+
+/** A password route refused because password sign-in is off: its audit event and name. */
+export interface PasswordRouteRefusal {
+  event: HubPasswordEvent
+  /** The route below `/api/auth/`, e.g. `sign-in/email` (the audit line's `op`). */
+  op: string
+  /** The path as the audit line records it (a reset token replaced by `:token`). */
+  route: string
+}
+
+/**
+ * With password sign-in off (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10): is `url` a
+ * password route? Then {@link withRestAuth} answers it 403 `HUB_PASSWORD_DISABLED`
+ * with one audit line — on EVERY hub, login on or off, bearer or none, before the gate
+ * and before better-auth (which would 404 it anyway, hub-auth `password.ts`). Null
+ * with the switch on, or for any other route. Pure.
+ *
+ * 403 with a stable code rather than 404: an attempt at a password sign-in on a hub
+ * where there is none is exactly what the audit trail should show, the existing
+ * switch refusals answer the same way, and a client can say why (the web shell shows
+ * the message; `slay hub login` names the switch) instead of a bare "not found".
+ */
+export function passwordRouteRefusal(
+  url: string | undefined,
+  passwordEnabled: boolean
+): PasswordRouteRefusal | null {
+  if (passwordEnabled || !url) return null
+  const path = url.split('?')[0]
+  const event = PASSWORD_ROUTES.get(path)
+  if (event) return { event, op: path.slice('/api/auth/'.length), route: path }
+  // The link route carries a reset token in its path: never written to the audit line.
+  return path.startsWith(PASSWORD_RESET_LINK_PREFIX)
+    ? {
+        event: 'auth.password.change',
+        op: 'reset-password/:token',
+        route: `${PASSWORD_RESET_LINK_PREFIX}:token`
+      }
+    : null
+}
+
+/**
+ * The Entra sign-in routes (T-09), open ONLY on a hub with Entra sign-in on — on any
+ * other hub they stay behind the bearer like every unlisted `/api/auth/` route.
+ *   - `sign-in/social` — starts the flow: answers the Entra authorize URL and sets the
+ *                        state cookie. better-auth only knows the one provider this
+ *                        hub installs, and refuses its ID-token variant (entra.ts).
+ *   - `callback/microsoft` — where Entra sends the browser back. The callback of the
+ *                        configured provider only, by exact path; it signs in nobody
+ *                        without the state cookie and a code Entra will redeem for
+ *                        this hub's own certificate.
+ * Better-auth's other OAuth routes (`/link-social`, `/refresh-token`,
+ * `/get-access-token`, `/account-info`, its `/error` page) are not listed: each needs a
+ * session, or nothing the server flow uses.
+ *
+ * Device sign-in (T-14, hub-auth `device.ts`), for a CLI/desktop with no token yet:
+ *   - `device/code`  — issue a device + user code to a known client id.
+ *   - `device/token` — poll; answers a bearer only after the person approved on
+ *                      `/device` (the hub's page, outside `/api`), signed in by Entra.
+ * The plugin's browser-leg routes (`/device`, `/device/approve`, `/device/deny`) are
+ * not listed and answer 404 over HTTP even with a bearer: only the page calls them.
+ *
+ * The web shell's sign-in (T-13, hub-auth `web-sign-in.ts`):
+ *   - `web-sso` — where "Sign in with Microsoft" goes: sends the browser through Entra
+ *                 and, back from it, mints the browser's scoped web session.
+ */
+const SSO_BOOTSTRAP_PATHS = new Set<string>([
+  '/api/auth/sign-in/social',
+  `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
+  '/api/auth/device/code',
+  '/api/auth/device/token',
+  WEB_SIGN_IN_PATH
 ])
 
 /**
@@ -116,9 +239,36 @@ const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/use
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'
 
+/**
+ * Everything a break-glass session (`szbg_`, break-glass.ts) may call: EXACT
+ * `METHOD path`, matched before {@link restAuthAction}, so the self-guarded and open
+ * routes are covered too. Anything else is 403 with one `authz.denied` line
+ * (`reason: 'break_glass'`) — `/mcp`, every content route, `POST /api/hub/users`
+ * (creating accounts) and `POST /api/computers/join-token` (enrolling a computer it
+ * would own) included. `/trpc` refuses the token outright (hub-trpc-context.ts). The
+ * session exists to stop access — disable an account, revoke a computer — so this is an
+ * allowlist, not the admin role: whatever the role gate or ownership rules would let an
+ * admin read, a break-glass session reaches none of it (O-6).
+ *
+ * Role changes through `PATCH /api/hub/users` are still the hub's to refuse: on a hub
+ * with Entra sign-in every one (`SSO_MANAGED_ROLE`), and the break-glass account's own
+ * anywhere (hub-auth `protected`).
+ */
+export const BREAK_GLASS_ROUTES: ReadonlySet<string> = new Set([
+  'GET /api/hub/users',
+  'PATCH /api/hub/users',
+  'GET /api/computers',
+  'PATCH /api/hub/computers',
+  `DELETE ${BREAK_GLASS_PATH}`
+])
+
 export interface RestAuthActionOptions {
   /** Whether THIS hub requires login (`SLAYZONE_HUB_REQUIRE_LOGIN`, see `server.ts`). */
   hubAuthRequired: boolean
+  /** Whether Entra sign-in is on (`HubBootSettings.ssoActive`). Opens {@link SSO_BOOTSTRAP_PATHS}. */
+  ssoActive?: boolean
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD`; default on. Off closes {@link PASSWORD_BOOTSTRAP_PATHS}. */
+  passwordEnabled?: boolean
   /** The raw request url (`req.url`), query string included. */
   url: string | undefined
 }
@@ -147,7 +297,13 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   const path = opts.url.split('?')[0]
   if (path !== MCP_PATH && !path.startsWith('/api/')) return 'allow'
   if (SELF_GUARDED.has(path)) return 'allow'
-  if (AUTH_BOOTSTRAP_PATHS.has(path)) return 'allow'
+  if (
+    AUTH_BOOTSTRAP_PATHS.has(path) &&
+    (opts.passwordEnabled !== false || !PASSWORD_BOOTSTRAP_PATHS.has(path))
+  ) {
+    return 'allow'
+  }
+  if (opts.ssoActive === true && SSO_BOOTSTRAP_PATHS.has(path)) return 'allow'
   return 'verify'
 }
 
@@ -188,7 +344,8 @@ export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, 
  * same two credential classes, same fail-closed/fail-quiet shape, reached over
  * headers instead of a tRPC connect frame.
  *
- * TWO CREDENTIAL CLASSES, checked in a specific order:
+ * TWO CREDENTIAL CLASSES, checked in a specific order (plus a break-glass session's
+ * `szbg_` bearer, resolved by `breakGlass` alone and refused without it):
  *   1. A `szw_`-prefixed value — from EITHER the bearer header OR the
  *      `slayzone_web_session` cookie — is looked up in `web_sessions` and
  *      resolves to that row's OWN `scopes`. Checked FIRST and by prefix alone,
@@ -202,8 +359,9 @@ export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, 
  * but cannot read or forge an `Authorization` header cross-origin. Restricting
  * cookie-based auth to the ONE credential class that is scope-limited by
  * construction (never `full`) bounds what a forged request could do even
- * before the origin check in `ws-origin.ts` (whose REST-side counterpart is
- * `restAuthAction`'s own path/loopback logic) is considered.
+ * before the Origin check (`cookieOriginDecision`, ws-origin.ts — `withRestAuth`
+ * applies it to every state-changing request that would authenticate by the
+ * cookie) is considered.
  *
  * Returns `null` for anything but a clean hit — absent/blank/duplicated
  * header, unknown/expired/revoked web session, invalid better-auth session, a
@@ -214,9 +372,19 @@ export async function verifyRestBearer(
   auth: HubAuth | null,
   db: SlayzoneDb | null,
   headers: IncomingHttpHeaders,
-  cookies: Record<string, string> = {}
+  cookies: Record<string, string> = {},
+  breakGlass: Pick<BreakGlass, 'resolve'> | null = null
 ): Promise<RestPrincipal | null> {
   const bearerToken = extractBearerToken(headers)
+  // A break-glass session (break-glass.ts), from the header only — never a cookie.
+  if (bearerToken && isBreakGlassToken(bearerToken)) {
+    if (!breakGlass) return null
+    try {
+      return await breakGlass.resolve(bearerToken)
+    } catch {
+      return null
+    }
+  }
   const cookieToken = cookies[WEB_SESSION_COOKIE_NAME]
   const webToken =
     bearerToken && isWebSessionToken(bearerToken)
@@ -245,6 +413,15 @@ export async function verifyRestBearer(
   }
 }
 
+/** Methods that change nothing: a cookie may carry them without an `Origin`. */
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+/** Does {@link verifyRestBearer} take its credential from the web-session cookie? */
+function viaWebSessionCookie(bearer: string | null, cookies: Record<string, string>): boolean {
+  const cookie = cookies[WEB_SESSION_COOKIE_NAME]
+  return Boolean(cookie && isWebSessionToken(cookie)) && !(bearer && isWebSessionToken(bearer))
+}
+
 /**
  * Wrap a request handler in the bearer gate. `server.ts` calls this ONCE and
  * mounts the result, so the allow/verify/401 sequencing lives here (tested)
@@ -261,11 +438,21 @@ export async function verifyRestBearer(
  */
 export function withRestAuth(opts: {
   getHubAuthRequired: () => boolean
+  /** Entra sign-in on: its two routes pass the gate (see {@link SSO_BOOTSTRAP_PATHS}). */
+  getSsoActive?: () => boolean
+  /** `SLAYZONE_HUB_ENABLE_PASSWORD`; absent = on. Off: {@link passwordRouteRefusal}. */
+  getPasswordEnabled?: () => boolean
   getHubAuth: () => HubAuth | null
   /** Needed to resolve a `szw_` web-session token — null on a host with no
    *  such table available (there is none today; kept optional for callers
    *  that genuinely have no DB, e.g. a future capability-only test double). */
   getDb: () => SlayzoneDb | null
+  /** Resolves a break-glass session (`szbg_`, break-glass.ts). Absent: such a bearer
+   *  never authenticates. */
+  getBreakGlass?: () => Pick<BreakGlass, 'resolve'> | null
+  /** Is this request's `Origin` the hub's own page (ws-origin.ts `cookieOriginDecision`)?
+   *  Absent = never: a state-changing request never authenticates by the cookie. */
+  isCookieOriginAllowed?: (req: IncomingMessage) => boolean
   next: (req: IncomingMessage, res: ServerResponse) => void
 }): (req: IncomingMessage, res: ServerResponse) => void {
   const deny = (res: ServerResponse, code: 401 | 403, message: string): void => {
@@ -297,8 +484,75 @@ export function withRestAuth(opts: {
       })
       deny(res, code, message)
     }
+    const passwordEnabled = opts.getPasswordEnabled?.() !== false
+    const passwordRefusal = passwordRouteRefusal(req.url, passwordEnabled)
+    if (passwordRefusal) {
+      // The switch-refusal shape (hub-switch-refusal.ts): one `denied` line, then 403
+      // `{ ok: false, error, code }` like every other switched-off operation.
+      const auditRoute = `${req.method ?? 'GET'} ${passwordRefusal.route}`
+      const thrown = runWithSecurityContext({ actor: null, ip, route: auditRoute }, () => {
+        try {
+          assertHubPasswordEnabled(
+            passwordRefusal.event,
+            { op: passwordRefusal.op, detail: { method: 'password' } },
+            false
+          )
+          return null
+        } catch (err) {
+          return err
+        }
+      })
+      const off = isHubSwitchedOffError(thrown)
+        ? thrown
+        : new HubSwitchedOffError('HUB_PASSWORD_DISABLED')
+      if (!res.headersSent) {
+        res.writeHead(403, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: off.message, code: off.code }))
+      }
+      return
+    }
+    // A break-glass session reaches BREAK_GLASS_ROUTES and nothing else — decided here,
+    // before the exemptions below, so no open or self-guarded route is a way around it.
+    // Each request it makes is one `auth.break_glass.use` line. Only where login is
+    // required: elsewhere every request is admitted as before and break-glass is off.
+    const bearer = extractBearerToken(req.headers)
+    if (bearer && isBreakGlassToken(bearer) && opts.getHubAuthRequired()) {
+      const breakGlass = opts.getBreakGlass?.() ?? null
+      void (breakGlass ? breakGlass.resolve(bearer) : Promise.resolve(null))
+        .then((principal) => {
+          if (!principal) {
+            refuse(401, 'Unauthorized', 'invalid_credential', null)
+            return
+          }
+          const path = (req.url ?? '').split('?')[0]
+          if (!BREAK_GLASS_ROUTES.has(`${req.method ?? 'GET'} ${path}`)) {
+            refuse(
+              403,
+              'a break-glass session can only manage accounts and computers',
+              'break_glass',
+              principal.userId
+            )
+            return
+          }
+          securityEvent({
+            event: 'auth.break_glass.use',
+            outcome: 'success',
+            actor: principal.userId,
+            ip,
+            route
+          })
+          bindRestPrincipal(req, principal)
+          admit(principal.userId)
+        })
+        .catch(() => {
+          if (!res.headersSent) refuse(401, 'Unauthorized', 'gate_error', null)
+        })
+      return
+    }
     const action = restAuthAction({
       hubAuthRequired: opts.getHubAuthRequired(),
+      ssoActive: opts.getSsoActive?.() === true,
+      passwordEnabled,
       url: req.url
     })
     if (action === 'allow') {
@@ -306,6 +560,17 @@ export function withRestAuth(opts: {
       return
     }
     const cookies = parseCookieHeader(req.headers)
+    // CSRF (T-13): a state-changing request that would authenticate by the web-session
+    // cookie — which the browser attaches to whatever asked — must come from the hub's
+    // own page. A missing Origin is no exception: browsers send one on these requests.
+    if (
+      viaWebSessionCookie(bearer, cookies) &&
+      !SAFE_METHODS.has(req.method ?? 'GET') &&
+      opts.isCookieOriginAllowed?.(req) !== true
+    ) {
+      refuse(403, "a cookie request must come from the hub's own page", 'origin', null)
+      return
+    }
     // Only to tell "presented nothing" from "presented something invalid" in the log.
     const presented =
       req.headers.authorization !== undefined || cookies[WEB_SESSION_COOKIE_NAME] !== undefined
@@ -334,6 +599,9 @@ export function withRestAuth(opts: {
           )
           return
         }
+        // Route handlers read it back with `restPrincipalOf(req)` — who created a
+        // project, for one (T-16).
+        bindRestPrincipal(req, principal)
         admit(principal.userId)
       })
       .catch(() => {

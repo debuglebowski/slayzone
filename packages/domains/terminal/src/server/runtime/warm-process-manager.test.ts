@@ -12,6 +12,9 @@ import {
   setProjectTabCounts,
   clearWindowTabCounts,
   claimWarmShell,
+  reserveWarmTaskId,
+  unadoptedWarmAgent,
+  teardownAllWarm,
   getWarmStatus,
   reapOrphanWarms,
   __resetForTests,
@@ -73,6 +76,9 @@ interface WarmSpawnCall {
 let spawnCalls: WarmSpawnCall[] = []
 let killCalls: Array<{ computerId: string; warmId: string }> = []
 let listResult: Array<{ warmId: string; cwd: string; pid: number }> = []
+// Pooled-row INSERTs already written when each warmSpawn was sent.
+let rowsAtSpawn: number[] = []
+let failNextSpawn = false
 
 const spawnCount = (): number => spawnCalls.length
 const lastSpawn = (): WarmSpawnCall | undefined => spawnCalls[spawnCalls.length - 1]
@@ -82,7 +88,12 @@ const fakeBackend = {
     throw new Error('cold spawn must not run from the warm pool')
   },
   async warmSpawn(computerId: string, spec: Omit<WarmSpawnCall, 'computerId'>) {
+    rowsAtSpawn.push(dbRunCalls.filter((c) => /INSERT INTO agent_sessions/.test(c.sql)).length)
     spawnCalls.push({ computerId, ...spec })
+    if (failNextSpawn) {
+      failNextSpawn = false
+      throw new Error('computer refused the warm spawn')
+    }
     return { pid: 4242 }
   },
   async warmKill(computerId: string, warmId: string) {
@@ -116,11 +127,13 @@ const db = {
 
 let computerId: string | null = 'computer-1'
 
-function init(): void {
+function init(opts: { reserveTtlMs?: number } = {}): void {
   spawnCalls = []
   killCalls = []
   listResult = []
   dbRunCalls = []
+  rowsAtSpawn = []
+  failNextSpawn = false
   enabled = true
   computerId = 'computer-1'
   setPtyBackend(fakeBackend as unknown as PtyBackend)
@@ -128,9 +141,40 @@ function init(): void {
     db,
     isEnabled: () => enabled,
     getProjectRoot: async () => PROJECT_ROOT,
-    resolveComputerId: async () => computerId
+    resolveComputerId: async () => computerId,
+    ...(opts.reserveTtlMs !== undefined ? { reserveTtlMs: opts.reserveTtlMs } : {})
   })
 }
+
+/** Reserve p1's ready agent for a new task, the way task create does. */
+async function reserve(
+  over: Partial<Parameters<typeof reserveWarmTaskId>[0]> = {}
+): Promise<string | null> {
+  return reserveWarmTaskId({
+    projectId: 'p1',
+    mode: 'claude-code',
+    flags: '--dangerously',
+    ...over
+  })
+}
+
+/** The task's first `pty:create`, matching the warm agent unless overridden. */
+function claim(
+  taskId: string,
+  over: Partial<Parameters<typeof claimWarmShell>[0]> = {}
+): ReturnType<typeof claimWarmShell> {
+  return claimWarmShell({
+    taskId,
+    mode: 'claude-code',
+    cwd: PROJECT_ROOT,
+    resuming: false,
+    computerId: 'computer-1',
+    flags: '--dangerously',
+    ...over
+  })
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 await test('gate 0→1 spawns one warm shell', async () => {
   init()
@@ -155,12 +199,53 @@ await test('warm spawn pre-boots the agent + records a pooled session (B3b)', as
   expect((pooledInsert!.params as unknown[]).includes('pooled')).toBeTruthy()
 })
 
-await test('warm spawn sets SLAYZONE_PROJECT_ID even with no task bound yet', async () => {
+await test('warm agent boots with its own reserved task id — never a session id', async () => {
+  // The hook env (and its ctx blob) is only built when the hub has a loopback port.
+  const g = globalThis as Record<string, unknown>
+  const savedPort = g.__serverPort
+  g.__serverPort = 51234
+  try {
+    init()
+    setProjectTabCounts(1, { p1: 1 })
+    await settle()
+  } finally {
+    g.__serverPort = savedPort
+  }
+  const env = lastSpawn()!.env
+  // The agent always knows its task: the id the task will get when it is created.
+  expect(UUID.test(env.SLAYZONE_TASK_ID ?? '')).toBe(true)
+  expect(env.SLAYZONE_PROJECT_ID).toBe('p1')
+  expect('SLAYZONE_SESSION_ID' in env).toBe(false)
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT ?? '{}')
+  expect(ctx.taskId).toBe(env.SLAYZONE_TASK_ID)
+  expect('slaySessionId' in ctx).toBe(false)
+  // The pool can name the not-yet-adopted agent by that task id.
+  const agent = unadoptedWarmAgent(env.SLAYZONE_TASK_ID)
+  expect(agent?.projectId).toBe('p1')
+  expect(agent?.computerId).toBe('computer-1')
+  expect(UUID.test(agent?.sessionId ?? '')).toBe(true)
+})
+
+await test('the pooled row is recorded BEFORE the agent is asked to boot', async () => {
+  // Its SessionStart hook confirms the conversation on that row; a hook that beat
+  // the INSERT used to lose the confirm.
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  expect(lastSpawn()?.env?.SLAYZONE_PROJECT_ID).toBe('p1')
-  expect(lastSpawn()?.env?.SLAYZONE_TASK_ID).toBe(undefined as unknown as string)
+  expect(rowsAtSpawn[0]).toBe(1)
+})
+
+await test('a failed warm spawn marks its pooled row dead and leaves no agent', async () => {
+  init()
+  failNextSpawn = true
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
+  expect(unadoptedWarmAgent(lastSpawn()!.env.SLAYZONE_TASK_ID)).toBeNull()
+  await wait(10)
+  expect(dbRunCalls.some((c) => /UPDATE agent_sessions/.test(c.sql) && /dead/.test(c.sql))).toBe(
+    true
+  )
 })
 
 await test('warm spawn fires the notify.sh self-heal (the clobber-bug population)', async () => {
@@ -235,14 +320,9 @@ await test('claim returns the computer handle, not a process (nothing to seed hu
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'claude-code',
-    cwd: PROJECT_ROOT,
-    resuming: false,
-    computerId: 'computer-1',
-    flags: '--dangerously'
-  })
+  const warmId = lastSpawn()!.warmId
+  const taskId = (await reserve())!
+  const c = claim(taskId)
   // The pool no longer owns output. The COMPUTER buffers a warm session in its own
   // RingBuffer and replays it in the pty.warmAdopt reply, which reaches the hub on
   // the session's normal data path — so it passes through `interceptSyncQueries` +
@@ -257,11 +337,9 @@ await test('claim returns the computer handle, not a process (nothing to seed hu
   // survives the move: nothing bypasses onData now, and the seed arrives as ONE
   // contiguous chunk, so there is no torn `ESC[?6` / `n` split across read
   // boundaries for a stateless filter to miss.
-  expect(claim!.warmId).toBe(lastSpawn()!.warmId)
-  expect(claim!.computerId).toBe('computer-1')
-  expect((claim as unknown as { seedBuffer?: string }).seedBuffer).toBe(
-    undefined as unknown as string
-  )
+  expect(c!.warmId).toBe(warmId)
+  expect(c!.computerId).toBe('computer-1')
+  expect((c as unknown as { seedBuffer?: string }).seedBuffer).toBe(undefined as unknown as string)
 })
 
 await test('never warms when no computer resolves (no ownerless billable agent)', async () => {
@@ -275,20 +353,17 @@ await test('never warms when no computer resolves (no ownerless billable agent)'
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('claim refuses a warm agent held by a DIFFERENT computer', async () => {
+await test('claim refuses a reserved agent on a DIFFERENT computer, and kills it', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'claude-code',
-    cwd: PROJECT_ROOT,
-    resuming: false,
-    computerId: 'computer-2',
-    flags: '--dangerously'
-  })
+  const warmId = lastSpawn()!.warmId
+  const taskId = (await reserve())!
   // The process lives on ONE machine; a spawn routed elsewhere must cold-spawn.
-  expect(claim).toBe(null as unknown as ReturnType<typeof claimWarmShell>)
+  expect(claim(taskId, { computerId: 'computer-2' })).toBeNull()
+  // Its task id is spent (the task now exists under it), so nothing else can use it.
+  expect(killCalls.some((k) => k.warmId === warmId)).toBe(true)
+  expect(unadoptedWarmAgent(taskId)).toBeNull()
 })
 
 await test('reapOrphanWarms kills computer-side warms this hub is not tracking', async () => {
@@ -308,80 +383,151 @@ await test('reapOrphanWarms kills computer-side warms this hub is not tracking',
   expect(killCalls[0].warmId).toBe('warm:orphan-from-a-previous-boot')
 })
 
-await test('adopt matches: claude-code + project-root cwd + fresh', async () => {
+await test('reserve hands the ready agent to a new task and re-arms the pool', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const bootedAs = lastSpawn()!.env.SLAYZONE_TASK_ID
+  const taskId = await reserve()
+  // The task is created under the id the agent already carries.
+  expect(taskId).toBe(bootedAs)
+  // Still findable (its hooks keep arriving until the tab adopts it)…
+  expect(unadoptedWarmAgent(taskId!)?.projectId).toBe('p1')
+  // …and the project gets a fresh ready agent with a different id.
+  await settle()
+  expect(spawnCount()).toBe(2)
+  expect(getWarmStatus().p1).toBe('ready')
+  expect(lastSpawn()!.env.SLAYZONE_TASK_ID === bootedAs).toBe(false)
+})
+
+await test('adopt matches: the reserved task id + claude-code + project-root cwd + fresh', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
   const adopted = lastSpawn()!.warmId
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'claude-code',
-    cwd: PROJECT_ROOT,
-    resuming: false,
-    computerId: 'computer-1',
-    flags: '--dangerously'
-  })
-  expect(claim?.warmId).toBe(adopted)
-  // Consumed: removed from the pool, then re-armed immediately (still has an open tab).
+  const taskId = (await reserve())!
+  expect(claim(taskId)?.warmId).toBe(adopted)
+  // Adopted: no longer an unadopted warm agent, and nothing is killed.
+  expect(unadoptedWarmAgent(taskId)).toBeNull()
+  expect(killCalls.length).toBe(0)
+  // Claiming does not re-arm a second time — the reserve already did.
   await settle()
   expect(spawnCount()).toBe(2)
 })
 
-await test('adopt miss: wrong mode', async () => {
+await test('claim by any other task never takes a reserved agent', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'codex',
-    cwd: PROJECT_ROOT,
-    resuming: false,
-    computerId: 'computer-1'
-  })
-  expect(claim).toBeNull()
-  expect(getWarmStatus().p1).toBe('ready') // untouched
+  const taskId = (await reserve())!
+  expect(claim('some-older-task')).toBeNull()
+  expect(unadoptedWarmAgent(taskId)?.projectId).toBe('p1')
+  expect(killCalls.length).toBe(0)
 })
 
-await test('adopt miss: resume', async () => {
+await test('no reservation: a ready agent is never adopted by an existing task', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'claude-code',
-    cwd: PROJECT_ROOT,
-    resuming: true,
-    computerId: 'computer-1'
-  })
-  expect(claim).toBeNull()
+  expect(claim('existing-task')).toBeNull()
   expect(getWarmStatus().p1).toBe('ready')
 })
 
-await test('adopt miss: cwd mismatch (e.g. worktree path)', async () => {
+await test('reserve miss: wrong mode / other flags / project on another computer / none ready', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
-  const claim = claimWarmShell({
-    projectId: 'p1',
-    mode: 'claude-code',
-    cwd: homedir(),
-    resuming: false,
-    computerId: 'computer-1'
-  })
-  expect(claim).toBeNull()
+  expect(await reserve({ mode: 'codex' })).toBeNull()
+  // A live agent cannot be re-flagged.
+  expect(await reserve({ flags: '--other' })).toBeNull()
+  computerId = 'computer-2'
+  expect(await reserve()).toBeNull()
+  computerId = 'computer-1'
+  expect(await reserve({ projectId: 'nope' })).toBeNull()
+  // Every miss left the ready agent alone.
   expect(getWarmStatus().p1).toBe('ready')
+  expect(killCalls.length).toBe(0)
+  expect(spawnCount()).toBe(1)
 })
 
-await test('adopt miss: no warm for project', async () => {
+await test('reserve miss: pre-warm switched off', async () => {
   init()
-  const claim = claimWarmShell({
-    projectId: 'nope',
-    mode: 'claude-code',
-    cwd: PROJECT_ROOT,
-    resuming: false,
-    computerId: 'computer-1'
-  })
-  expect(claim).toBeNull()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  enabled = false
+  expect(await reserve()).toBeNull()
+})
+
+await test('claim mismatch on a reserved agent kills it: resume / cwd / mode / flags', async () => {
+  const cases: Array<Partial<Parameters<typeof claimWarmShell>[0]>> = [
+    { resuming: true },
+    { cwd: homedir() },
+    { mode: 'codex' },
+    { flags: '--other' }
+  ]
+  for (const over of cases) {
+    __resetForTests()
+    init()
+    setProjectTabCounts(1, { p1: 1 })
+    await settle()
+    const warmId = lastSpawn()!.warmId
+    const taskId = (await reserve())!
+    expect(claim(taskId, over)).toBeNull()
+    expect(killCalls.some((k) => k.warmId === warmId)).toBe(true)
+    expect(unadoptedWarmAgent(taskId)).toBeNull()
+  }
+})
+
+await test('a reservation nobody adopts is killed after its TTL', async () => {
+  init({ reserveTtlMs: 40 })
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const warmId = lastSpawn()!.warmId
+  const taskId = (await reserve())!
+  await wait(80)
+  expect(unadoptedWarmAgent(taskId)).toBeNull()
+  expect(killCalls.some((k) => k.warmId === warmId)).toBe(true)
+  expect(claim(taskId)).toBeNull()
+})
+
+await test('switching pre-warm off kills reserved agents too', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const reservedWarmId = lastSpawn()!.warmId
+  const taskId = (await reserve())!
+  await settle()
+  enabled = false
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(killCalls.some((k) => k.warmId === reservedWarmId)).toBe(true)
+  expect(unadoptedWarmAgent(taskId)).toBeNull()
+})
+
+await test('teardown kills reserved agents too', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const reservedWarmId = lastSpawn()!.warmId
+  const taskId = (await reserve())!
+  teardownAllWarm()
+  expect(killCalls.some((k) => k.warmId === reservedWarmId)).toBe(true)
+  expect(unadoptedWarmAgent(taskId)).toBeNull()
+})
+
+await test('reapOrphanWarms leaves a reserved agent alone (it is tracked)', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  const reservedWarmId = lastSpawn()!.warmId
+  await reserve()
+  await settle()
+  listResult = [
+    { warmId: reservedWarmId, cwd: PROJECT_ROOT, pid: 1 },
+    { warmId: lastSpawn()!.warmId, cwd: PROJECT_ROOT, pid: 2 }
+  ]
+  await reapOrphanWarms('computer-1')
+  expect(killCalls.length).toBe(0)
 })
 
 await test('injected ops seam handles mode lookup + session writes (db untouched)', async () => {

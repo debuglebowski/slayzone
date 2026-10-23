@@ -17,11 +17,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { findHubAccount } from './account'
 import { createHubAuth, type HubAuth } from './auth'
+import { openBreakGlassAccount } from './break-glass'
 import { mintComputerApiKey, COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import {
   createHubUser,
   disableHubUser,
   enableHubUser,
+  findFirstAdmin,
+  findHubUser,
   listHubUsers,
   setHubUserRole,
   type CreatedHubUser
@@ -121,6 +124,21 @@ describe('createHubUser', () => {
     expect(a.password).not.toBe(b.password)
   })
 
+  it("a caller-chosen password (a reachable hub's derived owner password) is the one that signs in", async () => {
+    const chosen = 'derived-0123456789abcd'
+    const created = await createHubUser(auth, { email: 'owner@example.com' }, { password: chosen })
+    if ('error' in created) throw new Error(created.error)
+    expect(created.password).toBe(chosen)
+    expect((await signIn('owner@example.com', chosen)).token).toBeTruthy()
+  })
+
+  it('refuses a caller-chosen password outside the length bounds, creating nothing', async () => {
+    await expect(
+      createHubUser(auth, { email: 'short@example.com' }, { password: 'short' })
+    ).rejects.toThrow(/outside the configured bounds/)
+    expect(await listHubUsers(auth)).toEqual([])
+  })
+
   it('refuses a duplicate email, case-insensitively', async () => {
     await create('alice@example.com')
     expect(await createHubUser(auth, { email: 'Alice@Example.COM' })).toEqual({ error: 'exists' })
@@ -181,6 +199,37 @@ describe('listHubUsers', () => {
     await create('alice@example.com')
     const [row] = await listHubUsers(auth)
     expect(row!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/)
+  })
+})
+
+describe('findHubUser (the owner a join token names, T-20)', () => {
+  it('finds a person by id, or by email in any case, disabled or not', async () => {
+    const alice = await create('alice@example.com')
+    const bob = await create('bob@example.com')
+    expect((await findHubUser(auth, alice.id))?.email).toBe('alice@example.com')
+    expect((await findHubUser(auth, '  ALICE@Example.com '))?.id).toBe(alice.id)
+    expect(await disableHubUser(auth, 'bob@example.com')).toBe('ok')
+    const found = await findHubUser(auth, bob.id)
+    expect(found?.id).toBe(bob.id)
+    expect(found?.disabledAt).not.toBeNull()
+  })
+
+  it('is null for no such account, a blank reference, the service user and break-glass', async () => {
+    await create('alice@example.com')
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
+    const { userId: breakGlassId } = await openBreakGlassAccount(auth)
+    const ctx = await auth.$context
+    const service = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
+    for (const ref of [
+      'nobody@example.com',
+      'no-such-id',
+      '   ',
+      COMPUTER_SERVICE_USER_EMAIL,
+      service!.user.id,
+      breakGlassId
+    ]) {
+      expect(await findHubUser(auth, ref), ref).toBeNull()
+    }
   })
 })
 
@@ -266,6 +315,28 @@ describe('setHubUserRole', () => {
   it('returns not-found for an unknown email', async () => {
     await create('alice@example.com')
     expect(await setHubUserRole(auth, 'nobody@example.com', 'admin')).toBe('not-found')
+  })
+})
+
+describe('findFirstAdmin', () => {
+  it('is null on a hub with no human account', async () => {
+    await mintComputerApiKey(auth, { computerId: 'computer-1', name: 'ci-computer' })
+    expect(await findFirstAdmin(auth)).toBeNull()
+  })
+
+  it('is the oldest enabled admin', async () => {
+    const alice = await create('alice@example.com')
+    await create('bob@example.com', undefined, 'admin')
+    await create('carol@example.com')
+    expect(await findFirstAdmin(auth)).toBe(alice.id)
+  })
+
+  it('skips a disabled admin and plain users', async () => {
+    await create('alice@example.com')
+    const bob = await create('bob@example.com', undefined, 'admin')
+    await create('carol@example.com')
+    expect(await disableHubUser(auth, 'alice@example.com')).toBe('ok')
+    expect(await findFirstAdmin(auth)).toBe(bob.id)
   })
 })
 

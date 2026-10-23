@@ -532,23 +532,26 @@ function mapRowsToExport(rows: DiagnosticsEventRow[]): DiagnosticsExportBundle['
   }))
 }
 
-function buildSummary(rows: DiagnosticsEventRow[]): DiagnosticsExportBundle['summary'] {
+/** A bundle's summary, from its events (also after a caller cut them, T-101). */
+export function summarizeExportEvents(
+  events: DiagnosticsExportBundle['events']
+): DiagnosticsExportBundle['summary'] {
   const byLevel: Record<string, number> = {}
   const bySource: Record<string, number> = {}
   const byEvent: Record<string, number> = {}
   let firstErrorTsMs: number | null = null
 
-  for (const row of rows) {
-    byLevel[row.level] = (byLevel[row.level] ?? 0) + 1
-    bySource[row.source] = (bySource[row.source] ?? 0) + 1
-    byEvent[row.event] = (byEvent[row.event] ?? 0) + 1
-    if (row.level === 'error' && firstErrorTsMs == null) {
-      firstErrorTsMs = row.ts_ms
+  for (const e of events) {
+    byLevel[e.level] = (byLevel[e.level] ?? 0) + 1
+    bySource[e.source] = (bySource[e.source] ?? 0) + 1
+    byEvent[e.event] = (byEvent[e.event] ?? 0) + 1
+    if (e.level === 'error' && firstErrorTsMs == null) {
+      firstErrorTsMs = e.tsMs
     }
   }
 
   return {
-    total: rows.length,
+    total: events.length,
     byLevel,
     bySource,
     byEvent,
@@ -587,6 +590,7 @@ export async function buildExportBundle(
     .all(fromTsMs, toTsMs)) as DiagnosticsEventRow[]
 
   const config = getDiagnosticsConfig()
+  const events = mapRowsToExport(rows)
   return {
     meta: {
       appVersion: opts.appVersion,
@@ -598,8 +602,8 @@ export async function buildExportBundle(
       fromTsMs,
       toTsMs
     },
-    events: mapRowsToExport(rows),
-    summary: buildSummary(rows),
+    events,
+    summary: summarizeExportEvents(events),
     redaction: {
       version: REDACTION_VERSION,
       includePtyOutput: config.includePtyOutput

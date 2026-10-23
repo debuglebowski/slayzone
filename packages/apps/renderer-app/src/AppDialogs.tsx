@@ -211,7 +211,9 @@ export function AppDialogs({
     const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
       projectId: selectedProjectId,
       title: `Terminal ${nextNum}`,
-      isTemporary: true
+      isTemporary: true,
+      // Opened right below — lets the hub hand it the project's warm agent.
+      openAfterCreate: true
     })
     if (!task) return
     if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)

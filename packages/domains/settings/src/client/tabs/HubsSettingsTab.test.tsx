@@ -18,7 +18,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
  * well be gating.
  */
 
-type ProbeReply = { ok: boolean; normalizedUrl?: string; error?: string; authRequired?: boolean }
+type ProbeReply = {
+  ok: boolean
+  normalizedUrl?: string
+  error?: string
+  authRequired?: boolean
+  signIn?: { sso: boolean; password: boolean }
+}
 
 let registryHubs: Array<{ id: string; kind: string; label: string; url?: string }> = []
 let hubTokens: Record<string, string> = {}
@@ -38,6 +44,16 @@ let federation: {
 /** Whose `<HubScope>` is currently rendering, recorded by the mock below. */
 let renderingHubId = ''
 
+// Device sign-in (T-14) bridge calls, swapped per test.
+let deviceStart = vi.fn(async (_p: { hubId: string; url: string }) => ({
+  ok: true as const,
+  flowId: 'flow-1',
+  userCode: 'ABCD-EFGH',
+  verificationUri: 'https://hub.example.com/device?user_code=ABCDEFGH',
+  opened: true
+}))
+let deviceWait = vi.fn(async (_p: { flowId: string }) => ({ ok: true as const }))
+
 vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: {
     getHubRegistry: () => Promise.resolve({ hubs: registryHubs, defaultHubId: 'local' }),
@@ -45,6 +61,9 @@ vi.mock('@slayzone/transport/client', () => ({
     probeServerHealth: (url: string) =>
       Promise.resolve(probeReplies[url] ?? { ok: false, error: 'Unreachable' }),
     hubLogin: () => Promise.resolve({ ok: true as const, token: 't' }),
+    hubDeviceLoginStart: (payload: { hubId: string; url: string }) => deviceStart(payload),
+    hubDeviceLoginWait: (payload: { flowId: string }) => deviceWait(payload),
+    hubDeviceLoginCancel: () => Promise.resolve({ ok: true as const }),
     restartSidecar: () => Promise.resolve({ ok: true as const }),
     setBootSettings: () => Promise.resolve({ ok: true as const }),
     relaunch: () => Promise.resolve()
@@ -377,5 +396,85 @@ describe('HubsSettingsTab — nested computers', () => {
     await waitFor(() => expect(blocks().length).toBe(1))
     // No scope was entered — the ambient client is the only hub there is.
     expect(blocks()[0]).toEqual({ hub: 'local', scope: '', local: 'true' })
+  })
+})
+
+/**
+ * An Entra hub (T-14) signs in through the system browser: the dialog offers that, shows
+ * the code the hub's page must match, and — when the hub has password sign-in off —
+ * never renders a password field.
+ */
+describe('HubsSettingsTab — Microsoft sign-in (device)', () => {
+  beforeEach(() => {
+    registryHubs = []
+    hubTokens = {}
+    probeReplies = {}
+    federation = null
+    deviceStart = vi.fn(async () => ({
+      ok: true as const,
+      flowId: 'flow-1',
+      userCode: 'ABCD-EFGH',
+      verificationUri: 'https://hub.example.com/device?user_code=ABCDEFGH',
+      opened: true
+    }))
+    deviceWait = vi.fn(async () => ({ ok: true as const }))
+  })
+  afterEach(cleanup)
+
+  async function openDialog(signIn: { sso: boolean; password: boolean }): Promise<void> {
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true, signIn })
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    fireEvent.click(await screen.findByTestId('hub-signin-open'))
+    await waitFor(() => expect(screen.getByTestId('hub-signin-dialog')).toBeTruthy())
+  }
+
+  it('an SSO-only hub: Microsoft sign-in, and no password field anywhere', async () => {
+    await openDialog({ sso: true, password: false })
+    expect(screen.getByTestId('hub-signin-sso')).toBeTruthy()
+    expect(screen.queryByTestId('hub-signin-password')).toBeNull()
+    expect(screen.queryByTestId('hub-signin-email')).toBeNull()
+    expect(screen.queryByTestId('hub-signin')).toBeNull()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+  })
+
+  it('signs in through the browser: shows the code, stores the token', async () => {
+    let finish: (v: { ok: true }) => void = () => {}
+    deviceWait = vi.fn(() => new Promise<{ ok: true }>((r) => (finish = r)))
+    await openDialog({ sso: true, password: false })
+    fireEvent.click(screen.getByTestId('hub-signin-sso'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hub-signin-code').textContent).toContain('ABCD-EFGH')
+    )
+    expect(deviceStart).toHaveBeenCalledWith({ hubId: 'hub:remote', url: REMOTE_URL })
+    expect(deviceWait).toHaveBeenCalledWith({ flowId: 'flow-1' })
+    finish({ ok: true })
+    await waitFor(() =>
+      expect(screen.getByTestId('hub-signin-result').textContent).toContain('signed in')
+    )
+  })
+
+  it('shows the page to open when the app did not open it itself', async () => {
+    deviceStart = vi.fn(async () => ({
+      ok: true as const,
+      flowId: 'flow-2',
+      userCode: 'WXYZ-2345',
+      verificationUri: 'https://elsewhere.example/device',
+      opened: false
+    }))
+    deviceWait = vi.fn(() => new Promise<{ ok: true }>(() => {}))
+    await openDialog({ sso: true, password: false })
+    fireEvent.click(screen.getByTestId('hub-signin-sso'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hub-signin-code').textContent).toContain(
+        'https://elsewhere.example/device'
+      )
+    )
+  })
+
+  it('a password hub keeps the email + password form and offers no Microsoft sign-in', async () => {
+    await openDialog({ sso: false, password: true })
+    expect(screen.getByTestId('hub-signin-password')).toBeTruthy()
+    expect(screen.queryByTestId('hub-signin-sso')).toBeNull()
   })
 })

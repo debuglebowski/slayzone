@@ -1,8 +1,24 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
+import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+
+// Every git here runs against a worktree on the hub's OWN disk, so each spawn is
+// refused first on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06): there the
+// worktree lives on a computer, and the hub never touches project data.
+const refuseOnSwitchedOffHub = (): void => assertHubLocalExecEnabled({ op: 'git.turns' })
+
+const gitSpawn = ((...args: unknown[]): ChildProcess => {
+  refuseOnSwitchedOffHub()
+  return (spawn as (...a: unknown[]) => ChildProcess)(...args)
+}) as typeof spawn
+
+const gitSpawnSync = ((...args: unknown[]) => {
+  refuseOnSwitchedOffHub()
+  return (spawnSync as (...a: unknown[]) => unknown)(...args)
+}) as typeof spawnSync
 
 interface ExecResult {
   stdout: string
@@ -12,7 +28,7 @@ interface ExecResult {
 
 function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn('git', args, {
+    const child = gitSpawn('git', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       // Sanitized base (user env survives; SlayZone infra/secret/identity
@@ -126,7 +142,7 @@ export async function diffIsEmpty(
  * identical OR `git diff --quiet` exits 0. */
 export function diffIsEmptySync(repoPath: string, fromSha: string, toSha: string): boolean {
   if (fromSha === toSha) return true
-  const r = spawnSync('git', ['diff', '--quiet', fromSha, toSha], { cwd: repoPath })
+  const r = gitSpawnSync('git', ['diff', '--quiet', fromSha, toSha], { cwd: repoPath })
   return r.status === 0
 }
 
@@ -183,7 +199,7 @@ export function listTurnFilesCached(repoPath: string, fromSha: string, toSha: st
     turnFilesCache.set(key, hit)
     return hit
   }
-  const r = spawnSync('git', ['diff', '--name-only', '-z', fromSha, toSha], {
+  const r = gitSpawnSync('git', ['diff', '--name-only', '-z', fromSha, toSha], {
     cwd: repoPath,
     encoding: 'utf-8'
   })
@@ -215,7 +231,10 @@ export function listTreeBlobsCached(repoPath: string, treeIsh: string): Map<stri
     treeBlobsCache.set(key, hit)
     return hit
   }
-  const r = spawnSync('git', ['ls-tree', '-r', '-z', treeIsh], { cwd: repoPath, encoding: 'utf-8' })
+  const r = gitSpawnSync('git', ['ls-tree', '-r', '-z', treeIsh], {
+    cwd: repoPath,
+    encoding: 'utf-8'
+  })
   let result: Map<string, string> | null
   if (r.status !== 0) {
     result = null
@@ -249,7 +268,7 @@ export function listTreeBlobsCached(repoPath: string, treeIsh: string): Map<stri
  * not cached. Returns null on failure.
  */
 export function getHeadSha(repoPath: string): string | null {
-  const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf-8' })
+  const r = gitSpawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf-8' })
   if (r.status !== 0) return null
   const out = r.stdout.trim()
   return out || null
@@ -262,7 +281,7 @@ export function getHeadSha(repoPath: string): string | null {
  * change in the worktree.
  */
 export function listWorkingChangedFiles(repoPath: string): Set<string> {
-  const r = spawnSync('git', ['status', '--porcelain=v1', '-uall', '-z'], {
+  const r = gitSpawnSync('git', ['status', '--porcelain=v1', '-uall', '-z'], {
     cwd: repoPath,
     encoding: 'utf-8'
   })

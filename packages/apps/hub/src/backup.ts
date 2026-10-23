@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { containedPath } from '@slayzone/platform/safe-path'
 import type { BackupInfo, BackupSettings } from '@slayzone/types'
 
 /**
@@ -148,14 +149,13 @@ async function listBackups(deps: BackupDeps): Promise<BackupInfo[]> {
   return out
 }
 
-/** Resolve a caller-supplied filename inside the backups dir, or throw. */
+/**
+ * Resolve a caller-supplied filename strictly inside the backups dir, or throw
+ * `UnsafePathError`. A bare `startsWith(dir)` let `../backups-x` (a sibling sharing
+ * the prefix) and `''` (the dir itself) through.
+ */
 function resolveInsideBackups(dataRoot: string, filename: string): string {
-  const dir = backupsDir(dataRoot)
-  const filePath = path.join(dir, filename)
-  if (!path.resolve(filePath).startsWith(path.resolve(dir))) {
-    throw new Error('Invalid backup filename')
-  }
-  return filePath
+  return containedPath(backupsDir(dataRoot), filename)
 }
 
 export function buildBackupOps(deps: BackupDeps) {

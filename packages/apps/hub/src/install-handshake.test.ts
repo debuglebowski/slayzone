@@ -248,7 +248,8 @@ async function main(): Promise<void> {
     // `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
     // simulating an authenticated caller some other way.
     const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
-    const ownerToken = (JSON.parse(ownerRaw) as { token?: string }).token
+    const owner = JSON.parse(ownerRaw) as { token?: string; userId?: string }
+    const ownerToken = owner.token
     assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
 
     // --- mint a join token over the loopback REST channel --------------------
@@ -261,7 +262,8 @@ async function main(): Promise<void> {
             'content-type': 'application/json',
             authorization: `Bearer ${ownerToken}`
           },
-          body: JSON.stringify({ label: 'install-handshake' })
+          // T-20: minted FOR a named user — the owner, by account id.
+          body: JSON.stringify({ label: 'install-handshake', forUser: owner.userId })
         })
         if (r.status !== 200) return null
         return (await r.json()) as { token: string; hubUrl: string }
@@ -279,13 +281,12 @@ async function main(): Promise<void> {
         tok.hubUrl === `ws://127.0.0.1:${hubPort}/computers`,
         `local computer url is ws:// on the hub port, got: ${tok.hubUrl}`
       )
-      // The hub presents no certificate of its own any more, so the token carries
-      // NO pin: an empty fingerprint field (the grammar keeps the field until the
-      // client pin code is removed).
+      // The hub presents no certificate of its own, so the token carries NO pin:
+      // no certFingerprint field at all.
       const payload = JSON.parse(
         Buffer.from(tok.token.slice('szjt1.'.length), 'base64url').toString('utf8')
-      ) as { hubUrl: string; certFingerprint: string }
-      assert(payload.certFingerprint === '', `pin-less token, got: ${payload.certFingerprint}`)
+      ) as { hubUrl: string; certFingerprint?: unknown }
+      assert(!('certFingerprint' in payload), `pin-less token, got: ${JSON.stringify(payload)}`)
       assert(payload.hubUrl === tok.hubUrl, 'the token embeds the same url')
     })
 

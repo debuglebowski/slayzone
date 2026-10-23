@@ -205,6 +205,11 @@ export async function initTelemetry(tier: TelemetryTier): Promise<void> {
     autocapture: false,
     disable_session_recording: true,
     capture_exceptions: isOptedIn,
+    // No scripts from PostHog's CDN (remote config `config.js`, surveys, web
+    // vitals, exception autocapture…): the CSP of every surface allows only
+    // `script-src 'self'` (desktop `renderer-csp.ts`, hub `security-headers.ts`),
+    // so they were blocked anyway. Remote config still arrives, as JSON.
+    disable_external_dependency_loading: true,
     ...(isOptedIn ? {} : { disable_persistence: true })
   })
 
