@@ -9,4 +9,4 @@ minimumReleaseAge: 43200
 # Exempt: TypeScript is always used at its latest version.
 minimumReleaseAgeExclude:
   - typescript
-  - '@typescript/native-preview'
+  - '@typescript/typescript-*'
