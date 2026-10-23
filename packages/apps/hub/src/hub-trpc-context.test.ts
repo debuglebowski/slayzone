@@ -29,8 +29,12 @@ import { DatabaseSync } from 'node:sqlite'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
-import { mintWebSession } from './web-sessions.js'
+import {
+  connectionToken,
+  parseWindowIdFromUrl,
+  resolveConnectionPrincipal
+} from './hub-trpc-context.js'
+import { mintWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 
 let passed = 0
 let failed = 0
@@ -212,6 +216,59 @@ async function main(): Promise<void> {
       assertEq(principal!.userId, created.id, 'carries the owning userId')
       assertEq(principal!.scopes.join(','), 'read,tasks,agent', 'carries its minted scopes')
       assert(!principal!.scopes.includes('full'), 'never full — this is the whole point')
+    })
+
+    // ── the web shell's cookie (T-13): its only credential on /trpc ─────────────
+    const cookies = { [WEB_SESSION_COOKIE_NAME]: scopedSession.token, other: 'x' }
+
+    await test('cookie only, from the hub page: the socket authenticates as the web session', async () => {
+      const presented = connectionToken({
+        connectionParamsToken: undefined,
+        cookies,
+        cookieOriginAllowed: true
+      })
+      assertEq(presented.token, scopedSession.token, 'the cookie token is used')
+      assertEq(presented.cookieRefused, false, 'not refused')
+      const principal = await resolveConnectionPrincipal({
+        hubAuthRequired: true,
+        hubAuth: auth,
+        db,
+        token: presented.token
+      })
+      assertEq(principal?.userId, created.id, 'the session owner')
+      assertEq(principal?.scopes.join(','), 'read,tasks,agent', 'scoped, never full')
+    })
+
+    await test('cookie with a cross-origin or MISSING Origin: refused, no principal', async () => {
+      const presented = connectionToken({
+        connectionParamsToken: undefined,
+        cookies,
+        cookieOriginAllowed: false
+      })
+      assertEq(presented.token, null, 'cookie not used')
+      assertEq(presented.cookieRefused, true, 'reported, so the hub audits it')
+    })
+
+    await test('connectionParams wins over the cookie; a non-szw_ cookie is never read', async () => {
+      assertEq(
+        connectionToken({ connectionParamsToken: 'explicit', cookies, cookieOriginAllowed: false })
+          .token,
+        'explicit',
+        'a client-sent token needs no Origin (it is not ambient)'
+      )
+      const fullInCookie = connectionToken({
+        connectionParamsToken: undefined,
+        cookies: { [WEB_SESSION_COOKIE_NAME]: validToken },
+        cookieOriginAllowed: true
+      })
+      assertEq(fullInCookie.token, null, 'a better-auth token in the cookie slot resolves nothing')
+      assertEq(fullInCookie.cookieRefused, false, 'and is not a web-session cookie at all')
+      assertEq(
+        connectionToken({ connectionParamsToken: '', cookies: {}, cookieOriginAllowed: true })
+          .token,
+        null,
+        'nothing presented'
+      )
     })
 
     await test('a szw_ token with no db available resolves to null, never throws', async () => {

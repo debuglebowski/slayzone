@@ -200,6 +200,46 @@ test('/trpc: at most 120 upgrades a minute per address, however short-lived', ()
   assert(guard.admitTrpcUpgrade(request('GET', '/trpc', '203.0.113.60')).ok, 'next window')
 })
 
+test('the web shell sign-in and session routes (T-13): limited per address', () => {
+  const lines = captureAudit()
+  const clock = withClock()
+  const guard = createHubFloodGuard({ enabled: true, now: clock.now })
+  const cases: Array<[string, string, number]> = [
+    ['GET', '/api/auth/web-sso', HUB_FLOOD_RULES.webSso.max],
+    ['POST', '/api/auth/web-session', HUB_FLOOD_RULES.webSession.max],
+    ['POST', '/api/auth/web-logout', HUB_FLOOD_RULES.webLogout.max]
+  ]
+  for (const [method, path, max] of cases) {
+    for (let i = 0; i < max; i++) {
+      // The sign-in's return leg carries a query; it counts against the same path.
+      const url = i % 2 === 0 ? path : `${path}?return=1`
+      assert(
+        !guard.refuseRequest(request(method, url, '203.0.113.80'), response().res),
+        `${path} ${i + 1} passes`
+      )
+    }
+    const r = response()
+    assert(guard.refuseRequest(request(method, path, '203.0.113.80'), r.res), `${path} over`)
+    assert(r.out.status === 429, `${path} 429`)
+    assert(
+      !guard.refuseRequest(request(method, path, '203.0.113.81'), response().res),
+      `${path}: another address passes`
+    )
+  }
+  assert(HUB_FLOOD_RULES.webSso.max === 20, 'two requests per Entra sign-in, 10 sign-ins a minute')
+  const limits = rateLines(lines).map((l) => (l.detail as { limit?: string }).limit)
+  assert(
+    limits.join(',') === 'http.web_sso,http.web_session,http.web_logout',
+    `one line per flood, got ${limits.join(',')}`
+  )
+  // Other methods on those paths are not counted (the routes answer them 405).
+  assert(
+    !guard.refuseRequest(request('POST', '/api/auth/web-sso', '203.0.113.80'), response().res),
+    'POST web-sso is not the limited route'
+  )
+  setSecurityLogSink(silent)
+})
+
 test('off (the desktop app’s hub): nothing refused, nothing counted, nothing audited', () => {
   const lines = captureAudit()
   const guard = createHubFloodGuard({ enabled: false })

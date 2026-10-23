@@ -159,7 +159,7 @@ import { resolveAllowedWebOrigins } from './ws-origin.js'
 import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
-import { webLogin } from './web-sessions.js'
+import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
@@ -1276,7 +1276,10 @@ export function composeServer(opts: {
     // against such a hub's loopback listener, and doing so should behave the same
     // as any other hub's login.
     webLogin: {
-      login: (email, password) => webLogin(hubAuthRef, db, email, password)
+      login: (email, password) =>
+        webLogin(hubAuthRef, db, email, password, {
+          secure: webSessionCookieSecure(opts.publicAddress)
+        })
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's

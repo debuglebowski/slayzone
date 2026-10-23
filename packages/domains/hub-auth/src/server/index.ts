@@ -86,3 +86,10 @@ export {
   type DevicePageOptions
 } from './device-page'
 export { AUTH_RATE_LIMIT_DEFAULT, AUTH_RATE_LIMIT_RULES } from './rate-limit'
+export { cookieOnlyHeaders } from './sso-page'
+export {
+  createWebSignIn,
+  WEB_SIGN_IN_FRESH_MS,
+  WEB_SIGN_IN_PATH,
+  type WebSignInOptions
+} from './web-sign-in'

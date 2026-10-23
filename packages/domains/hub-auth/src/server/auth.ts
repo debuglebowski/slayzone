@@ -153,6 +153,13 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // ./rate-limit.ts. `enabled` is explicit so better-auth never falls back to its
     // NODE_ENV=production default.
     rateLimit: hubAuthRateLimit(config.rateLimit !== false),
+    // Where a browser goes when an OAuth callback cannot be tied to the flow that named
+    // its own error URL (state expired, missing, from another browser) — and where the
+    // error page redirects under NODE_ENV=production: the web shell, which says what
+    // happened from `?error=<code>` (T-13). Not better-auth's `/api/auth/error` page:
+    // the hub's gate keeps it closed (rest-auth.ts), so the browser would see a 401.
+    // Entra hubs only; no other hub has an OAuth callback.
+    ...(config.sso ? { onAPIError: { errorURL: '/' } } : {}),
     // Client IP (T-22): the session row's `ipAddress` and the rate-limit key. By default
     // better-auth reads `X-Forwarded-For`, which any client can send — a direct caller
     // could pick the IP it is recorded and rate-limited under — and it cannot see the

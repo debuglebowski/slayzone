@@ -786,6 +786,16 @@ run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-a
 # /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.
 run_test packages/apps/hub/src/flood-limits.test.ts
 
+# Web shell sign-in and sign-out through Entra (T-13): the session routes over real
+# hub-auth + app DB, and the shell's cookie-only session (hub-auth's web sign-in runs in
+# its package suite above).
+run_test_electron_strict_loader packages/apps/hub/src/web-session-routes.test.ts
+run_vitest_files "vitest (web shell session, T-13)" \
+  packages/apps/web-shell/src/web-session-storage.test.ts \
+  packages/apps/web-shell/src/web-session.test.ts \
+  packages/apps/web-shell/src/sign-in-error.test.ts \
+  packages/apps/web-shell/src/LoginScreen.test.tsx
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.

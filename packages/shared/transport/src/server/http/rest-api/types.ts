@@ -299,19 +299,15 @@ export interface RestApiDeps {
    */
   webLogin?: {
     /**
-     * `cookieName` + `maxAgeSec` travel back with the result rather than being
-     * a constant this package imports — this package has no dependency on the
-     * hub app (only the hub app depends on transport), so the route sets
-     * whatever cookie name/lifetime the capability hands it instead of
-     * knowing `WEB_SESSION_COOKIE_NAME` exists.
+     * `setCookie` — the whole `Set-Cookie` value — travels back with the result
+     * rather than being built here: this package has no dependency on the hub app
+     * (only the hub app depends on transport), and the cookie's name, lifetime and
+     * flags (`Secure` only on an https hub) are the hub's (`webSessionCookie`).
      */
     login: (
       email: string,
       password: string
-    ) => Promise<
-      | { ok: true; token: string; cookieName: string; maxAgeSec: number }
-      | { ok: false; error: string }
-    >
+    ) => Promise<{ ok: true; setCookie: string } | { ok: false; error: string }>
   }
 }
 

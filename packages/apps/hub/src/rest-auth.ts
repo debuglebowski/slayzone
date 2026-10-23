@@ -30,7 +30,8 @@ import type { HubAuth } from '@slayzone/hub-auth/server'
 import {
   ENTRA_PROVIDER_ID,
   PASSWORD_AUTH_ENDPOINTS,
-  verifySession
+  verifySession,
+  WEB_SIGN_IN_PATH
 } from '@slayzone/hub-auth/server'
 import {
   assertHubPasswordEnabled,
@@ -47,7 +48,13 @@ import {
 } from '@slayzone/platform/security-log'
 import { bindRestPrincipal, type RestPrincipal } from '@slayzone/transport/server'
 import { BREAK_GLASS_PATH, type BreakGlass, isBreakGlassToken } from './break-glass'
-import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions'
+import {
+  isWebSessionToken,
+  resolveWebSession,
+  WEB_LOGOUT_PATH,
+  WEB_SESSION_COOKIE_NAME,
+  WEB_SESSION_STATUS_PATH
+} from './web-sessions'
 
 /**
  * What to do with an inbound HTTP request:
@@ -86,6 +93,11 @@ export type RestAuthAction = 'allow' | 'verify'
  *                        break-glass session. Answers 404 unless break-glass is on
  *                        (login required); without a grant opened on the hub machine
  *                        and the verifier that matches it, it answers 403.
+ *   - `web-session`, `web-logout` — OURS (web-session-routes.ts, T-13): is this
+ *                        browser's web-session cookie live, and end it. Like
+ *                        `sign-out`, reachable holding a session the hub may already
+ *                        consider dead; both act only on the cookie the request carries
+ *                        and only from the hub's own page (`Origin`).
  *
  * Matching is EXACT, so `/api/auth/sign-in/email/extra` inherits nothing. Adding
  * a route here is a security decision: it makes that route reachable by anyone
@@ -100,7 +112,9 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-out',
   '/api/auth/get-session',
   '/api/auth/web-login',
-  BREAK_GLASS_PATH
+  BREAK_GLASS_PATH,
+  WEB_SESSION_STATUS_PATH,
+  WEB_LOGOUT_PATH
 ])
 
 /** The members of {@link AUTH_BOOTSTRAP_PATHS} that sign in with a password. */
@@ -179,12 +193,17 @@ export function passwordRouteRefusal(
  *                      `/device` (the hub's page, outside `/api`), signed in by Entra.
  * The plugin's browser-leg routes (`/device`, `/device/approve`, `/device/deny`) are
  * not listed and answer 404 over HTTP even with a bearer: only the page calls them.
+ *
+ * The web shell's sign-in (T-13, hub-auth `web-sign-in.ts`):
+ *   - `web-sso` — where "Sign in with Microsoft" goes: sends the browser through Entra
+ *                 and, back from it, mints the browser's scoped web session.
  */
 const SSO_BOOTSTRAP_PATHS = new Set<string>([
   '/api/auth/sign-in/social',
   `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
   '/api/auth/device/code',
-  '/api/auth/device/token'
+  '/api/auth/device/token',
+  WEB_SIGN_IN_PATH
 ])
 
 /**
@@ -340,8 +359,9 @@ export function parseCookieHeader(headers: IncomingHttpHeaders): Record<string, 
  * but cannot read or forge an `Authorization` header cross-origin. Restricting
  * cookie-based auth to the ONE credential class that is scope-limited by
  * construction (never `full`) bounds what a forged request could do even
- * before the origin check in `ws-origin.ts` (whose REST-side counterpart is
- * `restAuthAction`'s own path/loopback logic) is considered.
+ * before the Origin check (`cookieOriginDecision`, ws-origin.ts — `withRestAuth`
+ * applies it to every state-changing request that would authenticate by the
+ * cookie) is considered.
  *
  * Returns `null` for anything but a clean hit — absent/blank/duplicated
  * header, unknown/expired/revoked web session, invalid better-auth session, a
@@ -393,6 +413,15 @@ export async function verifyRestBearer(
   }
 }
 
+/** Methods that change nothing: a cookie may carry them without an `Origin`. */
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+/** Does {@link verifyRestBearer} take its credential from the web-session cookie? */
+function viaWebSessionCookie(bearer: string | null, cookies: Record<string, string>): boolean {
+  const cookie = cookies[WEB_SESSION_COOKIE_NAME]
+  return Boolean(cookie && isWebSessionToken(cookie)) && !(bearer && isWebSessionToken(bearer))
+}
+
 /**
  * Wrap a request handler in the bearer gate. `server.ts` calls this ONCE and
  * mounts the result, so the allow/verify/401 sequencing lives here (tested)
@@ -421,6 +450,9 @@ export function withRestAuth(opts: {
   /** Resolves a break-glass session (`szbg_`, break-glass.ts). Absent: such a bearer
    *  never authenticates. */
   getBreakGlass?: () => Pick<BreakGlass, 'resolve'> | null
+  /** Is this request's `Origin` the hub's own page (ws-origin.ts `cookieOriginDecision`)?
+   *  Absent = never: a state-changing request never authenticates by the cookie. */
+  isCookieOriginAllowed?: (req: IncomingMessage) => boolean
   next: (req: IncomingMessage, res: ServerResponse) => void
 }): (req: IncomingMessage, res: ServerResponse) => void {
   const deny = (res: ServerResponse, code: 401 | 403, message: string): void => {
@@ -528,6 +560,17 @@ export function withRestAuth(opts: {
       return
     }
     const cookies = parseCookieHeader(req.headers)
+    // CSRF (T-13): a state-changing request that would authenticate by the web-session
+    // cookie — which the browser attaches to whatever asked — must come from the hub's
+    // own page. A missing Origin is no exception: browsers send one on these requests.
+    if (
+      viaWebSessionCookie(bearer, cookies) &&
+      !SAFE_METHODS.has(req.method ?? 'GET') &&
+      opts.isCookieOriginAllowed?.(req) !== true
+    ) {
+      refuse(403, "a cookie request must come from the hub's own page", 'origin', null)
+      return
+    }
     // Only to tell "presented nothing" from "presented something invalid" in the log.
     const presented =
       req.headers.authorization !== undefined || cookies[WEB_SESSION_COOKIE_NAME] !== undefined

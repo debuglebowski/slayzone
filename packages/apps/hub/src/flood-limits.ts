@@ -17,6 +17,14 @@
  *     flood: at most 120 upgrades a minute and 64 open sockets per address. Six users'
  *     desktop windows, web tabs and CLIs behind one NAT stay far below either; a client
  *     refused retries with backoff (tRPC's ws link).
+ *   - `GET /api/auth/web-sso` — the web shell's Entra sign-in (T-13, hub-auth
+ *     `web-sign-in.ts`). It starts Entra in process (`auth.api.signInSocial`, an OAuth
+ *     state written per request), which better-auth never rate-limits — so the same
+ *     budget as its `/sign-in/*`, doubled: one sign-in is two requests here (the start
+ *     and the return leg). 20 a minute.
+ *   - `POST /api/auth/web-session`, `POST /api/auth/web-logout` — the web shell's
+ *     session status and sign-out (T-13, web-session-routes.ts): open like better-auth's
+ *     `get-session` / `sign-out`, so its default for those, 300 a minute each.
  *
  * Deliberately NOT limited here (see the PR for T-26):
  *   - `/health`: answered from memory, and the front end's health probe polls it — a
@@ -42,13 +50,19 @@ import {
   createRateLimitAudit,
   type RateRule
 } from '@slayzone/platform/rate-limit'
+import { WEB_SIGN_IN_PATH } from '@slayzone/hub-auth/server'
 import { BREAK_GLASS_PATH } from './break-glass'
+import { WEB_LOGOUT_PATH, WEB_SESSION_STATUS_PATH } from './web-sessions'
 
 /** Per client address. */
 export const HUB_FLOOD_RULES = {
   webLogin: { max: 10, windowMs: 60_000 },
   breakGlassRedeem: { max: 10, windowMs: 10 * 60_000 },
-  trpcUpgrades: { max: 120, windowMs: 60_000 }
+  trpcUpgrades: { max: 120, windowMs: 60_000 },
+  // T-13: the web shell's sign-in and session routes.
+  webSso: { max: 20, windowMs: 60_000 },
+  webSession: { max: 300, windowMs: 60_000 },
+  webLogout: { max: 300, windowMs: 60_000 }
 } as const satisfies Record<string, RateRule>
 
 /** Open `/trpc` sockets one client address may hold. */
@@ -60,7 +74,13 @@ const HTTP_RULES = new Map<string, { limit: string; rule: RateRule }>([
   [
     `POST ${BREAK_GLASS_PATH}`,
     { limit: 'http.break_glass_redeem', rule: HUB_FLOOD_RULES.breakGlassRedeem }
-  ]
+  ],
+  [`GET ${WEB_SIGN_IN_PATH}`, { limit: 'http.web_sso', rule: HUB_FLOOD_RULES.webSso }],
+  [
+    `POST ${WEB_SESSION_STATUS_PATH}`,
+    { limit: 'http.web_session', rule: HUB_FLOOD_RULES.webSession }
+  ],
+  [`POST ${WEB_LOGOUT_PATH}`, { limit: 'http.web_logout', rule: HUB_FLOOD_RULES.webLogout }]
 ])
 
 export type TrpcUpgradeAdmission =
