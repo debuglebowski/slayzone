@@ -15,10 +15,19 @@ import { readFileSync } from 'node:fs'
 
 const base = process.argv[2] ?? 'origin/main'
 
-const minutes = Number(
-  readFileSync('pnpm-workspace.yaml', 'utf8').match(/^minimumReleaseAge:\s*(\d+)\s*$/m)?.[1]
-)
+const workspace = readFileSync('pnpm-workspace.yaml', 'utf8')
+const minutes = Number(workspace.match(/^minimumReleaseAge:\s*(\d+)\s*$/m)?.[1])
 if (!minutes) throw new Error('pnpm-workspace.yaml has no minimumReleaseAge')
+// Packages pnpm installs at any age (`minimumReleaseAgeExclude`): exempt here too.
+// Entries are names or `*` patterns, as in pnpm (`@typescript/typescript-*`).
+const exempt = [
+  ...(workspace.match(/^minimumReleaseAgeExclude:\s*\n((?:\s+-\s+.+\n?)+)/m)?.[1] ?? '').matchAll(
+    /^\s+-\s+'?([^'\s]+)'?\s*$/gm
+  )
+].map((m) => m[1])
+const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\/]/g, '\\$&')
+const exemptRe = exempt.map((p) => new RegExp(`^${p.split('*').map(escapeRe).join('.*')}$`))
+const isExempt = (name) => exemptRe.some((re) => re.test(name))
 
 /** `name@version` keys of the lockfile's `packages:` section (registry packages only). */
 function lockedVersions(text) {
@@ -32,8 +41,9 @@ function lockedVersions(text) {
 const before = lockedVersions(
   execFileSync('git', ['show', `${base}:pnpm-lock.yaml`], { encoding: 'utf8', maxBuffer: 1 << 28 })
 )
+const nameOf = (key) => key.slice(0, key.lastIndexOf('@'))
 const added = [...lockedVersions(readFileSync('pnpm-lock.yaml', 'utf8'))].filter(
-  (k) => !before.has(k)
+  (k) => !before.has(k) && !isExempt(nameOf(k))
 )
 
 const cutoff = Date.now() - minutes * 60_000
@@ -72,7 +82,7 @@ await Promise.all(
 
 const days = minutes / 1440
 console.log(
-  `${added.length} package versions added to pnpm-lock.yaml since ${base}; minimum age ${days} days`
+  `${added.length} package versions added to pnpm-lock.yaml since ${base}; minimum age ${days} days (exempt: ${exempt.join(', ') || 'none'})`
 )
 for (const { key, published } of young.sort((a, b) => a.key.localeCompare(b.key))) {
   console.log(`  too young: ${key} (published ${published})`)

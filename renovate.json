@@ -43,6 +43,11 @@
       "description": "Patched in patches/ (package.json pnpm.patchedDependencies, keyed by exact version): a bump needs the patch re-ported, so approve it from the Dependency Dashboard. electron-builder is here because it pins the patched app-builder-lib.",
       "matchPackageNames": ["@convex-dev/auth", "posix", "app-builder-lib", "electron-builder"],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "TypeScript is exempt from the 30-day minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
+      "matchPackageNames": ["typescript", "@typescript/native-preview"],
+      "minimumReleaseAge": null
     }
   ]
 }
