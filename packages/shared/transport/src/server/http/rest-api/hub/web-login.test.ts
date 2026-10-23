@@ -6,7 +6,8 @@
  * (covered against a real better-auth instance in its own `web-sessions.test.ts`
  * and `rest-auth.test.ts`'s szw_ tests), and this package has no hub-auth
  * dependency. This file owns exactly what the ROUTE layer is responsible for:
- * status codes, body validation, the Set-Cookie header, and the capability gate.
+ * status codes, body validation, the Set-Cookie header (and no token in the body),
+ * and the capability gate.
  *
  * Uses raw `fetch` rather than the shared `mountRestApp` harness's `request()`
  * helper — that helper discards response headers, and `Set-Cookie` is the one
@@ -32,15 +33,10 @@ function mount(webLogin: RestApiDeps['webLogin']) {
 }
 
 await describe('POST /api/auth/web-login', () => {
-  test('a successful login sets an HttpOnly cookie AND returns the token in the body', async () => {
-    const stub: WebLogin = {
-      login: async (email) => ({
-        ok: true,
-        token: 'szw_test-token',
-        cookieName: 'slayzone_web_session',
-        maxAgeSec: 604800
-      })
-    }
+  test("a successful login sets the hub's cookie and returns NO token in the body (T-13)", async () => {
+    const cookie =
+      'slayzone_web_session=szw_test-token; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=604800'
+    const stub: WebLogin = { login: async () => ({ ok: true, setCookie: cookie }) }
     const rest = await mount(stub)
     try {
       const res = await fetch(`${rest.url}/api/auth/web-login`, {
@@ -49,16 +45,11 @@ await describe('POST /api/auth/web-login', () => {
         body: JSON.stringify({ email: 'alice@example.com', password: 'correct-horse' })
       })
       expect(res.status).toBe(200)
-      const body = (await res.json()) as { ok: boolean; token: string }
-      expect(body.ok).toBe(true)
-      expect(body.token).toBe('szw_test-token')
-
-      const setCookie = res.headers.get('set-cookie') ?? ''
-      expect(setCookie.includes('slayzone_web_session=szw_test-token')).toBe(true)
-      expect(setCookie.includes('HttpOnly')).toBe(true)
-      expect(setCookie.includes('Secure')).toBe(true)
-      expect(setCookie.includes('SameSite=Lax')).toBe(true)
-      expect(setCookie.includes('Max-Age=604800')).toBe(true)
+      const text = await res.text()
+      expect(JSON.parse(text)).toEqual({ ok: true })
+      expect(text.includes('szw_test-token')).toBe(false)
+      // Set exactly as the capability built it — the flags are the hub's (webSessionCookie).
+      expect(res.headers.get('set-cookie')).toBe(cookie)
     } finally {
       await rest.close()
     }
@@ -90,7 +81,7 @@ await describe('POST /api/auth/web-login', () => {
     const stub: WebLogin = {
       login: async () => {
         called = true
-        return { ok: true, token: 't', cookieName: 'c', maxAgeSec: 1 }
+        return { ok: true, setCookie: 'c=t' }
       }
     }
     const rest = await mount(stub)

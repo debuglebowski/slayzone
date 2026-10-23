@@ -11,10 +11,8 @@
  *      is an intentional feature-detect in shared renderer-app code
  *      (browser-mojo-link.ts, embedded-tab-host.ts) expecting `undefined`,
  *      never a thrown exception, for a namespace this shell never implements.
- *   3. `hubLogin` → `getHubTokens` round-trip: a successful sign-in must make
- *      the token immediately readable back, keyed by `getHubRegistry()`'s
- *      `defaultHubId` — that's the exact lookup `main.tsx`'s boot sequence
- *      performs before deciding whether to render the login screen.
+ *   3. `hubLogin` keeps no token (T-13): the hub's HttpOnly cookie is the session,
+ *      so `getHubTokens` stays empty and nothing reaches storage.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setupWindowApi } from './window-api'
@@ -54,17 +52,13 @@ describe('setupWindowApi', () => {
     expect(() => (api as unknown as { browser?: unknown }).browser).not.toThrow()
   })
 
-  it("hubLogin stores the token; getHubTokens reads it back under getHubRegistry()'s defaultHubId", async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ ok: true, token: 'szw_test-token' })
-      }))
-    )
+  it('hubLogin keeps no token: the session is the HttpOnly cookie, getHubTokens stays empty (T-13)', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
     const api = setupWindowApi()
-    expect(await api.app.getHubTokens()).toEqual({})
-
     const result = await api.app.hubLogin({
       hubId: 'local',
       url: '',
@@ -72,10 +66,12 @@ describe('setupWindowApi', () => {
       password: 'pw'
     })
     expect(result).toEqual({ ok: true })
-
-    const registry = await api.app.getHubRegistry()
-    const tokens = await api.app.getHubTokens()
-    expect(tokens[registry.defaultHubId]).toBe('szw_test-token')
+    expect(await api.app.getHubTokens()).toEqual({})
+    expect(window.localStorage.length).toBe(0)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/web-login',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
+    )
   })
 
   it('hubLogin surfaces a server-reported error and stores nothing', async () => {

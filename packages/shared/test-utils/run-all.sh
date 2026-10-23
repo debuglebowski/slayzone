@@ -242,6 +242,8 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycl
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_test packages/apps/cli/src/commands/update.test.ts
+# `slay computer mint --for` / `--ttl` cap against a fake hub (T-20). Pure Node.
+run_test packages/apps/cli/src/commands/computer-mint.test.ts
 run_test packages/apps/cli/src/local-hub.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts
@@ -779,6 +781,20 @@ run_test_electron_strict_loader packages/apps/hub/src/security-headers-served.te
 # revoke route it uses (hub-auth's account half runs in its package suite).
 run_test_electron_strict_loader packages/apps/hub/src/break-glass.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/hub/computers.test.ts
+
+# Flood limits (T-26): the hub's front-door limits (web-login, break-glass redemption,
+# /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.
+run_test packages/apps/hub/src/flood-limits.test.ts
+
+# Web shell sign-in and sign-out through Entra (T-13): the session routes over real
+# hub-auth + app DB, and the shell's cookie-only session (hub-auth's web sign-in runs in
+# its package suite above).
+run_test_electron_strict_loader packages/apps/hub/src/web-session-routes.test.ts
+run_vitest_files "vitest (web shell session, T-13)" \
+  packages/apps/web-shell/src/web-session-storage.test.ts \
+  packages/apps/web-shell/src/web-session.test.ts \
+  packages/apps/web-shell/src/sign-in-error.test.ts \
+  packages/apps/web-shell/src/LoginScreen.test.tsx
 
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner

@@ -13,7 +13,6 @@
 // beyond it is silently stubbed — see the Proxy at the bottom.
 import type { ElectronAPI, HubEntry } from '@slayzone/types'
 import { resolveServerUrl, resolveWindowId } from './server-url'
-import { getStoredSessionToken, setStoredSessionToken } from './web-session-storage'
 
 const NOT_SUPPORTED = 'Not supported in the browser'
 
@@ -34,17 +33,15 @@ async function hubLogin(payload: {
       body: JSON.stringify({ email: payload.email, password: payload.password })
     })
     const body = (await res.json().catch(() => null)) as
-      | { ok: true; token: string }
+      | { ok: true }
       | { ok: false; error: string }
       | null
     if (!res.ok || !body || !body.ok) {
       const error = (body && !body.ok && body.error) || `Sign-in failed (${res.status})`
       return { ok: false, error }
     }
-    // The cookie the response also set covers /api/* REST calls; this covers
-    // /trpc, which authenticates via connectionParams, not a cookie — see
-    // web-session-storage.ts and main.tsx's boot sequence.
-    setStoredSessionToken(body.token)
+    // The session is the HttpOnly cookie the response set — the only place it lives
+    // (T-13, web-session-storage.ts). Nothing to store here.
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Network error' }
@@ -61,13 +58,11 @@ const webApiTarget: ElectronAPI = {
       const hubs: HubEntry[] = [{ id: LOCAL_HUB_ID, kind: 'local', label: 'This hub' }]
       return { hubs, defaultHubId: LOCAL_HUB_ID }
     },
-    getHubTokens: async (): Promise<Record<string, string>> => {
-      const token = getStoredSessionToken()
-      return token ? { [LOCAL_HUB_ID]: token } : {}
-    },
-    // No-op: the web shell has exactly one hub token, written by hubLogin
-    // itself. Accepted rather than rejected — its return type has no error
-    // variant (`Promise<{ok:true}>`), and desktop's own multi-hub UI calling
+    // Always empty: the web shell holds no token a script can read (T-13). Its session
+    // is the hub's HttpOnly cookie, which rides the `/trpc` upgrade on its own.
+    getHubTokens: async (): Promise<Record<string, string>> => ({}),
+    // No-op, for the same reason. Accepted rather than rejected — its return type has
+    // no error variant (`Promise<{ok:true}>`), and desktop's own multi-hub UI calling
     // this against a browser session should degrade silently, not throw.
     setHubToken: async () => ({ ok: true }),
     hubLogin,

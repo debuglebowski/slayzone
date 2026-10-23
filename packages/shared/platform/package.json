@@ -30,7 +30,8 @@
     "./agent-hooks": "./src/agent-hooks/index.ts",
     "./client-address": "./src/client-address.ts",
     "./hub-convex": "./src/hub-convex.ts",
-    "./safe-path": "./src/safe-path.ts"
+    "./safe-path": "./src/safe-path.ts",
+    "./rate-limit": "./src/rate-limit.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -22,7 +22,7 @@ import { verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Scope } from '@slayzone/transport/server'
 import { isBreakGlassToken } from './break-glass.js'
-import { isWebSessionToken, resolveWebSession } from './web-sessions.js'
+import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 
 /**
  * The attributed principal for an authenticated `/trpc` connection.
@@ -62,6 +62,41 @@ export function parseWindowIdFromUrl(rawUrl: string | undefined): number | null 
   } catch {
     return null
   }
+}
+
+/** What a connecting `/trpc` client presented, per {@link connectionToken}. */
+export interface PresentedToken {
+  /** The credential to resolve, or null. */
+  token: string | null
+  /** A web-session cookie was there but not used: the upgrade's Origin was not the hub's page. */
+  cookieRefused: boolean
+}
+
+/**
+ * The credential a `/trpc` connection presents.
+ *
+ *   1. Its `connectionParams` token — desktop, CLI, a federated hub. Sent in the
+ *      connect frame by the client itself, never attached by a browser on its own.
+ *   2. Else the web shell's `slayzone_web_session` cookie (T-13: the shell keeps its
+ *      session nowhere else) — a `szw_` token only, never a better-auth one (the
+ *      scoped class only, as on REST), and only when `cookieOriginAllowed`: the
+ *      upgrade's `Origin` is the hub's own page (ws-origin.ts `cookieOriginDecision`).
+ *      A browser attaches the cookie to ANY socket a page opens to this host, so a
+ *      cross-origin or Origin-less one must never authenticate with it.
+ */
+export function connectionToken(opts: {
+  connectionParamsToken: unknown
+  cookies: Record<string, string>
+  cookieOriginAllowed: boolean
+}): PresentedToken {
+  if (typeof opts.connectionParamsToken === 'string' && opts.connectionParamsToken) {
+    return { token: opts.connectionParamsToken, cookieRefused: false }
+  }
+  const cookie = opts.cookies[WEB_SESSION_COOKIE_NAME]
+  if (!cookie || !isWebSessionToken(cookie)) return { token: null, cookieRefused: false }
+  return opts.cookieOriginAllowed
+    ? { token: cookie, cookieRefused: false }
+    : { token: null, cookieRefused: true }
 }
 
 export interface ResolvePrincipalOptions {

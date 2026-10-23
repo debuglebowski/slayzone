@@ -13,11 +13,15 @@
     "overrides": {
       "zod": "^4",
       "d3-shape>d3-path": "^3.1.0",
-      "node-abi": "^4.28.0"
+      "node-abi": "^4.28.0",
+      "electron-chrome-web-store>adm-zip": "^0.6.1",
+      "prosemirror-view": "^1.42.3",
+      "prosemirror-model": "^1.25.12"
     },
     "patchedDependencies": {
       "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
-      "posix@4.2.0": "patches/posix@4.2.0.patch"
+      "posix@4.2.0": "patches/posix@4.2.0.patch",
+      "app-builder-lib@26.15.2": "patches/app-builder-lib@26.15.2.patch"
     }
   },
   "scripts": {

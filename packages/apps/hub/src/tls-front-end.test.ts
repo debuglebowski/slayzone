@@ -457,7 +457,11 @@ async function main(): Promise<void> {
 
     let token = ''
     await test('the CLI mints a join token over https with the CA trusted the normal way', async () => {
-      const res = await slay(['computer', 'mint', 'tls-front-end', '--json'], home, childCa)
+      const res = await slay(
+        ['computer', 'mint', 'tls-front-end', '--json', '--for', BOOTSTRAP_OWNER_EMAIL],
+        home,
+        childCa
+      )
       assert(res.status === 0, `mint exit 0, got ${res.status}: ${res.stderr.trim()}`)
       const minted = JSON.parse(res.stdout) as { token: string; hubUrl: string }
       token = minted.token

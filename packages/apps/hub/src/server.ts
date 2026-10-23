@@ -18,6 +18,7 @@ import {
 import {
   createAuthExpressApp,
   createDevicePage,
+  createWebSignIn,
   ENTRA_AUTHORITY,
   loadEntraClientCredential
 } from '@slayzone/hub-auth/server'
@@ -47,10 +48,20 @@ import {
 } from './hub-admin-socket.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
-import { parseWindowIdFromUrl, resolveConnectionPrincipal } from './hub-trpc-context.js'
-import { withRestAuth } from './rest-auth.js'
+import {
+  connectionToken,
+  parseWindowIdFromUrl,
+  resolveConnectionPrincipal
+} from './hub-trpc-context.js'
+import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
-import { wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { createWebSessionRoutes } from './web-session-routes.js'
+import {
+  mintBrowserWebSession,
+  WEB_SESSION_COOKIE_NAME,
+  webSessionCookieSecure
+} from './web-sessions.js'
 import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
 import {
@@ -63,6 +74,7 @@ import {
 import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
 import { createWarmWindowSockets } from './warm-window-sockets.js'
+import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -130,6 +142,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     publicAddress: boot.publicAddress,
     sso,
     enablePassword: switches.enablePassword,
+    // Flood limits (T-26): better-auth's limiter and the /computers caps. On exactly
+    // where other machines can reach this hub; never on the desktop app's (B1/B9 keep a
+    // login-off, supervised hub on loopback with no public address).
+    floodLimits: boot.reachable,
     diagnosticsDb
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
@@ -298,11 +314,67 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // B15 validated the list. Empty = trust nobody = the peer (the desktop app's hub).
   const trustedProxiesRead = readTrustedProxies(process.env)
   const trustedProxies = trustedProxiesRead.ok ? trustedProxiesRead.value : NO_TRUSTED_PROXIES
+  // The front-door flood limits (flood-limits.ts): web-login, break-glass redemption and
+  // /trpc upgrades, per client address. Same switch as the limits composeServer wired.
+  const floodGuard = createHubFloodGuard({ enabled: boot.reachable })
   const trustedProxiesWarning = trustedProxiesBootWarning(boot.publicAddress, trustedProxies)
   if (trustedProxiesWarning) {
     process.stderr.write(`${trustedProxiesWarning}\n`)
     log(trustedProxiesWarning)
   }
+
+  // Which page a browser request comes from. `loopbackBind` means "reachable ONLY from
+  // this machine": it listens on loopback AND publishes no public address. The second
+  // half matters — a loopback hub behind a same-box reverse proxy is the internet's
+  // browser, and must not be handed the local-client allowances (file://, chrome://,
+  // "null", localhost). A hub other machines can reach accepts only its own configured
+  // public origin (plus SLAYZONE_HUB_ALLOWED_WEB_ORIGINS).
+  const loopbackBind = !boot.reachable
+  const allowedWsOrigins = resolveAllowedWebOrigins()
+  // The web shell's session cookie (T-13) authenticates a `/trpc` socket or a
+  // state-changing request only from the hub's own page — see ws-origin.ts.
+  const isCookieOriginAllowed = (req: IncomingMessage): boolean =>
+    cookieOriginDecision({
+      origin: req.headers.origin,
+      host: req.headers.host,
+      loopbackBind,
+      allowedOrigins: allowedWsOrigins
+    }) === 'accept'
+  // `Secure` exactly when the public address is https (web-sessions.ts).
+  const secureCookie = webSessionCookieSecure(boot.publicAddress)
+  // The web shell's session routes (status, sign-out) — login-required hubs only, so
+  // the desktop app's hub serves none of it (those paths reach better-auth's 404 there).
+  const webSessionRoutes =
+    hubAuthRequired && hubAuth
+      ? createWebSessionRoutes({
+          getAuth: () => hubAuth,
+          db,
+          secureCookie,
+          isCookieOriginAllowed,
+          // The sockets that rode the ended session close now, not at the next sweep.
+          onSignedOut: () => {
+            void composition.trpcConnections.revalidateAll().catch(() => {
+              /* the periodic sweep (trpc-connections.ts) still closes them */
+            })
+          }
+        })
+      : null
+  // The web shell's sign-in through Entra (T-13, hub-auth `web-sign-in.ts`): Entra hubs
+  // only, like the device page. It mints the browser's scoped session; the cookie the
+  // browser still holds names the session that replaces.
+  const webSignIn =
+    hubAuth && boot.ssoActive
+      ? createWebSignIn(hubAuth, {
+          mint: async (userId, req) => [
+            (
+              await mintBrowserWebSession(hubAuth, db, userId, {
+                secure: secureCookie,
+                replacing: parseCookieHeader(req.headers)[WEB_SESSION_COOKIE_NAME]
+              })
+            ).setCookie
+          ]
+        })
+      : null
 
   // Single muxed server: /health (pre-express, stays alive even if the express
   // stack wedges) + Electron-only REST reverse-proxied to the desktop app (when
@@ -344,6 +416,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       handleBreakGlassRequest(composition.breakGlass, req, res)
       return
     }
+    // The web shell's session routes and Entra sign-in are OURS too (T-13). Null on a
+    // hub without them, so their paths fall through unchanged.
+    if (webSessionRoutes?.(req, res)) return
+    if (webSignIn?.(req, res)) return
     if (authApp && authPath.startsWith('/api/auth/') && authPath !== '/api/auth/web-login') {
       // The apiKey plugin's CLIENT routes are never served. `mintComputerApiKey`
       // calls `auth.api.createApiKey` in-process (the server branch), so nothing
@@ -390,6 +466,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     getHubAuth: () => hubAuth,
     getDb: () => db,
     getBreakGlass: () => composition.breakGlass,
+    isCookieOriginAllowed,
     next: dispatchRequest
   })
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
@@ -397,6 +474,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // /health answers BEFORE the gate: a liveness probe has no credentials, and
     // it must keep answering even when auth is misconfigured.
     if (handleHealth(state, req, res)) return
+    if (floodGuard.refuseRequest(req, res)) return
     gatedDispatch(req, res)
   }
   // Every response gets the security headers here, whichever handler writes it.
@@ -405,16 +483,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   )
 
   // Reject cross-origin WS upgrades — see ws-origin.ts for the full reasoning.
-  // The decision is a pure, unit-tested function; this is only the wiring.
-  //
-  // `loopbackBind` means "reachable ONLY from this machine": it listens on loopback
-  // AND publishes no public address. The second half matters — a loopback hub behind
-  // a same-box reverse proxy is the internet's browser, and must not be handed the
-  // local-client allowances (file://, chrome://, "null", localhost). A hub that
-  // other machines can reach accepts only no-Origin (non-browser) callers plus its
-  // own configured public origin.
-  const loopbackBind = !boot.reachable
-  const allowedWsOrigins = resolveAllowedWebOrigins()
+  // The decision is a pure, unit-tested function; this is only the wiring. A hub that
+  // other machines can reach accepts only no-Origin (non-browser) callers plus its own
+  // configured public origin (`loopbackBind` / `allowedWsOrigins`, defined above).
   const isAllowedWsOrigin = (origin: string | undefined): boolean =>
     wsOriginDecision({
       origin,
@@ -438,6 +509,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     adoptClientAddress(req, trustedProxies)
     const pathname = (req.url ?? '').split('?')[0]
     if (pathname === '/trpc') {
+      // Flood limits first (T-26, flood-limits.ts): cheapest, and they bound the audit
+      // lines a flood of refused origins below could write.
+      const admission = floodGuard.admitTrpcUpgrade(req)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
@@ -456,22 +534,35 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         socket.destroy()
         return
       }
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        admission.track(ws)
+        wss.emit('connection', ws, req)
+      })
     } else if (pathname === '/computers' && computerWss && computerGateway) {
+      // Unauthenticated-socket caps (T-26, hub-gateway.ts `admitUpgrade`), asked before
+      // the upgrade so a refused one allocates nothing. Inert where the hub turned them
+      // off (`floodLimits` above). `handleUpgrade` calls back in this same tick, so the
+      // gateway's count cannot move between the answer and the adoption.
+      const peer = { ip: clientAddress(req) }
+      const admission = computerGateway.admitUpgrade(peer)
+      if (!admission.ok) {
+        refuseUpgrade(socket, admission.status, admission.retryAfterSec)
+        return
+      }
       computerWss.handleUpgrade(req, socket, head, (ws) =>
-        computerGateway.handleConnection(ws, { ip: clientAddress(req) })
+        computerGateway.handleConnection(ws, peer)
       )
     } else {
       // No handler owns this path — reject rather than leave the socket dangling.
       socket.destroy()
     }
   })
-  // createContext verifies the bearer only when this hub enforces auth
-  // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
-  // principal stays null, no verify → byte-identical to trusted loopback.
   // A window's warm-pool tab counts are dropped once its last socket is gone for good
   // (a closed window never reports empty counts) — see warm-window-sockets.ts.
   const warmWindowSockets = createWarmWindowSockets({ clearWindow: clearWindowTabCounts })
+  // createContext verifies the bearer only when this hub enforces auth
+  // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
+  // principal stays null, no verify → byte-identical to trusted loopback.
   const createTrpcContext = async ({
     req,
     res,
@@ -494,12 +585,32 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // auth. An invalid/absent token → principal stays null; individual procedures
     // gate on ctx.principal via the auth gate (an authed hub still accepts the
     // connection but attributes it). See hub-trpc-context.ts for the decision.
+    //
+    // The credential: the connectionParams token, else the web shell's session cookie
+    // from the hub's own page only (T-13, `connectionToken`). Login off: neither is read.
+    const presented = hubAuthRequired
+      ? connectionToken({
+          connectionParamsToken: info?.connectionParams?.token,
+          cookies: parseCookieHeader(req.headers),
+          cookieOriginAllowed: isCookieOriginAllowed(req)
+        })
+      : null
+    if (presented?.cookieRefused) {
+      securityEvent({
+        event: 'authz.denied',
+        outcome: 'denied',
+        actor: null,
+        ip: clientAddress(req),
+        route: routeOf(req.method, req.url),
+        detail: { reason: 'cookie_origin', origin: req.headers.origin ?? null }
+      })
+    }
     const resolve = () =>
       resolveConnectionPrincipal({
         hubAuthRequired,
         hubAuth,
         db,
-        token: info?.connectionParams?.token
+        token: presented?.token
       })
     const principal = await resolve()
     // T-12: the principal is resolved once per socket, so the socket is tracked by its

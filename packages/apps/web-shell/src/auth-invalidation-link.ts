@@ -1,19 +1,21 @@
 import { TRPCClientError, type TRPCLink } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
 import type { AppRouter } from '@slayzone/transport/client'
-import { clearStoredSessionToken } from './web-session-storage'
 
 /**
  * Web-only link: reacts to an `UNAUTHORIZED` error from any operation by
- * clearing the stored scoped session token and reloading back to the login
- * screen (`main.tsx`'s boot sequence renders `LoginScreen` whenever no token
- * is stored).
+ * reloading back to the login screen. The session is the hub's HttpOnly cookie
+ * (T-13), which the page can neither read nor clear; on reload `main.tsx` asks
+ * the hub (`fetchSignedIn`) and renders `LoginScreen` for a session that ended.
+ * That check and the socket apply the same rule (cookie + the hub page's
+ * `Origin`), so a reload cannot land on "signed in" for a socket that is not —
+ * no reload loop.
  *
  * WHY THIS IS NEEDED. The web shell's hub enforces auth on every non-open
  * procedure (`hubAuthRequired = !supervised`, unconditionally true for a
  * hub reachable at all from a browser). A scoped session's sliding expiry
  * (7d idle / 30d absolute, `web-sessions.ts`) or a server-side revoke
- * (`slay hub sessions revoke`) can invalidate the stored token at any time
+ * (`slay hub sessions revoke`) can invalidate the session at any time
  * WITHOUT closing the already-open WebSocket — `connectionParams` is sent
  * once, at connect (see `initTrpcClient`'s docstring), so the socket stays
  * open and every subsequent call just starts failing `UNAUTHORIZED`. Without
@@ -23,8 +25,8 @@ import { clearStoredSessionToken } from './web-session-storage'
  *
  * ONLY `UNAUTHORIZED`, never `FORBIDDEN`: a `FORBIDDEN` (insufficient scope
  * for an otherwise-valid session — e.g. an `agent`-scoped session hitting a
- * `full`-only procedure) is a real, permanent capability limit. Clearing a
- * perfectly valid token and bouncing to login would not fix anything and
+ * `full`-only procedure) is a real, permanent capability limit. Bouncing a
+ * perfectly valid session to login would not fix anything and
  * would just be an infinite reload loop the moment the same request re-fires
  * post-login with the exact same scope.
  *
@@ -42,7 +44,6 @@ export function authInvalidationLink(): TRPCLink<AppRouter> {
           next: (value) => observer.next(value),
           error: (err) => {
             if (err instanceof TRPCClientError && err.data?.code === 'UNAUTHORIZED') {
-              clearStoredSessionToken()
               window.location.reload()
               return // reload is already in flight — don't also propagate the error
             }

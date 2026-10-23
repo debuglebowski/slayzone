@@ -138,7 +138,12 @@ export const SECURITY_EVENTS = [
    *  `authz.denied` line with `detail.reason: 'break_glass'`. */
   'auth.break_glass.use',
   /** A grant or session ended; `detail.reason`: expired, ended, stop, boot, replaced. */
-  'auth.break_glass.end'
+  'auth.break_glass.end',
+  // T-26 (added): flood limits on a hub other machines can reach (`rate-limit.ts`).
+  /** A request, upgrade or socket refused by a flood limit (`denied`). At most one line
+   *  per limit and client address per minute, however many were refused; `detail.limit`
+   *  names the limit, `detail.max`/`windowSec` its size. */
+  'hub.rate_limit'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]

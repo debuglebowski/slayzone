@@ -13,8 +13,10 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ENTRA_AUTHORITY } from '@slayzone/hub-auth/server'
 import {
   API_CSP,
+  ENTRA_SIGN_IN_ORIGIN,
   POSTHOG_ORIGINS,
   strictTransportSecurity,
   webShellCsp,
@@ -161,6 +163,25 @@ async function main(): Promise<void> {
       directive(webShellCsp('127.0.0.1:4100'), 'connect-src')?.includes('ws://127.0.0.1:4100'),
       'loopback public address → ws'
     )
+  })
+
+  await test('shell CSP: the web sign-in chain needs no new source; form-action stays self + Entra (T-13)', () => {
+    // "Sign in with Microsoft" is a LINK to /api/auth/web-sso: a top-level navigation,
+    // which no directive governs, through Entra (wherever it hops) and back by the
+    // hub's own callback. form-action would govern a form-based start's redirects: it
+    // admits Entra's authorize origin and nothing else. The shell's session calls
+    // (/health, /api/auth/web-session, /api/auth/web-logout, /api/auth/web-login) are
+    // same-origin fetches under connect-src 'self'.
+    assertEq(ENTRA_SIGN_IN_ORIGIN, new URL(ENTRA_AUTHORITY).origin, 'the origin it redirects to')
+    for (const pub of [undefined, 'hub.example.com', '127.0.0.1:4100']) {
+      const csp = webShellCsp(pub)
+      assertEq(
+        directive(csp, 'form-action')?.join(' '),
+        `'self' ${ENTRA_SIGN_IN_ORIGIN}`,
+        'form-action: self + Entra, nothing else'
+      )
+      assertEq(directive(csp, 'connect-src')?.[0], "'self'", 'connect-src self')
+    }
   })
 
   await test("the web shell build's default PostHog host is allowed", () => {

@@ -2,10 +2,16 @@ import { createHash } from 'node:crypto'
 import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  DEFAULT_JOIN_TOKEN_TTL_MS,
   JOIN_TOKEN_PREFIX,
+  JoinTokenTtlError,
+  MAX_JOIN_TOKEN_TTL_MS,
+  auditJoinTokenRedeemRefused,
   decodeJoinToken,
   hashJoinToken,
+  isAllowedJoinTokenTtl,
   mintJoinToken,
+  recordJoinTokenRedeemed,
   verifyJoinToken
 } from './join-tokens'
 import { createMigratedDb, type TestDb } from './test-db'
@@ -108,6 +114,59 @@ describe('mintJoinToken', () => {
   })
 })
 
+describe('lifetime cap (T-20)', () => {
+  it('is 1 hour; the default (15 minutes) is under it', () => {
+    expect(MAX_JOIN_TOKEN_TTL_MS).toBe(60 * 60_000)
+    expect(DEFAULT_JOIN_TOKEN_TTL_MS).toBeLessThanOrEqual(MAX_JOIN_TOKEN_TTL_MS)
+    expect(isAllowedJoinTokenTtl(MAX_JOIN_TOKEN_TTL_MS)).toBe(true)
+    for (const bad of [MAX_JOIN_TOKEN_TTL_MS + 1, 2 * 60 * 60_000, 0, -1, 1.5, Number.NaN]) {
+      expect(isAllowedJoinTokenTtl(bad), String(bad)).toBe(false)
+    }
+  })
+
+  it('refuses to mint a longer token and writes nothing', async () => {
+    await expect(mint({ ttlMs: 2 * 60 * 60_000 })).rejects.toBeInstanceOf(JoinTokenTtlError)
+    await expect(mint({ ttlMs: 2 * 60 * 60_000 })).rejects.toMatchObject({
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect(t.raw.prepare('SELECT COUNT(*) AS n FROM join_tokens').get()).toEqual({ n: 0 })
+  })
+
+  it('mints one of exactly 1 hour', async () => {
+    const minted = await mint({ ttlMs: MAX_JOIN_TOKEN_TTL_MS })
+    expect(minted.expires_at - minted.created_at).toBe(MAX_JOIN_TOKEN_TTL_MS)
+  })
+})
+
+describe('owner (T-20)', () => {
+  it('records who it is for apart from who minted it, and verify hands back the owner', async () => {
+    const minted = await mint({ mintedByUserId: 'admin-1', ownerUserId: 'bob' })
+    const row = t.raw
+      .prepare('SELECT minted_by_user_id, owner_user_id FROM join_tokens WHERE id = ?')
+      .get(minted.id)
+    expect(row).toEqual({ minted_by_user_id: 'admin-1', owner_user_id: 'bob' })
+    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+    expect(verified.ok && verified.ownerUserId).toBe('bob')
+  })
+
+  it('a token for nobody (login off) verifies as unowned', async () => {
+    const verified = await verifyJoinToken(t.db, (await mint()).token, NOW + 1)
+    expect(verified.ok && verified.ownerUserId).toBeNull()
+  })
+
+  it('recordJoinTokenRedeemed records the computer the token enrolled', async () => {
+    const minted = await mint({ ownerUserId: 'bob' })
+    await recordJoinTokenRedeemed(t.db, {
+      tokenId: minted.id,
+      computerId: 'c-1',
+      ownerUserId: 'bob'
+    })
+    expect(
+      t.raw.prepare('SELECT computer_id FROM join_tokens WHERE id = ?').get(minted.id)
+    ).toEqual({ computer_id: 'c-1' })
+  })
+})
+
 describe('verifyJoinToken', () => {
   it('accepts a live token and stamps used_at (single-use claim)', async () => {
     const minted = await mint()
@@ -191,10 +250,10 @@ describe('audit (T-03)', () => {
   })
   afterEach(() => setSecurityLogSink())
 
-  it('mint writes computer.join_token.mint with the minter, never the token', async () => {
+  it('mint writes computer.join_token.mint with the minter and the owner, never the token', async () => {
     const minted = await runWithSecurityContext(
       { actor: 'ctx-user', ip: '203.0.113.5', route: 'trpc computers.mintJoinToken' },
-      () => mint({ mintedByUserId: 'user-1' })
+      () => mint({ mintedByUserId: 'user-1', ownerUserId: 'bob' })
     )
     expect(audit).toEqual([
       expect.objectContaining({
@@ -204,25 +263,36 @@ describe('audit (T-03)', () => {
         ip: '203.0.113.5',
         targetKind: 'join_token',
         targetId: minted.id,
-        detail: expect.objectContaining({ ttlMs: TTL, label: 'office-mac' })
+        detail: { ttlMs: TTL, label: 'office-mac', owner: 'bob' }
       })
     ])
     expect(JSON.stringify(audit)).not.toContain(minted.token)
     expect(JSON.stringify(audit)).not.toContain(decodeJoinToken(minted.token)!.secret)
   })
 
-  it('redeem writes computer.join_token.redeem: success once, then failure with the reason', async () => {
-    const minted = await mint({ mintedByUserId: 'user-1' })
+  it('redeem writes computer.join_token.redeem: success once (with the computer), then failure with the reason', async () => {
+    const minted = await mint({ mintedByUserId: 'user-1', ownerUserId: 'bob' })
     audit.length = 0
-    await verifyJoinToken(t.db, minted.token, NOW + 1)
+    const verified = await verifyJoinToken(t.db, minted.token, NOW + 1)
+    // The claim alone writes nothing: the success line waits for the computer.
+    expect(audit).toEqual([])
+    await runWithSecurityContext({ actor: null, ip: '198.51.100.7', route: 'WS /computers' }, () =>
+      recordJoinTokenRedeemed(t.db, {
+        tokenId: verified.ok ? verified.tokenId : '',
+        computerId: 'c-1',
+        ownerUserId: 'bob'
+      })
+    )
     await verifyJoinToken(t.db, minted.token, NOW + 2)
     await verifyJoinToken(t.db, 'szjt1.garbage', NOW + 3)
+    auditJoinTokenRedeemRefused(minted.id, 'owner_disabled', 'denied')
     expect(audit).toEqual([
       expect.objectContaining({
         event: 'computer.join_token.redeem',
         outcome: 'success',
+        ip: '198.51.100.7',
         targetId: minted.id,
-        detail: expect.objectContaining({ mintedBy: 'user-1' })
+        detail: { computerId: 'c-1', owner: 'bob' }
       }),
       expect.objectContaining({
         event: 'computer.join_token.redeem',
@@ -235,6 +305,12 @@ describe('audit (T-03)', () => {
         outcome: 'failure',
         targetId: null,
         detail: expect.objectContaining({ reason: 'malformed' })
+      }),
+      expect.objectContaining({
+        event: 'computer.join_token.redeem',
+        outcome: 'denied',
+        targetId: minted.id,
+        detail: { reason: 'owner_disabled' }
       })
     ])
     expect(JSON.stringify(audit)).not.toContain(minted.token)

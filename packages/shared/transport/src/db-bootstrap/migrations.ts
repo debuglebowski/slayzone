@@ -3895,6 +3895,22 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_user_settings_key ON user_settings(key);
       `)
     }
+  },
+  {
+    version: 170,
+    up: (db) => {
+      // Who a join token is FOR (T-20): the user the computer that redeems it will
+      // belong to. On a hub with login only an admin mints, always naming that user,
+      // so the minter (`minted_by_user_id`, kept for the record) is no longer the
+      // owner. Same loose hub-auth user id as v162.
+      //
+      // Backfilled from the minter: before this the minter WAS the owner, and an
+      // unused token minted then must still enroll its computer for the same user.
+      db.exec(`
+        ALTER TABLE join_tokens ADD COLUMN owner_user_id TEXT;
+        UPDATE join_tokens SET owner_user_id = minted_by_user_id;
+      `)
+    }
   }
 ]
 

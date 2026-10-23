@@ -87,7 +87,7 @@ function remoteWan(url: string): string {
 interface GateHarness {
   get(
     path: string,
-    opts?: { authorization?: string; cookie?: string }
+    opts?: { authorization?: string; cookie?: string; method?: string; origin?: string }
   ): Promise<{ status: number; body: string; reached: boolean }>
   /** The audit context the inner handler last ran with (T-03). */
   seenContext(): SecurityContext | undefined
@@ -119,6 +119,7 @@ async function mountGate(opts: {
   auth: HubAuth | null
   db?: SlayzoneDb | null
   forceOffBox: boolean
+  isCookieOriginAllowed?: (req: import('node:http').IncomingMessage) => boolean
 }): Promise<GateHarness> {
   let reached = false
   let seen: SecurityContext | undefined
@@ -127,6 +128,7 @@ async function mountGate(opts: {
     getHubAuthRequired: () => opts.required,
     getHubAuth: () => opts.auth,
     getDb: () => opts.db ?? null,
+    isCookieOriginAllowed: opts.isCookieOriginAllowed,
     next: (req, res) => {
       reached = true
       seen = currentSecurityContext()
@@ -154,7 +156,9 @@ async function mountGate(opts: {
       const headers: Record<string, string> = {}
       if (callOpts?.authorization) headers.authorization = callOpts.authorization
       if (callOpts?.cookie) headers.cookie = callOpts.cookie
+      if (callOpts?.origin) headers.origin = callOpts.origin
       const res = await fetch(`${base}${path}`, {
+        method: callOpts?.method ?? 'GET',
         headers: Object.keys(headers).length > 0 ? headers : undefined
       })
       const body = await res.text()
@@ -235,6 +239,24 @@ async function main(): Promise<void> {
       remoteWan('/api/auth/web-login?x=1'),
       'allow',
       'query string does not defeat the match'
+    )
+  })
+
+  await test('the web shell session routes (T-13) are open; web-sso only with SSO on', () => {
+    for (const url of ['/api/auth/web-session', '/api/auth/web-logout']) {
+      assertEq(remoteWan(url), 'allow', `${url} open (acts on its own cookie, Origin-checked)`)
+      assertEq(
+        restAuthAction({ hubAuthRequired: true, passwordEnabled: false, url }),
+        'allow',
+        `${url} open with password off too`
+      )
+      assertEq(remoteWan(`${url}/extra`), 'verify', `${url}/extra is not exempt`)
+    }
+    assertEq(remoteWan('/api/auth/web-sso'), 'verify', 'SSO off: web-sso gated')
+    assertEq(
+      restAuthAction({ hubAuthRequired: true, ssoActive: true, url: '/api/auth/web-sso?return=1' }),
+      'allow',
+      'SSO on: web-sso open'
     )
   })
 
@@ -743,6 +765,79 @@ async function main(): Promise<void> {
         assertEq(viaFull.status, 200, 'a full session is unaffected')
       } finally {
         await h.close()
+      }
+    })
+
+    // ── CSRF (T-13): a cookie authenticates a state-changing request only from the hub page
+    await test('withRestAuth: a state-changing request by cookie needs the hub page Origin', async () => {
+      const cookie = `${WEB_SESSION_COOKIE_NAME}=${scopedSession.token}`
+      const HUB = 'https://hub.example.com'
+      const allowed = (req: import('node:http').IncomingMessage): boolean =>
+        req.headers.origin === HUB
+      const h = await mountGate({
+        required: true,
+        auth,
+        db,
+        forceOffBox: true,
+        isCookieOriginAllowed: allowed
+      })
+      const bare = await mountGate({ required: true, auth, db, forceOffBox: true })
+      try {
+        const lines = await captureAudit(async () => {
+          for (const origin of [undefined, 'https://evil.example', 'null']) {
+            const res = await h.get('/api/tasks', { method: 'POST', cookie, origin })
+            assertEq(res.status, 403, `POST by cookie, Origin ${origin} → 403`)
+            assertEq(res.reached, false, 'inner handler never ran')
+          }
+          // Without the option nothing is ever the hub page: refused too (fail closed).
+          const unwired = await bare.get('/api/tasks', { method: 'DELETE', cookie, origin: HUB })
+          assertEq(unwired.status, 403, 'no origin check wired → refused')
+        })
+        const reasons = lines.map((l) => (l.detail as { reason?: string }).reason)
+        assertEq(reasons.join(','), 'origin,origin,origin,origin', 'each refused as origin')
+
+        // From the hub page the request reaches the credential check (a scoped session
+        // is then refused REST as before — not by origin).
+        const fromHub = await captureAudit(async () => {
+          const res = await h.get('/api/tasks', { method: 'POST', cookie, origin: HUB })
+          assertEq(res.status, 403, 'scoped session → 403 as before')
+        })
+        assertEq(
+          (fromHub[0]?.detail as { reason?: string }).reason,
+          'scoped_session',
+          'past the Origin check'
+        )
+        // A safe method by cookie needs no Origin (a same-origin GET sends none).
+        const get = await captureAudit(async () => {
+          await h.get('/api/tasks', { cookie })
+        })
+        assertEq(
+          (get[0]?.detail as { reason?: string }).reason,
+          'scoped_session',
+          'GET: no origin rule'
+        )
+        // A szw_ BEARER is not ambient: no Origin needed.
+        const bearer = await captureAudit(async () => {
+          await h.get('/api/tasks', {
+            method: 'POST',
+            authorization: `Bearer ${scopedSession.token}`,
+            cookie
+          })
+        })
+        assertEq(
+          (bearer[0]?.detail as { reason?: string }).reason,
+          'scoped_session',
+          'bearer: no origin rule'
+        )
+        // A full bearer with no cookie is untouched by the rule.
+        const full = await h.get('/api/tasks', {
+          method: 'POST',
+          authorization: `Bearer ${validToken}`
+        })
+        assertEq(full.status, 200, 'full bearer POST, no Origin → admitted')
+      } finally {
+        await h.close()
+        await bare.close()
       }
     })
 

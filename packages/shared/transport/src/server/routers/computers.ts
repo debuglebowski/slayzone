@@ -9,6 +9,7 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc'
 import { getAuthGate, getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import { adminOnlyTrpcError, callerIsNotAdmin } from '../admin-gate'
+import { decideJoinTokenMint } from '../join-token-policy'
 import type { TrpcContext } from '../context'
 import { accessRequestOf } from '../owner-gate'
 import {
@@ -66,8 +67,6 @@ function auditComputer(
  * Follows the `processesRouter` conventions: `ctx.db`, `publicProcedure`, zod
  * inputs. Registered as `computers` in router.ts.
  */
-
-const DEFAULT_JOIN_TOKEN_TTL_MS = 15 * 60_000 // 15 minutes
 
 /**
  * The request as a computer MANAGER (T-19, `computer-access.ts`): the owner, or an
@@ -180,28 +179,47 @@ export const computersRouter = router({
    * `decodeJoinToken` needs `Buffer`, which the renderer does not have. It is not
    * a secret: it is embedded in the token the caller already receives in full.
    * The REST twin has always returned it; this closes that shape gap.
+   *
+   * WHO IT IS FOR (T-20, `join-token-policy.ts`): on a hub with login only an admin
+   * mints (the role gate, `admin-policy.ts`) and `forUser` — an account id or email
+   * — must name an enabled account, which owns the computer that redeems the token.
+   * Without login, as before: no user, an unowned computer. `ttlMs` at most 1 hour.
    */
   mintJoinToken: publicProcedure
     .input(
       z.object({
         label: z.string().min(1),
-        ttlMs: z.number().int().positive().optional()
+        ttlMs: z.number().int().positive().optional(),
+        forUser: z.string().max(320).optional()
       })
     )
     .mutation(async ({ ctx, input }) => {
       const deps = getComputersDeps()
+      const decision = await decideJoinTokenMint({
+        loginRequired: getAuthGate(),
+        forUser: input.forUser,
+        ttlMs: input.ttlMs,
+        findAccount: deps.findAccount
+      })
+      if (!decision.ok) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: decision.error.message,
+          cause: decision.error
+        })
+      }
       const hubUrl = deps.getHubUrl()
       if (!hubUrl) {
         throw new Error('cannot mint join token — the computer listener has not bound its URL yet')
       }
       const minted = await storeMintJoinToken(ctx.db, {
         hubUrl,
-        ttlMs: input.ttlMs ?? DEFAULT_JOIN_TOKEN_TTL_MS,
+        ttlMs: decision.ttlMs,
         label: input.label,
-        // Carries this user onto the computer that redeems the token. Null on an
-        // unauthenticated loopback hub (the normal local case), which leaves the
-        // computer honestly unowned rather than attributed to a guess.
-        mintedByUserId: ctx.principal?.userId ?? null
+        mintedByUserId: ctx.principal?.userId ?? null,
+        // The named user, or null on a hub without login (the normal local case),
+        // which leaves the computer honestly unowned rather than attributed to a guess.
+        ownerUserId: decision.ownerUserId
       })
       return {
         id: minted.id,

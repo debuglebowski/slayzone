@@ -214,7 +214,8 @@ async function mintJoinToken(port: number, bearer: string): Promise<string> {
     async () => {
       const r = await postJson(
         `http://127.0.0.1:${port}/api/computers/join-token`,
-        { label: 'secrets-at-rest' },
+        // T-20: minted FOR a named user (the bootstrap owner, who also mints here).
+        { label: 'secrets-at-rest', forUser: BOOTSTRAP_OWNER_EMAIL },
         { authorization: `Bearer ${bearer}` }
       )
       return r.status === 200 ? (r.json as { token: string }) : null

@@ -157,10 +157,10 @@ import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import type { HubSsoBootConfig } from './boot-rules.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
 
-import { createHubUsersCapability } from './hub-users.js'
+import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
-import { webLogin } from './web-sessions.js'
+import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer } from './agent-hook-relay-consumer.js'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
@@ -274,6 +274,12 @@ export function composeServer(opts: {
   sso?: HubSsoBootConfig<EntraClientCredential> | null
   /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
   enablePassword?: boolean
+  /**
+   * Flood limits on (T-26): better-auth's rate limiter (hub-auth `rate-limit.ts`) and the
+   * unauthenticated `/computers` caps (computer-transport `hub-gateway.ts`). Required, so
+   * no caller can forget to decide; `server.ts` passes `boot.reachable`.
+   */
+  floodLimits: boolean
   /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
    *  THIS process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
@@ -320,6 +326,8 @@ export function composeServer(opts: {
   // later unit reads these after `computersReady` to mount the gateway in server.ts.
   let computerGatewayRef: HubComputerGateway | null = null
   let hubAuthRef: HubAuth | null = null
+  // Who a join token is for (T-20), read through the late-bound ref above.
+  const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
@@ -1226,7 +1234,9 @@ export function composeServer(opts: {
       // Same late-bound ref the tRPC `computers.list` reads, so the REST twin
       // (`GET /api/computers`, what `slay computer ls` calls) can never report a
       // different connection status than the app's Computers tab.
-      getGateway: () => computerGatewayRef
+      getGateway: () => computerGatewayRef,
+      // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
+      findAccount: joinTokenAccounts
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
@@ -1269,7 +1279,10 @@ export function composeServer(opts: {
     // against such a hub's loopback listener, and doing so should behave the same
     // as any other hub's login.
     webLogin: {
-      login: (email, password) => webLogin(hubAuthRef, db, email, password)
+      login: (email, password) =>
+        webLogin(hubAuthRef, db, email, password, {
+          secure: webSessionCookieSecure(opts.publicAddress)
+        })
     },
     // Raise the host window for the CLI/agent `tasks/open` foreground path. The
     // route itself runs HERE (emits the `open-task` menu event on the side-car's
@@ -1363,6 +1376,9 @@ export function composeServer(opts: {
   setComputersDeps({
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
+    // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
+    // only on a hub with login. The REST twin reads the same function.
+    findAccount: joinTokenAccounts,
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -1420,7 +1436,8 @@ export function composeServer(opts: {
       secret: hubAuthSecret,
       ...(sso ? { sso } : {}),
       // Off: no password sign-in or account with a password (hub-auth password.ts).
-      ...(opts.enablePassword === false ? { enablePassword: false } : {})
+      ...(opts.enablePassword === false ? { enablePassword: false } : {}),
+      rateLimit: opts.floodLimits
     })
     hubAuthRef = hubAuth
     // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
@@ -1442,9 +1459,11 @@ export function composeServer(opts: {
     let seedLocalProjectPaths: (computerId: string, computerName: string) => Promise<void> =
       async () => undefined
     let mirrorComputerProjectPaths: (computerId: string) => Promise<void> = async () => undefined
-    const computerGateway = createHubComputerGateway(
-      createComputerAuthAdapters({ db, auth: hubAuth, localComputerName })
-    )
+    const computerGateway = createHubComputerGateway({
+      ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
+      // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
+      ...(opts.floodLimits ? {} : { floodLimits: false as const })
+    })
     computerGatewayRef = computerGateway
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its
