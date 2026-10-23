@@ -46,7 +46,7 @@
     },
     {
       "description": "TypeScript is exempt from the 30-day minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
-      "matchPackageNames": ["typescript", "@typescript/native-preview"],
+      "matchPackageNames": ["typescript", "@typescript/typescript-*"],
       "minimumReleaseAge": null
     }
   ]
