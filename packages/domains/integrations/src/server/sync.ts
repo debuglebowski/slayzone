@@ -602,6 +602,22 @@ export function startSyncPoller(db: SlayzoneDb, onChanged?: () => void): NodeJS.
 }
 
 /**
+ * The task fields a sync carries to and from the issue (see
+ * `upsertNormalizedFieldState`). An edit that touches none of them has nothing to
+ * push — most app edits are UI state saved on the task row (open editor files, web
+ * panel URLs, the active artifact, the unread flag).
+ */
+export const SYNCED_TASK_FIELDS = ['title', 'description', 'status', 'priority'] as const
+
+/** Whether an edit changed anything a sync would send. */
+export function syncedTaskFieldsChanged(
+  before: Partial<Record<(typeof SYNCED_TASK_FIELDS)[number], unknown>>,
+  after: Partial<Record<(typeof SYNCED_TASK_FIELDS)[number], unknown>>
+): boolean {
+  return SYNCED_TASK_FIELDS.some((f) => (before[f] ?? null) !== (after[f] ?? null))
+}
+
+/**
  * Push a single task to all linked providers immediately after a local edit.
  * Silently skips if no external links exist.
  */

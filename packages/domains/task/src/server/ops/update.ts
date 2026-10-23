@@ -22,7 +22,12 @@ export async function updateTaskOp(
   const result = { previousTask, nextTask }
 
   if (result.nextTask) {
-    ipcMain?.emit('db:tasks:update:done', null, data.id, { oldStatus: result.previousTask?.status })
+    // The row before and after, so listeners (integration push) can tell what changed.
+    ipcMain?.emit('db:tasks:update:done', null, data.id, {
+      oldStatus: result.previousTask?.status,
+      previous: result.previousTask,
+      next: result.nextTask
+    })
     const projectId =
       result.nextTask.project_id ?? result.previousTask?.project_id ?? data.projectId
     if (projectId) {

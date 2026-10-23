@@ -65,12 +65,86 @@ function wired(): { bus: EventEmitter; calls: Calls; notified: () => number } {
 /** The ops emit with a leading null (ipcMain.emit's event arg). */
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
-test('db:tasks:update:done → pushTaskAfterEdit', async () => {
+test('db:tasks:update:done without before/after → pushTaskAfterEdit (fail open)', async () => {
   const { bus, calls } = wired()
   bus.emit('db:tasks:update:done', null, taskId, { oldStatus: 'inbox' })
   await flush()
   expect(calls.edit.length).toBe(1)
   expect(calls.edit[0][1]).toBe(taskId)
+})
+
+/** A task as the update ops report it, before or after. */
+const snap = (over: Record<string, unknown> = {}) => ({
+  id: taskId,
+  project_id: projectId,
+  title: 'T',
+  description: null,
+  status: 'inbox',
+  priority: 3,
+  is_temporary: false,
+  editor_open_files: null,
+  ...over
+})
+
+test('an update that changes a synced field re-syncs the task', async () => {
+  for (const changed of [
+    { title: 'T2' },
+    { description: '<p>d</p>' },
+    { status: 'done' },
+    { priority: 1 }
+  ]) {
+    const { bus, calls } = wired()
+    bus.emit('db:tasks:update:done', null, taskId, {
+      oldStatus: 'inbox',
+      previous: snap(),
+      next: snap(changed)
+    })
+    await flush()
+    expect(calls.edit.length).toBe(1)
+  }
+})
+
+test('an update that changes no synced field (UI state) does not re-sync', async () => {
+  // The app saves open editor files, web panel URLs, the active artifact and the
+  // unread flag through task.update — none of them exist on the issue.
+  const { bus, calls } = wired()
+  bus.emit('db:tasks:update:done', null, taskId, {
+    oldStatus: 'inbox',
+    previous: snap(),
+    next: snap({ editor_open_files: '["a.ts"]' })
+  })
+  await flush()
+  expect(calls.edit.length).toBe(0)
+  expect(calls.create.length).toBe(0)
+})
+
+test('a temporary task made permanent is pushed as a new task', async () => {
+  const { bus, calls } = wired()
+  bus.emit('db:tasks:update:done', null, taskId, {
+    oldStatus: 'inbox',
+    previous: snap({ is_temporary: true }),
+    next: snap({ is_temporary: false, title: 'Real now' })
+  })
+  await flush()
+  expect(calls.create.length).toBe(1)
+  expect(calls.create[0][1]).toBe(taskId)
+  expect(calls.create[0][2]).toBe(projectId)
+  expect(calls.edit.length).toBe(0)
+})
+
+test('a new temporary task is not pushed', async () => {
+  // Scratch terminals ("Terminal 1") are temporary; in a two-way-synced project
+  // each one used to become a Linear/GitHub issue.
+  const tempId = crypto.randomUUID()
+  h.db
+    .prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order", is_temporary) VALUES (?, ?, ?, ?, ?, ?, 1)'
+    )
+    .run(tempId, projectId, 'Terminal 1', 'inbox', 3, 0)
+  const { bus, calls } = wired()
+  bus.emit('db:tasks:create:done', null, tempId, projectId)
+  await flush()
+  expect(calls.create.length).toBe(0)
 })
 
 test('db:tasks:create:done → pushNewTaskToProviders', async () => {
