@@ -84,3 +84,4 @@ export {
   WRONG_CODE_WINDOW_MS,
   type DevicePageOptions
 } from './device-page'
+export { AUTH_RATE_LIMIT_DEFAULT, AUTH_RATE_LIMIT_RULES } from './rate-limit'

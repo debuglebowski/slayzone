@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as x509 from '@peculiar/x509'
+import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { exportJWK, importX509, jwtVerify, SignJWT } from 'jose'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -245,10 +246,14 @@ interface DeviceCodeResponse {
   interval: number
 }
 
-async function requestCode(clientId = 'slayzone-cli'): Promise<DeviceCodeResponse> {
+/** `from`: the client address the hub would have resolved (T-26 limits per address). */
+async function requestCode(clientId = 'slayzone-cli', from?: string): Promise<DeviceCodeResponse> {
   const res = await fetch(`${base}/api/auth/device/code`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(from ? { [CLIENT_ADDRESS_HEADER]: from } : {})
+    },
     body: JSON.stringify({ client_id: clientId })
   })
   expect(res.status).toBe(200)
@@ -499,9 +504,11 @@ describe('device sign-in', () => {
   it('a password session (break-glass) cannot approve: it is sent through Entra', async () => {
     const created = await createHubUser(auth, { email: 'ops@normain.test', name: 'Ops' })
     if ('error' in created) throw new Error(`createHubUser: ${created.error}`)
+    // With Origin, as a browser sends it: Node's fetch sends Fetch Metadata, and outside
+    // better-auth's test mode (vitest sets TEST) that makes the origin check mandatory.
     const signIn = await fetch(`${base}/api/auth/sign-in/email`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: base },
       body: JSON.stringify({ email: created.email, password: created.password })
     })
     expect(signIn.status).toBe(200)
@@ -596,10 +603,13 @@ describe('device sign-in', () => {
   })
 
   it(`at most ${MAX_PENDING_DEVICE_CODES} codes may be outstanding; expired ones are swept`, async () => {
-    for (let i = 0; i < MAX_PENDING_DEVICE_CODES; i++) await requestCode()
+    // From many addresses: one address may ask for only a few (rate-limit.ts).
+    for (let i = 0; i < MAX_PENDING_DEVICE_CODES; i++) {
+      await requestCode('slayzone-cli', `10.0.0.${i + 1}`)
+    }
     const refused = await fetch(`${base}/api/auth/device/code`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', [CLIENT_ADDRESS_HEADER]: '10.0.1.1' },
       body: JSON.stringify({ client_id: 'slayzone-cli' })
     })
     expect(refused.status).toBe(429)
