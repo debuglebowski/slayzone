@@ -252,9 +252,11 @@ describe('web sign-in through Entra', () => {
   it('a password session (break-glass) mints nothing: it is sent through Entra', async () => {
     const created = await createHubUser(auth, { email: 'ops@normain.test', name: 'Ops' })
     if ('error' in created) throw new Error(`createHubUser: ${created.error}`)
+    // With Origin, as a browser sends it (see device.test.ts: outside better-auth's test
+    // mode the origin check is mandatory once Fetch Metadata is present).
     const signIn = await fetch(`${base}/api/auth/sign-in/email`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: base },
       body: JSON.stringify({ email: created.email, password: created.password })
     })
     expect(signIn.status).toBe(200)
