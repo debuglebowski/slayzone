@@ -22,7 +22,7 @@
     "@slayzone/processes": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",
-    "ws": "^8.18.0",
+    "ws": "^8.21.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {

@@ -25,7 +25,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
     "@xyflow/react": "^12.10.2",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.2",
     "lucide-react": "^0.562.0",
     "zustand": "^5.0.0"
   },
