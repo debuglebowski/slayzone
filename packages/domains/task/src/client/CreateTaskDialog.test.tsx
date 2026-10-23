@@ -111,12 +111,13 @@ vi.mock('@slayzone/ui', () => {
 
 const { CreateTaskDialog } = await import('./CreateTaskDialog')
 
-function renderDialog(projectId: string) {
+function renderDialog(projectId: string, onCreatedAndOpen?: (task: unknown) => void) {
   return render(
     <CreateTaskDialog
       open
       onOpenChange={() => {}}
       onCreated={() => {}}
+      onCreatedAndOpen={onCreatedAndOpen}
       draft={{ projectId, title: 'Task on the VPS hub' }}
       tags={[]}
     />
@@ -168,5 +169,39 @@ describe('CreateTaskDialog — hub routing', () => {
     submit()
     await waitFor(() => expect(ambient.task.create.mutate).toHaveBeenCalledTimes(1))
     expect(remote.task.create.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('CreateTaskDialog — open after create', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ambient.task.create.mutate.mockResolvedValue({ id: 't-1', title: 'Task on the VPS hub' })
+  })
+  afterEach(cleanup)
+
+  // The hub hands a task created to be opened at once its project's warm agent; it
+  // must not for one that is only created (the agent would wait for a spawn that
+  // never comes, then be killed).
+  it('plain Create does not ask for the warm agent', async () => {
+    renderDialog('p-local', () => {})
+    submit()
+    await waitFor(() => expect(ambient.task.create.mutate).toHaveBeenCalledTimes(1))
+    expect(ambient.task.create.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ openAfterCreate: false })
+    )
+  })
+
+  it('Create + open asks for it', async () => {
+    const opened = vi.fn()
+    renderDialog('p-local', opened)
+    const createAndOpen = screen
+      .getAllByRole('button')
+      .find((b) => b.textContent?.startsWith('Create + open'))
+    fireEvent.click(createAndOpen as HTMLElement)
+    await waitFor(() => expect(ambient.task.create.mutate).toHaveBeenCalledTimes(1))
+    expect(ambient.task.create.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ openAfterCreate: true })
+    )
+    await waitFor(() => expect(opened).toHaveBeenCalled())
   })
 })

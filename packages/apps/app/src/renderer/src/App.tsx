@@ -980,7 +980,9 @@ function App(): React.JSX.Element {
         projectId,
         title: `Terminal ${next}`,
         status,
-        isTemporary: true
+        isTemporary: true,
+        // Opened right below — lets the hub hand it the project's warm agent.
+        openAfterCreate: true
       })
       if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
       recordDiagnosticsTimeline('temp_task_created', {

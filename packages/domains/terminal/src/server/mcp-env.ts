@@ -101,7 +101,7 @@ export async function resolveRemoteMcpEnv(
  *   SLAYZONE_AGENT_HOOK_CONTEXT
  *                            - an OPAQUE JSON blob carrying every identity field
  *                              the server needs to attribute a hook (taskId,
- *                              slaySessionId, projectId, agentId, channel). The
+ *                              projectId, agentId, channel). The
  *                              benign `notify.sh` forwards it VERBATIM without
  *                              naming any field — so adding a new identity field
  *                              later touches only this function + the server,
@@ -137,16 +137,10 @@ export async function buildMcpEnv(
   db: SlayzoneDb | null | undefined,
   taskId: string | undefined,
   mode?: TerminalMode,
-  /** Runtime session id for a pre-warmed POOLED agent (plans/agent-sessions.md
-   *  slice 4/B). Such an agent has NO task at launch, so `SLAYZONE_TASK_ID` is
-   *  absent; the `slay` CLI + the conversation hook fall back to this id to
-   *  resolve the task once the pool binds the session. Harmless to set for a
-   *  normal agent too (the task env wins), but only pooled spawns pass it. */
-  sessionId?: string,
-  /** Explicit project id — set when the caller already knows it without a task
-   *  (the warm pool spawns per-project, before any task exists). Takes priority
-   *  over the task-derived lookup so `SLAYZONE_PROJECT_ID` is always present,
-   *  regardless of whether a task is bound yet. */
+  /** Explicit project id — set when the caller already knows it without a task row
+   *  (the warm pool boots an agent under a reserved task id before that task is
+   *  created). Takes priority over the task-derived lookup so `SLAYZONE_PROJECT_ID`
+   *  is always present. */
   projectId?: string,
   /** Resolved remote hub target when this session runs on a computer.
    *  Absent/`null` => local loopback env (byte-identical to before the seam). */
@@ -164,7 +158,6 @@ export async function buildMcpEnv(
         )?.project_id
       : undefined)
   if (resolvedProjectId) env.SLAYZONE_PROJECT_ID = resolvedProjectId
-  if (sessionId) env.SLAYZONE_SESSION_ID = sessionId
 
   const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
 
@@ -199,7 +192,6 @@ export async function buildMcpEnv(
       releaseChannel: getSlayzoneReleaseChannel()
     }
     if (taskId) ctx.taskId = taskId
-    if (sessionId) ctx.slaySessionId = sessionId
     if (resolvedProjectId) ctx.projectId = resolvedProjectId
     env.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify(ctx)
   }

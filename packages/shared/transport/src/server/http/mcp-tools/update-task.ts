@@ -2,23 +2,19 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { updateTaskOp } from '@slayzone/task/server'
 import { isKnownStatus } from '@slayzone/projects/shared'
-import { getProjectColumns, getAllowedStatusesText, resolveCurrentTaskId } from './shared'
+import { getProjectColumns, getAllowedStatusesText } from './shared'
 import { NOOP_TASK_BUS } from '../rest-api/types'
 import type { McpToolsDeps } from './types'
 
 export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
     'update_task',
-    "Update a task's details (title, description, status, priority, assignee, due date). Prefer calling get_current_task_id first, then pass that as task_id. In task terminals, you can source task_id from local $SLAYZONE_TASK_ID. If empty (pre-warmed agent), pass session_id from $SLAYZONE_SESSION_ID instead.",
+    "Update a task's details (title, description, status, priority, assignee, due date). Prefer calling get_current_task_id first, then pass that as task_id. In task terminals, you can source task_id from local $SLAYZONE_TASK_ID.",
     {
       task_id: z
         .string()
         .optional()
         .describe('The task ID to update (read from $SLAYZONE_TASK_ID env var)'),
-      session_id: z
-        .string()
-        .optional()
-        .describe('Fallback when $SLAYZONE_TASK_ID is empty — pass $SLAYZONE_SESSION_ID instead'),
       title: z.string().optional().describe('New title'),
       description: z.string().nullable().optional().describe('New description (null to clear)'),
       status: z.string().optional().describe('New status'),
@@ -34,14 +30,13 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
         ),
       close: z.boolean().optional().describe('Close the task tab in the UI')
     },
-    async ({ task_id, session_id, due_date, parent_id, close, ...fields }) => {
-      const resolvedTaskId = await resolveCurrentTaskId(deps.db, task_id, session_id)
-      if (!resolvedTaskId) {
+    async ({ task_id, due_date, parent_id, close, ...fields }) => {
+      if (!task_id) {
         return {
           content: [
             {
               type: 'text' as const,
-              text: 'No task ID available. Pass task_id (from $SLAYZONE_TASK_ID) or session_id (from $SLAYZONE_SESSION_ID).'
+              text: 'No task ID available. Pass task_id (from $SLAYZONE_TASK_ID).'
             }
           ],
           isError: true
@@ -51,10 +46,10 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       if (fields.status !== undefined) {
         const taskRow = (await deps.db
           .prepare('SELECT project_id FROM tasks WHERE id = ?')
-          .get(resolvedTaskId)) as { project_id: string } | undefined
+          .get(task_id)) as { project_id: string } | undefined
         if (!taskRow) {
           return {
-            content: [{ type: 'text' as const, text: `Task ${resolvedTaskId} not found` }],
+            content: [{ type: 'text' as const, text: `Task ${task_id} not found` }],
             isError: true
           }
         }
@@ -66,7 +61,7 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
             content: [
               {
                 type: 'text' as const,
-                text: `Unknown status "${fields.status}" for task ${resolvedTaskId}. Allowed statuses: ${allowed}.`
+                text: `Unknown status "${fields.status}" for task ${task_id}. Allowed statuses: ${allowed}.`
               }
             ],
             isError: true
@@ -78,7 +73,7 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       try {
         updated = await updateTaskOp(
           deps.db,
-          { id: resolvedTaskId, ...fields, dueDate: due_date, parentId: parent_id },
+          { id: task_id, ...fields, dueDate: due_date, parentId: parent_id },
           { ipcMain: deps.taskBus ?? NOOP_TASK_BUS }
         )
       } catch (err) {
@@ -86,14 +81,14 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       }
       if (!updated) {
         return {
-          content: [{ type: 'text' as const, text: `Task ${resolvedTaskId} not found` }],
+          content: [{ type: 'text' as const, text: `Task ${task_id} not found` }],
           isError: true
         }
       }
       deps.notifyRenderer()
       if (close) {
-        deps.menu?.emit('close-task', resolvedTaskId)
-        deps.legacyBroadcast?.('app:close-task', resolvedTaskId) // slice 5: drop legacy send
+        deps.menu?.emit('close-task', task_id)
+        deps.legacyBroadcast?.('app:close-task', task_id) // slice 5: drop legacy send
       }
       return {
         content: [

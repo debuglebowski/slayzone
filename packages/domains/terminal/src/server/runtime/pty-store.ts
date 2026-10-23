@@ -78,8 +78,8 @@ export interface PtyCreateOpts {
  *
  * `warmSetProjectTabCounts` is per-window state: the IPC handler keys it by
  * `event.sender.id`, the tRPC proc by `ctx.windowId` (same webContents id).
- * Window-close cleanup lives host-side (`wireWarmWindowCleanup`), independent
- * of which transport pushed the counts.
+ * Window-close cleanup is the hub's: it clears a window's counts once that
+ * window's last `/trpc` socket stays closed (apps/hub warm-window-sockets.ts).
  */
 export function createPtyOps(db: SlayzoneDb) {
   // Wires the pty-manager's session ledger (hub/computer wave 1: the runtime's
@@ -302,10 +302,10 @@ export function createPtyOps(db: SlayzoneDb) {
 
     const modeInfo = (await lookups.getTerminalMode(modeId)) ?? undefined
 
-    // Warm-process pool: if this project has a ready warm agent ON THE COMPUTER this
-    // spawn resolves to, and it matches (default mode, project-root cwd, fresh
-    // start, same flags), adopt it instead of cold-spawning. A miss is silent —
-    // createPty cold-spawns exactly as before.
+    // Warm-process pool: if a warm agent was reserved for THIS task at create (it
+    // booted with the task's id) and the spawn matches it (default mode,
+    // project-root cwd, fresh start, same flags, same computer), adopt it instead of
+    // cold-spawning. A miss is silent — createPty cold-spawns exactly as before.
     //
     // Claiming is gated on a RESOLVED computer, the inverse of the old rule. It used
     // to fire only when `computerId == null`, because the pool was hub-local — which
@@ -323,18 +323,16 @@ export function createPtyOps(db: SlayzoneDb) {
       computerId = await lookups.resolveComputerId(taskId)
       projectId = await lookups.getTaskProjectId(taskId)
       if (computerId != null) {
-        if (projectId) {
-          warmClaim = claimWarmShell({
-            projectId,
-            mode: modeId,
-            cwd: opts.cwd,
-            resuming: !!opts.existingConversationId,
-            computerId,
-            // The warm agent baked the mode's default flags; only adopt it when
-            // this spawn's flags match (else cold-spawn with the right flags).
-            flags: opts.providerFlags ?? null
-          })
-        }
+        warmClaim = claimWarmShell({
+          taskId,
+          mode: modeId,
+          cwd: opts.cwd,
+          resuming: !!opts.existingConversationId,
+          computerId,
+          // The warm agent baked the mode's default flags; only adopt it when
+          // this spawn's flags match (else cold-spawn with the right flags).
+          flags: opts.providerFlags ?? null
+        })
       }
     }
 

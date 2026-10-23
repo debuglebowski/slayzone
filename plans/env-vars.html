@@ -444,8 +444,7 @@ const DATA = [
   //      alone reads is set for the terminal, not for the hook script. ----
   ["SLAYZONE_ROOT","CLI","R","State anchor — derives <ROOT>/storage, so `slay` opens the SAME DB as the app that spawned it","~/.slayzone",""],
   ["SLAYZONE_DEV","CLI","R","Picks the dev vs prod DB filename (equivalent to `slay --dev`, which just sets this)","prod",""],
-  ["SLAYZONE_TASK_ID","CLI","R","Default task for every `slay tasks …` (absent for a pooled/taskless agent)","—",""],
-  ["SLAYZONE_SESSION_ID","CLI","R","Fallback task resolution — looks up the task bound to this session when TASK_ID is unset","—",""],
+  ["SLAYZONE_TASK_ID","CLI","R","Default task for every `slay tasks …` (set for every agent; a warm-pool agent boots with the id its task is later created under)","—",""],
   ["SLAYZONE_PROJECT_ID","CLI","R","Default project for project-scoped commands","—",""],
   ["SLAYZONE_AGENT_ID","CLI","R","Tags CLI-authored writes with the agent that made them (author attribution)","—",""],
   ["SLAYZONE_HUB_ADDRESS","CLI","R","Hub authority to dial instead of the local app — authority only, http(s) from MODE; invalid = exit 1. NOT inherited (stripped at spawn), so in a task PTY the CLI reads settings.server_port instead","— (DB is the source)",""],
@@ -476,7 +475,7 @@ const SCOPES = {
   SLAYZONE_CODEX_HOOKS_PATH:'infra', SLAYZONE_ANTIGRAVITY_HOOKS_PATH:'infra',
   SLAYZONE_OPENCODE_PLUGIN_PATH:'infra',
   SLAYZONE_TASK_ID:'identity', SLAYZONE_PROJECT_ID:'identity',
-  SLAYZONE_SESSION_ID:'identity', SLAYZONE_AGENT_ID:'identity',
+  SLAYZONE_AGENT_ID:'identity',
   SLAYZONE_AGENT_HOOK_URL:'identity', SLAYZONE_AGENT_HOOK_CONTEXT:'identity',
   // SLAYZONE_HOOK_CONTEXT is deliberately absent → renders as `unlisted`.
   SLAYZONE_RELEASE_CHANNEL:'global', SLAYZONE_ROOT:'global', SLAYZONE_DEV:'global',
@@ -507,7 +506,7 @@ const REQUIRED = {
   SLAYZONE_HUB_ADDRESS: ['conditional','Runner: required for FIRST contact — absent a <ROOT>/config.json or a join token, config resolution throws. Hub: optional (binds loopback + an OS-assigned port). CLI: optional (falls back to the app’s settings.server_port)'],
   SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a runner’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/computers'],
   SLAYZONE_HUB_TOKEN: ['conditional','Required when dialing a hub that enforces auth (verified on /trpc + /api/* + /mcp); otherwise hub.json’s token is used. Set-but-empty = deliberately no token'],
-  SLAYZONE_TASK_ID: ['conditional','Agent: the OpenCode plugin no-ops without it, so no lifecycle event reaches notify.sh at all. CLI: falls back to SLAYZONE_SESSION_ID, then errors only if both are unset'],
+  SLAYZONE_TASK_ID: ['conditional','Agent: the OpenCode plugin no-ops without it, so no lifecycle event reaches notify.sh at all. CLI: errors if it is unset and no id is passed'],
   SLAYZONE_HOOK_CONTEXT: ['conditional','Only needed from a PRE-v4 app: notify.sh reads it as ${NEW:-$OLD}, so an older channel’s app feeding a newer shared script still resolves a task'],
 
   // --- optional: documented fallback ---
@@ -515,7 +514,6 @@ const REQUIRED = {
   SLAYZONE_MODE: ['optional','Defaults to local (http/ws + loopback-only bind). Set remote to force https/wss + client auth'],
   SLAYZONE_HUB_AUTH_SECRET: ['optional','A standalone hub GENERATES and persists a 256-bit secret (0600) when unset; supervised uses a dev constant. Set it only to pin a known key across reinstalls'],
   SLAYZONE_NONINTERACTIVE: ['optional','Defaults to prompting on a TTY. Set it in CI/headless so first-run setup does not block'],
-  SLAYZONE_SESSION_ID: ['optional','Only the fallback leg of task resolution — used when SLAYZONE_TASK_ID is unset'],
   SLAYZONE_PROJECT_ID: ['optional','Just a default for project-scoped commands; pass the project explicitly instead'],
   HOME: ['optional','OS-provided. Only the anchor fallback when SLAYZONE_ROOT is unset'],
   USERPROFILE: ['optional','OS-provided (Windows). Only the anchor fallback when SLAYZONE_ROOT is unset'],

@@ -97,10 +97,12 @@ export {
 // sidecar owns pty + must initialize it (the renderer's warm tab-count reports
 // land here, not in the Electron host). See plans/agent-sessions.md.
 export {
+  clearWindowTabCounts,
   initWarmProcessManager,
   reapOrphanWarms,
+  reserveWarmTaskId,
   teardownAllWarm,
-  warmSessionPlacement
+  unadoptedWarmAgent
 } from './runtime/warm-process-manager'
 export {
   ptyEvents,

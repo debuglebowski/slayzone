@@ -55,6 +55,8 @@ export {
   archiveManyTasksOp,
   createTaskOp,
   createImportedTaskOp,
+  insertTaskRow,
+  type TaskRowData,
   deleteTaskOp,
   getTaskOp,
   restoreTaskOp,
@@ -78,8 +80,7 @@ export {
   markSessionDead,
   markSessionFirstTurn,
   listResumeCandidates,
-  bindSessionToTask,
-  getBoundTaskId
+  bindSessionToTask
 } from './ops'
 export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
 export {

@@ -15,19 +15,19 @@ vi.mock('@slayzone/agent-turns/server', () => ({
 
 // Keep the route's other domain imports out of vitest (no Electron / DB / adapter
 // registry) — mirror agent-hook.test.ts.
+// The warm pool's view of a task id (a warm agent not adopted yet). Default: none.
+const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
 vi.mock('@slayzone/terminal/server', () => ({
-  isHookDrivenMode: () => false
+  isHookDrivenMode: () => false,
+  unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
 }))
 vi.mock('@slayzone/diagnostics/server', () => ({
   recordDiagnosticEvent: () => {}
 }))
-const getBoundTaskIdSpy = vi.fn<(db: unknown, sessionId: string) => Promise<string | null>>(() =>
-  Promise.resolve(null)
-)
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: () => {},
   findPendingSpawn: () => Promise.resolve(null),
-  getBoundTaskId: (db: unknown, sessionId: string) => getBoundTaskIdSpy(db, sessionId)
+  confirmSessionConversation: () => Promise.resolve()
 }))
 
 interface ServerHandle {
@@ -81,8 +81,8 @@ function postJson(port: number, body: unknown): Promise<{ status: number }> {
 describe('POST /api/agent-hook → capturePrompt', () => {
   beforeEach(() => {
     capturePromptSpy.mockReset()
-    getBoundTaskIdSpy.mockReset()
-    getBoundTaskIdSpy.mockResolvedValue(null)
+    unadoptedWarmAgentSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReturnValue(null)
   })
 
   test('forwards UserPromptSubmit payload to capturePrompt', async () => {
@@ -123,27 +123,34 @@ describe('POST /api/agent-hook → capturePrompt', () => {
     }
   })
 
-  test('warm-pool-adopted session (slaySessionId, no taskId) → captures with DB-resolved taskId', async () => {
-    // The adopted agent's env was fixed pre-task, so its payload carries only
-    // slaySessionId. The route must resolve the bound task and still capture —
-    // otherwise these sessions never populate the messages sidebar.
-    getBoundTaskIdSpy.mockResolvedValue('bound-task-7')
+  test('an adopted warm agent captures under its own task id', async () => {
+    // It booted with this id, so its hooks name the task directly.
     const srv = await startServer()
     try {
       await postJson(srv.port, {
         agentId: 'claude-code',
         hookEvent: 'UserPromptSubmit',
-        slaySessionId: 'pool-sess-capture-1',
-        raw: { prompt: 'hello from adopted session' }
+        taskId: 'adopted-task-7',
+        raw: { prompt: 'hello from adopted agent' }
       })
-      expect(getBoundTaskIdSpy).toHaveBeenCalledWith(expect.anything(), 'pool-sess-capture-1')
       expect(capturePromptSpy).toHaveBeenCalledTimes(1)
-      const [, input] = capturePromptSpy.mock.calls[0]
-      expect(input).toMatchObject({
+      expect(capturePromptSpy.mock.calls[0][1]).toMatchObject({ taskId: 'adopted-task-7' })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('an unadopted warm agent captures nothing (no task has its terminal yet)', async () => {
+    unadoptedWarmAgentSpy.mockReturnValue({ sessionId: 'pool-1' })
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
         agentId: 'claude-code',
-        taskId: 'bound-task-7',
-        raw: { prompt: 'hello from adopted session' }
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'reserved-task-8',
+        raw: { prompt: 'nobody typed this' }
       })
+      expect(capturePromptSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }

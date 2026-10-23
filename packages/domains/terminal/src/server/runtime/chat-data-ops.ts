@@ -282,7 +282,7 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
         computerId: computerId ?? null,
         mode: mode as TerminalMode
       })
-      return buildMcpEnv(db, taskId, mode as TerminalMode, undefined, undefined, remote)
+      return buildMcpEnv(db, taskId, mode as TerminalMode, undefined, remote)
     },
 
     resolveComputerId: async (taskId) => {

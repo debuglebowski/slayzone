@@ -8,6 +8,7 @@ import {
   type TerminalProps
 } from '@slayzone/terminal/client/LazyTerminal'
 import { markSkipCache } from '@slayzone/terminal/client'
+import { agentAutoStarts, TERMINAL_AUTO_START_SETTING } from '@slayzone/terminal/shared'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
@@ -54,10 +55,10 @@ export interface TerminalStarterProps extends TerminalProps {
    */
   hibernated?: boolean
   /**
-   * The owning task is temporary (ephemeral terminal tab). Auto-start is a
-   * regular-task-only feature: a temp task never auto-spawns from the
-   * `terminal_auto_start` setting, so the Start gate always shows. Reattach to
-   * a live PTY and warm-set restore (`wasSpawned`) still bypass the gate.
+   * The owning task is temporary (ephemeral terminal tab). A temp task always
+   * auto-starts; a regular task follows the `terminal_auto_start` setting (see
+   * `agentAutoStarts`). Reattach to a live PTY and warm-set restore (`wasSpawned`)
+   * bypass the gate either way.
    */
   isTemporary?: boolean
   /**
@@ -154,13 +155,14 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       }
       void Promise.all([
         trpcClient.pty.exists.query({ sessionId }),
-        trpcClient.settings.get.query({ key: 'terminal_auto_start' })
+        trpcClient.settings.get.query({ key: TERMINAL_AUTO_START_SETTING })
       ]).then(([exists, autoStart]) => {
         if (cancelled) return
-        // Temp tasks always auto-start (scratch terminals are "always live");
-        // regular tasks honor the `terminal_auto_start` setting. Reattaching to a
-        // live PTY (`exists`) always starts.
-        if (exists || isTemporary || autoStart === '1') setStarted(true)
+        // Reattaching to a live PTY (`exists`) always starts. Otherwise the shared
+        // rule decides — the same one task create used to reserve a warm agent for
+        // this spawn.
+        if (exists || agentAutoStarts({ isTemporary: !!isTemporary, autoStartSetting: autoStart }))
+          setStarted(true)
         setExistsChecked(true)
       })
       return () => {
@@ -278,7 +280,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         // The checkbox disables whichever feature put us on this screen.
         if (isHibernated)
           settingsSetMutation.mutate({ key: 'terminal_auto_close_idle', value: '0' })
-        else settingsSetMutation.mutate({ key: 'terminal_auto_start', value: '1' })
+        else settingsSetMutation.mutate({ key: TERMINAL_AUTO_START_SETTING, value: '1' })
       }
       setReason('initial')
       setStarted(true)

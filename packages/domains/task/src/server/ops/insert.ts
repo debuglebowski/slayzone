@@ -35,6 +35,8 @@ export interface TaskRowData {
   externalProvider?: string | null
   /** Override updated_at (ISO string from external source). When null, SQL `datetime('now')` is used. */
   updatedAt?: string | null
+  /** Board position. Omitted: the column default (0). */
+  order?: number | null
 }
 
 const INSERT_SQL = `
@@ -45,14 +47,14 @@ const INSERT_SQL = `
     is_temporary, repo_name,
     dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
     external_id, external_provider,
-    updated_at
+    updated_at, "order"
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    COALESCE(?, datetime('now')))
+    COALESCE(?, datetime('now')), COALESCE(?, 0))
 `
 
 /**
- * Canonical task INSERT seam. All task-creation paths (in-app, importers, MCP)
- * route through here. Atomically inserts row + records `task.created` activity event
+ * Canonical task INSERT seam. All task-creation paths (in-app, importers, MCP,
+ * REST + MCP subtasks) route through here. Atomically inserts row + records `task.created` activity event
  * via the `task:insert-row` named transaction (runs inside the DB worker).
  *
  * Caller responsible for: post-insert hooks (worktree provisioning, events, IPC).
@@ -87,7 +89,8 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     // A provider without an id names nothing — and would make the dedup index
     // key on a half-populated tuple.
     row.externalId ? (row.externalProvider ?? null) : null,
-    row.updatedAt ?? null
+    row.updatedAt ?? null,
+    row.order ?? null
   ]
 
   // Activity events are derived from the task being created; all fields the

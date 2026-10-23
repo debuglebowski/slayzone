@@ -441,7 +441,6 @@ async function markCliMigrationDialogShownLocally(): Promise<boolean> {
   return true
 }
 import {
-  wireWarmWindowCleanup,
   killAllPtys,
   shutdownAllPtys,
   killPtysByTaskId,
@@ -456,7 +455,6 @@ import {
   broadcastRespawnRequest,
   setReinstallHooks,
   beginTerminalShutdown,
-  teardownAllWarm,
   ptyEvents
 } from '@slayzone/terminal/electron'
 import { setOnTaskReachedTerminalHandler } from '@slayzone/terminal/server'
@@ -991,8 +989,6 @@ function shutdownSubprocessesForQuit(): Promise<void> {
   quitSubprocessCleanupPromise = (async () => {
     try {
       beginTerminalShutdown()
-      // Kill held warm shells and suppress re-arm before the pty sweep runs.
-      teardownAllWarm()
     } catch (err) {
       console.error('[main] quit subprocess cleanup failed in beginTerminalShutdown:', err)
     }
@@ -1965,9 +1961,6 @@ app
     // subscription and native OS theme changes derive from this one bus.
     wireNativeThemeBridge()
     const usageOps = buildUsageOps()
-    // Warm-process tab-count cleanup on window death — covers both the IPC and
-    // tRPC push paths (registered before any renderer window is created).
-    wireWarmWindowCleanup(app)
     logBoot('terminal runtime wired')
 
     setupFloatingGlobalAgentPanel(() => currentOverrides, { enableIpcHandlers: isPlaywright })

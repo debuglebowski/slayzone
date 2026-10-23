@@ -120,7 +120,8 @@ export const ptyRouter = router({
     .mutation(({ input }) => ops().ptySetShellOverride(input.value)),
   // Warm-process gate: this window's full per-project open-task-tab snapshot,
   // keyed by ctx.windowId (same webContents id the IPC path reads off
-  // event.sender). Window-close cleanup is host-side (wireWarmWindowCleanup).
+  // event.sender). Window-close cleanup: the hub clears it once the window's last
+  // socket stays closed (apps/hub warm-window-sockets.ts).
   warmSetProjectTabCounts: publicProcedure
     .input(z.object({ counts: z.record(z.string(), z.number()) }))
     .mutation(({ ctx, input }) => {

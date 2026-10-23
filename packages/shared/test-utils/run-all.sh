@@ -211,6 +211,8 @@ run_test packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
 # (plans/hub-lifecycle-and-discovery.md P1).
 run_test packages/apps/hub/src/health.test.ts
+# A closed window's warm-pool tab counts are dropped (after a reconnect grace).
+run_test packages/apps/hub/src/warm-window-sockets.test.ts
 run_test packages/apps/hub/src/web-assets.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
 run_test packages/shared/platform/src/hub-port-block.test.ts
@@ -525,8 +527,6 @@ run_test_electron_loader packages/shared/transport/src/server/http/rest-api/arti
 # run host-side; asserts the CLI's exact result shape + flag semantics.
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
-# Pool: session → bound task resolution (slay CLI fallback for pre-warmed agents).
-run_test_electron_loader packages/shared/transport/src/server/http/rest-api/sessions/resolve-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
 run_test_electron_loader packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
@@ -601,6 +601,7 @@ run_test packages/domains/task-terminals/src/client/chat/autocomplete/ranking.te
 run_test packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_test packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/create-project-guard.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_test packages/domains/task/src/shared/handoff.test.ts
 run_test packages/domains/task/src/shared/panel-config.test.ts
 run_test packages/domains/task/src/shared/reparent-validation.test.ts
@@ -642,8 +643,6 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 
 # Known-red suites, skipped visibly with the reason and owner instead of failing every run.
-skip_suite packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
-  "fails at HEAD (2 of 4 tests: the transition spy is never called). TODO(T-01): fix the test, then move it into the vitest run below"
 skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context). TODO(T-01): fix the test, then register it with the other migration suites"
 
@@ -686,6 +685,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
+  packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
   packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-execution.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-roundtrip.test.ts \
