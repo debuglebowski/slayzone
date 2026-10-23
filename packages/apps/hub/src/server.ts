@@ -10,7 +10,11 @@ import {
   setHubDescribeDeps,
   setAuthGate
 } from '@slayzone/transport/server'
-import { beginTerminalShutdown } from '@slayzone/terminal/server'
+import {
+  beginTerminalShutdown,
+  clearWindowTabCounts,
+  teardownAllWarm
+} from '@slayzone/terminal/server'
 import {
   createAuthExpressApp,
   createDevicePage,
@@ -58,6 +62,7 @@ import {
 } from '@slayzone/platform/client-address'
 import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
+import { createWarmWindowSockets } from './warm-window-sockets.js'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -464,6 +469,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // createContext verifies the bearer only when this hub enforces auth
   // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
   // principal stays null, no verify → byte-identical to trusted loopback.
+  // A window's warm-pool tab counts are dropped once its last socket is gone for good
+  // (a closed window never reports empty counts) — see warm-window-sockets.ts.
+  const warmWindowSockets = createWarmWindowSockets({ clearWindow: clearWindowTabCounts })
   const createTrpcContext = async ({
     req,
     res,
@@ -480,6 +488,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // whole warm-agent pool silently never fired. The renderer already sends it
     // (see main.tsx withWindowId).
     const windowId = parseWindowIdFromUrl(req.url)
+    // The window's warm-pool tab counts live only as long as the window does.
+    if (windowId != null && res) warmWindowSockets.track(windowId, res)
     // Verify the bearer token from tRPC connectionParams when this hub enforces
     // auth. An invalid/absent token → principal stays null; individual procedures
     // gate on ctx.principal via the auth gate (an authed hub still accepts the
@@ -663,6 +673,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()
+      // Kill the pool's pre-booted agents (billable, and nothing can adopt them once
+      // this hub is gone) and stop it re-arming, before the gateway below closes.
+      teardownAllWarm()
       state.ready = false
       if (sidecarSocket) {
         try {

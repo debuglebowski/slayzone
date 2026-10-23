@@ -58,6 +58,19 @@ await describe('mcp create_subtask', () => {
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 
+  test('a created subtask gets its task.created history entry', async () => {
+    const parent = seedParent()
+    const res = (await stub.invoke('create_subtask', {
+      parent_task_id: parent,
+      title: 'With history'
+    })) as { content: { text: string }[]; isError?: boolean }
+    const { id } = JSON.parse(res.content[0].text) as { id: string }
+    const events = h.db.prepare(`SELECT kind FROM activity_events WHERE task_id = ?`).all(id) as {
+      kind: string
+    }[]
+    expect(events.map((e) => e.kind).join(',')).toBe('task.created')
+  })
+
   test('no parent_task_id → isError', async () => {
     const res = (await stub.invoke('create_subtask', { title: 'Sub' })) as {
       content: { text: string }[]

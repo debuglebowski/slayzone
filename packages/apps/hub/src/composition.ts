@@ -415,9 +415,9 @@ export function composeServer(opts: {
   setAuthEvents(authEvents)
 
   // --- Task ops --------------------------------------------------------------
-  // Completion-event bus the task ops emit on (Electron host: ipcMain). Nothing
-  // subscribes here yet — the engine's tag-trigger listener attaches in
-  // standalone mode only, when the engine is started (slice 7).
+  // Completion-event bus the task ops emit `db:tasks:*:done` on — handed to every
+  // caller of the ops (tRPC via setTaskDeps, REST, MCP). Listeners: integration push
+  // and the automation engine's tag trigger, both wired below.
   const taskBus = new EventEmitter()
   // Base task runtime adapters (no worktrees override → the task server's local
   // git/fs default stays bound). Extracted so the computer-routing path can re-supply a
@@ -443,7 +443,7 @@ export function composeServer(opts: {
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   // The warm pool runs here (initWarmProcessManager below), so this is the one host
   // where a task created to be opened at once can take a warm agent's id.
-  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer, reserveWarmTaskId })
+  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer, reserveWarmTaskId, bus: taskBus })
 
   // Conversation self-heal + authoritative resolver. `createPty` runs in THIS
   // process post-slice-9, so the healer/resolver seams it calls must be wired

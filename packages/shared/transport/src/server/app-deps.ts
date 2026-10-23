@@ -149,15 +149,22 @@ let taskOnMutation: (() => void) | undefined
 // take a warm agent's id. Unset (the Electron host): no task ever does.
 type ReserveWarmTaskId = NonNullable<OpDeps['reserveWarmTaskId']>
 let taskReserveWarmTaskId: ReserveWarmTaskId | undefined
+// The completion bus the task ops emit `db:tasks:*:done` on — the hub's `taskBus`,
+// the same one REST and MCP hand them. Its listeners (integration push to
+// Linear/GitHub) must see the renderer's mutations too. Unset: the ops emit nothing.
+type TaskBus = NonNullable<OpDeps['ipcMain']>
+let taskBus: TaskBus | undefined
 
 export function setTaskDeps(deps: {
   ops: TaskOps
   onMutation?: () => void
   reserveWarmTaskId?: ReserveWarmTaskId
+  bus?: TaskBus
 }): void {
   taskOps = deps.ops
   taskOnMutation = deps.onMutation
   taskReserveWarmTaskId = deps.reserveWarmTaskId
+  taskBus = deps.bus
 }
 
 export function getTaskOps(): TaskOps {
@@ -171,6 +178,10 @@ export function getTaskOnMutation(): (() => void) | undefined {
 
 export function getTaskReserveWarmTaskId(): ReserveWarmTaskId | undefined {
   return taskReserveWarmTaskId
+}
+
+export function getTaskBus(): TaskBus | undefined {
+  return taskBus
 }
 
 // Notify event bus — the cross-domain `tasks-changed` / `settings-changed`

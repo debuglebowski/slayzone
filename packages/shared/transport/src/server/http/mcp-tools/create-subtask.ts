@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import { updateTask } from '@slayzone/task/server'
+import { insertTaskRow, updateTask } from '@slayzone/task/server'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
 import { getProjectColumns, getAllowedStatusesText, buildDefaultProviderConfig } from './shared'
 import type { McpToolsDeps } from './types'
@@ -86,34 +86,28 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       }
       const initialStatus = status ?? getDefaultStatus(projectColumns)
 
-      await deps.db
-        .prepare(`
-        INSERT INTO tasks (
-          id, project_id, parent_id, title, description, assignee,
-          status, priority, due_date, terminal_mode, provider_config,
-          claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-          is_temporary
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-        .run(
-          id,
-          parent.project_id,
-          parent.id,
-          title,
-          description ?? null,
-          assignee ?? null,
-          initialStatus,
-          priority ?? 3,
-          due_date ?? null,
-          terminalMode,
-          JSON.stringify(providerConfig),
-          providerConfig['claude-code']?.flags ?? '',
-          providerConfig.codex?.flags ?? '',
-          providerConfig['cursor-agent']?.flags ?? '',
-          providerConfig.gemini?.flags ?? '',
-          providerConfig.opencode?.flags ?? '',
-          0
-        )
+      // The shared insert, so the subtask gets its `task.created` history entry.
+      await insertTaskRow(deps.db, {
+        id,
+        projectId: parent.project_id,
+        parentId: parent.id,
+        title,
+        description: description ?? null,
+        descriptionFormat: 'markdown',
+        assignee: assignee ?? null,
+        status: initialStatus,
+        priority: priority ?? 3,
+        dueDate: due_date ?? null,
+        terminalMode,
+        providerConfig,
+        isTemporary: false,
+        repoName: null,
+        dangerouslySkipPermissions: false,
+        panelVisibility: null,
+        panelSizes: null,
+        browserTabs: null,
+        webPanelUrls: null
+      })
 
       const created = await updateTask(deps.db, { id })
       if (!created) {

@@ -13,7 +13,7 @@ import {
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
-import { getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
+import { getTaskBus, getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are
@@ -26,14 +26,18 @@ const updateInput = z.unknown() as unknown as z.ZodType<UpdateTaskInput>
 
 const ops = (): ReturnType<typeof getTaskOps> => getTaskOps()
 
-// Per-call OpDeps for the mutating procedures. No in-process IPC `:done` bus (ops
-// guard `ipcMain?.emit(...)`), but the host injects `onMutation` (notifyTasksChanged)
-// via `setTaskDeps`, so every tRPC mutation fires the same `notify.onTasksChanged`
-// renderer-refresh signal the legacy IPC handlers emit. A given renderer call uses
-// one transport (tRPC OR IPC), so this fires exactly once per mutation. The warm
-// pool's reserve rides along for `create` (the renderer is the only caller that
-// opens what it creates).
-const deps = (): Pick<OpDeps, 'onMutation' | 'reserveWarmTaskId'> => ({
+// Per-call OpDeps for the mutating procedures, all injected by the host via
+// `setTaskDeps`:
+//   - `ipcMain`: the hub's task bus, so the `db:tasks:*:done` events reach their
+//     listeners (integration push) for the renderer's mutations as they do for
+//     REST and MCP;
+//   - `onMutation` (notifyTasksChanged): the `notify.onTasksChanged` renderer
+//     refresh. A given renderer call uses one transport (tRPC OR IPC), so each fires
+//     exactly once per mutation;
+//   - the warm pool's reserve, for `create` (the renderer is the only caller that
+//     opens what it creates).
+const deps = (): Pick<OpDeps, 'ipcMain' | 'onMutation' | 'reserveWarmTaskId'> => ({
+  ipcMain: getTaskBus(),
   onMutation: getTaskOnMutation(),
   reserveWarmTaskId: getTaskReserveWarmTaskId()
 })

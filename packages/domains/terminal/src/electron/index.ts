@@ -13,14 +13,8 @@ configurePtyHost({
   bus: ipcMain
 })
 
-export { wireWarmWindowCleanup } from './warm-window-cleanup'
 export { createPtyOps, type PtyCreateOpts } from '../server/runtime/pty-store'
 export { registerUsageHandlers, buildUsageOps } from './usage'
-export {
-  initWarmProcessManager,
-  teardownAllWarm,
-  getWarmStatus
-} from '../server/runtime/warm-process-manager'
 export {
   killAllPtys,
   shutdownAllPtys,

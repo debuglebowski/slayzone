@@ -28,6 +28,7 @@
  *
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
+import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -223,6 +224,39 @@ test('create: openAfterCreate takes the id of the warm agent the host wired in',
     expect(t.id).toBe(reservedId)
     expect(asked.length).toBe(1)
     expect(asked[0].projectId).toBe(projectId)
+  } finally {
+    setTaskDeps({ ops: taskOps })
+  }
+})
+
+test('mutations emit their completion events on the host-wired task bus', async () => {
+  // The hub's integration push (Linear/GitHub) and other listeners hang off this
+  // bus, which REST and MCP already hand to the ops. Without it, a task created or
+  // edited in the app never reached its provider.
+  const bus = new EventEmitter()
+  const seen: Array<[string, unknown]> = []
+  for (const channel of [
+    'db:tasks:create:done',
+    'db:tasks:update:done',
+    'db:tasks:archive:done',
+    'db:tasks:unarchive:done'
+  ]) {
+    bus.on(channel, (_e: unknown, taskId: unknown) => seen.push([channel, taskId]))
+  }
+  setTaskDeps({ ops: taskOps, bus })
+  try {
+    const t = await createTask('Bus task')
+    await up({ id: t.id, title: 'Bus task renamed' })
+    await caller.archive({ id: t.id })
+    await caller.unarchive({ id: t.id })
+    expect(JSON.stringify(seen)).toBe(
+      JSON.stringify([
+        ['db:tasks:create:done', t.id],
+        ['db:tasks:update:done', t.id],
+        ['db:tasks:archive:done', t.id],
+        ['db:tasks:unarchive:done', t.id]
+      ])
+    )
   } finally {
     setTaskDeps({ ops: taskOps })
   }

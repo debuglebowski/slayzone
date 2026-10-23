@@ -78,8 +78,8 @@ export interface PtyCreateOpts {
  *
  * `warmSetProjectTabCounts` is per-window state: the IPC handler keys it by
  * `event.sender.id`, the tRPC proc by `ctx.windowId` (same webContents id).
- * Window-close cleanup lives host-side (`wireWarmWindowCleanup`), independent
- * of which transport pushed the counts.
+ * Window-close cleanup is the hub's: it clears a window's counts once that
+ * window's last `/trpc` socket stays closed (apps/hub warm-window-sockets.ts).
  */
 export function createPtyOps(db: SlayzoneDb) {
   // Wires the pty-manager's session ledger (hub/computer wave 1: the runtime's

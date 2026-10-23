@@ -10,16 +10,28 @@ import {
 // stays hermetic and asserts the CONSUMER wiring, not the domains.
 // A warm agent the pool still holds (booted with `taskId`, not adopted yet).
 const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
-vi.mock('@slayzone/terminal/server', () => ({
-  isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
-  unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
-}))
+// The claude agent tree is pure, so the real module is used (by path: the barrel
+// pulls in the native pty manager) — a hand-rolled fake would drift from its states.
+vi.mock('@slayzone/terminal/server', async () => {
+  const agentTree = await import('../../../domains/terminal/src/server/agent-tree.js')
+  return {
+    isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
+    applyAgentHook: agentTree.applyAgentHook,
+    createAgentTree: agentTree.createAgentTree,
+    resolveState: agentTree.resolveState,
+    subagentIdOf: agentTree.subagentIdOf,
+    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS,
+    unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
+  }
+})
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
 const confirmSessionConversationSpy = vi.fn()
 vi.mock('@slayzone/task/server', () => ({
   recordConversation: vi.fn(),
   findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
-  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args)
+  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
+  markSessionFirstTurn: vi.fn(async () => {}),
+  artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
 }))
 
 /** A fake gateway that lets the test emit `event` notifications synchronously. */

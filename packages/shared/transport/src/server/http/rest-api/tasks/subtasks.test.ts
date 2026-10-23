@@ -94,6 +94,24 @@ await describe('POST /api/tasks/:id/subtasks', () => {
     expect(notifyCount).toBe(1)
   })
 
+  test('a created subtask gets its task.created history entry and goes last', async () => {
+    const res = await rest.request<CreateResponse>('POST', `/api/tasks/${parentId}/subtasks`, {
+      title: 'With history'
+    })
+    expect(res.status).toBe(200)
+    const events = h.db
+      .prepare(`SELECT kind FROM activity_events WHERE task_id = ?`)
+      .all(res.body.data.id) as { kind: string }[]
+    expect(events.map((e) => e.kind).join(',')).toBe('task.created')
+    const { maxOther } = h.db
+      .prepare(`SELECT MAX("order") AS maxOther FROM tasks WHERE project_id = ? AND id != ?`)
+      .get(projectId, res.body.data.id) as { maxOther: number }
+    const { order } = h.db
+      .prepare(`SELECT "order" AS "order" FROM tasks WHERE id = ?`)
+      .get(res.body.data.id) as { order: number }
+    expect(order).toBe(maxOther + 1)
+  })
+
   test('happy: explicit status alias + priority', async () => {
     const res = await rest.request<CreateResponse>('POST', `/api/tasks/${parentId}/subtasks`, {
       title: 'Custom',

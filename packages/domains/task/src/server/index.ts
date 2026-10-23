@@ -55,6 +55,8 @@ export {
   archiveManyTasksOp,
   createTaskOp,
   createImportedTaskOp,
+  insertTaskRow,
+  type TaskRowData,
   deleteTaskOp,
   getTaskOp,
   restoreTaskOp,
