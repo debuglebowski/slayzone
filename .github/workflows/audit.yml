@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 20
+          # Nothing is installed, so there is no pnpm store to cache (v5 caches by default).
+          package-manager-cache: false
 
       # Reads only the lockfile; no install needed.
       - name: Every advisory has a current decision
