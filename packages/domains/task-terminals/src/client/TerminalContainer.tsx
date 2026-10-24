@@ -21,7 +21,7 @@ import { useTheme } from '@slayzone/settings/client'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
-import { createFocusHandoff, type FocusHandoff } from './focus-handoff'
+import { createContainerFocusHandoff } from './focus-handoff'
 import {
   AgentPromptsSidebar,
   AgentPromptsToggleButton,
@@ -149,20 +149,18 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     }, [terminalOverrideThemeId, contentVariant])
     const splitGroupRef = useRef<TerminalSplitGroupHandle | null>(null)
     const tabBarRef = useRef<TerminalTabBarHandle | null>(null)
-    const rootElRef = useRef<HTMLDivElement | null>(null)
     // Focus attempts no-op silently (pane unmounted, lazy chunk loading, or the
     // tab view still inert during the deferred swap). The handoff verifies each
-    // attempt landed — container-contains is the right granularity since panes
-    // are opaque (xterm textarea vs chat input) — and keeps the claim alive for
+    // attempt landed inside this container and keeps the claim alive for
     // whichever side (activation / pane attach) can complete it.
-    const focusHandoffRef = useRef<FocusHandoff | null>(null)
-    if (!focusHandoffRef.current) {
-      focusHandoffRef.current = createFocusHandoff(
-        () => !!rootElRef.current?.contains(document.activeElement),
-        isActive
-      )
-    }
-    const focusHandoff = focusHandoffRef.current
+    const [focusHandoff] = useState(() => createContainerFocusHandoff(isActive))
+    // Plain closures over the handoff's own state — safe to call detached.
+    const {
+      claim: claimFocus,
+      activate: activateFocus,
+      paneAttached: focusPaneAttached,
+      setContainer: setFocusContainer
+    } = focusHandoff
     const terminalApiRef = useRef<{
       sendInput: (text: string) => Promise<void>
       write: (data: string) => Promise<boolean>
@@ -255,7 +253,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         // New group
         if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-new-group'))) {
           e.preventDefault()
-          focusHandoff.claim(true)
+          claimFocus(true)
           createTab()
         }
         // Split current group
@@ -267,7 +265,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           const lastPane = activeGroup.tabs[activeGroup.tabs.length - 1]
           if (lastPane) {
             splitTab(lastPane.id).then((newTab) => {
-              if (newTab) focusHandoff.claim(getSessionId(newTab.id))
+              if (newTab) claimFocus(getSessionId(newTab.id))
             })
           }
         }
@@ -275,7 +273,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
       window.addEventListener('keydown', handleKeyDown)
       return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [shortcutActive, activeGroup, createTab, splitTab, getSessionId, focusHandoff])
+    }, [shortcutActive, activeGroup, createTab, splitTab, getSessionId, claimFocus])
 
     // Split the active group — add a new pane
     const handleSplitGroup = useCallback(
@@ -285,11 +283,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         const lastPane = group.tabs[group.tabs.length - 1]
         if (lastPane) {
           splitTab(lastPane.id).then((newTab) => {
-            if (newTab) focusHandoff.claim(getSessionId(newTab.id))
+            if (newTab) claimFocus(getSessionId(newTab.id))
           })
         }
       },
-      [groups, splitTab, getSessionId, focusHandoff]
+      [groups, splitTab, getSessionId, claimFocus]
     )
 
     // Close an entire group (all its panes)
@@ -309,7 +307,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       if (!isActive || !terminalApiRef.current) return
 
       if (mainGroupId && activeGroupId !== mainGroupId) {
-        focusHandoff.claim(true)
+        claimFocus(true)
         setActiveGroupId(mainGroupId)
         return
       }
@@ -323,7 +321,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       mainGroupId,
       activeGroupId,
       setActiveGroupId,
-      onFocusRequestHandled
+      onFocusRequestHandled,
+      claimFocus
     ])
 
     useEffect(() => {
@@ -333,14 +332,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // Focus terminal when task becomes the shortcut-focused cell (or active in non-explode)
     useEffect(() => {
       if (!shortcutActive) return
-      focusHandoff.activate(() => splitGroupRef.current?.focus())
-    }, [shortcutActive, focusHandoff])
+      activateFocus(() => splitGroupRef.current?.focus())
+    }, [shortcutActive, activateFocus])
 
     const handlePaneAttached = useCallback(
       (api: { sessionId: string; focus: () => void }) => {
-        focusHandoff.paneAttached(api)
+        focusPaneAttached(api)
       },
-      [focusHandoff]
+      [focusPaneAttached]
     )
 
     // Handle terminal ready - pass up to parent (main tab's API)
@@ -366,11 +365,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         const adjacentGroup = groups[groupIndex > 0 ? groupIndex - 1 : 1]
         await closeGroup(groupId)
         if (adjacentGroup) {
-          focusHandoff.claim(true)
+          claimFocus(true)
           setActiveGroupId(adjacentGroup.id)
         }
       },
-      [groups, closeGroup, setActiveGroupId, focusHandoff]
+      [groups, closeGroup, setActiveGroupId, claimFocus]
     )
 
     useImperativeHandle(
@@ -412,6 +411,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       [taskId, tabs, groups, closeTab, closeGroupAndFocusAdjacent, activeGroupId]
     )
 
+    const startTabRename = useCallback((tabId: string) => {
+      tabBarRef.current?.startRename(tabId)
+    }, [])
+
     // Build pane props for the active group
     const paneProps = useMemo(() => {
       if (!activeGroup) return []
@@ -438,7 +441,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           // Context menu callbacks
           onSplit: () => handleSplitGroup(activeGroup.id),
           onNewGroup: () => {
-            focusHandoff.claim(true)
+            claimFocus(true)
             createTab()
           },
           onClose: canClose
@@ -450,7 +453,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
                 }
               }
             : null,
-          onRename: tab.isMain ? null : () => tabBarRef.current?.startRename(tab.id),
+          onRename: tab.isMain ? null : () => startTabRename(tab.id),
           onResetSession: tab.isMain && onMainReset ? onMainReset : null
         }
       })
@@ -475,12 +478,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       createTab,
       closeGroup,
       closeTab,
-      onMainReset
+      onMainReset,
+      claimFocus,
+      startTabRename
     ])
 
     return (
       <div
-        ref={rootElRef}
+        ref={setFocusContainer}
         className="h-full flex"
         style={terminalPanelStyle as React.CSSProperties | undefined}
       >
@@ -491,11 +496,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             activeGroupId={activeGroupId}
             terminalTitles={terminalTitles}
             onGroupSelect={(groupId) => {
-              focusHandoff.claim(true)
+              claimFocus(true)
               setActiveGroupId(groupId)
             }}
             onGroupCreate={() => {
-              focusHandoff.claim(true)
+              claimFocus(true)
               createTab()
             }}
             onGroupClose={closeGroup}

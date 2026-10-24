@@ -124,6 +124,7 @@ vi.mock('@slayzone/ui', () => {
     matchesShortcut: () => false,
     useShortcutStore: () => ({ overrides: {}, isRecording: false }),
     useShortcutDisplay: () => null,
+    useStableCallback: <T,>(fn: T) => fn,
     withModalGuard: <T,>(fn: T) => fn,
     getThemeEditorColors: () => ({})
   }

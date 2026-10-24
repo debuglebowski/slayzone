@@ -13,7 +13,7 @@ import {
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import { toast } from '@slayzone/ui'
+import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 
 function hasTaskIdentity(task: Task | null | undefined): task is Task {
@@ -430,8 +430,7 @@ export function useTasksData(): UseTasksDataReturn {
     performance.mark('sz:dataReady')
     electronBootstrap.bootMark('dataReady (loadBoardData done)')
     electronBootstrap.dataReady()
-    // Fire exactly once, on the first non-pending state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Fires exactly once: isPending only ever goes true → false (refetches keep data).
   }, [boardQ.isPending])
 
   // Bridge the global to REFETCH (not invalidate the board): callers `await
@@ -458,13 +457,12 @@ export function useTasksData(): UseTasksDataReturn {
   // External changes: when a `tasks-changed` signal fires (CLI → REST → notify
   // bus), invalidate the board query and reload groups. Replaces the legacy
   // `app.onTasksChanged` IPC listener.
+  const handleTasksChanged = useStableCallback(() => {
+    void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+    void loadGroups()
+  })
   useSubscription(
-    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
-      onData: () => {
-        void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
-        void loadGroups()
-      }
-    })
+    trpc.notify.onTasksChanged.subscriptionOptions(undefined, { onData: handleTasksChanged })
   )
 
   // Tag CustomEvents patch local tags state directly (instant cross-component

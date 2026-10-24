@@ -49,3 +49,27 @@ export function createFocusHandoff(
     }
   }
 }
+
+export interface ContainerFocusHandoff extends FocusHandoff {
+  /** The element focus must land inside — pass as the container's callback ref. */
+  setContainer: (el: Element | null) => void
+}
+
+/**
+ * A focus handoff that owns its container: focus counts as landed when the
+ * active element is inside it. Container-contains is the right granularity
+ * because panes are opaque (xterm textarea vs chat input).
+ */
+export function createContainerFocusHandoff(initialClaim: boolean): ContainerFocusHandoff {
+  let container: Element | null = null
+  const handoff = createFocusHandoff(
+    () => !!container?.contains(document.activeElement),
+    initialClaim
+  )
+  return {
+    ...handoff,
+    setContainer(el) {
+      container = el
+    }
+  }
+}

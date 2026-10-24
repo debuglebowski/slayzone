@@ -144,6 +144,7 @@ import {
   matchesShortcut,
   useShortcutStore,
   useShortcutDisplay,
+  useStableCallback,
   withModalGuard,
   getThemeEditorColors,
   type EditorThemeColors
@@ -221,6 +222,19 @@ export interface TaskDetailPageProps {
   onPanelVisibilityChange?: (visibility: PanelVisibility) => void
 }
 
+/**
+ * Merge a drag-reordered subset of task-view panel ids back into the global
+ * panel_config.order: the reordered ids fill the slots of the panels they replace,
+ * in their new order; every other panel keeps its slot.
+ */
+function mergeReorderedPanels(order: string[], reorderedTaskIds: string[]): string[] {
+  const toOrderId = (taskId: string): string => (taskId === 'diff' ? 'git' : taskId)
+  const reorderedOrderIds = reorderedTaskIds.map(toOrderId)
+  const visibleSet = new Set(reorderedOrderIds)
+  let vi = 0
+  return order.map((id) => (visibleSet.has(id) ? (reorderedOrderIds[vi++] ?? id) : id))
+}
+
 export const TaskDetailPage = React.memo(function TaskDetailPage({
   taskId,
   task: taskProp,
@@ -253,7 +267,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const updateTaskMutation = useMutation(trpc.task.update.mutationOptions())
+  // mutateAsync is stable; the mutation result object is not (new each render).
+  const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 
   const { modes } = useTerminalModes()
 
@@ -609,12 +624,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // so panels reflow to match. Hidden/filtered-out panels keep their slots.
   const handlePanelReorder = useCallback(
     (reorderedTaskIds: string[]) => {
-      const order = panelConfig.order ?? []
-      const toOrderId = (taskId: string): string => (taskId === 'diff' ? 'git' : taskId)
-      const reorderedOrderIds = reorderedTaskIds.map(toOrderId)
-      const visibleSet = new Set(reorderedOrderIds)
-      let vi = 0
-      const next = order.map((id) => (visibleSet.has(id) ? (reorderedOrderIds[vi++] ?? id) : id))
+      const next = mergeReorderedPanels(panelConfig.order ?? [], reorderedTaskIds)
       void updatePanelConfig({ ...panelConfig, order: next })
     },
     [panelConfig, updatePanelConfig]
@@ -675,14 +685,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
   // panel_visibility). Secondary windows keep sizes local (no DB write).
+  const loadedTaskId = task?.id
   const persistPanelSizes = useCallback(
     (sizes: PanelSizes) => {
-      if (!task || isSecondaryWindow) return
-      void updateTaskMutation.mutateAsync({ id: task.id, panelSizes: sizes }).then((updated) => {
+      if (!loadedTaskId || isSecondaryWindow) return
+      void updateTaskAsync({ id: loadedTaskId, panelSizes: sizes }).then((updated) => {
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, isSecondaryWindow, onTaskUpdated] // eslint-disable-line react-hooks/exhaustive-deps
+    [loadedTaskId, isSecondaryWindow, onTaskUpdated, updateTaskAsync]
   )
   const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
     usePanelSizes(initialData?.panelSizes, persistPanelSizes)
@@ -788,12 +799,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const mainSessionId = task ? getMainSessionId(task.id) : ''
   const handleLoopConfigChange = useCallback(
     (cfg: LoopConfig | null) => {
-      if (!task) return
-      updateTaskMutation.mutateAsync({ id: task.id, loopConfig: cfg }).then((updated) => {
+      if (!loadedTaskId) return
+      updateTaskAsync({ id: loadedTaskId, loopConfig: cfg }).then((updated) => {
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, onTaskUpdated]
+    [loadedTaskId, onTaskUpdated, updateTaskAsync]
   )
   const {
     status: loopStatus,
@@ -845,7 +856,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleGitTabChange = (tab: GitTabId) => {
     setGitDefaultTab(tab)
     gitTabSyncedRef.current = true
-    if (task?.id) void updateTaskMutation.mutateAsync({ id: task.id, gitActiveTab: tab })
+    if (task?.id) void updateTaskAsync({ id: task.id, gitActiveTab: tab })
   }
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
@@ -870,16 +881,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const probeWorkspacePath = useCallback(
     async (path: string): Promise<void> => {
       if (!probeTaskId) return
-      try {
-        const res = await trpcClient.workspace.pathExists.query({ taskId: probeTaskId, path })
-        setWorkspaceUnreachable(!res.reachable)
-        setProjectPathMissing(res.reachable && !res.exists)
-      } catch {
+      const res = await trpcClient.workspace.pathExists
+        .query({ taskId: probeTaskId, path })
+        .catch(() => null)
+      if (!res) {
         // The request itself failed (hub down mid-flight). Same meaning as an
         // unreachable computer: we do not know, so do not claim the path is gone.
         setWorkspaceUnreachable(true)
         setProjectPathMissing(false)
+        return
       }
+      setWorkspaceUnreachable(!res.reachable)
+      setProjectPathMissing(res.reachable && !res.exists)
     },
     [trpcClient, probeTaskId]
   )
@@ -1017,13 +1030,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [shortcutActive, handleInjectTitle, handleInjectDescription, handleRestartTerminal])
 
   // Cmd+Shift+S screenshot trigger from main process
+  const handleScreenshotTrigger = useStableCallback(() => {
+    const viewId = browserPanelRef.current?.getActiveViewId()
+    if (viewId) void handleScreenshot(viewId)
+  })
   useSubscription(
     trpc.menu.onScreenshotTrigger.subscriptionOptions(undefined, {
       enabled: !!shortcutActive,
-      onData: () => {
-        const viewId = browserPanelRef.current?.getActiveViewId()
-        if (viewId) void handleScreenshot(viewId)
-      }
+      onData: handleScreenshotTrigger
     })
   )
 
@@ -1036,9 +1050,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Track last-focused sub-panel via focusin (macOS native menu accelerators clear activeElement by callback time)
   const lastFocusedPanelRef = useRef<'terminal' | 'editor' | 'browser' | null>(null)
   const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
-  const onCloseTabRef = useRef(onCloseTab)
-  onCloseTabRef.current = onCloseTab
-  const handlePanelToggleRef = useRef<typeof handlePanelToggle>(null!)
   useEffect(() => {
     const handleFocusIn = (e: FocusEvent): void => {
       const target = e.target as HTMLElement | null
@@ -1066,39 +1077,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
-  // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
-  // or fall through to close the task tab if nothing to close
-  useSubscription(
-    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, {
-      enabled: !!shortcutActive,
-      onData: async () => {
-        const panel = lastFocusedPanelRef.current
-        if (panel === 'terminal') {
-          const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
-          if (closed) return
-        } else if (panel === 'editor') {
-          const closed = fileEditorRef.current?.closeActiveFile()
-          if (closed) return
-        } else if (panel === 'browser') {
-          const bt = browserTabsRef.current
-          if (bt.tabs.length > 1) {
-            const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
-            const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
-            const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
-            setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
-            return
-          } else if (bt.tabs.length === 1) {
-            setBrowserTabs({ tabs: [], activeTabId: null })
-            handlePanelToggleRef.current('browser', false)
-            return
-          }
-        }
-        // Nothing was closed — close the task tab
-        onCloseTabRef.current?.(taskId)
-      }
-    })
-  )
-
   // Cmd+R browser reload is handled globally in App.tsx
 
   // Clear quick run prompt after it's been passed to Terminal
@@ -1125,7 +1103,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Small delay to let any remaining PTY data be processed and ignored
       await new Promise((r) => setTimeout(r, 100))
       // Update mode and clear all conversation IDs (fresh start)
-      const updated = await updateTaskMutation.mutateAsync({
+      const updated = await updateTaskAsync({
         id: task.id,
         terminalMode: mode,
         providerConfig: clearAllConversationIds(task.provider_config)
@@ -1137,7 +1115,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState, trpcClient]
+    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync]
   )
 
   const getMainHistory = useCallback(() => {
@@ -1172,7 +1150,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         providerConfig: setProviderFlags(task.provider_config, task.terminal_mode, nextValue)
       }
 
-      const updated = await updateTaskMutation.mutateAsync(update)
+      const updated = await updateTaskAsync(update)
       onTaskUpdated(updated)
 
       const mainSessionId = `${task.id}:${task.id}`
@@ -1182,7 +1160,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
     },
-    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState, trpcClient]
+    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState, trpcClient, updateTaskAsync]
   )
 
   const handleSetDefaultFlags = useCallback(async () => {
@@ -1228,29 +1206,66 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       // Persist to DB only for primary window — secondary's visibility is local-only
       if (isSecondaryWindow) return
-      const updated = await updateTaskMutation.mutateAsync({
+      const updated = await updateTaskAsync({
         id: task.id,
         panelVisibility: newVisibility
       })
       onTaskUpdated(updated)
     },
-    [task, panelVisibility, onTaskUpdated, resetPanelSize, ownership, isSecondaryWindow]
+    [
+      task,
+      panelVisibility,
+      onTaskUpdated,
+      resetPanelSize,
+      ownership,
+      isSecondaryWindow,
+      updateTaskAsync
+    ]
   )
-  handlePanelToggleRef.current = handlePanelToggle
 
-  const openArtifactRef = useRef<(taskId: string, artifactId: string) => void>(() => {
-    // Placeholder only — the assignment right below installs the real handler on
-    // every render, before anything can dispatch through the ref.
+  // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
+  // or fall through to close the task tab if nothing to close
+  const handleCloseCurrentFocus = useStableCallback(async () => {
+    const panel = lastFocusedPanelRef.current
+    if (panel === 'terminal') {
+      const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
+      if (closed) return
+    } else if (panel === 'editor') {
+      const closed = fileEditorRef.current?.closeActiveFile()
+      if (closed) return
+    } else if (panel === 'browser') {
+      const bt = browserTabsRef.current
+      if (bt.tabs.length > 1) {
+        const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
+        const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
+        const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
+        setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
+        return
+      } else if (bt.tabs.length === 1) {
+        setBrowserTabs({ tabs: [], activeTabId: null })
+        handlePanelToggle('browser', false)
+        return
+      }
+    }
+    // Nothing was closed — close the task tab
+    onCloseTab?.(taskId)
   })
-  openArtifactRef.current = (targetTaskId, artifactId) => {
-    if (!task || targetTaskId !== task.id) return
-    if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-    artifactsPanelRef.current?.selectArtifact(artifactId)
-  }
   useSubscription(
-    trpc.menu.onOpenArtifact.subscriptionOptions(undefined, {
-      onData: ({ taskId: tid, artifactId: aid }) => openArtifactRef.current(tid, aid)
+    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, {
+      enabled: !!shortcutActive,
+      onData: handleCloseCurrentFocus
     })
+  )
+
+  const handleOpenArtifact = useStableCallback(
+    ({ taskId: targetTaskId, artifactId }: { taskId: string; artifactId: string }) => {
+      if (!task || targetTaskId !== task.id) return
+      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
+      artifactsPanelRef.current?.selectArtifact(artifactId)
+    }
+  )
+  useSubscription(
+    trpc.menu.onOpenArtifact.subscriptionOptions(undefined, { onData: handleOpenArtifact })
   )
 
   const handleQuickOpenFile = useCallback(
@@ -1429,7 +1444,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!task || !descriptionDirty.current) return
     descriptionDirty.current = false
 
-    const updated = await updateTaskMutation.mutateAsync({
+    const updated = await updateTaskAsync({
       id: task.id,
       description: descriptionValue || undefined
     })
@@ -1450,6 +1465,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const subTaskSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   )
+
+  // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
+  const {
+    webPanelUrlsRef,
+    handleActiveArtifactIdChange,
+    handleWebPanelUrlChange,
+    handleEditorStateChange,
+    handleWebPanelFaviconChange
+  } = usePersistenceSaves(task)
 
   const handleTaskUpdate = (updated: Task): void => {
     setTitleValue(updated.title)
@@ -1475,7 +1499,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         markSkipCache(mainSessionId)
       }
 
-      const updated = await updateTaskMutation.mutateAsync(updates)
+      const updated = await updateTaskAsync(updates)
       handleTaskUpdate(updated)
 
       if (template.panel_visibility) setPanelVisibility(template.panel_visibility)
@@ -1486,7 +1510,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         setTerminalKey((k) => k + 1)
       }
     },
-    [task, getMainSessionId, resetTaskState, trpcClient]
+    [
+      task,
+      getMainSessionId,
+      resetTaskState,
+      trpcClient,
+      updateTaskAsync,
+      handleTaskUpdate,
+      webPanelUrlsRef
+    ]
   )
 
   // Wrapper for GitPanel that calls API and notifies parent
@@ -1512,7 +1544,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
     }
 
-    const updated = await updateTaskMutation.mutateAsync(data)
+    const updated = await updateTaskAsync(data)
     handleTaskUpdate(updated)
 
     // Force terminal remount if effective cwd changed
@@ -1529,22 +1561,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setBrowserTabs(tabs)
       if (!task) return
       // Persist to DB (debounced via the tab state itself)
-      await updateTaskMutation.mutateAsync({
+      await updateTaskAsync({
         id: task.id,
         browserTabs: tabs
       })
     },
-    [task]
+    [task, updateTaskAsync]
   )
-
-  // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
-  const {
-    webPanelUrlsRef,
-    handleActiveArtifactIdChange,
-    handleWebPanelUrlChange,
-    handleEditorStateChange,
-    handleWebPanelFaviconChange
-  } = usePersistenceSaves(task)
 
   // Open a dev server URL in the browser panel (used by both auto-open and toast)
   const openDevServerInBrowser = useCallback(
@@ -1557,7 +1580,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         handleBrowserTabsChange({ tabs: [newTab], activeTabId: newTab.id })
       }
     },
-    [handlePanelToggle, handleBrowserTabsChange, browserTabs]
+    [handlePanelToggle, handleBrowserTabsChange, browserTabs, browserOpenRef]
   )
 
   useEffect(() => {
@@ -1565,46 +1588,62 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [openDevServerInBrowser])
 
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
+  const handleBrowserEnsurePanelOpen = useStableCallback(
+    ({ taskId, url, tabId }: { taskId: string; url?: string | null; tabId?: string | null }) => {
+      if (!task || taskId !== task.id) return
+      if (tabId) {
+        // CLI targeted an existing tab — open panel and switch to that tab.
+        // The navigate route will load `url` into the targeted tab's webContents.
+        handlePanelToggle('browser', true)
+        const tabs = browserTabsRef.current
+        if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
+          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+        }
+      } else if (url) {
+        openDevServerInBrowser(url)
+      } else {
+        handlePanelToggle('browser', true)
+      }
+    }
+  )
   useSubscription(
     trpc.menu.onBrowserEnsurePanelOpen.subscriptionOptions(undefined, {
       enabled: !!task,
-      onData: ({ taskId, url, tabId }) => {
-        if (!task || taskId !== task.id) return
-        if (tabId) {
-          // CLI targeted an existing tab — open panel and switch to that tab.
-          // The navigate route will load `url` into the targeted tab's webContents.
-          handlePanelToggle('browser', true)
-          const tabs = browserTabsRef.current
-          if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
-            handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
-          }
-        } else if (url) {
-          openDevServerInBrowser(url)
-        } else {
-          handlePanelToggle('browser', true)
-        }
-      }
+      onData: handleBrowserEnsurePanelOpen
     })
   )
 
   // CLI: create a new browser tab with a server-supplied tabId (slay tasks browser new)
+  const handleBrowserCreateTab = useStableCallback(
+    ({
+      taskId,
+      tabId,
+      url,
+      background
+    }: {
+      taskId: string
+      tabId: string
+      url?: string | null
+      background?: boolean
+    }) => {
+      if (!task || taskId !== task.id) return
+      handlePanelToggle('browser', true)
+      const tabUrl = url ?? 'about:blank'
+      const newTab = {
+        id: tabId,
+        url: tabUrl,
+        title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
+      }
+      const current = browserTabsRef.current
+      if (current.tabs.some((t) => t.id === tabId)) return
+      const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
+      handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
+    }
+  )
   useSubscription(
     trpc.menu.onBrowserCreateTab.subscriptionOptions(undefined, {
       enabled: !!task,
-      onData: ({ taskId, tabId, url, background }) => {
-        if (!task || taskId !== task.id) return
-        handlePanelToggle('browser', true)
-        const tabUrl = url ?? 'about:blank'
-        const newTab = {
-          id: tabId,
-          url: tabUrl,
-          title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
-        }
-        const current = browserTabsRef.current
-        if (current.tabs.some((t) => t.id === tabId)) return
-        const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
-        handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
-      }
+      onData: handleBrowserCreateTab
     })
   )
 
@@ -1692,7 +1731,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             isCurrent && 'bg-accent font-medium'
                           )}
                           onClick={async () => {
-                            const updated = await updateTaskMutation.mutateAsync({
+                            const updated = await updateTaskAsync({
                               id: task.id,
                               status: opt.value
                             })
@@ -1732,7 +1771,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       opt.value === task.priority && 'bg-accent font-medium'
                     )}
                     onClick={async () => {
-                      const updated = await updateTaskMutation.mutateAsync({
+                      const updated = await updateTaskAsync({
                         id: task.id,
                         priority: opt.value
                       })
@@ -2086,7 +2125,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             setDetectedDevUrl(null)
             if (task?.id) {
               devUrlToastDismissedRef.current = true
-              void updateTaskMutation.mutateAsync({ id: task.id, devUrlToastDismissed: true })
+              void updateTaskAsync({ id: task.id, devUrlToastDismissed: true })
             }
           }}
         />

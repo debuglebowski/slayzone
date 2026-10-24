@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { createFocusHandoff } from './focus-handoff'
+import { createContainerFocusHandoff, createFocusHandoff } from './focus-handoff'
 
 describe('createFocusHandoff', () => {
   it('cold activation keeps the claim until a pane attaches', () => {
@@ -84,5 +85,41 @@ describe('createFocusHandoff', () => {
     const focus = vi.fn(() => {})
     handoff.paneAttached({ sessionId: 'a', focus })
     expect(focus).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createContainerFocusHandoff', () => {
+  it('counts focus as landed only inside its container', () => {
+    const container = document.createElement('div')
+    const inside = document.createElement('input')
+    const outside = document.createElement('input')
+    container.appendChild(inside)
+    document.body.append(container, outside)
+    try {
+      const handoff = createContainerFocusHandoff(false)
+      handoff.setContainer(container)
+
+      // Focus lands outside the container: the claim survives for the pane.
+      handoff.activate(() => outside.focus())
+      const focus = vi.fn(() => inside.focus())
+      handoff.paneAttached({ sessionId: 'a', focus })
+      expect(focus).toHaveBeenCalledTimes(1)
+
+      // Landed inside: claim consumed.
+      const focus2 = vi.fn(() => {})
+      handoff.paneAttached({ sessionId: 'b', focus: focus2 })
+      expect(focus2).not.toHaveBeenCalled()
+    } finally {
+      container.remove()
+      outside.remove()
+    }
+  })
+
+  it('without a container, focus never counts as landed', () => {
+    const handoff = createContainerFocusHandoff(true)
+    const focus = vi.fn(() => {})
+    handoff.paneAttached({ sessionId: 'a', focus })
+    handoff.paneAttached({ sessionId: 'b', focus })
+    expect(focus).toHaveBeenCalledTimes(2)
   })
 })
