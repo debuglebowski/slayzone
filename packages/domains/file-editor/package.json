@@ -57,14 +57,14 @@
   },
   "peerDependencies": {
     "electron": "^41.10.7",
-    "react": "^19.0.0"
+    "react": "^19.3.1"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
-    "@types/react": "^19.2.7",
+    "@types/react": "^19.3.0",
     "jsdom": "^26.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   }

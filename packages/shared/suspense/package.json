@@ -12,13 +12,13 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "react": "^19.2.1"
+    "react": "^19.3.1"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
-    "@types/react": "^19.2.8",
+    "@types/react": "^19.3.0",
     "jsdom": "^26.1.0",
-    "react-dom": "^19.2.1",
+    "react-dom": "^19.3.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   }

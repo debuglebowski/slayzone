@@ -31,7 +31,9 @@
     "./client-address": "./src/client-address.ts",
     "./hub-convex": "./src/hub-convex.ts",
     "./safe-path": "./src/safe-path.ts",
-    "./rate-limit": "./src/rate-limit.ts"
+    "./rate-limit": "./src/rate-limit.ts",
+    "./startup-deadline": "./src/startup-deadline.ts",
+    "./event-loop-stall": "./src/event-loop-stall.ts"
   },
   "scripts": {
     "test": "vitest run",

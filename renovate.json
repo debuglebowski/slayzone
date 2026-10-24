@@ -45,8 +45,14 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "TypeScript is exempt from the 30-day minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
-      "matchPackageNames": ["typescript", "@typescript/typescript-*"],
+      "description": "TypeScript and React are exempt from the 30-day minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
+      "matchPackageNames": [
+        "typescript",
+        "@typescript/typescript-*",
+        "react",
+        "react-dom",
+        "scheduler"
+      ],
       "minimumReleaseAge": null
     }
   ]

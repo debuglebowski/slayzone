@@ -6,7 +6,10 @@ packages:
 
 # Install only package versions published at least 30 days ago (minutes).
 minimumReleaseAge: 43200
-# Exempt: TypeScript is always used at its latest version.
+# Exempt: TypeScript and React are always used at their latest versions.
 minimumReleaseAgeExclude:
   - typescript
   - '@typescript/typescript-*'
+  - react
+  - react-dom
+  - scheduler
