@@ -95,10 +95,10 @@
   },
   "engines": {
     "node": ">=24",
-    "pnpm": ">=9"
+    "pnpm": ">=10.34.5"
   },
   "version": "0.36.0-beta.19",
-  "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "dependencies": {
     "@tabler/icons-react": "^3.40.0"
   }
