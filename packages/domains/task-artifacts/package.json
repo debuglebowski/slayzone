@@ -28,7 +28,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
-    "diff": "^7.0.0",
+    "diff": "^8.0.0",
     "lucide-react": "^0.562.0",
     "zod": "^4.3.5"
   },
