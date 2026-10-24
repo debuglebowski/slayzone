@@ -20,11 +20,13 @@ const minutes = Number(workspace.match(/^minimumReleaseAge:\s*(\d+)\s*$/m)?.[1])
 if (!minutes) throw new Error('pnpm-workspace.yaml has no minimumReleaseAge')
 // Packages pnpm installs at any age (`minimumReleaseAgeExclude`): exempt here too.
 // Entries are names or `*` patterns, as in pnpm (`@typescript/typescript-*`).
-const exempt = [
-  ...(workspace.match(/^minimumReleaseAgeExclude:\s*\n((?:\s+-\s+.+\n?)+)/m)?.[1] ?? '').matchAll(
-    /^\s+-\s+'?([^'\s]+)'?\s*$/gm
-  )
-].map((m) => m[1])
+// Exact-version entries (`picomatch@4.0.4`) are NOT honoured: Renovate adds one to every
+// security PR, so trusting them would let any version through. This check still applies
+// the age rule to those versions.
+const excludeBlock = workspace.split(/^minimumReleaseAgeExclude:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
+const exempt = [...excludeBlock.matchAll(/^\s+-\s+['"]?([^'"\s#]+)['"]?\s*(?:#.*)?$/gm)]
+  .map((m) => m[1])
+  .filter((entry) => entry.lastIndexOf('@') <= 0)
 const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\/]/g, '\\$&')
 const exemptRe = exempt.map((p) => new RegExp(`^${p.split('*').map(escapeRe).join('.*')}$`))
 const isExempt = (name) => exemptRe.some((re) => re.test(name))
