@@ -14,13 +14,13 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-collapsible": "^1.1.20",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "framer-motion": "^12.29.0",
+    "@tanstack/react-query": "^5.103.2",
+    "framer-motion": "^12.43.0",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {

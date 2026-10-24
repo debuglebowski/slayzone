@@ -12,6 +12,6 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
-    "rollup": "^4.55.1"
+    "rollup": "^4.63.5"
   }
 }

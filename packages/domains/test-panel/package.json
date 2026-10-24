@@ -18,8 +18,8 @@
   "dependencies": {
     "@slayzone/ui": "workspace:*",
     "@slayzone/transport": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "picomatch": "^4.0.0",
+    "@tanstack/react-query": "^5.103.2",
+    "picomatch": "^4.0.7",
     "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {

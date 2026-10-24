@@ -18,16 +18,16 @@
     "test:skill-validation": "node --import tsx src/client/skill-validation.test.ts"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.0.0",
+    "@dagrejs/dagre": "^3.1.1",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "@xyflow/react": "^12.10.2",
+    "@tanstack/react-query": "^5.103.2",
+    "@xyflow/react": "^12.12.0",
     "js-yaml": "^4.3.2",
     "lucide-react": "^0.562.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.15"
   },
   "peerDependencies": {
     "electron": "^41.10.7",

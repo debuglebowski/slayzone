@@ -82,16 +82,16 @@
     "@types/node": "^22.19.7",
     "changelogen": "^0.6.2",
     "convex": "^1.32.0",
-    "eslint": "^9.39.4",
+    "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "knip": "^5.83.1",
-    "png-to-ico": "^3.0.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "knip": "^5.88.1",
+    "png-to-ico": "^3.0.2",
     "sharp": "^0.34.5",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.59.3"
+    "typescript-eslint": "^8.70.1"
   },
   "engines": {
     "node": ">=24",
@@ -100,6 +100,6 @@
   "version": "0.36.0-beta.19",
   "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "dependencies": {
-    "@tabler/icons-react": "^3.40.0"
+    "@tabler/icons-react": "^3.48.0"
   }
 }
