@@ -1,7 +1,9 @@
 import { build } from 'esbuild'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 
 const appPkg = JSON.parse(readFileSync(new URL('../app/package.json', import.meta.url), 'utf-8'))
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
 await build({
   entryPoints: ['src/index.ts'],
@@ -14,6 +16,8 @@ await build({
   outfile: 'dist/slay.js',
   banner: { js: '#!/usr/bin/env node' },
   external: ['node:sqlite'],
+  // Fails the build if an external would not resolve where `slay` runs. See build-guards.
+  plugins: [runtimeImportsEsbuildPlugin({ bundleName: 'cli', packageJson: pkg })],
   define: { __APP_VERSION__: JSON.stringify(appPkg.version) }
 })
 

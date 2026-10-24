@@ -6,8 +6,10 @@
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import * as esbuild from 'esbuild'
+import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 
 const require = createRequire(import.meta.url)
+const pkg = require('./package.json')
 
 /**
  * Teach esbuild Vite's `?raw` suffix: `import x from 'pkg/file.sh?raw'` inlines
@@ -48,7 +50,17 @@ await esbuild.build({
   format: 'cjs',
   target: 'node20',
   sourcemap: true,
-  plugins: [rawImportPlugin],
+  plugins: [
+    rawImportPlugin,
+    // Fails the build if an external would not resolve where the computer runs.
+    // bufferutil/utf-8-validate stay undeclared on purpose: ws probes them in
+    // try/catch and runs without them. See build-guards.
+    runtimeImportsEsbuildPlugin({
+      bundleName: 'computer',
+      packageJson: pkg,
+      optionalExternals: ['bufferutil', 'utf-8-validate']
+    })
+  ],
   // node-pty is a native addon (loads a prebuilt .node binary) and cannot be
   // bundled; keep it external and resolve it from node_modules at runtime.
   // bufferutil/utf-8-validate are optional native ws accelerators.

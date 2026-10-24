@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync, watch } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
 
 // --- Build identity (plans/sidecar-staleness.md, Phase 1) --------------------
 // Stamp the sidecar with the commit + build time so the running process can
@@ -20,7 +21,8 @@ function gitCommit() {
   }
 }
 
-const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+const { version } = pkg
 
 /**
  * One full build. Each invocation recomputes commit + builtAt so the value
@@ -49,6 +51,9 @@ async function buildOnce() {
     format: 'cjs',
     target: 'node20',
     external: ['better-sqlite3', 'bufferutil', 'utf-8-validate', 'node-pty'],
+    // Fails the build if an external would not resolve where the hub runs (packaged
+    // app.asar.unpacked, or `npm i @slayzone/hub`). See build-guards.
+    plugins: [runtimeImportsEsbuildPlugin({ bundleName: 'hub', packageJson: pkg })],
     // Shebang: this bundle is ALSO the `slayzone-hub` bin of the published
     // @slayzone/hub package, so npm/npx exec it directly (no `node` prefix).
     // Without it the kernel has no interpreter and /bin/sh runs the JS as a

@@ -25,6 +25,7 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@slayzone/build-guards": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@types/node": "^22.19.1",
     "esbuild": "^0.25.0",

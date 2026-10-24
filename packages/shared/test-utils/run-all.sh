@@ -803,6 +803,11 @@ run_vitest_files "vitest (web shell session, T-13)" \
   packages/apps/web-shell/src/sign-in-error.test.ts \
   packages/apps/web-shell/src/LoginScreen.test.tsx
 
+# Runtime-imports build guard: every module a shipped Node bundle resolves at runtime
+# must resolve where it runs. A `require('@slayzone/platform')` Rollup left unbundled
+# in out/main failed on every diagnostics retention tick.
+run_test packages/shared/build-guards/runtime-imports.test.ts
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.
