@@ -26,6 +26,7 @@ import type { BufferedEvent } from '../chat-events-store'
 import type { ChatEffort } from '../../shared/chat-effort'
 import type { ChatCollaborationMode } from '../../shared/chat-collaboration'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
+import type { AgentStateRecorder } from './pty-manager'
 import {
   childProcessToHandle,
   createLineSplitter,
@@ -167,25 +168,25 @@ export function setTransportDepsForTests(override: Partial<TransportDeps>): void
 }
 
 /**
- * Composition-root hook to flip the `was_spawned` flag on a `terminal_tabs`
- * row. We can't import `@slayzone/task-terminals` from inside the terminal
- * package (would cycle), so the app wires this at boot. Called true on
- * successful spawn, false on natural / user-initiated exit unless the app
- * is shutting down (see `setChatShuttingDown`).
+ * Composition-root hook to persist how a chat tab's agent last ended
+ * (`terminal_tabs.agent_state`). We can't import `@slayzone/task-terminals` from
+ * inside the terminal package (would cycle), so the app wires this at boot. Called
+ * `running` on successful spawn and `stopped` on natural / user-initiated exit,
+ * unless the app is shutting down (see `setChatShuttingDown`). Same recorder type
+ * as the pty manager's — one recorder serves both.
  */
-type SpawnedSetter = (tabId: string, wasSpawned: boolean) => void
-let spawnedSetter: SpawnedSetter | null = null
-export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
-  spawnedSetter = fn
+let agentStateRecorder: AgentStateRecorder | null = null
+export function setAgentStateTabRecorder(fn: AgentStateRecorder | null): void {
+  agentStateRecorder = fn
 }
 /** See the pty-manager twin: readable so a test can assert the composition root
  *  actually installed a recorder in THIS process. */
-export function getSpawnedTabRecorder(): SpawnedSetter | null {
-  return spawnedSetter
+export function getAgentStateTabRecorder(): AgentStateRecorder | null {
+  return agentStateRecorder
 }
 
 /**
- * Shutdown gate. When true, the exit handler does NOT clear `was_spawned`
+ * Shutdown gate. When true, the exit handler leaves `agent_state` at `running`
  * so the next boot can auto-restart this chat session. Composition root
  * MUST set this true during app quit before calling `shutdownChatTransports`.
  */
@@ -1153,13 +1154,13 @@ async function spawnSubprocess(session: Session): Promise<void> {
   session.ended = false
   session.usedResume = Boolean(opts.conversationId)
   session.sawHealthyTurn = false
-  // Mark this tab as warm so a crash / unclean quit can restore it on next
-  // boot. Cleared in the exit handler below on natural/user exit (NOT on
-  // app shutdown — that's the whole point).
+  // Record this tab's agent as running so a crash / unclean quit can restore it
+  // on next boot. The exit handler below records `stopped` on natural/user exit
+  // (NOT on app shutdown — that's the whole point).
   try {
-    spawnedSetter?.(session.tabId, true)
+    agentStateRecorder?.(session.tabId, 'running')
   } catch (err) {
-    console.error('[chat-transport] markTabSpawned(true) failed:', err)
+    console.error('[chat-transport] agent state (running) write failed:', err)
   }
   // Move out of the lazy `not-spawned` state. `child.on('spawn')` below
   // promotes to `idle` once the kernel reports the pid.
@@ -1262,14 +1263,14 @@ async function spawnSubprocess(session: Session): Promise<void> {
       flushStderr()
     }
     session.ended = true
-    // Clear the warm flag UNLESS we're in app shutdown — in which case
-    // preserve so next boot restores. Subprocess crashes / claude-side
-    // exits drop the flag because there's nothing to "restore" anymore.
+    // Record `stopped` UNLESS we're in app shutdown — in which case the row stays
+    // `running` so next boot restores. Subprocess crashes / claude-side exits count
+    // as stopped because there's nothing to "restore" anymore.
     if (!isShuttingDown) {
       try {
-        spawnedSetter?.(session.tabId, false)
+        agentStateRecorder?.(session.tabId, 'stopped')
       } catch (err) {
-        console.error('[chat-transport] markTabSpawned(false) failed:', err)
+        console.error('[chat-transport] agent state (stopped) write failed:', err)
       }
     }
     // Tear down the driver — rejects its in-flight control/request promises

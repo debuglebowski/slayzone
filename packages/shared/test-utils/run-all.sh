@@ -312,6 +312,7 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/statu
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
 # v169 project owner + per-user settings, on an empty and a populated v168 DB.
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -631,6 +632,7 @@ run_test packages/domains/terminal/src/shared/chat-model.test.ts
 run_test packages/domains/terminal/src/shared/key-sequences.test.ts
 run_test packages/domains/terminal/src/shared/osc.test.ts
 run_test packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
+run_test packages/domains/terminal/src/shared/auto-start.test.ts
 run_test packages/domains/worktrees/src/client/parse-diff.test.ts
 run_test packages/domains/worktrees/src/client/utils.test.ts
 run_test packages/domains/worktrees/src/server/list-project-repos.test.ts

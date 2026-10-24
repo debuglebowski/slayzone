@@ -1,10 +1,17 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  AGENT_STARTUP_SETTING,
+  parseAgentStartupMode,
+  restoresRunningAgentsOnBoot,
+  type AgentState
+} from '@slayzone/terminal/shared'
 import { isTerminalStatus, parseColumnsConfig } from '@slayzone/workflow'
 
 /**
- * Mark a tab's subprocess liveness in DB. Called by pty-manager + chat-transport
- * around spawn/exit so reboots can restore warm agents. Direct DB write — kept
- * lean since hot-path called from spawn/exit handlers.
+ * Record how a tab's agent last ended (`terminal_tabs.agent_state`). Called by
+ * pty-manager + chat-transport around spawn/exit/idle-close (via the injected
+ * recorder) so reboots can restore running agents and the Start gate knows what
+ * to show. Direct DB write — kept lean since hot-path called from spawn/exit handlers.
  *
  * Resolution rules for the tabId arg:
  *   - PTY main session: sessionId is `${taskId}:${taskId}` → main tab row has `id = task_id` (see ensureMainTab insert)
@@ -12,65 +19,53 @@ import { isTerminalStatus, parseColumnsConfig } from '@slayzone/workflow'
  *   - Chat: tabId is the row id directly
  * Caller resolves the row id and passes it here; we just UPDATE by id.
  */
-export async function markTabSpawned(
+export async function setTabAgentState(
   db: SlayzoneDb,
   tabId: string,
-  wasSpawned: boolean
+  state: AgentState
 ): Promise<void> {
-  await db
-    .prepare('UPDATE terminal_tabs SET was_spawned = ? WHERE id = ?')
-    .run(wasSpawned ? 1 : 0, tabId)
+  await db.prepare('UPDATE terminal_tabs SET agent_state = ? WHERE id = ?').run(state, tabId)
 }
 
-/**
- * Persist a tab's idle-close (hibernation) status so the "sleeping 💤 / Reopen"
- * affordance survives reload + restart. Set true when the idle agent is killed,
- * false on any (re)spawn. Same tabId resolution as `markTabSpawned`.
- */
-export async function markTabHibernated(
-  db: SlayzoneDb,
-  tabId: string,
-  hibernated: boolean
-): Promise<void> {
-  await db
-    .prepare('UPDATE terminal_tabs SET hibernated = ? WHERE id = ?')
-    .run(hibernated ? 1 : 0, tabId)
-}
-
-/** Main-tab session ids (`${taskId}:${taskId}`) for tabs currently flagged
- *  hibernated. Seeds the renderer's PtyContext at boot so the 💤 dot shows for
- *  stale agents before any live session exists. */
+/** Main-tab session ids (`${taskId}:${taskId}`) for tabs whose agent the idle
+ *  timeout closed (`auto_stopped`). Seeds the renderer's PtyContext at boot so the
+ *  💤 dot shows for stale agents before any live session exists. */
 export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]> {
   const rows = (await db
-    .prepare('SELECT task_id FROM terminal_tabs WHERE hibernated = 1 AND is_main = 1')
+    .prepare("SELECT task_id FROM terminal_tabs WHERE agent_state = 'auto_stopped' AND is_main = 1")
     .all()) as Array<{ task_id: string }>
   return rows.map((r) => `${r.task_id}:${r.task_id}`)
 }
 
 /**
- * Task ids whose main agent session was alive at last shutdown (`was_spawned`)
- * and isn't explicitly idle-closed (`hibernated`) — the set that should
- * auto-restore on boot. `was_spawned` is tab-bar independent (closing a task's
- * outer UI tab doesn't clear it), so this is used to re-open a background tab
+ * Task ids whose main agent session was alive at last shutdown
+ * (`agent_state = 'running'`) — the set that should auto-restore on boot. Empty in
+ * the `manual` startup mode: those agents would only show their Start button.
+ * `agent_state` is tab-bar independent (closing a task's outer UI tab doesn't
+ * clear it), so this is used to re-open a background tab
  * for tasks the persisted tab-bar list alone would miss; the existing
- * `wasSpawned` prop on `TerminalStarter` then resumes each one without
+ * `agentState` prop on `TerminalStarter` then resumes each one without
  * triggering inference. `mode != 'terminal'` mirrors the `shouldGate`
  * condition in `TerminalSplitGroup` — plain shell tabs always eager-spawn.
  *
  * Also excludes tasks whose current status is terminal (done/canceled): a
  * task can reach a terminal status while its agent session is still live (or
- * while an exit went undetected, leaving `was_spawned` stuck at 1 — see
+ * while an exit went undetected, leaving `agent_state` stuck at `running` — see
  * `processes` exit-detection fixes), and reopening a finished task's tab on
  * every boot is never the intent of "auto-restore".
  */
 export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> {
+  const setting = (await db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get(AGENT_STARTUP_SETTING)) as { value: string } | undefined
+  if (!restoresRunningAgentsOnBoot(parseAgentStartupMode(setting?.value))) return []
   const rows = (await db
     .prepare(
       `SELECT tt.task_id, t.status, p.columns_config FROM terminal_tabs tt
        JOIN tasks t ON t.id = tt.task_id
        LEFT JOIN projects p ON p.id = t.project_id
        WHERE tt.is_main = 1 AND tt.mode != 'terminal'
-         AND tt.was_spawned = 1 AND tt.hibernated = 0
+         AND tt.agent_state = 'running'
          AND t.deleted_at IS NULL`
     )
     .all()) as Array<{ task_id: string; status: string; columns_config: string | null }>

@@ -804,8 +804,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       stopped = true
       // FIRST, before anything that can fire a pty/chat exit handler. Closing the
       // computer gateway below disposes every session on that computer, and each exit
-      // would otherwise clear `terminal_tabs.was_spawned` — the exact flag the
-      // next boot reads to bring your agents back (`listAutoRestoreTasks`).
+      // would otherwise record `terminal_tabs.agent_state = 'stopped'` — the exact
+      // state the next boot reads to bring your agents back (`listAutoRestoreTasks`).
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()

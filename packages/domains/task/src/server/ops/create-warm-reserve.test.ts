@@ -51,10 +51,10 @@ async function setup(opts: { selectedRepo?: string; autoWorktree?: 0 | 1 } = {})
     setAnswer: (a: string | null) => {
       answer = a
     },
-    setAutoStart: (v: '0' | '1') =>
+    setStartup: (v: 'manual' | 'auto' | 'instant') =>
       h.db
         .prepare(
-          "INSERT INTO settings (key, value) VALUES ('terminal_auto_start', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+          "INSERT INTO settings (key, value) VALUES ('terminal_agent_startup', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
         )
         .run(v)
   }
@@ -76,15 +76,28 @@ test('temporary task opened at once takes the reserved id', async () => {
   s.h.cleanup()
 })
 
-test('regular task opened at once takes the reserved id when its agent auto-starts', async () => {
+for (const mode of [null, 'auto', 'instant'] as const) {
+  test(`regular task opened at once takes the reserved id (startup mode ${mode ?? 'unset → auto'})`, async () => {
+    const s = await setup()
+    if (mode) s.setStartup(mode)
+    const task = await createTaskOp(
+      s.h.slayDb,
+      { projectId: s.projectId, title: 'Real', openAfterCreate: true },
+      s.deps
+    )
+    expect(task?.id).toBe(s.reservedId)
+    s.h.cleanup()
+  })
+}
+
+test("a created task's main tab starts out `new` (never started)", async () => {
   const s = await setup()
-  s.setAutoStart('1')
-  const task = await createTaskOp(
-    s.h.slayDb,
-    { projectId: s.projectId, title: 'Real', openAfterCreate: true },
-    s.deps
-  )
-  expect(task?.id).toBe(s.reservedId)
+  const task = await createTaskOp(s.h.slayDb, { projectId: s.projectId, title: 'Fresh' }, {})
+  const row = s.h.db
+    .prepare('SELECT agent_state, is_main FROM terminal_tabs WHERE id = ?')
+    .get(task!.id) as { agent_state: string; is_main: number } | undefined
+  expect(row?.agent_state).toBe('new')
+  expect(row?.is_main).toBe(1)
   s.h.cleanup()
 })
 
@@ -104,13 +117,13 @@ test('no warm agent available → a fresh id, task still created', async () => {
 const NOT_RESERVED: Array<{
   name: string
   project?: { selectedRepo?: string; autoWorktree?: 0 | 1 }
-  autoStart?: '0' | '1'
+  startup?: 'manual' | 'auto' | 'instant'
   input: Record<string, unknown>
 }> = [
   { name: 'not opened after create', input: { isTemporary: true } },
   {
-    name: 'regular task whose agent waits behind the Start gate',
-    autoStart: '0',
+    name: 'regular task whose agent waits behind the Start gate (manual)',
+    startup: 'manual',
     input: { openAfterCreate: true }
   },
   {
@@ -133,7 +146,7 @@ const NOT_RESERVED: Array<{
 for (const c of NOT_RESERVED) {
   test(`no reservation: ${c.name}`, async () => {
     const s = await setup(c.project)
-    if (c.autoStart) s.setAutoStart(c.autoStart)
+    if (c.startup) s.setStartup(c.startup)
     const task = await createTaskOp(
       s.h.slayDb,
       { projectId: s.projectId, title: 'T', ...c.input },

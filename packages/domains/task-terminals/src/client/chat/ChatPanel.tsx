@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import { useChatSession } from '@slayzone/terminal/client'
+import type { AgentState } from '@slayzone/terminal/shared'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
 import { ChatViewContext } from './ChatViewContext'
 import { useChatMode } from './useChatMode'
@@ -34,13 +35,16 @@ export interface ChatPanelProps {
   /** Cmd+Click on a file:line:col reference → editor pane. */
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   /**
-   * From `terminal_tabs.was_spawned`: was the chat subprocess alive when the
-   * app last touched this tab. True → after hydrate, auto-call chat.start so
-   * a warm session restores on reboot without the user typing first. The flag
-   * is sticky across shutdown (cleared only on user-initiated kill /
-   * subprocess exit), so it doubles as crash recovery.
+   * From `terminal_tabs.agent_state`: how this tab's agent last ended. With the
+   * startup mode it decides whether chat.start runs after hydrate (see
+   * `useChatLifecycle`), e.g. so a warm session restores on reboot without the
+   * user typing first. `running` is kept across shutdown, so it doubles as crash
+   * recovery.
    */
-  wasSpawned?: boolean
+  agentState?: AgentState
+  /** The task's main tab (the startup mode applies to it). */
+  isMain?: boolean
+  isTemporary?: boolean
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -55,7 +59,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       permissionNotice: overrideNotice,
       onOpenUrl,
       onOpenFile,
-      wasSpawned
+      agentState,
+      isMain,
+      isTemporary
     } = props
     const {
       state,
@@ -171,7 +177,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         mode,
         cwd,
         providerFlagsOverride,
-        wasSpawned,
+        agentState,
+        isMain,
+        isTemporary,
         chatApi,
         inFlight,
         hydrating,

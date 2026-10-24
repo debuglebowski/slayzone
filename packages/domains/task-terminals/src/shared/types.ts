@@ -1,4 +1,4 @@
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { AgentState, TerminalMode } from '@slayzone/terminal/shared'
 
 export interface TerminalTab {
   id: string // UUID or "main"
@@ -10,18 +10,13 @@ export interface TerminalTab {
   position: number
   createdAt: string
   /**
-   * True when this tab's subprocess (PTY for xterm, chat child_process for chat)
-   * was last known to be alive. Set on spawn, cleared on user kill / natural exit.
-   * NOT cleared on app shutdown — so next boot auto-restarts warm agents.
+   * How this tab's agent last ended (`terminal_tabs.agent_state`): `new` (never
+   * started), `running` (alive, or alive when the app shut down), `auto_stopped`
+   * (closed by the idle timeout) or `stopped` (any other exit). With the
+   * `terminal_agent_startup` setting it decides whether opening the task starts the
+   * agent — see `agentStartsOnOpen`.
    */
-  wasSpawned: boolean
-  /**
-   * True when the idle-close (hibernation) feature auto-closed this agent while
-   * idle. Distinct from `wasSpawned` (which hibernation clears): persists the
-   * "sleeping 💤 / Reopen" status across reload + restart so a stale agent stays
-   * visibly distinct from a never-started one. Cleared on (re)spawn.
-   */
-  hibernated: boolean
+  agentState: AgentState
 }
 
 export interface TerminalGroup {

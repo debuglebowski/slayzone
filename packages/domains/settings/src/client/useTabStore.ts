@@ -651,10 +651,10 @@ export async function loadTabStoreState(): Promise<void> {
 }
 
 // A task's outer tab can be closed while its agent keeps running — closing a
-// tab only drops it from `viewState`, it doesn't touch `terminal_tabs.was_spawned`
+// tab only drops it from `viewState`, it doesn't touch `terminal_tabs.agent_state`
 // (see tab-flags.ts). So the persisted tab list alone can miss live sessions on
 // boot. Reopen those as background tabs (no focus steal) so the existing
-// `wasSpawned` resume path on `TerminalStarter` picks them back up. Best-effort:
+// `agentState` resume path on `TerminalStarter` picks them back up. Best-effort:
 // a failed fetch here must not block boot.
 async function restoreActiveSessionTabs(): Promise<void> {
   try {

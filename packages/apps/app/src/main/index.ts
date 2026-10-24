@@ -1979,7 +1979,7 @@ app
     // is registered in the SIDE-CAR (composition.ts:377). `onGlobalStateChange`
     // fires on whichever process owns the pty sessions; the host owns none, so its
     // listener was registered against its own bundled pty-manager copy and never
-    // fired. Same orphaning as idle-close, the warm pool and `was_spawned`.
+    // fired. Same orphaning as idle-close, the warm pool and the tab agent-state recorder.
 
     // Expose test helpers for e2e
     if (isPlaywright) {
@@ -2007,11 +2007,11 @@ app
         devPost('/api/dev/user-input-mark', { sid, mark: false })
     }
 
-    // The per-tab `was_spawned` / `hibernated` recorders are installed by the
+    // The per-tab `agent_state` recorder is installed by the
     // SIDE-CAR (`wireTabFlagRecorders`, composition.ts:487) — the process that
     // actually spawns sessions. The host's copies fired against its own empty
     // registry, which is exactly the bug `tab-flag-recorders.test.ts` was written
-    // to pin: `was_spawned` stayed 0 forever and a restart restored nothing.
+    // to pin: no agent was ever recorded running and a restart restored nothing.
     //
     // The pty enricher is wired in the SIDE-CAR too now (composition.ts), where
     // the sessions it decorates actually live. `createPtyEnricher` moved to
@@ -3893,6 +3893,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // so it is seeded in the hub's database, not the client store.
         await devSqlRun(
           "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')"
+        )
+        // Agent startup `manual`: the Start gate + no warm pool, the baseline every
+        // spec was written against (a fresh DB would default to `auto`, which boots a
+        // pre-booted agent per open project and auto-starts new tasks). Specs that
+        // exercise another mode set it themselves.
+        await devSqlRun(
+          "INSERT OR REPLACE INTO settings (key, value) VALUES ('terminal_agent_startup', 'manual')"
         )
         // Client store is unaffected by the schema rebuild, but re-read anyway so
         // any test that rewrote it takes effect.

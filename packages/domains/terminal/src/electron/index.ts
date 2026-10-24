@@ -50,8 +50,6 @@ export {
   PTY_EXIT_KILLED_BY_HOST,
   type PtyShutdownOptions,
   type PtyShutdownResult,
-  setSpawnedTabRecorder as setPtySpawnedTabRecorder,
-  setHibernatedTabRecorder as setPtyHibernatedTabRecorder,
   setReinstallHooks,
   setIdleCloseConfigGetter,
   touchPty,
@@ -92,7 +90,6 @@ export {
   type ChatQueueEventMap
 } from '../server/runtime/chat-queue-handlers'
 export {
-  setSpawnedTabRecorder as setChatSpawnedTabRecorder,
   chatEvents,
   type ChatEventMap
 } from '../server/runtime/chat-transport-manager'

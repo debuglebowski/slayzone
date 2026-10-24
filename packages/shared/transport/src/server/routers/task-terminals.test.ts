@@ -73,7 +73,7 @@ test('task-terminals router: delete non-main true, main false, missing false', a
   expect(await caller.delete({ tabId: 'nope' })).toBe(false)
 })
 
-test('task-terminals router: listAutoRestoreTasks — spawned+non-hibernated only', async () => {
+test('task-terminals router: listAutoRestoreTasks — running agents only', async () => {
   const mkTask = (title: string, deletedAt: string | null = null) => {
     const id = crypto.randomUUID()
     h.db
@@ -83,37 +83,35 @@ test('task-terminals router: listAutoRestoreTasks — spawned+non-hibernated onl
       .run(id, projectId, title, 'inbox', 3, 0, deletedAt)
     return id
   }
-  const setTab = (id: string, wasSpawned: boolean, hibernated: boolean) =>
-    h.db
-      .prepare('UPDATE terminal_tabs SET was_spawned = ?, hibernated = ? WHERE id = ?')
-      .run(wasSpawned ? 1 : 0, hibernated ? 1 : 0, id)
+  const setTab = (id: string, state: 'new' | 'running' | 'auto_stopped' | 'stopped') =>
+    h.db.prepare('UPDATE terminal_tabs SET agent_state = ? WHERE id = ?').run(state, id)
 
   const active = mkTask('active')
   await caller.ensureMain({ taskId: active, mode: 'claude-code' })
-  setTab(active, true, false)
+  setTab(active, 'running')
 
   const hibernated = mkTask('hibernated')
   await caller.ensureMain({ taskId: hibernated, mode: 'claude-code' })
-  setTab(hibernated, true, true)
+  setTab(hibernated, 'auto_stopped')
 
   const neverSpawned = mkTask('never-spawned')
   await caller.ensureMain({ taskId: neverSpawned, mode: 'claude-code' })
-  setTab(neverSpawned, false, false)
+  setTab(neverSpawned, 'new')
 
   const plainShell = mkTask('plain-shell')
   await caller.ensureMain({ taskId: plainShell, mode: 'terminal' })
-  setTab(plainShell, true, false)
+  setTab(plainShell, 'running')
 
   const deleted = mkTask('deleted', new Date().toISOString())
   await caller.ensureMain({ taskId: deleted, mode: 'claude-code' })
-  setTab(deleted, true, false)
+  setTab(deleted, 'running')
 
-  // Regression: a task reaching 'done' with `was_spawned` stuck at 1 (e.g. an
+  // Regression: a task reaching 'done' with `agent_state` stuck at `running` (e.g. an
   // undetected agent exit) must not keep reopening as a background tab forever.
   const done = mkTask('done')
   h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', done)
   await caller.ensureMain({ taskId: done, mode: 'claude-code' })
-  setTab(done, true, false)
+  setTab(done, 'running')
 
   const ids = await caller.listAutoRestoreTasks()
   expect(ids).toContain(active)
@@ -122,4 +120,11 @@ test('task-terminals router: listAutoRestoreTasks — spawned+non-hibernated onl
   expect(ids).not.toContain(plainShell)
   expect(ids).not.toContain(deleted)
   expect(ids).not.toContain(done)
+
+  // `manual` startup mode: nothing restores — those agents would only show Start.
+  h.db
+    .prepare("INSERT INTO settings (key, value) VALUES ('terminal_agent_startup', 'manual')")
+    .run()
+  expect(await caller.listAutoRestoreTasks()).toEqual([])
+  h.db.prepare("DELETE FROM settings WHERE key = 'terminal_agent_startup'").run()
 })

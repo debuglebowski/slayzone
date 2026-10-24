@@ -47,7 +47,9 @@ const HUB_KEYS: ReadonlySet<string> = new Set([
   'terminal_auto_close_idle',
   'terminal_idle_close_value',
   'terminal_idle_close_unit',
-  'terminal_prewarm_enabled',
+  // agent startup mode (warm pool in hub composition.ts, task create's warm reserve,
+  // boot restore in task-terminals tab-flags.ts)
+  'terminal_agent_startup',
   // test panel (test-panel-store.ts)
   'test_profiles',
   // diagnostics config (diagnostics-store.ts)

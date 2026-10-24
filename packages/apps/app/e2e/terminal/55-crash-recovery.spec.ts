@@ -31,10 +31,12 @@ test.describe('Terminal crash overlay', () => {
     // AI-mode terminals are idle-gated (TerminalStarter). The custom mode's
     // starter button ("Open Crash Overlay E2E") doesn't match
     // startAgentTerminal's built-in-agent regex, and every Retry remount
-    // would re-hit the gate anyway (exit clears `was_spawned`) — seed
-    // auto-start so mounts spawn directly. The gate is 93/97's subject.
+    // would re-hit the gate anyway (exit records `stopped`) — seed the
+    // `instant` startup mode so mounts spawn directly. The gate is 93/97's subject.
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'instant' })
     )
     await mainWindow.evaluate(
       (id) =>
@@ -89,7 +91,7 @@ test.describe('Terminal crash overlay', () => {
       .evaluate(() =>
         window
           .getTrpcVanillaClient()
-          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+          .settings.set.mutate({ key: 'terminal_agent_startup', value: 'manual' })
       )
       .catch(() => {})
   })

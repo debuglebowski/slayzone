@@ -4,10 +4,11 @@
  * The pool pre-boots a real agent, so before this it was the last path by which
  * the HUB could start an agent itself — and `pty-store` reached for it precisely
  * when no computer resolved, i.e. the case that is supposed to raise "no computer
- * available". It is opt-in (`terminal_prewarm_enabled`, default off), which is
- * why it had no e2e coverage at all and the violation went unnoticed.
+ * available". It was opt-in (`terminal_prewarm_enabled`, default off), which is
+ * why it had no e2e coverage at all and the violation went unnoticed. It now runs
+ * in the `auto` and `instant` agent startup modes (`terminal_agent_startup`).
  *
- * These tests assert the invariant end-to-end: with pre-warm ON, the warm agent is
+ * These tests assert the invariant end-to-end: with the pool on (`auto` startup mode), the warm agent is
  * spawned through the computer, and a task created to be opened takes the id the
  * agent booted with, so its first spawn adopts it.
  */
@@ -22,12 +23,12 @@ test.describe('Warm pool (computer-hosted)', () => {
   })
 
   test.afterAll(async ({ mainWindow }) => {
-    // Leave pre-warm OFF for every other spec: a live pooled agent per project
+    // Leave the pool OFF (`manual`, the e2e baseline) for every other spec: a live pooled agent per project
     // would otherwise linger for the rest of the worker.
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
-        .settings.set.mutate({ key: 'terminal_prewarm_enabled', value: '0' })
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'manual' })
     )
   })
 
@@ -45,13 +46,13 @@ test.describe('Warm pool (computer-hosted)', () => {
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
-        .settings.set.mutate({ key: 'terminal_prewarm_enabled', value: '1' })
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'auto' })
     )
 
     // The gate is "this project has ≥1 open task tab", reported per window.
     //
     // Re-issued on every poll rather than sent once: the sidecar refreshes its
-    // cached `terminal_prewarm_enabled` asynchronously off a settings-changed
+    // cached startup mode asynchronously off a settings-changed
     // event, so a single report can land while the flag is still false and be
     // dropped as `warm.reconcile_skip_disabled`. Each report schedules a fresh
     // (debounced) reconcile, so re-sending is how the test converges rather than
@@ -103,7 +104,7 @@ test.describe('Warm pool (computer-hosted)', () => {
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
-        .settings.set.mutate({ key: 'terminal_prewarm_enabled', value: '1' })
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'auto' })
     )
     const pooledIds = async (): Promise<string[]> =>
       (
@@ -195,11 +196,11 @@ test.describe('Warm pool (computer-hosted)', () => {
     )
   })
 
-  test('pre-warm off spawns nothing', async ({ mainWindow, electronApp }) => {
+  test('manual startup mode (pool off) spawns nothing', async ({ mainWindow, electronApp }) => {
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
-        .settings.set.mutate({ key: 'terminal_prewarm_enabled', value: '0' })
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'manual' })
     )
     const project = (await seed(mainWindow).createProject({
       name: 'NoWarm',
@@ -208,7 +209,7 @@ test.describe('Warm pool (computer-hosted)', () => {
     })) as { id: string }
     const projectId = project.id
 
-    // Turning pre-warm off does not merely stop NEW warms — the next reconcile
+    // Turning the pool off does not merely stop NEW warms — the next reconcile
     // tears down every live one and marks its pooled session dead, so the pooled
     // count drains to zero (including the one the previous test left armed). That
     // is the assertion worth making: "off" means no pre-booted agent is left

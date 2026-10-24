@@ -1,4 +1,4 @@
-import { ensureMainTab, markTabSpawned, tabsEvents } from '@slayzone/task-terminals/server'
+import { ensureMainTab, setTabAgentState, tabsEvents } from '@slayzone/task-terminals/server'
 import type { PtyAccess, RestApiDeps } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 5_000
@@ -36,9 +36,10 @@ export function extractMainTaskId(sessionId: string): string | null {
  *  - Ensures the main tab row exists via the shared `ensureMainTab` (same impl
  *    the `tabs:ensureMain` IPC handler uses) so CLI-driven flows don't race
  *    the renderer's mount-time row creation.
- *  - Flips `was_spawned=1` so TerminalStarter skips its idle gate on next mount.
+ *  - Sets `agent_state='running'` so TerminalStarter skips its idle gate on next
+ *    mount (in every startup mode except `manual`).
  *  - Broadcasts `tabs:changed` so any open useTaskTerminals re-fetches the row
- *    and propagates the new `wasSpawned` prop to TerminalStarter, which then
+ *    and propagates the new `agentState` prop to TerminalStarter, which then
  *    auto-mounts <Terminal> → spawns via pty:create IPC.
  *  - Broadcasts `app:open-task` so a closed task tab still gets mounted.
  *  - Awaits the renderer's ack via requestEnsureAlive (force:false). Renderer
@@ -63,8 +64,8 @@ export async function startMainPty(
   const cached = failureCache.get(taskId)
   if (cached && cached.expiresAt > Date.now()) return cached.result
 
-  ensureMainTab(deps.db, taskId, task.terminal_mode ?? 'terminal')
-  markTabSpawned(deps.db, taskId, true)
+  await ensureMainTab(deps.db, taskId, task.terminal_mode ?? 'terminal')
+  await setTabAgentState(deps.db, taskId, 'running')
   // Dual-emit: legacy IPC broadcast + tRPC tabsEvents (subscribers in slice 5).
   deps.legacyBroadcast?.('tabs:changed', { taskId })
   tabsEvents.emit('tabs:changed', { taskId })

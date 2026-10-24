@@ -183,7 +183,9 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               permissionNotice={pane.permissionNotice ?? null}
               onOpenUrl={onOpenUrl}
               onOpenFile={onOpenFile}
-              wasSpawned={pane.tab.wasSpawned}
+              agentState={pane.tab.agentState}
+              isMain={pane.tab.isMain}
+              isTemporary={pane.isTemporary}
             />
           </Suspense>
         )
@@ -194,9 +196,9 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       // plain `terminal` mode keep eager spawn (user-driven).
       const shouldGate = pane.tab.isMain && pane.tab.mode !== 'terminal'
       const TerminalCmp = shouldGate ? TerminalStarter : Terminal
-      // `wasSpawned` (from terminal_tabs) tells TerminalStarter to auto-mount
-      // instead of showing the Start chip — restores warm agents after a crash
-      // or quit. Only meaningful when gating (Terminal ignores the prop).
+      // `agentState` (from terminal_tabs) + the startup mode tell TerminalStarter
+      // whether to auto-mount instead of showing the Start chip — e.g. restores
+      // warm agents after a crash or quit. Only meaningful when gating.
       const terminal = (
         <TerminalCmp
           ref={paneRefs.current[pane.sessionId]}
@@ -221,8 +223,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onOpenFile={onOpenFile}
           {...(shouldGate
             ? {
-                wasSpawned: pane.tab.wasSpawned,
-                hibernated: pane.tab.hibernated,
+                agentState: pane.tab.agentState,
                 isTemporary: pane.isTemporary,
                 conversationHydrated: pane.conversationHydrated
               }

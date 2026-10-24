@@ -2,18 +2,19 @@
  * Tab-flag recorder wiring — the seam that decides whether a restart restores
  * your agents.
  *
- * The regression this pins: `terminal_tabs.was_spawned` is written by
- * `spawnedSetter` inside pty-manager/chat-transport-manager, and that setter was
+ * The regression this pins: `terminal_tabs.agent_state` (formerly `was_spawned`) is
+ * written by a recorder inside pty-manager/chat-transport-manager, and that recorder was
  * installed ONLY by the Electron host (`apps/app/src/main/index.ts`). When the
  * pty runtime moved to the side-car (slice 9) and spawning moved to the computer,
- * the host stopped owning any session — so every `spawnedSetter?.(…)` became a
- * no-op, `was_spawned` stayed 0 forever, and `listAutoRestoreTasks` had nothing
+ * the host stopped owning any session — so every recorder call became a
+ * no-op, no agent was ever recorded running, and `listAutoRestoreTasks` had nothing
  * to restore. Same orphaning that killed idle-close and the warm pool.
  *
  * So this asserts the REAL module-global state of `@slayzone/terminal/server`
  * (not injected spies): after `wireTabFlagRecorders(db)` the pty AND chat
  * managers both hold a recorder, and driving it round-trips through
- * `markTabSpawned` into the real `terminal_tabs` row.
+ * `setTabAgentState` into the real `terminal_tabs` row — including the idle-close
+ * `auto_stopped` state, which no process ever wrote before.
  *
  * Plus a narrow source check that the hub's `stop()` sets the shutdown gate
  * BEFORE tearing the computer gateway down — the gate is what keeps a quit-time
@@ -30,10 +31,10 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
 import {
-  getPtySpawnedTabRecorder,
-  getChatSpawnedTabRecorder,
-  setPtySpawnedTabRecorder,
-  setChatSpawnedTabRecorder
+  getPtyAgentStateTabRecorder,
+  getChatAgentStateTabRecorder,
+  setPtyAgentStateTabRecorder,
+  setChatAgentStateTabRecorder
 } from '@slayzone/terminal/server'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
@@ -49,24 +50,24 @@ h.db
   )
   .run(taskId, projectId, 'T1', 'inbox', 3, 0)
 
-const wasSpawnedOf = (id: string): number =>
+const agentStateOf = (id: string): string =>
   (
-    h.db.prepare('SELECT was_spawned FROM terminal_tabs WHERE id = ?').get(id) as
-      | { was_spawned: number }
+    h.db.prepare('SELECT agent_state FROM terminal_tabs WHERE id = ?').get(id) as
+      | { agent_state: string }
       | undefined
-  )?.was_spawned ?? -1
+  )?.agent_state ?? 'missing'
 
 test('tab-flag recorders: unwired by default (the orphaned state)', () => {
-  setPtySpawnedTabRecorder(null)
-  setChatSpawnedTabRecorder(null)
-  expect(getPtySpawnedTabRecorder()).toBe(null)
-  expect(getChatSpawnedTabRecorder()).toBe(null)
+  setPtyAgentStateTabRecorder(null)
+  setChatAgentStateTabRecorder(null)
+  expect(getPtyAgentStateTabRecorder()).toBe(null)
+  expect(getChatAgentStateTabRecorder()).toBe(null)
 })
 
 test('tab-flag recorders: wireTabFlagRecorders installs on BOTH pty and chat', () => {
   wireTabFlagRecorders(h.slayDb)
-  const pty = getPtySpawnedTabRecorder()
-  const chat = getChatSpawnedTabRecorder()
+  const pty = getPtyAgentStateTabRecorder()
+  const chat = getChatAgentStateTabRecorder()
   expect(typeof pty).toBe('function')
   expect(typeof chat).toBe('function')
   // One recorder, two managers — a chat agent and a pty agent must flip the
@@ -76,16 +77,13 @@ test('tab-flag recorders: wireTabFlagRecorders installs on BOTH pty and chat', (
 
 test('tab-flag recorders: installed recorder round-trips into terminal_tabs', async () => {
   await ensureMainTab(h.slayDb, taskId, 'claude-code')
-  expect(wasSpawnedOf(taskId)).toBe(0)
-
-  const record = getPtySpawnedTabRecorder()!
-  record(taskId, true)
-  await new Promise((r) => setTimeout(r, 20))
-  expect(wasSpawnedOf(taskId)).toBe(1)
-
-  record(taskId, false)
-  await new Promise((r) => setTimeout(r, 20))
-  expect(wasSpawnedOf(taskId)).toBe(0)
+  expect(agentStateOf(taskId)).toBe('stopped')
+  const record = getPtyAgentStateTabRecorder()!
+  for (const state of ['running', 'auto_stopped', 'running', 'stopped'] as const) {
+    record(taskId, state)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(agentStateOf(taskId)).toBe(state)
+  }
 })
 
 // The unit above proves the wiring WORKS; this proves it is CALLED. That gap is

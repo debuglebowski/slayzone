@@ -1,5 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task } from '@slayzone/task/shared'
+import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { buildTaskCreatedEvents } from '../history.js'
 import { parseTask } from './shared.js'
 
@@ -57,6 +58,8 @@ const INSERT_SQL = `
  * REST + MCP subtasks) route through here. Atomically inserts row + records `task.created` activity event
  * via the `task:insert-row` named transaction (runs inside the DB worker).
  *
+ * Also writes the task's main terminal tab row with `agent_state = 'new'`.
+ *
  * Caller responsible for: post-insert hooks (worktree provisioning, events, IPC).
  */
 export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<Task | null> {
@@ -104,6 +107,10 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
   } as Task)
 
   await db.namedTxn('task:insert-row', { insertSql: INSERT_SQL, insertParams, events })
+  // The main tab row, marked `new`: an agent that has never run. In the `auto`
+  // startup mode that is what makes a new task start when opened, while an older
+  // task (whose row is created lazily on open, as `stopped`) waits for Start.
+  await ensureMainTab(db, row.id, row.terminalMode, 'new')
 
   const fetched = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
     row.id

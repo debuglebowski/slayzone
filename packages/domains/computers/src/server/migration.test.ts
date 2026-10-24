@@ -5,7 +5,11 @@
  * store takes, not against a hand-built schema.
  */
 import { describe, expect, it } from 'vitest'
-import { LATEST_MIGRATION_VERSION, runMigrations } from '@slayzone/transport/db-bootstrap'
+import {
+  LATEST_MIGRATION_VERSION,
+  migrations,
+  runMigrations
+} from '@slayzone/transport/db-bootstrap'
 import type Database from 'better-sqlite3'
 import { createMigratedDb } from './test-db'
 
@@ -128,7 +132,10 @@ describe('computer schema migration (v149 + v163)', () => {
            VALUES ('jt-old', 'h', 'old', 1, 2, 'alice'), ('jt-local', 'h2', 'local', 1, 2, NULL)`
         )
         .run()
-      runMigrations(t.raw)
+      // v170 alone: the database is otherwise at the latest schema, so re-running
+      // every later migration would hit columns that already exist.
+      const v170 = migrations.find((m) => m.version === 170)!
+      t.raw.transaction(() => v170.up(t.raw))()
       expect(t.raw.prepare('SELECT id, owner_user_id FROM join_tokens ORDER BY id').all()).toEqual([
         { id: 'jt-local', owner_user_id: null },
         { id: 'jt-old', owner_user_id: 'alice' }

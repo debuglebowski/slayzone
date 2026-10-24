@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { safeRandomUUID } from '@slayzone/ui'
+import {
+  AGENT_STARTUP_SETTING,
+  DEFAULT_AGENT_STARTUP_MODE,
+  parseAgentStartupMode,
+  type AgentStartupMode
+} from '@slayzone/terminal/shared'
 import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import type {
@@ -47,8 +53,9 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     'Menlo, Monaco, "Courier New", monospace'
   )
   const [terminalScrollback, setTerminalScrollback] = useState('2000')
-  const [terminalAutoStart, setTerminalAutoStart] = useState(false)
-  const [terminalPrewarmEnabled, setTerminalPrewarmEnabled] = useState(false)
+  const [agentStartupMode, setAgentStartupMode] = useState<AgentStartupMode>(
+    DEFAULT_AGENT_STARTUP_MODE
+  )
   const [terminalAutoCloseIdle, setTerminalAutoCloseIdle] = useState(false)
   const [terminalIdleCloseValue, setTerminalIdleCloseValue] = useState('30')
   const [terminalIdleCloseUnit, setTerminalIdleCloseUnit] = useState('minutes')
@@ -136,18 +143,16 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     const emvm = all['editor_markdown_view_mode']
     const gto = all['git_tab_order']
     const gtv = all['git_tab_visibility']
-    const tas = all['terminal_auto_start']
+    const tasm = all[AGENT_STARTUP_SETTING]
     const tfcr = all['terminal_force_compatibility_renderer']
     const taci = all['terminal_auto_close_idle']
     const ticv = all['terminal_idle_close_value']
     const ticu = all['terminal_idle_close_unit']
-    const tpw = all['terminal_prewarm_enabled']
 
     if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
     if (tff) setTerminalFontFamily(tff)
     if (ts) setTerminalScrollback(ts)
-    if (tas === '1') setTerminalAutoStart(true)
-    if (tpw === '1') setTerminalPrewarmEnabled(true)
+    setAgentStartupMode(parseAgentStartupMode(tasm))
     if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
     if (taci === '1') setTerminalAutoCloseIdle(true)
     if (ticv) setTerminalIdleCloseValue(ticv)
@@ -403,10 +408,8 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     setTerminalFontFamily,
     terminalScrollback,
     setTerminalScrollback,
-    terminalAutoStart,
-    setTerminalAutoStart,
-    terminalPrewarmEnabled,
-    setTerminalPrewarmEnabled,
+    agentStartupMode,
+    setAgentStartupMode,
     terminalAutoCloseIdle,
     setTerminalAutoCloseIdle,
     terminalIdleCloseValue,

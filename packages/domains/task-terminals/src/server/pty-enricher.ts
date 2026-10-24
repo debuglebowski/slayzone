@@ -7,7 +7,7 @@ import type { PtyInfo } from '@slayzone/terminal/shared'
 
 // Moved to the electron-free server entry (the REST API + standalone server
 // need them); re-exported here so existing electron-entry importers keep working.
-export { markTabSpawned, markTabHibernated } from '../server'
+export { setTabAgentState } from '../server'
 
 /** Returns an enricher for pty-manager's `listPtys()` that attaches the tab
  *  `label` from `terminal_tabs`. Wire via `setPtyEnricher` at app boot — keeps

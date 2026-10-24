@@ -176,15 +176,16 @@ export {
   // hibernation silently never fired. The side-car composition wires it now, and
   // it must be reachable from the server barrel to do that.
   setIdleCloseConfigGetter,
-  // `was_spawned` recorder seam — the flag that decides whether a restart
+  // `agent_state` recorder seam — the state that decides whether a restart
   // restores your agents. Same orphaning as `setIdleCloseConfigGetter` above:
   // only the ELECTRON barrel exported it, so when the pty runtime moved to the
   // side-car (and spawning to the computer) the host kept wiring a manager that
-  // owns no sessions, every `spawnedSetter?.(…)` became a no-op, and restore
+  // owns no sessions, every recorder call became a no-op, and restore
   // silently died. The side-car composition wires it now (tab-flag-recorders.ts)
   // and needs it reachable from the SERVER barrel to do that.
-  setSpawnedTabRecorder as setPtySpawnedTabRecorder,
-  getSpawnedTabRecorder as getPtySpawnedTabRecorder
+  setAgentStateTabRecorder as setPtyAgentStateTabRecorder,
+  getAgentStateTabRecorder as getPtyAgentStateTabRecorder,
+  type AgentStateRecorder
 } from './runtime/pty-manager'
 export {
   createChatOps,
@@ -208,13 +209,13 @@ export {
 export {
   chatEvents,
   configureTransport,
-  // Chat's half of the `was_spawned` seam — a chat-mode agent must flip the same
+  // Chat's half of the `agent_state` seam — a chat-mode agent must write the same
   // column a pty-mode one does, or restore works for half your tasks.
-  setSpawnedTabRecorder as setChatSpawnedTabRecorder,
-  getSpawnedTabRecorder as getChatSpawnedTabRecorder,
+  setAgentStateTabRecorder as setChatAgentStateTabRecorder,
+  getAgentStateTabRecorder as getChatAgentStateTabRecorder,
   type ChatEventMap,
   type TransportDeps
 } from './runtime/chat-transport-manager'
 // Quit-time gate: flip BEFORE any teardown that can fire pty/chat exit handlers,
-// or the kill cascade clears the very `was_spawned` flags the next boot needs.
+// or the kill cascade marks `stopped` the very agents the next boot needs to restore.
 export { beginTerminalShutdown } from './runtime/shutdown'

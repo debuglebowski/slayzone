@@ -3911,6 +3911,58 @@ export const migrations: Migration[] = [
         UPDATE join_tokens SET owner_user_id = minted_by_user_id;
       `)
     }
+  },
+  {
+    version: 171,
+    up: (db) => {
+      // Agent startup mode (plans/agent-startup-mode.md).
+      //
+      // 1. `terminal_tabs.agent_state` replaces `was_spawned` + `hibernated`. The two
+      //    flags encoded three states — (1,0) running, (0,1) idle-closed, (0,0)
+      //    stopped OR never started — and could drift into a fourth. One column, plus
+      //    the state the flags could not express: `new` (never started), which task
+      //    create writes. Rows that exist now, and rows created lazily for older
+      //    tasks, are `stopped` (the column default).
+      db.exec(`
+        ALTER TABLE terminal_tabs ADD COLUMN agent_state TEXT NOT NULL DEFAULT 'stopped';
+        UPDATE terminal_tabs SET agent_state = CASE
+          WHEN was_spawned = 1 THEN 'running'
+          WHEN hibernated = 1 THEN 'auto_stopped'
+          ELSE 'stopped'
+        END;
+        ALTER TABLE terminal_tabs DROP COLUMN was_spawned;
+        ALTER TABLE terminal_tabs DROP COLUMN hibernated;
+      `)
+
+      // 2. `terminal_agent_startup` replaces the `terminal_auto_start` +
+      //    `terminal_prewarm_enabled` checkboxes. An existing install keeps what it
+      //    had: auto-start on + pre-warm on → instant, auto-start on → auto, auto-start
+      //    off or never set → manual (the Start gate it saw before). A fresh database
+      //    (no tasks yet) gets no row, i.e. the default `auto`.
+      //    `terminal_auto_start` was mis-scoped as a per-user key, so on a hub with
+      //    login it may sit in `user_settings` instead; any user having it on counts.
+      const isOn = (key: string): boolean =>
+        (db
+          .prepare(
+            `SELECT 1 FROM settings WHERE key = ? AND value = '1'
+               UNION ALL SELECT 1 FROM user_settings WHERE key = ? AND value = '1' LIMIT 1`
+          )
+          .get(key, key) as unknown) !== undefined
+      const hasTasks = db.prepare('SELECT 1 FROM tasks LIMIT 1').get() !== undefined
+      if (hasTasks) {
+        const autoStart = isOn('terminal_auto_start')
+        const prewarm = isOn('terminal_prewarm_enabled')
+        const mode = autoStart ? (prewarm ? 'instant' : 'auto') : 'manual'
+        db.prepare(
+          `INSERT INTO settings (key, value) VALUES ('terminal_agent_startup', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).run(mode)
+      }
+      db.exec(`
+        DELETE FROM settings WHERE key IN ('terminal_auto_start', 'terminal_prewarm_enabled');
+        DELETE FROM user_settings WHERE key IN ('terminal_auto_start', 'terminal_prewarm_enabled');
+      `)
+    }
   }
 ]
 

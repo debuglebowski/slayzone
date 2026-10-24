@@ -6,6 +6,7 @@ export {
   useTaskTerminals,
   isChatSupported,
   CHAT_SUPPORTED_MODES,
-  markForceStart
+  markForceStart,
+  requestAgentStart
 } from './client'
 export type { TerminalContainerHandle } from './client'

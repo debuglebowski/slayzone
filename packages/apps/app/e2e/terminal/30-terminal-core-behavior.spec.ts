@@ -159,10 +159,12 @@ test.describe('Terminal mode switch teardown', () => {
     )
     // AI-mode terminals are idle-gated (TerminalStarter): after the switch to
     // codex, the remounted terminal would show the "Open Codex" gate instead of
-    // spawning — seed auto-start so the remount spawns directly. The gate
+    // spawning — seed the `instant` startup mode so the remount spawns directly. The gate
     // itself is 93/97's subject, not this spec's.
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'instant' })
     )
     await s.refreshData()
   })
@@ -172,7 +174,7 @@ test.describe('Terminal mode switch teardown', () => {
       .evaluate(() =>
         window
           .getTrpcVanillaClient()
-          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+          .settings.set.mutate({ key: 'terminal_agent_startup', value: 'manual' })
       )
       .catch(() => {})
   })

@@ -22,7 +22,7 @@ function readCurrentConversationId(
 }
 import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import { markSkipCache } from '@slayzone/terminal'
-import { markForceStart } from '@slayzone/task-terminals'
+import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -192,9 +192,9 @@ export function useTaskTerminalSession({
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
     // Claim the next TerminalStarter mount before killing: the kill's exit
-    // handler flips `was_spawned` false and broadcasts it, but that DB
-    // round-trip routinely loses the race against the remount below, which
-    // would otherwise show the "Open <mode>" Start gate instead of resuming.
+    // handler records `agent_state='stopped'`, and the remount below would
+    // otherwise decide from that and show the "Open <mode>" Start gate instead
+    // of resuming.
     markForceStart(mainSessionId)
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
     await new Promise((r) => setTimeout(r, 100))
@@ -221,7 +221,7 @@ export function useTaskTerminalSession({
     const mainSessionId = getMainSessionId(task.id)
     resetTaskState(mainSessionId)
     // See handleRestartTerminal — claim the next mount before the kill so the
-    // was_spawned=false race doesn't strand the user on the Start gate.
+    // recorded `stopped` state doesn't strand the user on the Start gate.
     markForceStart(mainSessionId)
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
     const updated = await trpcClient.task.resetConversation.mutate({
@@ -247,7 +247,7 @@ export function useTaskTerminalSession({
       const mainSessionId = getMainSessionId(task.id)
       resetTaskState(mainSessionId)
       // See handleRestartTerminal — claim the next mount before the kill so the
-      // was_spawned=false race doesn't strand the user on the Start gate.
+      // recorded `stopped` state doesn't strand the user on the Start gate.
       markForceStart(mainSessionId)
       await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
       const updated = await trpcClient.task.switchConversation.mutate({
@@ -366,11 +366,12 @@ export function useTaskTerminalSession({
             await handleRestartTerminal()
             result = 'ok'
           } else {
-            // Server has flipped `terminal_tabs.was_spawned=1` and broadcast
-            // `tabs:changed`, so useTaskTerminals will re-fetch and TerminalStarter
-            // will auto-mount <Terminal>, which spawns via pty:create IPC. Poll
+            // An explicit start (CLI cold-start): start the main agent whatever the
+            // startup mode — a mounted TerminalStarter starts now, otherwise its
+            // next mount does. <Terminal> then spawns via pty:create. Poll
             // pty.exists until alive or timeout.
             const sid = getMainSessionId(task.id)
+            requestAgentStart(sid)
             const deadline = Date.now() + 5000
             while (Date.now() < deadline) {
               try {

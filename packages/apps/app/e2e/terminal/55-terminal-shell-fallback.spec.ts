@@ -19,7 +19,9 @@ test.describe('Terminal shell fallback on CLI crash', () => {
     // the terminal mounts (and the failing CLI spawns) without the gate. The
     // gate itself is 93/97's subject, not this spec's.
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'instant' })
     )
     const s = seed(mainWindow)
     const p = await s.createProject({
@@ -70,7 +72,7 @@ test.describe('Terminal shell fallback on CLI crash', () => {
       .evaluate(() =>
         window
           .getTrpcVanillaClient()
-          .settings.set.mutate({ key: 'terminal_auto_start', value: '0' })
+          .settings.set.mutate({ key: 'terminal_agent_startup', value: 'manual' })
       )
       .catch(() => {})
   })

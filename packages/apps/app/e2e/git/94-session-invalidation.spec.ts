@@ -78,13 +78,15 @@ test.describe('Session invalidation', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
-    // Auto-start agents: the reset/restart/"Start fresh" remounts under test
-    // re-check the idle-gate, and the capture stub never flips
-    // `terminal_tabs.was_spawned` (that write lives after the real spawn), so
-    // without auto-start the gate would re-appear mid-test and swallow the
+    // `instant` startup mode: the reset/restart/"Start fresh" remounts under test
+    // re-check the idle-gate, and the capture stub never records
+    // `terminal_tabs.agent_state = 'running'` (that write lives after the real
+    // spawn), so otherwise the gate would re-appear mid-test and swallow the
     // remount's pty.create. The gate itself is 93/97's subject, not this spec's.
     await mainWindow.evaluate(() =>
-      window.getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_auto_start', value: '1' })
+      window
+        .getTrpcVanillaClient()
+        .settings.set.mutate({ key: 'terminal_agent_startup', value: 'instant' })
     )
     await resetCapture(mainWindow)
 

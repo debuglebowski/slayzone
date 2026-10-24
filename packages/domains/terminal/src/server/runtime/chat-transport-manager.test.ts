@@ -1192,14 +1192,14 @@ await test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQues
 })
 
 // ---------------------------------------------------------------------------
-// was_spawned lifecycle — restore-warm-on-reboot
+// agent_state lifecycle (formerly was_spawned) — restore-warm-on-reboot
 // ---------------------------------------------------------------------------
 
-await test('spawnedSetter: fires (true) on spawn-success with tabId', async () => {
+await test('agentStateRecorder: records running on spawn-success with tabId', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
-  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setAgentStateTabRecorder((tabId, state) => recorder.push({ tabId, v: state === 'running' }))
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
     spawn: () => fake as unknown as ChildProcess,
@@ -1220,15 +1220,15 @@ await test('spawnedSetter: fires (true) on spawn-success with tabId', async () =
     expect(recorder[0].tabId).toBe('tab-warm-1')
     expect(recorder[0].v).toBe(true)
   } finally {
-    mgr.setSpawnedTabRecorder(null)
+    mgr.setAgentStateTabRecorder(null)
   }
 })
 
-await test('spawnedSetter: fires (false) on natural subprocess exit', async () => {
+await test('agentStateRecorder: records stopped on natural subprocess exit', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
-  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setAgentStateTabRecorder((tabId, state) => recorder.push({ tabId, v: state === 'running' }))
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
     spawn: () => fake as unknown as ChildProcess,
@@ -1245,22 +1245,22 @@ await test('spawnedSetter: fires (false) on natural subprocess exit', async () =
       conversationId: null,
       providerFlags: []
     })
-    // Subprocess exits cleanly — exit handler should clear was_spawned.
+    // Subprocess exits cleanly — exit handler should record stopped.
     fake.emit('exit', 0, null)
     await new Promise((r) => setImmediate(r))
     const clears = recorder.filter((r) => r.v === false)
     expect(clears.length).toBe(1)
     expect(clears[0].tabId).toBe('tab-warm-2')
   } finally {
-    mgr.setSpawnedTabRecorder(null)
+    mgr.setAgentStateTabRecorder(null)
   }
 })
 
-await test('spawnedSetter: shutdown gate preserves was_spawned on exit', async () => {
+await test('agentStateRecorder: shutdown gate keeps running on exit', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
-  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setAgentStateTabRecorder((tabId, state) => recorder.push({ tabId, v: state === 'running' }))
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
     spawn: () => fake as unknown as ChildProcess,
@@ -1279,7 +1279,7 @@ await test('spawnedSetter: shutdown gate preserves was_spawned on exit', async (
     })
     // Simulate app.on('will-quit') → beginTerminalShutdown(): gate flips first,
     // THEN killAll fires subprocess exits. Without the gate, this exit would
-    // clear was_spawned and defeat the warm-restore on next boot.
+    // record stopped and defeat the warm-restore on next boot.
     mgr.setShuttingDown(true)
     fake.emit('exit', null, 'SIGTERM')
     await new Promise((r) => setImmediate(r))
@@ -1290,7 +1290,7 @@ await test('spawnedSetter: shutdown gate preserves was_spawned on exit', async (
     expect(sets.length).toBe(1)
   } finally {
     mgr.setShuttingDown(false)
-    mgr.setSpawnedTabRecorder(null)
+    mgr.setAgentStateTabRecorder(null)
   }
 })
 
@@ -1304,7 +1304,7 @@ await test('shutdownAll: waits for chat exits and preserves warm flags', async (
     return true
   }
   const recorder: Array<{ tabId: string; v: boolean }> = []
-  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setAgentStateTabRecorder((tabId, state) => recorder.push({ tabId, v: state === 'running' }))
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
     spawn: () => fake as unknown as ChildProcess,
@@ -1330,7 +1330,7 @@ await test('shutdownAll: waits for chat exits and preserves warm flags', async (
     expect(recorder.filter((r) => r.v === false).length).toBe(0)
   } finally {
     mgr.setShuttingDown(false)
-    mgr.setSpawnedTabRecorder(null)
+    mgr.setAgentStateTabRecorder(null)
   }
 })
 

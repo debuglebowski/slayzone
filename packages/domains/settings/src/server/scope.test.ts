@@ -36,7 +36,7 @@ describe('settingScope', () => {
       'terminal_auto_close_idle',
       'terminal_idle_close_value',
       'terminal_idle_close_unit',
-      'terminal_prewarm_enabled',
+      'terminal_agent_startup',
       'test_profiles',
       'diagnostics_enabled',
       'diagnostics_retention_days',

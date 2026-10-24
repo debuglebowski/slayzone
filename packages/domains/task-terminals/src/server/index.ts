@@ -4,8 +4,7 @@ export { createPtyEnricher } from './pty-enricher'
 export { tabsEvents } from './events'
 export type { TabsChangedPayload, TabsEventMap } from './events'
 export {
-  markTabSpawned,
-  markTabHibernated,
+  setTabAgentState,
   listHibernatedSessionIds,
   listAutoRestoreTaskIds
 } from './tab-flags'

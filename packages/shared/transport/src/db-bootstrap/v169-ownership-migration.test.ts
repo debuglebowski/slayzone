@@ -125,9 +125,18 @@ async function main(): Promise<void> {
         settings: dump(db, 'settings', 'key')
       }
 
-      runMigrations(db)
+      // Up to v169 only: this pins what v169 does to a populated database, and later
+      // migrations legitimately reshape these tables (v171 rewrites terminal_tabs'
+      // spawn flags and seeds a startup-mode setting).
+      for (const m of migrations) {
+        if (m.version <= 168 || m.version > 169) continue
+        db.transaction(() => {
+          m.up(db)
+          db.pragma(`user_version = ${m.version}`)
+        })()
+      }
 
-      assert(db.pragma('user_version', { simple: true }) === LATEST_MIGRATION_VERSION, 'version')
+      assert(db.pragma('user_version', { simple: true }) === 169, 'version')
       const projects = dump(db, 'projects', 'id') as Record<string, unknown>[]
       assert(projects.length === 2, `2 projects, got ${projects.length}`)
       assert(

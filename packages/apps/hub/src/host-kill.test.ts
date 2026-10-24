@@ -10,7 +10,7 @@
  * `pty-manager` module singleton in the host's process. But the pty runtime moved
  * to the side-car in slice 9 — `onHostKillHandler` fires in whichever process owns
  * the sessions, and the host owns none. So in local mode the stamp was never
- * written. Same orphaning that killed idle-close, the warm pool and `was_spawned`.
+ * written. Same orphaning that killed idle-close, the warm pool and the tab agent-state recorder.
  *
  * `setOnHostKillHandler` is exported from `@slayzone/terminal/server` and needs no
  * Electron; the only reason this lived on the host is that the `db` handle did.

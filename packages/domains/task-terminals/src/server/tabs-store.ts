@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { parseAgentState, type AgentState } from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
 
 /**
@@ -17,8 +18,7 @@ export interface TabRow {
   is_main: number
   position: number
   created_at: string
-  was_spawned: number
-  hibernated: number
+  agent_state: string
 }
 
 export function rowToTab(row: TabRow): TerminalTab {
@@ -31,8 +31,7 @@ export function rowToTab(row: TabRow): TerminalTab {
     isMain: row.is_main === 1,
     position: row.position,
     createdAt: row.created_at,
-    wasSpawned: row.was_spawned === 1,
-    hibernated: row.hibernated === 1
+    agentState: parseAgentState(row.agent_state)
   }
 }
 
@@ -57,7 +56,11 @@ export async function listTabsForTask(db: SlayzoneDb, taskId: string): Promise<T
 export async function ensureMainTab(
   db: SlayzoneDb,
   taskId: string,
-  mode: string
+  mode: string,
+  /** State for a row created by this call; an existing row keeps its own. Task
+   *  create passes `new` (never started); a row created lazily on open for an
+   *  older task is `stopped`. */
+  initialAgentState: AgentState = 'stopped'
 ): Promise<TerminalTab> {
   const existing = (await db
     .prepare('SELECT * FROM terminal_tabs WHERE task_id = ? AND is_main = 1')
@@ -80,10 +83,10 @@ export async function ensureMainTab(
   const now = new Date().toISOString()
   await db
     .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, NULL, ?, 1, 0, ?, ?)
+    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at, agent_state)
+    VALUES (?, ?, NULL, ?, 1, 0, ?, ?, ?)
   `)
-    .run(taskId, taskId, mode, taskId, now)
+    .run(taskId, taskId, mode, taskId, now, initialAgentState)
 
   return {
     id: taskId,
@@ -94,8 +97,7 @@ export async function ensureMainTab(
     isMain: true,
     position: 0,
     createdAt: now,
-    wasSpawned: false,
-    hibernated: false
+    agentState: initialAgentState
   }
 }
 
@@ -133,8 +135,7 @@ export async function createTabRow(
     isMain: false,
     position,
     createdAt: now,
-    wasSpawned: false,
-    hibernated: false
+    agentState: 'stopped'
   }
 }
 
@@ -204,8 +205,7 @@ export async function splitTabRow(db: SlayzoneDb, tabId: string): Promise<Termin
     isMain: false,
     position,
     createdAt: now,
-    wasSpawned: false,
-    hibernated: false
+    agentState: 'stopped'
   }
 }
 

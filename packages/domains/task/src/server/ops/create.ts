@@ -1,7 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/shared'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
-import { agentAutoStarts, TERMINAL_AUTO_START_SETTING } from '@slayzone/terminal/shared'
+import {
+  agentStartsOnOpen,
+  AGENT_STARTUP_SETTING,
+  parseAgentStartupMode
+} from '@slayzone/terminal/shared'
 import { taskEvents } from '../events.js'
 import { getTemplateForTask } from '../template-store.js'
 import {
@@ -189,11 +193,17 @@ async function reserveWarmAgent(
 ): Promise<string | null> {
   if (!deps.reserveWarmTaskId || !data.openAfterCreate) return null
   if (data.parentId || data.repoName || task.selectedRepo) return null
-  const autoStart = await db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [
-    TERMINAL_AUTO_START_SETTING
+  const startup = await db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [
+    AGENT_STARTUP_SETTING
   ])
+  // The task's main tab is created `new` (insertTaskRow), so the same rule the task
+  // view applies on open decides here whether that open will spawn.
   if (
-    !agentAutoStarts({ isTemporary: Boolean(data.isTemporary), autoStartSetting: autoStart?.value })
+    !agentStartsOnOpen({
+      mode: parseAgentStartupMode(startup?.value),
+      state: 'new',
+      isTemporary: Boolean(data.isTemporary)
+    })
   ) {
     return null
   }

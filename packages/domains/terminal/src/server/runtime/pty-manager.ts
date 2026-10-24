@@ -14,7 +14,12 @@ import {
   SESSION_ID_UNAVAILABLE,
   supportsFreshPreMint
 } from '@slayzone/terminal/shared'
-import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
+import type {
+  AgentState,
+  TerminalState,
+  PtyInfo,
+  BufferSinceResult
+} from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
@@ -163,36 +168,29 @@ export function getRemoteMcpEnvProvider(): RemoteMcpEnvProvider | null {
 }
 
 /**
- * Injected by composition root (apps/app) so we can flip the per-tab
- * `was_spawned` flag in `terminal_tabs` without pty-manager importing the
- * task-terminals package directly (would cycle: task-terminals depends on
- * terminal). Called on successful spawn (true) and on exit (false), unless
- * the app is shutting down — in which case we deliberately leave the flag
- * set so the next boot can auto-restart this agent.
+ * Injected by the composition root so we can persist how a tab's agent last ended
+ * (`terminal_tabs.agent_state`) without pty-manager importing the task-terminals
+ * package directly (would cycle: task-terminals depends on terminal). Called with
+ * `running` on successful spawn, `auto_stopped` when the idle timeout closes it, and
+ * `stopped` on any other exit — unless the app is shutting down, in which case the
+ * row deliberately stays `running` so the next boot can restart this agent.
  */
-type SpawnedSetter = (tabId: string, wasSpawned: boolean) => void
-let spawnedSetter: SpawnedSetter | null = null
-export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
-  spawnedSetter = fn
+export type AgentStateRecorder = (tabId: string, state: Exclude<AgentState, 'new'>) => void
+let agentStateRecorder: AgentStateRecorder | null = null
+export function setAgentStateTabRecorder(fn: AgentStateRecorder | null): void {
+  agentStateRecorder = fn
 }
 /** Read back what (if anything) is wired. Exists because "nobody installed the
  *  recorder in the process that owns the sessions" is the exact failure that
  *  silently disabled restart-restore — an assertable seam beats a spy, which
  *  would still pass against the wrong module. */
-export function getSpawnedTabRecorder(): SpawnedSetter | null {
-  return spawnedSetter
+export function getAgentStateTabRecorder(): AgentStateRecorder | null {
+  return agentStateRecorder
 }
 
-/**
- * Injected by composition root to persist a tab's idle-close (hibernation)
- * status to `terminal_tabs.hibernated`, so the "sleeping 💤 / Reopen" affordance
- * survives reload + restart. Set true on hibernate, false on any (re)spawn.
- */
-type HibernatedSetter = (tabId: string, hibernated: boolean) => void
-let hibernatedSetter: HibernatedSetter | null = null
-export function setHibernatedTabRecorder(fn: HibernatedSetter | null): void {
-  hibernatedSetter = fn
-}
+/** Sessions the idle timeout is killing. Their exit is recorded as `auto_stopped`,
+ *  not `stopped` — the kill goes through the same exit path as any other. */
+const hibernatingSessions = new Set<string>()
 
 /**
  * Spawn-time hook self-heal (injected by the composition root — apps/app, which
@@ -264,8 +262,8 @@ function isMainTabSession(sessionId: string): boolean {
 }
 
 /**
- * App shutdown gate. When true, `finalizeSessionExit` skips clearing
- * `was_spawned` so reboots can restore the warm set. Composition root
+ * App shutdown gate. When true, `finalizeSessionExit` leaves `agent_state`
+ * at `running` so reboots can restore the warm set. Composition root
  * MUST set this true before invoking `killAllPtys()` during app quit.
  */
 let isShuttingDown = false
@@ -909,7 +907,7 @@ function cancelHibernateCountdown(session: PtySession): void {
 
 /** Fire the hibernation: re-assert eligibility (state may have changed during
  *  the grace), tell the renderer to swap to the Start screen, then kill via the
- *  normal `killPty` path (clears `was_spawned`, emits `pty:exit`, frees buffer).
+ *  normal `killPty` path (records `auto_stopped`, emits `pty:exit`, frees buffer).
  *  Reopen resumes the conversation via the stored id. */
 function hibernateSession(sessionId: string): void {
   const session = sessions.get(sessionId)
@@ -935,9 +933,12 @@ function hibernateSession(sessionId: string): void {
   // sidebar dot stale until reconcile heals it; broadcasting flips 💤 at once.
   broadcastPtyEvent('pty:hibernated', sessionId)
   ptyEvents.emit('hibernated', sessionId)
-  // Persist the status so 💤 / Reopen survive reload + restart.
+  // Persist the status so 💤 / Reopen survive reload + restart. Written now AND by
+  // the exit the kill below triggers (which reads `hibernatingSessions`), so the row
+  // ends `auto_stopped` even if that exit is never observed.
+  hibernatingSessions.add(sessionId)
   try {
-    hibernatedSetter?.(resolveTabRowId(sessionId), true)
+    agentStateRecorder?.(resolveTabRowId(sessionId), 'auto_stopped')
   } catch {
     // Best-effort
   }
@@ -1822,21 +1823,16 @@ export async function createPty(
         // simply won't surface it for this task (no phantom binding).
       }
     }
-    // Record this tab as warm — survives across app shutdown so next boot
-    // auto-restarts. Cleared in finalizeSessionExit on natural/user exit.
-    // Also clear any hibernated flag — a fresh spawn means it's no longer asleep.
+    // Record this tab's agent as running — survives app shutdown so the next boot
+    // restarts it. finalizeSessionExit records how it ended.
+    hibernatingSessions.delete(sessionId)
     try {
-      hibernatedSetter?.(resolveTabRowId(sessionId), false)
-    } catch {
-      // Best-effort
-    }
-    try {
-      spawnedSetter?.(resolveTabRowId(sessionId), true)
+      agentStateRecorder?.(resolveTabRowId(sessionId), 'running')
     } catch (err) {
       recordDiagnosticEvent({
         level: 'warn',
         source: 'pty',
-        event: 'pty.was_spawned_set_failed',
+        event: 'pty.agent_state_set_failed',
         sessionId,
         taskId,
         message: (err as Error).message
@@ -1887,11 +1883,12 @@ export async function createPty(
           // which the periodic sweep collects within 10 min.
         })
       }
-      // Clear the warm flag — UNLESS we're in app shutdown, in which case
-      // we deliberately preserve was_spawned so the next boot auto-restarts.
+      // Record how the agent ended — UNLESS we're in app shutdown, in which case
+      // the row deliberately stays `running` so the next boot restarts it.
+      const endState = hibernatingSessions.delete(sessionId) ? 'auto_stopped' : 'stopped'
       if (!isShuttingDown) {
         try {
-          spawnedSetter?.(resolveTabRowId(sessionId), false)
+          agentStateRecorder?.(resolveTabRowId(sessionId), endState)
         } catch {
           // Diagnostic logging here would compete with the exit-time race; swallow.
         }

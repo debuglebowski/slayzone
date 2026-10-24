@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
+import {
+  agentStartsOnOpen,
+  AGENT_STARTUP_SETTING,
+  parseAgentStartupMode,
+  type AgentState
+} from '@slayzone/terminal/shared'
 import { resetChat } from './autocomplete/chat-actions'
 import type { ChatActions } from './autocomplete/types'
 
@@ -11,7 +17,12 @@ export interface UseChatLifecycleOpts {
   mode: string
   cwd: string
   providerFlagsOverride?: string | null
-  wasSpawned?: boolean
+  /** How this tab's agent last ended (`terminal_tabs.agent_state`). */
+  agentState?: AgentState
+  /** The task's main tab: the startup mode applies. Other chat tabs only restore
+   *  an agent that was running. */
+  isMain?: boolean
+  isTemporary?: boolean
   chatApi: ChatActions
   inFlight: boolean
   hydrating: boolean
@@ -25,10 +36,11 @@ export interface UseChatLifecycleOpts {
  * Owns chat-session *lifecycle*: reset / restart, the derived "session ended"
  * display flag, and three fire-and-forget effects:
  *
- *   - Warm-set restoration: when `terminal_tabs.was_spawned` is true on mount,
- *     a subprocess was alive last time. Auto-call `chat.start` (idempotent) once
- *     hydration settles so the user lands in a live session without typing.
- *     Covers clean shutdown AND crash recovery (the flag is sticky by design).
+ *   - Startup: once hydration settles, auto-call `chat.start` (idempotent) when the
+ *     startup mode says this agent starts on open (`agentStartsOnOpen`) — e.g. a
+ *     subprocess that was alive last time, so the user lands in a live session
+ *     without typing. Covers clean shutdown AND crash recovery (`running` is kept
+ *     across shutdown by design). Otherwise the chat spawns when the user types.
  *   - Clear the queue on session end / reset.
  *   - Diagnostic: log every `inFlight` transition (with the counters that drive
  *     it + the last 5 timeline kinds) so a stuck indicator leaves evidence.
@@ -39,7 +51,9 @@ export function useChatLifecycle({
   mode,
   cwd,
   providerFlagsOverride,
-  wasSpawned,
+  agentState = 'stopped',
+  isMain = false,
+  isTemporary = false,
   chatApi,
   inFlight,
   hydrating,
@@ -57,24 +71,39 @@ export function useChatLifecycle({
   // user can just type to trigger the first spawn.
   const displaySessionEnded = state.sessionEnded && !state.notStarted && !resetting && !restarting
 
-  // Warm-set restoration: when `terminal_tabs.was_spawned` is true on mount,
-  // a chat subprocess was alive when the app last touched this tab. Auto-call
-  // `chat.start` (idempotent) once hydration settles so the user lands in a
-  // live session without having to type first. Covers clean shutdown AND
-  // crash recovery — the flag is sticky across shutdown by design (see
-  // setChatShuttingDown in chat-transport-manager).
+  // Startup: decided once, against the state the tab was opened with (a later
+  // exit must not restart it). Waits for hydration so the spawn carries the
+  // conversation id.
+  const [openState] = useState(() => ({ agentState, isMain, isTemporary }))
   const autoStartedRef = useRef(false)
   useEffect(() => {
-    if (!wasSpawned || hydrating || autoStartedRef.current) return
+    if (hydrating || autoStartedRef.current) return
     autoStartedRef.current = true
-    void chatApi.start({
-      tabId,
-      taskId,
-      mode,
-      cwd,
-      providerFlagsOverride: providerFlagsOverride ?? null
-    })
-  }, [wasSpawned, hydrating, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
+    // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
+    // query would never start the agent (`chatApi` identity can change per render).
+    void trpcClient.settings.get
+      .query({ key: AGENT_STARTUP_SETTING })
+      .then((raw) => {
+        const start = openState.isMain
+          ? agentStartsOnOpen({
+              mode: parseAgentStartupMode(raw),
+              state: openState.agentState,
+              isTemporary: openState.isTemporary
+            })
+          : openState.agentState === 'running'
+        if (!start) return
+        void chatApi.start({
+          tabId,
+          taskId,
+          mode,
+          cwd,
+          providerFlagsOverride: providerFlagsOverride ?? null
+        })
+      })
+      .catch(() => {
+        /* best-effort — the chat still spawns when the user types */
+      })
+  }, [hydrating, openState, trpcClient, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

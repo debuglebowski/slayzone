@@ -9,11 +9,41 @@ import {
   SelectValue,
   Switch
 } from '@slayzone/ui'
-import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
+import {
+  AGENT_STARTUP_SETTING,
+  parseAgentStartupMode,
+  type AgentStartupMode,
+  type TerminalMode,
+  type TerminalModeInfo
+} from '@slayzone/terminal/shared'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import type { PanelSettingsState } from './usePanelSettings'
+
+const AGENT_STARTUP_OPTIONS: Array<{
+  value: AgentStartupMode
+  label: string
+  description: string
+}> = [
+  {
+    value: 'manual',
+    label: 'Manual',
+    description: 'Every agent waits for you to click Start.'
+  },
+  {
+    value: 'auto',
+    label: 'Auto',
+    description:
+      'Agents that were running when the app closed start again, and new tasks start at once. Agents that were stopped or closed while idle wait for Start. Keeps one Claude Code booted in the background per project with open tabs, so new tasks start instantly.'
+  },
+  {
+    value: 'instant',
+    label: 'Instant',
+    description:
+      'Every agent starts when you open its task. Keeps one Claude Code booted in the background per project with open tabs, so new tasks start instantly.'
+  }
+]
 
 export function TerminalPanelSettings({
   state,
@@ -30,10 +60,8 @@ export function TerminalPanelSettings({
     panelConfig,
     savePanelConfig,
     setSetting,
-    terminalAutoStart,
-    setTerminalAutoStart,
-    terminalPrewarmEnabled,
-    setTerminalPrewarmEnabled,
+    agentStartupMode,
+    setAgentStartupMode,
     terminalAutoCloseIdle,
     setTerminalAutoCloseIdle,
     terminalIdleCloseValue,
@@ -88,33 +116,29 @@ export function TerminalPanelSettings({
           </Select>
         </div>
         <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-          <span className="text-sm text-muted-foreground">Auto-start sessions</span>
+          <span className="text-sm text-muted-foreground">Agent startup</span>
           <div className="flex items-center gap-2">
-            <Switch
-              checked={terminalAutoStart}
-              onCheckedChange={(c) => {
-                setTerminalAutoStart(c)
-                setSetting('terminal_auto_start', c ? '1' : '0')
+            <Select
+              value={agentStartupMode}
+              onValueChange={(v) => {
+                const next = parseAgentStartupMode(v)
+                setAgentStartupMode(next)
+                setSetting(AGENT_STARTUP_SETTING, next)
               }}
-            />
+            >
+              <SelectTrigger className="w-32 shrink-0" data-testid="agent-startup-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="start">
+                {AGENT_STARTUP_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <span className="text-xs text-muted-foreground">
-              Spawn agent on tab open instead of showing the Start button.
-            </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-          <span className="text-sm text-muted-foreground">Pre-warm agent</span>
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={terminalPrewarmEnabled}
-              onCheckedChange={(c) => {
-                setTerminalPrewarmEnabled(c)
-                setSetting('terminal_prewarm_enabled', c ? '1' : '0')
-              }}
-            />
-            <span className="text-xs text-muted-foreground">
-              Keep one ready agent shell per project with open tabs, so the first agent you open in
-              it starts instantly (default provider, project root only).
+              {AGENT_STARTUP_OPTIONS.find((o) => o.value === agentStartupMode)?.description}
             </span>
           </div>
         </div>

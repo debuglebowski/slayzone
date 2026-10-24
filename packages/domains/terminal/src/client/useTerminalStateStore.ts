@@ -65,7 +65,7 @@ export interface TerminalStateStore {
   /** Seed from session.list() on init — fill-only, never overwrite a known value. */
   hydrate: (sessions: SessionInfoLite[]) => void
   /** Self-heal: converge local state to the authoritative session list.
-   *  `hibernatedIds` (the persisted `terminal_tabs.hibernated` set) is the
+   *  `hibernatedIds` (the persisted `terminal_tabs.agent_state = 'auto_stopped'` set) is the
    *  authority for the 💤 state, which the live `sessions` list can't carry
    *  (hibernating kills the PTY → it vanishes from the list). Passing it lets
    *  any window heal hibernation it never received the window-targeted IPC for.

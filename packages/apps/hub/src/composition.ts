@@ -105,6 +105,11 @@ import {
 } from '@slayzone/terminal/server'
 import { SettingsService } from '@slayzone/settings/server'
 import {
+  AGENT_STARTUP_SETTING,
+  parseAgentStartupMode,
+  warmPoolEnabled
+} from '@slayzone/terminal/shared'
+import {
   createIntegrationOps,
   ensureIntegrationSchema,
   setCredentialCipher
@@ -638,7 +643,7 @@ export function composeServer(opts: {
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
 
-  // `terminal_tabs.was_spawned` recorder — wired HERE for the same reason as the
+  // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as the
   // idle-close getter below: the pty/chat runtimes live in THIS process, so the
   // Electron host's copy of the recorder fires for sessions it does not own
   // (i.e. never). Without this, no live agent is ever flagged, so
@@ -697,15 +702,15 @@ export function composeServer(opts: {
   // tab-count reports (`pty.warmSetProjectTabCounts`) land in this process, not
   // the Electron host. It was only ever wired in the host, so it went dead when
   // pty moved to the sidecar; this restores it. `isEnabled` reads a cached
-  // `terminal_prewarm_enabled` (sync; refreshed on settings change). Raw
-  // `=== '1'` keeps it strictly opt-in.
+  // `terminal_agent_startup` (sync; refreshed on settings change): the pool runs in
+  // the `auto` and `instant` startup modes, not `manual` (`warmPoolEnabled`).
   let prewarmEnabled = false
   const refreshPrewarm = async (): Promise<void> => {
     try {
-      const row = await db.get<{ value?: string }>(
-        "SELECT value FROM settings WHERE key = 'terminal_prewarm_enabled'"
-      )
-      prewarmEnabled = row?.value === '1'
+      const row = await db.get<{ value?: string }>('SELECT value FROM settings WHERE key = ?', [
+        AGENT_STARTUP_SETTING
+      ])
+      prewarmEnabled = warmPoolEnabled(parseAgentStartupMode(row?.value))
     } catch {
       /* keep last-known value */
     }
@@ -716,8 +721,8 @@ export function composeServer(opts: {
     db,
     isEnabled: () => prewarmEnabled,
     // `settings.set` writes the row but emits no settings-changed, so the cache
-    // above would otherwise stay stale until the next boot — i.e. toggling
-    // pre-warm in Settings did nothing until restart.
+    // above would otherwise stay stale until the next boot — i.e. changing the
+    // startup mode in Settings did nothing until restart.
     refreshEnabled: refreshPrewarm,
     getProjectRoot: async (projectId) => {
       const row = await db.get<{ path?: string }>('SELECT path FROM projects WHERE id = ?', [

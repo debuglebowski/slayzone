@@ -276,8 +276,8 @@ export function seedOwned(dbPath: string, o: Owned): void {
     // The main tab was alive at shutdown (auto-restore names the task); a second task
     // has a hibernated main tab (the hibernated-sessions list names it).
     run(
-      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, was_spawned, hibernated)
-       VALUES (?, ?, 'claude-code', 1, 1, 0)`,
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, agent_state)
+       VALUES (?, ?, 'claude-code', 1, 'running')`,
       o.task,
       o.task
     )
@@ -288,7 +288,7 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_TASK2_TITLE`
     )
     run(
-      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, hibernated) VALUES (?, ?, 'claude-code', 1, 1)`,
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, agent_state) VALUES (?, ?, 'claude-code', 1, 'auto_stopped')`,
       `${o.mark}_task_hibernated`,
       `${o.mark}_task_hibernated`
     )
