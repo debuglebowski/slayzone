@@ -12,3 +12,5 @@ minimumReleaseAgeExclude:
   - '@typescript/typescript-*'
   # Renovate security update: picomatch@4.0.4
   - picomatch@4.0.4
+  # Renovate security update: diff@8.0.3
+  - diff@8.0.3
