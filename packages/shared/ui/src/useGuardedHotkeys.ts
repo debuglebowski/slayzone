@@ -38,7 +38,7 @@ export function useGuardedHotkeys<T extends HTMLElement>(
   return useHotkeys<T>(
     resolveMod(keys),
     (e, he) => {
-      if (isModalDialogOpen()) return
+      if (isModalDialogOpen(e)) return
       callback(e, he)
     },
     opts,

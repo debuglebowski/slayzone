@@ -12,22 +12,22 @@ import { isModalDialogOpen, useShortcutStore } from '@slayzone/ui'
 export function initShortcuts(): () => void {
   scopeTracker.init()
 
-  const shouldSkip = (): boolean => {
-    if (isModalDialogOpen()) return true
+  const shouldSkip = (e: KeyboardEvent): boolean => {
+    if (isModalDialogOpen(e)) return true
     if (useShortcutStore.getState().isRecording) return true
     if (scopeTracker.isBrowserPassthrough()) return true
     return false
   }
 
   const captureHandler = (e: KeyboardEvent) => {
-    if (shouldSkip()) return
+    if (shouldSkip(e)) return
     // Only handle modifier shortcuts in capture phase
     if (!(e.metaKey || e.ctrlKey || e.altKey)) return
     registry.dispatch(e, scopeTracker.getActiveScopes())
   }
 
   const bubbleHandler = (e: KeyboardEvent) => {
-    if (shouldSkip()) return
+    if (shouldSkip(e)) return
     // Only handle non-modifier shortcuts in bubble phase
     if (e.metaKey || e.ctrlKey || e.altKey) return
     registry.dispatch(e, scopeTracker.getActiveScopes())

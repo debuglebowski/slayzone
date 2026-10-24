@@ -988,6 +988,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Cmd+I (title), Cmd+Shift+I (description)
   // Note: Cmd+Shift+K (clear buffer) is handled per-terminal in Terminal.tsx via attachCustomKeyEventHandler
   useEffect(() => {
+    // Hidden tabs register nothing: every open tab used to run this on every keystroke.
+    if (!shortcutActive) return
     const isTerminalFocused = (): boolean => {
       const active = document.activeElement as HTMLElement | null
       if (!active) return false
@@ -996,7 +998,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
 
     const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
-      if (!shortcutActive) return
       if (useShortcutStore.getState().isRecording) return
       if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-inject-desc'))) {
         if (!isTerminalFocused()) return
@@ -1276,8 +1277,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Cmd+T/B/G/S/E/P + web panel shortcuts for panel toggles
   useEffect(() => {
+    // Hidden tabs register nothing: every open tab used to run this on every keystroke.
+    if (!shortcutActive) return
     const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
-      if (!shortcutActive) return
       // Cmd+Shift+G: git diff tab toggle
       if (useShortcutStore.getState().isRecording) return
       const keys = (id: string) => useShortcutStore.getState().getKeys(id)
