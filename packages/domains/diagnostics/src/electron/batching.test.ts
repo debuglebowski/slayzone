@@ -88,7 +88,10 @@ async function run(): Promise<void> {
   // shared settings DB as its second argument, and this call was left behind when
   // that parameter went away.
   const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
-  registerDiagnosticsHandlers(h.ipcMain as never, h.eventsDb as never, { clientRoot })
+  registerDiagnosticsHandlers(h.ipcMain as never, h.eventsDb as never, {
+    clientRoot,
+    blobDir: path.join(clientRoot, 'diagnostics')
+  })
 
   // 1. enqueue does not write immediately
   {
@@ -238,7 +241,10 @@ async function run(): Promise<void> {
     // Re-open eventsDb and rewire so flush has somewhere to write.
     const fresh = new Database(':memory:')
     fresh.exec(DIAG_SCHEMA)
-    registerDiagnosticsHandlers(h.ipcMain as never, fresh as never, { clientRoot })
+    registerDiagnosticsHandlers(h.ipcMain as never, fresh as never, {
+      clientRoot,
+      blobDir: path.join(clientRoot, 'diagnostics')
+    })
 
     await flushWriteQueue()
 

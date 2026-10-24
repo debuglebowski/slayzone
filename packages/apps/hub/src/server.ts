@@ -30,7 +30,12 @@ import {
   getTrpcPort
 } from '@slayzone/platform'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
-import { getDatabasePathFromEnv, openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
+import {
+  getDatabasePathFromEnv,
+  getServerDiagnosticsDatabasePath,
+  openServerDatabase,
+  openServerDiagnosticsDatabase
+} from './db.js'
 import { assertAuthLoaded, assertHubBootRules, assertSsoCredential } from './boot-rules.js'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
@@ -62,7 +67,15 @@ import {
   WEB_SESSION_COOKIE_NAME,
   webSessionCookieSecure
 } from './web-sessions.js'
-import { recordDiagnosticEvent, flushWriteQueue } from '@slayzone/diagnostics/server'
+import {
+  diagnosticsBlobDirBeside,
+  getDiagnosticsConfig,
+  getDiagnosticsDb,
+  recordDiagnosticEvent,
+  flushWriteQueue,
+  startRetentionScheduler,
+  stopRetentionScheduler
+} from '@slayzone/diagnostics/server'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
 import {
   adoptClientAddress,
@@ -146,10 +159,22 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // where other machines can reach this hub; never on the desktop app's (B1/B9 keep a
     // login-off, supervised hub on loopback with no public address).
     floodLimits: boot.reachable,
-    diagnosticsDb
+    diagnostics: {
+      db: diagnosticsDb,
+      blobDir: diagnosticsBlobDirBeside(getServerDiagnosticsDatabasePath())
+    }
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
+
+  // Diagnostics retention: one pruner per diagnostics DB file. A supervised hub
+  // writes its desktop host's file, and the host prunes it; any other hub
+  // (standalone, remote, chromium fork) is the only process on its file, so it
+  // prunes its own — rows past retentionDays and the payload blobs beside them.
+  const ownsDiagnosticsRetention = !supervised
+  if (ownsDiagnosticsRetention) {
+    startRetentionScheduler({ getDb: getDiagnosticsDb, getConfig: getDiagnosticsConfig })
+  }
 
   // --- Computer transport ---
   // `composition.computersReady` resolves the async computer init (createHubAuth runs
@@ -848,6 +873,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           /* ignore */
         }
       }
+      if (ownsDiagnosticsRetention) stopRetentionScheduler()
       // Drain buffered diagnostics before closing their DB — otherwise a clean
       // shutdown silently loses the tail of the write queue (batched `info`
       // events that never hit the flush interval).

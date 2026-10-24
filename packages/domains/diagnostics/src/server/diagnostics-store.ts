@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { offloadPayloadBlobs, type BlobWriter } from './payload-blobs'
 import type {
@@ -76,6 +78,7 @@ function withDefaults(partial: Partial<DiagnosticsConfig>): DiagnosticsConfig {
 }
 let settingsDb: SlayzoneDb | null = null // main DB — reads/writes diagnostics config from settings table
 let diagnosticsDb: SlayzoneDb | null = null // separate diagnostics-only DB — writes events to slayzone.dev.diagnostics.sqlite
+let blobDir: string | null = null // payload blobs (canary screenshots) — beside the diagnostics DB
 let cachedConfig: DiagnosticsConfig | null = null
 
 // Pre-registration buffer: events recorded before bindDiagnosticsDbs runs are
@@ -144,6 +147,14 @@ export function bindDiagnosticsDbs(opts: {
    */
   settingsDb?: SlayzoneDb
   diagnosticsDb: SlayzoneDb
+  /**
+   * Where oversized payload blobs are written and pruned:
+   * `diagnosticsBlobDirBeside(<path of diagnosticsDb>)`. Required so every host
+   * decides it explicitly. It used to be resolved in here from ambient env — in the
+   * Electron main process that was an unbundled runtime require (failed every
+   * retention tick) and, had it loaded, the cross-channel `~/.slayzone`.
+   */
+  blobDir: string
   /** Synchronous local config source (the client store), used when settingsDb is absent. */
   localConfig?: () => Partial<DiagnosticsConfig>
   /** Persist a config change locally. Required whenever `localConfig` is given. */
@@ -165,6 +176,7 @@ export function bindDiagnosticsDbs(opts: {
   localConfigSink = opts.saveLocalConfig ?? null
   configChangeListener = opts.onConfigChanged ?? null
   diagnosticsDb = opts.diagnosticsDb // separate diagnostics DB — writes to slayzone.dev.diagnostics.sqlite
+  blobDir = opts.blobDir
   cachedConfig = null
 
   // Warm the config cache from the (async, worker-thread) settings DB so the
@@ -182,6 +194,11 @@ export function bindDiagnosticsDbs(opts: {
 
 export function getDiagnosticsDb(): SlayzoneDb | null {
   return diagnosticsDb
+}
+
+/** The payload-blob dir bound by the host, or null before `bindDiagnosticsDbs`. */
+export function getDiagnosticsBlobDir(): string | null {
+  return blobDir
 }
 
 export function clearConfigCache(): void {
@@ -320,25 +337,18 @@ export function redactValue(value: unknown): unknown {
 }
 
 /**
- * Writes an oversized payload blob to `<storage>/diagnostics/` and returns its
- * absolute path. Node built-ins are imported lazily so this module stays loadable
- * in environments without them (the redactor half is used from tests and, via the
- * shared graph, from bundles that never record events).
+ * Writes an oversized payload blob into the bound blob dir and returns its
+ * absolute path. Unbound, it throws — `offloadPayloadBlobs` degrades that to a
+ * marker, so an event is never lost to a missing dir.
  */
 const filesystemBlobWriter: BlobWriter = {
   write(bytes, extension) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { join } = require('node:path') as typeof import('node:path')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getStorageDir } = require('@slayzone/platform') as typeof import('@slayzone/platform')
-    const dir = join(getStorageDir(), 'diagnostics')
-    mkdirSync(dir, { recursive: true })
+    if (!blobDir) throw new Error('diagnostics blob dir not bound')
+    mkdirSync(blobDir, { recursive: true })
     // Content-addressed-ish: timestamp + size keeps names unique without a
     // counter that would reset across processes.
     const name = `blob-${Date.now()}-${bytes.length}.${extension}`
-    const path = join(dir, name)
+    const path = join(blobDir, name)
     writeFileSync(path, bytes)
     return path
   }

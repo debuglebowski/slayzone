@@ -18,6 +18,8 @@
  *
  * The filesystem is injected so the policy is unit-testable without touching disk.
  */
+import { readdirSync, statSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /** One blob file as the pruner needs to see it. */
 export interface BlobFileInfo {
@@ -54,30 +56,29 @@ export interface PruneBlobsResult {
  */
 export const DEFAULT_MAX_BLOB_BYTES = 200 * 1024 * 1024
 
-/** Directory under the storage dir that `payload-blobs.ts` writes into. */
+/** Directory, beside the diagnostics DB, that `payload-blobs.ts` writes into. */
 export const BLOB_DIR_NAME = 'diagnostics'
 
 /**
- * The real filesystem, bound to `<storage>/diagnostics/`. Node built-ins are
- * required lazily for the same reason as in `payload-blobs.ts`: this package is
- * imported by graphs that never touch disk.
+ * Where the payload blobs of the diagnostics DB at `diagnosticsDbPath` live: a
+ * `diagnostics/` dir beside it. Every host derives its blob dir from the DB file it
+ * opened, so all processes writing one diagnostics DB write — and prune — one set
+ * of blobs. Hosts pass the result to `bindDiagnosticsDbs({ blobDir })`.
  */
-export function createFilesystemBlobFs(): BlobFileSystem {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const nodeFs = require('node:fs') as typeof import('node:fs')
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { join } = require('node:path') as typeof import('node:path')
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getStorageDir } = require('@slayzone/platform') as typeof import('@slayzone/platform')
-  const dir = join(getStorageDir(), BLOB_DIR_NAME)
+export function diagnosticsBlobDirBeside(diagnosticsDbPath: string): string {
+  return join(dirname(diagnosticsDbPath), BLOB_DIR_NAME)
+}
+
+/** The real filesystem, bound to `dir` (see {@link diagnosticsBlobDirBeside}). */
+export function createFilesystemBlobFs(dir: string): BlobFileSystem {
   return {
     list(): BlobFileInfo[] {
       const out: BlobFileInfo[] = []
       // `withFileTypes` avoids a stat per entry just to skip subdirectories.
-      for (const entry of nodeFs.readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (!entry.isFile()) continue
         try {
-          const stat = nodeFs.statSync(join(dir, entry.name))
+          const stat = statSync(join(dir, entry.name))
           out.push({ name: entry.name, sizeBytes: stat.size, mtimeMs: stat.mtimeMs })
         } catch {
           // Vanished between readdir and stat — nothing to prune.
@@ -86,7 +87,7 @@ export function createFilesystemBlobFs(): BlobFileSystem {
       return out
     },
     remove(name: string): void {
-      nodeFs.unlinkSync(join(dir, name))
+      unlinkSync(join(dir, name))
     }
   }
 }

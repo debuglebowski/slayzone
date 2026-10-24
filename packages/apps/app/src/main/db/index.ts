@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import path from 'path'
 import { getDbName, getDiagnosticsDbName } from '@slayzone/platform'
+import { diagnosticsBlobDirBeside } from '@slayzone/diagnostics/server'
 import { getStorageDir } from '../data-paths'
 import { createDiagBridge, type DiagBridge } from './diag-bridge'
 
@@ -13,6 +14,10 @@ const getDiagnosticsDatabasePath = (): string => {
   const userDataPath = getStorageDir()
   return path.join(userDataPath, getDiagnosticsDbName(app.isPackaged))
 }
+
+/** Payload blobs of the diagnostics DB — beside it, where the hub writes them too. */
+export const getDiagnosticsBlobDir = (): string =>
+  diagnosticsBlobDirBeside(getDiagnosticsDatabasePath())
 
 let diagDb: DiagBridge | null = null
 

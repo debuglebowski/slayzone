@@ -280,10 +280,11 @@ export function composeServer(opts: {
    * no caller can forget to decide; `server.ts` passes `boot.reachable`.
    */
   floodLimits: boolean
-  /** Separate diagnostics events DB. When present, `recordDiagnosticEvent` in
-   *  THIS process persists (and pre-bind buffered events flush) — without it the
+  /** Separate diagnostics events DB, and the payload-blob dir beside it
+   *  (`diagnosticsBlobDirBeside`). When present, `recordDiagnosticEvent` in THIS
+   *  process persists (and pre-bind buffered events flush) — without it the
    *  sidecar's diagnostics silently buffer + drop. */
-  diagnosticsDb?: SlayzoneDb
+  diagnostics?: { db: SlayzoneDb; blobDir: string }
 }): ServerComposition {
   const { db, dataRoot } = opts
   const supervised = !opts.standalone
@@ -338,10 +339,11 @@ export function composeServer(opts: {
   // Make this process's diagnostics queryable (pty + agent-pool run here). Bind
   // FIRST so every subsequent recordDiagnosticEvent persists and any buffered
   // pre-bind events flush. No-op if the host didn't pass a diagnostics DB.
-  if (opts.diagnosticsDb) {
+  if (opts.diagnostics) {
     bindDiagnosticsDbs({
       settingsDb: db,
-      diagnosticsDb: opts.diagnosticsDb,
+      diagnosticsDb: opts.diagnostics.db,
+      blobDir: opts.diagnostics.blobDir,
       // The desktop records into this SAME machine-local diagnostics file from
       // its own config copy (the client store), and the Settings UI writes here,
       // over tRPC — so the desktop has to be told, or it keeps recording after

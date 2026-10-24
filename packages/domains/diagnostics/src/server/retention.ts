@@ -6,6 +6,7 @@ import {
   pruneBlobs,
   type BlobFileSystem
 } from './blob-retention'
+import { getDiagnosticsBlobDir } from './diagnostics-store'
 
 const HARD_EVENT_CAP = 200_000
 const CHUNK_LIMIT = 10_000
@@ -17,9 +18,8 @@ export interface RetentionDeps {
   getConfig: () => DiagnosticsConfig
   now?: () => number
   /**
-   * Filesystem for payload-blob pruning. Injected for tests; production resolves
-   * `<storage>/diagnostics/` lazily on first tick (so a scheduler started before
-   * the storage dir exists does not throw).
+   * Filesystem for payload-blob pruning. Injected for tests; production prunes the
+   * dir the host bound via `bindDiagnosticsDbs({ blobDir })`.
    */
   blobFs?: BlobFileSystem
 }
@@ -90,8 +90,14 @@ export function runBlobRetention(
   nowMs: number,
   blobFs?: BlobFileSystem
 ): { deleted: number; freedBytes: number; failed: number } {
+  let fs = blobFs
+  if (!fs) {
+    const dir = getDiagnosticsBlobDir()
+    // Unbound: this process has written no blobs, so there are none to prune.
+    if (!dir) return { deleted: 0, freedBytes: 0, failed: 0 }
+    fs = createFilesystemBlobFs(dir)
+  }
   try {
-    const fs = blobFs ?? createFilesystemBlobFs()
     const result = pruneBlobs(fs, {
       cutoffMs: nowMs - config.retentionDays * 24 * 60 * 60 * 1000,
       maxTotalBytes: DEFAULT_MAX_BLOB_BYTES
@@ -101,7 +107,7 @@ export function runBlobRetention(
     }
     return result
   } catch (err) {
-    // e.g. storage dir unresolvable in a graph that never writes blobs.
+    // pruneBlobs isolates per-file fs errors itself; this is the last resort.
     console.error('[diagnostics retention] blob prune failed:', err)
     return { deleted: 0, freedBytes: 0, failed: 0 }
   }
@@ -120,16 +126,43 @@ async function reclaimFreePages(db: SlayzoneDb): Promise<void> {
 }
 
 let currentTimer: NodeJS.Timeout | null = null
-let isStopped = false
+// The running scheduler's deps; null when stopped. A tick from a stopped or
+// replaced scheduler compares against this and does not reschedule.
+let currentDeps: RetentionDeps | null = null
+let inFlight: Promise<void> | null = null
 
+/**
+ * Prune this process's diagnostics DB (rows + payload blobs) on a timer.
+ *
+ * Exactly ONE process per diagnostics DB file runs this: the Electron host for its
+ * file — which its supervised hub writes too — and an unsupervised hub for its own.
+ * Two pruners on one file would race on the same blobs.
+ */
 export function startRetentionScheduler(deps: RetentionDeps): void {
   stopRetentionScheduler()
-  isStopped = false
+  currentDeps = deps
   scheduleNext(deps, TICK_IDLE_MS)
 }
 
 export function stopRetentionScheduler(): void {
-  isStopped = true
+  currentDeps = null
+  clearScheduledTick()
+}
+
+/**
+ * Run one pass now instead of waiting for the next tick; the schedule continues
+ * from it. Returns false when no scheduler runs in this process.
+ */
+export async function runScheduledRetentionNow(): Promise<boolean> {
+  if (inFlight) await inFlight
+  const deps = currentDeps
+  if (!deps) return false
+  clearScheduledTick()
+  await runTick(deps)
+  return true
+}
+
+function clearScheduledTick(): void {
   if (currentTimer) {
     clearTimeout(currentTimer)
     currentTimer = null
@@ -137,15 +170,28 @@ export function stopRetentionScheduler(): void {
 }
 
 function scheduleNext(deps: RetentionDeps, delayMs: number): void {
-  currentTimer = setTimeout(() => void tick(deps), delayMs)
+  currentTimer = setTimeout(() => void runTick(deps), delayMs)
+  // Housekeeping must never keep a process alive on its own.
+  currentTimer.unref()
+}
+
+function runTick(deps: RetentionDeps): Promise<void> {
+  const run = tick(deps).finally(() => {
+    if (inFlight === run) inFlight = null
+  })
+  inFlight = run
+  return run
 }
 
 async function tick(deps: RetentionDeps): Promise<void> {
-  if (isStopped) return
+  if (currentDeps !== deps) return
   const now = deps.now ?? Date.now
   const db = deps.getDb()
   const config = deps.getConfig()
-  if (!db || !config.enabled) {
+  // Deliberately NOT gated on `config.enabled`: that stops new events, while this
+  // bounds the disk. Skipping it while disabled kept everything recorded before the
+  // user opted out, forever.
+  if (!db) {
     scheduleNext(deps, TICK_IDLE_MS)
     return
   }
@@ -161,6 +207,6 @@ async function tick(deps: RetentionDeps): Promise<void> {
 
   runBlobRetention(config, now(), deps.blobFs)
 
-  if (isStopped) return
+  if (currentDeps !== deps) return
   scheduleNext(deps, moreWork ? TICK_WORK_MS : TICK_IDLE_MS)
 }

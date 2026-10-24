@@ -327,7 +327,9 @@ async function runExport(request: DiagnosticsExportRequest): Promise<Diagnostics
 export function registerDiagnosticsHandlers(
   ipcMain: IpcMain,
   eventsDb: SlayzoneDb,
-  options?: {
+  options: {
+    /** Payload-blob dir: `diagnosticsBlobDirBeside(<path of eventsDb>)`. */
+    blobDir: string
     enableIpcHandlers?: boolean
     /** Client-settings dir. Injectable so tests never touch the real ~/.slayzone. */
     clientRoot?: string
@@ -336,9 +338,10 @@ export function registerDiagnosticsHandlers(
   // Config comes from the CLIENT store, not the shared DB — it governs the
   // machine-local diagnostics database this process writes to, and main must be
   // able to gate boot/crash events before any hub exists.
-  const clientRoot = options?.clientRoot ?? getClientRoot()
+  const clientRoot = options.clientRoot ?? getClientRoot()
   bindDiagnosticsDbs({
     diagnosticsDb: eventsDb,
+    blobDir: options.blobDir,
     localConfig: () => {
       const d = readClientSettings(clientRoot).diagnostics ?? {}
       return {
@@ -360,7 +363,7 @@ export function registerDiagnosticsHandlers(
     getConfig: getDiagnosticsConfig
   })
 
-  if (options?.enableIpcHandlers === false) return
+  if (options.enableIpcHandlers === false) return
 
   ipcMain.handle('diagnostics:getConfig', () => getDiagnosticsConfig())
 
