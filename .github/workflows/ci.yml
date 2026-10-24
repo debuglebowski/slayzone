@@ -42,8 +42,9 @@ jobs:
           CI_SKIP_POSTINSTALL: '1'
 
       # Everything `pnpm lint` runs: versions, theme tokens, server boundary, tRPC deps,
-      # window API, e2e guardrails, format, biome, eslint, and the unit-test registration
-      # check (every test file is in run-all.sh or skipped there with a reason).
+      # window API, e2e guardrails, React Compiler coverage, format, biome, eslint, and the
+      # unit-test registration check (every test file is in run-all.sh or skipped there
+      # with a reason).
       - name: Lint
         run: pnpm lint
 
