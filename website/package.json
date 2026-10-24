@@ -14,7 +14,7 @@
     "test:redirects": "node scripts/test-redirects.mjs"
   },
   "devDependencies": {
-    "astro": "^5.14.3",
+    "astro": "^7.0.0",
     "@types/js-yaml": "^4.0.9"
   },
   "dependencies": {
