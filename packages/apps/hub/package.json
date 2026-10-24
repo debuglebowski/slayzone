@@ -46,6 +46,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@slayzone/build-guards": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.1",

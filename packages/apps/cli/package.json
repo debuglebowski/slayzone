@@ -14,6 +14,7 @@
     "commander": "^13.0.0"
   },
   "devDependencies": {
+    "@slayzone/build-guards": "workspace:*",
     "@types/archiver": "^7.0.0",
     "@types/node": "^22.19.1",
     "esbuild": "^0.25.0",

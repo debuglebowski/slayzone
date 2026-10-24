@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv, type Plugin } from 'vite'
+import { runtimeImportsRollupPlugin } from '@slayzone/build-guards/runtime-imports'
 import { buildCspFloor } from './src/main/renderer-csp'
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
@@ -13,6 +14,12 @@ const slayzoneDeps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }
 )
 
 const root = resolve(__dirname, '../../..')
+
+// Fail the main/preload build (dev watch included) when a module their output
+// still resolves at runtime would not resolve in the shipped app — e.g. an ESM
+// `require('@slayzone/…')`, which Rollup leaves unbundled. See build-guards.
+const runtimeImportsGuard = (bundleName: string): Plugin =>
+  runtimeImportsRollupPlugin({ bundleName, packageJson: pkg, electron: true }) as Plugin
 
 // Discover @slayzone/* client entry files so Vite's dep scanner can trace
 // through them and pre-bundle their third-party imports automatically.
@@ -96,7 +103,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     main: {
-      plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps })],
+      plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps }), runtimeImportsGuard('app main')],
       // The renderer's Convex deployment (its `import.meta.env.VITE_CONVEX_URL`, read
       // from the same `root` env + mode), so main can hand the hub the one deployment
       // the renderer signs in against (T-99, hub-convex.ts). '' = Convex off.
@@ -117,7 +124,10 @@ export default defineConfig(({ mode }) => {
       }
     },
     preload: {
-      plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps })],
+      plugins: [
+        externalizeDepsPlugin({ exclude: slayzoneDeps }),
+        runtimeImportsGuard('app preload')
+      ],
       build: {
         rollupOptions: {
           input: {
