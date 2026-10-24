@@ -377,7 +377,12 @@ function packagedNativeModuleEnv(): { NODE_PATH?: string } {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import { initDatabases, closeDiagnosticsDatabase, getDatabasePath } from './db'
+import {
+  initDatabases,
+  closeDiagnosticsDatabase,
+  getDatabasePath,
+  getDiagnosticsBlobDir
+} from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import {
@@ -1914,7 +1919,10 @@ app
 
     // Bind diagnostics first so tRPC diagnostics works and IPC below is instrumented.
     // Flushes any events buffered before this point (boot.start, crash detect, lock outcome).
-    registerDiagnosticsHandlers(ipcMain, diagDb, { enableIpcHandlers: isPlaywright })
+    registerDiagnosticsHandlers(ipcMain, diagDb, {
+      blobDir: getDiagnosticsBlobDir(),
+      enableIpcHandlers: isPlaywright
+    })
     setIpcSuccessHook((channel, args, result) => {
       const entry = IPC_TELEMETRY_MAP[channel]
       if (!entry) return

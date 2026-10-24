@@ -45,7 +45,10 @@ h.db.exec(`
 // `diagnosticsDb.batchTxn(...)`, which the raw handle doesn't expose (the insert
 // would throw + get swallowed → 0 events persisted). slayDb wraps the SAME
 // in-memory connection the schema above was created on.
-registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, { clientRoot: testClientRoot })
+registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, {
+  clientRoot: testClientRoot,
+  blobDir: path.join(testClientRoot, 'diagnostics')
+})
 
 // instrumentIpcMain wraps handlers as async, so all invoke() calls return Promises.
 // Run tests sequentially via top-level await to avoid ordering issues.

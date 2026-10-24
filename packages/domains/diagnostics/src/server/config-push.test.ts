@@ -53,6 +53,8 @@ function fakeSettingsDb(): SlayzoneDb & { rows: Map<string, string> } {
 
 /** The diagnostics DB is irrelevant here — nothing in these paths records events. */
 const noopDiagDb = { prepare: () => ({ get: async () => undefined, run: async () => ({}) }) }
+/** Never written: no event here carries a payload blob. */
+const blobDir = '/nonexistent/slz-config-push-blobs'
 
 test('hub-side save notifies with the FULL merged config, not the partial', async () => {
   const seen: DiagnosticsConfig[] = []
@@ -61,6 +63,7 @@ test('hub-side save notifies with the FULL merged config, not the partial', asyn
   bindDiagnosticsDbs({
     settingsDb,
     diagnosticsDb: noopDiagDb as unknown as SlayzoneDb,
+    blobDir,
     onConfigChanged: (next) => {
       seen.push(next)
     }
@@ -84,6 +87,7 @@ test('notifies AFTER the value is persisted, never before', async () => {
   bindDiagnosticsDbs({
     settingsDb,
     diagnosticsDb: noopDiagDb as unknown as SlayzoneDb,
+    blobDir,
     onConfigChanged: () => {
       persistedAtNotifyTime = settingsDb.rows.get('diagnostics_retention_days')
     }
@@ -101,6 +105,7 @@ test('a THROWING listener does not fail the save', async () => {
   bindDiagnosticsDbs({
     settingsDb,
     diagnosticsDb: noopDiagDb as unknown as SlayzoneDb,
+    blobDir,
     onConfigChanged: () => {
       // The real listener crosses the capability bridge; a dead side-car must not
       // turn a successful, already-persisted save into a failed mutation.
@@ -120,6 +125,7 @@ test('client-store save notifies too — one seam, both bindings', async () => {
   clearConfigCache()
   bindDiagnosticsDbs({
     diagnosticsDb: noopDiagDb as unknown as SlayzoneDb,
+    blobDir,
     localConfig: () => stored,
     saveLocalConfig: async (next) => {
       stored = next
@@ -139,7 +145,7 @@ test('client-store save notifies too — one seam, both bindings', async () => {
 test('an unbound listener is not required — save still works', async () => {
   const settingsDb = fakeSettingsDb()
   clearConfigCache()
-  bindDiagnosticsDbs({ settingsDb, diagnosticsDb: noopDiagDb as unknown as SlayzoneDb })
+  bindDiagnosticsDbs({ settingsDb, diagnosticsDb: noopDiagDb as unknown as SlayzoneDb, blobDir })
 
   const next = await saveDiagnosticsConfig({ enabled: false })
 

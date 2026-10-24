@@ -4,7 +4,13 @@
  */
 import { expect } from '../../../../shared/test-utils/ipc-harness.js'
 import Database from 'better-sqlite3'
-import { runBlobRetention, runRetentionChunk } from './retention.js'
+import {
+  runBlobRetention,
+  runRetentionChunk,
+  runScheduledRetentionNow,
+  startRetentionScheduler,
+  stopRetentionScheduler
+} from './retention.js'
 import type { DiagnosticsConfig } from '../shared/index.js'
 
 const SCHEMA = `
@@ -188,6 +194,55 @@ async function run(): Promise<void> {
     })
     expect(result.deleted).toBe(0)
     console.log('  ✓ an unreadable blob dir is survivable')
+  }
+
+  console.log('\nscheduler — retention is independent of recording')
+
+  // 10. Turning recording OFF must not freeze what was already recorded: `enabled`
+  //     gates new events, retention bounds the disk. Skipping the pass while
+  //     disabled kept every row and blob of someone who opted out, forever.
+  {
+    const now = Date.now()
+    const dayMs = 24 * 60 * 60 * 1000
+    const db = makeDb()
+    seed(db, 3, now - 20 * dayMs) // past the 14-day window
+    seed(db, 2, now) // fresh
+    const removed: string[] = []
+    startRetentionScheduler({
+      getDb: () => db as never,
+      getConfig: () => ({ ...CONFIG, enabled: false }),
+      now: () => now,
+      blobFs: {
+        list: () =>
+          [{ name: 'old.png', sizeBytes: 1, mtimeMs: now - 20 * dayMs }].filter(
+            (f) => !removed.includes(f.name)
+          ),
+        remove: (name) => {
+          removed.push(name)
+        }
+      }
+    })
+    try {
+      expect(await runScheduledRetentionNow()).toBe(true)
+      expect(rowCount(db)).toBe(2)
+      expect(removed.join(',')).toBe('old.png')
+    } finally {
+      stopRetentionScheduler()
+      db.close()
+    }
+    console.log('  ✓ prunes expired rows and blobs while recording is off')
+  }
+
+  // 11. No DB bound yet → nothing to prune, and no throw.
+  {
+    startRetentionScheduler({ getDb: () => null, getConfig: () => CONFIG })
+    try {
+      expect(await runScheduledRetentionNow()).toBe(true)
+    } finally {
+      stopRetentionScheduler()
+    }
+    expect(await runScheduledRetentionNow()).toBe(false)
+    console.log('  ✓ an unbound DB is a no-op; a stopped scheduler runs nothing')
   }
 }
 

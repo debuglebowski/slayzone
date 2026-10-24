@@ -89,6 +89,10 @@ run_test_electron_strict_loader packages/domains/computers/src/server/project-pa
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_test_electron_strict_loader packages/apps/hub/src/supervised-bootstrap.test.ts
+# Diagnostics retention ownership: an unsupervised hub prunes its own diagnostics
+# (rows + blobs; only the desktop host used to, so standalone hubs grew forever);
+# a supervised hub leaves the shared file to its host.
+run_test_electron_strict_loader packages/apps/hub/src/diagnostics-retention.test.ts
 # Host-kill stamp: fires where the pty sessions are (the side-car), not on the
 # host, whose session registry has been empty since slice 9.
 run_test_electron_strict_loader packages/apps/hub/src/host-kill.test.ts
@@ -422,6 +426,9 @@ run_test packages/domains/diagnostics/src/server/payload-blobs.test.ts
 # Diagnostics — blob retention. Offloading to disk means row deletion reclaims
 # nothing, so blobs need their own age + size bound or they grow forever.
 run_test packages/domains/diagnostics/src/server/blob-retention.test.ts
+# Diagnostics — the blob dir is bound by each host, never resolved from ambient env.
+# The old lazy require('@slayzone/platform') failed in Electron main every tick.
+run_test packages/domains/diagnostics/src/server/blob-dir.test.ts
 # Diagnostics — event-row retention (needs better-sqlite3 → electron ABI). Was
 # never registered, which hid every assertion silently reading `undefined` from an
 # un-awaited async call.
@@ -636,7 +643,7 @@ run_test packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 skip_suite packages/domains/terminal/src/server/runtime/chat-handlers.test.ts \
   "10 of 14 cases fail: its hand-written mini-schema predates the projects table the handlers now query (already ported to the async SlayzoneDb adapter). Fix: build on createTestHarness's migrated DB"
 skip_suite packages/domains/diagnostics/src/electron/batching.test.ts \
-  "1 assertion fails (Expected 1, got 0) and the process never exits; blob prune also throws 'require is not defined' under ESM. Fix the flush expectation, the ESM require, and the lingering timer"
+  "1 assertion fails (Expected 1, got 0). Fix the flush expectation"
 skip_suite packages/domains/file-editor/src/client/useFileEditor.test.ts \
   "11 cases stub window.api.fs, the renderer IPC removed in June; the hook now uses tRPC (useTRPC needs a provider). Port the stubs to a tRPC test client"
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \

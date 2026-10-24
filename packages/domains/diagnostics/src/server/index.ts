@@ -1,7 +1,14 @@
 export { createDiagnosticsSchema, applyDiagnosticsPragmas } from './schema'
+export { diagnosticsBlobDirBeside } from './blob-retention'
+export {
+  startRetentionScheduler,
+  stopRetentionScheduler,
+  runScheduledRetentionNow
+} from './retention'
 export {
   bindDiagnosticsDbs,
   getDiagnosticsDb,
+  getDiagnosticsBlobDir,
   getDiagnosticsConfig,
   saveDiagnosticsConfig,
   recordDiagnosticEvent,

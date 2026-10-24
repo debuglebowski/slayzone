@@ -150,6 +150,15 @@ export async function openServerDatabase(): Promise<SlayzoneDb> {
 }
 
 /**
+ * Path of the diagnostics events DB. Named explicitly, NOT derived from the main
+ * DB's name: that would now yield `slayzone.data.diagnostics.sqlite`, a second
+ * diagnostics DB beside the real one.
+ */
+export function getServerDiagnosticsDatabasePath(): string {
+  return path.join(getStorageDir(), getDiagnosticsDbName(process.env.SLAYZONE_DEV !== '1'))
+}
+
+/**
  * Open the separate diagnostics events DB (`slayzone[.dev].diagnostics.sqlite`,
  * sibling of the main `slayzone[.dev].data.sqlite`). The sidecar owns pty + the agent pool, so its
  * `recordDiagnosticEvent` calls must persist HERE — otherwise they buffer and
@@ -159,13 +168,7 @@ export async function openServerDatabase(): Promise<SlayzoneDb> {
  * "mirrored", which is what let the two drift.
  */
 export function openServerDiagnosticsDatabase(): SlayzoneDb {
-  // Named explicitly, NOT derived from the main DB's name: that would now yield
-  // `slayzone.data.diagnostics.sqlite`, a second diagnostics DB beside the real one.
-  const diagPath = path.join(
-    getStorageDir(),
-    getDiagnosticsDbName(process.env.SLAYZONE_DEV !== '1')
-  )
-  const db = new Database(diagPath)
+  const db = new Database(getServerDiagnosticsDatabasePath())
   // ONE schema definition, shared with the Electron host's diag worker
   // (diagnostics/server/schema.ts). These used to diverge — four indexes and
   // auto_vacuum on the host side, two indexes and none here — and since both
