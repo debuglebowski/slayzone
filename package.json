@@ -75,7 +75,7 @@
     "dev:website": "pnpm --filter @slayzone/website dev"
   },
   "devDependencies": {
-    "@auth/core": "^0.37.4",
+    "@auth/core": "^0.41.0",
     "@biomejs/biome": "^2.4.15",
     "@convex-dev/auth": "^0.0.90",
     "@slayzone/tsgo": "workspace:*",
