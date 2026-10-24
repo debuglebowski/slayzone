@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react'
 import {
   useGuardedHotkeys,
   matchesShortcut,
@@ -33,7 +33,7 @@ export interface AppShortcutsDeps {
   setActiveTabIndex: (index: number) => void
   setSelectedProjectId: (id: string) => void
   reopenClosedTab: () => Promise<void>
-  openTaskRef: RefObject<(taskId: string, projectOverride?: Project) => void>
+  openTask: (taskId: string, projectOverride?: Project) => void
   undo: UndoApi['undo']
   redo: UndoApi['redo']
   zenMode: boolean
@@ -66,7 +66,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     setActiveTabIndex,
     setSelectedProjectId,
     reopenClosedTab,
-    openTaskRef,
+    openTask,
     undo,
     redo,
     zenMode,
@@ -210,21 +210,24 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     [tabCycleOrder, toVisibleIndex, setActiveTabIndex]
   )
 
-  const cycleSidebarTreeItems = useCallback((direction: 1 | -1) => {
-    const items = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-sidebar-tree-item="task"][data-task-id]')
-    )
-    if (items.length === 0) return
-    const activeIdx = items.findIndex((el) => el.dataset.active === 'true')
-    const nextIdx =
-      activeIdx === -1
-        ? direction === 1
-          ? 0
-          : items.length - 1
-        : (activeIdx + direction + items.length) % items.length
-    const id = items[nextIdx]?.dataset.taskId
-    if (id) openTaskRef.current(id)
-  }, [])
+  const cycleSidebarTreeItems = useCallback(
+    (direction: 1 | -1) => {
+      const items = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-sidebar-tree-item="task"][data-task-id]')
+      )
+      if (items.length === 0) return
+      const activeIdx = items.findIndex((el) => el.dataset.active === 'true')
+      const nextIdx =
+        activeIdx === -1
+          ? direction === 1
+            ? 0
+            : items.length - 1
+          : (activeIdx + direction + items.length) % items.length
+      const id = items[nextIdx]?.dataset.taskId
+      if (id) openTask(id)
+    },
+    [openTask]
+  )
 
   useGuardedHotkeys(
     getKeys('next-tab'),

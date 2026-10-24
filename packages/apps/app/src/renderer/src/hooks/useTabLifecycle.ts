@@ -49,10 +49,10 @@ export function useTabLifecycle({
 
   // Track whether task data has loaded at least once.
   const tasksLoadedRef = useRef(false)
-  if (tasks.length > 0) tasksLoadedRef.current = true
 
   // Sync tab titles/status and remove tabs for deleted tasks.
   useEffect(() => {
+    if (tasks.length > 0) tasksLoadedRef.current = true
     if (!tasksLoadedRef.current) return
     const taskIds = new Set(tasks.map((t) => t.id))
     const store = useTabStore.getState()

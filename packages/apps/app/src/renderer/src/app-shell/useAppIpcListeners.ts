@@ -1,7 +1,7 @@
-import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { useEffect, type Dispatch, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
-import { scopeTracker } from '@slayzone/ui'
+import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore, useDialogStore } from '@slayzone/settings'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
@@ -21,7 +21,7 @@ export interface AppIpcListenersDeps {
   closeTab: (index: number) => void
   guardTaskOpen: (taskId: string, fn: (id: string) => void, projectOverride?: Project) => void
   openTaskInBackground: (taskId: string) => void
-  openTaskRef: RefObject<(taskId: string, projectOverride?: Project) => void>
+  openTask: (taskId: string, projectOverride?: Project) => void
   setActiveTabIndex: (index: number) => void
   selectedProjectId: string
   globalAgentPanelState: GlobalAgentPanelState
@@ -50,7 +50,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     closeTab,
     guardTaskOpen,
     openTaskInBackground,
-    openTaskRef,
+    openTask,
     setActiveTabIndex,
     selectedProjectId,
     globalAgentPanelState,
@@ -71,34 +71,23 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   const trpcClient = useTRPCClient()
   const closeWindow = useMutation(trpc.app.window.close.mutationOptions())
 
-  // Stable refs for the close subscriptions — onData reads these so it always
-  // sees the latest tabs/activeTabIndex without re-binding the WS subscription.
-  const closeActiveTaskRef = useRef<() => void>(() => {
-    // Seeded no-op: the real closure is assigned on the next line of every render,
-    // so this initial value can never be the one a subscription invokes.
-  })
-  closeActiveTaskRef.current = () => {
+  // Stable handlers for the close subscriptions: they always see the latest
+  // tabs/activeTabIndex without re-binding the WS subscription.
+  const closeActiveTask = useStableCallback(() => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab?.type === 'task') closeTab(activeTabIndex)
     else void closeWindow.mutate()
-  }
-  const closeCurrentHomeRef = useRef<() => void>(() => {
-    // Seeded no-op, same as above — overwritten on the next line every render.
   })
-  closeCurrentHomeRef.current = () => {
+  const closeCurrentHome = useStableCallback(() => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab?.type === 'home') void closeWindow.mutate()
-  }
+  })
 
   useSubscription(
-    trpc.menu.onCloseActiveTask.subscriptionOptions(undefined, {
-      onData: () => closeActiveTaskRef.current()
-    })
+    trpc.menu.onCloseActiveTask.subscriptionOptions(undefined, { onData: closeActiveTask })
   )
   useSubscription(
-    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, {
-      onData: () => closeCurrentHomeRef.current()
-    })
+    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, { onData: closeCurrentHome })
   )
   useSubscription(
     trpc.menu.onCloseTask.subscriptionOptions(undefined, {
@@ -112,7 +101,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     trpc.menu.onOpenTask.subscriptionOptions(undefined, {
       onData: ({ taskId, background }) => {
         if (background) guardTaskOpen(taskId, openTaskInBackground)
-        else openTaskRef.current(taskId)
+        else openTask(taskId)
       }
     })
   )

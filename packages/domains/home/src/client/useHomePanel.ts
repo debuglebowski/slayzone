@@ -45,18 +45,20 @@ export function useHomePanel(
   }, [userOrderedIds])
   const [homePanelState, setHomePanelState] = useHomePanelState(selectedProjectId)
   const homePanelVisibility = homePanelState.visibility
-  const visibilityRef = useRef(homePanelVisibility)
-  visibilityRef.current = homePanelVisibility
 
   const setHomePanelVisibility = useCallback(
     (updater: (prev: Record<HomePanel, boolean>) => Record<HomePanel, boolean>) => {
-      const prev = visibilityRef.current
-      const next = updater(prev)
-      setHomePanelState((s) => ({ ...s, visibility: next }))
-      for (const key of Object.keys(next) as HomePanel[]) {
-        if (next[key] !== prev[key])
-          track('panel_toggled', { panel: key, active: next[key], context: 'home' })
-      }
+      // useHomePanelState applies the updater once, synchronously, to its latest
+      // state — so the toggles tracked here are exactly the ones applied.
+      setHomePanelState((s) => {
+        const prev = s.visibility
+        const next = updater(prev)
+        for (const key of Object.keys(next) as HomePanel[]) {
+          if (next[key] !== prev[key])
+            track('panel_toggled', { panel: key, active: next[key], context: 'home' })
+        }
+        return { ...s, visibility: next }
+      })
     },
     [setHomePanelState]
   )
@@ -104,7 +106,7 @@ export function useHomePanel(
       (id) => HOME_PANEL_SIZE_KEY[id]
     )
     return resolvePanels(ids, panelConfig, panelSizes, homeContainerWidth)
-  }, [homeContainerWidth, homePanelVisibility, panelSizes, panelConfig])
+  }, [HOME_PANEL_ORDER, homeContainerWidth, homePanelVisibility, panelSizes, panelConfig])
   const homeResolvedWidths = homeResolved.widths
 
   // Placement plan — same shared helper the task split-view uses. App renders home
@@ -117,7 +119,7 @@ export function useHomePanel(
     return homeStrip.renderOrder
       .map((k) => bySizeKey.get(k))
       .filter((x): x is HomePanel => x != null)
-  }, [homePanelVisibility, homeStrip])
+  }, [HOME_PANEL_ORDER, homePanelVisibility, homeStrip])
   const homeLeftCount = homeStrip.rightStart
 
   return {

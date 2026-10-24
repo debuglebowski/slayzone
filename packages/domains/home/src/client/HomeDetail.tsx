@@ -183,6 +183,21 @@ export function HomeDetail({
   panelAutomationsShortcut
 }: HomeDetailProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
+  const {
+    homeContainerRef,
+    homeContainerWidth,
+    homeEditorRefCallback,
+    homeGitDefaultTab,
+    homeGitPanelRef,
+    homeLeftCount,
+    homePanelVisibility,
+    homeRenderOrder,
+    homeResolved,
+    homeResolvedWidths,
+    orderedHomePanelIds,
+    setHomeGitDefaultTab,
+    setHomePanelVisibility
+  } = homePanel
   return (
     <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
       {durationLocked && selectedProject?.lock_config ? (
@@ -267,7 +282,7 @@ export function HomeDetail({
                       id: 'kanban',
                       icon: Kanban,
                       label: 'Kanban',
-                      active: homePanel.homePanelVisibility.kanban,
+                      active: homePanelVisibility.kanban,
                       disabled: !selectedProjectId
                     },
                     git: {
@@ -275,7 +290,7 @@ export function HomeDetail({
                       icon: GitBranch,
                       label: 'Git',
                       shortcut: panelGitShortcut,
-                      active: homePanel.homePanelVisibility.git,
+                      active: homePanelVisibility.git,
                       disabled: !selectedProjectId
                     },
                     editor: {
@@ -283,7 +298,7 @@ export function HomeDetail({
                       icon: FileCode,
                       label: 'Editor',
                       shortcut: panelEditorShortcut,
-                      active: homePanel.homePanelVisibility.editor,
+                      active: homePanelVisibility.editor,
                       disabled: !selectedProjectId
                     },
                     processes: {
@@ -291,7 +306,7 @@ export function HomeDetail({
                       icon: Cpu,
                       label: 'Processes',
                       shortcut: panelProcessesShortcut,
-                      active: homePanel.homePanelVisibility.processes,
+                      active: homePanelVisibility.processes,
                       disabled: !selectedProjectId
                     },
                     tests: {
@@ -299,7 +314,7 @@ export function HomeDetail({
                       icon: FlaskConical,
                       label: 'Tests',
                       shortcut: panelTestsShortcut,
-                      active: homePanel.homePanelVisibility.tests,
+                      active: homePanelVisibility.tests,
                       disabled: !selectedProjectId
                     },
                     automations: {
@@ -307,11 +322,11 @@ export function HomeDetail({
                       icon: Zap,
                       label: 'Automations',
                       shortcut: panelAutomationsShortcut,
-                      active: homePanel.homePanelVisibility.automations,
+                      active: homePanelVisibility.automations,
                       disabled: !selectedProjectId
                     }
                   }
-                  const ordered = homePanel.orderedHomePanelIds
+                  const ordered = orderedHomePanelIds
                     .map((id) => entries[id])
                     .filter((e): e is NonNullable<typeof e> => !!e)
                     .filter((p) => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))
@@ -321,7 +336,7 @@ export function HomeDetail({
                       <PanelToggle
                         panels={ordered}
                         onChange={(id, active) =>
-                          homePanel.setHomePanelVisibility((prev) => ({
+                          setHomePanelVisibility((prev) => ({
                             ...prev,
                             [id]: active
                           }))
@@ -351,22 +366,21 @@ export function HomeDetail({
               </div>
             </div>
           ) : (
-            <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex overflow-x-auto">
-              {homePanel.homeRenderOrder.map((id, j) => {
+            <div ref={homeContainerRef} className="flex-1 min-h-0 flex overflow-x-auto">
+              {homeRenderOrder.map((id, j) => {
                 const projectPath =
                   homeResolvedRepo.path ??
                   projects.find((p) => p.id === selectedProjectId)?.path ??
                   null
                 const sizeKey = HOME_PANEL_SIZE_KEY[id]
-                const w = homePanel.homeResolvedWidths[sizeKey] ?? 400
+                const w = homeResolvedWidths[sizeKey] ?? 400
                 // Cluster boundary (left→right anchor): the leftover gap sits
                 // just before the boundary handle (or the left edge if no
                 // left cluster).
-                const isClusterBoundary =
-                  j === homePanel.homeLeftCount && homePanel.homeResolved.rightKeys.length > 0
+                const isClusterBoundary = j === homeLeftCount && homeResolved.rightKeys.length > 0
                 // A handle renders before every panel except the very first —
                 // including the boundary (last-left ↔ first-right).
-                const leftId = j > 0 ? homePanel.homeRenderOrder[j - 1] : undefined
+                const leftId = j > 0 ? homeRenderOrder[j - 1] : undefined
                 const leftL = leftId
                   ? effectiveLayout(HOME_PANEL_SIZE_KEY[leftId], homePanelConfig, panelSizes)
                   : undefined
@@ -378,19 +392,17 @@ export function HomeDetail({
                         aria-hidden
                         data-testid="panel-gap"
                         className="shrink-0"
-                        style={{ width: homePanel.homeResolved.gapPx }}
+                        style={{ width: homeResolved.gapPx }}
                       />
                     )}
                     {leftId && leftL && (
                       <ResizeHandle
-                        leftWidth={homePanel.homeResolvedWidths[HOME_PANEL_SIZE_KEY[leftId]] ?? 400}
+                        leftWidth={homeResolvedWidths[HOME_PANEL_SIZE_KEY[leftId]] ?? 400}
                         rightWidth={w}
-                        leftMinWidth={
-                          homePanel.homeResolved.minPx[HOME_PANEL_SIZE_KEY[leftId]] ?? 200
-                        }
-                        rightMinWidth={homePanel.homeResolved.minPx[sizeKey] ?? 200}
-                        leftMaxWidth={homePanel.homeResolved.maxPx[HOME_PANEL_SIZE_KEY[leftId]]}
-                        rightMaxWidth={homePanel.homeResolved.maxPx[sizeKey]}
+                        leftMinWidth={homeResolved.minPx[HOME_PANEL_SIZE_KEY[leftId]] ?? 200}
+                        rightMinWidth={homeResolved.minPx[sizeKey] ?? 200}
+                        leftMaxWidth={homeResolved.maxPx[HOME_PANEL_SIZE_KEY[leftId]]}
+                        rightMaxWidth={homeResolved.maxPx[sizeKey]}
                         onResize={(lw, rw) =>
                           updatePanelSizes(
                             applyBoundaryResize(
@@ -400,7 +412,7 @@ export function HomeDetail({
                               sizeKey,
                               lw,
                               rw,
-                              homePanel.homeContainerWidth
+                              homeContainerWidth
                             )
                           )
                         }
@@ -416,8 +428,7 @@ export function HomeDetail({
                         cn(
                           'rounded-lg border border-border',
                           id === 'kanban' &&
-                            Object.values(homePanel.homePanelVisibility).filter(Boolean).length <=
-                              1 &&
+                            Object.values(homePanelVisibility).filter(Boolean).length <= 1 &&
                             !globalAgentPanelState.isOpen &&
                             !agentStatusState.isLocked
                             ? 'border-transparent'
@@ -486,12 +497,12 @@ export function HomeDetail({
                           fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}
                         >
                           <UnifiedGitPanel
-                            ref={homePanel.homeGitPanelRef}
+                            ref={homeGitPanelRef}
                             projectId={selectedProjectId}
                             projectPath={projectPath}
                             visible={isViewActive}
-                            defaultTab={homePanel.homeGitDefaultTab}
-                            onTabChange={homePanel.setHomeGitDefaultTab}
+                            defaultTab={homeGitDefaultTab}
+                            onTabChange={setHomeGitDefaultTab}
                             tasks={tasks}
                             filter={filter}
                             projects={projects}
@@ -512,7 +523,7 @@ export function HomeDetail({
                       {id === 'editor' && (
                         <Suspense>
                           <FileEditorView
-                            ref={homePanel.homeEditorRefCallback}
+                            ref={homeEditorRefCallback}
                             projectPath={projectPath ?? ''}
                           />
                         </Suspense>

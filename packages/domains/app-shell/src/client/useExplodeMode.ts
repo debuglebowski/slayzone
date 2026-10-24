@@ -38,12 +38,15 @@ export function useExplodeMode(
     if (openTaskIds.length < 2) setExplodeMode(false)
   }, [openTaskIds.length])
 
-  // Seed / clear focused explode cell on mode toggle; keep valid as tabs change
+  // Clear the focused explode cell on leaving explode mode. Keyed on the mode only:
+  // run on every tab switch, even a no-op setState re-renders the whole shell.
   useEffect(() => {
-    if (!explodeMode) {
-      setFocusedExplodeTaskId(null)
-      return
-    }
+    if (!explodeMode) setFocusedExplodeTaskId(null)
+  }, [explodeMode])
+
+  // Seed the focused explode cell on entering explode mode; keep it valid as tabs change
+  useEffect(() => {
+    if (!explodeMode) return
     setFocusedExplodeTaskId((prev) => {
       if (prev && openTaskIds.includes(prev)) return prev
       const activeTab = tabs[activeTabIndex]

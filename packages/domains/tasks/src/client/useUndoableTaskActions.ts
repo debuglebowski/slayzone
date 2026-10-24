@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
   getClientForHub,
   getHubIdForTask,
@@ -57,9 +57,14 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
     bulkContextMenuUpdate: rawBulkContextMenuUpdate
   } = mutations
 
-  // Ref avoids adding `tasks` to useCallback deps — keeps function references stable
+  // The actions take their undo snapshot from the latest board without depending on
+  // it: a `tasks` dep would hand every consumer (each open task tab) new functions
+  // on every board change. The undo API's functions are stable; the object is not.
   const tasksRef = useRef(mutations.tasks)
-  tasksRef.current = mutations.tasks
+  useEffect(() => {
+    tasksRef.current = mutations.tasks
+  })
+  const { push: pushUndo, undo: runUndo } = undo
 
   const contextMenuUpdate = useCallback(
     async (taskId: string, updates: Partial<Task>) => {
@@ -80,16 +85,16 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
           ? `${updates.is_blocked ? 'Blocked' : 'Unblocked'} "${task.title}"`
           : `Updated "${task.title}"`
 
-      undo.push({
+      pushUndo({
         label: desc,
         undo: () => rawContextMenuUpdate(taskId, prev),
         redo: () => rawContextMenuUpdate(taskId, updates)
       })
       toast(desc, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
     },
-    [rawContextMenuUpdate, undo]
+    [rawContextMenuUpdate, pushUndo, runUndo]
   )
 
   const archiveTask = useCallback(
@@ -99,7 +104,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       await rawArchive(taskId)
       if (!task) return
 
-      undo.push({
+      pushUndo({
         label: `Archived "${task.title}"`,
         undo: async () => {
           const restored = await getClientForHub(hubId, trpcClient).task.unarchive.mutate({
@@ -113,10 +118,10 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         redo: () => rawArchive(taskId)
       })
       toast(`Archived "${task.title}"`, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
     },
-    [rawArchive, updateTask, undo, trpcClient]
+    [rawArchive, updateTask, pushUndo, runUndo, trpcClient]
   )
 
   const archiveTasks = useCallback(
@@ -125,7 +130,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       const archivedIds = await rawArchiveMany(taskIds)
       if (archivedIds.length === 0) return archivedIds
 
-      undo.push({
+      pushUndo({
         label: `Archived ${archivedIds.length} tasks`,
         undo: async () => {
           for (const id of archivedIds) {
@@ -142,11 +147,11 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         }
       })
       toast(`Archived ${archivedIds.length} tasks`, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
       return archivedIds
     },
-    [rawArchiveMany, updateTask, undo, trpcClient]
+    [rawArchiveMany, updateTask, pushUndo, runUndo, trpcClient]
   )
 
   const deleteTask = useCallback(
@@ -156,7 +161,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       await rawDelete(taskId)
       if (!task) return
 
-      undo.push({
+      pushUndo({
         label: `Deleted "${task.title}"`,
         undo: async () => {
           const restored = await getClientForHub(hubId, trpcClient).task.restore.mutate({
@@ -170,10 +175,10 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         redo: () => rawDelete(taskId)
       })
       toast(`Deleted "${task.title}"`, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
     },
-    [rawDelete, setTasks, undo, trpcClient]
+    [rawDelete, setTasks, pushUndo, runUndo, trpcClient]
   )
 
   const bulkContextMenuUpdate = useCallback(
@@ -200,7 +205,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
           ? `${updates.is_blocked ? 'Blocked' : 'Unblocked'} ${updatedIds.length} tasks`
           : `Updated ${updatedIds.length} tasks`
 
-      undo.push({
+      pushUndo({
         label: desc,
         undo: async () => {
           // Per-id restore — heterogeneous, so apply individually
@@ -214,11 +219,11 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         }
       })
       toast(desc, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
       return updatedIds
     },
-    [rawBulkContextMenuUpdate, rawContextMenuUpdate, undo]
+    [rawBulkContextMenuUpdate, rawContextMenuUpdate, pushUndo, runUndo]
   )
 
   const bulkDelete = useCallback(
@@ -228,7 +233,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       const deletedIds = await rawBulkDelete(taskIds)
       if (deletedIds.length === 0) return deletedIds
 
-      undo.push({
+      pushUndo({
         label: `Deleted ${deletedIds.length} tasks`,
         undo: async () => {
           for (const id of deletedIds) {
@@ -245,11 +250,11 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         }
       })
       toast(`Deleted ${deletedIds.length} tasks`, {
-        action: { label: 'Undo', onClick: () => void undo.undo() }
+        action: { label: 'Undo', onClick: () => void runUndo() }
       })
       return deletedIds
     },
-    [rawBulkDelete, setTasks, undo, trpcClient]
+    [rawBulkDelete, setTasks, pushUndo, runUndo, trpcClient]
   )
 
   return {

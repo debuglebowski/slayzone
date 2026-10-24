@@ -41,8 +41,9 @@ export function useHomePanelState(
 ): [HomePanelState, (updater: (prev: HomePanelState) => HomePanelState) => void] {
   const trpcClient = useTRPCClient()
   const [state, setState] = useState<HomePanelState>(DEFAULTS)
+  // Mirrors the latest state set (every setState below writes it first), so
+  // back-to-back updates chain without waiting for a render.
   const stateRef = useRef(state)
-  stateRef.current = state
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef<HomePanelState | null>(null)
 
@@ -59,11 +60,14 @@ export function useHomePanelState(
 
   // Load on mount / project change
   useEffect(() => {
+    stateRef.current = DEFAULTS
     setState(DEFAULTS)
     void trpcClient.settings.get.query({ key: getKey(projectId) }).then((value) => {
       if (value) {
         try {
-          setState(parse(value))
+          const loaded = parse(value)
+          stateRef.current = loaded
+          setState(loaded)
         } catch {
           /* use defaults */
         }

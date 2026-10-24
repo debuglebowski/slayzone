@@ -4,6 +4,8 @@ export * from './constants'
 export { useLazyMounted } from './useLazyMounted'
 export { AppHeaderActions } from '@slayzone/app-shell/client'
 export { CompactFooter } from './CompactFooter'
+export { SidebarTaskContextMenu } from './SidebarTaskContextMenu'
+export { TabPanes } from './TabPanes'
 // HomeDetail now lives in the shared @slayzone/home package (one Home shell for
 // the Electron app + the Chromium fork — no drift). App.tsx feeds it the same
 // props as before; the fork uses HomeContainer (self-wiring) over the same component.

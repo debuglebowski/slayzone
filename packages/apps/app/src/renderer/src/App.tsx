@@ -5,7 +5,6 @@ import React, {
   useRef,
   useMemo,
   useCallback,
-  useDeferredValue,
   useTransition
 } from 'react'
 import { initShortcuts } from './shortcut-init'
@@ -16,7 +15,6 @@ import {
   useTRPCClient,
   useSubscription,
   useFederationOrNull,
-  HubScope,
   getClientForHub,
   getHubIdForProject,
   useHubOwnershipStore
@@ -41,7 +39,6 @@ import {
   applyFilters,
   getViewConfig,
   useSnoozeWakeUp,
-  TaskContextMenu,
   BulkTaskContextMenu
 } from '@slayzone/tasks/hooks'
 import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
@@ -56,10 +53,17 @@ import {
 } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
-import { usePtyStatus, useTerminalStateStore } from '@slayzone/terminal/client'
+import { usePtyStatus } from '@slayzone/terminal/client'
 // Shared
 import { Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
-import { SidebarProvider, cn, useUndo, useShortcutDisplay, KeyRecorder } from '@slayzone/ui'
+import {
+  SidebarProvider,
+  cn,
+  useUndo,
+  useShortcutDisplay,
+  useStableCallback,
+  KeyRecorder
+} from '@slayzone/ui'
 import { AppSidebar } from '@slayzone/sidebar'
 import { useChangelogAutoOpen, useOnboardingChecklist } from '@slayzone/onboarding'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
@@ -78,9 +82,6 @@ import { isConvexConfigured, useLeaderboardAuth } from '@/lib/convexAuth'
 import { recordDiagnosticsTimeline } from '@/lib/diagnosticsClient'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
-import { TaskShell } from '@slayzone/task/client/TaskShell'
-import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
-import { ErrorBoundary } from '@/components/ErrorBoundary'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel } from '@slayzone/home/client'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
@@ -89,13 +90,14 @@ import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
 // Extracted shell: lazy components, types/constants, hooks, panels (see ./app-shell)
 import {
-  TaskDetailDataLoader,
+  TabPanes,
   LeaderboardPage,
   UsageAnalyticsPage,
   ContextManagerPage,
   useLazyMounted,
   AppHeaderActions,
   CompactFooter,
+  SidebarTaskContextMenu,
   HomeDetail,
   AppSidePanels,
   AppDialogs,
@@ -114,6 +116,36 @@ import type {
   ProjectIntegrationOnboardingProvider,
   ContextManagerSection
 } from './app-shell'
+
+// Expose the stores for e2e tests. Same escape hatch the fork's HomeView uses:
+// these keys are test-only, so they get an index-signature view of `window`
+// rather than polluting the app's real Window type.
+const testWindow = window as unknown as Record<string, unknown>
+testWindow.__slayzone_tabStore ??= useTabStore
+testWindow.__slayzone_dialogStore ??= useDialogStore
+testWindow.__slayzone_filterStore ??= useFilterStore
+
+/**
+ * Idle-prefetch heavy chunks the user will likely hit soon. `import()` is cached,
+ * so real usage then lands on a warm chunk.
+ */
+function prefetchLikelyChunks(): void {
+  // Task-detail page chunk — shared by every task tab, lazy (see TaskDetailDataLoader
+  // import above). The very first task open cold-downloads it; warming here makes even
+  // the first open instant. This is the dominant first-task-open latency.
+  void import('@slayzone/task/client/TaskDetailDataLoader')
+  // xterm chunk (~440KB) — first terminal panel mount lands warm.
+  void import('@slayzone/terminal/client/Terminal')
+  // material-file-icons (~500KB) — first FileIcon render lands warm.
+  void import('@slayzone/icons').then((m) => m.loadFileIcons())
+  // Optional task panels — each its own lazy chunk (see TaskDetailPage lazy imports).
+  // Specifiers must match those lazy imports exactly so Vite dedupes to the same chunk.
+  // Warm so revealing a panel the first time lands without a skeleton flash.
+  void import('@slayzone/task-browser')
+  void import('@slayzone/file-editor/client')
+  void import('@slayzone/worktrees')
+  void import('@slayzone/task-artifacts/client')
+}
 
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
@@ -196,27 +228,16 @@ function App(): React.JSX.Element {
   const tabs = useTabStore((s) => s.tabs)
   const closedTabs = useTabStore((s) => s.closedTabs)
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
-  const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const sidebarView = useTabStore((s) => s.sidebarView)
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
-  const {
-    setActiveTabIndex,
-    setSelectedProjectId,
-    openTask: rawOpenTask,
-    openTaskInBackground,
-    reorderTabs
-  } = useTabStore.getState()
+  const setActiveTabIndex = useTabStore((s) => s.setActiveTabIndex)
+  const setSelectedProjectId = useTabStore((s) => s.setSelectedProjectId)
+  const rawOpenTask = useTabStore((s) => s.openTask)
+  const openTaskInBackground = useTabStore((s) => s.openTaskInBackground)
+  const reorderTabs = useTabStore((s) => s.reorderTabs)
   const [, startTransition] = useTransition()
-
-  // Expose tab store for e2e tests. Same escape hatch the fork's HomeView uses:
-  // these keys are test-only, so they get an index-signature view of `window`
-  // rather than polluting the app's real Window type.
-  const testWindow = window as unknown as Record<string, unknown>
-  if (!testWindow.__slayzone_tabStore) testWindow.__slayzone_tabStore = useTabStore
-  if (!testWindow.__slayzone_dialogStore) testWindow.__slayzone_dialogStore = useDialogStore
-  if (!testWindow.__slayzone_filterStore) testWindow.__slayzone_filterStore = useFilterStore
 
   // Filter state (persisted per project)
   const [filter, setFilter] = useFilterState(selectedProjectId)
@@ -306,16 +327,17 @@ function App(): React.JSX.Element {
       ),
     [homeSelectedProject?.path, homeDetectedRepos, homeSelectedProject?.selected_repo]
   )
+  const homeSelectedProjectId = homeSelectedProject?.id
   const handleHomeRepoChange = useCallback(
     (repoName: string) => {
-      if (!homeSelectedProject) return
+      if (!homeSelectedProjectId) return
       trpcClient.projects.update
-        .mutate({ id: homeSelectedProject.id, selectedRepo: repoName })
+        .mutate({ id: homeSelectedProjectId, selectedRepo: repoName })
         .then((updated) => {
           updateProject(updated)
         })
     },
-    [homeSelectedProject?.id, updateProject, trpcClient]
+    [homeSelectedProjectId, updateProject, trpcClient]
   )
 
   // Project path validation (extracted — validates on select + window focus)
@@ -413,7 +435,7 @@ function App(): React.JSX.Element {
 
   // Idle-prefetch heavy chunks user will likely hit soon. Runs after first
   // paint settles. requestIdleCallback yields to main-thread work so this
-  // never blocks user input. import() is cached → real usage hits warm chunk.
+  // never blocks user input.
   useEffect(() => {
     const idle = (cb: () => void): number => {
       const ric = (
@@ -423,23 +445,7 @@ function App(): React.JSX.Element {
       ).requestIdleCallback
       return ric ? ric(cb, { timeout: 3000 }) : (setTimeout(cb, 1500) as unknown as number)
     }
-    const handle = idle(() => {
-      // Task-detail page chunk — shared by every task tab, lazy (see TaskDetailDataLoader
-      // import above). The very first task open cold-downloads it; warming here makes even
-      // the first open instant. This is the dominant first-task-open latency.
-      void import('@slayzone/task/client/TaskDetailDataLoader')
-      // xterm chunk (~440KB) — first terminal panel mount lands warm.
-      void import('@slayzone/terminal/client/Terminal')
-      // material-file-icons (~500KB) — first FileIcon render lands warm.
-      void import('@slayzone/icons').then((m) => m.loadFileIcons())
-      // Optional task panels — each its own lazy chunk (see TaskDetailPage lazy imports).
-      // Specifiers must match those lazy imports exactly so Vite dedupes to the same chunk.
-      // Warm so revealing a panel the first time lands without a skeleton flash.
-      void import('@slayzone/task-browser')
-      void import('@slayzone/file-editor/client')
-      void import('@slayzone/worktrees')
-      void import('@slayzone/task-artifacts/client')
-    })
+    const handle = idle(prefetchLikelyChunks)
     return () => {
       const cic = (window as unknown as { cancelIdleCallback?: (h: number) => void })
         .cancelIdleCallback
@@ -487,8 +493,9 @@ function App(): React.JSX.Element {
   const [globalAgentPanelState, setGlobalAgentPanelState] = useGlobalAgentPanelState()
   const [agentStatusState, setAgentStatusState] = useAgentStatusState()
   const [isSidePanelResizing, setIsSidePanelResizing] = useState(false)
-  const globalAgentPanelMountedRef = useRef(false)
-  if (globalAgentPanelState.isOpen) globalAgentPanelMountedRef.current = true
+  // Mount the global agent panel on first open, then keep it mounted.
+  const [globalAgentPanelMounted, setGlobalAgentPanelMounted] = useState(false)
+  if (globalAgentPanelState.isOpen && !globalAgentPanelMounted) setGlobalAgentPanelMounted(true)
   const agentMode = globalAgentPanelState.mode ?? 'claude-code'
   useEffect(() => {
     if (globalAgentPanelState.mode) return
@@ -560,7 +567,9 @@ function App(): React.JSX.Element {
   // project from `tasks` state, or accepts a `projectOverride` for freshly-created
   // tasks not yet in state (closure lag from setTasks).
   const durationLocked = isProjectLocked(selectedProject)
-  const guardTaskOpen = useCallback(
+  // Stable: it (and openTask below) reach every open task tab, and the task list it
+  // reads changes constantly — a `tasks` dep would re-render all of them each time.
+  const guardTaskOpen = useStableCallback(
     (taskId: string, fn: (id: string) => void, projectOverride?: Project) => {
       const existing = useTabStore
         .getState()
@@ -585,8 +594,7 @@ function App(): React.JSX.Element {
       }
       if (taskProject) recordTaskOpen(taskProject.id)
       fn(taskId)
-    },
-    [tasks, projects]
+    }
   )
 
   const openTask = useCallback(
@@ -595,9 +603,6 @@ function App(): React.JSX.Element {
     },
     [guardTaskOpen, rawOpenTask, startTransition]
   )
-
-  const openTaskRef = useRef(openTask)
-  openTaskRef.current = openTask
 
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
   // Closing a temporary task's tab deletes the task on its owning hub.
@@ -772,7 +777,7 @@ function App(): React.JSX.Element {
     setActiveTabIndex,
     setSelectedProjectId,
     reopenClosedTab,
-    openTaskRef,
+    openTask,
     undo,
     redo,
     zenMode,
@@ -892,7 +897,7 @@ function App(): React.JSX.Element {
     closeTab,
     guardTaskOpen,
     openTaskInBackground,
-    openTaskRef,
+    openTask,
     setActiveTabIndex,
     selectedProjectId,
     globalAgentPanelState,
@@ -1225,6 +1230,68 @@ function App(): React.JSX.Element {
     }
   }, [projects, openProjectSettings])
 
+  const isHomeTabActive = tabs[activeTabIndex]?.type === 'home'
+  const renderHome = (isViewActive: boolean): React.JSX.Element => (
+    <HomeDetail
+      durationLocked={durationLocked}
+      selectedProject={selectedProject}
+      selectedProjectId={selectedProjectId}
+      projects={projects}
+      updateProject={updateProject}
+      updateTask={updateTask}
+      projectNameInputRef={projectNameInputRef}
+      projectNameValue={projectNameValue}
+      setProjectNameValue={setProjectNameValue}
+      handleProjectNameSave={handleProjectNameSave}
+      handleProjectNameKeyDown={handleProjectNameKeyDown}
+      projectPathMissing={projectPathMissing}
+      handleFixProjectPath={handleFixProjectPath}
+      filter={filter}
+      setFilter={setFilter}
+      projectTags={projectTags}
+      homePanel={homePanel}
+      homePanelConfig={homePanelConfig}
+      isHomePanelEnabled={isHomePanelEnabled}
+      panelSizes={panelSizes}
+      updatePanelSizes={updatePanelSizes}
+      resetPanelSize={resetPanelSize}
+      testsPanelEnabled={testsPanelEnabled}
+      testGroupBy={testGroupBy}
+      homeResolvedRepo={homeResolvedRepo}
+      homeDetectedRepos={homeDetectedRepos}
+      homeSelectedProject={homeSelectedProject}
+      handleHomeRepoChange={handleHomeRepoChange}
+      isViewActive={isViewActive}
+      isHomeTabActive={isHomeTabActive}
+      tasks={tasks}
+      displayTasks={displayTasks}
+      taskTags={taskTags}
+      blockedTaskIds={blockedTaskIds}
+      handleTaskMove={handleTaskMove}
+      handleTaskBulkMove={handleTaskBulkMove}
+      reorderTasks={reorderTasks}
+      handleTaskClick={handleTaskClick}
+      handleTaskTagsChange={handleTaskTagsChange}
+      contextMenuUpdate={contextMenuUpdate}
+      bulkContextMenuUpdate={bulkContextMenuUpdate}
+      clearBlockers={clearBlockers}
+      archiveTask={archiveTask}
+      deleteTask={deleteTask}
+      bulkDelete={bulkDelete}
+      archiveTasks={archiveTasks}
+      activeAgentTaskIds={activeAgentTaskIds}
+      shutdownAgentForTask={shutdownAgentForTask}
+      globalAgentPanelState={globalAgentPanelState}
+      agentStatusState={agentStatusState}
+      openProjectSettings={openProjectSettings}
+      panelGitShortcut={panelGitShortcut}
+      panelEditorShortcut={panelEditorShortcut}
+      panelProcessesShortcut={panelProcessesShortcut}
+      panelTestsShortcut={panelTestsShortcut}
+      panelAutomationsShortcut={panelAutomationsShortcut}
+    />
+  )
+
   const headerHidden = sidebarView === 'tree'
   // Tree view: align with the top icon row.
   // Projects rail: align horizontally with project cards + vertically with the
@@ -1361,7 +1428,7 @@ function App(): React.JSX.Element {
                   : null
             }
             taskContextMenuRender={(task, child) => (
-              <TaskContextMenu
+              <SidebarTaskContextMenu
                 task={task}
                 projects={projects}
                 columns={columnsByProjectId.get(task.project_id) ?? null}
@@ -1378,13 +1445,9 @@ function App(): React.JSX.Element {
                 }
                 isPinned={!!task.pinned}
                 onTogglePin={() => setTaskPinned(task.id, !task.pinned)}
-                canMarkUnread={
-                  useTerminalStateStore.getState().byId[`${task.id}:${task.id}`] === 'idle' &&
-                  !task.needs_attention
-                }
               >
                 {child}
-              </TaskContextMenu>
+              </SidebarTaskContextMenu>
             )}
             taskBulkContextMenuRender={(taskIds, child) => {
               const idSet = new Set(taskIds)
@@ -1558,160 +1621,31 @@ function App(): React.JSX.Element {
                           : undefined)
                       }}
                     >
-                      {tabs.map((tab, i) => {
-                        const isVisible = toVisibleIndex(i) >= 0
-                        if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
-                        // Inactive tabs hide via `invisible` (visibility:hidden). CSS does not
-                        // interpolate `visibility`, so a descendant carrying a `transition` (e.g.
-                        // Button's `transition-all`) stays fully painted for the whole transition
-                        // duration before snapping off — that was the "Turn into task" button
-                        // lingering on tab switch. Hidden tabs are inert, so we also kill their
-                        // descendant transitions (`[&_*]:transition-none!` below) → the hide is
-                        // instant for every element, not just ones without a transition.
-                        const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
-                        const isExplodeFocused =
-                          explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
-                        return (
-                          <div
-                            key={tab.type === 'home' ? 'home' : tab.taskId}
-                            data-explode-task-id={
-                              explodeMode && tab.type === 'task' ? tab.taskId : undefined
-                            }
-                            className={
-                              explodeMode
-                                ? cn(
-                                    'rounded overflow-hidden border min-h-0 relative',
-                                    isExplodeFocused
-                                      ? 'border-primary/60 ring-2 ring-primary/40'
-                                      : 'border-border'
-                                  )
-                                : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
-                            }
-                            inert={!explodeMode && !isViewActive ? true : undefined}
-                          >
-                            {/* Multi-hub: scope each tab's content to the hub that
-                              owns it, so ambient useTRPC() (TaskDetailPage/
-                              HomeDetail + the hub-keyed taskDetailCache) resolves
-                              to the right hub. Single-hub → HubScope(default) is
-                              the same client the app is already wrapped in. */}
-                            <HubScope
-                              hubId={
-                                tab.type === 'task'
-                                  ? (hubIdByTask.get(tab.taskId) ?? defaultHubId)
-                                  : selectedProjectHubId
-                              }
-                            >
-                              {tab.type === 'home' ? (
-                                <HomeDetail
-                                  durationLocked={durationLocked}
-                                  selectedProject={selectedProject}
-                                  selectedProjectId={selectedProjectId}
-                                  projects={projects}
-                                  updateProject={updateProject}
-                                  updateTask={updateTask}
-                                  projectNameInputRef={projectNameInputRef}
-                                  projectNameValue={projectNameValue}
-                                  setProjectNameValue={setProjectNameValue}
-                                  handleProjectNameSave={handleProjectNameSave}
-                                  handleProjectNameKeyDown={handleProjectNameKeyDown}
-                                  projectPathMissing={projectPathMissing}
-                                  handleFixProjectPath={handleFixProjectPath}
-                                  filter={filter}
-                                  setFilter={setFilter}
-                                  projectTags={projectTags}
-                                  homePanel={homePanel}
-                                  homePanelConfig={homePanelConfig}
-                                  isHomePanelEnabled={isHomePanelEnabled}
-                                  panelSizes={panelSizes}
-                                  updatePanelSizes={updatePanelSizes}
-                                  resetPanelSize={resetPanelSize}
-                                  testsPanelEnabled={testsPanelEnabled}
-                                  testGroupBy={testGroupBy}
-                                  homeResolvedRepo={homeResolvedRepo}
-                                  homeDetectedRepos={homeDetectedRepos}
-                                  homeSelectedProject={homeSelectedProject}
-                                  handleHomeRepoChange={handleHomeRepoChange}
-                                  isViewActive={isViewActive}
-                                  isHomeTabActive={tabs[activeTabIndex]?.type === 'home'}
-                                  tasks={tasks}
-                                  displayTasks={displayTasks}
-                                  taskTags={taskTags}
-                                  blockedTaskIds={blockedTaskIds}
-                                  handleTaskMove={handleTaskMove}
-                                  handleTaskBulkMove={handleTaskBulkMove}
-                                  reorderTasks={reorderTasks}
-                                  handleTaskClick={handleTaskClick}
-                                  handleTaskTagsChange={handleTaskTagsChange}
-                                  contextMenuUpdate={contextMenuUpdate}
-                                  bulkContextMenuUpdate={bulkContextMenuUpdate}
-                                  clearBlockers={clearBlockers}
-                                  archiveTask={archiveTask}
-                                  deleteTask={deleteTask}
-                                  bulkDelete={bulkDelete}
-                                  archiveTasks={archiveTasks}
-                                  activeAgentTaskIds={activeAgentTaskIds}
-                                  shutdownAgentForTask={shutdownAgentForTask}
-                                  globalAgentPanelState={globalAgentPanelState}
-                                  agentStatusState={agentStatusState}
-                                  openProjectSettings={openProjectSettings}
-                                  panelGitShortcut={panelGitShortcut}
-                                  panelEditorShortcut={panelEditorShortcut}
-                                  panelProcessesShortcut={panelProcessesShortcut}
-                                  panelTestsShortcut={panelTestsShortcut}
-                                  panelAutomationsShortcut={panelAutomationsShortcut}
-                                />
-                              ) : (
-                                <ErrorBoundary
-                                  onReset={() =>
-                                    taskDetailCache.invalidate(
-                                      'taskDetail',
-                                      tab.taskId,
-                                      hubIdByTask.get(tab.taskId) ?? defaultHubId
-                                    )
-                                  }
-                                >
-                                  <Suspense fallback={<TaskShell />}>
-                                    <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
-                                      <TaskDetailDataLoader
-                                        taskId={tab.taskId}
-                                        task={tasksMap.get(tab.taskId) ?? null}
-                                        project={
-                                          projectsMap.get(
-                                            tasksMap.get(tab.taskId)?.project_id ?? ''
-                                          ) ?? null
-                                        }
-                                        isActive={explodeMode || isViewActive}
-                                        hasShortcutFocus={
-                                          explodeMode
-                                            ? focusedExplodeTaskId === tab.taskId
-                                            : isViewActive
-                                        }
-                                        compact={explodeMode}
-                                        zenMode={zenMode}
-                                        onBack={goBack}
-                                        onTaskUpdated={updateTask}
-                                        onArchiveTask={archiveTask}
-                                        onDeleteTask={deleteTask}
-                                        onNavigateToTask={openTask}
-                                        onConvertTask={handleConvertTask}
-                                        onCloseTab={closeTabByTaskId}
-                                        settingsRevision={settingsRevision}
-                                        terminalFocusRequestId={
-                                          terminalFocusRequests[tab.taskId] ?? 0
-                                        }
-                                        onTerminalFocusRequestHandled={
-                                          handleTerminalFocusRequestHandled
-                                        }
-                                        isSidePanelResizing={isSidePanelResizing}
-                                      />
-                                    </div>
-                                  </Suspense>
-                                </ErrorBoundary>
-                              )}
-                            </HubScope>
-                          </div>
-                        )
-                      })}
+                      <TabPanes
+                        tabs={tabs}
+                        activeView={activeView}
+                        explodeMode={explodeMode}
+                        focusedExplodeTaskId={focusedExplodeTaskId}
+                        toVisibleIndex={toVisibleIndex}
+                        hubIdByTask={hubIdByTask}
+                        defaultHubId={defaultHubId}
+                        selectedProjectHubId={selectedProjectHubId}
+                        tasksMap={tasksMap}
+                        projectsMap={projectsMap}
+                        zenMode={zenMode}
+                        settingsRevision={settingsRevision}
+                        terminalFocusRequests={terminalFocusRequests}
+                        isSidePanelResizing={isSidePanelResizing}
+                        renderHome={renderHome}
+                        onBack={goBack}
+                        onTaskUpdated={updateTask}
+                        onArchiveTask={archiveTask}
+                        onDeleteTask={deleteTask}
+                        onNavigateToTask={openTask}
+                        onConvertTask={handleConvertTask}
+                        onCloseTab={closeTabByTaskId}
+                        onTerminalFocusRequestHandled={handleTerminalFocusRequestHandled}
+                      />
                       {activeView === 'leaderboard' && (
                         <div className="absolute inset-0 z-20">
                           <Suspense fallback={null}>
@@ -1742,7 +1676,7 @@ function App(): React.JSX.Element {
 
                     <AppSidePanels
                       agentSessionId={agentSessionId}
-                      globalAgentPanelMounted={globalAgentPanelMountedRef.current}
+                      globalAgentPanelMounted={globalAgentPanelMounted}
                       hideSidebarPanel={hideSidebarPanel}
                       globalAgentPanelState={globalAgentPanelState}
                       setGlobalAgentPanelState={setGlobalAgentPanelState}

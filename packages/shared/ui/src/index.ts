@@ -47,6 +47,7 @@ export {
 } from './task-status'
 export { UndoProvider, useUndo, type UndoableAction } from './use-undo'
 export { focusOwnsUndoKey } from './undo-key-target'
+export { useStableCallback } from './use-stable-callback'
 export {
   useStablePoll,
   type UseStablePollOptions,

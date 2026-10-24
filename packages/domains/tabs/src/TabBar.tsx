@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { memo, useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Home, X } from 'lucide-react'
 import {
   cn,
@@ -8,6 +8,7 @@ import {
   TooltipContent,
   projectColorBg,
   useShortcutDisplay,
+  useStableCallback,
   withShortcut
 } from '@slayzone/ui'
 import { useTaskTerminalState } from '@slayzone/terminal'
@@ -189,11 +190,12 @@ interface SortableTabProps {
   onEditChange?: (value: string) => void
   onEditSubmit?: () => void
   onEditCancel?: () => void
-  onDoubleClick?: () => void
+  onDoubleClick?: (tab: Tab & { type: 'task' }) => void
   inputRef?: React.RefObject<HTMLInputElement | null>
 }
 
-function SortableTab({
+// Memoized: a tab switch changes `isActive` on two tabs; the rest must not render.
+const SortableTab = memo(function SortableTab({
   tab,
   index,
   isActive,
@@ -256,7 +258,7 @@ function SortableTab({
       style={style}
       className="window-no-drag"
       onClick={() => !isEditing && onTabClick(index)}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={onDoubleClick && (() => onDoubleClick(tab))}
       onAuxClick={(e) => {
         if (e.button === 1) {
           e.preventDefault()
@@ -286,7 +288,7 @@ function SortableTab({
       />
     </div>
   )
-}
+})
 
 export function TabBar({
   tabs,
@@ -318,16 +320,17 @@ export function TabBar({
     }
   }, [editingTaskId])
 
-  const handleDoubleClick = useCallback(
-    (tab: Tab & { type: 'task' }) => {
-      if (!onTabRename) return
-      setEditingTaskId(tab.taskId)
-      setEditValue(tab.title)
-    },
-    [onTabRename]
-  )
+  // Handlers reach every (memoized) tab: stable identities, latest props/state.
+  const handleTabClick = useStableCallback(onTabClick)
+  const handleTabClose = useStableCallback(onTabClose)
 
-  const handleEditSubmit = useCallback(() => {
+  const handleDoubleClick = useStableCallback((tab: Tab & { type: 'task' }) => {
+    if (!onTabRename) return
+    setEditingTaskId(tab.taskId)
+    setEditValue(tab.title)
+  })
+
+  const handleEditSubmit = useStableCallback(() => {
     if (editCancelledRef.current) {
       editCancelledRef.current = false
       setEditingTaskId(null)
@@ -337,7 +340,7 @@ export function TabBar({
       onTabRename?.(editingTaskId, editValue.trim())
     }
     setEditingTaskId(null)
-  }, [editingTaskId, editValue, onTabRename])
+  })
 
   const handleEditCancel = useCallback(() => {
     editCancelledRef.current = true
@@ -352,8 +355,13 @@ export function TabBar({
     })
   )
 
-  const taskTabs = tabs.filter((t): t is Tab & { type: 'task' } => t.type === 'task')
-  const taskIds = taskTabs.map((t) => t.taskId)
+  const taskTabs = useMemo(
+    () => tabs.filter((t): t is Tab & { type: 'task' } => t.type === 'task'),
+    [tabs]
+  )
+  // Stable unless the tabs change: SortableContext's value (which every tab reads)
+  // is keyed on this array, so a fresh one would re-render every tab.
+  const taskIds = useMemo(() => taskTabs.map((t) => t.taskId), [taskTabs])
   const activeTab = activeId ? taskTabs.find((t) => t.taskId === activeId) : null
   const homeIndex = tabs.findIndex((t) => t.type === 'home')
   const goHomeShortcut = useShortcutDisplay('go-home')
@@ -439,26 +447,27 @@ export function TabBar({
             <SortableContext items={taskIds} strategy={horizontalListSortingStrategy}>
               {taskTabs.map((tab) => {
                 const index = tabs.findIndex((t) => t.type === 'task' && t.taskId === tab.taskId)
+                const isEditing = editingTaskId === tab.taskId
                 return (
                   <SortableTab
                     key={tab.taskId}
                     tab={tab}
                     index={index}
                     isActive={index === activeIndex && activeView === 'tabs'}
-                    onTabClick={onTabClick}
-                    onTabClose={onTabClose}
+                    onTabClick={handleTabClick}
+                    onTabClose={handleTabClose}
                     needsAttention={attentionTaskIds?.has(tab.taskId)}
                     projectColor={projectColors?.get(tab.taskId)}
                     worktreeColor={worktreeColors?.get(tab.taskId)}
                     progress={taskProgress?.get(tab.taskId)}
                     isDone={doneTaskIds?.has(tab.taskId)}
                     groupPosition={groupPositions.get(tab.taskId)}
-                    isEditing={editingTaskId === tab.taskId}
-                    editValue={editValue}
+                    isEditing={isEditing}
+                    editValue={isEditing ? editValue : undefined}
                     onEditChange={setEditValue}
                     onEditSubmit={handleEditSubmit}
                     onEditCancel={handleEditCancel}
-                    onDoubleClick={() => handleDoubleClick(tab)}
+                    onDoubleClick={handleDoubleClick}
                     inputRef={editInputRef}
                   />
                 )
