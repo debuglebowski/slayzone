@@ -70,6 +70,7 @@ test.describe('Artifact downloads', () => {
   let taskId: string
   let mdArtifactId: string
   let folderId: string
+  let mermaidArtifactId: string
 
   test.beforeAll(async ({ mainWindow, electronApp }) => {
     await resetApp(mainWindow)
@@ -92,6 +93,13 @@ test.describe('Artifact downloads', () => {
       content: '# Heading\n\nSome **bold** body text.\n'
     })) as { id: string }
     mdArtifactId = md.id
+
+    const mmd = (await s.createArtifact({
+      taskId,
+      title: 'diagram.mmd',
+      content: 'graph TD\n  A[Start] --> B[End]\n'
+    })) as { id: string }
+    mermaidArtifactId = mmd.id
 
     const folder = (await s.createArtifactFolder({ taskId, name: 'nested' })) as { id: string }
     folderId = folder.id
@@ -192,5 +200,41 @@ test.describe('Artifact downloads', () => {
     expect(ok).toBe(true)
     const bytes = fs.readFileSync(dest)
     expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-')
+  })
+
+  // Mermaid exports inline the standalone mermaid bundle the host build ships
+  // (mermaid/dist/mermaid.min.js). A missing bundle never errors: the HTML/PDF path
+  // silently degrades to plain code and the PNG path declines, so assert the bundle
+  // actually landed in the document and that the offscreen PNG render ran.
+  test('downloadAsHtml inlines the mermaid bundle for a mermaid artifact', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const dest = path.join(DEST_DIR, 'diagram.html')
+    await nextSavePath(electronApp, dest)
+
+    const ok = await download(mainWindow, 'downloadAsHtml', { id: mermaidArtifactId })
+
+    expect(ok).toBe(true)
+    const html = fs.readFileSync(dest, 'utf-8')
+    expect(html).toContain('<pre class="mermaid">')
+    expect(html).toContain("mermaid.initialize({ startOnLoad: true, theme: 'default' })")
+    // The inlined bundle is ~3.5 MB; the plain-code fallback is a few hundred bytes.
+    expect(html.length).toBeGreaterThan(1_000_000)
+  })
+
+  test('downloadAsPng renders a mermaid artifact offscreen', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    test.setTimeout(60_000)
+    const dest = path.join(DEST_DIR, 'diagram.png')
+    await nextSavePath(electronApp, dest)
+
+    const ok = await download(mainWindow, 'downloadAsPng', { id: mermaidArtifactId })
+
+    expect(ok).toBe(true)
+    const bytes = fs.readFileSync(dest)
+    expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG')
   })
 })

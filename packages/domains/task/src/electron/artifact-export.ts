@@ -73,11 +73,18 @@ export function buildPdfHtml(content: string, mode: string, title: string): stri
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${PDF_CSS}</style></head><body>${body}</body></html>`
 }
 
-export function buildMermaidPdfHtml(content: string, title: string): string {
+// `mermaidScriptPath` is the standalone mermaid browser bundle (mermaid/dist/mermaid.min.js).
+// The Electron host passes it in: its build copies that one file next to its own output
+// (an electron-vite `?asset` import), so the shipped app carries the 3 MB script, not
+// the whole mermaid package, and resolution never depends on a node_modules layout.
+export function buildMermaidPdfHtml(
+  content: string,
+  title: string,
+  mermaidScriptPath: string
+): string {
   let mermaidJs = ''
   try {
-    const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js')
-    mermaidJs = readFileSync(mermaidPath, 'utf-8')
+    mermaidJs = readFileSync(mermaidScriptPath, 'utf-8')
   } catch {
     // Fallback: render as code
     return buildPdfHtml(content, 'code', title)
@@ -99,7 +106,12 @@ export function buildMermaidPdfHtml(content: string, title: string): string {
 </body></html>`
 }
 
-export function buildPngHtml(content: string, mode: string, title: string): string {
+export function buildPngHtml(
+  content: string,
+  mode: string,
+  title: string,
+  mermaidScriptPath: string
+): string {
   const isMermaid = mode === 'mermaid-preview'
   const bodyHtml = isMermaid
     ? `<pre class="mermaid">${escapeHtml(content)}</pre>`
@@ -108,8 +120,7 @@ export function buildPngHtml(content: string, mode: string, title: string): stri
   let mermaidScript = ''
   if (isMermaid) {
     try {
-      const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js')
-      const mermaidJs = readFileSync(mermaidPath, 'utf-8')
+      const mermaidJs = readFileSync(mermaidScriptPath, 'utf-8')
       mermaidScript = `<script>${mermaidJs}</script>
 <script>
   mermaid.initialize({ startOnLoad: true, theme: 'default' });

@@ -37,7 +37,7 @@ import {
 // dependency here fails lint instead of shipping.
 //
 // HTML building is a host capability rather than local work on purpose:
-// buildMermaidPdfHtml resolves mermaid through require.resolve and silently falls
+// buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
 // back to plain-code rendering on a miss, which from the side-car bundle would
 // quietly downgrade every mermaid export.
 //

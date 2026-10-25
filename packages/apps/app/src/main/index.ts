@@ -376,6 +376,10 @@ function packagedNativeModuleEnv(): { NODE_PATH?: string } {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
+// The standalone mermaid browser bundle the offscreen artifact exporter injects. An
+// asset import copies just this file into out/main, so the packaged app need not ship
+// the mermaid package (the renderer bundles its own mermaid).
+import mermaidScriptPath from 'mermaid/dist/mermaid.min.js?asset'
 import {
   initDatabases,
   closeDiagnosticsDatabase,
@@ -2150,17 +2154,17 @@ app
               // Offscreen renderers, reached from the hub over the capability bridge.
               artifactBuildExportHtml: async (content, mode, title) =>
                 mode === 'mermaid-preview'
-                  ? buildMermaidPdfHtml(content, title)
+                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
                   : buildPdfHtml(content, mode, title),
               artifactRenderPdfToFile: async (content, mode, title, destPath) => {
                 const isMermaid = mode === 'mermaid-preview'
                 const html = isMermaid
-                  ? buildMermaidPdfHtml(content, title)
+                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
                   : buildPdfHtml(content, mode, title)
                 writeFileSync(destPath, await renderToPdf(html, isMermaid))
               },
               artifactRenderPngToFile: async (content, mode, title, destPath) => {
-                const html = buildPngHtml(content, mode, title)
+                const html = buildPngHtml(content, mode, title, mermaidScriptPath)
                 if (!html) return false
                 writeFileSync(destPath, await renderToPng(html))
                 return true
