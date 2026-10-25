@@ -340,6 +340,8 @@ run_test packages/apps/app/src/main/present-window.test.ts
 run_test packages/apps/app/src/main/clipboard-file-paths.test.ts
 # Remembered dialog folder: Electron 43 opens a dialog without defaultPath in Downloads.
 run_test packages/apps/app/src/main/dialog-last-dir.test.ts
+# Dev launcher (dev.mjs) ↔ main: relaunch exit code, shutdown grace > quit watchdog.
+run_test packages/apps/app/src/main/dev-launcher-contract.test.ts
 # macOS update manifest: OS-minimum stamp (Electron 44 = macOS 13+) survives the arch merge.
 run_test scripts/release/update-manifest.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must

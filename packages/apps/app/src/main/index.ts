@@ -168,6 +168,24 @@ protocol.registerSchemesAsPrivileged([
 // Use consistent app name for userData path (paired with legacy DB migration)
 app.name = 'slayzone'
 const isPlaywright = process.env.PLAYWRIGHT === '1'
+/**
+ * Running under `pnpm dev` (electron-vite dev via dev.mjs). Lifecycle is tied
+ * to the launcher there: the app quits on last-window-close on every platform,
+ * so closing the app always ends the dev server too, and a relaunch goes
+ * through the launcher (see relaunchApp) instead of a detached `app.relaunch()`
+ * that would outlive it.
+ */
+const isViteDev = !app.isPackaged && !isPlaywright && !!process.env['ELECTRON_RENDERER_URL']
+/** Must match DEV_RELAUNCH_EXIT_CODE in packages/apps/app/dev.mjs. */
+const DEV_RELAUNCH_EXIT_CODE = 75
+function relaunchApp(exitCode?: number): void {
+  if (isViteDev) {
+    app.exit(DEV_RELAUNCH_EXIT_CODE)
+    return
+  }
+  app.relaunch()
+  app.exit(exitCode)
+}
 
 // Start crash reporter before any windows or native modules can fault.
 // Local-only: minidumps land in app.getPath('crashDumps'); next boot scans + logs them.
@@ -2200,10 +2218,7 @@ app
               shellShowItemInFolder: (absPath: string) => shell.showItemInFolder(absPath),
               // Backup restore overwrites the DB file in the side-car, then needs
               // everything pointing at it restarted. Relaunch is the desktop's job.
-              appRelaunch: () => {
-                app.relaunch()
-                app.exit()
-              },
+              appRelaunch: () => relaunchApp(),
               // The side-car saved a diagnostics config; adopt it here so THIS
               // process stops (or starts) recording into the machine-local
               // diagnostics DB to match. Goes through saveDiagnosticsConfig rather
@@ -3304,8 +3319,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         logBoot('app:relaunch skipped (PLAYWRIGHT)')
         return
       }
-      app.relaunch()
-      app.exit(0)
+      relaunchApp(0)
     })
     // Cycle the embedded side-car in place (same sticky port — the renderer's
     // WS reconnects). Local mode only: in remote mode the backend runs
@@ -4522,7 +4536,7 @@ app.on('web-contents-created', (_, wc) => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' || isViteDev) {
     app.quit()
   }
 })
