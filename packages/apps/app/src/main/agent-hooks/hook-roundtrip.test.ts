@@ -6,7 +6,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { processAgentHook } from '@slayzone/transport/server'
 import { formatHookCommand, installNotifyScript } from '@slayzone/platform/agent-hooks'
-import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
+import { NOTIFY_SCRIPT_SOURCE } from './sources'
 
 /**
  * STITCHED round-trip: the REAL benign notify.sh (run via bash, exactly as an
@@ -29,7 +29,8 @@ import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
 // The agent tree is the REAL one (pure, no DB): it decides the state each hook
 // transitions to, which is exactly what this round-trip asserts.
 vi.mock('@slayzone/terminal/server', async () => {
-  const agentTree = await import('../../../../../domains/terminal/src/server/agent-tree.js')
+  const agentTree =
+    await vi.importActual<typeof import('@slayzone/terminal/server')>('@slayzone/terminal/server')
   return {
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,

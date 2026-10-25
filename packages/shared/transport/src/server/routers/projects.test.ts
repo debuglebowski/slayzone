@@ -203,8 +203,8 @@ test('projects router: task_automation_config null default / set / both / clear 
     id: both.id,
     taskAutomationConfig: { on_terminal_active: 'in_progress', on_terminal_idle: 'review' }
   })
-  expect(bothUpdated.task_automation_config.on_terminal_active).toBe('in_progress')
-  expect(bothUpdated.task_automation_config.on_terminal_idle).toBe('review')
+  expect(bothUpdated.task_automation_config!.on_terminal_active).toBe('in_progress')
+  expect(bothUpdated.task_automation_config!.on_terminal_idle).toBe('review')
 
   const clear = await caller.create({ name: 'AutoClear', color: '#333333' })
   await caller.update({
@@ -254,7 +254,7 @@ test('projects router: task_automation_config stale-reference cleanup', async ()
     taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: null }
   })
   expect(
-    (await caller.update({ id: a.id, columnsConfig: dropToTodoDone })).task_automation_config
+    (await caller.update({ id: a.id, columnsConfig: dropToTodoDone })).task_automation_config!
       .on_terminal_active
   ).toBeNull()
 
@@ -273,7 +273,7 @@ test('projects router: task_automation_config stale-reference cleanup', async ()
           { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' }
         ]
       })
-    ).task_automation_config.on_terminal_idle
+    ).task_automation_config!.on_terminal_idle
   ).toBeNull()
 
   // both cleared
@@ -283,8 +283,8 @@ test('projects router: task_automation_config stale-reference cleanup', async ()
     taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: 'review' }
   })
   const cUpdated = await caller.update({ id: c.id, columnsConfig: dropToTodoDone })
-  expect(cUpdated.task_automation_config.on_terminal_active).toBeNull()
-  expect(cUpdated.task_automation_config.on_terminal_idle).toBeNull()
+  expect(cUpdated.task_automation_config!.on_terminal_active).toBeNull()
+  expect(cUpdated.task_automation_config!.on_terminal_idle).toBeNull()
 
   // partial: keep valid 'todo', drop 'doing'
   const d = await caller.create({
@@ -301,8 +301,8 @@ test('projects router: task_automation_config stale-reference cleanup', async ()
     taskAutomationConfig: { on_terminal_active: 'todo', on_terminal_idle: 'doing' }
   })
   const dUpdated = await caller.update({ id: d.id, columnsConfig: dropToTodoDone })
-  expect(dUpdated.task_automation_config.on_terminal_active).toBe('todo')
-  expect(dUpdated.task_automation_config.on_terminal_idle).toBeNull()
+  expect(dUpdated.task_automation_config!.on_terminal_active).toBe('todo')
+  expect(dUpdated.task_automation_config!.on_terminal_idle).toBeNull()
 
   // no config → no error, stays null
   const e = await caller.create({
@@ -344,6 +344,6 @@ test('projects router: task_automation_config stale-reference cleanup', async ()
       { id: 'done', label: 'Shipped', color: 'green', position: 2, category: 'completed' }
     ]
   })
-  expect(fUpdated.task_automation_config.on_terminal_active).toBe('doing')
-  expect(fUpdated.task_automation_config.on_terminal_idle).toBe('todo')
+  expect(fUpdated.task_automation_config!.on_terminal_active).toBe('doing')
+  expect(fUpdated.task_automation_config!.on_terminal_idle).toBe('todo')
 })

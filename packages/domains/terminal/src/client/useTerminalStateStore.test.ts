@@ -74,14 +74,14 @@ test('applyStateChange on a non-dead transition clears the hibernated marker (re
   s().applyHibernated('f:f')
   s().applyStateChange('f:f', 'running')
   expect(s().getSessionState('f:f')).toBe('running')
-  expect(s().hibernated['f:f']).toBe(undefined)
+  expect<true | undefined>(s().hibernated['f:f']).toBe(undefined)
 })
 
 test('clearSession forgets the session entirely', () => {
   s().applyHibernated('g:g')
   s().clearSession('g:g')
   expect(s().getSessionState('g:g')).toBe('starting')
-  expect(s().hibernated['g:g']).toBe(undefined)
+  expect<true | undefined>(s().hibernated['g:g']).toBe(undefined)
 })
 
 console.log('\nuseTerminalStateStore — reconcile (self-heal)\n')
@@ -155,7 +155,7 @@ test('reconcile clears hibernated when alive again + dropped from DB set (cross-
   s().applyHibernated('r:r')
   s().reconcile([{ sessionId: 'r:r', state: 'running' }], [])
   expect(s().getSessionState('r:r')).toBe('running')
-  expect(s().hibernated['r:r']).toBe(undefined)
+  expect<true | undefined>(s().hibernated['r:r']).toBe(undefined)
 })
 
 test('reconcile keeps hibernated during DB-write lag (absent from list AND set)', () => {

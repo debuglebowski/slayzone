@@ -14,7 +14,7 @@ import { settingsRouter } from './settings.js'
 import { setNotifyEvents, type NotifyEventMap } from '../app-deps.js'
 
 const h = await createTestHarness()
-const ctx = { db: h.slayDb }
+const ctx = { db: h.slayDb, dataRoot: '' }
 // Same singleton (keyed by ctx.db) the router resolves via forDatabase — warm it
 // so getCached() readers (the idle-close sweep) observe write-through sets.
 const settings = SettingsService.forDatabase(ctx.db)
@@ -65,8 +65,8 @@ test('settings router: forDatabase returns one shared instance per db (no cache 
 // per-user key and shares the hub's keys; a request without one (above, and the
 // desktop app's hub) keeps the global table. The client sends nothing new.
 const principal = (userId: string) => ({ userId, role: 'user' as const, scopes: ['full' as const] })
-const callerA = settingsRouter.createCaller({ db: h.slayDb, principal: principal('user-a') })
-const callerB = settingsRouter.createCaller({ db: h.slayDb, principal: principal('user-b') })
+const callerA = settingsRouter.createCaller({ db: h.slayDb, dataRoot: '', principal: principal('user-a') })
+const callerB = settingsRouter.createCaller({ db: h.slayDb, dataRoot: '', principal: principal('user-b') })
 
 test('settings router: viewState is per user, and never falls back to the global row', async () => {
   await caller.set({ key: 'viewState', value: 'global-tabs' })

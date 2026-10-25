@@ -13,7 +13,6 @@
  */
 import Database from 'better-sqlite3'
 import type { PtySessionWindow } from '../pty-host'
-import type { IPty } from 'node-pty'
 import type { SlayzoneDb, BatchOp } from '@slayzone/platform'
 import { createPty, hasPty, getBuffer, killPty, setDatabase } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
@@ -293,7 +292,8 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
       cols: 180,
       rows: 45,
       adoptPty: {
-        pty: fake as unknown as IPty,
+        warmId: 'warm-D',
+        computerId: 'computer-1',
         preWarmedAgent: true,
         sessionId: 'poolS',
         conversationId: 'convPool'

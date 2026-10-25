@@ -150,7 +150,7 @@ test('computers: revoke, unrevoke, delete, claim and visibility write audit line
   try {
     const asUser = computersRouter.createCaller({
       ...ctx,
-      principal: { userId: 'user-9', scopes: ['full'] },
+      principal: { userId: 'user-9', role: 'user', scopes: ['full'] },
       req: { socket: { remoteAddress: '198.51.100.4' } } as never
     })
     const r = await registerComputer(h.slayDb, {

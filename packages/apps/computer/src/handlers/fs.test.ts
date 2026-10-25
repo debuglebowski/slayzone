@@ -316,7 +316,7 @@ describe('createFsHandlers — file-editor ops', () => {
 
 describe('createFsHandlers — watch lifecycle', () => {
   it('streams fs.change tagged with the hub-minted watchId, and stops on watchStop', async () => {
-    const notify = vi.fn(() => true)
+    const notify = vi.fn<ComputerDialer['notify']>(() => true)
     const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
     expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
@@ -338,7 +338,7 @@ describe('createFsHandlers — watch lifecycle', () => {
   // A hub retry after reconnect must not leave two live subscriptions feeding one
   // client — the panel would see every change twice and refetch twice.
   it('is idempotent on watchId — a repeated start does not double-deliver', async () => {
-    const notify = vi.fn(() => true)
+    const notify = vi.fn<ComputerDialer['notify']>(() => true)
     const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })

@@ -28,6 +28,7 @@ function makeProject(id: string, lock_config: ProjectLockConfig | null): Project
     worktree_source_branch: null,
     worktree_copy_behavior: null,
     worktree_copy_paths: null,
+    worktree_submodule_init: null,
     columns_config: null,
     execution_context: null,
     selected_repo: null,
@@ -37,6 +38,8 @@ function makeProject(id: string, lock_config: ProjectLockConfig | null): Project
     icon_image_path: null,
     owner_user_id: null,
     sort_order: 0,
+    group_id: null,
+    starred: false,
     created_at: '',
     updated_at: ''
   }

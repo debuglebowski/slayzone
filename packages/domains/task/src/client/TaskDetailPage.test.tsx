@@ -56,11 +56,14 @@ vi.mock('@slayzone/settings/client', () => ({
   })
 }))
 
-vi.mock('@slayzone/ui', () => {
+vi.mock('@slayzone/ui', async (importOriginal) => {
   // Every stub collapses to its children, so children is the only prop that matters.
   const Stub = (props: { children?: ReactNode }) => props.children ?? null
   const StubTrigger = (props: { children?: ReactNode }) => props.children ?? null
   return {
+    // Real module underneath, so exports the page gains later (hooks, helpers)
+    // don't break this suite; only the UI primitives below are stubbed.
+    ...(await importOriginal<typeof import('@slayzone/ui')>()),
     Button: Stub,
     IconButton: Stub,
     PanelToggle: () => null,
@@ -252,7 +255,7 @@ vi.mock('@slayzone/transport/client', () => {
     get: (_t, prop) => (prop === 'then' ? undefined : proxy),
     apply: () => Promise.resolve([])
   }
-  const proxy = new Proxy((() => Promise.resolve([])) as DeepProxy, handler)
+  const proxy = new Proxy((() => Promise.resolve([])) as unknown as DeepProxy, handler)
   return {
     useTRPC: () => proxy,
     useTRPCClient: () => proxy,

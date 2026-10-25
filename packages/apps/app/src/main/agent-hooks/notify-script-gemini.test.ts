@@ -4,7 +4,7 @@ import os from 'os'
 import { spawn, spawnSync } from 'child_process'
 import { describe, test, expect } from 'vitest'
 import { installNotifyScript } from '@slayzone/platform/agent-hooks'
-import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
+import { NOTIFY_SCRIPT_SOURCE } from './sources'
 
 /**
  * Integration test: notify.sh under Gemini event names.

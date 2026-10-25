@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { formatHookCommand, installNotifyScript } from '@slayzone/platform/agent-hooks'
-import { NOTIFY_SCRIPT_SOURCE, OPENCODE_PLUGIN_SOURCE } from './sources'
+import { NOTIFY_SCRIPT_SOURCE } from './sources'
 
 /**
  * End-to-end regression test for issue #88.

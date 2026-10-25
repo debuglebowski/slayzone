@@ -40,7 +40,7 @@ registerDeleteTaskRoute(app, {
 })
 const rest = await mountRestApp(app)
 
-function seedTask(id = crypto.randomUUID()): string {
+function seedTask(id: string = crypto.randomUUID()): string {
   h.db
     .prepare(
       'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'

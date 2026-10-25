@@ -49,6 +49,7 @@ const automation: Automation = {
   actions: [{ type: 'run_command', params: { command: 'printf close' } }],
   run_count: 3,
   last_run_at: '2026-03-31T11:00:00.000Z',
+  catchup_on_start: false,
   sort_order: 0,
   created_at: '2026-03-31T10:00:00.000Z',
   updated_at: '2026-03-31T10:00:00.000Z'

@@ -249,7 +249,7 @@ async function main(): Promise<void> {
           command: 'echo stale',
           cwd: '/tmp',
           auto_restart: 0,
-          pid: staleSurvivorPid // simulates a pid persisted before an uncontrolled app exit
+          pid: staleSurvivorPid ?? null // simulates a pid persisted before an uncontrolled app exit
         }
       ],
       insert: async () => {},

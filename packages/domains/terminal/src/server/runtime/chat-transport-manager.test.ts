@@ -769,7 +769,7 @@ await test('createChat: same tabId with different (taskId,cwd) → tears down zo
   const fakeNew = makeFakeChild()
   let spawnCount = 0
   let oldKilled = false
-  fakeOld.kill = (_sig?: string) => {
+  fakeOld.kill = (_sig?: NodeJS.Signals | number) => {
     oldKilled = true
     return true
   }
@@ -1298,8 +1298,8 @@ await test('shutdownAll: waits for chat exits and preserves warm flags', async (
   await setup()
   const fake = makeFakeChild()
   const kills: string[] = []
-  fake.kill = (sig?: string) => {
-    kills.push(sig ?? '')
+  fake.kill = (sig?: NodeJS.Signals | number) => {
+    kills.push(String(sig ?? ''))
     setImmediate(() => fake.emit('exit', null, sig ?? null))
     return true
   }
@@ -1338,8 +1338,8 @@ await test('shutdownAll: escalates stuck chat process and resolves', async () =>
   await setup()
   const fake = makeFakeChild()
   const kills: string[] = []
-  fake.kill = (sig?: string) => {
-    kills.push(sig ?? '')
+  fake.kill = (sig?: NodeJS.Signals | number) => {
+    kills.push(String(sig ?? ''))
     return true
   }
   mgr.setTransportDepsForTests({
@@ -1471,7 +1471,7 @@ await test('codex-chat: handshake with no user message rests at `idle`, not `run
  */
 async function watchdogHarness(opts: { alive?: boolean } = {}) {
   await setup()
-  const stateChanges: ChatTerminalState[] = []
+  const stateChanges: mgr.ChatTerminalState[] = []
   const killed: string[] = []
   let exits = 0
   const fakes: Array<ReturnType<typeof makeFakeChild>> = []

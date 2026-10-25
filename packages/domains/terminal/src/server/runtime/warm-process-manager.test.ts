@@ -539,7 +539,8 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
   computerId = 'computer-1'
   setPtyBackend(fakeBackend as unknown as PtyBackend)
   const modeLookups: string[] = []
-  let recorded: Parameters<WarmPoolDataOps['recordSessionSpawn']>[0] | null = null
+  // Initializer typed (not annotated) so TS does not narrow to `null`: the closure assigns it.
+  let recorded = null as Parameters<WarmPoolDataOps['recordSessionSpawn']>[0] | null
   const deadIds: string[] = []
   const ops: WarmPoolDataOps = {
     getModeSpawnConfig: async (modeId) => {

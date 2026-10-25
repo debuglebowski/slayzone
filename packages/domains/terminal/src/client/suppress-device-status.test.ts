@@ -45,7 +45,7 @@ function eq<T>(actual: T, expected: T, label?: string): void {
 }
 
 /** Feed `data` to a terminal and collect everything it emits on `onData`. */
-function emitted(term: Terminal, data: string): Promise<string> {
+function emitted(term: headless.Terminal, data: string): Promise<string> {
   return new Promise((resolve) => {
     let out = ''
     const sub = term.onData((d) => {

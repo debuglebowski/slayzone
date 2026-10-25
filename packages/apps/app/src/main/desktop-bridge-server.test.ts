@@ -69,7 +69,7 @@ function attemptConnect(
     }
     ws.once('open', () => finish({ kind: 'open' }))
     ws.once('unexpected-response', (_req, res) =>
-      finish({ kind: 'rejected', status: res.statusCode })
+      finish({ kind: 'rejected', status: res.statusCode ?? 0 })
     )
     ws.once('error', (err) => finish({ kind: 'error', message: err.message }))
   })

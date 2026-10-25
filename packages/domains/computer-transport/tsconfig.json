@@ -1,5 +1,4 @@
 {
   "extends": "../../../tsconfig.base.json",
-  "include": ["src/**/*", "../../shared/types/src/global.d.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/**/*", "../../shared/types/src/global.d.ts"]
 }

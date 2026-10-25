@@ -57,7 +57,7 @@ const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 const restartLocalComputerSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 
 /** The manual "re-check which computers are connected" round trip. */
-const refetchSpy = vi.fn(() => Promise.resolve({} as any))
+const refetchSpy = vi.fn((_hub?: string) => Promise.resolve({} as any))
 
 /** Reads/writes of a computer's filesystem path-jail, tagged with the asking hub. */
 const editRootsSpy = vi.fn(

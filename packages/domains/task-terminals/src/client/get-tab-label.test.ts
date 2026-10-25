@@ -32,6 +32,7 @@ function makeTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
     isMain: false,
     position: 0,
     createdAt: '',
+    agentState: 'new',
     ...overrides
   }
 }

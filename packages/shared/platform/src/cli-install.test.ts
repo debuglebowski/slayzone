@@ -10,7 +10,7 @@ vi.mock('child_process', async () => {
 
 // Mock fs — default to EACCES on mkdirSync so elevation path is reached
 const mockMkdirSync = vi.fn()
-const mockExistsSync = vi.fn(() => true)
+const mockExistsSync = vi.fn((..._args: unknown[]) => true)
 const mockSymlinkSync = vi.fn()
 const mockUnlinkSync = vi.fn()
 const mockRealpathSync = vi.fn((p: string) => p)
@@ -24,7 +24,7 @@ vi.mock('fs', async () => {
       existsSync: (...args: unknown[]) => mockExistsSync(...args),
       symlinkSync: (...args: unknown[]) => mockSymlinkSync(...args),
       unlinkSync: (...args: unknown[]) => mockUnlinkSync(...args),
-      realpathSync: (...args: unknown[]) => mockRealpathSync(...args)
+      realpathSync: (p: string) => mockRealpathSync(p)
     }
   }
 })
@@ -180,7 +180,7 @@ describe('installCli', () => {
       throw eaccesError()
     })
     const err = execError({ message: 'spawn pkexec ENOENT' }) as NodeJS.ErrnoException
-    err.code = 'ENOENT' as unknown as number // execFile ENOENT uses string code
+    err.code = 'ENOENT' // execFile ENOENT uses string code
     mockExecFileFailure(err)
 
     const installCli = await getInstallCli()

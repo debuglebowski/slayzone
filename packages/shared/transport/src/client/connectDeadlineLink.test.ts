@@ -18,7 +18,7 @@ import type { AddressInfo } from 'node:net'
 import { createTRPCClient, createWSClient, wsLink, type TRPCLink } from '@trpc/client'
 import { observable, behaviorSubject } from '@trpc/server/observable'
 import superjson from 'superjson'
-import { connectDeadlineLink } from './connectDeadlineLink'
+import { connectDeadlineLink, type ConnectionStateSource } from './connectDeadlineLink'
 import { createTrpcWsClient } from './trpc'
 import type { AppRouter } from '../server/router'
 
@@ -52,6 +52,12 @@ function slowLink(ms: number): TRPCLink<AppRouter> {
         }, ms)
         return () => clearTimeout(timer)
       })
+}
+
+/** The ws client's connection state, typed as the link reads it (wide union, so `.next()` can move it). */
+type ConnectionState = ReturnType<ConnectionStateSource['get']>
+function connectionStateOf(state: ConnectionState['state']) {
+  return behaviorSubject<ConnectionState>({ type: 'state', state, error: null })
 }
 
 const closers: Array<() => void> = []
@@ -93,11 +99,7 @@ describe('a hub whose socket never opens', () => {
 describe('connectDeadlineLink', () => {
   it('errors an operation that is still waiting on a connection', async () => {
     let toreDown = false
-    const connectionState = behaviorSubject({
-      type: 'state' as const,
-      state: 'connecting' as const,
-      error: null
-    })
+    const connectionState = connectionStateOf('connecting')
     const client = createTRPCClient<AppRouter>({
       links: [
         connectDeadlineLink({ connectionState, deadlineMs: 100 }),
@@ -112,11 +114,7 @@ describe('connectDeadlineLink', () => {
   })
 
   it('leaves a slow procedure alone once the hub is connected', async () => {
-    const connectionState = behaviorSubject({
-      type: 'state' as const,
-      state: 'pending' as const,
-      error: null
-    })
+    const connectionState = connectionStateOf('pending')
     const client = createTRPCClient<AppRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 50 }), slowLink(250)]
     })
@@ -125,11 +123,7 @@ describe('connectDeadlineLink', () => {
   })
 
   it('starts the deadline when a connected hub drops mid-operation', async () => {
-    const connectionState = behaviorSubject({
-      type: 'state' as const,
-      state: 'pending' as const,
-      error: null
-    })
+    const connectionState = connectionStateOf('pending')
     const client = createTRPCClient<AppRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 100 }), silentLink()]
     })
@@ -140,11 +134,7 @@ describe('connectDeadlineLink', () => {
   })
 
   it('never deadlines a subscription — it owns its own reconnect semantics', async () => {
-    const connectionState = behaviorSubject({
-      type: 'state' as const,
-      state: 'connecting' as const,
-      error: null
-    })
+    const connectionState = connectionStateOf('connecting')
     const client = createTRPCClient<AppRouter>({
       links: [connectDeadlineLink({ connectionState, deadlineMs: 50 }), slowLink(200)]
     })

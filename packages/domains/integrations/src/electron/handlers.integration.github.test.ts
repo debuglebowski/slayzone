@@ -3,10 +3,10 @@
  * Requires: GITHUB_TOKEN, GITHUB_TEST_REPO (auto-loaded from .env)
  * Optional: GITHUB_TEST_PROJECT_ID (Projects V2 node ID for status sync tests)
  *
- * Run: npx tsx packages/domains/integrations/src/main/handlers.integration.github.test.ts
+ * Run: npx tsx packages/domains/integrations/src/electron/handlers.integration.github.test.ts
  */
 import { createTestHarness, expect } from '../../../../shared/test-utils/ipc-harness.js'
-import { registerIntegrationHandlers } from './handlers'
+import { createIntegrationOps, ensureIntegrationSchema } from '../server/handlers-store'
 import {
   requireEnv,
   seedFullMapping,
@@ -15,36 +15,14 @@ import {
   startSuiteTimeout,
   runScopedDiscovery
 } from '../server/integration-test-helpers'
-import * as githubClient from './github-client'
+import * as githubClient from '../server/github-client'
 import {
   pushNewTaskToProviders,
   pushArchiveToProviders,
   pushUnarchiveToProviders
 } from '../server/sync'
-import { parseGitHubExternalKey } from './sync-helpers'
-import type { IpcMain } from 'electron'
-import type {
-  ExternalLink,
-  GithubIssueSummary,
-  GithubProjectSummary,
-  GithubRepositorySummary,
-  ImportGithubRepositoryIssuesResult,
-  IntegrationConnectionPublic,
-  IntegrationConnectionUsage,
-  ProviderStatus,
-  PullTaskResult,
-  PushTaskResult,
-  PushUnlinkedTasksResult,
-  StatusResyncPreview,
-  SyncNowResult,
-  TaskSyncStatus
-} from '../shared'
-
-/** Shared page shape of both `list-github-*-issues` handlers. */
-interface GithubIssuePage {
-  issues: GithubIssueSummary[]
-  nextCursor: string | null
-}
+import { parseGitHubExternalKey } from '../server/sync-helpers'
+import type { ExternalLink, ProviderStatus } from '../shared'
 
 // No OS keychain cipher is wired in this test, so credential storage falls back
 // to plaintext automatically (the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS
@@ -85,17 +63,11 @@ function no(name: string, e: unknown) {
 }
 
 const h = await createTestHarness()
-// MockIpcMain implements only the `handle`/`on` surface the handlers touch;
-// widen through `unknown` so nothing downstream in this file inherits an `any`.
-registerIntegrationHandlers(h.ipcMain as unknown as IpcMain, h.db)
-
-/**
- * `h.invoke` is deliberately untyped (the mock ipcMain has no channel→result
- * map), so name the expected result per call. A handler field that gets renamed
- * then fails here instead of silently reading `undefined` in an assertion.
- */
-const invoke = async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> =>
-  (await h.invoke(channel, ...args)) as T
+// The IPC registrar is gone; drive the same ops factory the tRPC
+// `integrationsRouter` calls, over the harness's async SlayzoneDb adapter. Ops
+// are fully typed, so a renamed result field fails typecheck here.
+await ensureIntegrationSchema(h.slayDb)
+const ops = createIntegrationOps(h.slayDb)
 
 /**
  * Row shapes for the raw better-sqlite3 fixture reads below — `.get()`/`.all()`
@@ -126,7 +98,7 @@ try {
 console.log('\nGitHub: Connect handler')
 let handlerConnectionId = ''
 try {
-  const result = await invoke<IntegrationConnectionPublic>('integrations:connect-github', {
+  const result = await ops.connectGithub({
     token: GITHUB_TOKEN
   })
   expect(result.provider).toBe('github')
@@ -141,7 +113,7 @@ try {
 try {
   let threw = false
   try {
-    await h.invoke('integrations:connect-github', { token: '  ' })
+    await ops.connectGithub({ token: '  ' })
   } catch {
     threw = true
   }
@@ -155,9 +127,7 @@ try {
 console.log('\nGitHub: Connection management')
 if (handlerConnectionId) {
   try {
-    const connections = await invoke<IntegrationConnectionPublic[]>(
-      'integrations:list-connections',
-      'github'
+    const connections = await ops.listConnections('github'
     )
     expect(connections.length).toBeGreaterThan(0)
     const found = connections.find((c) => c.id === handlerConnectionId)
@@ -168,9 +138,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    const usage = await invoke<IntegrationConnectionUsage>(
-      'integrations:get-connection-usage',
-      handlerConnectionId
+    const usage = await ops.getConnectionUsage(handlerConnectionId
     )
     expect(typeof usage.mapped_project_count).toBe('number')
     ok('get-connection-usage returns usage')
@@ -179,7 +147,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    await h.invoke('integrations:update-connection', {
+    await ops.updateConnection({
       connectionId: handlerConnectionId,
       credential: GITHUB_TOKEN
     })
@@ -196,16 +164,12 @@ if (handlerConnectionId) {
     .run(connTestProjectId)
 
   try {
-    await h.invoke('integrations:set-project-connection', {
+    await ops.setProjectConnection({
       projectId: connTestProjectId,
       provider: 'github',
       connectionId: handlerConnectionId
     })
-    const connId = await invoke<string | null>(
-      'integrations:get-project-connection',
-      connTestProjectId,
-      'github'
-    )
+    const connId = await ops.getProjectConnection(connTestProjectId, 'github')
     expect(connId).toBeTruthy()
     expect(connId).toBe(handlerConnectionId)
     ok('set/get-project-connection works')
@@ -214,7 +178,7 @@ if (handlerConnectionId) {
   }
 
   // Use a disposable connection for clear test so handlerConnectionId survives
-  const clearConnResult = await invoke<IntegrationConnectionPublic>('integrations:connect-github', {
+  const clearConnResult = await ops.connectGithub({
     token: GITHUB_TOKEN
   })
   const clearConnId = clearConnResult.id
@@ -223,22 +187,18 @@ if (handlerConnectionId) {
     .prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
     VALUES (?, 'Clear Conn', '#888888', '/tmp/clear-conn', datetime('now'), datetime('now'))`)
     .run(clearProjectId)
-  await h.invoke('integrations:set-project-connection', {
+  await ops.setProjectConnection({
     projectId: clearProjectId,
     provider: 'github',
     connectionId: clearConnId
   })
 
   try {
-    await h.invoke('integrations:clear-project-connection', {
+    await ops.clearProjectConnection({
       projectId: clearProjectId,
       provider: 'github'
     })
-    const connId = await invoke<string | null>(
-      'integrations:get-project-connection',
-      clearProjectId,
-      'github'
-    )
+    const connId = await ops.getProjectConnection(clearProjectId, 'github')
     expect(connId).toBeNull()
     ok('clear-project-connection removes connection')
   } catch (e) {
@@ -260,9 +220,7 @@ try {
 
 if (handlerConnectionId) {
   try {
-    const repos = await invoke<GithubRepositorySummary[]>(
-      'integrations:list-github-repositories',
-      handlerConnectionId
+    const repos = await ops.listGithubRepositories(handlerConnectionId
     )
     expect(repos.length).toBeGreaterThan(0)
     ok('list-github-repositories handler returns repos')
@@ -271,9 +229,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    const projects = await invoke<GithubProjectSummary[]>(
-      'integrations:list-github-projects',
-      handlerConnectionId
+    const projects = await ops.listGithubProjects(handlerConnectionId
     )
     expect(Array.isArray(projects)).toBe(true)
     ok('list-github-projects handler returns array')
@@ -283,7 +239,7 @@ if (handlerConnectionId) {
 
   if (GITHUB_TEST_PROJECT_ID) {
     try {
-      const result = await invoke<GithubIssuePage>('integrations:list-github-issues', {
+      const result = await ops.listGithubIssues({
         connectionId: handlerConnectionId,
         githubProjectId: GITHUB_TEST_PROJECT_ID,
         limit: 5
@@ -296,7 +252,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    const result = await invoke<GithubIssuePage>('integrations:list-github-repository-issues', {
+    const result = await ops.listGithubRepositoryIssues({
       connectionId: handlerConnectionId,
       repositoryFullName: GITHUB_TEST_REPO,
       limit: 5
@@ -378,7 +334,7 @@ if (createdIssueNumber) {
 // ── Import flow (handler-level) ───────────────────────────────────────────
 console.log('\nGitHub: Import flow')
 if (createdIssueNumber) {
-  const { projectId, connectionId } = seedFullMapping(h.db, 'github', GITHUB_TOKEN, {
+  const { projectId, connectionId } = await seedFullMapping(h.slayDb, 'github', GITHUB_TOKEN, {
     teamId: REPO_OWNER,
     teamKey: REPO_OWNER,
     syncMode: 'two_way',
@@ -387,9 +343,7 @@ if (createdIssueNumber) {
   })
 
   try {
-    const result = await invoke<ImportGithubRepositoryIssuesResult>(
-      'integrations:import-github-repository-issues',
-      {
+    const result = await ops.importGithubRepositoryIssues({
         projectId,
         connectionId,
         repositoryFullName: GITHUB_TEST_REPO,
@@ -411,7 +365,7 @@ if (createdIssueNumber) {
   }
 
   try {
-    await invoke('integrations:import-github-repository-issues', {
+    await ops.importGithubRepositoryIssues({
       projectId,
       connectionId,
       repositoryFullName: GITHUB_TEST_REPO,
@@ -435,7 +389,7 @@ if (createdIssueNumber) {
       .prepare("UPDATE tasks SET title = ?, updated_at = '2099-01-01 00:00:00' WHERE id = ?")
       .run(pushedTitle, task.id)
 
-    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
+    const result = await ops.syncNow({ taskId: task.id })
     expect(result.scanned).toBe(1)
     expect(result.pushed).toBe(1)
 
@@ -466,7 +420,7 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
+    const result = await ops.syncNow({ taskId: task.id })
     expect(result.scanned).toBe(1)
     expect(result.pulled).toBe(1)
 
@@ -494,7 +448,7 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    await h.invoke('integrations:sync-now', { taskId: task.id })
+    await ops.syncNow({ taskId: task.id })
     const updatedTask = h.db
       .prepare('SELECT archived_at FROM tasks WHERE id = ?')
       .get(task.id) as TaskArchivedRow
@@ -519,7 +473,7 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    await h.invoke('integrations:sync-now', { taskId: task.id })
+    await ops.syncNow({ taskId: task.id })
     const updatedTask = h.db
       .prepare('SELECT archived_at FROM tasks WHERE id = ?')
       .get(task.id) as TaskArchivedRow
@@ -541,7 +495,7 @@ if (createdIssueNumber) {
       )
       .run(task.id)
 
-    const result = await invoke<SyncNowResult>('integrations:sync-now', { taskId: task.id })
+    const result = await ops.syncNow({ taskId: task.id })
     expect(result.pushed).toBe(0)
     ok('one_way mode does not push')
   } catch (e) {
@@ -565,7 +519,7 @@ if (createdIssueNumber) {
       body: null,
       state: 'open'
     })
-    await pushArchiveToProviders(h.db, task.id)
+    await pushArchiveToProviders(h.slayDb, task.id)
 
     const remote = await githubClient.getIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
@@ -580,7 +534,7 @@ if (createdIssueNumber) {
 
   try {
     const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
-    await pushUnarchiveToProviders(h.db, task.id)
+    await pushUnarchiveToProviders(h.slayDb, task.id)
 
     const remote = await githubClient.getIssue(GITHUB_TOKEN, {
       owner: REPO_OWNER,
@@ -597,11 +551,7 @@ if (createdIssueNumber) {
   console.log('\nGitHub: Sync status')
   try {
     const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
-    const status = await invoke<TaskSyncStatus>(
-      'integrations:get-task-sync-status',
-      task.id,
-      'github'
-    )
+    const status = await ops.getTaskSyncStatus(task.id, 'github')
     expect(status.provider).toBe('github')
     expect(status.taskId).toBe(task.id)
     expect(
@@ -622,7 +572,7 @@ if (createdIssueNumber) {
       .prepare("UPDATE tasks SET title = ?, updated_at = datetime('now') WHERE id = ?")
       .run(forcePushTitle, task.id)
 
-    const result = await invoke<PushTaskResult>('integrations:push-task', {
+    const result = await ops.pushTask({
       taskId: task.id,
       provider: 'github',
       force: true
@@ -653,7 +603,7 @@ if (createdIssueNumber) {
       state: 'open'
     })
 
-    const result = await invoke<PullTaskResult>('integrations:pull-task', {
+    const result = await ops.pullTask({
       taskId: task.id,
       provider: 'github',
       force: true
@@ -675,7 +625,7 @@ if (createdIssueNumber) {
     const task = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').get(projectId) as TaskRow
 
     // Establish baseline via force pull
-    await h.invoke('integrations:pull-task', {
+    await ops.pullTask({
       taskId: task.id,
       provider: 'github',
       force: true
@@ -696,11 +646,7 @@ if (createdIssueNumber) {
       state: 'open'
     })
 
-    const status = await invoke<TaskSyncStatus>(
-      'integrations:get-task-sync-status',
-      task.id,
-      'github'
-    )
+    const status = await ops.getTaskSyncStatus(task.id, 'github')
     expect(status.fields.length).toBeGreaterThan(0)
     const titleField = status.fields.find((f) => f.field === 'title')
     expect(titleField).toBeTruthy()
@@ -713,7 +659,7 @@ if (createdIssueNumber) {
   // ── Discovery (scoped) ────────────────────────────────────────────────
   console.log('\nGitHub: Discovery')
   {
-    const disco = seedFullMapping(h.db, 'github', GITHUB_TOKEN, {
+    const disco = await seedFullMapping(h.slayDb, 'github', GITHUB_TOKEN, {
       teamId: REPO_OWNER,
       teamKey: REPO_OWNER,
       syncMode: 'two_way',
@@ -736,7 +682,7 @@ if (createdIssueNumber) {
       const tasksBefore = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
         .all(disco.projectId)
-      await runScopedDiscovery(h.db, disco.mappingId)
+      await runScopedDiscovery(h.slayDb, disco.mappingId)
       const tasksAfter = h.db
         .prepare('SELECT * FROM tasks WHERE project_id = ?')
         .all(disco.projectId)
@@ -758,7 +704,7 @@ if (createdIssueNumber) {
       VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
       .run(newTaskId, projectId, `[test] push-created ${Date.now()}`)
 
-    await pushNewTaskToProviders(h.db, newTaskId, projectId)
+    await pushNewTaskToProviders(h.slayDb, newTaskId, projectId)
 
     const link = h.db
       .prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'")
@@ -790,10 +736,10 @@ if (createdIssueNumber) {
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
       .get(projectId) as TaskRow
     // Force pull to establish baseline + in-sync state
-    await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'github', force: true })
+    await ops.pullTask({ taskId: task.id, provider: 'github', force: true })
 
     // In-sync → should return pushed=false
-    const result = await invoke<PushTaskResult>('integrations:push-task', {
+    const result = await ops.pushTask({
       taskId: task.id,
       provider: 'github'
     })
@@ -814,7 +760,7 @@ if (createdIssueNumber) {
         "UPDATE tasks SET title = '[test] baseline', updated_at = datetime('now') WHERE id = ?"
       )
       .run(task.id)
-    await h.invoke('integrations:push-task', { taskId: task.id, provider: 'github', force: true })
+    await ops.pushTask({ taskId: task.id, provider: 'github', force: true })
 
     // Update remote, then try non-force push → should refuse
     await githubClient.updateIssue(GITHUB_TOKEN, {
@@ -831,7 +777,7 @@ if (createdIssueNumber) {
       )
       .run(task.id)
 
-    const result = await invoke<PushTaskResult>('integrations:push-task', {
+    const result = await ops.pushTask({
       taskId: task.id,
       provider: 'github'
     })
@@ -847,7 +793,7 @@ if (createdIssueNumber) {
       .prepare('SELECT * FROM tasks WHERE project_id = ? LIMIT 1')
       .get(projectId) as TaskRow
     // Force pull to establish baseline
-    await h.invoke('integrations:pull-task', { taskId: task.id, provider: 'github', force: true })
+    await ops.pullTask({ taskId: task.id, provider: 'github', force: true })
 
     // Update local, then try non-force pull → should refuse
     h.db
@@ -856,7 +802,7 @@ if (createdIssueNumber) {
       )
       .run(task.id)
 
-    const result = await invoke<PullTaskResult>('integrations:pull-task', {
+    const result = await ops.pullTask({
       taskId: task.id,
       provider: 'github'
     })
@@ -881,7 +827,7 @@ if (createdIssueNumber) {
       unlinkedIds.push(id)
     }
 
-    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
+    const result = await ops.pushUnlinkedTasks({
       projectId,
       provider: 'github'
     })
@@ -903,7 +849,7 @@ if (createdIssueNumber) {
 
   // Race guard: calling again should push 0
   try {
-    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
+    const result = await ops.pushUnlinkedTasks({
       projectId,
       provider: 'github'
     })
@@ -922,7 +868,7 @@ if (createdIssueNumber) {
       VALUES (?, ?, ?, null, 'todo', 3, 'claude-code', '{}', '', '', 1, datetime('now'), datetime('now'))`)
       .run(tempId, projectId, `[test] temporary ${Date.now()}`)
 
-    const result = await invoke<PushUnlinkedTasksResult>('integrations:push-unlinked-tasks', {
+    const result = await ops.pushUnlinkedTasks({
       projectId,
       provider: 'github'
     })
@@ -1034,7 +980,7 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    await h.invoke('integrations:sync-now', { taskId: task.id })
+    await ops.syncNow({ taskId: task.id })
     const updatedTask = h.db
       .prepare('SELECT status FROM tasks WHERE id = ?')
       .get(task.id) as TaskStatusRow
@@ -1053,7 +999,7 @@ if (createdIssueNumber) {
     h.db.prepare("UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?").run(task.id)
     h.db.prepare('DELETE FROM external_field_state').run()
 
-    await h.invoke('integrations:sync-now', { taskId: task.id })
+    await ops.syncNow({ taskId: task.id })
     const reopenedTask = h.db
       .prepare('SELECT status FROM tasks WHERE id = ?')
       .get(task.id) as TaskStatusRow
@@ -1107,7 +1053,7 @@ if (GITHUB_TEST_PROJECT_ID) {
       projectId: statusProjectId,
       connectionId: statusConnId,
       mappingId: statusMappingId
-    } = seedFullMapping(h.db, 'github', GITHUB_TOKEN, {
+    } = await seedFullMapping(h.slayDb, 'github', GITHUB_TOKEN, {
       teamId: REPO_OWNER,
       teamKey: REPO_OWNER,
       syncMode: 'two_way',
@@ -1118,7 +1064,7 @@ if (GITHUB_TEST_PROJECT_ID) {
       .prepare('UPDATE integration_project_mappings SET external_project_id = ? WHERE id = ?')
       .run(GITHUB_TEST_PROJECT_ID, statusMappingId)
 
-    statuses = await invoke<ProviderStatus[]>('integrations:fetch-provider-statuses', {
+    statuses = await ops.fetchProviderStatuses({
       connectionId: statusConnId,
       provider: 'github',
       externalTeamId: REPO_OWNER,
@@ -1128,7 +1074,7 @@ if (GITHUB_TEST_PROJECT_ID) {
     ok('fetch-provider-statuses returns project statuses')
 
     try {
-      await h.invoke('integrations:apply-status-sync', {
+      await ops.applyStatusSync({
         projectId: statusProjectId,
         provider: 'github',
         statuses
@@ -1151,7 +1097,7 @@ if (GITHUB_TEST_PROJECT_ID) {
     }
 
     try {
-      const preview = await invoke<StatusResyncPreview>('integrations:resync-provider-statuses', {
+      const preview = await ops.resyncProviderStatuses({
         projectId: statusProjectId,
         provider: 'github'
       })
@@ -1185,7 +1131,7 @@ if (GITHUB_TEST_PROJECT_ID) {
 console.log('\nGitHub: Clear/disconnect')
 {
   // Use a fresh mapping to test clear-project-provider without affecting other tests
-  const clearTest = seedFullMapping(h.db, 'github', GITHUB_TOKEN, {
+  const clearTest = await seedFullMapping(h.slayDb, 'github', GITHUB_TOKEN, {
     teamId: REPO_OWNER,
     teamKey: REPO_OWNER,
     syncMode: 'two_way',
@@ -1204,7 +1150,7 @@ console.log('\nGitHub: Clear/disconnect')
     .run(crypto.randomUUID(), clearTest.connectionId, clearTaskId)
 
   try {
-    await h.invoke('integrations:clear-project-provider', {
+    await ops.clearProjectProvider({
       projectId: clearTest.projectId,
       provider: 'github'
     })
@@ -1227,7 +1173,7 @@ console.log('\nGitHub: Clear/disconnect')
   // Disconnect handler connection (if we created one via connect-github handler)
   if (handlerConnectionId) {
     try {
-      await h.invoke('integrations:disconnect', handlerConnectionId)
+      await ops.disconnect(handlerConnectionId)
       const conn = h.db
         .prepare('SELECT * FROM integration_connections WHERE id = ?')
         .get(handlerConnectionId)

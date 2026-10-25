@@ -228,6 +228,8 @@ describe('applyBoundaryResize', () => {
 describe('planPanelStrip', () => {
   const R = (leftKeys: string[], rightKeys: string[], gapPx = 0): ResolvedLayout => ({
     widths: {},
+    minPx: {},
+    maxPx: {},
     gapPx,
     overflow: false,
     leftKeys,

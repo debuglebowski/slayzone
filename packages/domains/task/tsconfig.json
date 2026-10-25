@@ -8,6 +8,5 @@
     "../../shared/types/src/global.d.ts",
     "../file-editor/src/lezer-toml.d.ts",
     "src/vite-env.d.ts"
-  ],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  ]
 }

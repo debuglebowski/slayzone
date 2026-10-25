@@ -45,6 +45,7 @@ function makeRow(overrides: Partial<AutomationRow> = {}): AutomationRow {
     actions: JSON.stringify([{ type: 'run_command', params: { command: 'echo hi' } }]),
     run_count: 0,
     last_run_at: null,
+    catchup_on_start: 0,
     sort_order: 0,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',

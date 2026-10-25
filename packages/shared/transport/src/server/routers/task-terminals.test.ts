@@ -10,7 +10,7 @@ import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harn
 import { taskTerminalsRouter } from './task-terminals.js'
 
 const h = await createTestHarness()
-const ctx = { db: h.slayDb }
+const ctx = { db: h.slayDb, dataRoot: '' }
 const caller = taskTerminalsRouter.createCaller(ctx)
 
 const projectId = crypto.randomUUID()
@@ -60,9 +60,9 @@ test('task-terminals router: create non-main (auto position) + custom label + de
 
 test('task-terminals router: update label set/clear, mode, null for missing', async () => {
   const nonMain = (await caller.list({ taskId })).find((t) => t.id !== taskId)!
-  expect((await caller.update({ id: nonMain.id, label: 'Renamed' })).label).toBe('Renamed')
-  expect((await caller.update({ id: nonMain.id, label: null })).label).toBeNull()
-  expect((await caller.update({ id: nonMain.id, mode: 'codex' })).mode).toBe('codex')
+  expect((await caller.update({ id: nonMain.id, label: 'Renamed' }))!.label).toBe('Renamed')
+  expect((await caller.update({ id: nonMain.id, label: null }))!.label).toBeNull()
+  expect((await caller.update({ id: nonMain.id, mode: 'codex' }))!.mode).toBe('codex')
   expect(await caller.update({ id: 'nope' })).toBeNull()
 })
 

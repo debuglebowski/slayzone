@@ -213,7 +213,7 @@ describe('createSuspenseCache', () => {
 
   it('handles rejection — error propagates through error boundary', async () => {
     const cache = createSuspenseCache({
-      failing: () => Promise.reject(new Error('fetch failed'))
+      failing: (): Promise<string> => Promise.reject(new Error('fetch failed'))
     })
 
     function Inner() {
@@ -254,7 +254,7 @@ describe('createSuspenseCache', () => {
   it('invalidate clears failed entry — retry fetches fresh data', async () => {
     let callCount = 0
     const cache = createSuspenseCache({
-      flaky: () => {
+      flaky: (): Promise<string> => {
         callCount++
         if (callCount === 1) return Promise.reject(new Error('fail'))
         return Promise.resolve('recovered')

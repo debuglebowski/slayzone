@@ -59,8 +59,8 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
   test('first call inserts row scoped to worktree, prev_snapshot_sha null', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'first.txt'), 'first edit')
-    await recordTurnBoundary(h.db, tabId, 'first prompt')
-    const list = await listTurnsForWorktree(h.db, repo)
+    await recordTurnBoundary(h.slayDb, tabId, 'first prompt')
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     expect(list[0].prompt_preview).toBe('first prompt')
     expect(list[0].prev_snapshot_sha).toBeNull()
@@ -70,10 +70,10 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
   test('second call with new edits → row chained via prev_snapshot_sha', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'first.txt'), 'first edit')
-    await recordTurnBoundary(h.db, tabId, 'p1')
+    await recordTurnBoundary(h.slayDb, tabId, 'p1')
     fs.writeFileSync(path.join(repo, 'edit.txt'), 'change 1')
-    await recordTurnBoundary(h.db, tabId, 'p2')
-    const list = await listTurnsForWorktree(h.db, repo)
+    await recordTurnBoundary(h.slayDb, tabId, 'p2')
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(2)
     expect(list[1].prev_snapshot_sha).toBe(list[0].snapshot_sha)
   })
@@ -81,16 +81,16 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
   test('repeat with no edits → dedupe drops it', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'first.txt'), 'first')
-    await recordTurnBoundary(h.db, tabId, 'p1')
+    await recordTurnBoundary(h.slayDb, tabId, 'p1')
     // No edits between calls — second call must be deduped.
-    await recordTurnBoundary(h.db, tabId, 'p2-noop')
-    expect(await listTurnsForWorktree(h.db, repo)).toHaveLength(1)
+    await recordTurnBoundary(h.slayDb, tabId, 'p2-noop')
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(1)
   })
 
   test('first call with NO edits (clean worktree) → dropped', async () => {
     const { tabId, repo } = freshTask()
-    await recordTurnBoundary(h.db, tabId, 'noop on clean tree')
-    expect(await listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    await recordTurnBoundary(h.slayDb, tabId, 'noop on clean tree')
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(0)
   })
 })
 
@@ -116,11 +116,11 @@ await describe('multi-task in same worktree', () => {
       .run(tabB, taskB, 'claude-code', 0)
 
     fs.writeFileSync(path.join(repo, 'a.txt'), 'from A')
-    await recordTurnBoundary(h.db, tabA, 'A first')
+    await recordTurnBoundary(h.slayDb, tabA, 'A first')
     fs.writeFileSync(path.join(repo, 'b.txt'), 'from B')
-    await recordTurnBoundary(h.db, tabB, 'B first')
+    await recordTurnBoundary(h.slayDb, tabB, 'B first')
 
-    const list = await listTurnsForWorktree(h.db, repo)
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(2)
     expect(list[0].task_id).toBe(taskA)
     expect(list[1].task_id).toBe(taskB)
@@ -131,14 +131,14 @@ await describe('task deletion sets task_id to NULL but keeps the turn', () => {
   test('ON DELETE SET NULL', async () => {
     const { taskId, tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'before-delete.txt'), 'data')
-    await recordTurnBoundary(h.db, tabId, 'before delete')
-    expect((await listTurnsForWorktree(h.db, repo))[0].task_id).toBe(taskId)
+    await recordTurnBoundary(h.slayDb, tabId, 'before delete')
+    expect((await listTurnsForWorktree(h.slayDb, repo))[0].task_id).toBe(taskId)
 
     // Cascade deletes the tab too. Drop tab first to avoid FK noise.
     h.db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
     h.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
 
-    const list = await listTurnsForWorktree(h.db, repo)
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     expect(list[0].task_id).toBeNull()
   })
@@ -161,8 +161,8 @@ await describe('worktree path fallback', () => {
       .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
       .run(tabId, taskId, 'claude-code', 0)
     fs.writeFileSync(path.join(repo, 'fb.txt'), 'fb')
-    await recordTurnBoundary(h.db, tabId, 'x')
-    expect(await listTurnsForWorktree(h.db, repo)).toHaveLength(1)
+    await recordTurnBoundary(h.slayDb, tabId, 'x')
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(1)
   })
 
   test('skips when both worktree_path AND project.path empty', async () => {
@@ -178,7 +178,7 @@ await describe('worktree path fallback', () => {
     h.db
       .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
       .run(tabId, taskId, 'claude-code', 0)
-    await recordTurnBoundary(h.db, tabId, 'x')
+    await recordTurnBoundary(h.slayDb, tabId, 'x')
     // Nothing inserted for this specific task
     const row = h.db.prepare('SELECT COUNT(*) as c FROM agent_turns WHERE task_id = ?').get(taskId)
     expect(row).toEqual({ c: 0 })
@@ -189,8 +189,8 @@ await describe('snapshot fail (no .git)', () => {
   test('no row inserted', async () => {
     const { tabId, repo } = freshTask()
     fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })
-    await recordTurnBoundary(h.db, tabId, 'x')
-    expect(await listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    await recordTurnBoundary(h.slayDb, tabId, 'x')
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(0)
   })
 })
 
@@ -198,8 +198,8 @@ await describe('prompt_preview truncation', () => {
   test('clamps to 200 chars + collapses whitespace', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'a.txt'), 'something')
-    await recordTurnBoundary(h.db, tabId, '   line1\n\n\nline2 ' + 'x'.repeat(500))
-    const list = await listTurnsForWorktree(h.db, repo)
+    await recordTurnBoundary(h.slayDb, tabId, '   line1\n\n\nline2 ' + 'x'.repeat(500))
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list[0].prompt_preview.length).toBe(200)
     expect(list[0].prompt_preview.startsWith('line1 line2')).toBe(true)
   })
@@ -211,10 +211,10 @@ await describe('retention: 50 per worktree', () => {
     let firstId: string | null = null
     for (let i = 0; i < 51; i++) {
       fs.writeFileSync(path.join(repo, `r${i}.txt`), `${i}`)
-      await recordTurnBoundary(h.db, tabId, `t${i}`)
-      if (i === 0) firstId = (await listTurnsForWorktree(h.db, repo))[0].id
+      await recordTurnBoundary(h.slayDb, tabId, `t${i}`)
+      if (i === 0) firstId = (await listTurnsForWorktree(h.slayDb, repo))[0].id
     }
-    const list = await listTurnsForWorktree(h.db, repo)
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(50)
     expect(list.find((t) => t.id === firstId!) === undefined).toBe(true)
   })
@@ -223,12 +223,12 @@ await describe('retention: 50 per worktree', () => {
 await describe('initChatTurnSubscriber', () => {
   test('user-message stash → result records boundary with text', async () => {
     const { tabId, repo } = freshTask()
-    const sub = initChatTurnSubscriber(h.db)
+    const sub = initChatTurnSubscriber(h.slayDb)
     sub(tabId, { kind: 'user-message', text: 'fix me' } as never)
     fs.writeFileSync(path.join(repo, 'fixed.txt'), 'patched')
     sub(tabId, { kind: 'result', isError: false } as never)
     await new Promise((r) => setTimeout(r, 250))
-    const list = await listTurnsForWorktree(h.db, repo)
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     expect(list[0].prompt_preview).toBe('fix me')
   })
@@ -238,10 +238,10 @@ await describe('initPtyTurnSubscriber', () => {
   test('claude-code mode tab + non-empty Enter → row w/ empty prompt', async () => {
     const { tabId, repo, taskId } = freshTask()
     fs.writeFileSync(path.join(repo, 'pty.txt'), 'change')
-    const sub = initPtyTurnSubscriber(h.db)
+    const sub = initPtyTurnSubscriber(h.slayDb)
     sub(`${taskId}:${tabId}`, taskId, 'do work\n')
     await new Promise((r) => setTimeout(r, 250))
-    const list = await listTurnsForWorktree(h.db, repo)
+    const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     // Raw PTY stdin is unreliable (contains edit keystrokes/escapes) — we don't
     // reconstruct it. prompt_preview stays empty until a structured-event source
@@ -262,10 +262,10 @@ await describe('initPtyTurnSubscriber', () => {
       .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
       .run(tabId, taskId, 'terminal', 0)
     fs.writeFileSync(path.join(repo, 'shell.txt'), 'x')
-    const sub = initPtyTurnSubscriber(h.db)
+    const sub = initPtyTurnSubscriber(h.slayDb)
     sub(`${taskId}:${tabId}`, taskId, 'ls -la')
     await new Promise((r) => setTimeout(r, 250))
-    expect(await listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(0)
   })
 })
 

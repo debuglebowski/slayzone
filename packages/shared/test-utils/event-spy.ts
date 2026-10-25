@@ -8,9 +8,12 @@
  *   expect(spy.calls).toEqual([{ event: 'task:created', payload: { ... } }])
  *   spy.stop()
  */
+// Method shorthand (not arrow-typed properties) on purpose: method params are
+// checked bivariantly, so typed emitters whose `on` narrows `event` to their
+// own key union (e.g. TypedEmitter<TaskEventMap>) are accepted without a cast.
 type AnyEmitter = {
-  on: (event: string, listener: (payload: unknown) => void) => unknown
-  off: (event: string, listener: (payload: unknown) => void) => unknown
+  on(event: string, listener: (payload: unknown) => void): unknown
+  off(event: string, listener: (payload: unknown) => void): unknown
 }
 
 export interface EventSpyCall {

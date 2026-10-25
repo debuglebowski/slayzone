@@ -3,6 +3,7 @@
  * Run with: npx tsx packages/domains/terminal/src/main/adapters/antigravity-adapter.test.ts
  */
 import { AntigravityAdapter } from './antigravity-adapter'
+import type { TerminalAdapter } from './types'
 
 const adapter = new AntigravityAdapter()
 
@@ -124,7 +125,9 @@ test('transitionOnInput is not explicitly false (TUI default → Enter flips to 
   // Hook-driven like Claude/Codex: the TUI default keeps the Enter → 'running'
   // flip for instant feedback before the PreInvocation hook lands. An explicit
   // `false` would also pin the idle clock open on every TUI redraw.
-  expect(adapter.transitionOnInput !== false).toBe(true)
+  // Read through the interface: the class leaves the optional field undeclared (= TUI default).
+  const config: TerminalAdapter = adapter
+  expect(config.transitionOnInput !== false).toBe(true)
 })
 
 console.log('\nDone\n')

@@ -19,7 +19,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerNotificationMethods } from '../shared/frames'
+import {
+  ComputerNotificationMethods,
+  procDataParamsSchema,
+  procExitParamsSchema
+} from '../shared/frames'
 import {
   createRoutingChatBackend,
   NoComputerAvailableError,
@@ -28,8 +32,6 @@ import {
 import type { ComputerGatewayEvents } from './hub-gateway'
 
 const COMPUTER_ID = 'computer-1'
-
-type ProcHandlerTable = Record<string, (params: unknown) => Promise<unknown> | unknown>
 
 let dir: string
 let cleanup: Array<() => void>
@@ -47,9 +49,7 @@ async function loadComputer(): Promise<{
   gateway: RoutingGateway
   disposeAll: () => void
 } | null> {
-  let mod: {
-    createProcHandlers: (ctx: unknown) => { handlers: ProcHandlerTable; disposeAll: () => void }
-  }
+  let mod: typeof import('../../../../apps/computer/src/handlers/proc')
   try {
     mod = await import('../../../../apps/computer/src/handlers/proc')
   } catch {
@@ -59,11 +59,11 @@ async function loadComputer(): Promise<{
   const created = mod.createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
-        const p = (params ?? {}) as Record<string, unknown>
+        // Validate like the real gateway's demux does before re-emitting.
         if (method === ComputerNotificationMethods.procData) {
-          events.emit('proc.data', { computerId: COMPUTER_ID, ...p } as never)
+          events.emit('proc.data', { computerId: COMPUTER_ID, ...procDataParamsSchema.parse(params) })
         } else if (method === ComputerNotificationMethods.procExit) {
-          events.emit('proc.exit', { computerId: COMPUTER_ID, ...p } as never)
+          events.emit('proc.exit', { computerId: COMPUTER_ID, ...procExitParamsSchema.parse(params) })
         }
         return true
       }
@@ -78,10 +78,11 @@ async function loadComputer(): Promise<{
   })
   return {
     gateway: {
-      request: async (_computerId: string, method: string, params?: unknown) => {
+      // Same contract as the real gateway: the caller names the reply type `T`.
+      request: async <T = unknown>(_computerId: string, method: string, params?: unknown) => {
         const handler = created.handlers[method]
         if (!handler) throw new Error(`computer has no handler for ${method}`)
-        return await handler(params)
+        return (await handler(params)) as T
       },
       events,
       // Never disconnects here, so the detach controller's epoch baseline is

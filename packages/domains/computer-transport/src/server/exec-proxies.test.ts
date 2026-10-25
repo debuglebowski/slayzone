@@ -103,6 +103,7 @@ const ptySpec = (over: Partial<PtySpawnSpec> = {}): PtySpawnSpec => ({
   sessionId: 'sess-1',
   taskId: 'task-1',
   computerId: 'computer-1',
+  projectId: null,
   file: 'bash',
   args: [],
   transport: false,
@@ -1656,6 +1657,16 @@ function makeLocalFs(): LocalWorkspaceFs & { calls: string[] } {
       calls.push('setAllowedRoots')
       throw new Error('this host has no path jail to configure')
     },
+    discoverRepos: async () => {
+      calls.push('discoverRepos')
+      return []
+    },
+    resolveProjectPath: note('resolveProjectPath', { path: null }),
+    setProjectPath: (_projectId: string, path: string) => {
+      calls.push('setProjectPath')
+      return { path }
+    },
+    forgetProjectPath: note('forgetProjectPath', undefined),
     readDir: note('readDir', []),
     readFile: note('readFile', { content: 'local' }),
     writeFile: note('writeFile', undefined),
@@ -1816,6 +1827,7 @@ describe('createRemoteFsAdapters — watch', () => {
     platform: 'linux-x64',
     version: '0.0.0',
     capabilities: ['fs'],
+    authMode: 'hello',
     connectedAt: 0,
     lastSeenAt: 0
   })

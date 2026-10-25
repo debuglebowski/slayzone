@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { codexChatBackend } from './codex-chat-session'
 import type { AgentEvent } from '../../../shared/agent-events'
-import type { ChatDriverContext, PermissionDecision } from '../types'
+import type { ChatDriverContext, ChatSessionDriver, PermissionDecision } from '../types'
 
 let passed = 0
 let failed = 0
@@ -31,8 +31,19 @@ function assert(cond: unknown, msg: string): void {
 
 const flush = (): Promise<void> => new Promise((r) => setImmediate(r))
 
+/** The Codex driver implements the optional control + permission seams; the tests drive them. */
+type CodexDriver = ChatSessionDriver &
+  Required<Pick<ChatSessionDriver, 'applyControl' | 'respondPermission'>>
+
+function hasControlSeams(d: ChatSessionDriver): d is CodexDriver {
+  return typeof d.applyControl === 'function' && typeof d.respondPermission === 'function'
+}
+
+/** Required by the `ChatSessionDriver` signature; Codex's applyControl ignores it. */
+const CONTROL_TIMEOUT_MS = 1_000
+
 interface Harness {
-  driver: ReturnType<typeof codexChatBackend.createDriver>
+  driver: CodexDriver
   sent: Record<string, unknown>[]
   emitted: AgentEvent[]
 }
@@ -50,9 +61,12 @@ function makeHarness(ctxOverrides: Partial<ChatDriverContext> = {}): Harness {
     chatModel: null,
     chatEffort: null,
     chatMode: 'full-access',
+    chatCollaboration: null,
+    chatFastMode: false,
     ...ctxOverrides
   }
   const driver = codexChatBackend.createDriver()
+  if (!hasControlSeams(driver)) throw new Error('codex driver must implement applyControl + respondPermission')
   void driver.start(ctx)
   return { driver, sent, emitted }
 }
@@ -400,7 +414,7 @@ async function run(): Promise<void> {
     h.driver.sendUserMessage('go')
     h.driver.handleLine(JSON.stringify({ id: 3, result: { turn: { id: 'turn-i' } } }))
     await flush()
-    void h.driver.applyControl({ subtype: 'interrupt' })
+    void h.driver.applyControl({ subtype: 'interrupt' }, CONTROL_TIMEOUT_MS)
     const interrupt = h.sent.find((m) => m.method === 'turn/interrupt')
     assert(interrupt !== undefined, 'expected a turn/interrupt request')
     eq(interrupt!.params, { threadId: 'thread-i', turnId: 'turn-i' })
@@ -409,7 +423,7 @@ async function run(): Promise<void> {
   await test('applyControl interrupt with no active turn sends nothing', async () => {
     const h = makeHarness()
     await handshake(h)
-    await h.driver.applyControl({ subtype: 'interrupt' })
+    await h.driver.applyControl({ subtype: 'interrupt' }, CONTROL_TIMEOUT_MS)
     assert(
       !h.sent.some((m) => m.method === 'turn/interrupt'),
       'no turn/interrupt should be sent without an active turn'
@@ -419,7 +433,7 @@ async function run(): Promise<void> {
   await test('applyControl set_model takes effect on the next turn', async () => {
     const h = makeHarness()
     await handshake(h)
-    const ack = await h.driver.applyControl({ subtype: 'set_model', model: 'gpt-6-codex' })
+    const ack = await h.driver.applyControl({ subtype: 'set_model', model: 'gpt-6-codex' }, CONTROL_TIMEOUT_MS)
     eq(ack, { ok: true }, 'set_model acks ok')
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
@@ -433,7 +447,7 @@ async function run(): Promise<void> {
   await test('applyControl set_effort takes effect on the next turn', async () => {
     const h = makeHarness()
     await handshake(h)
-    await h.driver.applyControl({ subtype: 'set_effort', effort: 'high' })
+    await h.driver.applyControl({ subtype: 'set_effort', effort: 'high' }, CONTROL_TIMEOUT_MS)
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
     eq((turn.params as Record<string, unknown>).effort, 'high', 'next turn uses the new effort')
@@ -442,7 +456,7 @@ async function run(): Promise<void> {
   await test('applyControl set_permission_mode changes the next turn sandbox', async () => {
     const h = makeHarness({ chatMode: 'full-access' })
     await handshake(h)
-    await h.driver.applyControl({ subtype: 'set_permission_mode', mode: 'approval-required' })
+    await h.driver.applyControl({ subtype: 'set_permission_mode', mode: 'approval-required' }, CONTROL_TIMEOUT_MS)
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
     const sp = (turn.params as Record<string, unknown>).sandboxPolicy as Record<string, unknown>
@@ -663,7 +677,7 @@ async function run(): Promise<void> {
         params: { threadId: 't', turn: { id: 'turn-streamed' } }
       })
     )
-    void h.driver.applyControl({ subtype: 'interrupt' })
+    void h.driver.applyControl({ subtype: 'interrupt' }, CONTROL_TIMEOUT_MS)
     const interrupt = h.sent.find((m) => m.method === 'turn/interrupt')!
     eq(
       (interrupt.params as Record<string, unknown>).turnId,

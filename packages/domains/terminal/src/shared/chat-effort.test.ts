@@ -84,8 +84,7 @@ test('modelSupportsEffort hides for haiku', () => {
   expect(modelSupportsEffort('haiku')).toBe(false)
 })
 
-test('modelSupportsEffort shows for sonnet/opus/default', () => {
-  expect(modelSupportsEffort('default')).toBe(true)
+test('modelSupportsEffort shows for sonnet/opus', () => {
   expect(modelSupportsEffort('sonnet')).toBe(true)
   expect(modelSupportsEffort('opus')).toBe(true)
 })

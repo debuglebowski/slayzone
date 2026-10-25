@@ -124,7 +124,7 @@ function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: Le
       events.push('bind')
       return true
     },
-    async buildMcpEnv(taskId) {
+    async buildMcpEnv(taskId): Promise<Record<string, string>> {
       return taskId ? { SLAYZONE_TASK_ID: taskId } : {}
     }
   }

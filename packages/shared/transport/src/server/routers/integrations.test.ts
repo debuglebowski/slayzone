@@ -92,7 +92,7 @@ h.db
   .run(connId)
 
 test('listConnections: returns connections without credential_ref', async () => {
-  const conns = (await caller.listConnections()) as Record<string, unknown>[]
+  const conns = await caller.listConnections()
   expect(conns.length).toBeGreaterThan(0)
   const conn = conns.find((c) => c.id === connId)!
   expect(conn.provider).toBe('linear')
@@ -455,14 +455,14 @@ test('connectLinear: creates new connection', async () => {
     workspaceName: 'New WS',
     accountLabel: 'new@test.com'
   })
-  const result = (await caller.connectLinear({
+  const result = await caller.connectLinear({
     apiKey: 'lin_new_key',
     projectId: apiProjectId
-  })) as Record<string, unknown>
+  })
   expect(result.provider).toBe('linear')
   expect(result.enabled).toBe(true)
   expect('credential_ref' in result).toBe(false)
-  h.db.prepare('DELETE FROM integration_connections WHERE id = ?').run(result.id as string)
+  h.db.prepare('DELETE FROM integration_connections WHERE id = ?').run(result.id)
 })
 
 test('connectLinear: re-connect updates existing', async () => {

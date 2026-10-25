@@ -3,6 +3,7 @@
  * Run with: npx tsx packages/domains/terminal/src/main/adapters/codex-adapter.test.ts
  */
 import { CodexAdapter } from './codex-adapter'
+import type { TerminalAdapter } from './types'
 
 const adapter = new CodexAdapter()
 
@@ -131,7 +132,9 @@ test('transitionOnInput is default (TUI adapter — Enter flips to running)', ()
   // Hook-driven like ClaudeAdapter, no silence-timer fallback. TUI default
   // keeps the Enter → 'running' flip for instant feedback before the
   // UserPromptSubmit hook lands.
-  expect(adapter.transitionOnInput !== false).toBe(true)
+  // Read through the interface: the class leaves the optional field undeclared (= TUI default).
+  const config: TerminalAdapter = adapter
+  expect(config.transitionOnInput !== false).toBe(true)
 })
 
 test('idleTimeoutMs is Infinity — no silence-timer fallback (hook-driven)', () => {

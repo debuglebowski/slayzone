@@ -7,7 +7,6 @@
     "src/preload/*.d.ts",
     "../../shared/types/src/txn-registry.d.ts"
   ],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",

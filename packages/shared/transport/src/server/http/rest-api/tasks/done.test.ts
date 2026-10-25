@@ -99,7 +99,7 @@ registerDoneTaskRoute(noListenerApp, {
 } as never)
 const noListenerRest = await mountRestApp(noListenerApp)
 
-function seedTask(pid = projectId, id = crypto.randomUUID(), status = 'todo'): string {
+function seedTask(pid = projectId, id: string = crypto.randomUUID(), status = 'todo'): string {
   h.db
     .prepare(
       'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'

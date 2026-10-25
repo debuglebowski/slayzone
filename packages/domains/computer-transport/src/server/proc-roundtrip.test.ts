@@ -24,7 +24,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerNotificationMethods } from '../shared/frames'
+import {
+  ComputerNotificationMethods,
+  procDataParamsSchema,
+  procExitParamsSchema
+} from '../shared/frames'
 import { createRoutingProcessBackend, type RoutingGateway } from './exec-proxies'
 import type { ComputerGatewayEvents } from './hub-gateway'
 
@@ -43,10 +47,11 @@ function bridge(
   events: TypedEventEmitter<ComputerGatewayEvents>
 ): RoutingGateway {
   return {
-    request: async (_computerId: string, method: string, params?: unknown) => {
+    // Same contract as the real gateway: the caller names the reply type `T`.
+    request: async <T = unknown>(_computerId: string, method: string, params?: unknown) => {
       const handler = handlers[method]
       if (!handler) throw new Error(`computer has no handler for ${method}`)
-      return await handler(params)
+      return (await handler(params)) as T
     },
     events,
     // These round-trips never disconnect, so the detach controller's epoch
@@ -76,9 +81,7 @@ interface LoadedComputer {
 async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
   // Resolved by path, not package name: the computer is an app, not a dependency
   // of this package, so there is no bare specifier to import.
-  let mod: {
-    createProcHandlers: (ctx: unknown) => { handlers: ProcHandlerTable; disposeAll: () => void }
-  }
+  let mod: typeof import('../../../../apps/computer/src/handlers/proc')
   try {
     mod = await import('../../../../apps/computer/src/handlers/proc')
   } catch {
@@ -88,11 +91,11 @@ async function loadComputerProcHandlers(): Promise<LoadedComputer | null> {
   const created = mod.createProcHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
-        const p = (params ?? {}) as Record<string, unknown>
+        // Validate like the real gateway's demux does before re-emitting.
         if (method === ComputerNotificationMethods.procData) {
-          events.emit('proc.data', { computerId: COMPUTER_ID, ...p })
+          events.emit('proc.data', { computerId: COMPUTER_ID, ...procDataParamsSchema.parse(params) })
         } else if (method === ComputerNotificationMethods.procExit) {
-          events.emit('proc.exit', { computerId: COMPUTER_ID, ...p })
+          events.emit('proc.exit', { computerId: COMPUTER_ID, ...procExitParamsSchema.parse(params) })
         }
         return true
       }
@@ -116,11 +119,6 @@ describe('proc.* hub⇄computer round trip', () => {
 
     const backend = createRoutingProcessBackend({
       gateway: bridge(computer.handlers, computer.events),
-      local: {
-        spawn: () => {
-          throw new Error('must not fall back to local: a computerId was resolved')
-        }
-      },
       resolveComputerId: () => COMPUTER_ID
     })
 
@@ -157,11 +155,6 @@ describe('proc.* hub⇄computer round trip', () => {
 
     const backend = createRoutingProcessBackend({
       gateway: bridge(computer.handlers, computer.events),
-      local: {
-        spawn: () => {
-          throw new Error('must not fall back to local')
-        }
-      },
       resolveComputerId: () => COMPUTER_ID
     })
 
@@ -216,11 +209,6 @@ describe('proc.* hub⇄computer round trip', () => {
         request: bridge(computer.handlers, computer.events).request,
         events: lossy,
         listComputers: () => []
-      },
-      local: {
-        spawn: () => {
-          throw new Error('must not fall back to local')
-        }
       },
       resolveComputerId: () => COMPUTER_ID
     })

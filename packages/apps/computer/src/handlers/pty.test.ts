@@ -159,11 +159,11 @@ describe('createPtyHandlers', () => {
     // Output produced BEFORE adoption must not be streamed: the hub has no
     // session to route it to, and adopt hands the whole buffer over instead.
     await pty.handlers['pty.write']({ sessionId: 'warm-1', data: 'preboot\n' })
-    await waitFor(() => (pty.handlers['pty.warmList']() as { warms: unknown[] }).warms.length === 1)
+    await waitFor(() => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 1)
     await new Promise((r) => setTimeout(r, 150))
     expect(dataParams(notifies)).toEqual([])
 
-    const listed = (await pty.handlers['pty.warmList']()) as {
+    const listed = (await pty.handlers['pty.warmList']({})) as {
       warms: Array<{ warmId: string; pid: number; cwd: string }>
     }
     expect(listed.warms[0]).toMatchObject({ warmId: 'warm-1', pid: warm.pid })
@@ -179,7 +179,7 @@ describe('createPtyHandlers', () => {
     expect(adopted.seq).toBeGreaterThanOrEqual(0)
 
     // No longer warm, and now streaming under the REAL session id.
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toEqual([])
     await pty.handlers['pty.write']({ sessionId: 'sess-warm', data: 'after\n' })
     await waitFor(() =>
       dataParams(notifies)
@@ -216,7 +216,7 @@ describe('createPtyHandlers', () => {
     })
     // The hub holds no session for a warm id, so a pre-adopt death must not
     // surface as pty.exit — it would tear down a session that never existed.
-    await waitFor(() => (pty.handlers['pty.warmList']() as { warms: unknown[] }).warms.length === 0)
+    await waitFor(() => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 0)
     expect(notifies.some((n) => n.method === 'pty.exit')).toBe(false)
 
     expect(() => pty.handlers['pty.warmAdopt']({ warmId: 'warm-dies', sessionId: 's' })).toThrow(
@@ -235,10 +235,10 @@ describe('createPtyHandlers', () => {
       command: 'cat',
       cwd: process.cwd()
     })
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toHaveLength(1)
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toHaveLength(1)
 
     await pty.handlers['pty.warmKill']({ warmId: 'warm-orphan' })
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toEqual([])
     // Idempotent: the hub reconciles against a list that may already be stale.
     await pty.handlers['pty.warmKill']({ warmId: 'warm-orphan' })
 
@@ -910,11 +910,11 @@ describe('agent-start admission', () => {
     )
     await new Promise((r) => setTimeout(r, 150))
     expect(warm.done).toBe(false)
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toEqual([])
     // Agent prints (t≈300ms) → slot free → quiet period (50ms) → warm boots.
     await waitFor(() => warm.done)
     expect((warm.value as { pid: number }).pid).toBeGreaterThan(0)
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toHaveLength(1)
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toHaveLength(1)
     pty.disposeAll()
   })
 
@@ -948,7 +948,7 @@ describe('agent-start admission', () => {
     await waitFor(() => warm.done)
     expect(warm.error).toBeInstanceOf(Error)
     await new Promise((r) => setTimeout(r, 500))
-    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    expect((pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms).toEqual([])
     pty.disposeAll()
   })
 })

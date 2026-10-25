@@ -23,7 +23,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerNotificationMethods } from '../shared/frames'
+import { ComputerNotificationMethods, fsChangeParamsSchema } from '../shared/frames'
 import { createRemoteFsAdapters, type RoutingGateway } from './exec-proxies'
 import type { ComputerGatewayEvents } from './hub-gateway'
 
@@ -45,10 +45,11 @@ function bridge(
   events: TypedEventEmitter<ComputerGatewayEvents>
 ): RoutingGateway {
   return {
-    request: async (_computerId: string, method: string, params?: unknown) => {
+    // Same contract as the real gateway: the caller names the reply type `T`.
+    request: async <T = unknown>(_computerId: string, method: string, params?: unknown) => {
       const handler = handlers[method]
       if (!handler) throw new Error(`computer has no handler for ${method}`)
-      return await handler(params)
+      return (await handler(params)) as T
     },
     events,
     listComputers: () => []
@@ -70,7 +71,7 @@ interface LoadedComputer {
 }
 
 async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer | null> {
-  let mod: { createFsHandlers: (ctx: unknown) => FsHandlerTable }
+  let mod: typeof import('../../../../apps/computer/src/handlers/fs')
   try {
     mod = await import('../../../../apps/computer/src/handlers/fs')
   } catch {
@@ -81,10 +82,8 @@ async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer |
     dialer: {
       notify: (method: string, params?: unknown) => {
         if (method === ComputerNotificationMethods.fsChange) {
-          events.emit('fs.change', {
-            computerId: COMPUTER_ID,
-            ...((params ?? {}) as Record<string, never>)
-          })
+          // Validate like the real gateway's demux does before re-emitting.
+          events.emit('fs.change', { computerId: COMPUTER_ID, ...fsChangeParamsSchema.parse(params) })
         }
         return true
       }

@@ -2,7 +2,7 @@
  * Retention chunk tests
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/main/retention.test.ts
  */
-import { expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { expect, createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import Database from 'better-sqlite3'
 import {
   runBlobRetention,
@@ -69,7 +69,7 @@ async function run(): Promise<void> {
   // 1. Empty DB → no work
   {
     const db = makeDb()
-    const result = await runRetentionChunk(db, CONFIG, Date.now())
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
     expect(result.deleted).toBe(0)
     expect(result.moreWork).toBe(false)
     db.close()
@@ -80,7 +80,7 @@ async function run(): Promise<void> {
   {
     const db = makeDb()
     seed(db, 1000, Date.now()) // all rows ts = now → no expiry
-    const result = await runRetentionChunk(db, CONFIG, Date.now())
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
     expect(result.deleted).toBe(0)
     expect(rowCount(db)).toBe(1000)
     db.close()
@@ -91,7 +91,7 @@ async function run(): Promise<void> {
   {
     const db = makeDb()
     seed(db, 215_000, Date.now()) // 15k over cap of 200k
-    const result = await runRetentionChunk(db, CONFIG, Date.now())
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
     // Chunks at 10_000; over by 15k → first chunk deletes min(15000, 10000) = 10_000
     expect(result.deleted).toBe(10_000)
     expect(result.moreWork).toBe(true) // still over cap after one chunk
@@ -108,7 +108,7 @@ async function run(): Promise<void> {
     seed(db, 500, oldCutoff) // these rows are all expired (older than 14d)
     seed(db, 500, now) // these are fresh
 
-    const result = await runRetentionChunk(db, CONFIG, now)
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     expect(result.deleted).toBe(500) // only the old ones
     expect(rowCount(db)).toBe(500) // fresh remain
     db.close()
@@ -122,7 +122,7 @@ async function run(): Promise<void> {
     const oldCutoff = now - 30 * 24 * 60 * 60 * 1000
     seed(db, 12_000, oldCutoff) // 12k all expired
 
-    const result = await runRetentionChunk(db, CONFIG, now)
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     expect(result.deleted).toBe(10_000) // chunk limit
     expect(result.moreWork).toBe(true)
     expect(rowCount(db)).toBe(2_000)
@@ -138,7 +138,7 @@ async function run(): Promise<void> {
     // Delete middle rows to create gaps — rowid math overestimates but that's OK
     db.exec(`DELETE FROM diagnostics_events WHERE ts_ms BETWEEN ${now - 80} AND ${now - 20}`)
     // 39 rows remain; rowid math says ~100; still under cap, all fresh
-    const result = await runRetentionChunk(db, CONFIG, now)
+    const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     expect(result.deleted).toBe(0) // not over cap, not expired
     db.close()
     console.log('  ✓ tolerates rowid gaps — overestimate harmless under cap')
@@ -151,7 +151,7 @@ async function run(): Promise<void> {
     const oldCutoff = now - 30 * 24 * 60 * 60 * 1000
     seed(db, 5_000, oldCutoff) // expired
     const pagesBefore = db.pragma('page_count', { simple: true }) as number
-    await runRetentionChunk(db, CONFIG, now)
+    await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     const pagesAfter = db.pragma('page_count', { simple: true }) as number
     if (pagesAfter >= pagesBefore) {
       throw new Error(`Expected pages to shrink, got ${pagesBefore} → ${pagesAfter}`)
@@ -209,7 +209,7 @@ async function run(): Promise<void> {
     seed(db, 2, now) // fresh
     const removed: string[] = []
     startRetentionScheduler({
-      getDb: () => db as never,
+      getDb: () => createSlayzoneDbAdapter(db),
       getConfig: () => ({ ...CONFIG, enabled: false }),
       now: () => now,
       blobFs: {

@@ -37,7 +37,7 @@ await describe('dropModeFromPointer (pointer, not dragged-rect center)', async (
   test('bottom third → after', () => expect(dropModeFromPointer(126, rect)).toBe('after'))
   test('null pointer → merge', () => expect(dropModeFromPointer(null, rect)).toBe('merge'))
   test('pointerYFromEvent = activator clientY + delta.y', () => {
-    expect(pointerYFromEvent({ activatorEvent: { clientY: 200 } as Event, delta: { y: 15 } })).toBe(
+    expect(pointerYFromEvent({ activatorEvent: { clientY: 200 } as unknown as Event, delta: { y: 15 } })).toBe(
       215
     )
     expect(pointerYFromEvent({ activatorEvent: null, delta: { y: 15 } })).toBeNull()

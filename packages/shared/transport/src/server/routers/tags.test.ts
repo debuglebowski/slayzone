@@ -9,7 +9,7 @@ import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harn
 import { tagsRouter } from './tags.js'
 
 const h = await createTestHarness()
-const ctx = { db: h.slayDb }
+const ctx = { db: h.slayDb, dataRoot: '' }
 const caller = tagsRouter.createCaller(ctx)
 
 const projectId = crypto.randomUUID()

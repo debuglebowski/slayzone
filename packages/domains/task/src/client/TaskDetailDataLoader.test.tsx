@@ -71,13 +71,14 @@ function StubTaskDetailPage(props: StubProps) {
 
 // Create a test cache (separate from the real taskDetailCache)
 let fetchFn: ReturnType<typeof vi.fn>
-let testCache: ReturnType<typeof createSuspenseCache>
+type TestFetchers = { taskDetail: (taskId: string) => Promise<TaskDetailData | null> }
+let testCache: ReturnType<typeof createSuspenseCache<TestFetchers>>
 
 beforeEach(() => {
   receivedProps.mockClear()
   fetchFn = vi.fn()
   testCache = createSuspenseCache({
-    taskDetail: fetchFn as (...args: unknown[]) => Promise<TaskDetailData | null>
+    taskDetail: fetchFn as TestFetchers['taskDetail']
   })
 })
 
@@ -160,6 +161,7 @@ describe('TaskDetailDataLoader', () => {
         diff: false,
         settings: false,
         editor: true,
+        artifacts: false,
         processes: false
       },
       browserTabs: {

@@ -11,7 +11,7 @@ import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harn
 import { fileEditorRouter } from './file-editor.js'
 
 const h = await createTestHarness()
-const caller = fileEditorRouter.createCaller({ db: h.slayDb })
+const caller = fileEditorRouter.createCaller({ db: h.slayDb, dataRoot: '' })
 const rootPath = h.tmpDir()
 
 fs.mkdirSync(path.join(rootPath, 'src'))

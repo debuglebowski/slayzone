@@ -260,7 +260,8 @@ const REMOTE: RemoteMcpEnv = {
 
 // 9. computerId != null + provider → the provider's resolved target, args forwarded.
 {
-  let seen: { taskId?: string; computerId?: string; mode?: string } | null = null
+  // Initializer typed (not annotated) so TS does not narrow to `null`: the closure assigns it.
+  let seen = null as { taskId?: string; computerId?: string; mode?: string } | null
   const provider = (args: { taskId: string | undefined; computerId: string; mode?: string }) => {
     seen = args
     return REMOTE

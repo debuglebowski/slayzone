@@ -3,6 +3,7 @@
  * Run with: npx tsx packages/domains/terminal/src/main/adapters/claude-adapter.test.ts
  */
 import { ClaudeAdapter } from './claude-adapter'
+import type { TerminalAdapter } from './types'
 
 const adapter = new ClaudeAdapter()
 
@@ -41,7 +42,9 @@ test('hookDriven is true — Enter does NOT optimistically flip to running', () 
   // signal. transitionOnInput stays at the TUI default (idle-clock semantics
   // unchanged); hookDriven is what suppresses the flip.
   expect(adapter.hookDriven).toBe(true)
-  expect(adapter.transitionOnInput !== false).toBe(true)
+  // Read through the interface: the class leaves the optional field undeclared (= TUI default).
+  const config: TerminalAdapter = adapter
+  expect(config.transitionOnInput !== false).toBe(true)
 })
 
 test('idleTimeoutMs is Infinity — no silence-timer fallback (hook-driven)', () => {

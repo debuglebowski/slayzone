@@ -57,7 +57,7 @@ const boundComputers = {
 /** A hub with login, the caller signed in as `principal`. */
 const loginHub = (principal: {
   userId: string
-  role?: 'admin' | 'user'
+  role: 'admin' | 'user'
   scopes: Array<'full' | 'read' | 'tasks'>
 }): RestApiDeps['restAuth'] => ({
   required: () => true,
@@ -221,7 +221,7 @@ await describe('POST /api/computers/join-token', () => {
     // for `full` specifically, not merely "verifyBearer resolved something".
     const rest = await mount(boundComputers, {
       required: () => true,
-      verifyBearer: async () => ({ userId: 'u2', scopes: ['read', 'tasks'] })
+      verifyBearer: async () => ({ userId: 'u2', role: 'user', scopes: ['read', 'tasks'] })
     })
     try {
       const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
