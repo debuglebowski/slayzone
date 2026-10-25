@@ -1,12 +1,15 @@
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import type { ValidationResult } from '@slayzone/terminal/shared'
 import { stripAnsi } from './Terminal.utils'
+import { describeExit } from './exit-description'
 
 export interface TerminalDeadOverlayProps {
   isStaleSession: boolean
   providerLabel: string
   deadCrashOutput: string | null
   deadExitCode: number | null
+  /** Lifecycle cause of the exit (`startup-timeout`, …); null when only the code is known. */
+  deadExitReason: string | null
   /** Raw prop — gates the Retry button's visibility. */
   onRetry?: () => void
   onStartFresh: () => void
@@ -25,6 +28,7 @@ export function TerminalDeadOverlay({
   providerLabel,
   deadCrashOutput,
   deadExitCode,
+  deadExitReason,
   onRetry,
   onStartFresh,
   onRetryClick,
@@ -57,7 +61,7 @@ export function TerminalDeadOverlay({
           {stripAnsi(deadCrashOutput).split('\n').slice(-20).join('\n')}
         </pre>
       )}
-      <p className="text-sm text-muted-foreground">Process exited with code {deadExitCode}</p>
+      <p className="text-sm text-muted-foreground">{describeExit(deadExitCode, deadExitReason)}</p>
       <div className="flex gap-2">
         {onRetry && (
           <button

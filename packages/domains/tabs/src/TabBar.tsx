@@ -11,7 +11,7 @@ import {
   useStableCallback,
   withShortcut
 } from '@slayzone/ui'
-import { useTaskTerminalState } from '@slayzone/terminal'
+import { useSessionStateRaw } from '@slayzone/terminal'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import {
   DndContext,
@@ -94,7 +94,9 @@ function TabContent({
   onEditCancel,
   inputRef
 }: TabContentProps): React.JSX.Element {
-  const terminalState = useTaskTerminalState(taskId)
+  // RAW: a task with no session is "no session", not "starting" — the tab's
+  // starting spinner must only mean an agent really is starting.
+  const terminalState = useSessionStateRaw(`${taskId}:${taskId}`)
   return (
     <div
       className={cn(
@@ -126,6 +128,7 @@ function TabContent({
         progress={progress}
         isDone={isDone}
         needsAttention={needsAttention}
+        alwaysShow
         tooltipSide="bottom"
         size={10}
       />

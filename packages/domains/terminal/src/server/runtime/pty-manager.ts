@@ -97,7 +97,14 @@ export type PtyEventMap = {
   data: [sessionId: string, data: string, seq: number]
   'state-change': [sessionId: string, newState: TerminalState, oldState: TerminalState]
   'title-change': [sessionId: string, title: string]
-  exit: [sessionId: string, exitCode: number | null, errorCode: string | null]
+  /** `exitReason`: lifecycle cause the code cannot carry (`startup-timeout`,
+   *  `computer-restarted`, `spawn-failed`, …) — distinct from the adapter's `errorCode`. */
+  exit: [
+    sessionId: string,
+    exitCode: number | null,
+    errorCode: string | null,
+    exitReason?: string | null
+  ]
   // Fired SYNCHRONOUSLY the instant `createPty` decides to replace a live
   // session at this id (respawn/mode-switch/warm-pool adopt) — strictly
   // BEFORE `killPty` and before the new session is registered. `exit` for the
@@ -1408,6 +1415,10 @@ export async function createPty(
     // Best-effort — on any failure keep null and fall through to a fresh spawn.
     // Honors the ledger's manual-reset cutoff + provenance gate (a deliberate
     // reset resolves to null here, so a reset is never silently undone).
+    // Skipped for a pre-warmed agent: it is claimed only by a task created this
+    // instant (single-use reserved id, fresh start), so the ledger cannot know a
+    // conversation for it, and its own id is adopted below regardless — asking
+    // would only sleep through the null retries.
     let ledgerConversationId: string | null = null
     if (!existingConversationId && conversationResolver) {
       // Resolve the authoritative id from the ledger, RETRYING on null. During
@@ -1888,19 +1899,13 @@ export async function createPty(
       })
     }
     notifySessionChange()
+    // `starting` lasts until the session's FIRST OUTPUT (see onData), not one
+    // tick: an agent can wait for a start slot on its computer and then take
+    // seconds to boot, and the tab shows `starting` for all of it. It used to
+    // flip to `idle` on the next microtask, so a queued agent looked stopped.
+    // Never stuck: a session that prints nothing is killed by the startup
+    // deadline (computer-owned, or the hub's fallback), and its exit → `dead`.
     stateMachine.register(sessionId, 'starting')
-    // node-pty.spawn is synchronous — pid is live by the time we get here.
-    // Flip to 'idle' on next microtask so the brief 'starting' window is
-    // observable for early-exit cases but the UI never gets stuck on
-    // 'starting' for processes that emit no immediate output. Adapter
-    // detection still drives idle→running on first spinner.
-    queueMicrotask(() => {
-      const live = sessions.get(sessionId)
-      if (live && live.state === 'starting') {
-        live.pendingTransitionTrigger = { source: 'startup-settle' }
-        transitionState(sessionId, 'idle')
-      }
-    })
     let firstOutputTs: number | null = null
     /** When the owner confirmed the spawn (round-trip backends) — after any admission wait. */
     let spawnConfirmedTs: number | null = null
@@ -1917,6 +1922,8 @@ export async function createPty(
     let earlyExitWatchdog: NodeJS.Timeout | undefined
     /** Lifecycle cause the backend attached to the exit (`startup-timeout`, a transport outcome). */
     let lastExitReason: string | undefined
+    /** The pty the HUB's own startup deadline killed — its exit is a startup timeout. */
+    let hubStartupKilled: pty.IPty | null = null
 
     const clearStartupTimeout = (): void => {
       startupDeadline?.cancel()
@@ -2018,7 +2025,13 @@ export async function createPty(
         notifySessionChange()
       }, 100)
       ptyEvents.emit('title-change', sessionId, '')
-      ptyEvents.emit('exit', sessionId, exitCode, exitSession?.error?.code ?? null)
+      ptyEvents.emit(
+        'exit',
+        sessionId,
+        exitCode,
+        exitSession?.error?.code ?? null,
+        lastExitReason ?? null
+      )
       const exitWin = getWin()
       if (!exitWin.isDestroyed()) {
         try {
@@ -2075,6 +2088,7 @@ export async function createPty(
           const live = sessions.get(sessionId)
           if (!live || live.pty !== target || firstOutputTs !== null) return
           recordStartupTimeout('hub')
+          hubStartupKilled = target
           try {
             target.kill('SIGKILL')
           } catch {
@@ -2085,6 +2099,7 @@ export async function createPty(
           setTimeout(() => {
             const stillLive = sessions.get(sessionId)
             if (!stillLive || stillLive.pty !== target) return
+            lastExitReason = 'startup-timeout'
             recordDiagnosticEvent({
               level: 'error',
               source: 'pty',
@@ -2163,6 +2178,12 @@ export async function createPty(
           if (firstOutputTs === null) {
             firstOutputTs = Date.now()
             clearStartupTimeout()
+            // Started. Adapter detection below still drives idle → running.
+            const settling = sessions.get(sessionId)
+            if (settling && settling.state === 'starting') {
+              settling.pendingTransitionTrigger = { source: 'startup-settle' }
+              transitionState(sessionId, 'idle')
+            }
             recordDiagnosticEvent({
               level: 'info',
               source: 'pty',
@@ -2494,7 +2515,9 @@ export async function createPty(
           const session = sessions.get(sessionId)
           if (!session || session.pty !== target) return
           // A routed handle carries the lifecycle cause the exit code cannot.
-          lastExitReason = (exit as PtyExit).reason
+          lastExitReason =
+            (exit as PtyExit).reason ??
+            (hubStartupKilled === target ? 'startup-timeout' : undefined)
           // The owner's deadline fired: record it exactly as the hub's own would,
           // then let the ordinary exit path below decide on a recovery shell.
           if (lastExitReason === 'startup-timeout') recordStartupTimeout('computer')
@@ -2766,6 +2789,7 @@ export async function createPty(
             taskId: taskIdFromSessionId(sessionId),
             payload: { reason: 'confirmed_without_pid' }
           })
+          lastExitReason = 'spawn-failed'
           finalizeSessionExit(-1)
         },
         (err: unknown) => {
@@ -2780,6 +2804,7 @@ export async function createPty(
             message: err instanceof Error ? err.message : String(err),
             payload: { reason: 'spawn_refused' }
           })
+          lastExitReason = 'spawn-failed'
           finalizeSessionExit(-1)
         }
       )

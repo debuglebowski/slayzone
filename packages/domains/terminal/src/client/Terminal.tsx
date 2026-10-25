@@ -139,6 +139,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Structured error code from the CLI at exit (e.g. SESSION_NOT_FOUND), carried
   // on `pty:exit`. Drives the error-specific dead overlay (see issue #90).
   const [deadReason, setDeadReason] = useState<string | null>(null)
+  /** Why the session ended, when the exit code can't say (see exit-description.ts). */
+  const [deadExitReason, setDeadExitReason] = useState<string | null>(null)
   const [doctorResults, setDoctorResults] = useState<
     import('@slayzone/terminal/shared').ValidationResult[] | null
   >(null)
@@ -623,7 +625,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
     })
 
-    const unsubExit = subscribeExit(sessionId, (exitCode, reason) => {
+    const unsubExit = subscribeExit(sessionId, (exitCode, reason, exitReason) => {
       // Resume died before any output — stop the overlay so the dead overlay shows.
       if (isResumingRef.current) {
         isResumingRef.current = false
@@ -643,6 +645,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // an error-specific message instead of the generic exit-code line.
       setDeadExitCode(exitCode)
       setDeadReason(reason ?? null)
+      setDeadExitReason(exitReason ?? null)
       if (raw) setDeadCrashOutput(raw)
     })
 
@@ -781,6 +784,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         )
         setPtyState('dead')
         setDeadExitCode(-1)
+        setDeadExitReason('no-response')
       }
     }
     timer = setTimeout(() => void check(), STARTING_WATCHDOG_INTERVAL_MS)
@@ -1166,6 +1170,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDeadExitCode(null)
     setDeadCrashOutput(null)
     setDeadReason(null)
+    setDeadExitReason(null)
     setDoctorResults(null)
     onRetry?.()
   }, [onRetry])
@@ -1177,6 +1182,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDeadExitCode(null)
     setDeadCrashOutput(null)
     setDeadReason(null)
+    setDeadExitReason(null)
     setDoctorResults(null)
     onStartFreshRef.current?.()
   }, [])
@@ -1252,6 +1258,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             providerLabel={providerLabel}
             deadCrashOutput={deadCrashOutput}
             deadExitCode={deadExitCode}
+            deadExitReason={deadExitReason}
             onRetry={onRetry}
             onStartFresh={handleStartFresh}
             onRetryClick={handleRetry}

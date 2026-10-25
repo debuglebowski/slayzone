@@ -191,12 +191,19 @@ export const ptyRouter = router({
     })
   ),
   onExit: publicProcedure.subscription(() =>
-    observable<{ sessionId: string; exitCode: number | null; errorCode: string | null }>((emit) => {
+    observable<{
+      sessionId: string
+      exitCode: number | null
+      errorCode: string | null
+      /** Lifecycle cause (`startup-timeout`, `computer-restarted`, …); null when none. */
+      exitReason: string | null
+    }>((emit) => {
       const handler = (
         sessionId: string,
         exitCode: number | null,
-        errorCode: string | null
-      ): void => emit.next({ sessionId, exitCode, errorCode })
+        errorCode: string | null,
+        exitReason?: string | null
+      ): void => emit.next({ sessionId, exitCode, errorCode, exitReason: exitReason ?? null })
       const ev = getPtyDeps().events
       ev.on('exit', handler)
       return () => ev.off('exit', handler)

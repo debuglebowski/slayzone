@@ -433,6 +433,8 @@ run_test packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
 # Stuck-'starting' watchdog: waits on a session the backend still holds as starting
 # (queued for an agent-start slot) instead of showing it dead.
 run_test packages/domains/terminal/src/client/starting-watchdog.test.ts
+# Dead-session overlay text: the exit reason, not a bare (possibly hub-made) code.
+run_test packages/domains/terminal/src/client/exit-description.test.ts
 # Terminal — CPR suppression at the parser. Guards the modified-F3 regression: a
 # reply and a Shift/Ctrl/Alt+F3 keystroke are byte-identical, so the reply must
 # never be generated rather than filtered afterwards. Uses @xterm/headless.

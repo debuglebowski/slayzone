@@ -58,6 +58,10 @@ export function TerminalProgressDot({
   // (work IS happening) at half speed and reduced opacity, so it reads as
   // "progressing, but nothing needs you" next to a real `running` spinner.
   const isBackground = !attentionWins && state === 'background'
+  // Starting: queued for a start slot on its computer, or booting until its first
+  // output. A slow muted spinner — work is under way, but it isn't the agent
+  // working, so it must not look like `running`.
+  const isStarting = !attentionWins && state === 'starting'
   // Hibernated (idle-closed) sessions show a pause icon instead of a dot.
   const isHibernated = !attentionWins && state === 'hibernated'
 
@@ -100,6 +104,16 @@ export function TerminalProgressDot({
             className={cn(
               'relative z-10 shrink-0 fill-current',
               stateStyle?.textColor ?? 'text-violet-500'
+            )}
+            aria-label={stateLabel}
+          />
+        ) : isStarting ? (
+          <Loader2
+            size={innerSize}
+            strokeWidth={2.75}
+            className={cn(
+              'relative z-10 shrink-0 animate-spin [animation-duration:2s]',
+              'text-muted-foreground'
             )}
             aria-label={stateLabel}
           />

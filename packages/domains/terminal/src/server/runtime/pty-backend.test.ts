@@ -22,7 +22,8 @@ import {
   hasPty,
   prioritizePty,
   setDatabase,
-  ptyEvents
+  ptyEvents,
+  getState
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
 
@@ -655,6 +656,44 @@ await test('prioritizePty forwards to the backend for a live session only', asyn
   prioritizePty('unknown:unknown')
   expect(JSON.stringify(asked) === JSON.stringify([sid]), `asked=${JSON.stringify(asked)}`)
   killPty(sid)
+  setPtyBackend(null)
+})
+
+// ── `starting` lasts until the agent's first output ─────────────────────────
+//
+// It used to flip to `idle` one microtask after spawn, so a tab whose agent was
+// queued for a start slot (or still booting) looked exactly like a stopped one.
+// The startup deadline bounds it: a session that never prints is killed.
+
+await test('a session stays starting until its first output, then settles to idle', async () => {
+  const handle = makeFakeHandle({
+    whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+  })
+  setPtyBackend({ spawn: () => handle })
+  const sid = 'startingUntilOutput:startingUntilOutput'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    computerId: 'computer-1'
+  })
+  await new Promise((r) => setTimeout(r, 300))
+  expect(
+    getState(sid) === 'starting',
+    `before any output: expected starting, got ${String(getState(sid))}`
+  )
+
+  handle.emitData('$ ')
+  await new Promise((r) => setTimeout(r, 300))
+  expect(
+    getState(sid) === 'idle',
+    `after first output: expected idle, got ${String(getState(sid))}`
+  )
+
+  killPty(sid)
+  handle.emitExit(-2)
   setPtyBackend(null)
 })
 

@@ -31,7 +31,9 @@ export interface PtyState {
 }
 
 type DataCallback = (data: string, seq: number) => void
-type ExitCallback = (exitCode: number, reason?: string | null) => void
+/** `reason`: the adapter's error code (e.g. SESSION_NOT_FOUND). `exitReason`: the
+ *  lifecycle cause the code cannot carry (`startup-timeout`, `computer-restarted`, …). */
+type ExitCallback = (exitCode: number, reason?: string | null, exitReason?: string | null) => void
 type StateChangeCallback = (newState: TerminalState, oldState: TerminalState) => void
 type PromptCallback = (prompt: PromptInfo) => void
 type SessionDetectedCallback = (sessionId: string) => void
@@ -137,7 +139,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
 
   useSubscription(
     trpc.pty.onExit.subscriptionOptions(undefined, {
-      onData: async ({ sessionId, exitCode, errorCode }) => {
+      onData: async ({ sessionId, exitCode, errorCode, exitReason }) => {
         const state = statesRef.current.get(sessionId)
 
         if (state) {
@@ -162,7 +164,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
         // which applies its own pty:exit handler + reconcile. `errorCode` is the
         // structured exit reason (the old positional `reason` arg).
         const subs = exitSubsRef.current.get(sessionId)
-        if (subs) subs.forEach((cb) => cb(exitCode ?? 0, errorCode ?? null))
+        if (subs) subs.forEach((cb) => cb(exitCode ?? 0, errorCode ?? null, exitReason ?? null))
 
         // Free xterm.js instance + this session's event-stream bookkeeping.
         disposeTerminal(sessionId)
