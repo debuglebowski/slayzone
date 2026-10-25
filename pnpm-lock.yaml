@@ -13,9 +13,9 @@ overrides:
   prosemirror-model: ^1.25.12
 
 patchedDependencies:
-  '@convex-dev/auth@0.0.90':
+  '@convex-dev/auth@0.0.95':
     hash: 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
-    path: patches/@convex-dev__auth@0.0.90.patch
+    path: patches/@convex-dev__auth@0.0.95.patch
   '@radix-ui/react-menu@2.1.24':
     hash: 6a6dc122db538601c36071f3299893ad2e0fc741df2ea5dae92787f151f68b71
     path: patches/@radix-ui__react-menu@2.1.24.patch
@@ -28,14 +28,14 @@ importers:
   .:
     devDependencies:
       '@auth/core':
-        specifier: ^0.37.4
-        version: 0.37.4
+        specifier: ^0.41.3
+        version: 0.41.3
       '@biomejs/biome':
         specifier: ^2.4.15
         version: 2.4.15
       '@convex-dev/auth':
-        specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        specifier: ^0.0.95
+        version: 0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@slayzone/tsgo':
         specifier: workspace:*
         version: link:packages/shared/tsgo
@@ -76,8 +76,8 @@ importers:
   packages/apps/app:
     dependencies:
       '@convex-dev/auth':
-        specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        specifier: ^0.0.95
+        version: 0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -1244,8 +1244,8 @@ importers:
   packages/domains/leaderboard:
     dependencies:
       '@convex-dev/auth':
-        specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        specifier: ^0.0.95
+        version: 0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -2877,12 +2877,12 @@ packages:
     resolution: {integrity: sha512-C1TLn5sPJr0x4vk56piHWKbnqlEB8BKyte5Y45V02U+D7BGO5eMqZDH5aPjnkXQWJggvmsTXxH03QMZ9NgWLzQ==}
     engines: {node: 18.20.8 || ^20.3.0 || >=22.0.0}
 
-  '@auth/core@0.37.4':
-    resolution: {integrity: sha512-HOXJwXWXQRhbBDHlMU0K/6FT1v+wjtzdKhsNg0ZN7/gne6XPsIrjZ4daMcFnbq0Z/vsAbYBinQhhua0d77v7qw==}
+  '@auth/core@0.41.3':
+    resolution: {integrity: sha512-sJ3JMHHkXMD3aOjopv7mOBTO1Ocw4b0fAEXJBz6k7YHLpYQI6C40jCUPc5fNvUKxXRXNE1/sRISA15UrwWJBTw==}
     peerDependencies:
       '@simplewebauthn/browser': ^9.0.1
       '@simplewebauthn/server': ^9.0.2
-      nodemailer: ^6.8.0
+      nodemailer: ^7.0.7 || ^8.0.5
     peerDependenciesMeta:
       '@simplewebauthn/browser':
         optional: true
@@ -3340,11 +3340,11 @@ packages:
   '@codemirror/view@6.43.13':
     resolution: {integrity: sha512-sihaFrUzAsYBQsL9J2t69y8nfMQGwcYmggAZsk+kjPbjYZMyuf2hU8tUNTZ+P+isb6XRr8JE22TZlJxBoVdH1A==}
 
-  '@convex-dev/auth@0.0.90':
-    resolution: {integrity: sha512-aqw88EB042HvnaF4wcf/f/wTocmT2Bus2VDQRuV79cM0+8kORM0ICK/ByZ6XsHgQ9qr6TmidNbXm6QAgndrdpQ==}
+  '@convex-dev/auth@0.0.95':
+    resolution: {integrity: sha512-LgUujfXRm7FcdYpTozjn0MHdVFxaxvZdWVFOQEkrL4AkY+k/8E8B4EFjJOG9S8Pq6QWfLJ8MCObeMJg0hAfKzA==}
     hasBin: true
     peerDependencies:
-      '@auth/core': ^0.37.0
+      '@auth/core': ^0.41.1
       convex: ^1.17.0
       react: ^18.2.0 || ^19.0.0-0
     peerDependenciesMeta:
@@ -4875,12 +4875,15 @@ packages:
 
   '@oslojs/asn1@1.0.0':
     resolution: {integrity: sha512-zw/wn0sj0j0QKbIXfIlnEcTviaCzYOY3V5rAyjR6YtOByFtJiT574+8p9Wlach0lZH9fddD4yb9laEAIl4vXQA==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   '@oslojs/binary@1.0.0':
     resolution: {integrity: sha512-9RCU6OwXU6p67H4NODbuxv2S3eenuQ4/WFLrsq+K/k682xrznH5EVWA7N4VFk9VYVcbFtKqur5YQQZc0ySGhsQ==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   '@oslojs/crypto@1.0.1':
     resolution: {integrity: sha512-7n08G8nWjAr/Yu3vu9zzrd0L9XnrJfpMioQcvCMxBIiF5orECHe5/3J0jmXRVvgfqMm/+4oxlQ+Sq39COYLcNQ==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   '@oslojs/encoding@1.1.0':
     resolution: {integrity: sha512-70wQhgYmndg4GCPxPPxPGevRKqTIJ2Nh4OkiMWmDAVYsTQ+Ta7Sq+rPevXyXGdzr30/qZBnyOalCszoMxlyldQ==}
@@ -11943,10 +11946,10 @@ snapshots:
       is-docker: 4.0.0
       package-manager-detector: 1.6.0
 
-  '@auth/core@0.37.4':
+  '@auth/core@0.41.3':
     dependencies:
       '@panva/hkdf': 1.2.1
-      jose: 5.10.0
+      jose: 6.2.12
       oauth4webapi: 3.8.5
       preact: 10.24.3
       preact-render-to-string: 6.5.11(preact@10.24.3)
@@ -12481,9 +12484,9 @@ snapshots:
       style-mod: 4.1.3
       w3c-keyname: 2.2.8
 
-  '@convex-dev/auth@0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)':
+  '@convex-dev/auth@0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)':
     dependencies:
-      '@auth/core': 0.37.4
+      '@auth/core': 0.41.3
       '@oslojs/crypto': 1.0.1
       '@oslojs/encoding': 1.1.0
       convex: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)

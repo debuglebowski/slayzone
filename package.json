@@ -19,7 +19,7 @@
       "prosemirror-model": "^1.25.12"
     },
     "patchedDependencies": {
-      "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
+      "@convex-dev/auth@0.0.95": "patches/@convex-dev__auth@0.0.95.patch",
       "posix@4.2.0": "patches/posix@4.2.0.patch",
       "@radix-ui/react-menu@2.1.24": "patches/@radix-ui__react-menu@2.1.24.patch"
     }
@@ -76,9 +76,9 @@
     "dev:website": "pnpm --filter @slayzone/website dev"
   },
   "devDependencies": {
-    "@auth/core": "^0.37.4",
+    "@auth/core": "^0.41.3",
     "@biomejs/biome": "^2.4.15",
-    "@convex-dev/auth": "^0.0.90",
+    "@convex-dev/auth": "^0.0.95",
     "@slayzone/tsgo": "workspace:*",
     "@types/node": "^22.19.7",
     "changelogen": "^0.6.2",

@@ -159,13 +159,6 @@
       ]
     },
     {
-      "packages": ["@auth/core"],
-      "reason": "Convex auth (convex/auth.ts) uses the GitHub OAuth provider only: no email provider, no getToken() call, a single OAuth provider.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-7rqj-j65f-68wh", "GHSA-x445-f3h2-j279", "GHSA-xmf8-cvqr-rfgj"]
-    },
-    {
       "packages": [
         "vite",
         "vitest",
