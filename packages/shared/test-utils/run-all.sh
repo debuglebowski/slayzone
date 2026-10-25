@@ -729,6 +729,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
   packages/shared/transport/src/server/trpc.test.ts \
+  packages/shared/transport/src/server/trpc-transformer.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 
