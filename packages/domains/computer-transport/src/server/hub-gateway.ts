@@ -55,7 +55,7 @@ import {
   ComputerToHubMethods
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
-import { wsDataToText } from '../shared/ws-data'
+import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
 import { auditedHubCall } from './hub-audit'
 
 export interface ComputerDescriptor {
@@ -272,6 +272,20 @@ const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000
 // a high-latency link — and every lapse is a strike against its address.
 const DEFAULT_AUTH_TIMEOUT_MS = 10_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+
+/**
+ * Largest frame a socket may send before enroll/hello succeeds. A real enroll or hello
+ * is well under 4 KiB (a join token or api key, a name, a few capability tags).
+ *
+ * Why a cap: the socket is anyone's until then, ws accepts a 100 MiB frame by default,
+ * and a frame is JSON-parsed then zod-validated. zod <= 4.6.5 allocates one issue per
+ * failing array element (GHSA-mrhx-c7xc-m3w5), measured at ~180 bytes of heap per byte
+ * of `capabilities: [0, 0, …]`, so a 100 MiB enroll is many GiB: an out-of-memory hub
+ * with no credential. 64 KiB bounds that to ~12 MiB per frame. Authenticated computers
+ * are not capped (pty output, file reads and command output ride their frames). Keep it
+ * after the zod bump: an unauthenticated peer has no reason to send more.
+ */
+export const PRE_AUTH_FRAME_MAX_BYTES = 64 * 1024
 
 /**
  * Wall-clock lateness above which a watchdog fire is attributed to THIS PROCESS
@@ -831,6 +845,12 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     }
 
     ws.on('message', (data) => {
+      if (!conn.descriptor && wsDataByteLength(data) > PRE_AUTH_FRAME_MAX_BYTES) {
+        // Dropped unparsed: see PRE_AUTH_FRAME_MAX_BYTES. 1009 = message too big.
+        protocolError(conn, `unauthenticated frame over ${PRE_AUTH_FRAME_MAX_BYTES} bytes`)
+        ws.close(1009, 'frame too large before authentication')
+        return
+      }
       for (const line of wsDataToText(data).split('\n')) {
         if (line.trim().length > 0) conn.rpc.handleLine(line)
       }

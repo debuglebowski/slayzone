@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { motion, LayoutGroup } from 'framer-motion'
+import { motion, LayoutGroup } from 'motion/react'
 import { Home, Plus, X } from 'lucide-react'
 import { cn, PriorityIcon } from '@slayzone/ui'
 

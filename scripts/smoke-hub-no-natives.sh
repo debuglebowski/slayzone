@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # smoke-hub-no-natives.sh <hub.tgz> — the packed @slayzone/hub installs and boots WITHOUT
-# its optional native dependencies: node-pty, bufferutil, utf-8-validate (T-30).
+# its optional native dependencies: node-pty, bufferutil (T-30).
 #
 # That is what `npm install @slayzone/hub` leaves on a machine with no C/C++ toolchain:
 # the optional builds fail and npm drops them. `--omit=optional` gives the same tree on
@@ -36,7 +36,7 @@ fail() {
   exit 1
 }
 
-echo "==> Smoke: hub tarball without its optional natives (node-pty, bufferutil, utf-8-validate)"
+echo "==> Smoke: hub tarball without its optional natives (node-pty, bufferutil)"
 
 # --- install -----------------------------------------------------------------------
 ( cd "$DIR" && npm init -y >/dev/null 2>&1 \
@@ -49,14 +49,14 @@ node -e '
   const deps = Object.keys(p.dependencies || {}).sort().join(",");
   const opt = Object.keys(p.optionalDependencies || {}).sort().join(",");
   if (deps !== "better-sqlite3") throw new Error("dependencies must be better-sqlite3 only, got: " + deps);
-  if (opt !== "bufferutil,node-pty,utf-8-validate")
-    throw new Error("optionalDependencies must be node-pty, bufferutil, utf-8-validate, got: " + opt);
+  if (opt !== "bufferutil,node-pty")
+    throw new Error("optionalDependencies must be node-pty, bufferutil, got: " + opt);
 ' "$PKG" 2>"$DIR/manifest.err" || fail "manifest: $(cat "$DIR/manifest.err")"
-for n in node-pty bufferutil utf-8-validate; do
+for n in node-pty bufferutil; do
   [ ! -e "$DIR/node_modules/$n" ] || fail "$n is installed despite --omit=optional"
 done
 [ -d "$DIR/node_modules/better-sqlite3" ] || fail "better-sqlite3 (required) is not installed"
-echo "   ✓ installed with better-sqlite3 only (manifest: 1 required, 3 optional natives)"
+echo "   ✓ installed with better-sqlite3 only (manifest: 1 required, 2 optional natives)"
 
 # --- boot --------------------------------------------------------------------------
 # Scrub inherited SlayZone + module-resolution env: run from inside a SlayZone session,

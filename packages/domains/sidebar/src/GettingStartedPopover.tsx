@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Check, CheckCheck } from 'lucide-react'
-import { FaRegHandshake } from 'react-icons/fa'
+import { Check, CheckCheck, Handshake } from 'lucide-react'
 import {
   Tooltip,
   TooltipTrigger,
@@ -38,7 +37,7 @@ export function GettingStartedPopover({
                 onboardingChecklist.dismissed && 'opacity-80'
               )}
             >
-              <FaRegHandshake className="size-5" />
+              <Handshake className="size-5" />
               {onboardingChecklist.hasRemaining && !onboardingChecklist.dismissed && (
                 <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
                   {onboardingChecklist.remainingCount}

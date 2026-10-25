@@ -1,9 +1,7 @@
-import { ElectronAPI as ElectronToolkitAPI } from '@electron-toolkit/preload'
 import type { ElectronAPI } from '@slayzone/types'
 
 declare global {
   interface Window {
-    electron: ElectronToolkitAPI
     /**
      * Intentional bootstrap-only preload surface. Do not extend for domain
      * features; use tRPC over WebSocket after renderer boot.

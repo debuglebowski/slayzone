@@ -125,7 +125,7 @@ test.describe('Terminal clickable URLs', () => {
   }
 
   /** Clear the mock call log */
-  async function clearExternalCalls(electronApp: import('playwright').ElectronApplication) {
+  async function clearExternalCalls(electronApp: import('@playwright/test').ElectronApplication) {
     await electronApp.evaluate(() => {
       ;(globalThis as Record<string, unknown>).__urlTestCalls = []
     })

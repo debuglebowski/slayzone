@@ -20,7 +20,6 @@
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
-    "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
     "@slayzone/integrations": "workspace:*",
@@ -38,11 +37,10 @@
     "@slayzone/worktrees": "workspace:*",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
-    "better-sqlite3": "^12.8.0",
+    "better-sqlite3": "^12.11.1",
     "bufferutil": "^4.1.0",
     "node-pty": "^1.1.0",
     "superjson": "^2.2.1",
-    "utf-8-validate": "^6.0.6",
     "ws": "^8.21.3"
   },
   "devDependencies": {

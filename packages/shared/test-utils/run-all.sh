@@ -67,6 +67,9 @@ run_test_electron_strict_loader packages/domains/task/src/server/ops/exec-bounda
 # Artifact export routes after the inversion: served by the HUB against ctx.db,
 # reaching the desktop over AppDeps for the offscreen render alone.
 run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
+# GHSA-27r3-jxmh-p828: compressed request bodies are refused 415 on /mcp and /api/*
+# (one compressed frame + trailing bytes crashed the process); one way to build a parser.
+run_test_electron_strict_loader packages/shared/transport/src/server/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_test_electron_strict_loader packages/shared/transport/src/server/path-ids.test.ts

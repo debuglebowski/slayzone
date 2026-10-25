@@ -48,7 +48,15 @@ function buildOptions(commit, builtAt) {
     external: ['better-sqlite3', 'bufferutil', 'utf-8-validate', 'node-pty'],
     // Fails the build if an external would not resolve where the hub runs (packaged
     // app.asar.unpacked, or `npm i @slayzone/hub`). See build-guards.
-    plugins: [runtimeImportsEsbuildPlugin({ bundleName: 'hub', packageJson: pkg })],
+    // utf-8-validate stays undeclared on purpose: ws requires it only when
+    // buffer.isUtf8 is missing (Node < 18.14), and the hub needs Node >= 24.
+    plugins: [
+      runtimeImportsEsbuildPlugin({
+        bundleName: 'hub',
+        packageJson: pkg,
+        optionalExternals: ['utf-8-validate']
+      })
+    ],
     // Shebang: this bundle is ALSO the `slayzone-hub` bin of the published
     // @slayzone/hub package, so npm/npx exec it directly (no `node` prefix).
     // Without it the kernel has no interpreter and /bin/sh runs the JS as a

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import { Dialog, DialogContent, Button, cn, useVisibleInterval } from '@slayzone/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { SceneProjects } from './scenes/SceneProjects'

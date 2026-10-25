@@ -64,7 +64,7 @@ test.describe('CLI: PTY start + auto-spawn on submit', () => {
     })
 
   const ptyExists = async (
-    electronApp: import('playwright').ElectronApplication,
+    electronApp: import('@playwright/test').ElectronApplication,
     sessionId: string
   ) =>
     electronApp.evaluate(

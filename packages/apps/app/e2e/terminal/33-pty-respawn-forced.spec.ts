@@ -13,7 +13,7 @@ import { getMainSessionId, openTaskTerminal, waitForPtySession } from '../fixtur
 // Renderer-side `fetch('http://127.0.0.1:...')` is blocked by the CSP in dev
 // mode, so POST via Node http from the main-process eval context instead.
 function postRespawn(
-  electronApp: import('playwright').ElectronApplication,
+  electronApp: import('@playwright/test').ElectronApplication,
   port: number,
   body: Record<string, unknown>
 ) {

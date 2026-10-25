@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Terminal } from 'lucide-react'
 import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
 import { useTRPCClient } from '@slayzone/transport/client'

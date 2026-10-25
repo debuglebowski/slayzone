@@ -17,7 +17,6 @@
     "@slayzone/build-guards": "workspace:*",
     "@types/archiver": "^7.0.0",
     "@types/node": "^22.19.1",
-    "esbuild": "^0.25.0",
-    "typescript": "^5.9.3"
+    "esbuild": "^0.25.0"
   }
 }

@@ -26,7 +26,7 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-type ElectronApp = import('playwright').ElectronApplication
+type ElectronApp = import('@playwright/test').ElectronApplication
 type Page = import('@playwright/test').Page
 
 /** Snapshot all BrowserWindow IDs. */

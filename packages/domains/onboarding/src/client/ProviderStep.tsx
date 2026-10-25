@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Button, cn } from '@slayzone/ui'
 import { Check, SquareTerminal } from 'lucide-react'
 import { PROVIDERS } from './onboardingConstants'

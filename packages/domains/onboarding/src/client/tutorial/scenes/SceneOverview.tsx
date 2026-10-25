@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Home, Settings, HelpCircle, Map, Keyboard, Plus, X } from 'lucide-react'
 
 const PROJECTS = [

@@ -72,9 +72,6 @@ async function installInstrumentation(page: Page): Promise<void> {
       __slayzone_perf_installed__?: boolean
       __slayzone_perf_longTasks__?: Array<{ startTime: number; duration: number }>
       __slayzone_perf_ipc__?: Map<string, { count: number; totalMs: number; maxMs: number }>
-      electron?: {
-        ipcRenderer?: { invoke?: (channel: string, ...args: unknown[]) => Promise<unknown> }
-      }
     }
     if (w.__slayzone_perf_installed__) return
     w.__slayzone_perf_installed__ = true
@@ -102,19 +99,6 @@ async function installInstrumentation(page: Page): Promise<void> {
       existing.totalMs += elapsedMs
       if (elapsedMs > existing.maxMs) existing.maxMs = elapsedMs
       ipcStats.set(channel, existing)
-    }
-
-    // Wrap legacy window.electron.ipcRenderer.invoke if present
-    const legacyOriginal = w.electron?.ipcRenderer?.invoke
-    if (legacyOriginal && w.electron?.ipcRenderer) {
-      w.electron.ipcRenderer.invoke = async function wrapped(channel: string, ...args: unknown[]) {
-        const start = performance.now()
-        try {
-          return await legacyOriginal.call(this, channel, ...args)
-        } finally {
-          record(`electron.ipcRenderer.invoke:${channel}`, performance.now() - start)
-        }
-      }
     }
 
     // Recursively wrap contextBridge-exposed functions so preload calls

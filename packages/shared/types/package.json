@@ -31,8 +31,5 @@
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.3"
   }
 }

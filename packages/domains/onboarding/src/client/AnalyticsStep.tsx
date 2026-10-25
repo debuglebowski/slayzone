@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Button } from '@slayzone/ui'
 import { BarChart3 } from 'lucide-react'
 import { TRACKED_EVENTS, NOT_TRACKED } from './onboardingConstants'
