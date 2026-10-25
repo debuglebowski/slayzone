@@ -15,7 +15,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.103.2",
     "@posthog/react": "^1.11.1",
-    "posthog-js": "^1"
+    "posthog-js": "^1.434.13"
   },
   "peerDependencies": {
     "react": "^19.0.0"

@@ -20,6 +20,7 @@
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
