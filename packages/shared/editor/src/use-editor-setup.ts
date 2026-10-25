@@ -12,6 +12,7 @@ import { listItemMovePlugin } from './milkdown-list-move'
 import { escapeBlurPlugin } from './milkdown-escape-blur'
 import { taskListPlugin } from './milkdown-task-list'
 import { htmlRenderPlugin } from './milkdown-html-render'
+import { createLinkClickPlugin, type LinkOpenTarget } from './milkdown-link-click'
 import { mermaidRenderPlugin } from './milkdown-mermaid-render'
 import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
 import {
@@ -45,6 +46,7 @@ interface UseEditorSetupArgs {
   onSave?: () => void
   htmlResolveSrc?: (src: string) => string
   htmlOnLinkClick?: (resolvedHref: string) => void
+  onOpenLink?: (href: string, target: LinkOpenTarget) => void
   onArtifactClick?: (artifactId: string) => void
   artifacts?: ArtifactPickerItem[]
   onSearchMatchCountChange?: (count: number) => void
@@ -80,6 +82,7 @@ export function useEditorSetup({
   onSave,
   htmlResolveSrc,
   htmlOnLinkClick,
+  onOpenLink,
   onArtifactClick,
   artifacts,
   onSearchMatchCountChange,
@@ -124,6 +127,10 @@ export function useEditorSetup({
   const htmlOnLinkClickRef = useRef(htmlOnLinkClick)
   useEffect(() => {
     htmlOnLinkClickRef.current = htmlOnLinkClick
+  })
+  const onOpenLinkRef = useRef(onOpenLink)
+  useEffect(() => {
+    onOpenLinkRef.current = onOpenLink
   })
 
   useEffect(() => {
@@ -186,6 +193,10 @@ export function useEditorSetup({
       (state) => setMentionState(state)
     )
     insertArtifactLinkRef.current = artifactPlugins.insertArtifactLink
+
+    const linkClickPlugin = createLinkClickPlugin((href, target) =>
+      onOpenLinkRef.current?.(href, target)
+    )
 
     const searchPlugin = createSearchHighlightPlugin({
       onMatchCountChange: (n) => onSearchMatchCountChangeRef.current?.(n)
@@ -263,6 +274,7 @@ export function useEditorSetup({
       .use(blurHandlerPlugin)
       .use(artifactPlugins.artifactLinkDecoPlugin)
       .use(artifactPlugins.artifactMentionPlugin)
+      .use(linkClickPlugin)
       .use(searchPlugin)
       .use(imagePastePlugin)
 

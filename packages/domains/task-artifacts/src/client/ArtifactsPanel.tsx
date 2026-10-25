@@ -119,7 +119,7 @@ function startSidebarResize(
 
 export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelProps>(
   function ArtifactsPanel(
-    { taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange },
+    { taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange, onOpenUrl },
     ref
   ) {
     const trpc = useTRPC()
@@ -1168,6 +1168,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   searchMatchCase={findMatchCase}
                   searchRegex={findUseRegex}
                   onSearchMatchCountChange={setFindMatchCount}
+                  onOpenUrl={onOpenUrl}
                 />
               </>
             ) : (

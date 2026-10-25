@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, app, screen, webContents } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
+import { attachPdfViewerLinkBridge } from './pdf-viewer-link-bridge'
 
 interface OwnershipKey {
   taskId: string
@@ -130,6 +131,7 @@ function createSecondaryTaskWindow(taskId: string): BrowserWindow {
     !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
       ? `${process.env['ELECTRON_RENDERER_URL']}?${params.toString()}`
       : `file://${join(__dirname, '../renderer/index.html')}?${params.toString()}`
+  attachPdfViewerLinkBridge(win.webContents)
   win.loadURL(url)
   const wcId = win.webContents.id
   taskWindows.set(wcId, { window: win, taskId })

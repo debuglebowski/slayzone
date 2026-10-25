@@ -13,6 +13,12 @@ export {
 } from './use-artifact-upload'
 export { taskListPlugin } from './milkdown-task-list'
 export { htmlRenderPlugin } from './milkdown-html-render'
+export {
+  type LinkOpenTarget,
+  resolveLinkClickTarget,
+  resolveReadOnlyLinkClickTarget
+} from './milkdown-link-click'
+export { usePdfViewerLinks } from './use-pdf-viewer-links'
 export { mermaidRenderPlugin } from './milkdown-mermaid-render'
 export {
   remarkFrontmatterPlugin,

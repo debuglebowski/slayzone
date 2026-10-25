@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { getThemeEditorColors } from '@slayzone/ui'
-import { RichTextEditor, getEditorViewDOM, type Editor as MilkdownEditor } from '@slayzone/editor'
+import {
+  RichTextEditor,
+  getEditorViewDOM,
+  type Editor as MilkdownEditor,
+  type LinkOpenTarget
+} from '@slayzone/editor'
 import { toSlzFileUrl, SLZ_FILE_PREFIX } from '@slayzone/platform/slz-file-url'
 import { MARKDOWN_FILE_TEXT_EXTENSIONS, posixDirname, posixResolve } from './FileEditorView.utils'
 
@@ -18,6 +23,8 @@ interface MarkdownFilePaneProps {
   onChange: (content: string) => void
   onSave: () => void
   onOpenFile: (filePath: string) => void
+  /** ⌘/Ctrl-clicked markdown links. */
+  onOpenLink: (href: string, target: LinkOpenTarget) => void
   themeColors: ReturnType<typeof getThemeEditorColors>
   readability: 'compact' | 'normal'
   width: 'narrow' | 'wide'
@@ -32,6 +39,7 @@ export function MarkdownFilePane({
   onChange,
   onSave,
   onOpenFile,
+  onOpenLink,
   themeColors,
   readability,
   width,
@@ -120,6 +128,7 @@ export function MarkdownFilePane({
       frontmatter
       htmlResolveSrc={resolveSrc}
       htmlOnLinkClick={handleLinkClick}
+      onOpenLink={onOpenLink}
     />
   )
 }

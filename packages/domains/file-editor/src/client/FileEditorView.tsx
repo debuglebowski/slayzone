@@ -29,8 +29,10 @@ import {
   getChromeStyleOverrides,
   getThemeEditorColors,
   useAppearance,
+  useStableCallback,
   safeClipboardWriteText
 } from '@slayzone/ui'
+import { usePdfViewerLinks, type LinkOpenTarget } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { useTheme } from '@slayzone/settings/client'
@@ -75,6 +77,8 @@ interface FileEditorViewProps {
   target?: WorkspaceTarget
   initialEditorState?: EditorOpenFilesState | null
   onEditorStateChange?: (state: EditorOpenFilesState) => void
+  /** ⌘-clicked links (markdown, PDF): open in the task's in-app browser. Absent → external. */
+  onOpenUrl?: (url: string) => void
 }
 
 /**
@@ -95,12 +99,22 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
 )
 
 const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
-  function FileEditorViewBody({ projectPath, initialEditorState, onEditorStateChange }, ref) {
+  function FileEditorViewBody(
+    { projectPath, initialEditorState, onEditorStateChange, onOpenUrl },
+    ref
+  ) {
     const trpc = useTRPC()
     // mutateAsync is identity-stable across renders (the mutation object is not).
     const { mutateAsync: showInFinder } = useMutation(
       trpc.fileEditor.showInFinder.mutationOptions()
     )
+    const { mutateAsync: openExternal } = useMutation(trpc.app.shell.openExternal.mutationOptions())
+    const handleOpenLink = useStableCallback((href: string, target: LinkOpenTarget) => {
+      if (target === 'in-app-browser' && onOpenUrl) onOpenUrl(href)
+      else void openExternal({ url: href })
+    })
+    const pdfFrameRef = useRef<HTMLIFrameElement>(null)
+    usePdfViewerLinks(pdfFrameRef, handleOpenLink)
     const {
       openFiles,
       activeFile,
@@ -493,6 +507,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
             </div>
           ) : activeFile && isPdf ? (
             <iframe
+              ref={pdfFrameRef}
               src={toSlzFileUrl(
                 `${projectPath}/${activeFile.path}`,
                 fileVersions.get(activeFile.path)
@@ -528,6 +543,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
                     onChange={(content) => updateContent(activeFile.path, content)}
                     onSave={() => saveFile(activeFile.path)}
                     onOpenFile={openFile}
+                    onOpenLink={handleOpenLink}
                     themeColors={markdownThemeColors}
                     readability={notesReadability}
                     width={notesWidth}
@@ -537,6 +553,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
                 ) : isMarkdown && viewMode === 'split' ? (
                   <MarkdownSplitView
                     key={activeFile.path}
+                    onOpenLink={handleOpenLink}
                     filePath={activeFile.path}
                     content={activeFile.content}
                     onChange={(content) => updateContent(activeFile.path, content)}

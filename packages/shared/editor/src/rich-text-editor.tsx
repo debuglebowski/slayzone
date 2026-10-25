@@ -44,6 +44,7 @@ export function RichTextEditor({
   frontmatter,
   htmlResolveSrc,
   htmlOnLinkClick,
+  onOpenLink,
   onSave
 }: RichTextEditorProps) {
   const {
@@ -67,6 +68,7 @@ export function RichTextEditor({
     onSave,
     htmlResolveSrc,
     htmlOnLinkClick,
+    onOpenLink,
     onArtifactClick,
     artifacts,
     onSearchMatchCountChange,

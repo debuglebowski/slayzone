@@ -4,7 +4,8 @@ import {
   RichTextEditor,
   type Editor,
   type EditorThemeColors,
-  type ArtifactPickerItem
+  type ArtifactPickerItem,
+  type LinkOpenTarget
 } from '@slayzone/editor'
 import { editorViewCtx } from '@milkdown/core'
 
@@ -24,6 +25,7 @@ interface DescriptionDialogProps {
   artifacts?: ArtifactPickerItem[]
   onArtifactClick?: (artifactId: string) => void
   onUploadImages?: (files: File[]) => Promise<Array<{ id: string; title: string }>>
+  onOpenLink?: (href: string, target: LinkOpenTarget) => void
 }
 
 function getWordCount(editor: Editor | null): number {
@@ -54,7 +56,8 @@ export function DescriptionDialog({
   themeColors,
   artifacts,
   onArtifactClick,
-  onUploadImages
+  onUploadImages,
+  onOpenLink
 }: DescriptionDialogProps) {
   const editorRef = useRef<Editor | null>(null)
   const [wordCount, setWordCount] = useState(0)
@@ -119,6 +122,7 @@ export function DescriptionDialog({
           artifacts={artifacts}
           onArtifactClick={onArtifactClick}
           onUploadImages={onUploadImages}
+          onOpenLink={onOpenLink}
         />
       </DialogContent>
     </Dialog>

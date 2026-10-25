@@ -769,6 +769,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/worktrees/src/client/highlight.test.ts \
   packages/domains/worktrees/src/client/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \
+  packages/shared/editor/src/milkdown-link-click.test.ts \
   packages/shared/editor/src/milkdown-task-list.test.ts \
   packages/shared/suspense/src/suspense-cache.test.tsx \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \

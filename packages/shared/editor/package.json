@@ -23,6 +23,7 @@
     "@milkdown/prose": "^7.22.2",
     "@milkdown/utils": "^7.22.2",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "dompurify": "^3.4.16",

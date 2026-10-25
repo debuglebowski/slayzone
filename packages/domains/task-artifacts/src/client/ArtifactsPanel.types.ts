@@ -11,6 +11,8 @@ export interface ArtifactsPanelProps {
   isResizing?: boolean
   initialActiveArtifactId?: string | null
   onActiveArtifactIdChange?: (id: string | null) => void
+  /** Open a URL in the task's in-app browser (⌘-clicked links). */
+  onOpenUrl?: (url: string) => void
 }
 
 export type ArtifactViewMode = 'preview' | 'split' | 'raw'

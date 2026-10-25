@@ -9,7 +9,12 @@ import {
 } from 'react'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { Button, useStableCallback, useVisibleInterval } from '@slayzone/ui'
-import { RichTextEditor } from '@slayzone/editor'
+import {
+  RichTextEditor,
+  resolveReadOnlyLinkClickTarget,
+  usePdfViewerLinks,
+  type LinkOpenTarget
+} from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact } from '@slayzone/task/shared'
@@ -68,13 +73,17 @@ function ImageViewer({
 function PdfViewer({
   artifactId,
   contentVersion,
-  getFilePath
+  getFilePath,
+  onOpenLink
 }: {
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
+  onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   const [src, setSrc] = useState<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  usePdfViewerLinks(iframeRef, onOpenLink)
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
@@ -89,7 +98,7 @@ function PdfViewer({
       </div>
     )
 
-  return <iframe src={src} className="flex-1 w-full" title="PDF preview" />
+  return <iframe ref={iframeRef} src={src} className="flex-1 w-full" title="PDF preview" />
 }
 
 // --- Zoom ---
@@ -143,7 +152,8 @@ export function ArtifactContentEditor({
   searchActiveIndex,
   searchMatchCase,
   searchRegex,
-  onSearchMatchCountChange
+  onSearchMatchCountChange,
+  onOpenUrl
 }: {
   artifact: TaskArtifact
   viewMode: ArtifactViewMode
@@ -159,6 +169,8 @@ export function ArtifactContentEditor({
   searchMatchCase: boolean
   searchRegex: boolean
   onSearchMatchCountChange: (count: number) => void
+  /** ⌘-clicked links (PDF): open in the task's in-app browser. */
+  onOpenUrl?: (url: string) => void
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
@@ -302,6 +314,11 @@ export function ArtifactContentEditor({
     { enabled: !isBinary }
   )
 
+  const handleOpenLink = useStableCallback((href: string, target: LinkOpenTarget) => {
+    if (target === 'in-app-browser' && onOpenUrl) onOpenUrl(href)
+    else void trpcClient.app.shell.openExternal.mutate({ url: href })
+  })
+
   const handleChange = useCallback(
     (value: string) => {
       setContent(value)
@@ -401,6 +418,7 @@ export function ArtifactContentEditor({
           artifactId={artifact.id}
           contentVersion={previewVersion}
           getFilePath={getFilePath}
+          onOpenLink={handleOpenLink}
         />
       )
 
@@ -428,6 +446,7 @@ export function ArtifactContentEditor({
             searchQuery={searchQuery}
             searchActiveIndex={searchActiveIndex}
             onSearchMatchCountChange={onSearchMatchCountChange}
+            onOpenLink={handleOpenLink}
           />
         </ZoomPane>
       )
@@ -457,6 +476,15 @@ export function ArtifactContentEditor({
             <div
               className="flex-1 border-l border-border min-w-0 min-h-0"
               onClick={(e) => {
+                // Never let a preview anchor navigate the app window itself.
+                const anchor = (e.target as HTMLElement).closest('a[href]')
+                if (anchor) {
+                  e.preventDefault()
+                  const href = anchor.getAttribute('href') ?? ''
+                  const target = resolveReadOnlyLinkClickTarget(href, e)
+                  if (target) handleOpenLink(href, target)
+                  return
+                }
                 const el = (e.target as HTMLElement).closest('[data-source-line]')
                 const line = el ? parseInt(el.getAttribute('data-source-line') || '1', 10) : 1
                 splitCodeRef.current?.focusLine(Number.isFinite(line) ? line : 1)

@@ -152,6 +152,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
+import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
@@ -1594,6 +1595,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     devServerAutoOpenCallbackRef.current = openDevServerInBrowser
   }, [openDevServerInBrowser])
 
+  // ⌘-clicked markdown links in the description: in-app browser / external.
+  const handleDescriptionOpenLink = useStableCallback((href: string, target: LinkOpenTarget) => {
+    if (target === 'in-app-browser') openDevServerInBrowser(href)
+    else void trpcClient.app.shell.openExternal.mutate({ url: href })
+  })
+
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
   const handleBrowserEnsurePanelOpen = useStableCallback(
     ({ taskId, url, tabId }: { taskId: string; url?: string | null; tabId?: string | null }) => {
@@ -1986,6 +1993,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           artifactsPanelRef.current?.selectArtifact(artifactId)
                         }}
                         onUploadImages={handleUploadImages}
+                        onOpenLink={handleDescriptionOpenLink}
                       />
                     </Suspense>
                   </div>
@@ -3221,6 +3229,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         target={{ taskId: task.id }}
                         initialEditorState={task.editor_open_files}
                         onEditorStateChange={handleEditorStateChange}
+                        onOpenUrl={openDevServerInBrowser}
                       />
                     </Activity>
                   </Suspense>
@@ -3260,6 +3269,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         isResizing={isResizing}
                         initialActiveArtifactId={task.active_artifact_id}
                         onActiveArtifactIdChange={handleActiveArtifactIdChange}
+                        onOpenUrl={openDevServerInBrowser}
                       />
                     </Activity>
                   </Suspense>
@@ -3569,6 +3579,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             artifactsPanelRef.current?.selectArtifact(artifactId)
           }}
           onUploadImages={handleUploadImages}
+          onOpenLink={handleDescriptionOpenLink}
         />
       </Suspense>
     </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, type CSSProperties, type MutableRefObject } from '
 import { Markdown } from '@slayzone/markdown/client'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
+import { resolveReadOnlyLinkClickTarget, type LinkOpenTarget } from '@slayzone/editor'
 import type { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'
 
@@ -10,6 +11,8 @@ interface MarkdownSplitViewProps {
   content: string
   onChange: (content: string) => void
   onSave: () => void
+  /** Clicked preview links (read-only: bare click opens too). */
+  onOpenLink: (href: string, target: LinkOpenTarget) => void
   version?: number
   goToPosition?: { line: number; col: number } | null
   onGoToPositionApplied?: () => void
@@ -22,6 +25,7 @@ export function MarkdownSplitView({
   content,
   onChange,
   onSave,
+  onOpenLink,
   version,
   goToPosition,
   onGoToPositionApplied,
@@ -76,6 +80,15 @@ export function MarkdownSplitView({
       <div
         className="flex-1 border-l border-border min-w-0 min-h-0"
         onClick={(e) => {
+          // Never let a preview anchor navigate the app window itself.
+          const anchor = (e.target as HTMLElement).closest('a[href]')
+          if (anchor) {
+            e.preventDefault()
+            const href = anchor.getAttribute('href') ?? ''
+            const target = resolveReadOnlyLinkClickTarget(href, e)
+            if (target) onOpenLink(href, target)
+            return
+          }
           const el = (e.target as HTMLElement).closest('[data-source-line]')
           const line = el ? parseInt(el.getAttribute('data-source-line') || '1', 10) : 1
           setPreviewClickPos({ line: Number.isFinite(line) ? line : 1, col: 0 })

@@ -2,6 +2,7 @@ import type { MutableRefObject } from 'react'
 import type { Editor } from '@milkdown/core'
 import type { EditorThemeColors } from './editor-themes'
 import type { ArtifactPickerItem } from './ArtifactPicker'
+import type { LinkOpenTarget } from './milkdown-link-click'
 
 export interface FormatState {
   bold: boolean
@@ -54,6 +55,8 @@ export interface RichTextEditorProps {
   htmlResolveSrc?: (src: string) => string
   /** Click handler for inline HTML links + images. Receives the resolved href. */
   htmlOnLinkClick?: (resolvedHref: string) => void
+  /** ⌘/Ctrl-click on a markdown link (⌘ → in-app browser, ⌘⇧ → external). Bare clicks edit. */
+  onOpenLink?: (href: string, target: LinkOpenTarget) => void
   /** Cmd+S / Ctrl+S handler installed on the editor DOM. */
   onSave?: () => void
 }

@@ -586,6 +586,7 @@ import { powerResumeEvents } from './power-resume-events'
 import { startDesktopBridgeServer } from './desktop-bridge-server'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
+import { attachPdfViewerLinkBridge } from './pdf-viewer-link-bridge'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
 const DEFAULT_WINDOW_WIDTH = 1760
@@ -1508,6 +1509,7 @@ function createMainWindow(): void {
   // Floating global agent panel: register main window with state machine adapter
   attachFloatingGlobalAgentPanel(mainWindow)
   attachTaskWindows(mainWindow)
+  attachPdfViewerLinkBridge(mainWindow.webContents)
 
   mainWindow.on('closed', () => {
     mainWindow = null
