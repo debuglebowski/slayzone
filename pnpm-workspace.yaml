@@ -18,3 +18,5 @@ minimumReleaseAgeExclude:
   - pnpm@10.34.5
   # Renovate security update: astro@7.3.2
   - astro@7.3.2
+  # Renovate security update: diff@8.0.3
+  - diff@8.0.3
