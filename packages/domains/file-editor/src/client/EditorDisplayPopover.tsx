@@ -27,11 +27,15 @@ export function EditorDisplayPopover({
 }: EditorDisplayPopoverProps) {
   const [displayOpen, setDisplayOpen] = useState(false)
   const trpc = useTRPC()
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
-  const writeAppearance = useCallback((key: string, value: string) => {
-    void setSettingMutation.mutateAsync({ key, value })
-    window.dispatchEvent(new Event('sz:settings-changed'))
-  }, [])
+  // mutateAsync is identity-stable across renders (the mutation object is not).
+  const { mutateAsync: setSetting } = useMutation(trpc.settings.set.mutationOptions())
+  const writeAppearance = useCallback(
+    (key: string, value: string) => {
+      void setSetting({ key, value })
+      window.dispatchEvent(new Event('sz:settings-changed'))
+    },
+    [setSetting]
+  )
 
   return (
     <MarkdownSettingsPopover

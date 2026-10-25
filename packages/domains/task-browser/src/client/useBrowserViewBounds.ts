@@ -1,6 +1,7 @@
-import { useCallback, useRef, useEffect, useState } from 'react'
+import { useCallback, useRef, useEffect, useInsertionEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -35,9 +36,14 @@ export function useBrowserViewBounds(
   const effectivelyVisibleRef = useRef(effectivelyVisible)
   const appZoomFactorRef = useRef(appZoomFactor)
 
-  viewIdRef.current = viewId
-  effectivelyVisibleRef.current = effectivelyVisible
-  appZoomFactorRef.current = appZoomFactor
+  // Latest-value refs for the rAF loop + callback ref. Insertion effects run in
+  // the mutation phase, before callback refs attach, so placeholderRef sees this
+  // commit's values.
+  useInsertionEffect(() => {
+    viewIdRef.current = viewId
+    effectivelyVisibleRef.current = effectivelyVisible
+    appZoomFactorRef.current = appZoomFactor
+  })
 
   // Initial app zoom factor — app.meta.getZoomFactor mirrors app:get-zoom-factor.
   const zoomQuery = useQuery(trpc.app.meta.getZoomFactor.queryOptions())
@@ -46,15 +52,16 @@ export function useBrowserViewBounds(
   }, [zoomQuery.data])
 
   // Live zoom changes — menu.onZoomFactorChanged mirrors app:zoom-factor-changed.
+  const handleZoomFactorChanged = useStableCallback((factor: number) => {
+    setAppZoomFactor((current) => {
+      if (Math.abs(current - factor) < 0.0001) return current
+      lastBoundsRef.current = null
+      return factor
+    })
+  })
   useSubscription(
     trpc.menu.onZoomFactorChanged.subscriptionOptions(undefined, {
-      onData: (factor) => {
-        setAppZoomFactor((current) => {
-          if (Math.abs(current - factor) < 0.0001) return current
-          lastBoundsRef.current = null
-          return factor
-        })
-      }
+      onData: handleZoomFactorChanged
     })
   )
 

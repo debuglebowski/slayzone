@@ -12,6 +12,29 @@ interface SearchPanelProps {
   onOpenFile: (path: string, options?: OpenFileOptions) => void
 }
 
+// Plain module function: React Compiler can't lower try/finally inside the
+// component. Body moved verbatim from the debounced search timer.
+async function runSearch(
+  search: () => Promise<{ results: FileSearchResult[] }>,
+  setters: {
+    setResults: (results: FileSearchResult[]) => void
+    setCollapsed: (collapsed: Set<string>) => void
+    setSearching: (searching: boolean) => void
+  }
+): Promise<void> {
+  const { setResults, setCollapsed, setSearching } = setters
+  try {
+    const res = await search()
+    setResults(res.results)
+    setCollapsed(new Set())
+    track('file_search_used', { had_results: res.results.length > 0 })
+  } catch {
+    setResults([])
+  } finally {
+    setSearching(false)
+  }
+}
+
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
   const trpc = useTRPC()
   // Which machine these filesystem calls are for. Ambient for the whole
@@ -42,24 +65,19 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
       return
     }
     setSearching(true)
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await queryClient.fetchQuery(
-          trpc.fileEditor.searchFiles.queryOptions({
-            ...target,
-            rootPath: projectPath,
-            query,
-            options: { matchCase, regex: useRegex }
-          })
-        )
-        setResults(res.results)
-        setCollapsed(new Set())
-        track('file_search_used', { had_results: res.results.length > 0 })
-      } catch {
-        setResults([])
-      } finally {
-        setSearching(false)
-      }
+    debounceRef.current = setTimeout(() => {
+      void runSearch(
+        () =>
+          queryClient.fetchQuery(
+            trpc.fileEditor.searchFiles.queryOptions({
+              ...target,
+              rootPath: projectPath,
+              query,
+              options: { matchCase, regex: useRegex }
+            })
+          ),
+        { setResults, setCollapsed, setSearching }
+      )
     }, 300)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -185,6 +203,31 @@ function HighlightedLine({
   matchCase: boolean
   useRegex: boolean
 }) {
+  const parts = splitHighlights(text, query, matchCase, useRegex)
+
+  return (
+    <span className="truncate text-xs text-muted-foreground">
+      {parts.map((p, i) =>
+        p.highlight ? (
+          <span key={i} className="text-foreground bg-amber-500/30 rounded-sm">
+            {p.text}
+          </span>
+        ) : (
+          <span key={i}>{p.text}</span>
+        )
+      )}
+    </span>
+  )
+}
+
+// Plain module function: React Compiler can't lower conditional expressions
+// inside try/catch. Body moved verbatim from HighlightedLine.
+function splitHighlights(
+  text: string,
+  query: string,
+  matchCase: boolean,
+  useRegex: boolean
+): { text: string; highlight: boolean }[] {
   const trimmed = text.trimStart()
   const parts: { text: string; highlight: boolean }[] = []
 
@@ -210,17 +253,5 @@ function HighlightedLine({
     parts.push({ text: trimmed, highlight: false })
   }
 
-  return (
-    <span className="truncate text-xs text-muted-foreground">
-      {parts.map((p, i) =>
-        p.highlight ? (
-          <span key={i} className="text-foreground bg-amber-500/30 rounded-sm">
-            {p.text}
-          </span>
-        ) : (
-          <span key={i}>{p.text}</span>
-        )
-      )}
-    </span>
-  )
+  return parts
 }

@@ -37,8 +37,10 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
     const tryCreate = async (): Promise<void> => {
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
 
-      try {
-        const id = await trpcClient.app.browser.createView.mutate({
+      // Promise chain, not try/catch: React Compiler can't lower value blocks
+      // inside try. `.catch` after `.then` covers the same span the try did.
+      return trpcClient.app.browser.createView
+        .mutate({
           taskId,
           tabId,
           partition,
@@ -47,30 +49,31 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
           kind,
           desktopHandoffPolicy
         })
+        .then((id) => {
+          if (!id) {
+            // Manager returned null (window not ready) — retry
+            console.warn('[useBrowserViewLifecycle] createView returned null, retrying in 500ms')
+            retryTimer = setTimeout(() => {
+              if (mountedRef.current) void tryCreate()
+            }, 500)
+            return
+          }
 
-        if (!id) {
-          // Manager returned null (window not ready) — retry
-          console.warn('[useBrowserViewLifecycle] createView returned null, retrying in 500ms')
+          if (!mountedRef.current || currentTabIdRef.current !== tabId) {
+            void trpcClient.app.browser.destroyView.mutate({ viewId: id as string })
+            return
+          }
+
+          createdViewId = id as string
+          setViewId(id as string)
+        })
+        .catch((err) => {
+          console.error('[useBrowserViewLifecycle] createView failed:', err)
+          // Retry on failure (e.g., main process not ready)
           retryTimer = setTimeout(() => {
             if (mountedRef.current) void tryCreate()
           }, 500)
-          return
-        }
-
-        if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-          void trpcClient.app.browser.destroyView.mutate({ viewId: id as string })
-          return
-        }
-
-        createdViewId = id as string
-        setViewId(id as string)
-      } catch (err) {
-        console.error('[useBrowserViewLifecycle] createView failed:', err)
-        // Retry on failure (e.g., main process not ready)
-        retryTimer = setTimeout(() => {
-          if (mountedRef.current) void tryCreate()
-        }, 500)
-      }
+        })
     }
 
     void tryCreate()
@@ -83,8 +86,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): {
       }
       setViewId(null)
     }
-    // url/partition are initial values only — intentional
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // url/partition/kind/desktopHandoffPolicy are initial values only — intentional
   }, [tabId, taskId, trpcClient])
 
   return { viewId }

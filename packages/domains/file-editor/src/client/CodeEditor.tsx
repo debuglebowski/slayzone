@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
+import { useEffect, useInsertionEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useAppearance } from '@slayzone/settings/client'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors } from '@slayzone/ui'
@@ -102,9 +102,12 @@ export function CodeEditor({
     editorRenderWhitespace
   } = useAppearance()
 
-  const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
   const cmThemeExt = useMemo(
-    () => buildCodeMirrorTheme(resolvedEditorColors, contentVariant === 'dark'),
+    () =>
+      buildCodeMirrorTheme(
+        getThemeEditorColors(editorThemeId, contentVariant),
+        contentVariant === 'dark'
+      ),
     [editorThemeId, contentVariant]
   )
 
@@ -122,9 +125,12 @@ export function CodeEditor({
   const onSaveRef = useRef(onSave)
   const contentRef = useRef(content)
   const suppressOnChange = useRef(false)
-  onChangeRef.current = onChange
-  onSaveRef.current = onSave
-  contentRef.current = content
+  // Latest-prop refs for CM listeners/effects; synced at commit, not in render.
+  useInsertionEffect(() => {
+    onChangeRef.current = onChange
+    onSaveRef.current = onSave
+    contentRef.current = content
+  })
 
   // Compartments for runtime-reconfigurable extensions
   const themeComp = useRef(new Compartment())
@@ -191,12 +197,15 @@ export function CodeEditor({
       viewRef.current = null
       if (viewHandleRef) viewHandleRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Recreate only on file/size-theme change; everything else is reconfigured
+    // live via compartments below or read once as the initial doc.
   }, [filePath, sizeTheme])
 
   // Navigate to line/col and focus
   const onGoToRef = useRef(onGoToPositionApplied)
-  onGoToRef.current = onGoToPositionApplied
+  useInsertionEffect(() => {
+    onGoToRef.current = onGoToPositionApplied
+  })
   useEffect(() => {
     const view = viewRef.current
     if (!view || !goToPosition) return

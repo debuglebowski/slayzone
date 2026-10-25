@@ -113,15 +113,18 @@ export function useBrowserExtensions() {
   // activateExtension manipulates the active WebContentsView (opens the
   // extension action in the live view) but is an app.browser router proc; keep
   // it on tRPC. Fire-and-forget after the rAF, matching the prior behavior.
-  const activateMutation = useMutation(trpc.app.browser.activateExtension.mutationOptions())
-  const handleActivateExtension = useCallback((extensionId: string) => {
-    setExtensionsManagerOpen(false)
-    requestAnimationFrame(() => {
-      activateMutation.mutate({ extensionId })
-    })
-  }, [])
+  const activateExtension = useMutation(trpc.app.browser.activateExtension.mutationOptions()).mutate
+  const handleActivateExtension = useCallback(
+    (extensionId: string) => {
+      setExtensionsManagerOpen(false)
+      requestAnimationFrame(() => {
+        activateExtension({ extensionId })
+      })
+    },
+    [activateExtension]
+  )
 
-  const importMutation = useMutation(
+  const importExtensionAsync = useMutation(
     trpc.app.browser.importExtension.mutationOptions({
       onSuccess: (result) => {
         if (result && typeof result === 'object' && 'id' in result) {
@@ -131,17 +134,18 @@ export function useBrowserExtensions() {
         }
       }
     })
+  ).mutateAsync
+  const handleImportExtension = useCallback(
+    async (path: string, name: string) => {
+      await importExtensionAsync({ extPath: path }).catch((error) => {
+        const message = error instanceof Error ? error.message : `Failed to import ${name}`
+        setExtensionsError(message)
+      })
+    },
+    [importExtensionAsync]
   )
-  const handleImportExtension = useCallback(async (path: string, name: string) => {
-    try {
-      await importMutation.mutateAsync({ extPath: path })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : `Failed to import ${name}`
-      setExtensionsError(message)
-    }
-  }, [])
 
-  const loadMutation = useMutation(
+  const loadExtensionAsync = useMutation(
     trpc.app.browser.loadExtension.mutationOptions({
       onSuccess: (result) => {
         if (result && typeof result === 'object' && 'id' in result) {
@@ -151,31 +155,30 @@ export function useBrowserExtensions() {
         }
       }
     })
-  )
+  ).mutateAsync
   const handleLoadExtension = useCallback(async () => {
-    try {
-      await loadMutation.mutateAsync()
-    } catch (error) {
+    await loadExtensionAsync().catch((error) => {
       const message = error instanceof Error ? error.message : 'Failed to load unpacked extension'
       setExtensionsError(message)
-    }
-  }, [])
+    })
+  }, [loadExtensionAsync])
 
-  const removeMutation = useMutation(
+  const removeExtensionAsync = useMutation(
     trpc.app.browser.removeExtension.mutationOptions({
       onSuccess: () => {
         void refreshExtensions()
       }
     })
+  ).mutateAsync
+  const handleRemoveExtension = useCallback(
+    async (extensionId: string) => {
+      await removeExtensionAsync({ extensionId }).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Failed to remove extension'
+        setExtensionsError(message)
+      })
+    },
+    [removeExtensionAsync]
   )
-  const handleRemoveExtension = useCallback(async (extensionId: string) => {
-    try {
-      await removeMutation.mutateAsync({ extensionId })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to remove extension'
-      setExtensionsError(message)
-    }
-  }, [])
 
   return {
     extensionsManagerOpen,

@@ -23,6 +23,7 @@ function readCurrentConversationId(
 import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
+import { useStableCallback } from '@slayzone/ui'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -123,18 +124,15 @@ export function useTaskTerminalSession({
     setDetectedSessionId(null)
   }, [task, detectedSessionId, onTaskUpdated, updateTask])
 
-  const handleUpdateSessionIdRef = useRef(handleUpdateSessionId)
-  useEffect(() => {
-    handleUpdateSessionIdRef.current = handleUpdateSessionId
-  }, [handleUpdateSessionId])
+  const handleSyncSessionId = useStableCallback(() => {
+    void handleUpdateSessionId()
+  })
 
   // Cmd+Shift+U: sync detected session ID to DB (only when this task is active and banner is showing)
   useSubscription(
     trpc.menu.onSyncSessionId.subscriptionOptions(undefined, {
       enabled: !!shortcutActive,
-      onData: () => {
-        void handleUpdateSessionIdRef.current()
-      }
+      onData: handleSyncSessionId
     })
   )
 
@@ -326,78 +324,82 @@ export function useTaskTerminalSession({
   // The `pty.onEnsureAlive` subscription and the `pty.ackEnsureAlive` mutation
   // share the same main-process pty emitter/ops, so the reqId received here is
   // the same one main expects on the ack round-trip.
+  const handleEnsureAlive = useStableCallback(
+    async ({ taskId, reqId, force }: { taskId: string; reqId: number; force: boolean }) => {
+      if (!task) return
+      if (taskId !== task.id) return
+      // Stale retry for an already-completed reqId — re-ack idempotently.
+      if (ensureAliveHandledReqsRef.current.includes(reqId)) {
+        void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'ok' })
+        return
+      }
+      // Fast path for non-forced ensure when PTY already alive — no work, no
+      // coalescing. Main's `hasPty` short-circuit usually catches this before
+      // the broadcast, but a race during spawn can land us here.
+      if (!force) {
+        const sid = getMainSessionId(task.id)
+        try {
+          if (await trpcClient.pty.exists.query({ sessionId: sid })) {
+            ensureAliveHandledReqsRef.current.push(reqId)
+            void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'already-alive' })
+            return
+          }
+        } catch {
+          void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'error' })
+          return
+        }
+      }
+      // In-flight: coalesce. The current run's result will ack this reqId too.
+      if (ensureAliveInFlightRef.current) {
+        ensureAlivePendingReqsRef.current.add(reqId)
+        return
+      }
+      ensureAliveInFlightRef.current = true
+      ensureAlivePendingReqsRef.current.add(reqId)
+      let result: 'ok' | 'error' = 'error'
+      const run = async (): Promise<void> => {
+        if (force) {
+          await handleRestartTerminal()
+          result = 'ok'
+        } else {
+          // An explicit start (CLI cold-start): start the main agent whatever the
+          // startup mode — a mounted TerminalStarter starts now, otherwise its
+          // next mount does. <Terminal> then spawns via pty:create. Poll
+          // pty.exists until alive or timeout.
+          const sid = getMainSessionId(task.id)
+          requestAgentStart(sid)
+          const deadline = Date.now() + 5000
+          while (Date.now() < deadline) {
+            try {
+              if (await trpcClient.pty.exists.query({ sessionId: sid })) {
+                result = 'ok'
+                break
+              }
+            } catch {
+              break
+            }
+            await new Promise((r) => setTimeout(r, 100))
+          }
+        }
+      }
+      await run().finally(() => {
+        const reqs = [...ensureAlivePendingReqsRef.current]
+        ensureAlivePendingReqsRef.current.clear()
+        for (const r of reqs) {
+          ensureAliveHandledReqsRef.current.push(r)
+          void trpcClient.pty.ackEnsureAlive.mutate({ reqId: r, result })
+        }
+        if (ensureAliveHandledReqsRef.current.length > 100) {
+          ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)
+        }
+        ensureAliveInFlightRef.current = false
+      })
+    }
+  )
   useSubscription(
     trpc.pty.onEnsureAlive.subscriptionOptions(undefined, {
       enabled: !!task,
-      onData: async ({ taskId, reqId, force }) => {
-        if (!task) return
-        if (taskId !== task.id) return
-        // Stale retry for an already-completed reqId — re-ack idempotently.
-        if (ensureAliveHandledReqsRef.current.includes(reqId)) {
-          void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'ok' })
-          return
-        }
-        // Fast path for non-forced ensure when PTY already alive — no work, no
-        // coalescing. Main's `hasPty` short-circuit usually catches this before
-        // the broadcast, but a race during spawn can land us here.
-        if (!force) {
-          const sid = getMainSessionId(task.id)
-          try {
-            if (await trpcClient.pty.exists.query({ sessionId: sid })) {
-              ensureAliveHandledReqsRef.current.push(reqId)
-              void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'already-alive' })
-              return
-            }
-          } catch {
-            void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'error' })
-            return
-          }
-        }
-        // In-flight: coalesce. The current run's result will ack this reqId too.
-        if (ensureAliveInFlightRef.current) {
-          ensureAlivePendingReqsRef.current.add(reqId)
-          return
-        }
-        ensureAliveInFlightRef.current = true
-        ensureAlivePendingReqsRef.current.add(reqId)
-        let result: 'ok' | 'error' = 'error'
-        try {
-          if (force) {
-            await handleRestartTerminal()
-            result = 'ok'
-          } else {
-            // An explicit start (CLI cold-start): start the main agent whatever the
-            // startup mode — a mounted TerminalStarter starts now, otherwise its
-            // next mount does. <Terminal> then spawns via pty:create. Poll
-            // pty.exists until alive or timeout.
-            const sid = getMainSessionId(task.id)
-            requestAgentStart(sid)
-            const deadline = Date.now() + 5000
-            while (Date.now() < deadline) {
-              try {
-                if (await trpcClient.pty.exists.query({ sessionId: sid })) {
-                  result = 'ok'
-                  break
-                }
-              } catch {
-                break
-              }
-              await new Promise((r) => setTimeout(r, 100))
-            }
-          }
-        } finally {
-          const reqs = [...ensureAlivePendingReqsRef.current]
-          ensureAlivePendingReqsRef.current.clear()
-          for (const r of reqs) {
-            ensureAliveHandledReqsRef.current.push(r)
-            void trpcClient.pty.ackEnsureAlive.mutate({ reqId: r, result })
-          }
-          if (ensureAliveHandledReqsRef.current.length > 100) {
-            ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)
-          }
-          ensureAliveInFlightRef.current = false
-        }
-      }
+      onData: handleEnsureAlive
     })
   )
 
@@ -405,7 +407,7 @@ export function useTaskTerminalSession({
   const handleReattachTerminal = useCallback(() => {
     if (!task) return
     setTerminalKey((k) => k + 1)
-  }, [task])
+  }, [task, setTerminalKey])
 
   return {
     sessionIdCommand,

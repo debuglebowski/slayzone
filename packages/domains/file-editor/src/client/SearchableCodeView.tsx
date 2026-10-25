@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useInsertionEffect,
   useMemo,
   useRef,
   type MutableRefObject
@@ -244,9 +245,12 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
     const onMatchCountRef = useRef(onSearchMatchCountChange)
     const contentRef = useRef(value)
     const suppressOnChange = useRef(false)
-    onChangeRef.current = onChange
-    onMatchCountRef.current = onSearchMatchCountChange
-    contentRef.current = value
+    // Latest-prop refs for CM listeners/effects; synced at commit, not in render.
+    useInsertionEffect(() => {
+      onChangeRef.current = onChange
+      onMatchCountRef.current = onSearchMatchCountChange
+      contentRef.current = value
+    })
 
     const themeComp = useRef(new Compartment())
     const minimapComp = useRef(new Compartment())
@@ -304,7 +308,8 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         if (viewHandleRef) viewHandleRef.current = null
         searchFieldRef.current = null
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      // Recreate only on language/size-theme change; theme + minimap are
+      // reconfigured live via compartments below, value is the initial doc.
     }, [fileExt, sizeTheme])
 
     // Reconfigure theme at runtime

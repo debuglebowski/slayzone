@@ -43,7 +43,7 @@ export function useBrowserMultiDevice({
         ? { multiDeviceLayout: 'horizontal' as GridLayout }
         : {})
     })
-  }, [activeTab, multiDeviceMode, updateActiveTab])
+  }, [activeTab, multiDeviceMode, updateActiveTab, browserDeviceDefaults])
 
   const setMultiDeviceLayout = useCallback(
     (layout: GridLayout) => {

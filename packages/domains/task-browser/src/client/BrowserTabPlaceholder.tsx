@@ -4,6 +4,12 @@ import { useTRPC } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 import type { BrowserTabTheme } from '../shared'
 
+/** The reactive part of a tab's handle: which view it owns and how to drive it. */
+export interface BrowserTabView {
+  viewId: string | null
+  actions: BrowserTabPlaceholderHandle['actions']
+}
+
 export interface BrowserTabPlaceholderHandle {
   viewId: string | null
   state: BrowserViewState
@@ -39,6 +45,8 @@ interface BrowserTabPlaceholderProps {
   className?: string
   onStateChange?: (state: BrowserViewState) => void
   onOverlayChange?: (hidden: boolean) => void
+  /** Reports this tab's viewId/actions whenever they change; `null` on unmount. */
+  onViewChange?: (tabId: string, view: BrowserTabView | null) => void
 }
 
 export const BrowserTabPlaceholder = forwardRef<
@@ -58,7 +66,8 @@ export const BrowserTabPlaceholder = forwardRef<
     themeMode,
     className,
     onStateChange,
-    onOverlayChange
+    onOverlayChange,
+    onViewChange
   },
   ref
 ) {
@@ -86,6 +95,12 @@ export const BrowserTabPlaceholder = forwardRef<
     actions,
     hiddenByOverlay
   ])
+
+  useEffect(() => {
+    if (!onViewChange) return
+    onViewChange(tabId, { viewId, actions })
+    return () => onViewChange(tabId, null)
+  }, [tabId, viewId, actions, onViewChange])
 
   useEffect(() => {
     if (visible) onStateChange?.(state)

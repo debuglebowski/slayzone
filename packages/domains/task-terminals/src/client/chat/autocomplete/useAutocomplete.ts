@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import type { AcceptCtx, AutocompleteSource, FetchCtx, TriggerMatch } from './types'
 import { rankAcrossSources, type MergedEntry, type UsageLookup } from './ranking'
 
@@ -13,6 +14,22 @@ export interface UseAutocompleteOptions {
 }
 
 type UsageMap = Record<string, Record<string, number>>
+
+/**
+ * Re-read the usage map after a bump. Plain function (not inline in the hook):
+ * the React Compiler cannot lower value blocks inside try/catch.
+ */
+async function refreshUsage(
+  trpcClient: ReturnType<typeof useTRPCClient>,
+  setUsage: (m: UsageMap) => void
+): Promise<void> {
+  try {
+    const m = await trpcClient.chat.getAutocompleteUsage.query()
+    setUsage(m ?? {})
+  } catch {
+    /* best-effort */
+  }
+}
 
 export interface ActiveMatch {
   match: TriggerMatch
@@ -58,22 +75,25 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   /** Names the user explicitly accepted from the menu during the current draft. */
   const pickedRef = useRef<Map<string, { sourceId: string; name: string }>>(new Map())
 
-  // Load usage map once on mount. Refreshed after each bump.
-  useEffect(() => {
-    let cancelled = false
+  // Load usage map once on mount (reads the latest trpcClient). Refreshed after
+  // each bump.
+  const loadUsage = useStableCallback((isCancelled: () => boolean) => {
     void trpcClient.chat.getAutocompleteUsage
       .query()
       .then((m) => {
-        if (!cancelled) setUsage(m ?? {})
+        if (!isCancelled()) setUsage(m ?? {})
       })
       .catch(() => {
         /* ignore — usage is best-effort */
       })
+  })
+  useEffect(() => {
+    let cancelled = false
+    loadUsage(() => cancelled)
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [loadUsage])
 
   // Fetch items per source once (cwd-scoped). Sources are stable refs.
   const cwdRef = useRef(fetchCtx.cwd)
@@ -273,12 +293,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       if (bumps.length === 0) return
       await Promise.all(bumps)
       // Refresh usage map so the next ranking sees the new counts.
-      try {
-        const m = await trpcClient.chat.getAutocompleteUsage.query()
-        setUsage(m ?? {})
-      } catch {
-        /* best-effort */
-      }
+      await refreshUsage(trpcClient, setUsage)
     },
     [sources, itemsBySource, trpcClient]
   )

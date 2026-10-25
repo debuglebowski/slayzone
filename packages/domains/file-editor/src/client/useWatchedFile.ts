@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import { useWorkspaceTarget } from './workspace-target'
 
 export interface UseWatchedFileOptions {
@@ -18,6 +19,37 @@ export interface UseWatchedFileResult {
   reloadFromDisk: () => Promise<void>
   flushNow: () => Promise<void>
   onBlur: () => void
+}
+
+interface PerformSaveDeps {
+  savingRef: { current: string | null }
+  saveRef: { current: (content: string) => Promise<void> }
+  contentRef: { current: string }
+  originalContentRef: { current: string }
+  setOriginalContent: (content: string) => void
+  setDiskChanged: (changed: boolean) => void
+}
+
+// Core save: idempotent, dedupes via savingRef. Plain module function — React
+// Compiler can't lower try/finally, and the finally must keep its exact timing.
+async function performSaveImpl(deps: PerformSaveDeps, target: string): Promise<void> {
+  const { savingRef, saveRef, contentRef, originalContentRef, setOriginalContent, setDiskChanged } =
+    deps
+  if (savingRef.current === target) return
+  savingRef.current = target
+  try {
+    await saveRef.current(target)
+    // Only update baseline if no newer edits happened during the save
+    if (contentRef.current === target) {
+      originalContentRef.current = target
+      setOriginalContent(target)
+      setDiskChanged(false)
+    }
+  } finally {
+    if (savingRef.current === target) {
+      savingRef.current = null
+    }
+  }
 }
 
 /**
@@ -76,23 +108,14 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Core save: idempotent, dedupes via savingRef
-  const performSave = useCallback(async (target: string): Promise<void> => {
-    if (savingRef.current === target) return
-    savingRef.current = target
-    try {
-      await saveRef.current(target)
-      // Only update baseline if no newer edits happened during the save
-      if (contentRef.current === target) {
-        originalContentRef.current = target
-        setOriginalContent(target)
-        setDiskChanged(false)
-      }
-    } finally {
-      if (savingRef.current === target) {
-        savingRef.current = null
-      }
-    }
-  }, [])
+  const performSave = useCallback(
+    (target: string): Promise<void> =>
+      performSaveImpl(
+        { savingRef, saveRef, contentRef, originalContentRef, setOriginalContent, setDiskChanged },
+        target
+      ),
+    []
+  )
 
   // Track whether the hook currently has a target — flushNow/onBlur no-op when null.
   const hasTargetRef = useRef(false)
@@ -196,29 +219,30 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     reloadFromDiskRef.current = reloadFromDisk
   })
 
+  const onWatchEvent = useStableCallback(
+    (event: { type: 'changed' | 'deleted'; root: string; relPath: string }) => {
+      if (event.type !== 'changed') return
+      const changedRoot = event.root
+      const changedRel = event.relPath
+      const normalize = (p: string) => p.replace(/\/+$/, '')
+      if (!projectPath || normalize(changedRoot) !== normalize(projectPath)) return
+      if (changedRel !== relPathRef.current) return
+
+      // Ignore echoes from our own in-flight save
+      if (savingRef.current !== null) return
+
+      if (dirtyRef.current) {
+        setDiskChanged(true)
+        return
+      }
+      void reloadFromDiskRef.current()
+    }
+  )
+
   useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
       { ...target, rootPath: projectPath ?? '' },
-      {
-        enabled: !!projectPath,
-        onData: (event) => {
-          if (event.type !== 'changed') return
-          const changedRoot = event.root
-          const changedRel = event.relPath
-          const normalize = (p: string) => p.replace(/\/+$/, '')
-          if (!projectPath || normalize(changedRoot) !== normalize(projectPath)) return
-          if (changedRel !== relPathRef.current) return
-
-          // Ignore echoes from our own in-flight save
-          if (savingRef.current !== null) return
-
-          if (dirtyRef.current) {
-            setDiskChanged(true)
-            return
-          }
-          void reloadFromDiskRef.current()
-        }
-      }
+      { enabled: !!projectPath, onData: onWatchEvent }
     )
   )
 

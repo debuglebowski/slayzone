@@ -204,6 +204,43 @@ function VersionPill({
   )
 }
 
+// Async row actions as plain module functions: the React Compiler can't lower
+// try/finally (without catch) inside a component body.
+async function commitVersionRename(
+  v: ArtifactVersion,
+  renameValue: string,
+  onRename: Props['onRename'],
+  setRenamingId: (id: string | null) => void,
+  setBusyId: (id: string | null) => void
+): Promise<void> {
+  const next = renameValue.trim()
+  const normalized = next.length === 0 ? null : next
+  if (normalized === v.name) {
+    setRenamingId(null)
+    return
+  }
+  setBusyId(v.id)
+  try {
+    await onRename(v.version_num, normalized)
+  } finally {
+    setBusyId(null)
+    setRenamingId(null)
+  }
+}
+
+async function setVersionCurrent(
+  v: ArtifactVersion,
+  onSetCurrent: Props['onSetCurrent'],
+  setBusyId: (id: string | null) => void
+): Promise<void> {
+  setBusyId(v.id)
+  try {
+    await onSetCurrent(v.version_num)
+  } finally {
+    setBusyId(null)
+  }
+}
+
 export function ArtifactVersionsDialog({
   open,
   onOpenChange,
@@ -227,30 +264,11 @@ export function ArtifactVersionsDialog({
     return s
   }, [versions])
 
-  const commitRename = async (v: ArtifactVersion): Promise<void> => {
-    const next = renameValue.trim()
-    const normalized = next.length === 0 ? null : next
-    if (normalized === v.name) {
-      setRenamingId(null)
-      return
-    }
-    setBusyId(v.id)
-    try {
-      await onRename(v.version_num, normalized)
-    } finally {
-      setBusyId(null)
-      setRenamingId(null)
-    }
-  }
+  const commitRename = (v: ArtifactVersion): Promise<void> =>
+    commitVersionRename(v, renameValue, onRename, setRenamingId, setBusyId)
 
-  const handleSetCurrent = async (v: ArtifactVersion): Promise<void> => {
-    setBusyId(v.id)
-    try {
-      await onSetCurrent(v.version_num)
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const handleSetCurrent = (v: ArtifactVersion): Promise<void> =>
+    setVersionCurrent(v, onSetCurrent, setBusyId)
 
   const startRename = (v: ArtifactVersion): void => {
     setRenameValue(v.name ?? '')

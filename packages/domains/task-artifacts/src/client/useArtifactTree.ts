@@ -8,6 +8,24 @@ interface UseArtifactTreeArgs {
   folderPathMap: Map<string, string>
 }
 
+function readPersistedExpanded(key: string): Set<string> | null {
+  try {
+    const raw = window.localStorage?.getItem(key)
+    if (raw) return new Set(JSON.parse(raw) as string[])
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function persistExpanded(key: string, expanded: Set<string>): void {
+  try {
+    window.localStorage?.setItem(key, JSON.stringify([...expanded]))
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Folder/artifact hierarchy + expand state for the artifacts tree.
  * Owns the persisted expand set and derives the grouped tree maps,
@@ -22,15 +40,9 @@ export function useArtifactTree({
   // Expanded folders state — persisted in localStorage per task.
   // null sentinel = nothing persisted yet; auto-expand all once folders load.
   const expandedStorageKey = `slayzone:artifacts-panel:expanded:${taskId}`
-  const [expandedFolders, setExpandedFolders] = useState<Set<string> | null>(() => {
-    try {
-      const raw = window.localStorage?.getItem(expandedStorageKey)
-      if (raw) return new Set(JSON.parse(raw) as string[])
-    } catch {
-      /* ignore */
-    }
-    return null
-  })
+  const [expandedFolders, setExpandedFolders] = useState<Set<string> | null>(() =>
+    readPersistedExpanded(expandedStorageKey)
+  )
 
   // Auto-expand all folders on first load when nothing was persisted
   useEffect(() => {
@@ -42,11 +54,7 @@ export function useArtifactTree({
   // Persist on change
   useEffect(() => {
     if (expandedFolders === null) return
-    try {
-      window.localStorage?.setItem(expandedStorageKey, JSON.stringify([...expandedFolders]))
-    } catch {
-      /* ignore */
-    }
+    persistExpanded(expandedStorageKey, expandedFolders)
   }, [expandedFolders, expandedStorageKey])
 
   const toggleFolder = useCallback((folderId: string) => {

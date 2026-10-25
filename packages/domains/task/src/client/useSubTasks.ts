@@ -51,12 +51,12 @@ export function useSubTasks(
   // carries the same `project_id` foreign key as any other task.
   const parentHubId = useHubIdForTask(parentId)
   const createClient = useClientForTask(parentId)
-  const createMutation = useMutation({
+  const { mutateAsync: createTask } = useMutation({
     mutationFn: (input: CreateTaskInput) => createClient.task.create.mutate(input)
   })
-  const updateMutation = useMutation(trpc.task.update.mutationOptions())
-  const deleteMutation = useMutation(trpc.task.delete.mutationOptions())
-  const reorderMutation = useMutation(trpc.task.reorder.mutationOptions())
+  const { mutateAsync: updateTask } = useMutation(trpc.task.update.mutationOptions())
+  const { mutateAsync: deleteTask } = useMutation(trpc.task.delete.mutationOptions())
+  const { mutateAsync: reorderTasks } = useMutation(trpc.task.reorder.mutationOptions())
 
   // Re-fetch subtasks on external changes (CLI, MCP, bulk ops). Mirrors the
   // legacy `app.onTasksChanged` IPC listener via the `tasks-changed` subscription.
@@ -73,7 +73,7 @@ export function useSubTasks(
   const createSubTask = useCallback(
     async (params: { projectId: string; title: string; status: string }): Promise<Task | null> => {
       if (!parentId) return null
-      const sub = await createMutation.mutateAsync({
+      const sub = await createTask({
         projectId: params.projectId,
         title: params.title,
         parentId,
@@ -89,31 +89,31 @@ export function useSubTasks(
       }
       return sub
     },
-    [parentId, parentHubId]
+    [parentId, parentHubId, createTask, queryClient, trpc]
   )
 
   const updateSubTask = useCallback(
     async (subId: string, updates: Record<string, unknown>): Promise<void> => {
-      const updated = await updateMutation.mutateAsync({ id: subId, ...updates })
+      const updated = await updateTask({ id: subId, ...updates })
       if (updated && parentId) {
         queryClient.setQueryData<Task[]>(trpc.task.getSubTasks.queryKey({ parentId }), (prev) =>
           (prev ?? []).map((s) => (s.id === subId ? updated : s))
         )
       }
     },
-    [parentId]
+    [parentId, updateTask, queryClient, trpc]
   )
 
   const deleteSubTask = useCallback(
     async (subId: string): Promise<void> => {
-      await deleteMutation.mutateAsync({ id: subId })
+      await deleteTask({ id: subId })
       if (parentId) {
         queryClient.setQueryData<Task[]>(trpc.task.getSubTasks.queryKey({ parentId }), (prev) =>
           (prev ?? []).filter((s) => s.id !== subId)
         )
       }
     },
-    [parentId]
+    [parentId, deleteTask, queryClient, trpc]
   )
 
   const handleDragEnd = useCallback(
@@ -125,11 +125,11 @@ export function useSubTasks(
         const oldIndex = list.findIndex((s) => s.id === active.id)
         const newIndex = list.findIndex((s) => s.id === over.id)
         const reordered = arrayMove(list, oldIndex, newIndex)
-        void reorderMutation.mutateAsync({ taskIds: reordered.map((t) => t.id) })
+        void reorderTasks({ taskIds: reordered.map((t) => t.id) })
         return reordered
       })
     },
-    [parentId]
+    [parentId, reorderTasks, queryClient, trpc]
   )
 
   return { subTasks, createSubTask, updateSubTask, deleteSubTask, handleDragEnd }

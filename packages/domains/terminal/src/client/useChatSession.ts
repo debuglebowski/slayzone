@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject
+} from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import type { AgentEvent } from '../shared/agent-events'
 import {
   initialState,
   reducer,
+  type Action as ChatTimelineAction,
   isInFlight,
   type ChatTimelineState,
   type TimelineItem
@@ -82,6 +92,82 @@ export interface UseChatSessionOpts {
   providerFlagsOverride?: string | null
 }
 
+interface HydrateChatCtx {
+  trpcClient: ReturnType<typeof useTRPCClient>
+  target: {
+    tabId: string
+    taskId: string
+    mode: string
+    cwd: string
+    providerFlagsOverride: string | null
+  }
+  gen: number
+  genRef: RefObject<number>
+  hydratedRef: RefObject<boolean>
+  liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number }>>
+  applyLive: (event: AgentEvent, seq: number) => void
+  dispatch: Dispatch<ChatTimelineAction>
+  setHydrating: (v: boolean) => void
+}
+
+/**
+ * Async body of the hydrate effect. A plain function (not inline in the hook):
+ * the React Compiler cannot lower `finally` clauses.
+ *
+ * Serialize: AWAIT hydrate, THEN replay. Hydrate inserts the session
+ * skeleton into the main-side sessions map (seeded with persisted history)
+ * synchronously enough for getBufferSince to return real data. Awaiting
+ * guarantees session.buffer is seeded with persisted history.
+ */
+async function hydrateAndReplay({
+  trpcClient,
+  target,
+  gen,
+  genRef,
+  hydratedRef,
+  liveQueueRef,
+  applyLive,
+  dispatch,
+  setHydrating
+}: HydrateChatCtx): Promise<void> {
+  try {
+    await trpcClient.chat.hydrate.mutate(target)
+  } catch (e) {
+    // Surface hydrate failure but still attempt replay (e.g. session may
+    // exist from a previous reattach despite this hydrate rejecting).
+    dispatch({
+      type: 'event',
+      event: { kind: 'error', message: (e as Error).message ?? String(e) }
+    })
+  }
+  if (gen !== genRef.current) return
+  try {
+    const buffered = await trpcClient.chat.getBufferSince.query({
+      tabId: target.tabId,
+      afterSeq: -1
+    })
+    if (gen !== genRef.current) return
+    // Route replay through applyLive (not raw dispatch) so side-channel
+    // state — notably `permissionRequests` for unresolved AskUserQuestion
+    // prompts — repopulates on tab reattach. Without this, hydrating a tab
+    // with a pending perm-request leaves the Map empty; Submit can't find
+    // the prompt → falls back to `sendMessage`, but the CLI is still
+    // blocked waiting on `control_response` and never responds.
+    for (const { seq, event } of buffered) applyLive(event as AgentEvent, seq)
+  } catch {
+    /* ignore replay failures */
+  } finally {
+    if (gen === genRef.current) {
+      // Drain live events queued during hydration. Dedup via lastSeqRef
+      // so anything already covered by the replay buffer is skipped.
+      hydratedRef.current = true
+      for (const { event, seq } of liveQueueRef.current) applyLive(event, seq)
+      liveQueueRef.current = []
+      setHydrating(false)
+    }
+  }
+}
+
 /**
  * React hook that spawns and subscribes to a chat session for one tab.
  *
@@ -155,17 +241,22 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // after replay. Server fan-out is global; filter by tabId here. The chat
   // event payload is the domain's own AgentEvent vocabulary (router types it as
   // `unknown` so the boundary stays vocabulary-agnostic) — cast at the seam.
+  // Stable handler (reads refs + the latest tabId) — refs must not be touched
+  // from a closure built during render.
+  const handleEvent = useStableCallback(
+    ({ tabId, event, seq }: { tabId: string; event: unknown; seq: number }) => {
+      if (tabId !== opts.tabId) return
+      if (!hydratedRef.current) {
+        liveQueueRef.current.push({ event: event as AgentEvent, seq })
+        return
+      }
+      applyLive(event as AgentEvent, seq)
+    }
+  )
   useSubscription(
     trpc.chat.onEvent.subscriptionOptions(undefined, {
       enabled: !!opts.tabId,
-      onData: ({ tabId, event, seq }) => {
-        if (tabId !== opts.tabId) return
-        if (!hydratedRef.current) {
-          liveQueueRef.current.push({ event: event as AgentEvent, seq })
-          return
-        }
-        applyLive(event as AgentEvent, seq)
-      }
+      onData: handleEvent
     })
   )
 
@@ -186,54 +277,23 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     lastSeqRef.current = -1
     setHydrating(true)
 
-    // Serialize: AWAIT hydrate, THEN replay. Hydrate inserts the session
-    // skeleton into the main-side sessions map (seeded with persisted history)
-    // synchronously enough for getBufferSince to return real data. Awaiting
-    // guarantees session.buffer is seeded with persisted history.
-    void (async () => {
-      try {
-        await trpcClient.chat.hydrate.mutate({
-          tabId: opts.tabId,
-          taskId: opts.taskId,
-          mode: opts.mode,
-          cwd: opts.cwd,
-          providerFlagsOverride: opts.providerFlagsOverride ?? null
-        })
-      } catch (e) {
-        // Surface hydrate failure but still attempt replay (e.g. session may
-        // exist from a previous reattach despite this hydrate rejecting).
-        dispatch({
-          type: 'event',
-          event: { kind: 'error', message: (e as Error).message ?? String(e) }
-        })
-      }
-      if (gen !== genRef.current) return
-      try {
-        const buffered = await trpcClient.chat.getBufferSince.query({
-          tabId: opts.tabId,
-          afterSeq: -1
-        })
-        if (gen !== genRef.current) return
-        // Route replay through applyLive (not raw dispatch) so side-channel
-        // state — notably `permissionRequests` for unresolved AskUserQuestion
-        // prompts — repopulates on tab reattach. Without this, hydrating a tab
-        // with a pending perm-request leaves the Map empty; Submit can't find
-        // the prompt → falls back to `sendMessage`, but the CLI is still
-        // blocked waiting on `control_response` and never responds.
-        for (const { seq, event } of buffered) applyLive(event as AgentEvent, seq)
-      } catch {
-        /* ignore replay failures */
-      } finally {
-        if (gen === genRef.current) {
-          // Drain live events queued during hydration. Dedup via lastSeqRef
-          // so anything already covered by the replay buffer is skipped.
-          hydratedRef.current = true
-          for (const { event, seq } of liveQueueRef.current) applyLive(event, seq)
-          liveQueueRef.current = []
-          setHydrating(false)
-        }
-      }
-    })()
+    void hydrateAndReplay({
+      trpcClient,
+      target: {
+        tabId: opts.tabId,
+        taskId: opts.taskId,
+        mode: opts.mode,
+        cwd: opts.cwd,
+        providerFlagsOverride: opts.providerFlagsOverride ?? null
+      },
+      gen,
+      genRef,
+      hydratedRef,
+      liveQueueRef,
+      applyLive,
+      dispatch,
+      setHydrating
+    })
 
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for

@@ -1,6 +1,10 @@
 import { RotateCw } from 'lucide-react'
 import type { BrowserTabsState } from '../shared'
-import { BrowserTabPlaceholder, type BrowserTabPlaceholderHandle } from './BrowserTabPlaceholder'
+import {
+  BrowserTabPlaceholder,
+  type BrowserTabPlaceholderHandle,
+  type BrowserTabView
+} from './BrowserTabPlaceholder'
 import { BrowserLoadingAnimation } from './BrowserLoadingAnimation'
 import type { BrowserViewState } from './useBrowserView'
 
@@ -18,6 +22,7 @@ interface BrowserViewportProps {
   activeActions: BrowserTabPlaceholderHandle['actions'] | undefined
   setActiveViewState: React.Dispatch<React.SetStateAction<BrowserViewState>>
   setHiddenByOverlay: React.Dispatch<React.SetStateAction<boolean>>
+  onTabViewChange: (tabId: string, view: BrowserTabView | null) => void
 }
 
 export function BrowserViewport({
@@ -33,7 +38,8 @@ export function BrowserViewport({
   hiddenByOverlay,
   activeActions,
   setActiveViewState,
-  setHiddenByOverlay
+  setHiddenByOverlay,
+  onTabViewChange
 }: BrowserViewportProps) {
   return (
     <div className="relative flex-1 min-h-0">
@@ -55,6 +61,7 @@ export function BrowserViewport({
           className="absolute inset-0"
           onStateChange={tab.id === tabs.activeTabId ? setActiveViewState : undefined}
           onOverlayChange={tab.id === tabs.activeTabId ? setHiddenByOverlay : undefined}
+          onViewChange={onTabViewChange}
         />
       ))}
       {!hasLoadedRealPage && !loadError && !hiddenByOverlay && (

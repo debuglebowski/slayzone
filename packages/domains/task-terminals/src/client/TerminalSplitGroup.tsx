@@ -27,6 +27,7 @@ function ChatPanelSkeleton() {
   )
 }
 import { TerminalStarter } from './TerminalStarter'
+import { createHandleRefRegistry, handleRefFor } from './handle-ref-registry'
 
 interface PaneProps {
   tab: TerminalTab
@@ -80,21 +81,11 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     const [sizes, setSizes] = useState<number[]>(() => panes.map(() => 100 / panes.length))
     const containerRef = useRef<HTMLDivElement>(null)
     const draggingRef = useRef<{ index: number; startX: number; startSizes: number[] } | null>(null)
-    const paneRefs = useRef<Record<string, React.RefObject<TerminalHandle | null>>>({})
-    const chatRefs = useRef<Record<string, React.RefObject<ChatPanelHandle | null>>>({})
+    // Terminal handles keyed by sessionId, chat handles by tab id.
+    const [paneRefs] = useState(createHandleRefRegistry<TerminalHandle>)
+    const [chatRefs] = useState(createHandleRefRegistry<ChatPanelHandle>)
 
     const isChatPane = (pane: PaneProps): boolean => isChatSupported(pane.tab.mode)
-
-    // Ensure a ref exists for each pane
-    for (const pane of panes) {
-      if (isChatPane(pane)) {
-        if (!chatRefs.current[pane.tab.id]) {
-          chatRefs.current[pane.tab.id] = { current: null }
-        }
-      } else if (!paneRefs.current[pane.sessionId]) {
-        paneRefs.current[pane.sessionId] = { current: null }
-      }
-    }
 
     useImperativeHandle(ref, () => ({
       focus: (sessionId?: string) => {
@@ -102,17 +93,17 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
         if (!id) return
         const pane = panes.find((p) => p.sessionId === id)
         if (pane && isChatPane(pane)) {
-          chatRefs.current[pane.tab.id]?.current?.focus()
+          chatRefs.get(pane.tab.id)?.current?.focus()
         } else {
-          paneRefs.current[id]?.current?.focus()
+          paneRefs.get(id)?.current?.focus()
         }
       }
     }))
 
     // Reset sizes when pane count changes
-    const prevCountRef = useRef(panes.length)
-    if (panes.length !== prevCountRef.current) {
-      prevCountRef.current = panes.length
+    const [prevCount, setPrevCount] = useState(panes.length)
+    if (panes.length !== prevCount) {
+      setPrevCount(panes.length)
       setSizes(panes.map(() => 100 / panes.length))
     }
 
@@ -172,7 +163,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
         return (
           <Suspense fallback={<ChatPanelSkeleton />}>
             <ChatPanel
-              ref={chatRefs.current[pane.tab.id]}
+              ref={handleRefFor(chatRefs, pane.tab.id)}
               key={pane.tab.id}
               tabId={pane.tab.id}
               taskId={pane.taskId}
@@ -192,6 +183,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       }
 
       const hasContextMenu = pane.onSplit && pane.onNewGroup
+      const terminalRef = handleRefFor(paneRefs, pane.sessionId)
       // Lazy-spawn gate: only the main AI-mode tab. Splits / extra groups /
       // plain `terminal` mode keep eager spawn (user-driven).
       const shouldGate = pane.tab.isMain && pane.tab.mode !== 'terminal'
@@ -201,7 +193,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       // warm agents after a crash or quit. Only meaningful when gating.
       const terminal = (
         <TerminalCmp
-          ref={paneRefs.current[pane.sessionId]}
+          ref={terminalRef}
           key={pane.sessionId}
           sessionId={pane.sessionId}
           cwd={pane.cwd}
@@ -235,7 +227,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
 
       return (
         <TerminalContextMenu
-          terminalRef={paneRefs.current[pane.sessionId]}
+          terminalRef={terminalRef}
           sessionId={pane.sessionId}
           mode={pane.tab.mode}
           conversationId={pane.conversationId}

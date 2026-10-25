@@ -29,11 +29,18 @@ export function useArtifactClipboard({
 }: UseArtifactClipboardArgs) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const writeFilePathsMutation = useMutation(trpc.app.clipboard.writeFilePaths.mutationOptions())
-  const pasteFilesMutation = useMutation(trpc.artifacts.pasteFiles.mutationOptions())
+  // mutateAsync is a stable (bound) function across renders — depend on it, not the
+  // per-render mutation result object.
+  const { mutateAsync: writeFilePaths } = useMutation(
+    trpc.app.clipboard.writeFilePaths.mutationOptions()
+  )
+  const { mutateAsync: pasteFiles } = useMutation(trpc.artifacts.pasteFiles.mutationOptions())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
-  const [clipboard, setClipboard] = useState<{ ids: string[]; mode: 'copy' | 'cut' } | null>(null)
+  const [clipboard, setClipboard] = useState<{
+    ids: string[]
+    mode: 'copy' | 'cut'
+  } | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
     queryClient
@@ -94,9 +101,9 @@ export function useArtifactClipboard({
       const paths = (await Promise.all(ids.map((id) => getFilePath(id)))).filter(
         (p): p is string => !!p
       )
-      await writeFilePathsMutation.mutateAsync({ paths })
+      await writeFilePaths({ paths })
     },
-    [getFilePath]
+    [getFilePath, writeFilePaths]
   )
 
   const handleArtifactCopy = useCallback(
@@ -120,7 +127,7 @@ export function useArtifactClipboard({
   const handleArtifactPaste = async (destFolderId: string | null) => {
     const osPaths = await queryClient.fetchQuery(trpc.app.clipboard.readFilePaths.queryOptions())
     if (!osPaths.length) return
-    const created = await pasteFilesMutation.mutateAsync({
+    const created = await pasteFiles({
       sourcePaths: osPaths,
       destTaskId: taskId,
       destFolderId
@@ -156,13 +163,13 @@ export function useArtifactClipboard({
       if (!paths.length) return
       const sourceArtifact = artifacts.find((a) => a.id === ids[0])
       const destFolderId = sourceArtifact?.folder_id ?? null
-      await pasteFilesMutation.mutateAsync({
+      await pasteFiles({
         sourcePaths: paths,
         destTaskId: taskId,
         destFolderId
       })
     },
-    [getFilePath, artifacts, taskId]
+    [getFilePath, artifacts, taskId, pasteFiles]
   )
 
   const handleDeleteSelected = async (ids: string[]) => {

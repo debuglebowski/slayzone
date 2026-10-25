@@ -31,14 +31,15 @@ export function useArtifactVersions({
   const refreshVersions = useCallback(
     async (artifactId: string): Promise<void> => {
       setVersionsLoading(true)
+      // catch swallows everything, so the trailing reset always runs (no
+      // `finally` needed — the React Compiler can't lower try/finally).
       try {
         const rows = await listVersions(artifactId, { limit: 50 })
         setArtifactVersions(rows)
       } catch {
         setArtifactVersions([])
-      } finally {
-        setVersionsLoading(false)
       }
+      setVersionsLoading(false)
     },
     [listVersions]
   )

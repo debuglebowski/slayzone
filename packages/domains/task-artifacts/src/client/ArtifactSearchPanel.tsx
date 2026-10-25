@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from 'react'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { TaskArtifact } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task/shared'
@@ -29,6 +29,86 @@ interface ArtifactResult {
   artifact: TaskArtifact
   path: string
   matches: SearchMatch[]
+}
+
+// Debounced search body. Plain module function: try/finally can't be compiled
+// inside a component by the React Compiler.
+async function runArtifactSearch({
+  query,
+  matchCase,
+  useRegex,
+  textArtifacts,
+  contentCache,
+  readContent,
+  getArtifactPath,
+  setResults,
+  setCollapsed,
+  setSearching
+}: {
+  query: string
+  matchCase: boolean
+  useRegex: boolean
+  textArtifacts: TaskArtifact[]
+  contentCache: RefObject<Map<string, string>>
+  readContent: (id: string) => Promise<string | null>
+  getArtifactPath: (artifact: TaskArtifact) => string
+  setResults: (results: ArtifactResult[]) => void
+  setCollapsed: (collapsed: Set<string>) => void
+  setSearching: (searching: boolean) => void
+}): Promise<void> {
+  try {
+    const flags = matchCase ? 'g' : 'gi'
+    const escaped = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Validate once so malformed user regex short-circuits via the outer
+    // try/catch before we read every file.
+    void new RegExp(escaped, flags)
+
+    // Load content for all text artifacts (cached)
+    await Promise.all(
+      textArtifacts.map(async (a) => {
+        if (!contentCache.current.has(a.id)) {
+          const c = await readContent(a.id)
+          if (c != null) contentCache.current.set(a.id, c)
+        }
+      })
+    )
+
+    const res: ArtifactResult[] = []
+    for (const artifact of textArtifacts) {
+      const content = contentCache.current.get(artifact.id)
+      if (!content) continue
+      const lines = content.split('\n')
+      const matches: SearchMatch[] = []
+      let globalCount = 0
+      for (let i = 0; i < lines.length; i++) {
+        // Count matches in this line with a fresh regex so `g` flag state
+        // is isolated per line.
+        const lineRe = new RegExp(escaped, flags)
+        let n = 0
+        let m: RegExpExecArray | null
+        while ((m = lineRe.exec(lines[i])) !== null) {
+          if (m[0].length === 0) {
+            lineRe.lastIndex++
+            continue
+          }
+          n++
+        }
+        if (n > 0) {
+          matches.push({ line: i + 1, lineText: lines[i], matchIndex: globalCount })
+          globalCount += n
+        }
+      }
+      if (matches.length > 0) {
+        res.push({ artifact, path: getArtifactPath(artifact), matches })
+      }
+    }
+    setResults(res)
+    setCollapsed(new Set())
+  } catch {
+    setResults([])
+  } finally {
+    setSearching(false)
+  }
 }
 
 export function ArtifactSearchPanel({
@@ -83,60 +163,19 @@ export function ArtifactSearchPanel({
       return
     }
     setSearching(true)
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const flags = matchCase ? 'g' : 'gi'
-        const escaped = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        // Validate once so malformed user regex short-circuits via the outer
-        // try/catch before we read every file.
-        void new RegExp(escaped, flags)
-
-        // Load content for all text artifacts (cached)
-        await Promise.all(
-          textArtifacts.map(async (a) => {
-            if (!contentCache.current.has(a.id)) {
-              const c = await readContent(a.id)
-              if (c != null) contentCache.current.set(a.id, c)
-            }
-          })
-        )
-
-        const res: ArtifactResult[] = []
-        for (const artifact of textArtifacts) {
-          const content = contentCache.current.get(artifact.id)
-          if (!content) continue
-          const lines = content.split('\n')
-          const matches: SearchMatch[] = []
-          let globalCount = 0
-          for (let i = 0; i < lines.length; i++) {
-            // Count matches in this line with a fresh regex so `g` flag state
-            // is isolated per line.
-            const lineRe = new RegExp(escaped, flags)
-            let n = 0
-            let m: RegExpExecArray | null
-            while ((m = lineRe.exec(lines[i])) !== null) {
-              if (m[0].length === 0) {
-                lineRe.lastIndex++
-                continue
-              }
-              n++
-            }
-            if (n > 0) {
-              matches.push({ line: i + 1, lineText: lines[i], matchIndex: globalCount })
-              globalCount += n
-            }
-          }
-          if (matches.length > 0) {
-            res.push({ artifact, path: getArtifactPath(artifact), matches })
-          }
-        }
-        setResults(res)
-        setCollapsed(new Set())
-      } catch {
-        setResults([])
-      } finally {
-        setSearching(false)
-      }
+    debounceRef.current = setTimeout(() => {
+      void runArtifactSearch({
+        query,
+        matchCase,
+        useRegex,
+        textArtifacts,
+        contentCache,
+        readContent,
+        getArtifactPath,
+        setResults,
+        setCollapsed,
+        setSearching
+      })
     }, 300)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -249,17 +288,14 @@ export function ArtifactSearchPanel({
   )
 }
 
-function HighlightedLine({
-  text,
-  query,
-  matchCase,
-  useRegex
-}: {
-  text: string
-  query: string
-  matchCase: boolean
+// Plain module function: the React Compiler can't lower this try/catch (value
+// blocks inside it) in a component body.
+function highlightParts(
+  text: string,
+  query: string,
+  matchCase: boolean,
   useRegex: boolean
-}) {
+): { text: string; highlight: boolean }[] {
   const trimmed = text.trimStart()
   const parts: { text: string; highlight: boolean }[] = []
 
@@ -284,6 +320,21 @@ function HighlightedLine({
   } catch {
     parts.push({ text: trimmed, highlight: false })
   }
+  return parts
+}
+
+function HighlightedLine({
+  text,
+  query,
+  matchCase,
+  useRegex
+}: {
+  text: string
+  query: string
+  matchCase: boolean
+  useRegex: boolean
+}) {
+  const parts = highlightParts(text, query, matchCase, useRegex)
 
   return (
     <span className="truncate text-[10px] text-muted-foreground">

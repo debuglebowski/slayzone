@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
 import { useBrowserViewEvents, type BrowserViewState, type LoadError } from './useBrowserViewEvents'
@@ -96,18 +97,15 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   }, [viewId, trpcClient])
 
   // Handle web-panel:popup-request events
-  const onPopupRouteRef = useRef(onPopupRoute)
-  useEffect(() => {
-    onPopupRouteRef.current = onPopupRoute
+  const handlePopupEvent = useStableCallback((raw: unknown) => {
+    const event = raw as { viewId: string; type: string; url?: string }
+    if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
+    onPopupRoute?.(event.url as string)
   })
   useSubscription(
     trpc.app.browser.onEvent.subscriptionOptions(undefined, {
       enabled: !!viewId,
-      onData: (raw) => {
-        const event = raw as { viewId: string; type: string; url?: string }
-        if (event.viewId !== viewId || event.type !== 'web-panel:popup-request') return
-        onPopupRouteRef.current?.(event.url as string)
-      }
+      onData: handlePopupEvent
     })
   )
 

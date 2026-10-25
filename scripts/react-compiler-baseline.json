@@ -86,52 +86,6 @@
   "packages/domains/feedback/src/client/FeedbackDialog.tsx": [
     "FeedbackDialog"
   ],
-  "packages/domains/file-editor/src/client/CodeEditor.tsx": [
-    "CodeEditor"
-  ],
-  "packages/domains/file-editor/src/client/EditorDisplayPopover.tsx": [
-    "EditorDisplayPopover"
-  ],
-  "packages/domains/file-editor/src/client/EditorFileTree.tsx": [
-    "EditorFileTree"
-  ],
-  "packages/domains/file-editor/src/client/EditorMarkdownPane.tsx": [
-    "MarkdownFilePane"
-  ],
-  "packages/domains/file-editor/src/client/FileEditorView.tsx": [
-    "FileEditorViewBody"
-  ],
-  "packages/domains/file-editor/src/client/SearchableCodeView.tsx": [
-    "SearchableCodeView"
-  ],
-  "packages/domains/file-editor/src/client/SearchPanel.tsx": [
-    "SearchPanel",
-    "HighlightedLine"
-  ],
-  "packages/domains/file-editor/src/client/useFileDropZone.ts": [
-    "useFileDropZone"
-  ],
-  "packages/domains/file-editor/src/client/useFileEditor.ts": [
-    "useFileEditor"
-  ],
-  "packages/domains/file-editor/src/client/useFileTreeClipboard.ts": [
-    "useFileTreeClipboard"
-  ],
-  "packages/domains/file-editor/src/client/useFileTreeCrud.ts": [
-    "useFileTreeCrud"
-  ],
-  "packages/domains/file-editor/src/client/useFileTreeData.ts": [
-    "useFileTreeData"
-  ],
-  "packages/domains/file-editor/src/client/useFileTreeDragDrop.ts": [
-    "useFileTreeDragDrop"
-  ],
-  "packages/domains/file-editor/src/client/useFileTreeKeyboard.ts": [
-    "useFileTreeKeyboard"
-  ],
-  "packages/domains/file-editor/src/client/useWatchedFile.ts": [
-    "useWatchedFile"
-  ],
   "packages/domains/home/src/client/HomeContainer.tsx": [
     "HomeContainerImpl"
   ],
@@ -231,119 +185,12 @@
   "packages/domains/sidebar/src/AppSidebar.tsx": [
     "AppSidebar"
   ],
-  "packages/domains/task-artifacts/src/client/ArtifactContentEditor.tsx": [
-    "ArtifactContentEditor"
-  ],
-  "packages/domains/task-artifacts/src/client/ArtifactSearchPanel.tsx": [
-    "ArtifactSearchPanel",
-    "HighlightedLine"
-  ],
-  "packages/domains/task-artifacts/src/client/ArtifactsPanel.tsx": [
-    "ArtifactsPanel"
-  ],
-  "packages/domains/task-artifacts/src/client/ArtifactVersionsDialog.tsx": [
-    "ArtifactVersionsDialog"
-  ],
-  "packages/domains/task-artifacts/src/client/useArtifactClipboard.ts": [
-    "useArtifactClipboard"
-  ],
-  "packages/domains/task-artifacts/src/client/useArtifacts.ts": [
-    "useArtifacts"
-  ],
-  "packages/domains/task-artifacts/src/client/useArtifactTree.ts": [
-    "useArtifactTree"
-  ],
-  "packages/domains/task-artifacts/src/client/useArtifactVersions.ts": [
-    "useArtifactVersions"
-  ],
-  "packages/domains/task-browser/src/client/BrowserExtensionsManager.tsx": [
-    "useBrowserExtensions"
-  ],
-  "packages/domains/task-browser/src/client/BrowserLoadingAnimation.tsx": [
-    "BrowserLoadingAnimation"
-  ],
-  "packages/domains/task-browser/src/client/BrowserPanel.tsx": [
-    "BrowserPanel"
-  ],
-  "packages/domains/task-browser/src/client/DeviceWebview.tsx": [
-    "DeviceWebview"
-  ],
-  "packages/domains/task-browser/src/client/MultiDeviceGrid.tsx": [
-    "DeviceColumn",
-    "MultiDeviceGrid"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserFind.ts": [
-    "useBrowserFind"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserLock.ts": [
-    "useBrowserLock"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserMultiDevice.ts": [
-    "useBrowserMultiDevice"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserPickElement.ts": [
-    "useBrowserPickElement"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserView.ts": [
-    "useBrowserView"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserViewBounds.ts": [
-    "useBrowserViewBounds"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserViewEvents.ts": [
-    "useBrowserViewEvents"
-  ],
-  "packages/domains/task-browser/src/client/useBrowserViewLifecycle.ts": [
-    "useBrowserViewLifecycle"
-  ],
   "packages/domains/task-terminals/src/client/agent-prompts/AgentPromptsSidebar.tsx": [
     "usePromptsSidebarOpen"
   ],
   "packages/domains/task-terminals/src/client/agent-sessions/SessionsSidebar.tsx": [
     "useSessionsSidebarOpen",
     "SessionsSidebar"
-  ],
-  "packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.ts": [
-    "useAutocomplete"
-  ],
-  "packages/domains/task-terminals/src/client/chat/ChatPanel.tsx": [
-    "ChatPanel"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatCollaboration.ts": [
-    "useChatCollaboration"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatComposer.ts": [
-    "useChatComposer"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatEffort.ts": [
-    "useChatEffort"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatFastMode.ts": [
-    "useChatFastMode"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatLifecycle.ts": [
-    "useChatLifecycle"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatMode.ts": [
-    "useChatMode"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatModel.ts": [
-    "useChatModel"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useChatQueue.ts": [
-    "useChatQueue"
-  ],
-  "packages/domains/task-terminals/src/client/chat/useFollowBottom.ts": [
-    "useFollowBottom"
-  ],
-  "packages/domains/task-terminals/src/client/TerminalContextMenu.tsx": [
-    "TerminalContextMenu"
-  ],
-  "packages/domains/task-terminals/src/client/TerminalSplitGroup.tsx": [
-    "TerminalSplitGroup"
-  ],
-  "packages/domains/task-terminals/src/client/useTaskTerminals.ts": [
-    "useTaskTerminals"
   ],
   "packages/domains/task/src/client/CreateTaskDialog.tsx": [
     "CreateTaskDialog"
@@ -360,9 +207,6 @@
   "packages/domains/task/src/client/task-detail/useTaskDoctor.ts": [
     "useTaskDoctor"
   ],
-  "packages/domains/task/src/client/task-detail/useTaskTerminalSession.ts": [
-    "useTaskTerminalSession"
-  ],
   "packages/domains/task/src/client/TaskHistoryPanel.tsx": [
     "TaskHistoryPanel"
   ],
@@ -375,9 +219,6 @@
   ],
   "packages/domains/task/src/client/useSharedCardHeights.ts": [
     "useSharedCardHeights"
-  ],
-  "packages/domains/task/src/client/useSubTasks.ts": [
-    "useSubTasks"
   ],
   "packages/domains/task/src/client/WebPanelView.tsx": [
     "WebPanelView"
@@ -395,9 +236,6 @@
   "packages/domains/terminal/src/client/TerminalStatusPopover.tsx": [
     "TerminalStatusButton",
     "TerminalStatusDialog"
-  ],
-  "packages/domains/terminal/src/client/useChatSession.ts": [
-    "useChatSession"
   ],
   "packages/domains/terminal/src/client/useTerminalModes.ts": [
     "useTerminalModes"

@@ -39,8 +39,9 @@ export function MarkdownFilePane({
   handleRef
 }: MarkdownFilePaneProps) {
   const trpc = useTRPC()
-  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
-  const openPathMutation = useMutation(trpc.app.shell.openPath.mutationOptions())
+  // mutateAsync is identity-stable across renders (the mutation objects are not).
+  const { mutateAsync: openExternal } = useMutation(trpc.app.shell.openExternal.mutationOptions())
+  const { mutateAsync: openPath } = useMutation(trpc.app.shell.openPath.mutationOptions())
   const editorRef = useRef<MilkdownEditor | null>(null)
   useEffect(() => {
     if (!handleRef) return
@@ -82,7 +83,7 @@ export function MarkdownFilePane({
         return
       }
       if (/^(https?:|mailto:)/i.test(resolvedHref)) {
-        void openExternalMutation.mutateAsync({ url: resolvedHref })
+        void openExternal({ url: resolvedHref })
         return
       }
       if (resolvedHref.startsWith(SLZ_FILE_PREFIX)) {
@@ -99,10 +100,10 @@ export function MarkdownFilePane({
             return
           }
         }
-        void openPathMutation.mutateAsync({ absPath })
+        void openPath({ absPath })
       }
     },
-    [projectPath, onOpenFile]
+    [projectPath, onOpenFile, openExternal, openPath]
   )
 
   return (

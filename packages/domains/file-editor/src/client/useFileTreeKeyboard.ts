@@ -198,7 +198,8 @@ export function useFileTreeKeyboard({
       setConfirmDelete,
       setFocusedPath,
       setClipboard,
-      setSelectedPaths
+      setSelectedPaths,
+      treeContainerRef
     ]
   )
 

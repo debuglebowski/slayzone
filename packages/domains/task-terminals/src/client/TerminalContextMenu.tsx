@@ -64,8 +64,8 @@ export function TerminalContextMenu({
   const [hasSelection, setHasSelection] = useState(false)
   const { terminalFontSize } = useAppearance()
   const trpc = useTRPC()
-  const ptyWriteMutation = useMutation(trpc.pty.write.mutationOptions())
-  const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: ptyWrite } = useMutation(trpc.pty.write.mutationOptions())
+  const { mutate: settingsSet } = useMutation(trpc.settings.set.mutationOptions())
 
   const searchShortcut = useShortcutDisplay('terminal-search')
   const clearShortcut = useShortcutDisplay('terminal-clear')
@@ -92,9 +92,9 @@ export function TerminalContextMenu({
 
   const handlePaste = useCallback(() => {
     void safeClipboardReadText().then((text) => {
-      if (text) ptyWriteMutation.mutate({ sessionId, data: text })
+      if (text) ptyWrite({ sessionId, data: text })
     })
-  }, [sessionId])
+  }, [ptyWrite, sessionId])
 
   const handleSelectAll = useCallback(() => {
     terminalRef.current?.selectAll()
@@ -118,9 +118,9 @@ export function TerminalContextMenu({
 
   const updateFontSize = useCallback((size: number) => {
     const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
-    settingsSetMutation.mutate({ key: 'terminal_font_size', value: String(clamped) })
+    settingsSet({ key: 'terminal_font_size', value: String(clamped) })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  }, [settingsSet])
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>

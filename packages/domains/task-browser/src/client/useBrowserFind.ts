@@ -126,7 +126,7 @@ export function useBrowserFind({
   // Close find when switching tabs
   useEffect(() => {
     if (findMode) closeFindMode()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Keyed on activeTabId only — intentional
   }, [activeTabId])
 
   // Find shortcuts via scope-aware registry. Routes from both DOM focus

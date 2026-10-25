@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react'
+import React, { useRef, useState, useEffect, useMemo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import {
   cn,
@@ -14,6 +14,17 @@ import { presetsForSlot } from './device-presets'
 import { DeviceWebview, type DeviceLayout } from './DeviceWebview'
 
 const SLOTS: DeviceSlot[] = ['desktop', 'tablet', 'mobile']
+
+/** Group presets by category ('Other' when unset), preserving first-seen order. */
+function groupPresetsByCategory<P extends { category?: string }>(presets: P[]): [string, P[]][] {
+  return Object.entries(
+    presets.reduce<Record<string, P[]>>((acc, p) => {
+      const cat = p.category ?? 'Other'
+      ;(acc[cat] ??= []).push(p)
+      return acc
+    }, {})
+  )
+}
 
 interface MultiDeviceGridProps {
   config: MultiDeviceConfig
@@ -91,13 +102,7 @@ function DeviceColumn({
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-[336px]" align="center" side="bottom">
               <div className="max-h-72 overflow-y-auto">
-                {Object.entries(
-                  presets.reduce<Record<string, typeof presets>>((acc, p) => {
-                    const cat = p.category ?? 'Other'
-                    ;(acc[cat] ??= []).push(p)
-                    return acc
-                  }, {})
-                ).map(([cat, items], gi) => (
+                {groupPresetsByCategory(presets).map(([cat, items], gi) => (
                   <div key={cat}>
                     {gi > 0 && <DropdownMenuSeparator />}
                     <DropdownMenuLabel className="text-[10px] text-muted-foreground px-2 py-1">
@@ -194,56 +199,53 @@ export function MultiDeviceGrid({
     []
   )
 
-  const handleDragStart = useCallback(
-    (e: React.MouseEvent, leftSlot: DeviceSlot, rightSlot: DeviceSlot) => {
-      e.preventDefault()
-      const container = containerRef.current
-      if (!container) return
+  const handleDragStart = (e: React.MouseEvent, leftSlot: DeviceSlot, rightSlot: DeviceSlot) => {
+    e.preventDefault()
+    const container = containerRef.current
+    if (!container) return
 
-      const isHorizontal = layout === 'horizontal'
-      const containerSize = isHorizontal ? container.offsetWidth : container.offsetHeight
+    const isHorizontal = layout === 'horizontal'
+    const containerSize = isHorizontal ? container.offsetWidth : container.offsetHeight
 
-      const currentFlex: Record<string, number> = {}
-      for (const s of enabledSlots) {
-        currentFlex[s] = getFlexValue(s)
-      }
-      const totalFlex = Object.values(currentFlex).reduce((a, b) => a + b, 0)
+    const currentFlex: Record<string, number> = {}
+    for (const s of enabledSlots) {
+      currentFlex[s] = getFlexValue(s)
+    }
+    const totalFlex = Object.values(currentFlex).reduce((a, b) => a + b, 0)
 
-      const startPos = isHorizontal ? e.clientX : e.clientY
-      const leftStartFlex = currentFlex[leftSlot]
-      const rightStartFlex = currentFlex[rightSlot]
+    const startPos = isHorizontal ? e.clientX : e.clientY
+    const leftStartFlex = currentFlex[leftSlot]
+    const rightStartFlex = currentFlex[rightSlot]
 
-      setDragging(true)
+    setDragging(true)
 
-      const handleMouseMove = (ev: MouseEvent) => {
-        const delta = (isHorizontal ? ev.clientX : ev.clientY) - startPos
-        const flexPerPx = totalFlex / containerSize
-        const flexDelta = delta * flexPerPx
+    const handleMouseMove = (ev: MouseEvent) => {
+      const delta = (isHorizontal ? ev.clientX : ev.clientY) - startPos
+      const flexPerPx = totalFlex / containerSize
+      const flexDelta = delta * flexPerPx
 
-        const minFlex = totalFlex * 0.1
-        const newLeft = Math.max(
-          minFlex,
-          Math.min(leftStartFlex + rightStartFlex - minFlex, leftStartFlex + flexDelta)
-        )
-        const newRight = leftStartFlex + rightStartFlex - newLeft
+      const minFlex = totalFlex * 0.1
+      const newLeft = Math.max(
+        minFlex,
+        Math.min(leftStartFlex + rightStartFlex - minFlex, leftStartFlex + flexDelta)
+      )
+      const newRight = leftStartFlex + rightStartFlex - newLeft
 
-        setFlexOverrides((prev) => ({ ...prev, [leftSlot]: newLeft, [rightSlot]: newRight }))
-      }
+      setFlexOverrides((prev) => ({ ...prev, [leftSlot]: newLeft, [rightSlot]: newRight }))
+    }
 
-      const cleanup = () => {
-        setDragging(false)
-        document.removeEventListener('mousemove', handleMouseMove)
-        document.removeEventListener('mouseup', handleMouseUp)
-        cleanupDragRef.current = null
-      }
-      const handleMouseUp = cleanup
+    const cleanup = () => {
+      setDragging(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      cleanupDragRef.current = null
+    }
+    const handleMouseUp = cleanup
 
-      cleanupDragRef.current = cleanup
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
-    },
-    [layout, enabledSlots, flexOverrides, config]
-  ) // eslint-disable-line react-hooks/exhaustive-deps
+    cleanupDragRef.current = cleanup
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
 
   if (enabledSlots.length === 0) {
     return (

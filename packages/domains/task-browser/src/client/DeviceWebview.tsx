@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useInsertionEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -170,7 +170,9 @@ export function DeviceWebview({
 
   // Disable emulation on unmount
   const disableEmulationRef = useRef(disableEmulation)
-  disableEmulationRef.current = disableEmulation
+  useInsertionEffect(() => {
+    disableEmulationRef.current = disableEmulation
+  })
   useEffect(() => {
     return () => {
       const wv = webviewRef.current

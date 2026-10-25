@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useVisibleInterval } from '@slayzone/ui'
 
 const LOADING_TEXTS = [
@@ -20,6 +20,15 @@ const LOADING_TEXTS = [
 ]
 
 const SIZE = 18
+
+/** Per-dot style; `--edge-fade` feeds the browser-pulse-grid keyframes. */
+function dotStyle(edgeFade: number, delay: number): CSSProperties {
+  return {
+    opacity: edgeFade * 0.12,
+    animation: `browser-pulse-grid 2.5s ease-in-out ${delay}s infinite`,
+    ['--edge-fade' as string]: edgeFade
+  }
+}
 
 export function BrowserLoadingAnimation() {
   const [textIndex, setTextIndex] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
@@ -51,11 +60,7 @@ export function BrowserLoadingAnimation() {
               <div
                 key={i}
                 className="w-[6px] h-[6px] rounded-full bg-blue-500"
-                style={{
-                  opacity: edgeFade * 0.12,
-                  animation: `browser-pulse-grid 2.5s ease-in-out ${delay}s infinite`,
-                  ['--edge-fade' as string]: edgeFade
-                }}
+                style={dotStyle(edgeFade, delay)}
               />
             )
           })}

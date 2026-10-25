@@ -24,7 +24,8 @@ export function useFileDropZone(
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
   const target = useWorkspaceTarget()
-  const copyInMutation = useMutation(trpc.fileEditor.copyIn.mutationOptions())
+  // mutateAsync is identity-stable across renders (the mutation object is not).
+  const { mutateAsync: copyIn } = useMutation(trpc.fileEditor.copyIn.mutationOptions())
   const [isFileDragOver, setIsFileDragOver] = useState(false)
   const dragCounter = useRef(0)
 
@@ -75,7 +76,7 @@ export function useFileDropZone(
         } else {
           // External file — copy into project root
           try {
-            const relPath = await copyInMutation.mutateAsync({
+            const relPath = await copyIn({
               ...target,
               rootPath: projectPath,
               absoluteSrc: absPath
@@ -87,7 +88,7 @@ export function useFileDropZone(
         }
       }
     },
-    [projectPath, openFile]
+    [projectPath, openFile, copyIn, target]
   )
 
   return {

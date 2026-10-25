@@ -5,14 +5,15 @@ import {
   useCallback,
   forwardRef,
   useImperativeHandle,
+  useInsertionEffect,
   createRef
 } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
-import { cn, useShortcutAction, useShortcutDisplay } from '@slayzone/ui'
+import { cn, useShortcutAction, useShortcutDisplay, useStableCallback } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
-import { type BrowserTabPlaceholderHandle } from './BrowserTabPlaceholder'
+import { type BrowserTabPlaceholderHandle, type BrowserTabView } from './BrowserTabPlaceholder'
 import type { BrowserViewState } from './useBrowserView'
 import type { BrowserTab, BrowserTabsState } from '../shared'
 import { MultiDeviceGrid } from './MultiDeviceGrid'
@@ -112,18 +113,28 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
   }, [tabs.activeTabId])
 
-  // Convenience accessors for active tab
-  // getActiveHandle reads the ref at call time — safe for event handlers where
-  // the imperative handle may have updated since the last render.
-  const activeTabIdRef = useRef(tabs.activeTabId)
-  activeTabIdRef.current = tabs.activeTabId
-  const getActiveHandle = useCallback(() => {
-    const tabId = activeTabIdRef.current
-    return tabId ? (tabRefsRef.current.get(tabId)?.current ?? null) : null
+  // Per-tab viewId/actions, reported by each mounted BrowserTabPlaceholder
+  // (null on unmount). Render reads this state, never the imperative handles:
+  // a render-time ref read would be frozen by React Compiler memoization.
+  const [tabViews, setTabViews] = useState<Record<string, BrowserTabView>>({})
+  const handleTabViewChange = useCallback((tabId: string, view: BrowserTabView | null) => {
+    setTabViews((prev) => {
+      const cur = prev[tabId]
+      if (!view) {
+        if (!cur) return prev
+        const next = { ...prev }
+        delete next[tabId]
+        return next
+      }
+      if (cur && cur.viewId === view.viewId && cur.actions === view.actions) return prev
+      return { ...prev, [tabId]: view }
+    })
   }, [])
-  const activeTabRef = getActiveHandle()
-  const activeActions = activeTabRef?.actions
-  const activeViewId = activeTabRef?.viewId ?? null
+
+  // Convenience accessors for active tab
+  const activeView = tabs.activeTabId ? tabViews[tabs.activeTabId] : undefined
+  const activeActions = activeView?.actions
+  const activeViewId = activeView?.viewId ?? null
   const canGoBack = activeViewState.canGoBack
   const canGoForward = activeViewState.canGoForward
   const isLoading = activeViewState.isLoading
@@ -263,21 +274,22 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
   }, [tabs.activeTabId, extensionsManagerOpen, trpcClient])
 
-  // Refs for stable event handler closures (avoids tearing down listeners on every tabs change)
+  // Refs for stable event handler closures (avoids tearing down listeners on every tabs change).
+  // Written every commit (no deps), before any effect or handler reads them.
   const tabsRef = useRef(tabs)
   const onTabsChangeRef = useRef(onTabsChange)
-  const createNewTabRef = useRef(createNewTab)
-  tabsRef.current = tabs
-  onTabsChangeRef.current = onTabsChange
-  createNewTabRef.current = createNewTab
+  useInsertionEffect(() => {
+    tabsRef.current = tabs
+    onTabsChangeRef.current = onTabsChange
+  })
 
   // Eagerly update tabsRef + notify parent. Prevents stale-ref races when
   // multiple webview events (did-navigate, page-title-updated, page-favicon-updated)
   // fire in the same React batch before a re-render can refresh the ref.
-  const commitTabsUpdate = useRef((next: BrowserTabsState) => {
+  const commitTabsUpdate = useCallback((next: BrowserTabsState) => {
     tabsRef.current = next
     onTabsChangeRef.current(next)
-  }).current
+  }, [])
 
   // Sync active view state to tab data (url, title, favicon)
   useEffect(() => {
@@ -317,26 +329,27 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   }, [activeViewState.favicon])
 
   // Handle new-tab-request events from main process (Cmd+Click / middle-click on links)
+  const handleNewTabRequest = useStableCallback((raw: unknown) => {
+    const event = raw as {
+      type: string
+      taskId?: string
+      url?: string
+      background?: boolean
+    }
+    if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
+    const tabUrl = event.url as string
+    if (event.background) {
+      const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
+      const t = tabsRef.current
+      commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
+    } else {
+      createNewTab(tabUrl)
+    }
+  })
   useSubscription(
     trpc.app.browser.onEvent.subscriptionOptions(undefined, {
       enabled: !!taskId,
-      onData: (raw) => {
-        const event = raw as {
-          type: string
-          taskId?: string
-          url?: string
-          background?: boolean
-        }
-        if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
-        const tabUrl = event.url as string
-        if (event.background) {
-          const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
-          const t = tabsRef.current
-          commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
-        } else {
-          createNewTabRef.current(tabUrl)
-        }
-      }
+      onData: handleNewTabRequest
     })
   )
 
@@ -417,7 +430,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
     // Read ref at call time — activeActions from render may be stale if the
     // child's useImperativeHandle updated after the parent's last render.
-    const handle = getActiveHandle()
+    const activeTabId = tabs.activeTabId
+    const handle = activeTabId ? (tabRefsRef.current.get(activeTabId)?.current ?? null) : null
     if (!handle?.actions) return
     handle.actions.navigate(url)
   }
@@ -618,6 +632,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
           activeActions={activeActions}
           setActiveViewState={setActiveViewState}
           setHiddenByOverlay={setHiddenByOverlay}
+          onTabViewChange={handleTabViewChange}
         />
       )}
     </div>

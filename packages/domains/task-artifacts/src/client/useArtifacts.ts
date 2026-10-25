@@ -16,7 +16,7 @@ import type {
   PruneReport
 } from '@slayzone/task-artifacts/shared'
 import { track } from '@slayzone/telemetry/client'
-import { toast } from '@slayzone/ui'
+import { toast, useStableCallback } from '@slayzone/ui'
 
 // Downloads reach the Electron host over the capability bridge, so they can fail for
 // reasons the user must see (no host capability, render failure, unwritable path).
@@ -103,11 +103,14 @@ export function useArtifacts(
   const [folders, setFolders] = useState<ArtifactFolder[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
 
-  // Re-sync selection when switching tasks
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
+  // Re-sync selection when switching tasks. Only `taskId` triggers the reset;
+  // the stable callback reads the latest `initialSelectedId` at that moment.
+  const resyncSelection = useStableCallback(() => {
     setSelectedId(initialSelectedId ?? null)
-  }, [taskId])
+  })
+  useEffect(() => {
+    resyncSelection()
+  }, [taskId, resyncSelection])
 
   // Fetch artifacts + folders. The two queries are the source of truth; local
   // state mirrors them so optimistic mutation updates stay instant and consumers
@@ -150,26 +153,52 @@ export function useArtifacts(
   )
 
   // --- Mutations ---
-  const createMutation = useMutation(trpc.artifacts.create.mutationOptions())
-  const updateMutation = useMutation(trpc.artifacts.update.mutationOptions())
-  const deleteMutation = useMutation(trpc.artifacts.delete.mutationOptions())
-  const uploadMutation = useMutation(trpc.artifacts.upload.mutationOptions())
-  const uploadDirMutation = useMutation(trpc.artifacts.uploadDir.mutationOptions())
-  const downloadFileMutation = useMutation(trpc.artifacts.downloadFile.mutationOptions())
-  const downloadFolderMutation = useMutation(trpc.artifacts.downloadFolder.mutationOptions())
-  const downloadAsPdfMutation = useMutation(trpc.artifacts.downloadAsPdf.mutationOptions())
-  const downloadAsPngMutation = useMutation(trpc.artifacts.downloadAsPng.mutationOptions())
-  const downloadAsHtmlMutation = useMutation(trpc.artifacts.downloadAsHtml.mutationOptions())
-  const downloadAllAsZipMutation = useMutation(trpc.artifacts.downloadAllAsZip.mutationOptions())
-  const versionsCreateMutation = useMutation(trpc.artifacts.versionsCreate.mutationOptions())
-  const versionsRenameMutation = useMutation(trpc.artifacts.versionsRename.mutationOptions())
-  const versionsPruneMutation = useMutation(trpc.artifacts.versionsPrune.mutationOptions())
-  const versionsSetCurrentMutation = useMutation(
+  // mutateAsync is a stable (bound) function across renders — the callbacks below
+  // depend on it rather than the per-render mutation result object.
+  const { mutateAsync: createMutate } = useMutation(trpc.artifacts.create.mutationOptions())
+  const { mutateAsync: updateMutate } = useMutation(trpc.artifacts.update.mutationOptions())
+  const { mutateAsync: deleteMutate } = useMutation(trpc.artifacts.delete.mutationOptions())
+  const { mutateAsync: uploadMutate } = useMutation(trpc.artifacts.upload.mutationOptions())
+  const { mutateAsync: uploadDirMutate } = useMutation(trpc.artifacts.uploadDir.mutationOptions())
+  const { mutateAsync: downloadFileMutate } = useMutation(
+    trpc.artifacts.downloadFile.mutationOptions()
+  )
+  const { mutateAsync: downloadFolderMutate } = useMutation(
+    trpc.artifacts.downloadFolder.mutationOptions()
+  )
+  const { mutateAsync: downloadAsPdfMutate } = useMutation(
+    trpc.artifacts.downloadAsPdf.mutationOptions()
+  )
+  const { mutateAsync: downloadAsPngMutate } = useMutation(
+    trpc.artifacts.downloadAsPng.mutationOptions()
+  )
+  const { mutateAsync: downloadAsHtmlMutate } = useMutation(
+    trpc.artifacts.downloadAsHtml.mutationOptions()
+  )
+  const { mutateAsync: downloadAllAsZipMutate } = useMutation(
+    trpc.artifacts.downloadAllAsZip.mutationOptions()
+  )
+  const { mutateAsync: versionsCreateMutate } = useMutation(
+    trpc.artifacts.versionsCreate.mutationOptions()
+  )
+  const { mutateAsync: versionsRenameMutate } = useMutation(
+    trpc.artifacts.versionsRename.mutationOptions()
+  )
+  const { mutateAsync: versionsPruneMutate } = useMutation(
+    trpc.artifacts.versionsPrune.mutationOptions()
+  )
+  const { mutateAsync: versionsSetCurrentMutate } = useMutation(
     trpc.artifacts.versionsSetCurrent.mutationOptions()
   )
-  const foldersCreateMutation = useMutation(trpc.artifacts.foldersCreate.mutationOptions())
-  const foldersUpdateMutation = useMutation(trpc.artifacts.foldersUpdate.mutationOptions())
-  const foldersDeleteMutation = useMutation(trpc.artifacts.foldersDelete.mutationOptions())
+  const { mutateAsync: foldersCreateMutate } = useMutation(
+    trpc.artifacts.foldersCreate.mutationOptions()
+  )
+  const { mutateAsync: foldersUpdateMutate } = useMutation(
+    trpc.artifacts.foldersUpdate.mutationOptions()
+  )
+  const { mutateAsync: foldersDeleteMutate } = useMutation(
+    trpc.artifacts.foldersDelete.mutationOptions()
+  )
 
   // Build folder path lookup: folderId -> slash-separated path
   const folderPathMap = useMemo(() => {
@@ -215,7 +244,7 @@ export function useArtifacts(
     }): Promise<TaskArtifact | null> => {
       if (!taskId) return null
       const data: CreateArtifactInput = { taskId, ...params }
-      const artifact = await createMutation.mutateAsync(data)
+      const artifact = await createMutate(data)
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
@@ -223,38 +252,47 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId]
+    [taskId, createMutate]
   )
 
-  const updateArtifact = useCallback(async (data: UpdateArtifactInput): Promise<void> => {
-    const updated = await updateMutation.mutateAsync(data)
-    if (updated) {
-      setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
-    }
-  }, [])
+  const updateArtifact = useCallback(
+    async (data: UpdateArtifactInput): Promise<void> => {
+      const updated = await updateMutate(data)
+      if (updated) {
+        setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
+      }
+    },
+    [updateMutate]
+  )
 
-  const deleteArtifact = useCallback(async (id: string): Promise<void> => {
-    await deleteMutation.mutateAsync({ id })
-    setArtifacts((prev) => prev.filter((a) => a.id !== id))
-    setSelectedId((prev) => (prev === id ? null : prev))
-    track('asset_deleted')
-  }, [])
+  const deleteArtifact = useCallback(
+    async (id: string): Promise<void> => {
+      await deleteMutate({ id })
+      setArtifacts((prev) => prev.filter((a) => a.id !== id))
+      setSelectedId((prev) => (prev === id ? null : prev))
+      track('asset_deleted')
+    },
+    [deleteMutate]
+  )
 
-  const renameArtifact = useCallback(async (id: string, newTitle: string): Promise<void> => {
-    const updated = await updateMutation.mutateAsync({ id, title: newTitle })
-    if (updated) {
-      setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
-    }
-  }, [])
+  const renameArtifact = useCallback(
+    async (id: string, newTitle: string): Promise<void> => {
+      const updated = await updateMutate({ id, title: newTitle })
+      if (updated) {
+        setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
+      }
+    },
+    [updateMutate]
+  )
 
   const moveArtifactToFolder = useCallback(
     async (artifactId: string, folderId: string | null): Promise<void> => {
-      const updated = await updateMutation.mutateAsync({ id: artifactId, folderId })
+      const updated = await updateMutate({ id: artifactId, folderId })
       if (updated) {
         setArtifacts((prev) => prev.map((a) => (a.id === artifactId ? updated : a)))
       }
     },
-    []
+    [updateMutate]
   )
 
   const readContent = useCallback(
@@ -272,16 +310,19 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
-  const saveContent = useCallback(async (id: string, content: string): Promise<void> => {
-    // UI saves always mutate the latest version in place. The explicit
-    // "Create version" action is the only UI path that creates new versions.
-    await updateMutation.mutateAsync({ id, content, mutateVersion: true })
-  }, [])
+  const saveContent = useCallback(
+    async (id: string, content: string): Promise<void> => {
+      // UI saves always mutate the latest version in place. The explicit
+      // "Create version" action is the only UI path that creates new versions.
+      await updateMutate({ id, content, mutateVersion: true })
+    },
+    [updateMutate]
+  )
 
   const uploadArtifact = useCallback(
     async (sourcePath: string, title?: string): Promise<TaskArtifact | null> => {
       if (!taskId) return null
-      const artifact = await uploadMutation.mutateAsync({ taskId, sourcePath, title })
+      const artifact = await uploadMutate({ taskId, sourcePath, title })
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
@@ -289,7 +330,7 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId]
+    [taskId, uploadMutate]
   )
 
   const getFilePath = useCallback(
@@ -301,43 +342,43 @@ export function useArtifacts(
 
   const downloadFile = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Download', () => downloadFileMutation.mutateAsync({ id })),
-    []
+      runDownload('Download', () => downloadFileMutate({ id })),
+    [downloadFileMutate]
   )
 
   const downloadFolder = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Folder download', () => downloadFolderMutation.mutateAsync({ folderId: id })),
-    []
+      runDownload('Folder download', () => downloadFolderMutate({ folderId: id })),
+    [downloadFolderMutate]
   )
 
   const downloadAsPdf = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PDF export', () => downloadAsPdfMutation.mutateAsync({ id })),
-    []
+      runDownload('PDF export', () => downloadAsPdfMutate({ id })),
+    [downloadAsPdfMutate]
   )
 
   const downloadAsPng = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PNG export', () => downloadAsPngMutation.mutateAsync({ id })),
-    []
+      runDownload('PNG export', () => downloadAsPngMutate({ id })),
+    [downloadAsPngMutate]
   )
 
   const downloadAsHtml = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('HTML export', () => downloadAsHtmlMutation.mutateAsync({ id })),
-    []
+      runDownload('HTML export', () => downloadAsHtmlMutate({ id })),
+    [downloadAsHtmlMutate]
   )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return runDownload('ZIP export', () => downloadAllAsZipMutation.mutateAsync({ taskId }))
-  }, [taskId])
+    return runDownload('ZIP export', () => downloadAllAsZipMutate({ taskId }))
+  }, [taskId, downloadAllAsZipMutate])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
       if (!taskId) return
-      await uploadDirMutation.mutateAsync({
+      await uploadDirMutate({
         taskId,
         dirPath,
         parentFolderId: parentFolderId ?? null
@@ -350,7 +391,7 @@ export function useArtifacts(
       setArtifacts(newArtifacts)
       setFolders(newFolders)
     },
-    [taskId, queryClient, trpc]
+    [taskId, queryClient, trpc, uploadDirMutate]
   )
 
   // --- Versions ---
@@ -378,9 +419,9 @@ export function useArtifacts(
 
   const createVersion = useCallback(
     async (artifactId: string, name?: string | null): Promise<ArtifactVersion> => {
-      return versionsCreateMutation.mutateAsync({ artifactId, name })
+      return versionsCreateMutate({ artifactId, name })
     },
-    []
+    [versionsCreateMutate]
   )
 
   const renameVersion = useCallback(
@@ -389,9 +430,9 @@ export function useArtifacts(
       versionRef: VersionRef,
       newName: string | null
     ): Promise<ArtifactVersion> => {
-      return versionsRenameMutation.mutateAsync({ artifactId, versionRef, newName })
+      return versionsRenameMutate({ artifactId, versionRef, newName })
     },
-    []
+    [versionsRenameMutate]
   )
 
   const diffVersions = useCallback(
@@ -406,14 +447,14 @@ export function useArtifacts(
       artifactId: string,
       opts: { keepLast?: number; keepNamed?: boolean; keepCurrent?: boolean; dryRun?: boolean }
     ): Promise<PruneReport> => {
-      return versionsPruneMutation.mutateAsync({ artifactId, ...opts })
+      return versionsPruneMutate({ artifactId, ...opts })
     },
-    []
+    [versionsPruneMutate]
   )
 
   const setCurrentVersion = useCallback(
     async (artifactId: string, versionRef: VersionRef): Promise<ArtifactVersion> => {
-      const v = await versionsSetCurrentMutation.mutateAsync({ artifactId, versionRef })
+      const v = await versionsSetCurrentMutate({ artifactId, versionRef })
       // Refresh artifact rows so current_version_id in local state matches DB.
       if (taskId) {
         const refreshed = await queryClient.fetchQuery(
@@ -423,7 +464,7 @@ export function useArtifacts(
       }
       return v
     },
-    [taskId, queryClient, trpc]
+    [taskId, queryClient, trpc, versionsSetCurrentMutate]
   )
 
   // --- Folder CRUD ---
@@ -431,35 +472,44 @@ export function useArtifacts(
   const createFolder = useCallback(
     async (params: { name: string; parentId?: string | null }): Promise<ArtifactFolder | null> => {
       if (!taskId) return null
-      const folder = await foldersCreateMutation.mutateAsync({ taskId, ...params })
+      const folder = await foldersCreateMutate({ taskId, ...params })
       if (folder) {
         setFolders((prev) => [...prev, folder])
       }
       return folder
     },
-    [taskId]
+    [taskId, foldersCreateMutate]
   )
 
-  const updateFolder = useCallback(async (data: UpdateArtifactFolderInput): Promise<void> => {
-    const updated = await foldersUpdateMutation.mutateAsync(data)
-    if (updated) {
-      setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
-    }
-  }, [])
+  const updateFolder = useCallback(
+    async (data: UpdateArtifactFolderInput): Promise<void> => {
+      const updated = await foldersUpdateMutate(data)
+      if (updated) {
+        setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
+      }
+    },
+    [foldersUpdateMutate]
+  )
 
-  const deleteFolder = useCallback(async (id: string): Promise<void> => {
-    await foldersDeleteMutation.mutateAsync({ id })
-    setFolders((prev) => prev.filter((f) => f.id !== id))
-    // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
-    setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
-  }, [])
+  const deleteFolder = useCallback(
+    async (id: string): Promise<void> => {
+      await foldersDeleteMutate({ id })
+      setFolders((prev) => prev.filter((f) => f.id !== id))
+      // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
+      setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
+    },
+    [foldersDeleteMutate]
+  )
 
-  const renameFolder = useCallback(async (id: string, newName: string): Promise<void> => {
-    const updated = await foldersUpdateMutation.mutateAsync({ id, name: newName })
-    if (updated) {
-      setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
-    }
-  }, [])
+  const renameFolder = useCallback(
+    async (id: string, newName: string): Promise<void> => {
+      const updated = await foldersUpdateMutate({ id, name: newName })
+      if (updated) {
+        setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
+      }
+    },
+    [foldersUpdateMutate]
+  )
 
   return {
     artifacts,

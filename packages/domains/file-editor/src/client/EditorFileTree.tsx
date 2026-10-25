@@ -1,5 +1,5 @@
 import { useCallback, forwardRef, useImperativeHandle } from 'react'
-import { File, FilePlus, FolderPlus, Folder, ClipboardPaste } from 'lucide-react'
+import { FilePlus, FolderPlus, ClipboardPaste } from 'lucide-react'
 import {
   cn,
   AlertDialog,
@@ -15,8 +15,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
-  ContextMenuTrigger,
-  Input
+  ContextMenuTrigger
 } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { compactChildren } from './EditorFileTree.utils'
@@ -26,7 +25,7 @@ import { useFileTreeClipboard } from './useFileTreeClipboard'
 import { useFileTreeCrud } from './useFileTreeCrud'
 import { useFileTreeDragDrop } from './useFileTreeDragDrop'
 import { useFileTreeKeyboard } from './useFileTreeKeyboard'
-import { renderEntry, type FileTreeRenderCtx } from './fileTreeRenders'
+import { renderEntry, renderRootCreateInput, type FileTreeRenderCtx } from './fileTreeRenders'
 
 interface EditorFileTreeProps {
   projectPath: string
@@ -124,7 +123,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           return next
         })
       },
-      [loadDir, dirContents, expandedFolders]
+      [loadDir, dirContents, expandedFolders, setExpandedFolders]
     )
 
     const {
@@ -322,28 +321,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             {rootCompacted.map((c) => renderEntry(ctx, c.entry, 0, c.displayName, c.chainPaths))}
 
             {/* Root-level create input */}
-            {creating && creating.parentPath === '' && (
-              <div className="px-2 py-0.5 flex items-center gap-1.5">
-                {creating.type === 'file' ? (
-                  <File className="size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <Folder className="size-4 shrink-0 text-amber-500/80" />
-                )}
-                <Input
-                  ref={createInputRef}
-                  placeholder={creating.type === 'file' ? 'filename' : 'folder name'}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreate((e.target as HTMLInputElement).value)
-                    if (e.key === 'Escape') setCreating(null)
-                  }}
-                  onBlur={(e) => {
-                    const v = (e.target as HTMLInputElement).value.trim()
-                    if (v) handleCreate(v)
-                  }}
-                  className="h-6 text-xs font-mono py-0 px-1 border-0 focus-visible:ring-0 shadow-none"
-                />
-              </div>
-            )}
+            {creating && creating.parentPath === '' && renderRootCreateInput(ctx, creating)}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>

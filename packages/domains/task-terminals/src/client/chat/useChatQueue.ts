@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import type { QueuedChatMessage } from '@slayzone/terminal/shared'
 
 /**
@@ -47,15 +48,13 @@ export function useChatQueue(
     })
   )
 
-  const onDrainedRef = useRef(onDrained)
-  useEffect(() => {
-    onDrainedRef.current = onDrained
-  })
+  // Always invokes the latest `onDrained` without re-subscribing.
+  const handleDrained = useStableCallback((original: string) => onDrained?.(original))
   useSubscription(
     trpc.chat.onQueueDrained.subscriptionOptions(undefined, {
       enabled: !!tabId,
       onData: ({ tabId: drainedTabId, original }) => {
-        if (drainedTabId === tabId) onDrainedRef.current?.(original)
+        if (drainedTabId === tabId) handleDrained(original)
       }
     })
   )

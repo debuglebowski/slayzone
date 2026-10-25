@@ -208,6 +208,37 @@ export function renderContextMenuItems(ctx: FileTreeRenderCtx, entry: DirEntry, 
   )
 }
 
+/**
+ * Root-level create input. Lives here (not inline in EditorFileTree) so the tree
+ * component only hands `createInputRef` to render helpers via ctx — using it as a
+ * JSX `ref` there too makes React Compiler type it as a ref and bail.
+ */
+export function renderRootCreateInput(ctx: FileTreeRenderCtx, creating: CreatingState) {
+  const { createInputRef, handleCreate, setCreating } = ctx
+  return (
+    <div className="px-2 py-0.5 flex items-center gap-1.5">
+      {creating.type === 'file' ? (
+        <File className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <Folder className="size-4 shrink-0 text-amber-500/80" />
+      )}
+      <Input
+        ref={createInputRef}
+        placeholder={creating.type === 'file' ? 'filename' : 'folder name'}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleCreate((e.target as HTMLInputElement).value)
+          if (e.key === 'Escape') setCreating(null)
+        }}
+        onBlur={(e) => {
+          const v = (e.target as HTMLInputElement).value.trim()
+          if (v) handleCreate(v)
+        }}
+        className="h-6 text-xs font-mono py-0 px-1 border-0 focus-visible:ring-0 shadow-none"
+      />
+    </div>
+  )
+}
+
 export function renderEntry(
   ctx: FileTreeRenderCtx,
   entry: DirEntry,

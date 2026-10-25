@@ -211,6 +211,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [onOpenFile])
 
+    // Destructured so the memo depends on the stable callback, not the
+    // composer object (a method call on `composer` would make it the dep).
+    const { clearQueue: clearComposerQueue } = composer
     const chatView = useMemo(
       () => ({
         collapseSignal,
@@ -226,7 +229,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         permissionRequests,
         respondPermission,
         abortAgent: async () => {
-          void composer.clearQueue()
+          void clearComposerQueue()
           await abortAndPop()
         },
         timeline,
@@ -247,7 +250,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         permissionRequests,
         respondPermission,
         abortAndPop,
-        composer.clearQueue,
+        clearComposerQueue,
         timeline,
         state.childIndex,
         onOpenUrl,

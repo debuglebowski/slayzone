@@ -1,6 +1,14 @@
-import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  useInsertionEffect,
+  type CSSProperties
+} from 'react'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
-import { Button, useVisibleInterval } from '@slayzone/ui'
+import { Button, useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import { RichTextEditor } from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
@@ -205,8 +213,13 @@ export function ArtifactContentEditor({
   const cmViewRef = useRef<CMEditorView | null>(null)
   const contentAreaRef = useRef<HTMLDivElement>(null)
   const [tocWidth, setTocWidth] = useState(220)
-  contentRef.current = content
-  isDirtyRef.current = isDirty
+  // Latest-value mirrors for the unmount flush, subscription and save timers.
+  // Insertion effects run first in commit, before any layout/passive effect or
+  // cleanup that reads them.
+  useInsertionEffect(() => {
+    contentRef.current = content
+    isDirtyRef.current = isDirty
+  })
   const fileExt = getExtensionFromTitle(artifact.title) || undefined
 
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
@@ -250,16 +263,17 @@ export function ArtifactContentEditor({
   }, [artifact.id, isBinary, loadFromDisk, saveContent, getMtime])
 
   // fs.watch subscription — disk is the single source of truth for content.
+  const handleContentChanged = useStableCallback((changedId: string) => {
+    if (changedId !== artifact.id) return
+    if (isDirtyRef.current) {
+      setExternalChangePending(true)
+    } else {
+      loadFromDisk()
+    }
+  })
   useSubscription(
     trpc.artifacts.onContentChanged.subscriptionOptions(undefined, {
-      onData: (changedId) => {
-        if (changedId !== artifact.id) return
-        if (isDirtyRef.current) {
-          setExternalChangePending(true)
-        } else {
-          loadFromDisk()
-        }
-      }
+      onData: handleContentChanged
     })
   )
 

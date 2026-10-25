@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useStableCallback } from '@slayzone/ui'
 import { buildDomElementSnippet, type PickedDomPayload } from './dom-picker'
 import { DOM_PICKER_SCRIPT, DOM_PICKER_CANCEL_SCRIPT } from './dom-picker-runtime'
 import type { BrowserTabPlaceholderHandle } from './BrowserTabPlaceholder'
@@ -20,6 +21,11 @@ export function useBrowserPickElement({
 }: UseBrowserPickElementParams) {
   const [isPickingElement, setIsPickingElement] = useState(false)
   const [pickError, setPickError] = useState<string | null>(null)
+  // Stable identity (startPickElement's deps unchanged) that always calls the
+  // latest onElementSnippet prop.
+  const emitElementSnippet = useStableCallback((snippet: string) => {
+    onElementSnippet?.(snippet)
+  })
 
   const cancelPickElement = useCallback(async () => {
     if (!activeActions) return
@@ -70,14 +76,21 @@ export function useBrowserPickElement({
         return
       }
       const snippet = buildDomElementSnippet(payload)
-      onElementSnippet?.(snippet)
+      emitElementSnippet(snippet)
       setIsPickingElement(false)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start element picker'
       setPickError(message)
       setIsPickingElement(false)
     }
-  }, [extensionsManagerOpen, canUseDomPicker, isPickingElement, multiDeviceMode, activeActions])
+  }, [
+    extensionsManagerOpen,
+    canUseDomPicker,
+    isPickingElement,
+    multiDeviceMode,
+    activeActions,
+    emitElementSnippet
+  ])
 
   const handlePickElement = useCallback(() => {
     if (isPickingElement) {

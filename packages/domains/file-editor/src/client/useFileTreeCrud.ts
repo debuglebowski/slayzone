@@ -21,6 +21,11 @@ interface UseFileTreeCrudArgs {
   setSelectedPaths: (paths: Set<string>) => void
 }
 
+// Kept outside the hook: React Compiler can't lower a conditional inside try.
+function parentDirOf(p: string): string {
+  return p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+}
+
 export function useFileTreeCrud({
   projectPath,
   loadDir,
@@ -36,10 +41,11 @@ export function useFileTreeCrud({
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
   const target = useWorkspaceTarget()
-  const createFileMutation = useMutation(trpc.fileEditor.createFile.mutationOptions())
-  const createDirMutation = useMutation(trpc.fileEditor.createDir.mutationOptions())
-  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
-  const deleteMutation = useMutation(trpc.fileEditor.delete.mutationOptions())
+  // mutateAsync is identity-stable across renders (the mutation objects are not).
+  const { mutateAsync: createFile } = useMutation(trpc.fileEditor.createFile.mutationOptions())
+  const { mutateAsync: createDir } = useMutation(trpc.fileEditor.createDir.mutationOptions())
+  const { mutateAsync: renamePath } = useMutation(trpc.fileEditor.rename.mutationOptions())
+  const { mutateAsync: deletePath } = useMutation(trpc.fileEditor.delete.mutationOptions())
   const [creating, setCreating] = useState<CreatingState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -67,14 +73,14 @@ export function useFileTreeCrud({
       const newPath = creating.parentPath ? `${creating.parentPath}/${name.trim()}` : name.trim()
       try {
         if (creating.type === 'file') {
-          await createFileMutation.mutateAsync({
+          await createFile({
             ...target,
             rootPath: projectPath,
             filePath: newPath
           })
           track('file_created')
         } else {
-          await createDirMutation.mutateAsync({
+          await createDir({
             ...target,
             rootPath: projectPath,
             dirPath: newPath
@@ -90,7 +96,7 @@ export function useFileTreeCrud({
       }
       setCreating(null)
     },
-    [creating, projectPath, loadDir, onOpenFile]
+    [creating, projectPath, loadDir, onOpenFile, createFile, createDir, target]
   )
 
   const handleRename = useCallback(
@@ -102,9 +108,9 @@ export function useFileTreeCrud({
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await renameMutation.mutateAsync({ ...target, rootPath: projectPath, oldPath, newPath })
+        await renamePath({ ...target, rootPath: projectPath, oldPath, newPath })
         track('file_renamed')
-        onFileRenamed?.(oldPath, newPath)
+        if (onFileRenamed) onFileRenamed(oldPath, newPath)
         const srcPrefix = oldPath + '/'
         setExpandedFolders((prev) => {
           let changed = false
@@ -128,7 +134,7 @@ export function useFileTreeCrud({
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renamePath, target]
   )
 
   const executeDelete = useCallback(
@@ -136,9 +142,9 @@ export function useFileTreeCrud({
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await deleteMutation.mutateAsync({ ...target, rootPath: projectPath, targetPath: p })
+          await deletePath({ ...target, rootPath: projectPath, targetPath: p })
           track('file_deleted')
-          dirsToReload.add(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
+          dirsToReload.add(parentDirOf(p))
         } catch (err) {
           console.error('Delete failed:', err)
         }
@@ -146,7 +152,7 @@ export function useFileTreeCrud({
       setSelectedPaths(new Set())
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, loadDir, setSelectedPaths]
+    [projectPath, loadDir, setSelectedPaths, deletePath, target]
   )
 
   const handleDeleteSelected = useCallback(

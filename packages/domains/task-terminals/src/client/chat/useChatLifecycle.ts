@@ -32,6 +32,89 @@ export interface UseChatLifecycleOpts {
   clearQueue: () => Promise<void>
 }
 
+type ChatTarget = {
+  tabId: string
+  taskId: string
+  mode: string
+  cwd: string
+  providerFlagsOverride: string | null
+}
+
+// Imperative bodies live outside the hook: the React Compiler cannot lower
+// `finally` clauses or value blocks inside try/catch, so keeping them here lets
+// the hook itself compile.
+async function restartChat(
+  chatApi: ChatActions,
+  target: ChatTarget,
+  setRestarting: (v: boolean) => void
+): Promise<void> {
+  setRestarting(true)
+  try {
+    // Explicit eager spawn — user clicked "Restart", they want a live
+    // subprocess immediately. chat.start hydrates if needed then
+    // ensureSpawned. chat.hydrate alone would leave the session lazy.
+    await chatApi.start(target)
+  } catch (err) {
+    toast(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    setRestarting(false)
+  }
+}
+
+async function runChatReset(
+  chatApi: ChatActions,
+  target: ChatTarget,
+  inFlight: boolean,
+  setResetting: (v: boolean) => void
+): Promise<void> {
+  try {
+    await resetChat(chatApi, target, {
+      interruptFirst: inFlight,
+      onSuccess: () => toast('Chat reset'),
+      onError: (err) => toast(`Reset failed: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  } catch {
+    /* handled via onError */
+  } finally {
+    setResetting(false)
+  }
+}
+
+function recordInFlightFlip(
+  trpcClient: ReturnType<typeof useTRPCClient>,
+  prev: boolean | null,
+  inFlight: boolean,
+  { tabId, taskId, mode }: { tabId: string; taskId: string; mode: string },
+  state: ChatTimelineState
+): void {
+  try {
+    void trpcClient.diagnostics.recordClientEvent
+      .mutate({
+        event: 'renderer.chat.inFlight.flip',
+        level: 'info',
+        message: `inFlight ${prev ?? 'init'}→${inFlight}`,
+        taskId,
+        sessionId: state.sessionId,
+        payload: {
+          tabId,
+          mode,
+          from: prev,
+          to: inFlight,
+          userMessagesSent: state.userMessagesSent,
+          resultCount: state.resultCount,
+          sessionEnded: state.sessionEnded,
+          timelineLen: state.timeline.length,
+          lastEventKinds: state.timeline.slice(-5).map((it) => it.kind)
+        }
+      })
+      .catch(() => {
+        /* diagnostics never escalate */
+      })
+  } catch {
+    /* diagnostics never escalate */
+  }
+}
+
 /**
  * Owns chat-session *lifecycle*: reset / restart, the derived "session ended"
  * display flag, and three fire-and-forget effects:
@@ -107,23 +190,11 @@ export function useChatLifecycle({
 
   const handleRestart = useCallback(async () => {
     if (restarting) return
-    setRestarting(true)
-    try {
-      // Explicit eager spawn — user clicked "Restart", they want a live
-      // subprocess immediately. chat.start hydrates if needed then
-      // ensureSpawned. chat.hydrate alone would leave the session lazy.
-      await chatApi.start({
-        tabId,
-        taskId,
-        mode,
-        cwd,
-        providerFlagsOverride: providerFlagsOverride ?? null
-      })
-    } catch (err) {
-      toast(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setRestarting(false)
-    }
+    await restartChat(
+      chatApi,
+      { tabId, taskId, mode, cwd, providerFlagsOverride: providerFlagsOverride ?? null },
+      setRestarting
+    )
   }, [restarting, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleReset = useCallback(async () => {
@@ -133,22 +204,12 @@ export function useChatLifecycle({
     resetTimeline()
     setDraft('')
     void clearQueue()
-    try {
-      await resetChat(
-        chatApi,
-        { tabId, taskId, mode, cwd, providerFlagsOverride: providerFlagsOverride ?? null },
-        {
-          interruptFirst: inFlight,
-          onSuccess: () => toast('Chat reset'),
-          onError: (err) =>
-            toast(`Reset failed: ${err instanceof Error ? err.message : String(err)}`)
-        }
-      )
-    } catch {
-      /* handled via onError */
-    } finally {
-      setResetting(false)
-    }
+    await runChatReset(
+      chatApi,
+      { tabId, taskId, mode, cwd, providerFlagsOverride: providerFlagsOverride ?? null },
+      inFlight,
+      setResetting
+    )
   }, [
     resetting,
     inFlight,
@@ -159,6 +220,7 @@ export function useChatLifecycle({
     cwd,
     providerFlagsOverride,
     resetTimeline,
+    setDraft,
     clearQueue
   ])
 
@@ -176,32 +238,7 @@ export function useChatLifecycle({
     const prev = prevInFlightRef.current
     prevInFlightRef.current = inFlight
     if (prev === inFlight) return
-    try {
-      void trpcClient.diagnostics.recordClientEvent
-        .mutate({
-          event: 'renderer.chat.inFlight.flip',
-          level: 'info',
-          message: `inFlight ${prev ?? 'init'}→${inFlight}`,
-          taskId,
-          sessionId: state.sessionId,
-          payload: {
-            tabId,
-            mode,
-            from: prev,
-            to: inFlight,
-            userMessagesSent: state.userMessagesSent,
-            resultCount: state.resultCount,
-            sessionEnded: state.sessionEnded,
-            timelineLen: state.timeline.length,
-            lastEventKinds: state.timeline.slice(-5).map((it) => it.kind)
-          }
-        })
-        .catch(() => {
-          /* diagnostics never escalate */
-        })
-    } catch {
-      /* diagnostics never escalate */
-    }
+    recordInFlightFlip(trpcClient, prev, inFlight, { tabId, taskId, mode }, state)
   }, [
     inFlight,
     hydrating,

@@ -5,7 +5,8 @@ import {
   useRef,
   useImperativeHandle,
   forwardRef,
-  type DragEvent
+  type DragEvent,
+  type RefObject
 } from 'react'
 import {
   Upload,
@@ -88,6 +89,32 @@ import {
 
 export type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 
+// Document-level mousemove/mouseup drag for the sidebar resize handle. Plain module
+// function: the self-removing listener pair can't live in a compiled component body.
+function startSidebarResize(
+  startX: number,
+  startW: number,
+  sidebarDrag: RefObject<{ startX: number; startW: number } | null>,
+  setSidebarWidth: (width: number) => void,
+  setSidebarDragging: (dragging: boolean) => void
+): void {
+  sidebarDrag.current = { startX, startW }
+  setSidebarDragging(true)
+  const handleMove = (ev: MouseEvent) => {
+    if (!sidebarDrag.current) return
+    const delta = ev.clientX - sidebarDrag.current.startX
+    setSidebarWidth(Math.max(100, Math.min(400, sidebarDrag.current.startW + delta)))
+  }
+  const handleUp = () => {
+    sidebarDrag.current = null
+    setSidebarDragging(false)
+    document.removeEventListener('mousemove', handleMove)
+    document.removeEventListener('mouseup', handleUp)
+  }
+  document.addEventListener('mousemove', handleMove)
+  document.addEventListener('mouseup', handleUp)
+}
+
 // --- Main panel ---
 
 export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelProps>(
@@ -97,7 +124,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   ) {
     const trpc = useTRPC()
     const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
-    const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
+    const { mutateAsync: showOpenDialog } = useMutation(
+      trpc.app.dialog.showOpenDialog.mutationOptions()
+    )
     const {
       artifacts,
       folders,
@@ -258,27 +287,27 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const htmlTheme = selectedArtifact?.html_theme_override ?? 'system'
     const showHtmlTheme = selectedRenderMode === 'html-preview'
 
+    // Plain functions (no manual useCallback): they only feed DOM onClick props, and
+    // the compiler memoizes them itself. A manual memo can't be preserved here because
+    // render-mode helpers called on `selectedRenderMode` later in render may alias it.
     // Persist as NULL at 100% so the column only ever holds a real override.
-    const applyZoom = useCallback(
-      (next: number) => {
-        if (!selectedArtifact) return
-        void updateArtifact({
-          id: selectedArtifact.id,
-          zoomPct: next === DEFAULT_ZOOM_PCT ? null : next
-        })
-      },
-      [selectedArtifact, updateArtifact]
-    )
+    const applyZoom = (next: number) => {
+      if (!selectedArtifact) return
+      void updateArtifact({
+        id: selectedArtifact.id,
+        zoomPct: next === DEFAULT_ZOOM_PCT ? null : next
+      })
+    }
 
     // Persist as NULL at 'system' so the column only ever holds a real override.
-    const cycleHtmlTheme = useCallback(() => {
+    const cycleHtmlTheme = () => {
       if (!selectedArtifact) return
       const next = nextHtmlTheme(htmlTheme)
       void updateArtifact({
         id: selectedArtifact.id,
         htmlThemeOverride: next === 'system' ? null : next
       })
-    }, [selectedArtifact, htmlTheme, updateArtifact])
+    }
 
     useEffect(() => {
       const artifact = artifacts.find((a) => a.id === selectedId)
@@ -362,7 +391,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     // --- Upload / drop ---
 
     const handleUpload = useCallback(async () => {
-      const result = await showOpenDialogMutation.mutateAsync({
+      const result = await showOpenDialog({
         title: 'Upload Artifact',
         properties: ['openFile', 'multiSelections']
       })
@@ -370,7 +399,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       for (const filePath of result.filePaths) {
         await uploadArtifact(filePath)
       }
-    }, [uploadArtifact])
+    }, [uploadArtifact, showOpenDialog])
 
     const handleFileDrop = useCallback(
       async (e: DragEvent) => {
@@ -566,23 +595,15 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const handleSidebarMouseDown = useCallback(
       (e: React.MouseEvent) => {
         e.preventDefault()
-        sidebarDrag.current = { startX: e.clientX, startW: sidebarWidth }
-        setSidebarDragging(true)
-        const handleMove = (ev: MouseEvent) => {
-          if (!sidebarDrag.current) return
-          const delta = ev.clientX - sidebarDrag.current.startX
-          setSidebarWidth(Math.max(100, Math.min(400, sidebarDrag.current.startW + delta)))
-        }
-        const handleUp = () => {
-          sidebarDrag.current = null
-          setSidebarDragging(false)
-          document.removeEventListener('mousemove', handleMove)
-          document.removeEventListener('mouseup', handleUp)
-        }
-        document.addEventListener('mousemove', handleMove)
-        document.addEventListener('mouseup', handleUp)
+        startSidebarResize(
+          e.clientX,
+          sidebarWidth,
+          sidebarDrag,
+          setSidebarWidth,
+          setSidebarDragging
+        )
       },
-      [sidebarWidth]
+      [sidebarWidth, setSidebarWidth]
     )
 
     return (

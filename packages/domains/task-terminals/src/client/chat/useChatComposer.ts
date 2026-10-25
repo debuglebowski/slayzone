@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { toast, type AgentEffort } from '@slayzone/ui'
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
+import { toast, useStableCallback, type AgentEffort } from '@slayzone/ui'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
 import { useChatQueue } from './useChatQueue'
@@ -89,9 +89,12 @@ export function useChatComposer({
     push: pushQueue,
     remove: removeQueue,
     clear: clearQueue
-  } = useChatQueue(tabId, (original) => {
-    void bumpUsageRef.current(original)
-  })
+  } = useChatQueue(
+    tabId,
+    useStableCallback((original: string) => {
+      void bumpUsageRef.current(original)
+    })
+  )
   const [attachments, setAttachments] = useState<ArtifactRef[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // Snapshot of the in-flight turn's raw input + attachments. Used by Stop/Esc
@@ -253,14 +256,20 @@ export function useChatComposer({
     mode,
     cwd,
     providerFlagsOverride,
-    scrollToBottom
+    scrollToBottom,
+    handleEffortChange
   ])
 
   // Wire the forward-declared bumpUsageRef now that autocomplete is in scope.
   // `autocomplete` is a fresh object every render (useAutocomplete returns
   // an object literal); reading via ref keeps the backend drain callback
-  // stable so onDrained subscribers don't churn.
-  bumpUsageRef.current = autocomplete.bumpUsageFromMessage
+  // stable so onDrained subscribers don't churn. Written in an insertion effect
+  // (not during render) — every reader (drain events, post-send bump) runs
+  // after commit, so it always sees this commit's function.
+  const bumpUsageFromMessage = autocomplete.bumpUsageFromMessage
+  useInsertionEffect(() => {
+    bumpUsageRef.current = bumpUsageFromMessage
+  })
 
   // Stop button + Esc shared path. Clears the queue (intentional: queued msgs
   // are abandoned alongside the in-flight turn — the main side wipes

@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useImperativeHandle,
+  useInsertionEffect,
   forwardRef
 } from 'react'
 import { FileCode, Files, RefreshCw, Search } from 'lucide-react'
@@ -96,7 +97,10 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
 const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
   function FileEditorViewBody({ projectPath, initialEditorState, onEditorStateChange }, ref) {
     const trpc = useTRPC()
-    const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
+    // mutateAsync is identity-stable across renders (the mutation object is not).
+    const { mutateAsync: showInFinder } = useMutation(
+      trpc.fileEditor.showInFinder.mutationOptions()
+    )
     const {
       openFiles,
       activeFile,
@@ -196,7 +200,10 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
     // Parent (TaskDetailPage) debounces at 500ms, so frequent calls here are fine.
     // Use filePathsKey (stable string) instead of openFiles to avoid emitting on every keystroke.
     const onChangeRef = useRef(onEditorStateChange)
-    onChangeRef.current = onEditorStateChange
+    // Latest-prop ref, synced at commit before the persistence effect below runs.
+    useInsertionEffect(() => {
+      onChangeRef.current = onEditorStateChange
+    })
     const filePathsKey = openFiles.map((f) => f.path).join('\0')
 
     const fileViewModesKey = JSON.stringify(fileViewModes)
@@ -339,9 +346,9 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
     const handleRevealInFinder = useCallback(
       (filePath: string) => {
         if (!canRevealInFinder) return
-        void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: filePath })
+        void showInFinder({ rootPath: projectPath, targetPath: filePath })
       },
-      [projectPath, canRevealInFinder]
+      [projectPath, canRevealInFinder, showInFinder]
     )
 
     return (

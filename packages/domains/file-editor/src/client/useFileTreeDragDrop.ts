@@ -24,7 +24,8 @@ export function useFileTreeDragDrop({
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
   const target = useWorkspaceTarget()
-  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
+  // mutateAsync is identity-stable across renders (the mutation object is not).
+  const { mutateAsync: renamePath } = useMutation(trpc.fileEditor.rename.mutationOptions())
   // --- Drag and drop state ---
   const dragPathRef = useRef<string | null>(null)
   const dragTypeRef = useRef<'file' | 'directory' | null>(null)
@@ -124,13 +125,13 @@ export function useFileTreeDragDrop({
       const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
 
       try {
-        await renameMutation.mutateAsync({
+        await renamePath({
           ...target,
           rootPath: projectPath,
           oldPath: srcPath,
           newPath
         })
-        onFileRenamed?.(srcPath, newPath)
+        if (onFileRenamed) onFileRenamed(srcPath, newPath)
 
         const srcPrefix = srcPath + '/'
         setExpandedFolders((prev) => {
@@ -159,7 +160,7 @@ export function useFileTreeDragDrop({
         console.error('Move failed:', err)
       }
     },
-    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders]
+    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders, renamePath, target]
   )
 
   return {

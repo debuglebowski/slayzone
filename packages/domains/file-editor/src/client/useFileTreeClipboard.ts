@@ -19,6 +19,28 @@ interface UseFileTreeClipboardArgs {
   onFileRenamed?: (oldPath: string, newPath: string) => void
 }
 
+// Pure path helpers. Kept outside the hook so the try blocks in handlePaste hold
+// no conditional expressions (React Compiler can't lower those inside try).
+function parentDirOf(p: string): string {
+  return p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
+}
+
+function baseNameOf(p: string): string {
+  return p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p
+}
+
+function joinDest(targetDir: string, name: string): string {
+  return targetDir ? `${targetDir}/${name}` : name
+}
+
+function isInProject(abs: string, projectPath: string, projectPrefix: string): boolean {
+  return abs === projectPath || abs.startsWith(projectPrefix)
+}
+
+function relativeToProject(abs: string, projectPath: string, projectPrefix: string): string {
+  return abs === projectPath ? '' : abs.slice(projectPrefix.length)
+}
+
 export function useFileTreeClipboard({
   projectPath,
   loadDir,
@@ -31,11 +53,14 @@ export function useFileTreeClipboard({
   // keys the query cache.
   const target = useWorkspaceTarget()
   const queryClient = useQueryClient()
-  const copyMutation = useMutation(trpc.fileEditor.copy.mutationOptions())
-  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
-  const copyInMutation = useMutation(trpc.fileEditor.copyIn.mutationOptions())
-  const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
-  const writeFilePathsMutation = useMutation(trpc.app.clipboard.writeFilePaths.mutationOptions())
+  // mutateAsync is identity-stable across renders (the mutation objects are not).
+  const { mutateAsync: copyPath } = useMutation(trpc.fileEditor.copy.mutationOptions())
+  const { mutateAsync: renamePath } = useMutation(trpc.fileEditor.rename.mutationOptions())
+  const { mutateAsync: copyIn } = useMutation(trpc.fileEditor.copyIn.mutationOptions())
+  const { mutateAsync: showInFinder } = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
+  const { mutateAsync: writeFilePaths } = useMutation(
+    trpc.app.clipboard.writeFilePaths.mutationOptions()
+  )
   // --- Internal clipboard for copy/cut ---
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
@@ -49,9 +74,9 @@ export function useFileTreeClipboard({
   const writeOsClipboard = useCallback(
     (relPaths: string[]) => {
       const absolute = relPaths.map((p) => `${projectPath}/${p}`)
-      void writeFilePathsMutation.mutateAsync({ paths: absolute })
+      void writeFilePaths({ paths: absolute })
     },
-    [projectPath]
+    [projectPath, writeFilePaths]
   )
 
   const handleCopy = useCallback(
@@ -114,24 +139,21 @@ export function useFileTreeClipboard({
             const destPath = resolveCollisionPath(rawDest, targetDir)
             try {
               if (clipboard.mode === 'copy') {
-                await copyMutation.mutateAsync({
+                await copyPath({
                   ...target,
                   rootPath: projectPath,
                   srcPath,
                   destPath
                 })
               } else {
-                await renameMutation.mutateAsync({
+                await renamePath({
                   ...target,
                   rootPath: projectPath,
                   oldPath: srcPath,
                   newPath: destPath
                 })
-                onFileRenamed?.(srcPath, destPath)
-                const srcParent = srcPath.includes('/')
-                  ? srcPath.slice(0, srcPath.lastIndexOf('/'))
-                  : ''
-                dirsToReload.add(srcParent)
+                if (onFileRenamed) onFileRenamed(srcPath, destPath)
+                dirsToReload.add(parentDirOf(srcPath))
               }
             } catch (err) {
               console.error('Paste failed:', err)
@@ -147,20 +169,21 @@ export function useFileTreeClipboard({
         )
         for (const abs of osPaths) {
           try {
-            if (abs === projectPath || abs.startsWith(projectPrefix)) {
-              const srcRel = abs === projectPath ? '' : abs.slice(projectPrefix.length)
+            if (isInProject(abs, projectPath, projectPrefix)) {
+              const srcRel = relativeToProject(abs, projectPath, projectPrefix)
               if (!srcRel) continue
-              const name = srcRel.includes('/') ? srcRel.slice(srcRel.lastIndexOf('/') + 1) : srcRel
-              const rawDest = targetDir ? `${targetDir}/${name}` : name
-              const destPath = resolveCollisionPath(rawDest, targetDir)
-              await copyMutation.mutateAsync({
+              const destPath = resolveCollisionPath(
+                joinDest(targetDir, baseNameOf(srcRel)),
+                targetDir
+              )
+              await copyPath({
                 ...target,
                 rootPath: projectPath,
                 srcPath: srcRel,
                 destPath
               })
             } else {
-              await copyInMutation.mutateAsync({
+              await copyIn({
                 ...target,
                 rootPath: projectPath,
                 absoluteSrc: abs,
@@ -183,11 +206,12 @@ export function useFileTreeClipboard({
       resolveCollisionPath,
       onFileRenamed,
       dirContents,
-      copyMutation,
-      renameMutation,
-      copyInMutation,
+      copyPath,
+      renamePath,
+      copyIn,
       queryClient,
-      trpc
+      trpc,
+      target
     ]
   )
 
@@ -203,7 +227,7 @@ export function useFileTreeClipboard({
         const destName = duplicateName(entry.name, names)
         const destPath = parentDir ? `${parentDir}/${destName}` : destName
         try {
-          await copyMutation.mutateAsync({
+          await copyPath({
             ...target,
             rootPath: projectPath,
             srcPath: entry.path,
@@ -217,7 +241,7 @@ export function useFileTreeClipboard({
       track('file_duplicated')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, dirContents, loadDir]
+    [projectPath, dirContents, loadDir, copyPath, target]
   )
 
   const handleCopyPath = useCallback(
@@ -237,10 +261,10 @@ export function useFileTreeClipboard({
   const handleRevealInFinder = useCallback(
     (entry: DirEntry) => {
       if (!canRevealInFinder) return
-      void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: entry.path })
+      void showInFinder({ rootPath: projectPath, targetPath: entry.path })
       track('reveal_in_finder')
     },
-    [projectPath, canRevealInFinder]
+    [projectPath, canRevealInFinder, showInFinder]
   )
 
   return {
