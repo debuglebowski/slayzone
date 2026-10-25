@@ -71,17 +71,31 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
   const browserTabEntries = (page: Page) =>
     page.locator('.h-10.overflow-x-auto:visible [role="button"]:not(:has(.lucide-plus))')
 
-  /** Focus the xterm textarea in the currently visible terminal */
+  /**
+   * Focus the xterm textarea in the currently visible terminal.
+   *
+   * TerminalContainer renders only the active group (keyed by group id), so
+   * activating a group unmounts the old xterm and mounts a new one whose
+   * textarea appears only after `terminal.open()`. Retry until a visible
+   * textarea actually holds focus — focusing too early leaves focus on body,
+   * Cmd+W then finds no focused panel and falls through to closing the task tab.
+   */
   const focusTerminal = (page: Page) =>
-    page.evaluate(() => {
-      const textareas = document.querySelectorAll<HTMLElement>('.xterm-helper-textarea')
-      for (const ta of textareas) {
-        if (!ta.closest('.hidden')) {
-          ta.focus()
-          break
-        }
-      }
-    })
+    expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const textareas = document.querySelectorAll<HTMLElement>('.xterm-helper-textarea')
+            for (const ta of textareas) {
+              if (ta.closest('.hidden') || !ta.closest('.xterm')?.checkVisibility()) continue
+              ta.focus()
+              return document.activeElement === ta
+            }
+            return false
+          }),
+        { timeout: 5_000 }
+      )
+      .toBe(true)
 
   const openTaskViaSearch = async (page: Page, title: string) => {
     const taskCardTitle = page.getByText(title).first()
@@ -159,7 +173,14 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    await s.createTask({ projectId: p.id, title: 'CmdW task', status: 'in_progress' })
+    // Plain shell, not the default agent: an un-started agent renders the idle
+    // start gate (no xterm), so the main group would have nothing to focus.
+    await s.createTask({
+      projectId: p.id,
+      title: 'CmdW task',
+      status: 'in_progress',
+      terminalMode: 'terminal'
+    })
     await s.refreshData()
 
     await goHome(mainWindow)

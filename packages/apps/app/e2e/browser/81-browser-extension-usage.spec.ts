@@ -8,6 +8,7 @@ import {
   openTaskViaSearch,
   getActiveViewId
 } from '../fixtures/browser-view'
+import { getTestUrl } from '../fixtures/test-server'
 
 // Resolve test extension fixture paths (fixtures live in e2e/fixtures/)
 const TEST_EXT_DIR = join(import.meta.dirname, '..', 'fixtures', 'test-extension')
@@ -82,7 +83,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     expect(result.id).toBeTruthy()
 
     // Navigate to a real page
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-ext-page'))
     await expect
       .poll(
         async () => {
@@ -90,7 +91,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
         },
         { timeout: 15000 }
       )
-      .toContain('example.com')
+      .toContain('/title-ext-page')
 
     // Wait for content script + messaging to complete
     await mainWindow.waitForTimeout(5000)
@@ -122,7 +123,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    // The previous test already loaded the extension and navigated to example.com.
+    // The previous test already loaded the extension and navigated to the fixture page.
     // The content script should have sent a ping and received a pong.
     // Check the marker element's status immediately (content script already ran).
     // Read the diagnostic immediately (content script already ran from previous test)
@@ -155,7 +156,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Navigate to a different page
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.org')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-ext-page-2'))
     await expect
       .poll(
         async () => {
@@ -163,7 +164,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
         },
         { timeout: 15000 }
       )
-      .toContain('example.org')
+      .toContain('/title-ext-page-2')
 
     // Wait and check marker exists on new page
     await expect
@@ -229,7 +230,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     })
 
     // Navigate to trigger content script
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-ext-page'))
     await expect
       .poll(
         async () => {
@@ -237,7 +238,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
         },
         { timeout: 15000 }
       )
-      .toContain('example.com')
+      .toContain('/title-ext-page')
 
     await mainWindow.waitForTimeout(5000)
 

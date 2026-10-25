@@ -123,13 +123,17 @@ async function readOwner(
 /** Spawn the sidecar bin as a second, standalone hub on its own port + store. */
 async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   if (!fs.existsSync(HUB_BIN)) throw new Error(`hub bin missing: ${HUB_BIN} (run pnpm build)`)
-  fs.mkdirSync(storeDir, { recursive: true })
+  // The hub's own state lives in `<storeDir>/hub`, BESIDE the computer's dirs and
+  // the project dirs these specs create — never above them: the owner gate refuses
+  // any path inside the hub's state directory as a project path or pty cwd.
+  const hubRoot = path.join(storeDir, 'hub')
+  fs.mkdirSync(hubRoot, { recursive: true })
   const port = await freePort()
   const electronPath = require('electron') as unknown as string
   // CRITICAL: strip inherited SLAYZONE_*/ELECTRON_* first. When e2e runs from a
   // supervised SlayZone terminal, the parent leaks SLAYZONE_ROOT (the real dev
   // install) → the second hub would scribble into the real dev store. Re-add only
-  // what this hub needs, ROOT included, so its DB derives inside `storeDir`.
+  // what this hub needs, ROOT included, so its DB derives inside `hubRoot`.
   const cleanEnv: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue
@@ -145,7 +149,7 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
       SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
       // Login on: the spec's callers authenticate with the hub's bootstrap owner.
       SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-      SLAYZONE_ROOT: storeDir
+      SLAYZONE_ROOT: hubRoot
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -156,7 +160,7 @@ async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   // a bearer: every caller below — this spec's raw clients AND the app — has to
   // carry one. The hub provisions its own first user on first boot
   // precisely so this needs no human; that file is the credential.
-  const owner = await readOwner(storeDir)
+  const owner = await readOwner(hubRoot)
   hubTokens.set(url, owner.token)
   return {
     proc,
@@ -1065,6 +1069,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(remoteGroup).toBeVisible({ timeout: 10_000 })
       await remoteGroup.locator('[data-testid="computer-add-open"]').click()
       await expect(page.locator('[data-testid="computer-add-hub"]')).toHaveCount(0)
+      // Hub B requires sign-in, so it mints only for a named user (T-20).
+      await remoteGroup.locator('[data-testid="computer-enroll-for"]').fill(hub.email)
       await remoteGroup.locator('[data-testid="computer-add"]').click()
 
       // The dialog must name the hub the token belongs to: with several connected, a
@@ -1113,13 +1119,15 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         // hub process itself. The jail admits the pty cwd used below.
         hubComputer = await attachDefaultComputer(hub, secondStore)
 
-        // Remote hub: create a project (path = the remote store dir, a real dir) +
-        // a task to run a terminal in.
+        // Remote hub: create a project (a real dir inside the computer's jail, outside
+        // the hub's own state dir) + a task to run a terminal in.
+        const workDir = path.join(secondStore, 'work')
+        fs.mkdirSync(workDir)
         const { remoteTaskId } = await withHubClient(remoteHubUrl, async (c) => {
           const project = (await c.projects.create.mutate({
             name: 'Remote-Term',
             color: '#22c55e',
-            path: secondStore
+            path: workDir
           })) as { id: string }
           const task = (await c.task.create.mutate({
             projectId: project.id,
@@ -1164,7 +1172,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         // Create on the remote hub directly (deterministic — no UI timing), then
         // assert the app observes its live output through the federated stream.
         await withHubClient(remoteHubUrl, (c) =>
-          c.pty.create.mutate({ sessionId, cwd: secondStore, mode: 'terminal' })
+          c.pty.create.mutate({ sessionId, cwd: workDir, mode: 'terminal' })
         )
         await expect
           .poll(() => withHubClient(remoteHubUrl, (c) => c.pty.exists.query({ sessionId })), {

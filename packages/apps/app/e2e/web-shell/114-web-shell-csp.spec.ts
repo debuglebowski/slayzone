@@ -75,6 +75,8 @@ async function until<T>(fn: () => Promise<T | null> | T | null, label: string): 
 
 interface Hub {
   base: string
+  /** Temp dir holding this hub's state (`hub/`) and its seeded projects, side by side. */
+  scratch: string
   root: string
   /** Owner credentials (login-required hub only). */
   owner: { email: string; password: string; token: string } | null
@@ -85,7 +87,9 @@ async function spawnHub(requireLogin: boolean): Promise<Hub> {
   if (!fs.existsSync(HUB_BIN) || !fs.existsSync(WEB_INDEX)) {
     throw new Error(`hub or web shell not built (${HUB_BIN}, ${WEB_INDEX}): run pnpm build`)
   }
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-shell-csp-'))
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-shell-csp-'))
+  const root = path.join(scratch, 'hub')
+  fs.mkdirSync(root)
   const port = await freePort()
   const proc: ChildProcess = spawn(require('electron') as unknown as string, [HUB_BIN], {
     env: {
@@ -119,7 +123,7 @@ async function spawnHub(requireLogin: boolean): Promise<Hub> {
           return o.token && o.email && o.password ? o : null
         }, 'bootstrap owner')
       : null
-    return { base, root, owner, stop }
+    return { base, scratch, root, owner, stop }
   } catch (err) {
     await stop()
     throw err
@@ -143,7 +147,9 @@ async function seed(hub: Hub): Promise<void> {
     sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')",
     method: 'run'
   })
-  const projectDir = fs.mkdtempSync(path.join(hub.root, 'project-'))
+  // Beside the hub root, never inside it: the owner gate refuses any path in the
+  // hub's own state directory (its DB, its owner token) as a project path.
+  const projectDir = fs.mkdtempSync(path.join(hub.scratch, 'project-'))
   const project = await post('/api/projects', { name: 'CSP Project', path: projectDir })
   await post('/api/tasks', {
     projectId: project.data?.id,
@@ -215,7 +221,7 @@ test.describe('web shell under the hub CSP — real hub, real browser', () => {
     await browser.close()
     for (const hub of hubs) {
       await hub.stop()
-      fs.rmSync(hub.root, { recursive: true, force: true })
+      fs.rmSync(hub.scratch, { recursive: true, force: true })
     }
   })
 

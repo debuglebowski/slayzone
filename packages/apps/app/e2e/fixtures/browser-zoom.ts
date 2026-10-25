@@ -1,5 +1,6 @@
 import { expect, type ElectronApplication, type Page } from '@playwright/test'
 import { testInvoke } from './browser-view'
+import { getTestUrl } from './test-server'
 
 export interface Rect {
   x: number
@@ -93,11 +94,12 @@ export async function expectNativeBoundsToMatchZoomAdjustedPlaceholder(
     .toBe(true)
 }
 
+/** Load the local fixture page — never the public internet (DNS filters, offline CI). */
 export async function navigateToExample(page: Page, viewId: string): Promise<void> {
-  await testInvoke(page, 'browser:navigate', viewId, 'https://example.com')
+  await testInvoke(page, 'browser:navigate', viewId, await getTestUrl('/title-zoom-page'))
   await expect
     .poll(async () => (await testInvoke(page, 'browser:get-url', viewId)) as string)
-    .toContain('example.com')
+    .toContain('/title-zoom-page')
 }
 
 export async function resizeMainWindow(
