@@ -433,9 +433,9 @@ export type AppDeps = {
   diagnosticsConfigChanged: (next: DiagnosticsConfig) => Promise<void>
 
   // clipboard
-  clipboardWriteFilePaths: (paths: string[]) => void
-  clipboardReadFilePaths: () => string[]
-  clipboardHasFiles: () => boolean
+  clipboardWriteFilePaths: (paths: string[]) => Promise<void>
+  clipboardReadFilePaths: () => Promise<string[]>
+  clipboardHasFiles: () => Promise<boolean>
 
   // screenshot
   screenshotCaptureView: (viewId: string) => Promise<{ success: boolean; path?: string }>

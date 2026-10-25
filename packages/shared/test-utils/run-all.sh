@@ -336,6 +336,12 @@ run_test_electron_strict_loader packages/domains/projects/src/server/project-ico
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
 # the developer's focus for the rest of that worker's specs (worker-scoped app).
 run_test packages/apps/app/src/main/present-window.test.ts
+# File-tree copy/paste of files: Electron 44's async clipboard, text/uri-list ⇄ native file refs.
+run_test packages/apps/app/src/main/clipboard-file-paths.test.ts
+# Remembered dialog folder: Electron 43 opens a dialog without defaultPath in Downloads.
+run_test packages/apps/app/src/main/dialog-last-dir.test.ts
+# macOS update manifest: OS-minimum stamp (Electron 44 = macOS 13+) survives the arch merge.
+run_test scripts/release/update-manifest.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.

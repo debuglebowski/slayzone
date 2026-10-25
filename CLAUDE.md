@@ -14,7 +14,7 @@ Assume near-infinite dev capability. Always pick most sustainable, robust long-t
 
 ## Stack
 
-* **Runtime**: Electron 41
+* **Runtime**: Electron 44
 
 * **Frontend**: React 19, TailwindCSS 4, Radix UI
 

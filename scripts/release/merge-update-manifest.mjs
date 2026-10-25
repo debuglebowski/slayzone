@@ -9,6 +9,7 @@
 // Usage: merge-update-manifest.mjs --existing <path> --incoming <path>
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 function parseArgs(argv) {
   const args = {}
@@ -28,7 +29,7 @@ function parseArgs(argv) {
 
 // Minimal parser for electron-builder's latest-*.yml format.
 // Structure: top-level key-value pairs + a `files:` array of objects.
-function parseManifest(text) {
+export function parseManifest(text) {
   const lines = text.split('\n')
   const top = {}
   const files = []
@@ -73,7 +74,10 @@ function parseManifest(text) {
   return { top, files }
 }
 
-function serializeManifest(top, files) {
+// Keys serializeManifest writes itself (path/sha512 derive from the first file).
+const DERIVED_TOP_KEYS = new Set(['version', 'path', 'sha512', 'releaseDate'])
+
+export function serializeManifest(top, files) {
   let out = `version: ${top.version}\n`
   out += 'files:\n'
   for (const f of files) {
@@ -86,20 +90,31 @@ function serializeManifest(top, files) {
   }
   out += `path: ${files[0].url}\n`
   out += `sha512: ${files[0].sha512}\n`
+  // Any other top-level key (minimumSystemVersion, from stamp-min-system-version.mjs)
+  // must survive the merge: electron-updater reads it to skip unsupported updates.
+  for (const [key, value] of Object.entries(top)) {
+    if (!DERIVED_TOP_KEYS.has(key)) out += `${key}: ${value}\n`
+  }
   if (top.releaseDate) {
     out += `releaseDate: ${top.releaseDate}\n`
   }
   return out
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2))
-  if (!args.existing || !args.incoming) {
-    throw new Error('Usage: merge-update-manifest.mjs --existing <path> --incoming <path>')
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number)
+  const pb = String(b).split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
   }
+  return 0
+}
 
-  const existing = parseManifest(readFileSync(args.existing, 'utf8'))
-  const incoming = parseManifest(readFileSync(args.incoming, 'utf8'))
+/** Merges `incoming` into `existing`: union of files; the stricter OS minimum wins. */
+export function mergeManifests(existingText, incomingText) {
+  const existing = parseManifest(existingText)
+  const incoming = parseManifest(incomingText)
 
   const seenUrls = new Set(existing.files.map((f) => f.url))
   for (const f of incoming.files) {
@@ -109,7 +124,27 @@ function main() {
     }
   }
 
-  writeFileSync(args.existing, serializeManifest(existing.top, existing.files))
+  const min = incoming.top.minimumSystemVersion
+  if (
+    min &&
+    (!existing.top.minimumSystemVersion ||
+      compareVersions(min, existing.top.minimumSystemVersion) > 0)
+  ) {
+    existing.top.minimumSystemVersion = min
+  }
+
+  return serializeManifest(existing.top, existing.files)
 }
 
-main()
+function main() {
+  const args = parseArgs(process.argv.slice(2))
+  if (!args.existing || !args.incoming) {
+    throw new Error('Usage: merge-update-manifest.mjs --existing <path> --incoming <path>')
+  }
+
+  writeFileSync(
+    args.existing,
+    mergeManifests(readFileSync(args.existing, 'utf8'), readFileSync(args.incoming, 'utf8'))
+  )
+}
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main()

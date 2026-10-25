@@ -987,7 +987,7 @@ export class BrowserViewManager {
         return true
       }
       case 'copy-link':
-        clipboard.writeText(normalizedInput.linkURL)
+        void clipboard.writeText(normalizedInput.linkURL)
         return true
       case 'open-link-externally':
         void shell.openExternal(normalizedInput.linkURL)

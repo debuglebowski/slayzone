@@ -276,6 +276,13 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      # Tells Macs below the new Electron's minimum macOS to skip this update instead of
+      # downloading one macOS will refuse to open (electron-builder never writes the key).
+      - name: Stamp macOS minimum into the update manifest
+        if: runner.os == 'macOS'
+        shell: bash
+        run: node scripts/release/stamp-min-system-version.mjs --dist packages/apps/app/dist
+
       # Boots the PACKAGED hub and loads the computer's natives from the builder's
       # unpacked output. Nothing else in CI runs from a packaged layout, which is how
       # two release-blocking packaging bugs (the hub could not open its database; no

@@ -108,7 +108,7 @@ function readServicePkg(
  * Pick the interpreter a given bundle can actually run under.
  *
  * A monorepo checkout's native addons are compiled for ELECTRON's ABI
- * (NODE_MODULE_VERSION 145 vs plain node's 137) — `better-sqlite3` for the hub,
+ * (NODE_MODULE_VERSION 149 vs plain node's 137) — `better-sqlite3` for the hub,
  * `node-pty` for the computer — so a dev-tree bundle launched with `node` dies
  * instantly on `require()`, and under a supervisor that means an invisible
  * crash-loop. Such a bundle must run as `ELECTRON_RUN_AS_NODE=1 <electron>`, which is

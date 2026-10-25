@@ -197,6 +197,15 @@ if (!app.isPackaged && !isPlaywright) {
   app.commandLine.appendSwitch('remote-debugging-port', '0')
 }
 
+// e2e never touches the developer's real login keychain: safeStorage (hub tokens,
+// integration credentials) runs on Chromium's in-memory mock keychain instead.
+// Without it, a new Electron binary (every Electron bump) blocks the main process
+// on a macOS "allow keychain access" prompt nobody is there to answer, and the
+// suite hangs at boot. Same isolation rule as the profile and hook paths below.
+if (isPlaywright) {
+  app.commandLine.appendSwitch('use-mock-keychain')
+}
+
 // Raise renderer V8 heap. React 19 dev-mode `logComponentRender` calls
 // performance.measure(name, { detail: fiber }) — with big in-memory state
 // (1000+ tasks, many open tabs) the structured-clone of detail OOMs the
@@ -238,6 +247,30 @@ if (process.platform === 'linux') {
     mkdirSync(stateDir, { recursive: true })
     app.setPath('userData', stateDir)
   }
+}
+
+// Every main-process file dialog goes through this so one opened without a
+// `defaultPath` starts in the last folder used (Electron 43+ would open Downloads).
+// Lazy: userData is swapped to the e2e/dev profile during boot, after module load.
+let rememberingDialog: ReturnType<typeof createRememberingDialogForElectron> | null = null
+function createRememberingDialogForElectron() {
+  return createRememberingDialog<
+    BrowserWindow,
+    Electron.OpenDialogOptions,
+    Electron.SaveDialogOptions
+  >(
+    {
+      showOpenDialog: (win, options) =>
+        win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options),
+      showSaveDialog: (win, options) =>
+        win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
+    },
+    createLastDirStore(join(app.getPath('userData'), 'dialog-last-dir.json'))
+  )
+}
+function fileDialog() {
+  rememberingDialog ??= createRememberingDialogForElectron()
+  return rememberingDialog
 }
 
 // The legacy state location = userData BEFORE any dev/e2e profile swap below.
@@ -504,6 +537,7 @@ import { resetSyncFlags, setCredentialCipher } from '@slayzone/integrations/serv
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
 import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
+import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -2217,14 +2251,13 @@ app
               },
               authGithubSystemSignIn: (input) => githubSystemSignIn(input),
               dialogShowOpenDialog: (options) =>
-                dialog.showOpenDialog(options as Electron.OpenDialogOptions),
+                fileDialog().showOpenDialog(null, options as Electron.OpenDialogOptions),
               // Parent the save sheet to the focused window when there is one —
               // the side-car has no window handle to pass, so the choice is made
               // here rather than threaded across the bridge.
               dialogShowSaveDialog: (options) => {
                 const opts = options as Electron.SaveDialogOptions
-                const focused = BrowserWindow.getFocusedWindow()
-                return focused ? dialog.showSaveDialog(focused, opts) : dialog.showSaveDialog(opts)
+                return fileDialog().showSaveDialog(BrowserWindow.getFocusedWindow(), opts)
               },
               windowClose: (windowId) => {
                 const wc = webContents.fromId(windowId)
@@ -2983,7 +3016,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         })),
       loadExtension: async () => {
         if (!mainWindow) return null
-        const result = await dialog.showOpenDialog(mainWindow, {
+        const result = await fileDialog().showOpenDialog(mainWindow, {
           properties: ['openDirectory'],
           title: 'Select Chrome Extension Directory'
         })
@@ -3525,7 +3558,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
             >
             filters?: Array<{ name: string; extensions: string[] }>
           }
-        ) => dialog.showOpenDialog(options)
+        ) => fileDialog().showOpenDialog(null, options)
       )
 
       ipcMain.handle(
