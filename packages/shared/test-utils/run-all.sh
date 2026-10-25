@@ -450,10 +450,10 @@ run_test packages/domains/terminal/src/client/paint-throttle.test.ts
 run_test packages/domains/terminal/src/client/webgl-budget.test.ts
 run_test packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
 run_test packages/domains/terminal/src/client/open-trace.test.ts
-# Stuck-'starting' watchdog: waits on a session the backend still holds as starting
-# (queued for an agent-start slot) instead of showing it dead.
 run_test packages/domains/terminal/src/client/input-gate.test.ts
 run_test packages/domains/terminal/src/client/early-input.test.ts
+# Stuck-'starting' watchdog: waits on a session the backend still holds as starting
+# (queued for an agent-start slot) instead of showing it dead.
 run_test packages/domains/terminal/src/client/starting-watchdog.test.ts
 # Dead-session overlay text: the exit reason, not a bare (possibly hub-made) code.
 run_test packages/domains/terminal/src/client/exit-description.test.ts
@@ -655,9 +655,9 @@ run_test packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_test packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/create-warm-reserve.test.ts
+run_test_electron_strict_loader packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 run_test packages/domains/task/src/shared/handoff.test.ts
 run_test packages/domains/task/src/shared/panel-config.test.ts
-run_test_electron_strict_loader packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 run_test packages/domains/task/src/shared/reparent-validation.test.ts
 run_test packages/domains/terminal/src/client/chat-timeline.test.ts
 run_test packages/domains/terminal/src/client/useLoopMode.test.ts
@@ -724,10 +724,10 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
-  packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
-  packages/domains/task/src/client/BlockerDialog.test.tsx \
   packages/domains/task/src/client/main-terminal-props.test.ts \
   packages/domains/task/src/client/terminal-first.test.ts \
+  packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
+  packages/domains/task/src/client/BlockerDialog.test.tsx \
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
@@ -798,9 +798,9 @@ run_vitest_files "vitest (tasks-changed refresh)" \
 # a tab's page is mounted are held for it.
 run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
+  packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts
-  packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
 # hub's open REST routes.
