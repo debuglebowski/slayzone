@@ -714,6 +714,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/connectPacing.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
+  packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
