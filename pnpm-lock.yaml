@@ -42,7 +42,7 @@ importers:
         version: 2.4.15
       '@convex-dev/auth':
         specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@slayzone/tsgo':
         specifier: workspace:*
         version: link:packages/shared/tsgo
@@ -53,8 +53,8 @@ importers:
         specifier: ^0.6.2
         version: 0.6.2(magicast@0.5.2)
       convex:
-        specifier: ^1.32.0
-        version: 1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+        specifier: ^1.46.0
+        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
       eslint:
         specifier: ^9.39.4
         version: 9.39.4(jiti@2.6.1)
@@ -90,7 +90,7 @@ importers:
     dependencies:
       '@convex-dev/auth':
         specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -254,8 +254,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       convex:
-        specifier: ^1.32.0
-        version: 1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+        specifier: ^1.46.0
+        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
@@ -1083,8 +1083,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       convex:
-        specifier: ^1.32.0
-        version: 1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+        specifier: ^1.46.0
+        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
       electron:
         specifier: ^41.10.7
         version: 41.10.7
@@ -1354,7 +1354,7 @@ importers:
     dependencies:
       '@convex-dev/auth':
         specifier: ^0.0.90
-        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1365,8 +1365,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       convex:
-        specifier: ^1.32.0
-        version: 1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+        specifier: ^1.46.0
+        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.3.1)
@@ -7566,18 +7566,21 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
-  convex@1.32.0:
-    resolution: {integrity: sha512-5FlajdLpW75pdLS+/CgGH5H6yeRuA+ru50AKJEYbJpmyILUS+7fdTvsdTaQ7ZFXMv0gE8mX4S+S3AtJ94k0mfw==}
-    engines: {node: '>=18.0.0', npm: '>=7.0.0'}
+  convex@1.46.0:
+    resolution: {integrity: sha512-dhBwDQTZDOhi5SUGAX17EWNehCdNq6/UFrSL0eLZuGfMkdsQbCVWVRZCzbZ5CF+/pgvoGxtApbEoTSipqL4JTw==}
+    engines: {node: '>=20.0.0', npm: '>=7.0.0'}
     hasBin: true
     peerDependencies:
       '@auth0/auth0-react': ^2.0.1
       '@clerk/clerk-react': ^4.12.8 || ^5.0.0
+      '@clerk/react': ^6.4.3
       react: ^18.0.0 || ^19.0.0-0 || ^19.0.0
     peerDependenciesMeta:
       '@auth0/auth0-react':
         optional: true
       '@clerk/clerk-react':
+        optional: true
+      '@clerk/react':
         optional: true
       react:
         optional: true
@@ -11919,8 +11922,8 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.18.0:
-    resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -12588,12 +12591,12 @@ snapshots:
       style-mod: 4.1.3
       w3c-keyname: 2.2.8
 
-  '@convex-dev/auth@0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)':
+  '@convex-dev/auth@0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)':
     dependencies:
       '@auth/core': 0.37.4
       '@oslojs/crypto': 1.0.1
       '@oslojs/encoding': 1.1.0
-      convex: 1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+      convex: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
       cookie: 1.1.1
       is-network-error: 1.3.0
       jose: 5.10.0
@@ -16989,11 +16992,11 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  convex@1.32.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6):
+  convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6):
     dependencies:
       esbuild: 0.27.0
       prettier: 3.8.0
-      ws: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     optionalDependencies:
       react: 19.3.1
     transitivePeerDependencies:
@@ -22401,7 +22404,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
+  ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6

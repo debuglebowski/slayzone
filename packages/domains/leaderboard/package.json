@@ -17,7 +17,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "convex": "^1.32.0",
+    "convex": "^1.46.0",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {

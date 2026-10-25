@@ -81,7 +81,7 @@
     "@xyflow/react": "^12.10.2",
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.1",
-    "convex": "^1.32.0",
+    "convex": "^1.46.0",
     "date-fns": "^4.1.0",
     "electron-chrome-extensions": "^4.9.0",
     "electron-chrome-web-store": "^0.13.0",
