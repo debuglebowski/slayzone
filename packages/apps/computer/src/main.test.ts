@@ -33,21 +33,19 @@ describe('createHubRequestHandler dispatch table', () => {
   // `fs.readFile` used to sit here and stopped qualifying once the file-editor
   // ops were routed — an unimplemented-method fixture has to be a method that
   // stays unimplemented, or the test quietly starts asserting a zod parse error.
-  it.each([
-    'fs.chmod',
-    'git.clone',
-    'proc.status',
-    'bogus.method'
-  ])('answers unknown method %s with -32001 unimplemented', async (method) => {
-    const { handle } = makeDispatch()
-    const err = await handle(method, {}).then(
-      () => null,
-      (e: unknown) => e
-    )
-    expect(err).toBeInstanceOf(RpcError)
-    expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
-    expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
-  })
+  it.each(['fs.chmod', 'git.clone', 'proc.status', 'bogus.method'])(
+    'answers unknown method %s with -32001 unimplemented',
+    async (method) => {
+      const { handle } = makeDispatch()
+      const err = await handle(method, {}).then(
+        () => null,
+        (e: unknown) => e
+      )
+      expect(err).toBeInstanceOf(RpcError)
+      expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
+      expect((err as RpcError).message).toBe(`unimplemented: ${method}`)
+    }
+  )
 
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()

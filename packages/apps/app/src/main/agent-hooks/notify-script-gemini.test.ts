@@ -94,46 +94,47 @@ describe('notify.sh under Gemini', () => {
     }
   })
 
-  test.each(
-    GEMINI_EVENTS
-  )('POSTs benign envelope carrying event="%s" in raw', async (eventName) => {
-    if (process.platform === 'win32') return
-    const dir = tmpDir()
-    try {
-      const target = path.join(dir, 'notify.sh')
-      await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
+  test.each(GEMINI_EVENTS)(
+    'POSTs benign envelope carrying event="%s" in raw',
+    async (eventName) => {
+      if (process.platform === 'win32') return
+      const dir = tmpDir()
+      try {
+        const target = path.join(dir, 'notify.sh')
+        await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE, targetPath: target })
 
-      const binDir = path.join(dir, 'bin')
-      fs.mkdirSync(binDir)
-      const capture = path.join(dir, 'capture.json')
-      writeCurlStub(binDir, capture)
+        const binDir = path.join(dir, 'bin')
+        fs.mkdirSync(binDir)
+        const capture = path.join(dir, 'capture.json')
+        writeCurlStub(binDir, capture)
 
-      const stdin = `{"hook_event_name":"${eventName}","session_id":"sess-1"}`
-      const res = spawnSync('bash', [target], {
-        input: stdin,
-        env: {
-          PATH: `${binDir}:${process.env.PATH ?? ''}`,
-          SLAYZONE_AGENT_HOOK_URL: 'http://127.0.0.1:1/api/agent-hook',
-          SLAYZONE_AGENT_ID: 'gemini',
-          // The app packs identity into ctx; the benign forwarder ships it verbatim.
-          SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-1","agentId":"gemini"}'
-        }
-      })
-      expect(res.status).toBe(0)
-      const env = JSON.parse(fs.readFileSync(capture, 'utf8'))
-      // Benign forwarder: agentId + THREE opaque channels, no per-field naming.
-      expect(env.agentId).toBe('gemini')
-      // The event name rides inside the verbatim stdin payload (`raw`), NOT a
-      // top-level `hookEvent` — the server extracts it.
-      expect(env.raw.hook_event_name).toBe(eventName)
-      // Identity comes from the opaque ctx blob, forwarded verbatim.
-      expect(env.ctx.taskId).toBe('task-1')
-      // No argv → arg null.
-      expect(env.arg).toBeNull()
-    } finally {
-      cleanup(dir)
+        const stdin = `{"hook_event_name":"${eventName}","session_id":"sess-1"}`
+        const res = spawnSync('bash', [target], {
+          input: stdin,
+          env: {
+            PATH: `${binDir}:${process.env.PATH ?? ''}`,
+            SLAYZONE_AGENT_HOOK_URL: 'http://127.0.0.1:1/api/agent-hook',
+            SLAYZONE_AGENT_ID: 'gemini',
+            // The app packs identity into ctx; the benign forwarder ships it verbatim.
+            SLAYZONE_AGENT_HOOK_CONTEXT: '{"v":1,"taskId":"task-1","agentId":"gemini"}'
+          }
+        })
+        expect(res.status).toBe(0)
+        const env = JSON.parse(fs.readFileSync(capture, 'utf8'))
+        // Benign forwarder: agentId + THREE opaque channels, no per-field naming.
+        expect(env.agentId).toBe('gemini')
+        // The event name rides inside the verbatim stdin payload (`raw`), NOT a
+        // top-level `hookEvent` — the server extracts it.
+        expect(env.raw.hook_event_name).toBe(eventName)
+        // Identity comes from the opaque ctx blob, forwarded verbatim.
+        expect(env.ctx.taskId).toBe('task-1')
+        // No argv → arg null.
+        expect(env.arg).toBeNull()
+      } finally {
+        cleanup(dir)
+      }
     }
-  })
+  )
 
   test('POSTs ctx={} when SLAYZONE_HOOK_CONTEXT is unset (never crashes)', async () => {
     if (process.platform === 'win32') return

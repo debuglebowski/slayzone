@@ -259,7 +259,9 @@ describe('device sign-in', () => {
     const bearer = String(token.body.access_token)
     const ctx = await verifySession(auth, new Headers({ authorization: `Bearer ${bearer}` }))
     expect(ctx?.role).toBe('user')
-    expect((ctx?.session as unknown as Record<string, unknown>).signInMethod).toBe('device')
+    expect((ctx?.session as unknown as Record<string, unknown> | undefined)?.signInMethod).toBe(
+      'device'
+    )
     // The session follows the hub's normal lifetime (better-auth default: 7 days).
     const lifetime = new Date(ctx!.session.expiresAt).getTime() - Date.now()
     expect(Math.round(lifetime / 86_400_000)).toBe(7)

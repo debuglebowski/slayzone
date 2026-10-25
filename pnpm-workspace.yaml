@@ -4,10 +4,10 @@ packages:
   - 'packages/domains/*'
   - 'packages/shared/*'
 
-# Install only package versions published at least 25 days ago (minutes). Renovate
-# proposes updates only after 30 days; the 5-day slack lets a hand bump install a version
-# Renovate would not propose yet.
-minimumReleaseAge: 36000
+# Install only package versions published at least 30 days ago (minutes), the same age
+# Renovate waits before proposing an update. A hand bump that needs a newer version goes
+# in minimumReleaseAgeExclude below, with the reason and the date it clears the gate.
+minimumReleaseAge: 43200
 # Exempt: TypeScript and React are always used at their latest versions.
 minimumReleaseAgeExclude:
   - typescript
@@ -25,3 +25,7 @@ minimumReleaseAgeExclude:
   - astro@7.3.2
   # Renovate security update: diff@8.0.3
   - diff@8.0.3
+  # Hand bump (2026-10-25): v45 features needed now; also fixes the eMudhra cert
+  # advisory 44.5.1 is exposed to. Tarball checksums.json verified against the GitHub
+  # release SHASUMS256.txt. Drop once 45.0.0 clears the age gate (2026-11-20).
+  - electron@45.0.0

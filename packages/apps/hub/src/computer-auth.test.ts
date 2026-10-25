@@ -472,7 +472,11 @@ async function main(): Promise<void> {
       assert(/disabled/.test(refused), `refused, got: ${refused}`)
       const line = audit.find((l) => l.event === 'computer.join_token.redeem')
       assertEq(line?.outcome, 'denied', 'denied')
-      assertEq((line?.detail as { reason?: string }).reason, 'owner_disabled', 'reason')
+      assertEq(
+        (line?.detail as { reason?: string } | undefined)?.reason,
+        'owner_disabled',
+        'reason'
+      )
       const owned = await db.get<{ n: number }>(
         'SELECT COUNT(*) AS n FROM computers WHERE owner_user_id = ?',
         [dave.id]

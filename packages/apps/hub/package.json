@@ -37,7 +37,7 @@
     "@slayzone/worktrees": "workspace:*",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "bufferutil": "^4.1.0",
     "node-pty": "^1.1.0",
     "superjson": "^2.2.1",
@@ -46,7 +46,7 @@
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.19.1",
     "@types/ws": "^8.5.13",
     "esbuild": "^0.25.0",

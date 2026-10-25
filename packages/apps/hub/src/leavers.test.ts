@@ -628,7 +628,11 @@ async function main(): Promise<void> {
       const denied = audit.filter((l) => l.event === 'auth.sso.recheck' && l.outcome === 'denied')
       assertEq(denied.length, 1, 'one denied line')
       assertEq(denied[0]?.targetId, alice.userId, 'for alice')
-      assertEq((denied[0]?.detail as { reason?: string }).reason, 'invalid_grant', 'reason')
+      assertEq(
+        (denied[0]?.detail as { reason?: string } | undefined)?.reason,
+        'invalid_grant',
+        'reason'
+      )
     })
 
     await test('same tick: the outage keeps his sessions; audited once, at level info', async () => {
@@ -640,7 +644,7 @@ async function main(): Promise<void> {
       assertEq(failures.length, 1, 'one line')
       assertEq(failures[0]?.level, 'info', 'level info')
       assertEq(
-        (failures[0]?.detail as { reason?: string; cause?: string }).cause,
+        (failures[0]?.detail as { reason?: string; cause?: string } | undefined)?.cause,
         'http_503',
         'cause'
       )
@@ -652,7 +656,7 @@ async function main(): Promise<void> {
       assertEq(await sessionsOf(carol.userId), 1, 'session kept')
       const change = audit.find((l) => l.event === 'user.role_change')
       assertEq(change?.targetId, carol.userId, 'audited')
-      assertEq((change?.detail as { reason?: string }).reason, 'sso_recheck', 'reason')
+      assertEq((change?.detail as { reason?: string } | undefined)?.reason, 'sso_recheck', 'reason')
     })
 
     await test('next hour: the outage is retried, no second line; then recovery', async () => {

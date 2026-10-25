@@ -803,7 +803,7 @@ async function main(): Promise<void> {
           assertEq(res.status, 403, 'scoped session → 403 as before')
         })
         assertEq(
-          (fromHub[0]?.detail as { reason?: string }).reason,
+          (fromHub[0]?.detail as { reason?: string } | undefined)?.reason,
           'scoped_session',
           'past the Origin check'
         )
@@ -812,7 +812,7 @@ async function main(): Promise<void> {
           await h.get('/api/tasks', { cookie })
         })
         assertEq(
-          (get[0]?.detail as { reason?: string }).reason,
+          (get[0]?.detail as { reason?: string } | undefined)?.reason,
           'scoped_session',
           'GET: no origin rule'
         )
@@ -825,7 +825,7 @@ async function main(): Promise<void> {
           })
         })
         assertEq(
-          (bearer[0]?.detail as { reason?: string }).reason,
+          (bearer[0]?.detail as { reason?: string } | undefined)?.reason,
           'scoped_session',
           'bearer: no origin rule'
         )

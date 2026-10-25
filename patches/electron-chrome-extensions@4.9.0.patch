@@ -1,0 +1,25 @@
+diff --git a/dist/chrome-extension-api.preload.js b/dist/chrome-extension-api.preload.js
+index 67d3be4b5026069ec4ae73c1fc6e661f8a19098e..e5562f7a4c59b6378ebfbc8233355a43e3b10671 100644
+--- a/dist/chrome-extension-api.preload.js
++++ b/dist/chrome-extension-api.preload.js
+@@ -568,6 +568,20 @@
+       });
+       delete globalThis.electron;
+       Object.freeze(chrome);
++      // SlayZone patch: Chromium exposes a native `browser` namespace that is NOT
++      // the shimmed `chrome`, so extensions that prefer `browser` (1Password's MV3
++      // service worker reads browser.windows at startup) crash on the missing APIs.
++      // Point `browser` at the shimmed `chrome`, as in Chrome where they match.
++      if (globalThis.browser !== chrome) {
++        try {
++          Object.defineProperty(globalThis, "browser", {
++            value: chrome,
++            enumerable: true,
++            configurable: true,
++            writable: true
++          });
++        } catch {}
++      }
+     }
+     if (!process.contextIsolated) {
+       console.warn(`injectExtensionAPIs: context isolation disabled in ${location.href}`);

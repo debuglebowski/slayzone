@@ -64,7 +64,11 @@ describe('PDF viewer link bridge script', () => {
 
 describe('parsePdfViewerLinkMessage', () => {
   it('accepts a well-formed http(s) message', () => {
-    const msg = { type: PDF_VIEWER_LINK_MESSAGE_TYPE, intent: 'foreground-tab', url: 'https://a.b/' }
+    const msg = {
+      type: PDF_VIEWER_LINK_MESSAGE_TYPE,
+      intent: 'foreground-tab',
+      url: 'https://a.b/'
+    }
     expect(parsePdfViewerLinkMessage(msg)).toEqual(msg)
   })
 
