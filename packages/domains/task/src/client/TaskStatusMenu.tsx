@@ -14,6 +14,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  MountWhenOpened,
   Button,
   Textarea,
   getColumnStatusStyle,
@@ -158,51 +159,58 @@ export function TaskStatusMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Dialogs mount on first open: this menu is mounted in every open task tab. */}
       {/* Blocking task dialog */}
-      <BlockerDialog
-        taskId={blockerOpen ? task.id : null}
-        projects={project ? [project] : undefined}
-        onClose={() => setBlockerOpen(false)}
-      />
+      <MountWhenOpened open={blockerOpen}>
+        <BlockerDialog
+          taskId={blockerOpen ? task.id : null}
+          projects={project ? [project] : undefined}
+          onClose={() => setBlockerOpen(false)}
+        />
+      </MountWhenOpened>
 
       {/* Snooze date/time dialog */}
-      <CustomSnoozeDialog
-        open={snoozeOpen}
-        onOpenChange={setSnoozeOpen}
-        onSnooze={(until) => {
-          track('task_snoozed')
-          update({ snoozed_until: until } as Partial<Task>)
-        }}
-      />
+      <MountWhenOpened open={snoozeOpen}>
+        <CustomSnoozeDialog
+          open={snoozeOpen}
+          onOpenChange={setSnoozeOpen}
+          onSnooze={(until) => {
+            track('task_snoozed')
+            update({ snoozed_until: until } as Partial<Task>)
+          }}
+        />
+      </MountWhenOpened>
 
       {/* Blocked with comment dialog */}
-      <Dialog
-        open={commentOpen}
-        onOpenChange={(o) => {
-          setCommentOpen(o)
-          if (!o) setBlockedComment('')
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Set blocked with comment</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={blockedComment}
-            onChange={(e) => setBlockedComment(e.target.value)}
-            placeholder="Why is this task blocked?"
-            rows={3}
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCommentOpen(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSetBlockedWithComment}>
-              Set blocked
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <MountWhenOpened open={commentOpen}>
+        <Dialog
+          open={commentOpen}
+          onOpenChange={(o) => {
+            setCommentOpen(o)
+            if (!o) setBlockedComment('')
+          }}
+        >
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Set blocked with comment</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              value={blockedComment}
+              onChange={(e) => setBlockedComment(e.target.value)}
+              placeholder="Why is this task blocked?"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCommentOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSetBlockedWithComment}>
+                Set blocked
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </MountWhenOpened>
     </>
   )
 }

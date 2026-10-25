@@ -687,6 +687,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
+  packages/domains/task/src/client/BlockerDialog.test.tsx \
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \

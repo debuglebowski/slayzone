@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
@@ -20,6 +20,29 @@ export function BlockerDialog({
   projects,
   onClose
 }: BlockerDialogProps): React.JSX.Element {
+  const open = taskId !== null
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+    >
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add blocking task</DialogTitle>
+        </DialogHeader>
+        {/* DialogContent mounts its children only while open (or animating
+            out), so the task-list queries and filtering below cost nothing for
+            the many closed instances (one per kanban card / task tab). */}
+        <BlockerDialogBody taskId={taskId} projects={projects} onClose={onClose} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BlockerDialogBody({ taskId, projects, onClose }: BlockerDialogProps): React.JSX.Element {
   const trpc = useTRPC()
   const [search, setSearch] = useState('')
 
@@ -41,10 +64,13 @@ export function BlockerDialog({
   )
   const blockers: Task[] = blockersQuery.data ?? []
 
-  // Reset the search box when the dialog (re)opens for a task.
-  useEffect(() => {
-    if (open) setSearch('')
-  }, [open, taskId])
+  // Reset the search box when the dialog is retargeted to another task while
+  // still open (a fresh open remounts this body with an empty search).
+  const [searchTaskId, setSearchTaskId] = useState(taskId)
+  if (taskId !== null && taskId !== searchTaskId) {
+    setSearchTaskId(taskId)
+    setSearch('')
+  }
 
   const addBlocker = useMutation(trpc.task.addBlocker.mutationOptions())
 
@@ -65,53 +91,36 @@ export function BlockerDialog({
     return !q || t.title.toLowerCase().includes(q)
   })
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) {
-          onClose()
-          setSearch('')
-        }
-      }}
-    >
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Add blocking task</DialogTitle>
-        </DialogHeader>
-        {availableBlockers.length === 0 && !search ? (
-          <p className="text-sm text-muted-foreground">No tasks available</p>
-        ) : (
-          <div className="space-y-2">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search available blockers"
-                placeholder="Search tasks..."
-                className="h-8 pl-8 text-sm"
-              />
-            </div>
-            {filteredAvailableBlockers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No tasks match your search</p>
-            ) : (
-              <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                {filteredAvailableBlockers.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleAddBlocker(t.id)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                  >
-                    <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
-                    <span className="line-clamp-1 flex-1">{t.title}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+  return availableBlockers.length === 0 && !search ? (
+    <p className="text-sm text-muted-foreground">No tasks available</p>
+  ) : (
+    <div className="space-y-2">
+      <div className="relative">
+        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search available blockers"
+          placeholder="Search tasks..."
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
+      {filteredAvailableBlockers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No tasks match your search</p>
+      ) : (
+        <div className="max-h-[200px] space-y-1 overflow-y-auto">
+          {filteredAvailableBlockers.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => handleAddBlocker(t.id)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
+            >
+              <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
+              <span className="line-clamp-1 flex-1">{t.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

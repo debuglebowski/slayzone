@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@slayzone/ui'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, MountWhenOpened } from '@slayzone/ui'
 import { Button, Textarea, safeClipboardWriteText } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -434,98 +434,114 @@ export function TaskContextMenu({
         </ContextMenuContent>
       </ContextMenu>
 
+      {/* Every dialog below mounts on first open (MountWhenOpened): this menu
+          wraps each kanban card / list row, so never-opened dialogs must cost
+          nothing on a board of hundreds of tasks. */}
+
       {/* Archive confirmation dialog */}
-      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive Task</AlertDialogTitle>
-            <AlertDialogDescription>
-              Archive "{task.title}"? You can restore it later from the archive.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleArchiveConfirm}>Archive</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MountWhenOpened open={archiveDialogOpen}>
+        <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Archive Task</AlertDialogTitle>
+              <AlertDialogDescription>
+                Archive "{task.title}"? You can restore it later from the archive.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleArchiveConfirm}>Archive</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </MountWhenOpened>
 
       {/* Delete confirmation dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Task</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete "{task.title}"? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteConfirm}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MountWhenOpened open={deleteDialogOpen}>
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Task</AlertDialogTitle>
+              <AlertDialogDescription>
+                Delete "{task.title}"? This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteConfirm}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </MountWhenOpened>
 
       {/* Custom snooze dialog */}
-      <CustomSnoozeDialog
-        open={customSnoozeOpen}
-        onOpenChange={setCustomSnoozeOpen}
-        onSnooze={(until) => {
-          track('task_snoozed')
-          onUpdateTask(task.id, { snoozed_until: until } as Partial<Task>)
-        }}
-      />
+      <MountWhenOpened open={customSnoozeOpen}>
+        <CustomSnoozeDialog
+          open={customSnoozeOpen}
+          onOpenChange={setCustomSnoozeOpen}
+          onSnooze={(until) => {
+            track('task_snoozed')
+            onUpdateTask(task.id, { snoozed_until: until } as Partial<Task>)
+          }}
+        />
+      </MountWhenOpened>
 
       {/* Create tag dialog */}
       {tags && (
-        <CreateTagDialog
-          open={tagDialogOpen}
-          onOpenChange={setTagDialogOpen}
-          projectId={task.project_id}
-          tag={null}
-          existingTags={tags}
-          onCreated={(tag) => {
-            onTagCreated?.(tag)
-            handleTagToggle(tag.id, true)
-          }}
-        />
+        <MountWhenOpened open={tagDialogOpen}>
+          <CreateTagDialog
+            open={tagDialogOpen}
+            onOpenChange={setTagDialogOpen}
+            projectId={task.project_id}
+            tag={null}
+            existingTags={tags}
+            onCreated={(tag) => {
+              onTagCreated?.(tag)
+              handleTagToggle(tag.id, true)
+            }}
+          />
+        </MountWhenOpened>
       )}
 
       {/* Blocking task dialog */}
-      <BlockerDialog
-        taskId={blockerDialogOpen ? task.id : null}
-        projects={projects}
-        onClose={() => setBlockerDialogOpen(false)}
-      />
+      <MountWhenOpened open={blockerDialogOpen}>
+        <BlockerDialog
+          taskId={blockerDialogOpen ? task.id : null}
+          projects={projects}
+          onClose={() => setBlockerDialogOpen(false)}
+        />
+      </MountWhenOpened>
 
       {/* Blocked with comment dialog */}
-      <Dialog
-        open={commentDialogOpen}
-        onOpenChange={(open) => {
-          setCommentDialogOpen(open)
-          if (!open) setBlockedComment('')
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Set blocked with comment</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={blockedComment}
-            onChange={(e) => setBlockedComment(e.target.value)}
-            placeholder="Why is this task blocked?"
-            rows={3}
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCommentDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSetBlockedWithComment}>
-              Set blocked
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <MountWhenOpened open={commentDialogOpen}>
+        <Dialog
+          open={commentDialogOpen}
+          onOpenChange={(open) => {
+            setCommentDialogOpen(open)
+            if (!open) setBlockedComment('')
+          }}
+        >
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Set blocked with comment</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              value={blockedComment}
+              onChange={(e) => setBlockedComment(e.target.value)}
+              placeholder="Why is this task blocked?"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCommentDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSetBlockedWithComment}>
+                Set blocked
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </MountWhenOpened>
     </>
   )
 }
