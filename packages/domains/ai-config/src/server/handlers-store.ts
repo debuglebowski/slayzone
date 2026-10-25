@@ -2014,17 +2014,21 @@ export function createAiConfigOps(db: SlayzoneDb) {
       return await recomputeSingleSkillStatus(projectId, projectPath, itemId)
     },
     listProviders: async () => {
+      // SQLite stores `enabled` as 0/1; the row type says so, the API returns a boolean.
       const providers = (await db
         .prepare('SELECT * FROM ai_config_sources ORDER BY name')
-        .all()) as CliProviderInfo[]
+        .all()) as Array<Omit<CliProviderInfo, 'enabled'> & { enabled: number }>
       const defaultKind = await getDefaultProviderKind()
       return providers
         .filter((provider) => isConfigurableCliProvider(provider.kind))
-        .map((provider) => ({
-          ...provider,
-          name: PROVIDER_LABELS[provider.kind as CliProvider] ?? provider.name,
-          isDefault: provider.kind === defaultKind
-        }))
+        .map(
+          (provider): CliProviderInfo => ({
+            ...provider,
+            enabled: provider.enabled === 1,
+            name: PROVIDER_LABELS[provider.kind as CliProvider] ?? provider.name,
+            isDefault: provider.kind === defaultKind
+          })
+        )
     },
     toggleProvider: async (id: string, enabled: boolean) => {
       const row = (await db.prepare('SELECT kind FROM ai_config_sources WHERE id = ?').get(id)) as

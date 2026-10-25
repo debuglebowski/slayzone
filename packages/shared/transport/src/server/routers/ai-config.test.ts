@@ -385,17 +385,13 @@ await describe('removeProjectSelection', () => {
 
 await describe('listProviders', () => {
   test('returns seeded providers', async () => {
-    const providers = (await caller.listProviders()) as {
-      name: string
-      kind: string
-      enabled: number
-    }[]
+    const providers = await caller.listProviders()
     expect(providers.length).toBeGreaterThan(0)
     const claude = providers.find((p) => p.kind === 'claude')
     const codex = providers.find((p) => p.kind === 'codex')
     expect(claude).toBeTruthy()
     expect(codex).toBeTruthy()
-    expect(claude!.enabled).toBe(1)
+    expect(claude!.enabled).toBe(true)
   })
 })
 
@@ -406,23 +402,23 @@ await describe('toggleProvider', () => {
   // assert the default-guard separately.
   test('enables provider', async () => {
     await caller.toggleProvider({ id: 'provider-cursor', enabled: true })
-    const providers = (await caller.listProviders()) as { kind: string; enabled: number }[]
+    const providers = await caller.listProviders()
     const cursor = providers.find((p) => p.kind === 'cursor')
-    expect(cursor!.enabled).toBe(1)
+    expect(cursor!.enabled).toBe(true)
   })
 
   test('disables provider', async () => {
     await caller.toggleProvider({ id: 'provider-cursor', enabled: false })
-    const providers = (await caller.listProviders()) as { kind: string; enabled: number }[]
+    const providers = await caller.listProviders()
     const cursor = providers.find((p) => p.kind === 'cursor')
-    expect(cursor!.enabled).toBe(0)
+    expect(cursor!.enabled).toBe(false)
   })
 
   test('refuses to disable the default-mode provider (claude)', async () => {
     await caller.toggleProvider({ id: 'provider-claude', enabled: false })
-    const providers = (await caller.listProviders()) as { kind: string; enabled: number }[]
+    const providers = await caller.listProviders()
     const claude = providers.find((p) => p.kind === 'claude')
-    expect(claude!.enabled).toBe(1)
+    expect(claude!.enabled).toBe(true)
   })
 })
 
@@ -3031,7 +3027,7 @@ await describe('marketplace: list-entries without projectId', () => {
       projectId: mkt5.projectId
     })
 
-    const entries = (await caller.marketplace.listEntries()) as ListEntry[]
+    const entries = (await caller.marketplace.listEntries(undefined)) as ListEntry[]
     const entry = entries.find((e) => e.id === entry5.id)!
     expect(entry.installed_library_item_id).toBeNull()
     expect(entry.installed_project_item_id).toBeNull()
@@ -3040,7 +3036,7 @@ await describe('marketplace: list-entries without projectId', () => {
   test('library install visible without projectId', async () => {
     await caller.marketplace.installSkill({ entryId: entry5.id, scope: 'library' })
 
-    const entries = (await caller.marketplace.listEntries()) as ListEntry[]
+    const entries = (await caller.marketplace.listEntries(undefined)) as ListEntry[]
     const entry = entries.find((e) => e.id === entry5.id)!
     expect(entry.installed_library_item_id).toBeTruthy()
   })
