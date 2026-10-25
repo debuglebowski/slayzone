@@ -308,7 +308,8 @@ export function SearchDialog({
                 <span className="ml-auto text-[10px] text-muted-foreground/70">Tab to switch</span>
               </div>
             )}
-            <CommandList className="max-h-[480px]">
+            {/* No fixed cap: grows with its results, bounded only by the window (input + chips + margins). */}
+            <CommandList className="max-h-[calc(100dvh-12rem)]">
               {page ? (
                 <PageResults
                   page={page}
