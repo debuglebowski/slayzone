@@ -325,6 +325,34 @@ async function main(): Promise<void> {
   ).x
   assert(beforeLegacy === afterLegacy, 'foreign-observed must NOT mutate the legacy field')
 
+  // 12. Resumability proof (v158). Claude fires SessionStart at LAUNCH, before
+  //     it writes any transcript, so a fresh claude-code id must stay unproven
+  //     until a real turn — else an agent that never got a prompt is resumed
+  //     after restart → "No conversation found" → false "session expired".
+  const proven = (cid: string): boolean =>
+    raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(cid) !== undefined
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'claude-code',
+    conversationId: 'FRESH-CLAUDE',
+    origin: 'slay-spawned-fresh'
+  })
+  assert(!proven('FRESH-CLAUDE'), 'fresh claude-code id must stay unproven until its first turn')
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'claude-code',
+    conversationId: 'RESUMED-CLAUDE',
+    origin: 'slay-spawned-resume'
+  })
+  assert(proven('RESUMED-CLAUDE'), 'a resume proves itself at write')
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'codex',
+    conversationId: 'FRESH-CODEX',
+    origin: 'slay-spawned-fresh'
+  })
+  assert(proven('FRESH-CODEX'), 'non-turn-tracked mode is proven at write')
+
   console.log('OK — task_conversations all checks passed')
 }
 

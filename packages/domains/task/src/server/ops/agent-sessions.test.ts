@@ -181,6 +181,9 @@ async function main(): Promise<void> {
     conversationId: 'C3',
     origin: 'slay-spawned-fresh'
   })
+  // A fresh claude-code id is only resumable once it has taken a turn (Claude
+  // writes no transcript before its first prompt) — see recordConversation.
+  await markSessionFirstTurn(db, 'C3')
   await parity('claude-code', 'C3', 'fresh row strictly after reset becomes current')
 
   // 5. History parity (minus the reset row, which is not a session). Old ledger
