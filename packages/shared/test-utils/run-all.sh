@@ -816,6 +816,9 @@ run_vitest_files "vitest (web shell session, T-13)" \
 # must resolve where it runs. A `require('@slayzone/platform')` Rollup left unbundled
 # in out/main failed on every diagnostics retention tick.
 run_test packages/shared/build-guards/runtime-imports.test.ts
+# Sidecar dev watcher: rebuild hub/computer bin.cjs on ANY bundled input change,
+# incl. inlined workspace server code outside the package's own src/.
+run_test packages/shared/build-guards/watch-inputs.test.ts
 
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner

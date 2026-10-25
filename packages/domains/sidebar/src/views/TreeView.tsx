@@ -25,7 +25,7 @@ import { cn, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from 
 import { type Task } from '@slayzone/task/shared'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
 import { groupTreeRows, orderTreeRows, PINNED_GROUP_KEY, type TreeGroup } from './treeGrouping'
-import { useStaleSkillCounts } from '@slayzone/ai-config/client'
+import { useStaleSkillCounts } from '@slayzone/ai-config/client/hooks'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
 import { resolveProjectDrop, applyProjectDrop } from './projectDrop'

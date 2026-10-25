@@ -6,7 +6,17 @@ import { useEffect } from 'react'
 // the one in lazy.ts so both share one chunk in the module cache.
 const PRELOADS: Array<() => Promise<unknown>> = [
   // Cmd+K command palette (+ its cmdk/fzf deps). See lazy.ts `SearchDialog`.
-  () => import('@slayzone/search')
+  () => import('@slayzone/search'),
+  // Dialogs/pages kept off the startup graph by their packages' lean barrels
+  // (settings, onboarding, ai-config). Before that split they loaded at boot, so
+  // warming them here keeps their first open (Cmd+, settings, an auto-opened
+  // onboarding/changelog dialog, the AI-config page) exactly as instant.
+  () => import('@slayzone/settings/client/UserSettingsDialog'),
+  () => import('@slayzone/settings/client/CliInstallDialog'),
+  () => import('@slayzone/onboarding/client/OnboardingDialog'),
+  () => import('@slayzone/onboarding/client/ChangelogDialog'),
+  () => import('@slayzone/onboarding/client/TutorialAnimationModal'),
+  () => import('@slayzone/ai-config/client')
 ]
 
 export function useIdlePreload(): void {

@@ -1,6 +1,8 @@
 export { useDialogStore, type SearchFileContext } from './useDialogStore'
-export { UserSettingsDialog } from './UserSettingsDialog'
-export { CliInstallDialog } from './CliInstallDialog'
+// UserSettingsDialog / CliInstallDialog are NOT re-exported here: this barrel is
+// on the startup path (stores, theme), and the dialogs (all settings tabs) load
+// lazily via their own entries — `@slayzone/settings/client/UserSettingsDialog`,
+// `@slayzone/settings/client/CliInstallDialog`.
 export { ThemeProvider, useTheme } from './ThemeContext'
 export { applyTheme } from './apply-theme'
 export {

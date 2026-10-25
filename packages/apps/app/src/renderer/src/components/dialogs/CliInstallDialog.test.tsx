@@ -50,7 +50,7 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => trpcClientMock
 }))
 
-import { CliInstallDialog } from '@slayzone/settings'
+import { CliInstallDialog } from '@slayzone/settings/client/CliInstallDialog'
 
 function mockApi(
   overrides: { onboarded?: string | null; dismissed?: string | null; installed?: boolean } = {}

@@ -1,12 +1,15 @@
 /**
  * Bundle the computer into a single self-contained dist/bin.cjs (node target).
- * Not wired into the app build pipeline — build on demand:
- *   pnpm --filter @slayzone/computer build
+ *   pnpm --filter @slayzone/computer build      one build (app `prebuild` runs it)
+ *   node build.mjs --watch [--no-initial]       dev: rebuild on any bundle-input
+ *                                                change (the app's dev.mjs runs it)
  */
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
 import { runtimeImportsEsbuildPlugin } from '@slayzone/build-guards/runtime-imports'
+import { watchBundleInputs } from '@slayzone/build-guards/watch-inputs'
 
 const require = createRequire(import.meta.url)
 const pkg = require('./package.json')
@@ -42,7 +45,7 @@ const rawImportPlugin = {
   }
 }
 
-await esbuild.build({
+const options = {
   entryPoints: ['src/bin.ts'],
   outfile: 'dist/bin.cjs',
   bundle: true,
@@ -66,5 +69,52 @@ await esbuild.build({
   // bufferutil/utf-8-validate are optional native ws accelerators.
   external: ['node-pty', 'bufferutil', 'utf-8-validate'],
   banner: { js: '#!/usr/bin/env node' },
-  logLevel: 'info'
-})
+  logLevel: 'info',
+  // Exact input list for the dev watcher.
+  metafile: true
+}
+
+const initialMetafile = process.argv.includes('--no-initial')
+  ? null
+  : (await esbuild.build(options)).metafile
+
+// Dev watch: rebuild when any bundled input changes — computer/src AND the
+// workspace code it inlines. Same shape as hub/build.mjs. A running computer
+// keeps its loaded code; the next spawn picks up the fresh bin.cjs.
+if (process.argv.includes('--watch')) {
+  let building = false
+  let pending = false
+  const watcher = watchBundleInputs({
+    onChange: () => void rebuild(),
+    fallbackDir: fileURLToPath(new URL('./src/', import.meta.url))
+  })
+  async function rebuild() {
+    if (building) {
+      pending = true
+      return
+    }
+    building = true
+    try {
+      watcher.update((await esbuild.build(options)).metafile)
+    } catch (err) {
+      process.stderr.write(`[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`)
+    } finally {
+      building = false
+      if (pending) {
+        pending = false
+        void rebuild()
+      }
+    }
+  }
+  // With --no-initial the caller just built bin.cjs: learn the inputs from a
+  // write:false analysis build instead of rewriting the bundle. If even that
+  // fails (src is mid-edit), watch src/ until a build succeeds.
+  watcher.update(
+    initialMetafile ??
+      (await esbuild.build({ ...options, write: false, logLevel: 'silent' }).then(
+        (r) => r.metafile,
+        () => null
+      ))
+  )
+  process.stdout.write('[build] computer: watching bundle inputs for changes…\n')
+}

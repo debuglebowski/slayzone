@@ -58,7 +58,9 @@ import type { Task } from '@slayzone/task/shared'
 // bundle and loads only on first open. Barrel exports named components → adapt
 // to a default export for React.lazy.
 const UserSettingsDialog = lazy(() =>
-  import('@slayzone/settings').then((m) => ({ default: m.UserSettingsDialog }))
+  import('@slayzone/settings/client/UserSettingsDialog').then((m) => ({
+    default: m.UserSettingsDialog
+  }))
 )
 const CreateProjectDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.CreateProjectDialog }))
@@ -91,16 +93,24 @@ const SearchDialog = lazy(() =>
 // hook's module graph (changelog-data + settings store), so these heavy component
 // chunks (framer-motion, scenes) still split out of the initial bundle.
 const OnboardingDialog = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.OnboardingDialog }))
+  import('@slayzone/onboarding/client/OnboardingDialog').then((m) => ({
+    default: m.OnboardingDialog
+  }))
 )
 const ChangelogDialog = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.ChangelogDialog }))
+  import('@slayzone/onboarding/client/ChangelogDialog').then((m) => ({
+    default: m.ChangelogDialog
+  }))
 )
 const TutorialAnimationModal = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.TutorialAnimationModal }))
+  import('@slayzone/onboarding/client/TutorialAnimationModal').then((m) => ({
+    default: m.TutorialAnimationModal
+  }))
 )
 const CliInstallDialog = lazy(() =>
-  import('@slayzone/settings').then((m) => ({ default: m.CliInstallDialog }))
+  import('@slayzone/settings/client/CliInstallDialog').then((m) => ({
+    default: m.CliInstallDialog
+  }))
 )
 // Active-terminals dialog — shared with the Electron renderer. Rendered once at
 // root, controlled by useDialogStore.terminalsOpen (opened by the header's

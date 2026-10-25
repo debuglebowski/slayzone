@@ -11,7 +11,8 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./client/hooks": "./src/client/hooks.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import { readFileSync, readdirSync, existsSync } from 'fs'
+import { readFileSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -7,6 +7,8 @@ import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv, type Plugin } from 'vite'
 import { runtimeImportsRollupPlugin } from '@slayzone/build-guards/runtime-imports'
 import { buildCspFloor } from './src/main/renderer-csp'
+import { NO_MODULE_RE, reactCompilerCachePlugin } from './vite/react-compiler-cache'
+import { devWatchIgnored, envFilesRestartPlugin } from './vite/dev-watch'
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
 const slayzoneDeps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((d) =>
@@ -21,8 +23,6 @@ const root = resolve(__dirname, '../../..')
 const runtimeImportsGuard = (bundleName: string): Plugin =>
   runtimeImportsRollupPlugin({ bundleName, packageJson: pkg, electron: true }) as Plugin
 
-// Discover @slayzone/* client entry files so Vite's dep scanner can trace
-// through them and pre-bundle their third-party imports automatically.
 // Injects the renderer Content-Security-Policy floor as a <meta> tag. The main
 // process emits an exact-port CSP header at runtime (see main/renderer-csp.ts);
 // this build-time floor guarantees the document always has a policy even if
@@ -44,41 +44,22 @@ function cspFloorPlugin(dev: boolean): Plugin {
 
 // Strip sourcemaps post-hoc to cut V8 parse/decode overhead during dev
 // cold-start + HMR. Dev only (apply: 'serve') — prod keeps full maps for Sentry.
+// `{ mappings: '' }` is Vite's explicit "no sourcemap": it collapses the whole
+// combined chain and suppresses the fallback map the dev server would inject.
+// (`map: null` would mean "positions unchanged" and keep the earlier plugins'
+// maps — the full inline maps were still being served.)
 function stripDevSourcemapsPlugin(): Plugin {
   return {
     name: 'slayzone:strip-dev-sourcemaps',
     apply: 'serve',
     enforce: 'post',
     transform(code) {
-      return { code, map: null }
+      return { code, map: { mappings: '' } }
     }
   }
 }
 
-function discoverDomainClientEntries(): string[] {
-  const entries: string[] = []
-  const dirs = [resolve(root, 'packages/domains'), resolve(root, 'packages/shared')]
-  for (const base of dirs) {
-    if (!existsSync(base)) continue
-    for (const pkg of readdirSync(base, { withFileTypes: true })) {
-      if (!pkg.isDirectory()) continue
-      for (const candidate of [
-        resolve(base, pkg.name, 'src/client/index.ts'),
-        resolve(base, pkg.name, 'src/client/index.tsx'),
-        resolve(base, pkg.name, 'src/index.ts'),
-        resolve(base, pkg.name, 'src/index.tsx')
-      ]) {
-        if (existsSync(candidate)) {
-          entries.push(candidate)
-          break
-        }
-      }
-    }
-  }
-  return entries
-}
-
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, root, '')
 
   // In dev, run React's PRODUCTION build to cut render cost (no dev invariants,
@@ -100,6 +81,14 @@ export default defineConfig(({ mode }) => {
   // out (needs dev/profiling React for <Profiler>).
   const useReactProdInDev =
     mode !== 'production' && env.SLAYZONE_REACT_DEV !== '1' && env.SLAYZONE_PROFILE !== '1'
+
+  // Dev under prod React: the React Compiler pass runs in
+  // slayzone:react-compiler-cache (on-disk cache + worker pool, byte-identical
+  // output, no fast refresh — prod react-dom cannot apply it). plugin-react
+  // keeps its config role (preamble, optimizeDeps incl. react/compiler-runtime)
+  // but transforms nothing. `vite build` and the real-dev-React modes keep the
+  // stock plugin-react Babel pass, so prod output is untouched.
+  const cachedReactCompiler = command === 'serve' && useReactProdInDev
 
   return {
     main: {
@@ -144,6 +133,10 @@ export default defineConfig(({ mode }) => {
     },
     renderer: {
       envDir: root,
+      // envDir is the repo root: keep its .env files (and build/test output) out
+      // of Vite's chokidar so its FSEvents stream isn't rooted at the repo — see
+      // vite/dev-watch.ts. envFilesRestartPlugin keeps env-change → restart.
+      server: { watch: { ignored: devWatchIgnored(root, mode) } },
       // HMR channel stays ENABLED. Under prod React, react-refresh is an inert
       // no-op (prod react-dom omits scheduleRefresh, so performReactRefresh does
       // nothing — no targeted hot-reload, but it never throws). The channel is
@@ -187,17 +180,32 @@ export default defineConfig(({ mode }) => {
       plugins: [
         // Babel + React Compiler in all modes — auto-memoization cuts re-renders
         // in both dev and prod. No SWC: compiler has no SWC equivalent.
-        react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
+        cachedReactCompiler && reactCompilerCachePlugin(),
+        react({
+          babel: { plugins: ['babel-plugin-react-compiler'] },
+          ...(cachedReactCompiler ? { include: NO_MODULE_RE } : {})
+        }),
         tailwindcss(),
         cspFloorPlugin(mode !== 'production'),
+        envFilesRestartPlugin(root),
         stripDevSourcemapsPlugin(),
         // Bundle analyzer is a rollup plugin; only useful at build time.
         mode === 'production' &&
           visualizer({ filename: 'bundle-report.html', gzipSize: true, template: 'treemap' })
       ],
       optimizeDeps: {
-        exclude: slayzoneDeps,
-        entries: discoverDomainClientEntries(),
+        // No `entries` / no `exclude` of @slayzone/*: the scanner starts from
+        // index.html (Vite's default) and follows every import — static AND
+        // lazy `import()` — through the workspace packages. Those resolve (via
+        // the symlinks) to packages/*, outside node_modules, so Vite treats them
+        // as source and never pre-bundles them; excluding them only stopped the
+        // scanner at each package boundary, so third-party deps first imported
+        // behind a subpath export (@slayzone/terminal/client/Terminal → @xterm/*,
+        // …) were discovered mid-boot → re-optimize → full renderer reload.
+        // With the scan complete, nothing is left to discover while crawling, so
+        // don't hold optimized-dep responses until the static crawl ends (Vite's
+        // documented setting for a scanner that finds every dep).
+        holdUntilCrawlEnd: false,
         // The sole prod-React-in-dev lever: bakes NODE_ENV=production into the
         // pre-bundled deps so react/react-dom resolve to their cjs/*.production
         // builds. Scoped to the dep optimizer only — does NOT touch Vite's

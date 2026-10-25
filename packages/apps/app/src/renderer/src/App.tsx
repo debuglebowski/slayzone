@@ -66,7 +66,7 @@ import {
 } from '@slayzone/ui'
 import { AppSidebar } from '@slayzone/sidebar'
 import { useChangelogAutoOpen, useOnboardingChecklist } from '@slayzone/onboarding'
-import { useStaleSkillCount } from '@slayzone/ai-config/client'
+import { useStaleSkillCount } from '@slayzone/ai-config/client/hooks'
 import {
   useGlobalAgentPanelState,
   type FloatingStateKind,

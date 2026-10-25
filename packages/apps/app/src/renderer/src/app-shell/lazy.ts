@@ -20,7 +20,7 @@ export const UserSettingsDialog = lazy(() =>
   }))
 )
 export const TutorialAnimationModal = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({
+  import('@slayzone/onboarding/client/TutorialAnimationModal').then((m) => ({
     default: m.TutorialAnimationModal
   }))
 )
@@ -73,16 +73,22 @@ export const GroupSettingsDialog = lazy(() =>
   import('@slayzone/projects').then((m) => ({ default: m.GroupSettingsDialog }))
 )
 export const OnboardingDialog = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.OnboardingDialog }))
+  import('@slayzone/onboarding/client/OnboardingDialog').then((m) => ({
+    default: m.OnboardingDialog
+  }))
 )
 export const SearchDialog = lazy(() =>
   import('@slayzone/search').then((m) => ({ default: m.SearchDialog }))
 )
 export const CliInstallDialog = lazy(() =>
-  import('@slayzone/settings/client').then((m) => ({ default: m.CliInstallDialog }))
+  import('@slayzone/settings/client/CliInstallDialog').then((m) => ({
+    default: m.CliInstallDialog
+  }))
 )
 export const ChangelogDialog = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.ChangelogDialog }))
+  import('@slayzone/onboarding/client/ChangelogDialog').then((m) => ({
+    default: m.ChangelogDialog
+  }))
 )
 export const KanbanBoard = lazy(() =>
   import('@slayzone/tasks').then((m) => ({ default: m.KanbanBoard }))

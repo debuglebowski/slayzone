@@ -2,12 +2,16 @@
   "name": "@slayzone/build-guards",
   "version": "0.36.0-beta.18",
   "private": true,
-  "description": "Build-time guards the Node bundles (Electron main/preload, hub, computer, CLI) run on their own output. Plain .mjs: build.mjs scripts import it under bare Node.",
+  "description": "Build tooling for the Node bundles (Electron main/preload, hub, computer, CLI): guards they run on their own output, plus the dev rebuild watcher for the esbuild sidecars. Plain .mjs: build.mjs scripts import it under bare Node.",
   "type": "module",
   "exports": {
     "./runtime-imports": {
       "types": "./runtime-imports.d.mts",
       "default": "./runtime-imports.mjs"
+    },
+    "./watch-inputs": {
+      "types": "./watch-inputs.d.mts",
+      "default": "./watch-inputs.mjs"
     }
   },
   "devDependencies": {

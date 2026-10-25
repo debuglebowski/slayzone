@@ -8,7 +8,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./client/OnboardingDialog": "./src/client/OnboardingDialog.tsx",
+    "./client/ChangelogDialog": "./src/client/changelog/ChangelogDialog.tsx",
+    "./client/TutorialAnimationModal": "./src/client/tutorial/TutorialAnimationModal.tsx"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
