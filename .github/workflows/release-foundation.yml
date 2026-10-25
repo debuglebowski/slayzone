@@ -243,6 +243,9 @@ jobs:
       - name: Build
         run: pnpm build
         env:
+          # The renderer bundle passes Node's default ~2 GB heap while Vite renders chunks
+          # (OOM on macOS runners). Runners have 7+ GB.
+          NODE_OPTIONS: --max-old-space-size=6144
           POSTHOG_API_KEY: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_API_KEY || 'dry-run' }}
           POSTHOG_HOST: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_HOST || 'https://app.posthog.com' }}
           VITE_CONVEX_URL: ${{ needs.resolve.outputs.mode == 'publish' && secrets.VITE_CONVEX_URL || 'https://example.invalid' }}

@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/telemetry",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -13,9 +13,9 @@
   "dependencies": {
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "@posthog/react": "^1",
-    "posthog-js": "^1"
+    "@tanstack/react-query": "^5.103.2",
+    "@posthog/react": "^1.11.1",
+    "posthog-js": "^1.434.13"
   },
   "peerDependencies": {
     "react": "^19.3.1"

@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/suspense",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -15,11 +15,11 @@
     "react": "^19.3.1"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.0",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
     "jsdom": "^26.1.0",
     "react-dom": "^19.3.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   }
 }

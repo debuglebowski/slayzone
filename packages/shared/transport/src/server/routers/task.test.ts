@@ -235,6 +235,10 @@ test('mutations emit their completion events on the host-wired task bus', async 
   // edited in the app never reached its provider.
   const bus = new EventEmitter()
   const seen: Array<[string, unknown]> = []
+  let updateInfo: { previous?: { title: string }; next?: { title: string } } | undefined
+  bus.on('db:tasks:update:done', (_e: unknown, _id: unknown, info: typeof updateInfo) => {
+    updateInfo = info
+  })
   for (const channel of [
     'db:tasks:create:done',
     'db:tasks:update:done',
@@ -257,6 +261,10 @@ test('mutations emit their completion events on the host-wired task bus', async 
         ['db:tasks:unarchive:done', t.id]
       ])
     )
+    // The update reports the row before and after (integration push re-syncs only
+    // when a synced field changed).
+    expect(updateInfo?.previous?.title).toBe('Bus task')
+    expect(updateInfo?.next?.title).toBe('Bus task renamed')
   } finally {
     setTaskDeps({ ops: taskOps })
   }

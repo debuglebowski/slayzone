@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task-terminals",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -16,7 +16,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@lobehub/icons": "^5.8.0",
+    "@lobehub/icons": "^5.21.0",
     "@slayzone/editor": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
@@ -25,7 +25,7 @@
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
+    "@tanstack/react-query": "^5.103.2",
     "fzf": "^0.5.2",
     "lucide-react": "^0.562.0",
     "@slayzone/platform": "workspace:*"

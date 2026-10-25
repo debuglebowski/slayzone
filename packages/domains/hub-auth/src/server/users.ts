@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { assertHubPasswordEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import type { HubRole } from '../shared/types'
-import { isBreakGlassEmail, isDisabled, readRole } from './account'
+import { isBreakGlassEmail, isDisabled, OPERATOR_PROVISIONED, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
@@ -224,7 +224,10 @@ export async function createHubUser(
   // account would be permanently unverifiable. Marking an operator-created account
   // verified keeps it usable and stays correct if `requireEmailVerification` is
   // ever switched on. The operator vouched for the address by typing it.
-  const created = await ctx.internalAdapter.createUser({ email, name, emailVerified: true, role })
+  const created = await ctx.internalAdapter.createUser(
+    { email, name, emailVerified: true, role },
+    OPERATOR_PROVISIONED
+  )
 
   await ctx.internalAdapter.linkAccount({
     userId: created.id,

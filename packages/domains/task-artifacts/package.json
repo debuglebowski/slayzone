@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task-artifacts",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -17,7 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@codemirror/view": "^6.36.5",
+    "@codemirror/view": "^6.43.13",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/markdown": "workspace:*",
@@ -27,8 +27,8 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
-    "diff": "^7.0.0",
+    "@tanstack/react-query": "^5.103.2",
+    "diff": "^8.0.0",
     "lucide-react": "^0.562.0",
     "zod": "^4.3.5"
   },
@@ -41,6 +41,6 @@
     "@types/react": "^19.3.0",
     "better-sqlite3": "^12.4.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   }
 }

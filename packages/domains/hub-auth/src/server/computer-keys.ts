@@ -1,4 +1,5 @@
 import { API_KEY_TABLE_NAME } from '@better-auth/api-key'
+import { OPERATOR_PROVISIONED } from './account'
 import type { HubAuth } from './auth'
 
 /**
@@ -25,11 +26,14 @@ async function ensureComputerServiceUser(auth: HubAuth): Promise<string> {
   const ctx = await auth.$context
   const existing = await ctx.internalAdapter.findUserByEmail(COMPUTER_SERVICE_USER_EMAIL)
   if (existing) return existing.user.id
-  const created = await ctx.internalAdapter.createUser({
-    email: COMPUTER_SERVICE_USER_EMAIL,
-    name: 'SlayZone Computer Service',
-    emailVerified: true
-  })
+  const created = await ctx.internalAdapter.createUser(
+    {
+      email: COMPUTER_SERVICE_USER_EMAIL,
+      name: 'SlayZone Computer Service',
+      emailVerified: true
+    },
+    OPERATOR_PROVISIONED
+  )
   return created.id
 }
 

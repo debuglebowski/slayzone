@@ -185,10 +185,10 @@ export function createEntraRecheck(auth: HubAuth, opts: EntraRecheckOptions): En
     aadsts: string | null
   ): Promise<RecheckOutcome> {
     const ctx = await auth.$context
-    const current = (await ctx.internalAdapter.findAccountByProviderId(
-      account.accountId,
-      ENTRA_PROVIDER_ID
-    )) as AccountRow | null
+    const current = (await ctx.internalAdapter.findAccountByKey({
+      providerId: ENTRA_PROVIDER_ID,
+      accountId: account.accountId
+    })) as AccountRow | null
     if (current && current.refreshToken !== storedToken) {
       return {
         userId: account.userId,

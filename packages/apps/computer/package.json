@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/computer",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "main": "./src/main.ts",
@@ -30,6 +30,6 @@
     "@types/node": "^22.19.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   }
 }

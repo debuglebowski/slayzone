@@ -187,12 +187,15 @@ async function entraUser(
   opts: { role?: 'admin' | 'user'; signedIn?: boolean; refreshToken?: string | null } = {}
 ): Promise<{ userId: string; accountId: string }> {
   const ctx = await auth.$context
-  const user = await ctx.internalAdapter.createUser({
-    email: `${oid}@normain.test`,
-    name: oid,
-    emailVerified: true,
-    role: opts.role ?? 'user'
-  })
+  const user = await ctx.internalAdapter.createUser(
+    {
+      email: `${oid}@normain.test`,
+      name: oid,
+      emailVerified: true,
+      role: opts.role ?? 'user'
+    },
+    { method: 'oauth', oauth: { providerId: ENTRA_PROVIDER_ID } }
+  )
   const accountId = entraAccountId(oid, TENANT)
   const rt = opts.refreshToken === undefined ? `rt-${oid}` : opts.refreshToken
   if (rt) entra.oidOf.set(rt, oid)
@@ -211,7 +214,10 @@ const liveSessions = async (userId: string): Promise<number> =>
 
 async function storedRefreshToken(accountId: string): Promise<string | null> {
   const ctx = await auth.$context
-  const row = await ctx.internalAdapter.findAccountByProviderId(accountId, ENTRA_PROVIDER_ID)
+  const row = await ctx.internalAdapter.findAccountByKey({
+    providerId: ENTRA_PROVIDER_ID,
+    accountId
+  })
   return row?.refreshToken ? await decryptOAuthToken(row.refreshToken, await tokenCtx()) : null
 }
 
@@ -288,7 +294,10 @@ describe('a definite refusal revokes', () => {
     entra.answers = [{ kind: 'error', status: 400, error: 'invalid_grant' }]
     entra.onRequest = async () => {
       const ctx = await auth.$context
-      const row = await ctx.internalAdapter.findAccountByProviderId(a.accountId, ENTRA_PROVIDER_ID)
+      const row = await ctx.internalAdapter.findAccountByKey({
+        providerId: ENTRA_PROVIDER_ID,
+        accountId: a.accountId
+      })
       await ctx.internalAdapter.updateAccount(row!.id, {
         refreshToken: (await setTokenUtil('rt-fresh-sign-in', await tokenCtx())) as string
       })
@@ -396,7 +405,7 @@ describe('a refresh that works', () => {
     const raw = (
       await (
         await auth.$context
-      ).internalAdapter.findAccountByProviderId(a.accountId, ENTRA_PROVIDER_ID)
+      ).internalAdapter.findAccountByKey({ providerId: ENTRA_PROVIDER_ID, accountId: a.accountId })
     )?.refreshToken
     expect(raw).not.toContain('rt-rotated-x')
     expect(await liveSessions(a.userId)).toBe(1)

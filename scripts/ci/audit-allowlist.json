@@ -2,6 +2,27 @@
   "$comment": "Reviewed decisions for production-dependency advisories (not applicable, or accepted until a date). Read by scripts/ci/audit-check.mjs: an advisory missing here, or past its expiry, fails the audit job. Re-review on expiry; remove ids the job reports as stale.",
   "entries": [
     {
+      "packages": ["zod"],
+      "reason": "APPLIES, accepted for now: a large array sent to a schema without a length cap makes zod allocate one issue per failing element until the process runs out of memory. Our hub and computer validate network input with zod (tRPC inputs, REST bodies, computer frames), mostly from authenticated callers. The fix (4.6.6) was published 2026-10-11, so the 30-day minimumReleaseAge holds it back until 2026-11-10.",
+      "reviewed": "2026-10-24",
+      "expires": "2026-11-11",
+      "advisories": ["GHSA-mrhx-c7xc-m3w5"]
+    },
+    {
+      "packages": ["body-parser"],
+      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process. express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 30-day minimumReleaseAge holds it back until 2026-11-21.",
+      "reviewed": "2026-10-24",
+      "expires": "2026-11-22",
+      "advisories": ["GHSA-27r3-jxmh-p828"]
+    },
+    {
+      "packages": ["undici"],
+      "reason": "Via @electron/get, the electron package's install-time downloader; never in the app or hub.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-24",
+      "advisories": ["GHSA-4qv8-2p9j-2685", "GHSA-f72v-6w45-q472", "GHSA-xjj6-f33q-929c"]
+    },
+    {
       "packages": ["@modelcontextprotocol/sdk"],
       "reason": "APPLIES, accepted for now: one request to /mcp can exhaust hub memory. Only authenticated callers reach /mcp (and only local processes on the desktop hub, which binds 127.0.0.1). The fix (1.32.0) was published 2026-10-02, so the 30-day minimumReleaseAge holds it back until 2026-11-01; Renovate opens the bump then.",
       "reviewed": "2026-10-22",
@@ -33,52 +54,28 @@
         "GHSA-997q-gvvc-jwmx",
         "GHSA-fw47-9c62-h3vw",
         "GHSA-h3v5-h239-pg29",
+        "GHSA-jr5w-w6x2-84p9",
         "GHSA-x562-297c-g43g"
       ]
     },
     {
-      "packages": ["protobufjs", "@protobufjs/utf8", "@opentelemetry/core", "fflate", "dompurify"],
-      "reason": "Inside posthog-js: protobufjs/OpenTelemetry only load posthog's own fixed schemas, fflate only compresses, and dompurify 3.3.1 is posthog's pinned copy (our sanitizer uses ^3.4.15). Clears when posthog-js is bumped.",
+      "packages": ["fflate"],
+      "reason": "Inside posthog-js (0.4.8, pinned by posthog): the advisory is in unzipSync (ZIP64 parsing), which posthog-js does not ship; it only compresses outgoing event batches.",
+      "reviewed": "2026-10-25",
+      "expires": "2027-01-22",
+      "advisories": ["GHSA-px8p-9vwx-vf98"]
+    },
+    {
+      "packages": ["dompurify"],
+      "reason": "NEEDS REVIEW: dompurify 3.4.15 via mermaid and 3.4.16 via @slayzone/editor. These ids were previously covered by the posthog-js entry, whose rationale (posthog's pinned 3.3.1 copy) does not apply to these paths; moved here unchanged when posthog-js 1.434 dropped dompurify.",
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
       "advisories": [
-        "GHSA-2pr8-phx7-x9h3",
-        "GHSA-39q2-94rc-95cp",
-        "GHSA-55q2-fjhq-7xh7",
         "GHSA-6688-9rhm-gjv2",
-        "GHSA-66ff-xgx4-vchm",
-        "GHSA-685m-2w69-288q",
-        "GHSA-75px-5xx7-5xc7",
-        "GHSA-76mc-f452-cxcm",
-        "GHSA-8988-4f7v-96qf",
-        "GHSA-c2j3-45gr-mqc4",
         "GHSA-c6gr-qvv4-5v3f",
         "GHSA-cg2g-xh64-v4q7",
-        "GHSA-cj63-jhhr-wcxv",
-        "GHSA-cjmm-f4jc-qw8r",
-        "GHSA-cmwh-pvxp-8882",
-        "GHSA-crv5-9vww-q3g8",
-        "GHSA-f38q-mgvj-vph7",
-        "GHSA-fx83-v9x8-x52w",
-        "GHSA-gvmj-g25r-r7wr",
-        "GHSA-h7mw-gpvr-xq4m",
-        "GHSA-h8r8-wccr-v5f2",
-        "GHSA-hpcv-96wg-7vj8",
-        "GHSA-j3f2-48v5-ccww",
-        "GHSA-jggg-4jg4-v7c6",
-        "GHSA-jvwf-75h9-cwgg",
         "GHSA-mrv2-3pqr-j5jr",
-        "GHSA-p98j-92pf-mc4p",
-        "GHSA-px8p-9vwx-vf98",
-        "GHSA-q6x5-8v7m-xcrf",
-        "GHSA-r47g-fvhr-h676",
-        "GHSA-rp9w-3fw7-7cwq",
-        "GHSA-v2wj-7wpq-c8vv",
-        "GHSA-v9jr-rg53-9pgp",
-        "GHSA-vxr8-fq34-vvx9",
-        "GHSA-wcpc-wj8m-hjx6",
-        "GHSA-x4vx-rjvf-j5p4",
-        "GHSA-xq3m-2v4x-88gg"
+        "GHSA-p98j-92pf-mc4p"
       ]
     },
     {
@@ -89,6 +86,7 @@
       "advisories": [
         "GHSA-26pp-8wgv-hjvm",
         "GHSA-2gcr-mfcq-wcc3",
+        "GHSA-333x-w4r6-6crp",
         "GHSA-3hrh-pfw6-9m5x",
         "GHSA-458j-xx4x-4375",
         "GHSA-46wh-pxpv-q5gq",
@@ -133,12 +131,14 @@
         "GHSA-v39h-62p7-jpjc",
         "GHSA-v8w9-8mx6-g223",
         "GHSA-w62v-xxxg-mg59",
+        "GHSA-w74x-v6f9-j3xg",
         "GHSA-wc8c-qw6v-h7f6",
         "GHSA-wgpf-jwqj-8h8p",
         "GHSA-wmmm-f939-6g9c",
         "GHSA-wwfh-h76j-fc44",
         "GHSA-xf4j-xp2r-rqqx",
         "GHSA-xgm2-5f3f-mvvc",
+        "GHSA-xhq7-xmqj-769h",
         "GHSA-xpcf-pg52-r92g",
         "GHSA-xrhx-7g5j-rcj5"
       ]
@@ -221,6 +221,8 @@
         "GHSA-rq7h-c2jc-7f22",
         "GHSA-v2wj-q39q-566r",
         "GHSA-v6wh-96g9-6wx3",
+        "GHSA-vfpm-58rq-9qcg",
+        "GHSA-xp26-3454-mjgp",
         "GHSA-xwg4-73v4-xw9w"
       ]
     },
@@ -236,14 +238,7 @@
       "reason": "Via @lobehub/icons / @lobehub/ui: we deep-import 6 icon components, which do not load these.",
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-238p-pmpm-9mq7",
-        "GHSA-2wm5-q62r-hmrv",
-        "GHSA-f23m-r3pf-42rh",
-        "GHSA-qjx8-664m-686j",
-        "GHSA-r5fr-rjxr-66jc",
-        "GHSA-vcc3-ghjq-m6fr"
-      ]
+      "advisories": ["GHSA-238p-pmpm-9mq7", "GHSA-f23m-r3pf-42rh", "GHSA-r5fr-rjxr-66jc"]
     },
     {
       "packages": ["minimatch", "brace-expansion", "lodash"],

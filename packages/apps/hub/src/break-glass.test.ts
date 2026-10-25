@@ -38,6 +38,7 @@ import { getComputer, registerComputer } from '@slayzone/computers/server'
 import {
   BREAK_GLASS_EMAIL,
   createHubAuth,
+  ENTRA_PROVIDER_ID,
   type HubAuth,
   listHubUsers,
   openBreakGlassAccount
@@ -140,18 +141,24 @@ async function main(): Promise<void> {
   })
   // Two people, as Entra would have made them (password is off).
   const ctx = await auth.$context
-  const alice = await ctx.internalAdapter.createUser({
-    email: 'alice@example.com',
-    name: 'Alice',
-    emailVerified: true,
-    role: 'admin'
-  })
-  const bob = await ctx.internalAdapter.createUser({
-    email: 'bob@example.com',
-    name: 'Bob',
-    emailVerified: true,
-    role: 'user'
-  })
+  const alice = await ctx.internalAdapter.createUser(
+    {
+      email: 'alice@example.com',
+      name: 'Alice',
+      emailVerified: true,
+      role: 'admin'
+    },
+    { method: 'oauth', oauth: { providerId: ENTRA_PROVIDER_ID } }
+  )
+  const bob = await ctx.internalAdapter.createUser(
+    {
+      email: 'bob@example.com',
+      name: 'Bob',
+      emailVerified: true,
+      role: 'user'
+    },
+    { method: 'oauth', oauth: { providerId: ENTRA_PROVIDER_ID } }
+  )
   await registerComputer(db, { id: 'c-laptop', name: 'laptop', platform: 'p', version: '0' })
 
   const dropped: string[] = []
@@ -554,12 +561,15 @@ async function main(): Promise<void> {
       const v1File = join(dataRoot, 'hub.break-glass.json')
       writeFileSync(v1File, JSON.stringify({ userId: 'x', password: 'v1-secret' }), { mode: 0o600 })
       const { userId } = await openBreakGlassAccount(auth) // as a crash would leave it
-      const v1 = await ctx.internalAdapter.createUser({
-        email: 'break-glass-20261022-a1b2c3@hub.slayzone.local',
-        name: 'Break-glass (temporary)',
-        emailVerified: true,
-        role: 'user'
-      })
+      const v1 = await ctx.internalAdapter.createUser(
+        {
+          email: 'break-glass-20261022-a1b2c3@hub.slayzone.local',
+          name: 'Break-glass (temporary)',
+          emailVerified: true,
+          role: 'user'
+        },
+        { method: 'admin' }
+      )
       audit.length = 0
       const closed = await breakGlass.closeAtBoot(dataRoot)
       assertEq(closed.sort(), [userId, v1.id].sort(), 'both closed')

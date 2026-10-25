@@ -10,6 +10,8 @@ export {
   pushNewTaskToProviders,
   pushArchiveToProviders,
   pushUnarchiveToProviders,
+  syncedTaskFieldsChanged,
+  SYNCED_TASK_FIELDS,
   startDiscoveryPoller,
   resetSyncFlags
 } from './sync'

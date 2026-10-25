@@ -11,7 +11,7 @@
       "posix"
     ],
     "overrides": {
-      "zod": "^4",
+      "zod": "^4.5.4",
       "d3-shape>d3-path": "^3.1.0",
       "node-abi": "^4.28.0",
       "electron-chrome-web-store>adm-zip": "^0.6.1",
@@ -22,8 +22,7 @@
       "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
       "posix@4.2.0": "patches/posix@4.2.0.patch",
       "app-builder-lib@26.15.2": "patches/app-builder-lib@26.15.2.patch",
-      "@radix-ui/react-menu@2.1.16": "patches/@radix-ui__react-menu@2.1.16.patch",
-      "@radix-ui/react-dismissable-layer@1.1.11": "patches/@radix-ui__react-dismissable-layer@1.1.11.patch"
+      "@radix-ui/react-menu@2.1.24": "patches/@radix-ui__react-menu@2.1.24.patch"
     }
   },
   "scripts": {
@@ -85,24 +84,24 @@
     "@types/node": "^22.19.7",
     "changelogen": "^0.6.2",
     "convex": "^1.46.0",
-    "eslint": "^9.39.4",
+    "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "knip": "^5.83.1",
-    "png-to-ico": "^3.0.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "knip": "^5.88.1",
+    "png-to-ico": "^3.0.2",
     "sharp": "^0.34.5",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.59.3"
+    "typescript-eslint": "^8.70.1"
   },
   "engines": {
     "node": ">=24",
-    "pnpm": ">=9"
+    "pnpm": ">=10.34.5"
   },
-  "version": "0.36.0-beta.18",
-  "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017",
+  "version": "0.36.0-beta.19",
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "dependencies": {
-    "@tabler/icons-react": "^3.40.0"
+    "@tabler/icons-react": "^3.48.0"
   }
 }

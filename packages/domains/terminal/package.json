@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/terminal",
-  "version": "0.36.0-beta.18",
+  "version": "0.36.0-beta.19",
   "private": true,
   "type": "module",
   "//xterm": "@xterm/* + @xterm/headless are pinned (exact, no ^) to the xterm 6.1 beta channel for ScreenDprMonitor + texture-atlas race fixes. Move all 8 in lockstep. Re-bump when xterm 6.1 ships stable, or to a newer beta if a relevant fix lands.",
@@ -32,7 +32,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.100.9",
+    "@tanstack/react-query": "^5.103.2",
     "@xterm/addon-fit": "0.12.0-beta.292",
     "@xterm/addon-search": "0.17.0-beta.292",
     "@xterm/addon-serialize": "0.15.0-beta.292",
@@ -41,7 +41,7 @@
     "@xterm/xterm": "6.1.0-beta.292",
     "lucide-react": "^0.562.0",
     "node-pty": "^1.1.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.15"
   },
   "peerDependencies": {
     "electron": "^41.10.7",

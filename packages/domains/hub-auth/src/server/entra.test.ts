@@ -626,10 +626,10 @@ describe('Entra sign-in', () => {
     expect(audit[0]!.detail).toEqual({ method: 'sso', reason: 'account_not_linked' })
     const ctx = await auth.$context
     expect(
-      await ctx.internalAdapter.findAccountByProviderId(
-        entraAccountId('kim-oid', TENANT),
-        ENTRA_PROVIDER_ID
-      )
+      await ctx.internalAdapter.findAccountByKey({
+        providerId: ENTRA_PROVIDER_ID,
+        accountId: entraAccountId('kim-oid', TENANT)
+      })
     ).toBeNull()
   })
 
@@ -642,7 +642,10 @@ describe('Entra sign-in', () => {
         body: JSON.stringify({ provider: ENTRA_PROVIDER_ID, idToken: { token } })
       })
     )
-    expect(res.status).toBe(401)
+    // Refused before the token is even looked at: the provider declares no ID-token
+    // sign-in (`disableIdTokenSignIn`), so better-auth answers 404 ID_TOKEN_NOT_SUPPORTED.
+    expect(res.status).toBe(404)
+    expect(((await res.json()) as { code?: string }).code).toBe('ID_TOKEN_NOT_SUPPORTED')
     expect(await userCount()).toBe(0)
   })
 
