@@ -118,6 +118,20 @@ if (have('computer/bin.cjs')) {
     : fail(`computer: node-pty cannot load — ${r.out.split('\n')[0]}`)
 }
 
+// ws's native frame masking: bufferutil falls back to plain JS, silently, when its
+// loader (node-gyp-build) is not reachable from app.asar.unpacked.
+for (const bundle of ['hub', 'computer']) {
+  if (!have(`${bundle}/bin.cjs`)) continue
+  const bin = path.join(resources, bundle, 'bin.cjs')
+  const r = run(
+    `const b=require('module').createRequire(${JSON.stringify(bin)})('bufferutil');` +
+      `console.log(String(b.mask).includes('[native code]')?'native':'fallback')`
+  )
+  r.status === 0 && r.out.includes('native')
+    ? pass(`${bundle}: bufferutil loads natively`)
+    : fail(`${bundle}: bufferutil runs its JS fallback — ${r.out.split('\n')[0]}`)
+}
+
 // 3. The packaged hub boots against an empty root and answers /health.
 console.log('\n3. packaged hub boots')
 const root = mkdtempSync(path.join(tmpdir(), 'slz-packaged-smoke-'))

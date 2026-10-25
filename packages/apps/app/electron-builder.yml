@@ -29,6 +29,11 @@ asarUnpack:
   - '**/node_modules/bindings/**'
   - '**/node_modules/file-uri-to-path/**'
   - '**/node_modules/node-pty/**'
+  # Same rule for ws's native accelerator: bufferutil (unpacked as a native) loads its
+  # .node through node-gyp-build, its one dependency. Left in app.asar, the require fails
+  # and bufferutil silently runs its JS fallback in the hub and computer (smoke step 2).
+  - '**/node_modules/bufferutil/**'
+  - '**/node_modules/node-gyp-build/**'
 win:
   executableName: slayzone
 nsis:
