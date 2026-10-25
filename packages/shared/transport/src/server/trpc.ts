@@ -1,5 +1,4 @@
 import { initTRPC, TRPCError } from '@trpc/server'
-import superjson from 'superjson'
 import { peerAddress, runWithSecurityContext, securityEvent } from '@slayzone/platform/security-log'
 import {
   assertHubLocalExecEnabled,
@@ -8,6 +7,7 @@ import {
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './app-deps'
+import { trpcTransformer } from './trpc-transformer'
 import { isPathAllowed } from './scopes'
 import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
@@ -15,7 +15,9 @@ import { checkOwnership, ownedResult } from './owner-gate'
 import { isJoinTokenRefusedError } from './join-token-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
-  transformer: superjson,
+  // superjson on the wire; responses skip superjson's walk when they are plain
+  // JSON data (byte-identical output) — see trpc-transformer.ts.
+  transformer: trpcTransformer,
   // A hub-switch refusal carries its stable code (`HUB_PROCESSES_DISABLED`, …) to the
   // client as `data.appCode`; every other error keeps its shape exactly.
   errorFormatter: ({ shape, error }) => ({

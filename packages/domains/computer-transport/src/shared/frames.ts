@@ -61,7 +61,14 @@ export const ComputerTransportErrorCodes = {
   /** Computer and hub speak incompatible protocol versions. */
   protocolMismatch: -32003,
   /** Addressed computer is not connected to this hub. */
-  unknownComputer: -32004
+  unknownComputer: -32004,
+  /**
+   * Another live PROCESS (different epoch) already holds this computer id —
+   * two processes sharing one credential store. Transient: the refused
+   * computer retries, and gets in once the incumbent's connection is gone.
+   * Older computers treat any unlisted code as transient too.
+   */
+  computerInUse: -32005
 } as const
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,12 @@ interface Entry {
 
 const noop = (): void => undefined
 
+/**
+ * Marked once per page load when the boot queue has drained — every hidden pane
+ * that was queued is hydrated. Read by the renderer boot telemetry.
+ */
+export const ALL_HYDRATED_MARK = 'sz:panes:allHydrated'
+
 const defaultEnv = (): HydrationEnv => ({
   requestIdle: (cb, timeoutMs) => {
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
@@ -85,6 +91,8 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
   const listeners = new Map<string, Set<() => void>>()
   let seq = 0
   let idleScheduled = false
+  let everQueued = false
+  let drainMarked = false
 
   const hydrate = (id: string): void => {
     queue.delete(id)
@@ -92,6 +100,10 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     hydrated.add(id)
     const subs = listeners.get(id)
     if (subs) for (const cb of [...subs]) cb()
+    if (everQueued && !drainMarked && queue.size === 0) {
+      drainMarked = true
+      if (typeof performance !== 'undefined') performance.mark(ALL_HYDRATED_MARK)
+    }
   }
 
   const takeBest = (): Entry | undefined => {
@@ -137,6 +149,7 @@ export function createPaneHydrator(env: HydrationEnv = defaultEnv()): PaneHydrat
     if (hydrated.has(id)) return noop
     const entry: Entry = { id, seq: seq++, rank: opts.rank, ready: false }
     queue.set(id, entry)
+    everQueued = true
     const markReady = (): void => {
       if (queue.get(id) !== entry) return
       entry.ready = true

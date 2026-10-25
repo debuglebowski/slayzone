@@ -519,7 +519,11 @@ import {
   stopDiagnostics,
   setIpcSuccessHook
 } from '@slayzone/diagnostics/electron'
-import { recordDiagnosticEvent, saveDiagnosticsConfig } from '@slayzone/diagnostics/server'
+import {
+  createBootStepRecorder,
+  recordDiagnosticEvent,
+  saveDiagnosticsConfig
+} from '@slayzone/diagnostics/server'
 import {
   detectPreviousCrash,
   writeBootStub,
@@ -839,10 +843,11 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     return
   }
 
-  // The mint window (waitForReady + retries) can straddle an app quit: the quit
-  // drain already ran localComputerCleanup (while it was still null), so spawning
-  // now would orphan a child no cleanup hook tracks. Skip if quit has drained.
-  if (quitDrainComplete) {
+  // The mint window (waitForReady + retries) can straddle an app quit: before-quit
+  // already suspended restarts on a handle that did not exist yet, and will-quit
+  // may have run localComputerCleanup while it was still null — spawning now
+  // would orphan a child no quit hook governs. Skip once quit has been requested.
+  if (quitRequested) {
     logBoot('[local-computer] app quitting — skipping computer spawn')
     return
   }
@@ -1004,6 +1009,21 @@ let quitDrainComplete = false
 let quitSubprocessCleanupPromise: Promise<void> | null = null
 const QUIT_SUBPROCESS_TERM_GRACE_MS = 1500
 const QUIT_SUBPROCESS_HARD_TIMEOUT_MS = 5000
+/**
+ * How long a started quit may take to reach `will-quit` before the process is
+ * force-exited. Covers the subprocess drain (≤ QUIT_SUBPROCESS_HARD_TIMEOUT_MS)
+ * plus window teardown, with headroom.
+ *
+ * A quit that never reaches `will-quit` used to leave the app alive forever:
+ * `before-quit` short-circuits once the drain is done, so every later SIGTERM
+ * was swallowed too. That orphan kept its hub and computer running, and its
+ * computer fought the next app's computer for the same id — killing every agent
+ * on each takeover ("Process exited with code 1" across all tasks).
+ */
+const QUIT_WATCHDOG_MS = 15_000
+let quitWatchdog: NodeJS.Timeout | null = null
+/** Set on the first `before-quit`; never cleared (a started quit always ends the process). */
+let quitRequested = false
 type OAuthCallbackPayload = { code?: string; error?: string }
 const oauthCallbackQueue: OAuthCallbackPayload[] = []
 const oauthCallbackWaiters = new Set<(payload: OAuthCallbackPayload) => void>()
@@ -1073,8 +1093,10 @@ const OAUTH_DEEP_LINK_REDIRECT_URI = `${APP_PROTOCOL_SCHEME}://auth/callback`
 const OAUTH_CALLBACK_TIMEOUT_MS = 120_000
 
 const BOOT_START_MS = performance.now()
-let bootLastStepMs = BOOT_START_MS
-const bootSteps: { step: string; t: number; delta: number }[] = []
+// Always recorded (an array push per step); printed only with SLAYZONE_DEBUG_BOOT=1,
+// summarized into one `main.boot.timings` diagnostics event per boot.
+const bootSteps = createBootStepRecorder(() => performance.now(), BOOT_START_MS)
+let bootTimingsRecorded = false
 const isBootDebug = (): boolean => !app.isPackaged && process.env.SLAYZONE_DEBUG_BOOT === '1'
 
 // Optional sync file sink. stdout capture in Playwright drops data emitted
@@ -1085,12 +1107,8 @@ function bootLogFilePath(): string | null {
 }
 
 function logBoot(step: string): void {
+  const { t, delta } = bootSteps.step(step)
   if (!isBootDebug()) return
-  const now = performance.now()
-  const t = Math.round(now - BOOT_START_MS)
-  const delta = Math.round(now - bootLastStepMs)
-  bootLastStepMs = now
-  bootSteps.push({ step, t, delta })
   const line = `[boot] t=${String(t).padStart(5)}ms Δ=${String(delta).padStart(5)}ms ${step}`
   console.log(line)
   const file = bootLogFilePath()
@@ -1104,11 +1122,23 @@ function logBoot(step: string): void {
 }
 
 function dumpBootSummary(label: string): void {
-  if (!isBootDebug() || bootSteps.length === 0) return
-  const sorted = [...bootSteps].sort((a, b) => b.delta - a.delta).slice(0, 12)
-  const last = bootSteps[bootSteps.length - 1]
+  if (!bootTimingsRecorded && bootSteps.all().length > 0) {
+    bootTimingsRecorded = true
+    const summary = bootSteps.summary()
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'main',
+      event: 'main.boot.timings',
+      message: `main boot ${summary.totalMs}ms to ${label}`,
+      payload: { at: label, packaged: app.isPackaged, ...summary }
+    })
+  }
+  const all = bootSteps.all()
+  if (!isBootDebug() || all.length === 0) return
+  const sorted = [...all].sort((a, b) => b.delta - a.delta).slice(0, 12)
+  const last = all[all.length - 1]
   const lines: string[] = []
-  lines.push(`[boot] ── summary @ ${label} ── total=${last.t}ms steps=${bootSteps.length}`)
+  lines.push(`[boot] ── summary @ ${label} ── total=${last.t}ms steps=${all.length}`)
   lines.push(`[boot] top gaps:`)
   for (const s of sorted) {
     lines.push(
@@ -4498,6 +4528,35 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', (event) => {
+  // From the first quit request on, a hub/computer that exits stays down: the
+  // drain below can take seconds, and a respawn in that window outlives a quit
+  // that stalls (see QUIT_WATCHDOG_MS).
+  quitRequested = true
+  sidecarServerHandle?.suspendRestarts()
+  localComputerHandle?.suspendRestarts()
+  if (!quitWatchdog) {
+    quitWatchdog = setTimeout(() => {
+      console.error(
+        `[main] quit did not reach will-quit within ${QUIT_WATCHDOG_MS}ms — forcing exit`
+      )
+      try {
+        recordDiagnosticEvent({
+          level: 'error',
+          source: 'main',
+          event: 'app.quit_watchdog_fired',
+          message: `Quit did not complete within ${QUIT_WATCHDOG_MS}ms; forced exit.`,
+          payload: { drainComplete: quitDrainComplete }
+        })
+      } catch {
+        /* diagnostics unavailable — the console error above still records it */
+      }
+      // app.exit skips will-quit, so reap the children here: both stops SIGTERM
+      // synchronously, which is all a force-exit can wait for.
+      sidecarCleanup?.()
+      localComputerCleanup?.()
+      app.exit(1)
+    }, QUIT_WATCHDOG_MS)
+  }
   if (quitDrainComplete) return
   event.preventDefault()
   void shutdownSubprocessesForQuit().finally(() => {
@@ -4508,6 +4567,8 @@ app.on('before-quit', (event) => {
 
 // Clean up database connection and active processes before quitting
 app.on('will-quit', () => {
+  if (quitWatchdog) clearTimeout(quitWatchdog)
+  quitWatchdog = null
   oauthCallbackQueue.length = 0
   oauthCallbackWaiters.clear()
   if (linearSyncPoller) {

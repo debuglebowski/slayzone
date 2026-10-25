@@ -29,6 +29,24 @@ export function recordDiagnosticsTimeline(event: string, payload?: Record<string
   }
 }
 
+/** One renderer diagnostics event under its own name (not the timeline prefix). */
+export function recordRendererEvent(
+  event: string,
+  message: string,
+  payload: Record<string, unknown>
+): void {
+  try {
+    void getTrpcClient().diagnostics.recordClientEvent.mutate({
+      event,
+      level: 'info',
+      message,
+      payload
+    })
+  } catch {
+    // ignore diagnostics failures (incl. tRPC client not yet ready)
+  }
+}
+
 export function recordClientError(input: ClientErrorEventInput): void {
   try {
     void getTrpcClient().diagnostics.recordClientError.mutate(input)

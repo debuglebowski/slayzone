@@ -670,6 +670,44 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       auditAuth(conn, 'computer.hello', 'failure', null, { reason: 'unknown_key' })
       return
     }
+    // A different PROCESS claiming an id whose connection is still live is not a
+    // reconnect — it is two computers sharing one credential store (e.g. an
+    // orphaned app's computer and the next app's). Letting each supersede the
+    // other disposed every session on every takeover. The incumbent keeps the
+    // id; the newcomer's dialer retries and gets in once the incumbent is gone
+    // (closed, or reaped by the heartbeat watchdog). Same epoch ⇒ the same
+    // process over a fresh socket (half-open old one) ⇒ supersede as before. A
+    // missing epoch on either side proves nothing ⇒ supersede as before.
+    const incumbent = byComputerId.get(identity.computerId)
+    const newEpoch = parsed.data.epoch
+    if (
+      incumbent &&
+      incumbent !== conn &&
+      isUsable(incumbent) &&
+      incumbent.descriptor.epoch !== undefined &&
+      newEpoch !== undefined &&
+      incumbent.descriptor.epoch !== newEpoch
+    ) {
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.computerInUse,
+        'another live process is already connected as this computer'
+      )
+      auditAuth(conn, 'computer.hello', 'failure', identity.computerId, {
+        reason: 'computer_in_use'
+      })
+      log('computer hello refused — another live process holds this computer id', {
+        computerId: identity.computerId,
+        incumbentEpoch: incumbent.descriptor.epoch,
+        refusedEpoch: newEpoch
+      })
+      // Its credentials were valid — not a flood strike. Without this, a local
+      // computer waiting out an incumbent would rate-limit its own address and
+      // stay locked out after the incumbent left.
+      releasePending(conn)
+      conn.ws.close(1008, 'computer in use')
+      return
+    }
     const descriptor: ComputerDescriptor = {
       computerId: identity.computerId,
       name: identity.name,

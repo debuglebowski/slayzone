@@ -304,6 +304,30 @@ test('restart clears the needs-re-enrollment latch', async () => {
   }
 })
 
+test('suspendRestarts: a computer that dies during app quit stays down', async () => {
+  // App quit drains subprocesses BEFORE will-quit runs stop(). A computer that
+  // dies in that window (e.g. SIGINT to the dev process group) must not be
+  // respawned: the respawn outlives a stalled quit and fights the next app's
+  // computer for the same id, killing every agent on each takeover.
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1' },
+    { backoffMs: [5, 5], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+    const pid = handle.getPid()!
+    handle.suspendRestarts()
+    process.kill(pid, 'SIGKILL')
+    await waitFor(() => handle.getPid() === null, 15_000, 'killed computer detached')
+    await delay(200)
+    assertEq(tokensSeenByChildren(ctx).length, 1, 'no respawn after suspendRestarts')
+    assertEq(handle.getPid(), null, 'nothing running')
+    assertEq(ctx.permanentFailure, null, 'a quit-time death is not a permanent failure')
+  } finally {
+    await handle.stop()
+  }
+})
+
 // --- computer ---------------------------------------------------------------
 
 async function main(): Promise<void> {
