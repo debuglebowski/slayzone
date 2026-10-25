@@ -77,6 +77,7 @@ import {
   stopRetentionScheduler
 } from '@slayzone/diagnostics/server'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
+import { startEventLoopStallDetector } from '@slayzone/platform/event-loop-stall'
 import {
   adoptClientAddress,
   clientAddress,
@@ -144,6 +145,21 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // (pty + agent pool run here) persist + are queryable, instead of buffering +
   // dropping. Always owned here (independent of cfg.db).
   const diagnosticsDb = openServerDiagnosticsDatabase()
+
+  // A frozen main thread looks dead to everything talking to this hub: computer
+  // heartbeats go unanswered, sockets drop, timers fire late all at once. Record
+  // every freeze of a second or more WITH the evidence that names its cause — a
+  // ~20s freeze on 2026-10-23 left nothing but a 20s gap in these diagnostics.
+  const stallDetector = startEventLoopStallDetector({
+    onStall: (stall) =>
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'server',
+        event: 'server.event_loop_stall',
+        message: `main thread froze for ${String(stall.durationMs)}ms`,
+        payload: stall
+      })
+  })
 
   // Populate every transport registry BEFORE accepting connections, so the
   // first procedure call can't hit an uninitialized dep.
@@ -874,6 +890,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         }
       }
       if (ownsDiagnosticsRetention) stopRetentionScheduler()
+      stallDetector.stop()
       // Drain buffered diagnostics before closing their DB — otherwise a clean
       // shutdown silently loses the tail of the write queue (batched `info`
       // events that never hit the flush interval).

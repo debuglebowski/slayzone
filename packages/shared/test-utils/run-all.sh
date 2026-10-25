@@ -341,6 +341,12 @@ run_test packages/apps/app/src/main/desktop-bridge-server.test.ts
 run_test packages/shared/platform/src/hub-switches.test.ts
 # Env scope manifest + sanitizeSpawnEnv — spawn-boundary denylist (fail closed).
 run_test packages/shared/platform/src/env-manifest.test.ts
+# Startup deadline shared by the computer and pty-manager: must read output that
+# is already waiting before judging a session hung after an event-loop stall.
+run_test packages/shared/platform/src/startup-deadline.test.ts
+# Event-loop stall detector: a frozen main thread is reported after it thaws,
+# with the stacks / child processes / CPU split that name the cause.
+run_test packages/shared/platform/src/event-loop-stall.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_test packages/shared/platform/src/device-status-queries.test.ts
