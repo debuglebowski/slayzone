@@ -248,6 +248,27 @@ test.describe('Tab switch cost does not scale with open tabs', () => {
     expect(perSwitch('AppHeaderActions'), top).toBe(0)
   })
 
+  test("revealing a tab mounts none of its closed selects' options", async ({ mainWindow }) => {
+    // The incoming tab's panels sit in <Activity mode="hidden"> until revealed. Each
+    // closed Radix Select kept every option mounted, and a reveal re-ran their
+    // ref/layout effects and remounted them all: ~680 of ~1,470 renders per switch
+    // came from the settings panel's four selects alone.
+    test.setTimeout(120_000)
+    const switching = taskIds.slice(0, 3)
+    for (const id of switching) await openTaskById(mainWindow, id)
+    const cycle = [...switching, ...switching, ...switching]
+    await rendersPerSwitch(mainWindow, cycle)
+    const { median, top, perSwitch } = await rendersPerSwitch(mainWindow, cycle)
+    const summary = `renders per switch: ${median}\n  most rendered: ${top}`
+    test.info().annotations.push({ type: 'renders', description: summary })
+    console.log(summary)
+    // SelectItemText only exists inside a mounted Radix option (our closed-select
+    // wrapper is also named SelectItem, and renders nothing).
+    expect(perSwitch('SelectItemText'), summary).toBe(0)
+    // Once, for the reveal itself — its effects (re-run by the reveal) must not render it again.
+    expect(perSwitch('TaskSettingsPanel'), summary).toBeLessThanOrEqual(1)
+  })
+
   test('a keystroke checks for an open modal at most once', async ({ mainWindow }) => {
     // Every guarded keydown handler used to run its own full-document `querySelector`
     // for an open modal — 2 per open tab, each ~1ms on a large DOM.

@@ -16,12 +16,16 @@ export function TaskSettingsPanel({
   renderDefaultContent,
   renderHistoryContent
 }: TaskSettingsPanelProps): React.JSX.Element {
-  const [view, setView] = useState<'default' | 'history'>('default')
+  // The view belongs to the task it was chosen on: another task starts on 'default'.
+  // Derived, not reset from an effect — task tabs hide this panel in <Activity>, and a
+  // re-show re-runs effects, so a resetting effect re-rendered the whole panel on
+  // every tab switch.
+  const [chosen, setChosen] = useState<{ taskId: string; view: 'default' | 'history' }>({
+    taskId,
+    view: 'default'
+  })
+  const view = chosen.taskId === taskId ? chosen.view : 'default'
   const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    setView('default')
-  }, [taskId])
 
   useEffect(() => {
     if (!copied) return
@@ -53,7 +57,7 @@ export function TaskSettingsPanel({
           type="button"
           aria-label={view === 'history' ? 'Back to settings' : 'View activity'}
           className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setView((current) => (current === 'history' ? 'default' : 'history'))}
+          onClick={() => setChosen({ taskId, view: view === 'history' ? 'default' : 'history' })}
         >
           {view === 'history' ? 'Back to settings' : 'View activity'}
         </button>
