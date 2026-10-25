@@ -166,26 +166,6 @@
       "advisories": ["GHSA-7rqj-j65f-68wh", "GHSA-x445-f3h2-j279", "GHSA-xmf8-cvqr-rfgj"]
     },
     {
-      "packages": ["builder-util-runtime", "js-yaml"],
-      "reason": "Via electron-updater: the update feed is public GitHub releases sent without a token, and the YAML it parses is our own release metadata. Our own js-yaml is ^4.3.2.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-2883-xcg3-v3hh",
-        "GHSA-52cp-r559-cp3m",
-        "GHSA-5p4m-2wfm-xmqj",
-        "GHSA-h67p-54hq-rp68",
-        "GHSA-p2f4-r6v6-j797"
-      ]
-    },
-    {
-      "packages": ["ws"],
-      "reason": "ws 8.18.0 is pinned by convex; the Convex client only connects to Convex's own servers, so the hostile peer would have to be Convex. Our own ws is ^8.21.3.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-58qx-3vcg-4xpx", "GHSA-96hv-2xvq-fx4p"]
-    },
-    {
       "packages": [
         "vite",
         "vitest",
@@ -200,30 +180,15 @@
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
       "advisories": [
-        "GHSA-28wg-ghj8-5hjv",
-        "GHSA-2v37-7h3g-55p8",
-        "GHSA-4w7w-66w2-5vf9",
         "GHSA-587h-7wmj-h5pm",
         "GHSA-68fv-2mgg-jv7q",
         "GHSA-698v-4r3x-3vcv",
-        "GHSA-6g55-p6wh-862q",
-        "GHSA-82fw-gwwq-j7x9",
         "GHSA-9jrq-w75r-8gcw",
-        "GHSA-fx2h-pf6j-xcff",
-        "GHSA-fxqj-rqcc-2cmp",
-        "GHSA-g7r4-m6w7-qqqr",
-        "GHSA-mw96-cpmx-2vgc",
-        "GHSA-p9ff-h696-f583",
-        "GHSA-qx2v-qp2m-jg93",
         "GHSA-qxg6-89mg-rqv8",
-        "GHSA-r28c-9q8g-f849",
         "GHSA-r825-w8mm-5pxw",
         "GHSA-rq7h-c2jc-7f22",
-        "GHSA-v2wj-q39q-566r",
-        "GHSA-v6wh-96g9-6wx3",
         "GHSA-vfpm-58rq-9qcg",
-        "GHSA-xp26-3454-mjgp",
-        "GHSA-xwg4-73v4-xw9w"
+        "GHSA-xp26-3454-mjgp"
       ]
     },
     {
@@ -238,7 +203,14 @@
       "reason": "Via @lobehub/icons / @lobehub/ui: we deep-import 6 icon components, which do not load these.",
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
-      "advisories": ["GHSA-238p-pmpm-9mq7", "GHSA-f23m-r3pf-42rh", "GHSA-r5fr-rjxr-66jc"]
+      "advisories": [
+        "GHSA-238p-pmpm-9mq7",
+        "GHSA-2wm5-q62r-hmrv",
+        "GHSA-f23m-r3pf-42rh",
+        "GHSA-qjx8-664m-686j",
+        "GHSA-r5fr-rjxr-66jc",
+        "GHSA-vcc3-ghjq-m6fr"
+      ]
     },
     {
       "packages": ["minimatch", "brace-expansion", "lodash"],
@@ -262,13 +234,6 @@
       ]
     },
     {
-      "packages": ["diff"],
-      "reason": "task-artifacts uses createPatch/structuredPatch; the DoS is in parsePatch/applyPatch.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-73rr-hh4g-fpgx"]
-    },
-    {
       "packages": ["posix"],
       "reason": "The crash needs an argument whose toString is not a function; only our own calls reach it.",
       "reviewed": "2026-10-22",
@@ -281,13 +246,6 @@
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
       "advisories": ["GHSA-737v-mqg7-c878"]
-    },
-    {
-      "packages": ["picomatch"],
-      "reason": "test-panel matches the user's own configured patterns.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-3v7f-55p6-f55p", "GHSA-c2c7-rcm5-vvqj"]
     },
     {
       "packages": ["protocol-buffers-schema"],
