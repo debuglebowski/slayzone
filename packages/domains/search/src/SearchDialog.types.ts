@@ -30,6 +30,8 @@ export type SearchItem =
       sublabel: string
       keywords: string
       command: PaletteCommand
+      /** Max hits root search shows from this item's page (entity pages). */
+      limit?: { key: string; max: number }
     }
 
 export interface SearchDialogProps {

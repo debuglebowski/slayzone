@@ -52,6 +52,7 @@ export {
   usePaletteCommandStore,
   usePublishPaletteCommands,
   flattenPaletteCommands,
+  type FlatPaletteCommand,
   type PaletteCommand,
   type PaletteIcon,
   type PalettePage,

@@ -49,7 +49,7 @@ export function buildSearchItems({
   const showProjects = filter === 'all' || filter === 'projects'
 
   if (showTaskCommands) {
-    for (const { command, trail } of flattenPaletteCommands(taskCommands)) {
+    for (const { command, trail, limit } of flattenPaletteCommands(taskCommands)) {
       list.push({
         kind: 'task-command',
         // Prefixed: rankResults dedupes by id across kinds.
@@ -57,7 +57,8 @@ export function buildSearchItems({
         label: [...trail, command.label].join(' → '),
         sublabel: '',
         keywords: command.keywords ?? '',
-        command
+        command,
+        limit
       })
     }
   }
@@ -156,14 +157,67 @@ export function rankResults(
 
   const weighted = merged.map((r) => ({
     ...r,
+    tier: matchTier(r.item, search),
     weightedScore: r.score * KIND_WEIGHT[r.item.kind]
   }))
+  // Match quality first (fzf scores exact, prefix and mid-word hits alike), then score.
   weighted.sort(
     (a, b) =>
+      a.tier - b.tier ||
       b.weightedScore - a.weightedScore ||
       selectorForItem(a.item).length - selectorForItem(b.item).length
   )
-  return weighted.slice(0, MAX_RESULTS)
+  // Entity pages (tasks, projects…) contribute at most `limit.max` hits each.
+  const perPage = new Map<string, number>()
+  const capped = weighted.filter((r) => {
+    const limit = r.item.kind === 'task-command' ? r.item.limit : undefined
+    if (!limit) return true
+    const n = (perPage.get(limit.key) ?? 0) + 1
+    perPage.set(limit.key, n)
+    return n <= limit.max
+  })
+  return capped.slice(0, MAX_RESULTS).map(({ tier: _tier, ...r }) => r)
+}
+
+/** The texts an item can match "as a whole": its label, plus a sub-page item's own label and its trail joined by spaces. */
+function wholeMatchTexts(item: SearchItem): string[] {
+  if (item.kind !== 'task-command') return [item.label]
+  return [item.label, item.command.label, item.label.replaceAll(' → ', ' ')]
+}
+
+/** 0 exact, 1 prefix, 2 a word starts with the query, 3 substring, 4 fuzzy only. */
+function matchTier(item: SearchItem, search: string): number {
+  const q = search.trim().toLowerCase()
+  let best = 4
+  for (const raw of wholeMatchTexts(item)) {
+    const t = raw.toLowerCase()
+    if (t === q) return 0
+    if (t.startsWith(q)) best = Math.min(best, 1)
+    else if (new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(q)}`, 'u').test(t))
+      best = Math.min(best, 2)
+    else if (t.includes(q)) best = Math.min(best, 3)
+  }
+  return best
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** cmdk value of a ranked row (matches the values SearchResults renders). */
+export function resultValue(r: RankedResult): string {
+  return r.item.kind === 'file' ? r.item.id : `${r.item.kind}:${r.item.id}`
+}
+
+/** The first row on screen: groups render in a fixed order, not by best hit. */
+export function firstResultValue(groups: GroupedResults): string {
+  const first =
+    groups.taskCommands[0] ??
+    groups.actions[0] ??
+    groups.files[0] ??
+    groups.tasks[0] ??
+    groups.projects[0]
+  return first ? resultValue(first) : ''
 }
 
 export function groupResults(results: RankedResult[]): GroupedResults {

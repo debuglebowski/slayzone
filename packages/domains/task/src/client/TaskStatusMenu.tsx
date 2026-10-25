@@ -22,7 +22,7 @@ import {
   type StatusOption
 } from '@slayzone/ui'
 import { Circle, ShieldAlert, AlarmClock, Check, ListChecks, MessageSquare } from 'lucide-react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { track } from '@slayzone/telemetry/client'
 import { CustomSnoozeDialog } from './SnoozePicker'
@@ -59,32 +59,30 @@ export function TaskStatusMenu({
 
   const isSnoozed = Boolean(task.snoozed_until && new Date(task.snoozed_until) > new Date())
 
-  const update = async (patch: Partial<Task>): Promise<void> => {
+  // camelCase update input — the server ignores snake_case row keys.
+  const update = async (patch: Omit<UpdateTaskInput, 'id'>): Promise<void> => {
     const updated = await updateTask.mutateAsync({ id: task.id, ...patch })
     onTaskUpdate(updated)
   }
 
   const handleStatusChange = async (value: string): Promise<void> => {
     track('task_status_changed', { from: task.status, to: value })
-    await update({ status: value } as Partial<Task>)
+    await update({ status: value })
   }
 
   const handleToggleBlocked = async (): Promise<void> => {
     if (task.is_blocked) {
       track('task_unblocked')
-      await update({ is_blocked: false, blocked_comment: null } as Partial<Task>)
+      await update({ isBlocked: false, blockedComment: null })
     } else {
       track('task_blocked', {})
-      await update({ is_blocked: true } as Partial<Task>)
+      await update({ isBlocked: true })
     }
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
-    await update({
-      is_blocked: true,
-      blocked_comment: blockedComment.trim() || null
-    } as Partial<Task>)
+    await update({ isBlocked: true, blockedComment: blockedComment.trim() || null })
     setCommentOpen(false)
     setBlockedComment('')
   }
@@ -95,6 +93,7 @@ export function TaskStatusMenu({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            data-testid="task-status-menu-trigger"
             className="shrink-0 cursor-pointer transition-opacity hover:opacity-70"
           >
             <StatusIcon className={cn('size-5', statusStyle.iconClass)} strokeWidth={3} />
@@ -176,7 +175,7 @@ export function TaskStatusMenu({
           onOpenChange={setSnoozeOpen}
           onSnooze={(until) => {
             track('task_snoozed')
-            update({ snoozed_until: until } as Partial<Task>)
+            update({ snoozedUntil: until })
           }}
         />
       </MountWhenOpened>

@@ -149,6 +149,7 @@ import {
   useStableCallback,
   withModalGuard,
   getThemeEditorColors,
+  MountWhenOpened,
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
@@ -172,6 +173,7 @@ import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
 import { useTaskPaletteCommands, type PalettePanel } from './useTaskPaletteCommands'
+import { CustomSnoozeDialog } from './SnoozePicker'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
 import { WebPanelView } from './WebPanelView'
@@ -492,6 +494,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Delete/archive dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
+  // Custom snooze date/time, opened from Cmd+K (Snooze → Pick date & time…).
+  const [snoozeDialogOpen, setSnoozeDialogOpen] = useState(false)
 
   // Templates for temporary tasks
   const { templates } = useTaskTemplates(task)
@@ -1776,6 +1780,48 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onInjectTitle: handleInjectTitle,
     onInjectDescription: handleInjectDescription,
     onCopyConversationId: handleCopyConversationId,
+    onCustomSnooze: () => setSnoozeDialogOpen(true),
+    parentTask,
+    templates,
+    windowAction: isSecondaryWindow ? 'reattach' : hasOpenSecondary ? null : 'detach',
+    browserOpen: !!panelVisibility.browser && isBuiltinEnabled('browser', 'task'),
+    onConvertToTask: async () => {
+      if (!task) return
+      const converted = await onConvertTask?.(task)
+      if (converted) {
+        handleTaskUpdate(converted)
+        setEditingTitle(true)
+      }
+    },
+    onApplyTemplate: applyTemplate,
+    onNavigateToTask: (id) => onNavigateToTask?.(id),
+    onCloseTask: () => onCloseTab(taskId),
+    onToggleWindow: () => {
+      if (isSecondaryWindow) void trpcClient.app.window.close.mutate()
+      else void trpcClient.app.taskWindows.open.mutate({ taskId })
+    },
+    onStopAgent: handleStopAgent,
+    onResetTerminal: handleResetTerminal,
+    onReattachTerminal: handleReattachTerminal,
+    onCopyHistory: handleCopyHistory,
+    onEditFlags: () => {
+      // The flags dialog lives in the terminal panel's header.
+      if (!panelVisibility.terminal) handlePanelToggle('terminal', true)
+      setFlagsPopoverOpen(true)
+    },
+    onResetFlags: handleSetDefaultFlags,
+    onDoctor: handleDoctor,
+    onEditDescription: () => setDescriptionFullscreen(true),
+    onNewArtifact: () => {
+      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
+      artifactsPanelRef.current?.createArtifact()
+    },
+    onOpenExternal: (url) => void trpcClient.app.shell.openExternal.mutate({ url }),
+    onNewBrowserTab: () => {
+      browserPanelRef.current?.newTab()
+      requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+    },
+    onBrowserScreenshot: handleScreenshotTrigger,
     onTogglePanel: (panelId) => {
       if (panelId === 'git') toggleGitTab('general')
       else if (panelId === 'git-diff') toggleGitTab('changes')
@@ -3556,6 +3602,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         onDeleteTask={onDeleteTask}
       />
 
+      <MountWhenOpened open={snoozeDialogOpen}>
+        <CustomSnoozeDialog
+          open={snoozeDialogOpen}
+          onOpenChange={setSnoozeDialogOpen}
+          onSnooze={async (until) => {
+            track('task_snoozed')
+            handleTaskUpdate(await updateTaskAsync({ id: task.id, snoozedUntil: until }))
+          }}
+        />
+      </MountWhenOpened>
       <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

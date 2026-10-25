@@ -16,6 +16,11 @@ export interface PaletteListPage {
   title: string
   placeholder?: string
   items: PaletteCommand[]
+  /**
+   * Max hits root search shows from this page. For pages listing other entities
+   * (tasks, projects, tags) — searching inside the page still shows all of them.
+   */
+  searchLimit?: number
 }
 
 /** A sub-page whose input is the value (e.g. a new subtask's title). Enter submits. */
@@ -93,16 +98,28 @@ export function usePublishPaletteCommands(scope: PaletteScope | null, enabled: b
   }, [owner, scope, enabled])
 }
 
+export interface FlatPaletteCommand {
+  command: PaletteCommand
+  /** Titles of the pages above the command. */
+  trail: string[]
+  /** The nearest enclosing page's `searchLimit`, keyed by that page's command id. */
+  limit?: { key: string; max: number }
+}
+
 /** Every command in `commands`, sub-page items included, with the trail of page titles above it. */
 export function flattenPaletteCommands(
   commands: PaletteCommand[],
-  trail: string[] = []
-): { command: PaletteCommand; trail: string[] }[] {
-  const out: { command: PaletteCommand; trail: string[] }[] = []
+  trail: string[] = [],
+  limit?: FlatPaletteCommand['limit']
+): FlatPaletteCommand[] {
+  const out: FlatPaletteCommand[] = []
   for (const command of commands) {
-    out.push({ command, trail })
-    if (command.page?.kind === 'list') {
-      out.push(...flattenPaletteCommands(command.page.items, [...trail, command.page.title]))
+    out.push({ command, trail, limit })
+    const page = command.page
+    if (page?.kind === 'list') {
+      const pageLimit =
+        page.searchLimit !== undefined ? { key: command.id, max: page.searchLimit } : limit
+      out.push(...flattenPaletteCommands(page.items, [...trail, page.title], pageLimit))
     }
   }
   return out

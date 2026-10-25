@@ -101,4 +101,49 @@ test.describe('Cmd+K task commands', () => {
       )
       .toEqual(['CK sub one'])
   })
+
+  test('snooze preset, blocked and due date write the task', async ({ mainWindow }) => {
+    await openTaskById(mainWindow, taskA)
+
+    await pressShortcut(mainWindow, 'search')
+    await mainWindow.keyboard.type('snooze tomorrow')
+    await expect(item(mainWindow, 'Snooze → Tomorrow')).toBeVisible()
+    await mainWindow.keyboard.press('Enter')
+    await expect.poll(async () => !!(await getTask(mainWindow, taskA))?.snoozed_until).toBe(true)
+
+    await pressShortcut(mainWindow, 'search')
+    await mainWindow.keyboard.type('mark blocked')
+    await expect(
+      palette(mainWindow).getByRole('option', { name: 'Mark blocked', exact: true })
+    ).toBeVisible()
+    await mainWindow.keyboard.press('Enter')
+    await expect.poll(async () => (await getTask(mainWindow, taskA))?.is_blocked).toBe(true)
+
+    await pressShortcut(mainWindow, 'search')
+    await mainWindow.keyboard.type('due date tomorrow')
+    await expect(item(mainWindow, 'Due date → Tomorrow')).toBeVisible()
+    await mainWindow.keyboard.press('Enter')
+    await expect.poll(async () => (await getTask(mainWindow, taskA))?.due_date).toBeTruthy()
+  })
+
+  test('blocked by toggles a blocker and stays open', async ({ mainWindow }) => {
+    await openTaskById(mainWindow, taskA)
+    await pressShortcut(mainWindow, 'search')
+    await mainWindow.keyboard.type('blocked by')
+    await item(mainWindow, 'Blocked by…').click()
+    await item(mainWindow, 'CK task B').click()
+    const blockerIds = () =>
+      mainWindow.evaluate(
+        async (id) =>
+          (await window.getTrpcVanillaClient().task.getBlockers.query({ taskId: id })).map(
+            (t) => t.id
+          ),
+        taskA
+      )
+    await expect.poll(blockerIds).toEqual([taskB])
+    // keepOpen: still on the page; toggling again removes it.
+    await item(mainWindow, 'CK task B').click()
+    await expect.poll(blockerIds).toEqual([])
+    await mainWindow.keyboard.press('Escape')
+  })
 })

@@ -16,7 +16,13 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
 import { FILTERS, MAX_RECENT } from './SearchDialog.constants'
-import { buildSearchItems, createFzf, groupResults, rankResults } from './SearchDialog.algorithm'
+import {
+  buildSearchItems,
+  createFzf,
+  firstResultValue,
+  groupResults,
+  rankResults
+} from './SearchDialog.algorithm'
 import { SearchResults } from './SearchResults'
 import { PageResults, PROMPT_SUBMIT_VALUE, taskCommandValue } from './PaletteCommandResults'
 
@@ -146,10 +152,8 @@ export function SearchDialog({
       const featured = featuredTaskCommands[0]
       return featured ? taskCommandValue(featured.id) : 'action:new-task'
     }
-    const r = results[0]
-    if (!r) return ''
-    return r.item.kind === 'file' ? r.item.id : `${r.item.kind}:${r.item.id}`
-  }, [page, isSearching, results, featuredTaskCommands])
+    return firstResultValue(groupedResults)
+  }, [page, isSearching, groupedResults, featuredTaskCommands])
 
   const [selected, setSelected] = useState('')
   const [prevFirstValue, setPrevFirstValue] = useState('')
