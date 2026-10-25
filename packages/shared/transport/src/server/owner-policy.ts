@@ -1005,9 +1005,11 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.kill': checked(session('sessionId')),
   'pty.touch': checked(session('sessionId')),
   'pty.interrupt': checked(session('sessionId')),
+  'pty.prioritize': checked(session('sessionId')),
   'pty.ackEnsureAlive': none(
     'a correlation number for an ensure-alive request the caller was sent (onEnsureAlive is filtered)'
   ),
+  'pty.attach': checked(session('sessionId')),
   'pty.exists': checked(session('sessionId')),
   'pty.getBuffer': checked(session('sessionId')),
   'pty.clearBuffer': checked(session('sessionId')),

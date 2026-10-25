@@ -173,7 +173,13 @@ export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional()
+  signal: z.string().nullable().optional(),
+  /**
+   * A lifecycle cause the code cannot carry — today `startup-timeout`: the
+   * computer killed a session that produced no output within the spawn's
+   * `startupTimeoutMs`. Absent on an ordinary exit (and from older computers).
+   */
+  reason: z.string().min(1).optional()
 })
 export type PtyExitParams = z.infer<typeof ptyExitParamsSchema>
 
@@ -217,7 +223,8 @@ export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional()
+  signal: z.string().nullable().optional(),
+  reason: z.string().min(1).optional()
 })
 export type ProcExitParams = z.infer<typeof procExitParamsSchema>
 
@@ -259,6 +266,8 @@ export const HubToComputerMethods = {
   ptyGetBufferSince: 'pty.getBufferSince',
   /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
+  /** Move a session still waiting for an agent-start slot to the front (tab revealed). */
+  ptyPrioritize: 'pty.prioritize',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -323,9 +332,69 @@ export const HubToComputerMethods = {
 /** Reserved method namespaces for future hub → computer exec commands. */
 export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.', 'project.'] as const
 
+/**
+ * Idempotency key for ONE spawn attempt, minted by the hub.
+ *
+ * Why it exists: a `pty.spawn` / `proc.spawn` whose reply is lost to a dropped
+ * socket has an UNKNOWN outcome — the computer may or may not have started it.
+ * The hub settles that on reconnect against the computer's own list, and re-sends
+ * the request if the computer holds nothing for it. The key makes that safe: a
+ * repeat of the same attempt returns the process already running instead of
+ * starting a second agent, and a session id that repeats (an agent tab reuses its
+ * id on every restart) is never mistaken for a different attempt's process.
+ *
+ * Optional on the wire: an older hub sends none and gets the old replace-on-
+ * respawn behavior.
+ */
+const spawnIdField = z.string().min(1).optional()
+
+/**
+ * A session the computer reaped and still remembers (a tombstone), reported by
+ * `pty.list` / `proc.list` so an exit that happened while the hub was away is
+ * settled with its REAL code instead of a guess. Kept for a bounded window; see
+ * the computer's handlers.
+ */
+export const exitedSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField,
+  pid: z.number().int().optional(),
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable(),
+  reason: z.string().min(1).optional()
+})
+export type ExitedSession = z.infer<typeof exitedSessionSchema>
+
+/**
+ * Agent-start admission lane for a `pty.spawn`.
+ *
+ * Why it exists: an agent's first seconds are its most expensive (runtime load,
+ * MCP startup, transcript replay on `--resume`). Restoring a workspace used to
+ * start every open tab's agent at once, and that contention made each one take
+ * ~10x longer to print anything — long enough to trip startup deadlines. With a
+ * lane set, the computer starts the spawn through a small admission queue: a few
+ * agent starts at a time, `foreground` (the tab the user is looking at) before
+ * `background`. The spawn reply — and the startup deadline — wait for the slot.
+ *
+ * Absent: started at once, exactly as before (plain shells, recovery shells,
+ * older hubs).
+ */
+export const ptySpawnAdmissionSchema = z.enum(['foreground', 'background'])
+export type PtySpawnAdmission = z.infer<typeof ptySpawnAdmissionSchema>
+
 export const ptySpawnParamsSchema = z
   .object({
     sessionId: z.string().min(1),
+    spawnId: spawnIdField,
+    admission: ptySpawnAdmissionSchema.optional(),
+    /**
+     * Arm a startup deadline ON THE COMPUTER: no output at all within this many
+     * ms of the spawn ⇒ the computer kills it and reports `pty.exit` with
+     * `reason: 'startup-timeout'`. The computer owns it because it is the only side
+     * that sees the output directly — a hub judging silence across a socket
+     * cannot tell "printed nothing" from "printed, not yet read by me". Absent:
+     * no deadline here (an older hub runs its own).
+     */
+    startupTimeoutMs: z.number().int().positive().optional(),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
     /**
@@ -353,7 +422,10 @@ export const ptySpawnParamsSchema = z
 export type PtySpawnParams = z.infer<typeof ptySpawnParamsSchema>
 
 export const ptySpawnResultSchema = z.object({
-  pid: z.number().int()
+  pid: z.number().int(),
+  /** The computer armed the requested `startupTimeoutMs`. Absent from a computer
+   *  that predates computer-side deadlines — the hub then keeps its own. */
+  startupDeadline: z.literal(true).optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
@@ -362,6 +434,22 @@ export const ptyKillParamsSchema = z.object({
   signal: z.string().optional()
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
+
+/**
+ * The user is now looking at this session: if its spawn is still waiting for an
+ * agent-start slot, start it next. A no-op (`queued: false`) for a session that
+ * already started, never existed, or a spawn sent without `admission`.
+ */
+export const ptyPrioritizeParamsSchema = z.object({
+  sessionId: z.string().min(1)
+})
+export type PtyPrioritizeParams = z.infer<typeof ptyPrioritizeParamsSchema>
+
+export const ptyPrioritizeResultSchema = z.object({
+  ok: z.literal(true),
+  queued: z.boolean()
+})
+export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -419,11 +507,15 @@ export const ptyListResultSchema = z.object({
   sessions: z.array(
     z.object({
       sessionId: z.string().min(1),
+      /** The spawn attempt this process belongs to (absent from older computers). */
+      spawnId: spawnIdField,
       pid: z.number().int(),
       /** Highest assigned seq; -1 when the session has emitted nothing yet. */
       seq: z.number().int()
     })
-  )
+  ),
+  /** Recently reaped sessions. Absent from older computers, which keep none. */
+  exited: z.array(exitedSessionSchema).optional()
 })
 export type PtyListResult = z.infer<typeof ptyListResultSchema>
 
@@ -1017,6 +1109,8 @@ export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
+  /** Idempotency key — see `pty.spawn`. */
+  spawnId: spawnIdField,
   /** Resolve cwd from this project when `cwd` is absent. See `pty.spawn`. */
   projectId: z.string().min(1).optional(),
   command: z.string().min(1),
@@ -1086,10 +1180,13 @@ export const procListResultSchema = z.object({
   sessions: z.array(
     z.object({
       sessionId: z.string().min(1),
+      spawnId: spawnIdField,
       pid: z.number().int().optional(),
       /** Highest assigned seq; -1 when nothing has been emitted yet. */
       seq: z.number().int()
     })
-  )
+  ),
+  /** Recently reaped processes — see {@link ptyListResultSchema}. */
+  exited: z.array(exitedSessionSchema).optional()
 })
 export type ProcListResult = z.infer<typeof procListResultSchema>

@@ -17,6 +17,7 @@
     "./client": "./src/client/index.ts",
     "./client/Terminal": "./src/client/Terminal.tsx",
     "./client/LazyTerminal": "./src/client/LazyTerminal.tsx",
+    "./client/terminal-mru": "./src/client/terminal-mru.ts",
     "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/client/chat-timeline.ts"
   },

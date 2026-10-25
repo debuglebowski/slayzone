@@ -11,12 +11,12 @@ interface Notify {
   params: Record<string, unknown>
 }
 
-function makeCtx(roots: string[]) {
+function makeCtx(roots: string[], { online = true }: { online?: boolean } = {}) {
   const notifies: Notify[] = []
   const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
-      return true
+      return online
     }
   }
   const config: ComputerConfig = {
@@ -318,5 +318,74 @@ describe('createProcHandlers — allowedRoots guard + dispose', () => {
           (n.params.sessionId === 'd1' || n.params.sessionId === 'd2')
       )
     ).toEqual([])
+  })
+})
+
+// The proc twin of the pty handler's lifecycle rules (chat agents ride this path):
+// a repeat of the same spawn attempt returns the running process, and exits are
+// remembered so a hub that was away settles them with the real code.
+describe('createProcHandlers — spawn attempts and tombstones', () => {
+  type ListResult = {
+    sessions: Array<{ sessionId: string; spawnId?: string; pid?: number; seq: number }>
+    exited?: Array<{ sessionId: string; spawnId?: string; exitCode: number | null }>
+  }
+
+  it('a repeated spawn of the SAME attempt returns the running process', async () => {
+    const { ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const params = { sessionId: 'p-dup', spawnId: 'attempt-1', command: 'sleep', args: ['30'] }
+
+    const first = (await proc.handlers[ProcMethods.procSpawn](params)) as { pid: number }
+    const again = (await proc.handlers[ProcMethods.procSpawn](params)) as { pid: number }
+
+    expect(again.pid).toBe(first.pid)
+    const listed = (await proc.handlers[ProcMethods.procList]({})) as ListResult
+    expect(listed.sessions).toEqual([
+      { sessionId: 'p-dup', spawnId: 'attempt-1', pid: first.pid, seq: -1 }
+    ])
+    proc.disposeAll()
+  })
+
+  it('an exit is remembered with its real code, and that attempt is never run twice', async () => {
+    const { notifies, ctx } = makeCtx(roots)
+    const proc = createProcHandlers(ctx)
+    const params = {
+      sessionId: 'p-once',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'exit 5']
+    }
+    await proc.handlers[ProcMethods.procSpawn](params)
+    await waitFor(() => exitFor(notifies, 'p-once') !== undefined)
+
+    const listed = (await proc.handlers[ProcMethods.procList]({})) as ListResult
+    expect(listed.exited).toMatchObject([
+      { sessionId: 'p-once', spawnId: 'attempt-1', exitCode: 5 }
+    ])
+    await expect(
+      Promise.resolve().then(() => proc.handlers[ProcMethods.procSpawn](params))
+    ).rejects.toThrow(/already ran/)
+    proc.disposeAll()
+  })
+
+  it('an exit the hub could not receive keeps its stdout for replay', async () => {
+    const { ctx } = makeCtx(roots, { online: false })
+    const proc = createProcHandlers(ctx)
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: 'p-offline',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'printf "last words"']
+    })
+    await waitFor(
+      () => ((proc.handlers[ProcMethods.procList]({}) as ListResult).exited ?? []).length > 0
+    )
+
+    const replay = (await proc.handlers[ProcMethods.procGetBufferSince]({
+      sessionId: 'p-offline',
+      seq: -1
+    })) as { frames: Array<{ data: string }> }
+    expect(replay.frames.map((f) => f.data).join('')).toBe('last words')
+    proc.disposeAll()
   })
 })

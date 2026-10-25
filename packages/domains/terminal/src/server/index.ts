@@ -66,7 +66,10 @@ export {
   setPtyBackend,
   localPtyBackend,
   type PtyBackend,
+  type PtyExit,
   type PtyHandle,
+  type PtySpawnAdmission,
+  type PtySpawnConfirmation,
   type PtySpawnSpec
 } from './runtime/pty-backend'
 export {

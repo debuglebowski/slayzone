@@ -11,6 +11,7 @@ import {
   killPty,
   touchPty,
   interruptPty,
+  prioritizePty,
   ackEnsureAlive,
   hasPty,
   getBuffer,
@@ -65,6 +66,8 @@ export interface PtyCreateOpts {
   executionContext?: ExecutionContext | null
   cols?: number
   rows?: number
+  /** The creating tab is on screen: its agent starts first (see `CreatePtyOptions.foreground`). */
+  foreground?: boolean
 }
 
 /**
@@ -356,6 +359,7 @@ export function createPtyOps(db: SlayzoneDb) {
       patternError: modeInfo?.patternError,
       cols: opts.cols,
       rows: opts.rows,
+      foreground: opts.foreground === true,
       adoptPty: warmClaim ?? undefined
     })
   }
@@ -368,6 +372,7 @@ export function createPtyOps(db: SlayzoneDb) {
   const ptyKill = (sessionId: string) => killPty(sessionId)
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
   const ptyInterrupt = (sessionId: string) => interruptPty(sessionId)
+  const ptyPrioritize = (sessionId: string) => prioritizePty(sessionId)
   const ptyAckEnsureAlive = (reqId: number, result: 'ok' | 'already-alive' | 'error') =>
     ackEnsureAlive(reqId, result)
   const ptyExists = (sessionId: string) => hasPty(sessionId)
@@ -427,6 +432,7 @@ export function createPtyOps(db: SlayzoneDb) {
     ptyKill,
     ptyTouch,
     ptyInterrupt,
+    ptyPrioritize,
     ptyAckEnsureAlive,
     ptyExists,
     ptyGetBuffer,

@@ -5,7 +5,8 @@
 import {
   shouldShellFallback,
   buildRecoveryMessage,
-  decideRecoveryAdoption
+  decideRecoveryAdoption,
+  shouldArmHubStartupDeadline
 } from './pty-exit-strategy.js'
 
 let passed = 0
@@ -158,6 +159,31 @@ describe('buildRecoveryMessage', () => {
     const msg = buildRecoveryMessage('codex', 1)
     expect(msg.startsWith('\r\n')).toBe(true)
     expect(msg.endsWith('\r\n')).toBe(true)
+  })
+})
+
+// --- shouldArmHubStartupDeadline ---
+//
+// The startup deadline belongs to whoever owns the process. The hub runs its own
+// only when nothing closer does: a remote hub judging silence across a socket
+// cannot tell "printed nothing" from "printed, not yet read by me", and after a
+// hub stall it killed healthy agents whose output was already waiting.
+
+describe('shouldArmHubStartupDeadline', () => {
+  test('in-process spawn (no confirmation round-trip): the hub is the owner, so it arms', () => {
+    expect(shouldArmHubStartupDeadline('synchronous')).toBe(true)
+  })
+
+  test('the owner confirmed it armed the deadline itself: the hub must not arm a second one', () => {
+    expect(shouldArmHubStartupDeadline({ ownsStartupDeadline: true })).toBe(false)
+  })
+
+  test('the owner confirmed WITHOUT owning one (older computer): the hub keeps its own', () => {
+    expect(shouldArmHubStartupDeadline({ ownsStartupDeadline: false })).toBe(true)
+  })
+
+  test('a confirmation that says nothing about the deadline is treated as not owned', () => {
+    expect(shouldArmHubStartupDeadline({})).toBe(true)
   })
 })
 

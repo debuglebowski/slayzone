@@ -421,6 +421,14 @@ run_test packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
 # passed but were never registered here, so nothing ran them.
 run_test packages/domains/terminal/src/client/scramble-detector.test.ts
 run_test packages/domains/terminal/src/client/paint-throttle.test.ts
+# Terminal — boot renderer economy: WebGL only for on-screen terminals under an MRU
+# budget, parked (no DOM-renderer stylesheet) otherwise; plus the hidden-terminal
+# init queue and the one-round-trip pty.attach (with fallback for older servers).
+run_test packages/domains/terminal/src/client/webgl-budget.test.ts
+run_test packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
+# Stuck-'starting' watchdog: waits on a session the backend still holds as starting
+# (queued for an agent-start slot) instead of showing it dead.
+run_test packages/domains/terminal/src/client/starting-watchdog.test.ts
 # Terminal — CPR suppression at the parser. Guards the modified-F3 regression: a
 # reply and a Shift/Ctrl/Alt+F3 keystroke are byte-identical, so the reply must
 # never be generated rather than filtered afterwards. Uses @xterm/headless.
@@ -635,13 +643,13 @@ run_test packages/domains/terminal/src/server/runtime/session-registry.test.ts
 run_test packages/domains/terminal/src/server/shell-env.test.ts
 run_test packages/domains/terminal/src/server/skills.test.ts
 run_test packages/domains/terminal/src/shared/agent-event-handler.test.ts
+run_test packages/domains/terminal/src/shared/auto-start.test.ts
 run_test packages/domains/terminal/src/shared/bg-shell-helpers.test.ts
 run_test packages/domains/terminal/src/shared/chat-effort.test.ts
 run_test packages/domains/terminal/src/shared/chat-model.test.ts
 run_test packages/domains/terminal/src/shared/key-sequences.test.ts
 run_test packages/domains/terminal/src/shared/osc.test.ts
 run_test packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
-run_test packages/domains/terminal/src/shared/auto-start.test.ts
 run_test packages/domains/worktrees/src/client/parse-diff.test.ts
 run_test packages/domains/worktrees/src/client/utils.test.ts
 run_test packages/domains/worktrees/src/server/list-project-repos.test.ts
@@ -752,6 +760,13 @@ run_vitest_files "vitest (tasks-changed refresh)" \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \
   packages/domains/settings/src/client/theme-cache.test.ts
+
+# Boot idle hydration: hidden task tabs mount their detail page one per idle slice
+# (queue order, readiness gating, permanence), and task events that arrive before
+# a tab's page is mounted are held for it.
+run_vitest_files "vitest (boot idle hydration)" \
+  packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
+  packages/domains/task/src/client/taskPaneEvents.test.ts
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
 # hub's open REST routes.

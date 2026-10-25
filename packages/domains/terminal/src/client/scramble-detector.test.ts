@@ -218,6 +218,91 @@ function runFrameTimeTests(): void {
     ok(h.state.downgrades.length === 0, 'no downgrade when isCurrent false')
   })
 
+  // Boot-jank regression: a busy renderer boot made every terminal's rAF deltas
+  // >50ms, so every terminal downgraded to DOM for the whole session.
+  function gatedHarness(opts: {
+    deltas: number[]
+    canSample?: () => boolean
+    isJanky?: (from: number, to: number) => boolean
+    maxFrames?: number
+  }): {
+    downgrades: string[]
+    timers: Array<() => void>
+    flush: () => void
+  } {
+    const { addon } = makeStubAddon()
+    const { terminal } = makeStubTerminal([''])
+    let active: WebglAddon | null = addon
+    const downgrades: string[] = []
+    let clockMs = 0
+    const frames: Array<() => void> = []
+    const timers: Array<() => void> = []
+    monitorFrameTime({
+      addon,
+      terminal,
+      getActiveAddon: () => active,
+      setActiveAddon: (a) => {
+        active = a
+      },
+      onDowngrade: (r) => downgrades.push(r),
+      isAborted: () => false,
+      isCurrent: () => true,
+      thresholdMs: 50,
+      sampleCount: 5,
+      canSample: opts.canSample,
+      isJanky: opts.isJanky,
+      maxFrames: opts.maxFrames,
+      now: () => clockMs,
+      requestFrame: (cb) => frames.push(cb),
+      cancelFrame: () => {},
+      setTimer: (cb) => timers.push(cb),
+      clearTimer: () => {}
+    })
+    const flush = (): void => {
+      const deltas = [...opts.deltas]
+      while (frames.length > 0 && deltas.length > 0) {
+        clockMs += deltas.shift()!
+        frames.shift()!()
+      }
+    }
+    return { downgrades, timers, flush }
+  }
+
+  test('canSample false (hidden / busy boot): no samples, no downgrade', () => {
+    const h = gatedHarness({ deltas: Array(20).fill(200), canSample: () => false })
+    h.flush()
+    ok(h.downgrades.length === 0, 'slow frames while not sampleable never downgrade')
+    ok(h.timers.length === 1, 'waits on a timer (not rAF) to re-check')
+  })
+
+  test('frames overlapping long tasks are discarded, not averaged', () => {
+    // Every delta is 200ms but each overlaps a long task: thread jank, not GPU.
+    const h = gatedHarness({
+      deltas: Array(50).fill(200),
+      isJanky: () => true,
+      maxFrames: 40
+    })
+    h.flush()
+    ok(h.downgrades.length === 0, 'jank-only frames never downgrade')
+  })
+
+  test('slow frames with no long task still downgrade (real slow GPU)', () => {
+    const h = gatedHarness({ deltas: Array(10).fill(200), isJanky: () => false })
+    h.flush()
+    ok(h.downgrades.length === 1 && h.downgrades[0] === 'frame-time', 'downgraded')
+  })
+
+  test('janky frames dropped, clean slow frames still judged', () => {
+    // Alternate frames overlap a long task (keyed on the frame, as a real
+    // long-task log is); the clean half alone is still slow.
+    const h = gatedHarness({
+      deltas: Array(30).fill(200),
+      isJanky: (from) => Math.round(from / 200) % 2 === 0
+    })
+    h.flush()
+    ok(h.downgrades.length === 1, 'downgrade from the clean samples alone')
+  })
+
   test('explicit stop(): cancels pending frame, no fire', () => {
     const h = ftHarness({ deltas: [100], sampleCount: 5, thresholdMs: 50 })
     h.stop()

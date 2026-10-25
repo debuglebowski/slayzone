@@ -758,25 +758,46 @@ useTabStore.subscribe(
 // keeps exactly one warm agent shell ready per project that has ≥1 open tab. Full snapshot
 // each time (idempotent on the main side), debounced to coalesce rapid tab churn.
 let _warmDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * This window's open-task-tab counts per project, grouped by the hub that owns
+ * each project — or `null` when they cannot be computed yet.
+ *
+ * Multi-hub: a project's warm shell must be pre-spawned on the hub that OWNS it,
+ * so counts are grouped by owning hub and each hub is pushed its own slice. The
+ * project→hub map rides `_taskLookup.projects[].hubId` (App fills it); absent →
+ * default hub, so single-hub pushes exactly one snapshot = byte-identical.
+ *
+ * `null` while restored task tabs exist but the task lookup has not loaded yet
+ * (renderer boot or reload): counts computed then are all zero, and the hub would
+ * tear down every warm agent only to boot them all again a moment later, when
+ * the lookup lands and re-fires the push.
+ */
+export function computeWarmTabCounts(
+  tabs: Tab[],
+  lookup: TaskLookup
+): Map<string | undefined, Record<string, number>> | null {
+  if (lookup.tasks.length === 0 && tabs.some((tab) => tab.type === 'task')) return null
+  const hubOfProject = new Map(lookup.projects.map((p) => [p.id, p.hubId]))
+  const countsByHub = new Map<string | undefined, Record<string, number>>()
+  for (const tab of tabs) {
+    if (tab.type !== 'task') continue
+    const projectId = lookup.tasks.find((t) => t.id === tab.taskId)?.project_id
+    if (!projectId) continue
+    const hubId = hubOfProject.get(projectId)
+    const counts = countsByHub.get(hubId) ?? {}
+    counts[projectId] = (counts[projectId] ?? 0) + 1
+    countsByHub.set(hubId, counts)
+  }
+  return countsByHub
+}
+
 useTabStore.subscribe(
   (state) => ({ tabs: state.tabs, _taskLookup: state._taskLookup }),
   ({ tabs, _taskLookup }) => {
     if (typeof window === 'undefined') return
-    // Multi-hub: a project's warm shell must be pre-spawned on the hub that OWNS
-    // it, so group counts by owning hub and push each hub its own slice. The
-    // project→hub map rides `_taskLookup.projects[].hubId` (App fills it); absent
-    // → default hub, so single-hub pushes exactly one snapshot = byte-identical.
-    const hubOfProject = new Map(_taskLookup.projects.map((p) => [p.id, p.hubId]))
-    const countsByHub = new Map<string | undefined, Record<string, number>>()
-    for (const tab of tabs) {
-      if (tab.type !== 'task') continue
-      const projectId = _taskLookup.tasks.find((t) => t.id === tab.taskId)?.project_id
-      if (!projectId) continue
-      const hubId = hubOfProject.get(projectId)
-      const counts = countsByHub.get(hubId) ?? {}
-      counts[projectId] = (counts[projectId] ?? 0) + 1
-      countsByHub.set(hubId, counts)
-    }
+    const countsByHub = computeWarmTabCounts(tabs, _taskLookup)
+    if (!countsByHub) return
     if (_warmDebounceTimer) clearTimeout(_warmDebounceTimer)
     _warmDebounceTimer = setTimeout(() => {
       // getTrpcClient throws until initTrpcClient runs (main.tsx boot). The only

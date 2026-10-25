@@ -32,8 +32,12 @@ export interface SuspenseCache<F extends Fetchers> {
    */
   useData<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): FetcherReturn<F[K]>
 
-  /** Start fetching data without suspending. Warms the cache so useData resolves instantly. */
-  prefetch<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): void
+  /**
+   * Start fetching data without suspending. Warms the cache so useData resolves instantly.
+   * The returned promise settles (never rejects) once the entry has: from then on
+   * useData returns — or throws — synchronously.
+   */
+  prefetch<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): Promise<void>
 
   /** Invalidate a specific cache entry. Triggers re-render → re-suspend. */
   invalidate<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): void
@@ -123,7 +127,11 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
     },
 
     prefetch(key, ...args) {
-      getOrFetch(key, args)
+      const entry = getOrFetch(key, args)
+      return entry.promise.then(
+        () => undefined,
+        () => undefined
+      )
     },
 
     invalidate(key, ...args) {

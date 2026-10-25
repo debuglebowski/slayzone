@@ -24,6 +24,7 @@ import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
+import { takeTaskPaneEvents } from '../taskPaneEvents'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -284,33 +285,43 @@ export function useTaskTerminalSession({
   // Plain shell mode is skipped — no conversation model, respawning a shell would
   // surprise the user. Hot bounces resume the existing conversation; cold (>30 min)
   // bounces start a fresh one.
+  const handleRespawnSuggested = useStableCallback(async ({ taskId }: { taskId: string }) => {
+    if (!task) return
+    if (taskId !== task.id) return
+    if (task.terminal_mode === 'terminal') return
+    const sid = getMainSessionId(task.id)
+    // Idempotent: if a PTY is already alive, another listener (or the user) beat
+    // us to it — skip to avoid a double-spawn.
+    try {
+      if (await trpcClient.pty.exists.query({ sessionId: sid })) return
+    } catch {
+      return
+    }
+    const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
+    // Unknown kill time defaults to RESUME (non-destructive). A cold start is
+    // destructive — it clears the conversation id — so it requires positive
+    // evidence the task sat past the threshold. See decideReviveMode / RC2.
+    if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
+      await handleResetTerminal()
+    } else {
+      await handleRestartTerminal()
+    }
+  })
   useSubscription(
     trpc.pty.onRespawnSuggested.subscriptionOptions(undefined, {
       enabled: !!task,
-      onData: async ({ taskId }) => {
-        if (!task) return
-        if (taskId !== task.id) return
-        if (task.terminal_mode === 'terminal') return
-        const sid = getMainSessionId(task.id)
-        // Idempotent: if a PTY is already alive, another listener (or the user) beat
-        // us to it — skip to avoid a double-spawn.
-        try {
-          if (await trpcClient.pty.exists.query({ sessionId: sid })) return
-        } catch {
-          return
-        }
-        const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
-        // Unknown kill time defaults to RESUME (non-destructive). A cold start is
-        // destructive — it clears the conversation id — so it requires positive
-        // evidence the task sat past the threshold. See decideReviveMode / RC2.
-        if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
-          await handleResetTerminal()
-        } else {
-          await handleRestartTerminal()
-        }
-      }
+      onData: handleRespawnSuggested
     })
   )
+  // A suggestion that arrived before this page mounted was held for it (see
+  // taskPaneEvents.ts) — act on it now.
+  const respawnTaskId = task?.id
+  useEffect(() => {
+    if (!respawnTaskId) return
+    for (const ev of takeTaskPaneEvents(respawnTaskId, ['respawn-suggested'])) {
+      if (ev.kind === 'respawn-suggested') void handleRespawnSuggested(ev.payload)
+    }
+  }, [respawnTaskId, handleRespawnSuggested])
 
   // Ensure-alive: CLI-triggered (`slay pty respawn` w/ force=true, or
   // `slay pty start` / `slay tasks open --start` / auto-start w/ force=false).

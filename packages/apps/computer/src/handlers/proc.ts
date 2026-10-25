@@ -21,6 +21,10 @@
  * stdin is PIPED and writable via `proc.write`, which is what makes this channel
  * usable by a bidirectional agent protocol at all.
  *
+ * Same lifecycle rules as `handlers/pty.ts`: a repeat of the same spawn attempt
+ * (`spawnId`) returns the running process, and exits are remembered as tombstones
+ * that `proc.list` reports — see `exit-tombstones.ts`.
+ *
  * The working directory (`cwd`), when supplied, passes the
  * {@link assertPathAllowed} containment guard. The command binary itself is NOT
  * root-constrained (it typically lives in /usr/bin etc.); containment is
@@ -42,6 +46,7 @@ import {
   ComputerNotificationMethods
 } from '@slayzone/computer-transport/shared'
 import { assertPathAllowed } from '../config'
+import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -66,6 +71,8 @@ interface ProcSession {
   child: ChildProcess
   /** stdout only — the replayable stream. */
   buffer: RingBuffer
+  /** The hub's idempotency key for the spawn attempt that started this process. */
+  spawnId?: string
 }
 
 export interface ProcHandlers {
@@ -83,6 +90,7 @@ export function createProcHandlers(
   getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
 ): ProcHandlers {
   const procs = new Map<string, ProcSession>()
+  const tombstones = new ExitTombstones()
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {
     // Sanitize the inherited computer env through the shared manifest: keep the
@@ -108,6 +116,16 @@ export function createProcHandlers(
 
   function procSpawn(rawParams: unknown): { pid: number | null } {
     const params = procSpawnParamsSchema.parse(rawParams)
+    if (params.spawnId !== undefined) {
+      const live = procs.get(params.sessionId)
+      // The hub re-sent an attempt whose reply it lost: this process IS it.
+      if (live && live.spawnId === params.spawnId) return { pid: live.child.pid ?? null }
+      if (tombstones.ran(params.sessionId, params.spawnId)) {
+        throw new Error(
+          `proc.spawn ${params.sessionId}: attempt ${params.spawnId} already ran and exited — not starting it twice`
+        )
+      }
+    }
     // An explicit cwd wins (a worktree, or a task.base_dir the user set). Else
     // resolve the project's checkout here. Neither → undefined, which is the
     // pre-existing behaviour for a process that genuinely has no directory.
@@ -143,17 +161,36 @@ export function createProcHandlers(
       stdio: ['pipe', 'pipe', 'pipe']
     })
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
-    const session: ProcSession = { child, buffer }
+    const session: ProcSession = {
+      child,
+      buffer,
+      ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {})
+    }
     procs.set(params.sessionId, session)
 
     // Emit proc.exit at most once, and only for the CURRENTLY-tracked process
     // for this sessionId. This dedupes the error+close double-fire on a failed
     // spawn (ENOENT emits both) and prevents a superseded process from tearing
     // down its replacement.
-    const settle = (payload: Record<string, unknown>): void => {
+    const settle = (payload: {
+      exitCode: number | null
+      signal: string | null
+      error?: string
+    }): void => {
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
-      ctx.dialer.notify(ProcNotifications.procExit, { sessionId: params.sessionId, ...payload })
+      const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
+        sessionId: params.sessionId,
+        ...payload
+      })
+      tombstones.add(params.sessionId, {
+        spawnId: session.spawnId,
+        ...(typeof child.pid === 'number' ? { pid: child.pid } : {}),
+        exitCode: payload.exitCode,
+        signal: payload.signal,
+        // The hub never got this exit, so it may be missing stdout too.
+        ...(delivered ? {} : { buffer: session.buffer })
+      })
     }
 
     child.stdout?.on('data', (d: Buffer) => {
@@ -233,11 +270,10 @@ export function createProcHandlers(
     frames: Array<{ seq: number; data: string }>
   } {
     const params = procGetBufferSinceParamsSchema.parse(rawParams)
-    const session = procs.get(params.sessionId)
-    if (!session) return { frames: [] }
-    const frames = session.buffer
-      .getChunksSince(params.seq)
-      .map((c) => ({ seq: c.seq, data: c.data }))
+    // An exited process's stdout is still served when its exit never reached the hub.
+    const buffer = procs.get(params.sessionId)?.buffer ?? tombstones.get(params.sessionId)?.buffer
+    if (!buffer) return { frames: [] }
+    const frames = buffer.getChunksSince(params.seq).map((c) => ({ seq: c.seq, data: c.data }))
     return { frames }
   }
 
@@ -252,11 +288,12 @@ export function createProcHandlers(
     for (const [sessionId, session] of procs) {
       sessions.push({
         sessionId,
+        ...(session.spawnId !== undefined ? { spawnId: session.spawnId } : {}),
         ...(typeof session.child.pid === 'number' ? { pid: session.child.pid } : {}),
         seq: session.buffer.getCurrentSeq()
       })
     }
-    return { sessions }
+    return { sessions, exited: tombstones.list() }
   }
 
   function disposeAll(): void {

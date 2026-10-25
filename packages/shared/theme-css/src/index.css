@@ -265,6 +265,57 @@
   animation: shimmer 2s infinite linear;
 }
 
+/* PulseGrid loader (@slayzone/ui loading-pulse-grid.tsx). Kept here, not in a
+   <style> the component renders: a stylesheet that registers a property or
+   declares keyframes restyles the whole document whenever it is inserted or
+   removed, and every booting terminal mounts this loader.
+   Dot pitch 12px, field radius 300px, ripple wavelength 300px, period 2s. */
+@property --pulse-grid-wave {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.pulse-grid-field {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(600px, 100%);
+  height: min(600px, 100%);
+  mask-image:
+    radial-gradient(circle 300px at center, #000 0%, transparent 100%),
+    radial-gradient(ellipse farthest-side at center, #000 0%, #000 40%, transparent 100%);
+  mask-composite: intersect;
+}
+.pulse-grid-dots {
+  background-image: radial-gradient(circle at center, currentColor 0 1.9px, transparent 2.4px);
+  background-size: 12px 12px;
+  background-position: center;
+}
+.pulse-grid-dots--wave {
+  background-image: radial-gradient(circle at center, currentColor 0 2.4px, transparent 2.9px);
+  mask-image: repeating-radial-gradient(
+    circle at center,
+    transparent calc(var(--pulse-grid-wave) + 0px),
+    #000 calc(var(--pulse-grid-wave) + 150px),
+    transparent calc(var(--pulse-grid-wave) + 300px)
+  );
+  animation: pulse-grid-wave 2s linear infinite;
+}
+@keyframes pulse-grid-wave {
+  from {
+    --pulse-grid-wave: 0px;
+  }
+  to {
+    --pulse-grid-wave: 300px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-grid-dots--wave {
+    animation: none;
+  }
+}
+
 @keyframes loop-glow-active {
   0%, 100% { box-shadow: 0 4px 20px 0 rgba(249,115,22,0.08), 0 0 15px 2px rgba(249,115,22,0.08); }
   50% { box-shadow: 0 0 35px 5px rgba(249,115,22,0.6), 0 0 80px 10px rgba(249,115,22,0.25); }

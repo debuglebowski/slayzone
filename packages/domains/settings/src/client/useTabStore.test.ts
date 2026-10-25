@@ -3,7 +3,13 @@
  * Run with: npx tsx packages/domains/settings/src/client/useTabStore.test.ts
  */
 
-import { useTabStore, parseClosedTab, type ClosedTab, type TaskLookupTask } from './useTabStore.js'
+import {
+  useTabStore,
+  parseClosedTab,
+  computeWarmTabCounts,
+  type ClosedTab,
+  type TaskLookupTask
+} from './useTabStore.js'
 
 const store = useTabStore
 
@@ -212,6 +218,40 @@ await test('persisted entries: discard info survives, malformed discard info is 
   assert(!parseClosedTab({ ...tab, discarded: true })?.discarded, 'non-object dropped')
   assert(parseClosedTab({ ...tab, discarded: true })?.taskId === 't', 'tab itself kept')
   assert(parseClosedTab({ type: 'home' }) === null, 'non-task rejected')
+})
+
+console.log('computeWarmTabCounts')
+
+// A renderer reload restores its task tabs before the task lookup loads. Pushing
+// the all-zero counts of that moment made the hub kill every warm agent and boot
+// them all again ~0.6s later (diagnostics 2026-10-25 08:31:36).
+await test('restored task tabs before the lookup loads: no snapshot, not an empty one', () => {
+  const tabs = [{ type: 'home' as const }, { type: 'task' as const, taskId: 't1', title: 'T1' }]
+  assert(computeWarmTabCounts(tabs, { tasks: [], projects: [] }) === null, 'not ready → null')
+})
+
+await test('no task tabs at all: an empty snapshot (pool tears down)', () => {
+  const counts = computeWarmTabCounts([{ type: 'home' }], { tasks: [], projects: [] })
+  assert(counts !== null && counts.size === 0, 'empty map')
+})
+
+await test('loaded lookup: counts per project, grouped by owning hub', () => {
+  const tabs = [
+    { type: 'task' as const, taskId: 't1', title: '1' },
+    { type: 'task' as const, taskId: 't2', title: '2' },
+    { type: 'task' as const, taskId: 't3', title: '3' }
+  ]
+  const counts = computeWarmTabCounts(tabs, {
+    tasks: [
+      { id: 't1', project_id: 'pA' },
+      { id: 't2', project_id: 'pA' },
+      { id: 't3', project_id: 'pB' }
+    ] as TaskLookupTask[],
+    projects: [{ id: 'pB', hubId: 'h2' }] as never
+  })
+  assert(counts !== null, 'ready')
+  assert(JSON.stringify(counts!.get(undefined)) === JSON.stringify({ pA: 2 }), 'default hub')
+  assert(JSON.stringify(counts!.get('h2')) === JSON.stringify({ pB: 1 }), 'owning hub')
 })
 
 console.log('Done')

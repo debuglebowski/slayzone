@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from '../config'
+import { createSpawnAdmission } from '../spawn-admission'
 import { createPtyHandlers } from './pty'
 import type { ComputerDialer } from './types'
 
@@ -9,12 +10,14 @@ interface Notify {
   params: Record<string, unknown>
 }
 
-function makeCtx() {
+/** `online: false` models a computer whose hub connection is down — every
+ *  notification is recorded but reported undelivered, as the real dialer does. */
+function makeCtx({ online = true }: { online?: boolean } = {}) {
   const notifies: Notify[] = []
   const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
-      return true
+      return online
     }
   }
   const config: ComputerConfig = {
@@ -452,6 +455,489 @@ describe('createPtyHandlers', () => {
     // Untouched: whatever the hub sent survives verbatim.
     expect(out).toContain('HOOK=https://hub.example:8443/api/agent-hook')
     expect(out).toContain('TOKEN=[kept-as-is]')
+    pty.disposeAll()
+  })
+})
+
+// ===========================================================================
+// Session lifecycle owned by the computer
+// ===========================================================================
+//
+// The computer is the only side that sees a session's output directly, and the
+// only side whose view survives a dropped hub connection. So it owns the startup
+// deadline (the hub judged silence across a socket and, after a hub stall, killed
+// agents whose output was already waiting), it remembers exits (a hub that was
+// away used to guess "code 1"), and it answers a repeated spawn of the same
+// attempt with the process it already started (the hub re-sends spawns whose
+// reply was lost).
+
+type SpawnResult = { pid: number; startupDeadline?: true }
+type ListResult = {
+  sessions: Array<{ sessionId: string; spawnId?: string; pid: number; seq: number }>
+  exited?: Array<{
+    sessionId: string
+    spawnId?: string
+    pid?: number
+    exitCode: number | null
+    signal: string | null
+    reason?: string
+  }>
+}
+
+const exitOf = (notifies: Notify[], sessionId: string): Record<string, unknown> | undefined =>
+  notifies.find((n) => n.method === 'pty.exit' && n.params.sessionId === sessionId)?.params
+
+describe('computer-owned session lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('startup deadline: a session that prints nothing is killed, and the exit says why', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    const spawned = (await pty.handlers['pty.spawn']({
+      sessionId: 'silent',
+      spawnId: 'attempt-1',
+      command: 'sleep',
+      args: ['30'],
+      cwd: process.cwd(),
+      startupTimeoutMs: 300
+    })) as SpawnResult
+    // Acknowledged, so the hub knows not to run a second deadline of its own.
+    expect(spawned.startupDeadline).toBe(true)
+
+    await waitFor(() => exitOf(notifies, 'silent') !== undefined)
+    expect(exitOf(notifies, 'silent')!.reason).toBe('startup-timeout')
+    pty.disposeAll()
+  })
+
+  it('startup deadline: any output clears it for good', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    await pty.handlers['pty.spawn']({
+      sessionId: 'talks',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'printf ready; exec sleep 30'],
+      cwd: process.cwd(),
+      startupTimeoutMs: 300
+    })
+    await new Promise((r) => setTimeout(r, 900))
+
+    expect(exitOf(notifies, 'talks')).toBeUndefined()
+    pty.disposeAll()
+  })
+
+  it('no startupTimeoutMs ⇒ no deadline and no acknowledgement (an older hub runs its own)', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    const spawned = (await pty.handlers['pty.spawn']({
+      sessionId: 'legacy',
+      command: 'sleep',
+      args: ['30'],
+      cwd: process.cwd()
+    })) as SpawnResult
+    await new Promise((r) => setTimeout(r, 500))
+
+    expect(spawned.startupDeadline).toBeUndefined()
+    expect(exitOf(notifies, 'legacy')).toBeUndefined()
+    pty.disposeAll()
+  })
+
+  it('a repeated spawn of the SAME attempt returns the running process instead of a second one', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const params = { sessionId: 'dup', spawnId: 'attempt-1', command: 'cat', cwd: process.cwd() }
+
+    const first = (await pty.handlers['pty.spawn'](params)) as SpawnResult
+    const again = (await pty.handlers['pty.spawn'](params)) as SpawnResult
+
+    expect(again.pid).toBe(first.pid)
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.sessions).toEqual([
+      { sessionId: 'dup', spawnId: 'attempt-1', pid: first.pid, seq: expect.any(Number) }
+    ])
+    pty.disposeAll()
+  })
+
+  it('a DIFFERENT attempt under the same session id still replaces the old process', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    const first = (await pty.handlers['pty.spawn']({
+      sessionId: 'reused',
+      spawnId: 'attempt-1',
+      command: 'cat',
+      cwd: process.cwd()
+    })) as SpawnResult
+    const second = (await pty.handlers['pty.spawn']({
+      sessionId: 'reused',
+      spawnId: 'attempt-2',
+      command: 'cat',
+      cwd: process.cwd()
+    })) as SpawnResult
+
+    expect(second.pid).not.toBe(first.pid)
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.sessions.map((s) => s.spawnId)).toEqual(['attempt-2'])
+    pty.disposeAll()
+  })
+
+  it('an exit is remembered: pty.list reports the REAL code as a tombstone', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+
+    const spawned = (await pty.handlers['pty.spawn']({
+      sessionId: 'quits',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'exit 3'],
+      cwd: process.cwd()
+    })) as SpawnResult
+    await waitFor(() => exitOf(notifies, 'quits') !== undefined)
+
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.sessions).toEqual([])
+    // Byte-for-byte the exit that was reported live (node-pty's signal included),
+    // so the hub settles a missed exit exactly as it would have the live one.
+    const delivered = exitOf(notifies, 'quits')!
+    expect(listed.exited).toEqual([
+      {
+        sessionId: 'quits',
+        spawnId: 'attempt-1',
+        pid: spawned.pid,
+        exitCode: 3,
+        signal: delivered.signal
+      }
+    ])
+    pty.disposeAll()
+  })
+
+  it('re-spawning an attempt that already ran and exited is refused, never run twice', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const params = {
+      sessionId: 'once',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'exit 0'],
+      cwd: process.cwd()
+    }
+    await pty.handlers['pty.spawn'](params)
+    await waitFor(() => exitOf(notifies, 'once') !== undefined)
+
+    await expect(Promise.resolve().then(() => pty.handlers['pty.spawn'](params))).rejects.toThrow(
+      /already ran/
+    )
+    pty.disposeAll()
+  })
+
+  it('an exit the hub could NOT receive keeps its output for replay', async () => {
+    // The hub is away: the exit and the output before it were never delivered.
+    // On reconnect the hub backfills from its last seq, so the tombstone keeps
+    // the buffer — the tail is often the line saying WHY the agent exited.
+    const { ctx } = makeCtx({ online: false })
+    const pty = createPtyHandlers(ctx)
+
+    await pty.handlers['pty.spawn']({
+      sessionId: 'offline',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'printf "bye from the agent"; exit 4'],
+      cwd: process.cwd()
+    })
+    await waitFor(() => {
+      const listed = pty.handlers['pty.list']({}) as ListResult
+      return listed.sessions.length === 0
+    })
+
+    const replay = (await pty.handlers['pty.getBufferSince']({
+      sessionId: 'offline',
+      seq: -1
+    })) as { frames: Array<{ seq: number; data: string }> }
+    expect(replay.frames.map((f) => f.data).join('')).toContain('bye from the agent')
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.exited?.[0]).toMatchObject({ sessionId: 'offline', exitCode: 4 })
+    pty.disposeAll()
+  })
+
+  it('tombstones expire after the hub could have stopped waiting for them', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    await pty.handlers['pty.spawn']({
+      sessionId: 'old',
+      spawnId: 'attempt-1',
+      command: 'sh',
+      args: ['-c', 'exit 0'],
+      cwd: process.cwd()
+    })
+    await waitFor(() => exitOf(notifies, 'old') !== undefined)
+    expect(((await pty.handlers['pty.list']({})) as ListResult).exited).toHaveLength(1)
+
+    // Past the hub's 10-minute detach grace: no hub can still be waiting on it.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 11 * 60_000)
+
+    expect(((await pty.handlers['pty.list']({})) as ListResult).exited).toEqual([])
+    pty.disposeAll()
+  })
+})
+
+// ===========================================================================
+// Agent-start admission
+// ===========================================================================
+//
+// Restoring a workspace used to start every open tab's agent at once; under that
+// contention each took ~10s to print anything and many hit the startup deadline.
+// A spawn sent with `admission` now waits for a slot in the computer's admission
+// queue. Everything the hub does with the session meanwhile must still land.
+
+describe('agent-start admission', () => {
+  const cwd = process.cwd()
+  /** One slot, held until first output (no cap in test time), quick warm quiet. */
+  const oneSlot = () => createSpawnAdmission({ concurrency: 1, startCapMs: 60_000, warmQuietMs: 50 })
+  const outputOf = (notifies: Notify[], sessionId: string): string =>
+    notifies
+      .filter((n) => n.method === 'pty.data' && n.params.sessionId === sessionId)
+      .map((n) => n.params.data as string)
+      .join('')
+  /** Holds the only slot until it prints `ready` (after `delayS`). */
+  const holder = (sessionId: string, delayS = 0.4) => ({
+    sessionId,
+    admission: 'background',
+    command: 'sh',
+    args: ['-c', `sleep ${String(delayS)}; printf ready; exec cat`],
+    cwd
+  })
+  const settled = (p: Promise<unknown>) => {
+    const state = { done: false, value: undefined as unknown, error: undefined as unknown }
+    p.then(
+      (v) => Object.assign(state, { done: true, value: v }),
+      (e) => Object.assign(state, { done: true, error: e })
+    )
+    return state
+  }
+
+  it('a queued spawn starts when the slot frees, and gets the input sent while it waited', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+
+    const first = settled(pty.handlers['pty.spawn'](holder('first')) as Promise<unknown>)
+    const second = settled(
+      pty.handlers['pty.spawn']({ sessionId: 'second', admission: 'foreground', command: 'cat', cwd }) as Promise<unknown>
+    )
+    await waitFor(() => first.done)
+    expect((first.value as SpawnResult).pid).toBeGreaterThan(0)
+
+    // Waiting: no process, not listed, but input is kept rather than dropped.
+    await pty.handlers['pty.write']({ sessionId: 'second', data: 'typed-while-queued\n' })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(second.done).toBe(false)
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.sessions.map((s) => s.sessionId)).toEqual(['first'])
+
+    // First output frees the slot; the queued spawn starts and the input lands.
+    await waitFor(() => second.done)
+    expect(outputOf(notifies, 'first')).toContain('ready')
+    expect((second.value as SpawnResult).pid).toBeGreaterThan(0)
+    await waitFor(() => outputOf(notifies, 'second').includes('typed-while-queued'))
+    pty.disposeAll()
+  })
+
+  it('the startup deadline counts from the start, not from the queue', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder', 0.6))
+    // Queued for ~600ms with a 300ms deadline: counted from the queue, it would be
+    // killed before it ever ran.
+    const queued = pty.handlers['pty.spawn']({
+      sessionId: 'queued',
+      admission: 'background',
+      startupTimeoutMs: 300,
+      command: 'sh',
+      args: ['-c', 'printf alive; exec cat'],
+      cwd
+    }) as Promise<SpawnResult>
+    expect((await queued).startupDeadline).toBe(true)
+    await waitFor(() => outputOf(notifies, 'queued').includes('alive'))
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitOf(notifies, 'queued')).toBeUndefined()
+    pty.disposeAll()
+  })
+
+  it('a resize while queued sets the size it starts at', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder'))
+    const sized = pty.handlers['pty.spawn']({
+      sessionId: 'sized',
+      admission: 'background',
+      command: 'sh',
+      args: ['-c', 'stty size; exec cat'],
+      cwd,
+      cols: 80,
+      rows: 24
+    }) as Promise<SpawnResult>
+    await pty.handlers['pty.resize']({ sessionId: 'sized', cols: 133, rows: 41 })
+    await sized
+    await waitFor(() => outputOf(notifies, 'sized').includes('41 133'))
+    pty.disposeAll()
+  })
+
+  it('a kill while queued: it never runs, and ends with an exit like a killed process', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder'))
+    const doomed = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'doomed',
+        spawnId: 'attempt-1',
+        admission: 'background',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
+    )
+    await pty.handlers['pty.kill']({ sessionId: 'doomed' })
+    expect(exitOf(notifies, 'doomed')).toMatchObject({
+      exitCode: null,
+      reason: 'killed-before-start'
+    })
+    await waitFor(() => doomed.done)
+    expect(doomed.error).toBeInstanceOf(Error)
+    // Remembered like any exit, so a hub that missed it settles it on reconnect.
+    const listed = (await pty.handlers['pty.list']({})) as ListResult
+    expect(listed.exited).toContainEqual(
+      expect.objectContaining({ sessionId: 'doomed', spawnId: 'attempt-1' })
+    )
+    await waitFor(() => outputOf(notifies, 'holder').includes('ready'))
+    await new Promise((r) => setTimeout(r, 100))
+    expect(listed.sessions.map((s) => s.sessionId)).not.toContain('doomed')
+    expect(
+      ((await pty.handlers['pty.list']({})) as ListResult).sessions.map((s) => s.sessionId)
+    ).toEqual(['holder'])
+    pty.disposeAll()
+  })
+
+  it('prioritize: the revealed tab starts next', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder'))
+    const order: string[] = []
+    for (const id of ['bg-1', 'bg-2']) {
+      void (
+        pty.handlers['pty.spawn']({
+          sessionId: id,
+          admission: 'background',
+          command: 'sh',
+          args: ['-c', `printf ${id}; exec cat`],
+          cwd
+        }) as Promise<unknown>
+      ).then(() => order.push(id))
+    }
+    expect(await pty.handlers['pty.prioritize']({ sessionId: 'bg-2' })).toEqual({
+      ok: true,
+      queued: true
+    })
+    await waitFor(() => order.length === 2)
+    expect(order).toEqual(['bg-2', 'bg-1'])
+    // Started already: nothing to move.
+    expect(await pty.handlers['pty.prioritize']({ sessionId: 'bg-2' })).toEqual({
+      ok: true,
+      queued: false
+    })
+    await waitFor(() => outputOf(notifies, 'bg-1').includes('bg-1'))
+    pty.disposeAll()
+  })
+
+  it('the hub re-sending a queued attempt (lost reply) is answered by the one start', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder'))
+    const spec = { sessionId: 'dup', spawnId: 'a1', admission: 'background', command: 'cat', cwd }
+    const a = pty.handlers['pty.spawn'](spec) as Promise<SpawnResult>
+    const b = pty.handlers['pty.spawn'](spec) as Promise<SpawnResult>
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.pid).toBe(rb.pid)
+    pty.disposeAll()
+  })
+
+  it('a hub disconnect drops queued spawns: they never run (the hub re-sends what it still wants)', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder', 0.2))
+    const lost = settled(
+      pty.handlers['pty.spawn']({ sessionId: 'lost', admission: 'background', command: 'cat', cwd }) as Promise<unknown>
+    )
+    pty.dropQueued('hub disconnected')
+    await waitFor(() => lost.done)
+    expect(lost.error).toBeInstanceOf(Error)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(
+      ((await pty.handlers['pty.list']({})) as ListResult).sessions.map((s) => s.sessionId)
+    ).toEqual(['holder'])
+    pty.disposeAll()
+  })
+
+  it('a spawn WITHOUT admission (plain shell, older hub) starts at once, even with the queue full', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder'))
+    const shell = pty.handlers['pty.spawn']({ sessionId: 'shell', command: 'cat', cwd })
+    expect((shell as SpawnResult).pid).toBeGreaterThan(0)
+    pty.disposeAll()
+  })
+
+  it('the warm pool waits until no agent is starting', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('agent', 0.3))
+    const warm = settled(
+      pty.handlers['pty.warmSpawn']({ warmId: 'warm-1', command: 'cat', cwd }) as Promise<unknown>
+    )
+    await new Promise((r) => setTimeout(r, 150))
+    expect(warm.done).toBe(false)
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
+    // Agent prints (t≈300ms) → slot free → quiet period (50ms) → warm boots.
+    await waitFor(() => warm.done)
+    expect((warm.value as { pid: number }).pid).toBeGreaterThan(0)
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toHaveLength(1)
+    pty.disposeAll()
+  })
+
+  it('warm agents boot one at a time: a warm start keeps its slot past its shell\'s first output', async () => {
+    // The shell prints first; the agent it execs boots after that. Releasing on
+    // that first output would let the whole pool boot at once.
+    const { ctx } = makeCtx()
+    const admission = createSpawnAdmission({ concurrency: 4, startCapMs: 400, warmQuietMs: 0 })
+    const pty = createPtyHandlers(ctx, undefined, { admission })
+    const spec = (warmId: string) => ({
+      warmId,
+      command: 'sh',
+      args: ['-c', 'printf prompt; exec cat'],
+      cwd
+    })
+    const t0 = Date.now()
+    await pty.handlers['pty.warmSpawn'](spec('w1'))
+    await pty.handlers['pty.warmSpawn'](spec('w2'))
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(380)
+    pty.disposeAll()
+  })
+
+  it('warmKill of a still-queued warm agent: it never boots', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('agent', 0.2))
+    const warm = settled(
+      pty.handlers['pty.warmSpawn']({ warmId: 'warm-x', command: 'cat', cwd }) as Promise<unknown>
+    )
+    await pty.handlers['pty.warmKill']({ warmId: 'warm-x' })
+    await waitFor(() => warm.done)
+    expect(warm.error).toBeInstanceOf(Error)
+    await new Promise((r) => setTimeout(r, 500))
+    expect((pty.handlers['pty.warmList']() as { warms: unknown[] }).warms).toEqual([])
     pty.disposeAll()
   })
 })

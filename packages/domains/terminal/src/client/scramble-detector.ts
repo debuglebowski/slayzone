@@ -30,6 +30,7 @@
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import { downgradeToDom, type DowngradeReason } from './webgl-loader'
+import { webglContextFor } from './webgl-budget'
 
 // ---------------------------------------------------------------------------
 // Signal B — frame-time heartbeat at startup
@@ -50,36 +51,83 @@ export interface FrameTimeMonitorOptions {
   thresholdMs?: number
   /** How many rAF deltas to average. Default 20. */
   sampleCount?: number
+  /**
+   * True when a frame delta measured now says something about THIS renderer:
+   * production requires the terminal to be on screen, the document visible and
+   * the main thread settled (see main-thread-jank.ts). While false, sampling
+   * pauses and re-checks every `retryDelayMs`. Default: always true.
+   */
+  canSample?: () => boolean
+  /**
+   * True when `[from, to]` overlapped whole-main-thread jank (a long task). Such a
+   * delta measures the thread, not the GPU, and is discarded. Default: never.
+   */
+  isJanky?: (from: number, to: number) => boolean
+  /** Re-check delay (ms) while `canSample()` is false. Default 1000. */
+  retryDelayMs?: number
+  /**
+   * Delay (ms) between collecting the last sample and judging. Long-task entries
+   * reach their observer asynchronously, so production waits a beat before
+   * filtering with `isJanky`. Default 0 (judge synchronously).
+   */
+  verdictDelayMs?: number
+  /**
+   * Upper bound on frames sampled while hunting for `sampleCount` clean deltas.
+   * Reaching it without a clean verdict ends the monitor WITHOUT downgrading —
+   * a thread too busy to measure is no evidence against the GPU. Default 600.
+   */
+  maxFrames?: number
   /** Inject for tests; production uses `window.requestAnimationFrame`. */
   requestFrame?: (cb: () => void) => number
   /** Inject for tests; production uses `window.cancelAnimationFrame`. */
   cancelFrame?: (id: number) => void
+  /** Inject for tests; production uses `window.setTimeout`. */
+  setTimer?: (cb: () => void, ms: number) => number
+  /** Inject for tests; production uses `window.clearTimeout`. */
+  clearTimer?: (id: number) => void
   /** Inject for tests; production uses `performance.now`. */
   now?: () => number
   sessionId?: string
 }
 
 /**
- * Sample the first `sampleCount` rAF deltas after the WebGL addon attaches.
- * If the average exceeds `thresholdMs`, downgrade to the DOM renderer.
+ * Sample `sampleCount` rAF deltas while the WebGL addon is live and on screen.
+ * If their average exceeds `thresholdMs`, downgrade to the DOM renderer.
  *
  * Catches the "WebGL constructs but renders very slowly" failure class —
  * bad GPU drivers, SwiftShader software fallback, virtualized GPU. xterm
  * surfaces no event for this; we have to measure paint cadence ourselves.
  *
- * Returns a cleanup function that cancels any pending sample frame.
+ * A rAF delta measures the whole main thread, not just this renderer, so the
+ * caller gates sampling (`canSample`: terminal visible, document visible, boot
+ * settled) and every delta overlapping a long task is discarded (`isJanky`).
+ * Without both, a busy renderer boot read as a slow GPU for every terminal at
+ * once and latched each of them to the DOM renderer for the whole session.
+ *
+ * Returns a cleanup function that cancels any pending sample frame / timer.
  */
 export function monitorFrameTime(opts: FrameTimeMonitorOptions): () => void {
   const thresholdMs = opts.thresholdMs ?? 50
   const sampleCount = opts.sampleCount ?? 20
+  const retryDelayMs = opts.retryDelayMs ?? 1000
+  const verdictDelayMs = opts.verdictDelayMs ?? 0
+  const maxFrames = opts.maxFrames ?? 600
+  const canSample = opts.canSample ?? ((): boolean => true)
+  const isJanky = opts.isJanky ?? ((): boolean => false)
   const requestFrame =
     opts.requestFrame ?? ((cb: () => void): number => window.requestAnimationFrame(cb))
   const cancelFrame = opts.cancelFrame ?? ((id: number): void => window.cancelAnimationFrame(id))
+  const setTimer =
+    opts.setTimer ?? ((cb: () => void, ms: number): number => window.setTimeout(cb, ms))
+  const clearTimer = opts.clearTimer ?? ((id: number): void => window.clearTimeout(id))
   const now = opts.now ?? ((): number => performance.now())
 
-  const samples: number[] = []
-  let last = now()
+  // Sampled frames as [start, end] so jank filtering can run at verdict time.
+  let intervals: Array<[number, number]> = []
+  let last: number | null = now()
+  let frames = 0
   let frameId: number | null = null
+  let timerId: number | null = null
   let cancelled = false
 
   const stop = (): void => {
@@ -88,24 +136,45 @@ export function monitorFrameTime(opts: FrameTimeMonitorOptions): () => void {
       cancelFrame(frameId)
       frameId = null
     }
+    if (timerId !== null) {
+      clearTimer(timerId)
+      timerId = null
+    }
   }
 
-  const tick = (): void => {
-    frameId = null
-    if (cancelled || opts.isAborted() || !opts.isCurrent()) return
+  const live = (): boolean => {
+    if (cancelled || opts.isAborted() || !opts.isCurrent()) return false
     if (opts.getActiveAddon() !== opts.addon) {
       // Addon was superseded (e.g. by a retry); stop sampling against a dead handle.
       cancelled = true
+      return false
+    }
+    return true
+  }
+
+  const scheduleFrame = (): void => {
+    frameId = requestFrame(tick)
+  }
+
+  const judge = (): void => {
+    timerId = null
+    if (!live()) return
+    const clean = intervals.filter(([from, to]) => !isJanky(from, to))
+    if (clean.length < sampleCount) {
+      // Jank ate some samples — keep the clean ones and measure more, unless the
+      // frame budget is spent: then end without a verdict (keep WebGL).
+      intervals = clean
+      if (frames >= maxFrames) {
+        cancelled = true
+        return
+      }
+      last = null
+      scheduleFrame()
       return
     }
-    const t = now()
-    samples.push(t - last)
-    last = t
-    if (samples.length < sampleCount) {
-      frameId = requestFrame(tick)
-      return
-    }
-    const avg = samples.reduce((a, b) => a + b, 0) / samples.length
+    const deltas = clean.slice(0, sampleCount).map(([from, to]) => to - from)
+    const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length
+    cancelled = true
     if (avg > thresholdMs) {
       console.warn(
         `[terminal] frame-time avg ${avg.toFixed(1)}ms > ${thresholdMs}ms — downgrading to DOM renderer`
@@ -124,7 +193,37 @@ export function monitorFrameTime(opts: FrameTimeMonitorOptions): () => void {
     }
   }
 
-  frameId = requestFrame(tick)
+  const tick = (): void => {
+    frameId = null
+    if (!live()) return
+    if (!canSample()) {
+      // Off screen / hidden document / busy boot: a delta now would not measure
+      // this renderer. Drop the open interval and look again later (a timer, not
+      // rAF — rAF does not run for a hidden document).
+      last = null
+      timerId = setTimer(() => {
+        timerId = null
+        if (live()) scheduleFrame()
+      }, retryDelayMs)
+      return
+    }
+    const t = now()
+    if (last !== null) intervals.push([last, t])
+    last = t
+    frames++
+    if (intervals.length < sampleCount) {
+      if (frames >= maxFrames) {
+        cancelled = true
+        return
+      }
+      scheduleFrame()
+      return
+    }
+    if (verdictDelayMs > 0) timerId = setTimer(judge, verdictDelayMs)
+    else judge()
+  }
+
+  scheduleFrame()
   return stop
 }
 
@@ -240,12 +339,14 @@ function bufferHash(terminal: ScrambleProbeTerminal): number {
 
 /**
  * Locate the WebGL render canvas inside an xterm container and return a
- * sampler bound to its GL context. The xterm public API does not expose the
- * canvas reference directly, but the DOM under `terminal.element` only
- * holds one canvas that responds to `getContext('webgl2'|'webgl')` — the
- * renderer's own.
+ * sampler bound to its GL context. The context comes from the addon itself when
+ * reachable, else from the one class-less render canvas (webgl-budget.ts) — never
+ * by calling `getContext()` on every canvas in the pane.
  */
-function defaultCreateSampler(terminal: ScrambleProbeTerminal): PixelSampler {
+function defaultCreateSampler(
+  terminal: ScrambleProbeTerminal,
+  addon?: WebglAddon
+): PixelSampler {
   const SAMPLE_W = 64
   const SAMPLE_H = 16
 
@@ -254,26 +355,10 @@ function defaultCreateSampler(terminal: ScrambleProbeTerminal): PixelSampler {
 
   const find = (): void => {
     if (canvas && gl) return
-    const root = terminal.element
-    if (!root) return
-    const candidates = Array.from(root.querySelectorAll('canvas')) as HTMLCanvasElement[]
-    for (const c of candidates) {
-      try {
-        const ctx2 = c.getContext('webgl2') as WebGL2RenderingContext | null
-        if (ctx2) {
-          canvas = c
-          gl = ctx2
-          return
-        }
-        const ctx1 = c.getContext('webgl') as WebGLRenderingContext | null
-        if (ctx1) {
-          canvas = c
-          gl = ctx1
-          return
-        }
-      } catch {
-        /* getContext can throw on cross-context confusion; try the next */
-      }
+    const found = webglContextFor(terminal.element, addon)
+    if (found.canvas && found.gl) {
+      canvas = found.canvas
+      gl = found.gl
     }
   }
 
@@ -339,7 +424,9 @@ export function createScrambleProbe(opts: ScrambleProbeOptions): ScrambleProbe {
     // eslint-disable-next-line no-restricted-syntax
     ((cb: () => void, ms: number): number => window.setInterval(cb, ms))
   const clearInt = opts.clearInterval ?? ((id: number): void => window.clearInterval(id))
-  const sampler = (opts.createSampler ?? defaultCreateSampler)(opts.terminal)
+  const sampler = (
+    opts.createSampler ?? ((t: ScrambleProbeTerminal) => defaultCreateSampler(t, opts.addon))
+  )(opts.terminal)
 
   let baselineBufferHash = 0
   let baselinePixelHash = 0

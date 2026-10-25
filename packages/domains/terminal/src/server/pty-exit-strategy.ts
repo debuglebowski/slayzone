@@ -21,6 +21,27 @@ export function shouldShellFallback(ctx: ExitContext): boolean {
   return ctx.hasPostSpawnCommand && ctx.exitCode !== 0 && !ctx.usedShellFallback && !ctx.isStale
 }
 
+/**
+ * How a pty's spawn was confirmed: `'synchronous'` for an in-process spawn (the
+ * pty exists the moment the handle does), or the owner's confirmation reply.
+ */
+export type SpawnConfirmationState = 'synchronous' | { ownsStartupDeadline?: boolean }
+
+/**
+ * Should the HUB arm its own startup deadline for this pty?
+ *
+ * Only when nothing closer to the process owns one. A deadline judged across a
+ * socket cannot tell "printed nothing" from "printed, but not yet read by me" —
+ * after a hub stall it killed agents whose output was already waiting in the
+ * hub's own buffers. So a computer that confirms it armed the deadline is never
+ * second-guessed; an in-process spawn, or a computer that predates computer-side
+ * deadlines, still gets the hub's.
+ */
+export function shouldArmHubStartupDeadline(confirmation: SpawnConfirmationState): boolean {
+  if (confirmation === 'synchronous') return true
+  return confirmation.ownsStartupDeadline !== true
+}
+
 /** Build the recovery message shown in the terminal buffer. */
 export function buildRecoveryMessage(terminalMode: string, exitCode: number): string {
   return `\r\n[SlayZone] ${terminalMode} exited with code ${String(exitCode)}. Switched to interactive shell for recovery.\r\n`

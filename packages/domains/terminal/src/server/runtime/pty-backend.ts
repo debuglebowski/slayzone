@@ -49,6 +49,52 @@ export interface PtySpawnSpec {
   /** docker/ssh transport spawn — skip the ulimit wrap (the remote side owns
    *  its own env). Mirrors the former `spawnWrappedShell(..., transport)` flag. */
   transport: boolean
+  /**
+   * How long the session may stay silent after it starts before it counts as hung
+   * (no output at all ⇒ killed, and pty-manager's normal exit path decides on a
+   * recovery shell).
+   *
+   * Handed to the backend because the deadline belongs to whoever OWNS the
+   * process. A remote hub judging silence across a socket cannot tell "printed
+   * nothing" from "printed, but I have not read it yet" — after a hub stall it
+   * killed healthy agents whose output was already waiting in its own buffers. A
+   * backend that arms it says so via `whenSpawned` (`ownsStartupDeadline`);
+   * otherwise pty-manager keeps arming its own.
+   */
+  startupTimeoutMs?: number
+  /**
+   * Agent-start admission lane: the owner starts this spawn through its admission
+   * queue (a few agent starts at a time, the visible tab first) instead of at
+   * once. Set for an agent's INITIAL spawn only — never for a plain shell or a
+   * recovery shell. `whenSpawned` resolves when it has actually started, and the
+   * startup deadline counts from then. Ignored by the local backend.
+   */
+  admission?: PtySpawnAdmission
+}
+
+/** See {@link PtySpawnSpec.admission}. */
+export type PtySpawnAdmission = 'foreground' | 'background'
+
+/** How a spawn was confirmed by whoever owns the process. */
+export interface PtySpawnConfirmation {
+  pid: number | null
+  /**
+   * The owner armed the spec's `startupTimeoutMs` itself, so the caller must not
+   * run a second, worse-placed deadline of its own. Absent/false: nothing on the
+   * other end owns one (an older computer), and the caller keeps its own.
+   */
+  ownsStartupDeadline?: boolean
+}
+
+/**
+ * A pty exit. `reason` names a lifecycle cause the exit code alone cannot carry:
+ * the owner's `startup-timeout`, or a transport outcome (`spawn-failed`,
+ * `computer-restarted`, `reattach-timeout`, `exited-while-detached`).
+ */
+export interface PtyExit {
+  exitCode: number
+  signal?: number
+  reason?: string
 }
 
 /**
@@ -82,11 +128,11 @@ export interface PtyHandle {
    * guessing with a timer — no timeout tuned on one machine, one computer load or
    * one batch size can be wrong on another.
    */
-  readonly whenSpawned?: Promise<{ pid: number | null }>
+  readonly whenSpawned?: Promise<PtySpawnConfirmation>
   readonly process: string
   readonly fd?: number
   onData(cb: (data: string) => void): { dispose(): void }
-  onExit(cb: (e: { exitCode: number; signal?: number }) => void): { dispose(): void }
+  onExit(cb: (e: PtyExit) => void): { dispose(): void }
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
@@ -131,6 +177,12 @@ export interface PtyBackend {
   warmKill?(computerId: string, warmId: string): Promise<void>
   /** Warm sessions the computer still holds — used to reap orphans on reconnect. */
   warmList?(computerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
+  /**
+   * The user revealed this session: if its spawn is still waiting for an
+   * agent-start slot ({@link PtySpawnSpec.admission}), start it next. Best-effort
+   * and fire-and-forget — a session that already started is unaffected.
+   */
+  prioritize?(sessionId: string): void
 }
 
 /**

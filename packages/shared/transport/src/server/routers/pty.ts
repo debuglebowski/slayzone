@@ -83,6 +83,11 @@ export const ptyRouter = router({
   interrupt: publicProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => ops().ptyInterrupt(input.sessionId)),
+  // The tab showing this session was revealed: if its agent is still waiting for
+  // an agent-start slot on its computer, start it next. No-op otherwise.
+  prioritize: publicProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(({ input }) => ops().ptyPrioritize(input.sessionId)),
   // Renderer→main ensure-alive ACK — resolves the pending requestEnsureAlive
   // waiter by reqId. Mirrors the legacy `pty:ensure-alive:ack` IPC.
   ackEnsureAlive: publicProcedure
@@ -100,6 +105,19 @@ export const ptyRouter = router({
   getBufferSince: publicProcedure
     .input(z.object({ sessionId: z.string(), afterSeq: z.number() }))
     .query(({ input }) => ops().ptyGetBufferSince(input.sessionId, input.afterSeq)),
+  // One-round-trip attach for a terminal (re)mounting onto its session:
+  // exists + state + the buffer after `afterSeq`, read back-to-back on the
+  // server. Replaces three serial renderer→server round trips (exists → getState
+  // → getBufferSince) per terminal — ~50 of them on a renderer boot. `buffer` is
+  // read whether or not the PTY is live, exactly as `getBufferSince` would answer.
+  attach: publicProcedure
+    .input(z.object({ sessionId: z.string(), afterSeq: z.number() }))
+    .query(async ({ input }) => {
+      const exists = await ops().ptyExists(input.sessionId)
+      const state = await ops().ptyGetState(input.sessionId)
+      const buffer = await ops().ptyGetBufferSince(input.sessionId, input.afterSeq)
+      return { exists, state, buffer }
+    }),
   list: publicProcedure.query(() => ops().ptyList()),
   chatList: publicProcedure.query(() => ops().chatList()),
   getState: publicProcedure

@@ -27,13 +27,13 @@ const LOADING_TEXTS = [
  * dots that keep going underneath it. The layer is sized to that circle so no
  * dot is painted only to be masked away; the second mask layer takes over in
  * panes too small to hold it, fading to the box instead of being clipped.
+ *
+ * Its CSS (the `.pulse-grid-*` rules, the `--pulse-grid-wave` @property and its
+ * @keyframes) lives in @slayzone/theme-css, not in a <style> rendered here: every
+ * hidden terminal shows this loader while it boots, and inserting or removing a
+ * stylesheet that registers a property / declares keyframes restyles the WHOLE
+ * document — once per loader mount and once per unmount.
  */
-const DOT_PITCH = 12 // px between dot centres
-const WAVE_LENGTH = 300 // px between successive ripple crests
-/** Radius at which the field has faded to nothing. Clamped to the pane in boxes too small to hold it. */
-const FIELD_RADIUS = 300
-const WAVE_DURATION = '2s'
-
 export function PulseGrid() {
   const [textIndex, setTextIndex] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
   const [fade, setFade] = useState(true)
@@ -60,55 +60,6 @@ export function PulseGrid() {
           {LOADING_TEXTS[textIndex]}
         </span>
       </div>
-      <style>{`
-        @property --pulse-grid-wave {
-          syntax: '<length>';
-          inherits: false;
-          initial-value: 0px;
-        }
-        .pulse-grid-field {
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%);
-          width: min(${FIELD_RADIUS * 2}px, 100%);
-          height: min(${FIELD_RADIUS * 2}px, 100%);
-          mask-image:
-            radial-gradient(circle ${FIELD_RADIUS}px at center, #000 0%, transparent 100%),
-            radial-gradient(ellipse farthest-side at center, #000 0%, #000 40%, transparent 100%);
-          mask-composite: intersect;
-        }
-        .pulse-grid-dots {
-          background-image: radial-gradient(
-            circle at center,
-            currentColor 0 1.9px,
-            transparent 2.4px
-          );
-          background-size: ${DOT_PITCH}px ${DOT_PITCH}px;
-          background-position: center;
-        }
-        .pulse-grid-dots--wave {
-          background-image: radial-gradient(
-            circle at center,
-            currentColor 0 2.4px,
-            transparent 2.9px
-          );
-          mask-image: repeating-radial-gradient(
-            circle at center,
-            transparent calc(var(--pulse-grid-wave) + 0px),
-            #000 calc(var(--pulse-grid-wave) + ${WAVE_LENGTH / 2}px),
-            transparent calc(var(--pulse-grid-wave) + ${WAVE_LENGTH}px)
-          );
-          animation: pulse-grid-wave ${WAVE_DURATION} linear infinite;
-        }
-        @keyframes pulse-grid-wave {
-          from { --pulse-grid-wave: 0px; }
-          to { --pulse-grid-wave: ${WAVE_LENGTH}px; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .pulse-grid-dots--wave { animation: none; }
-        }
-      `}</style>
     </div>
   )
 }

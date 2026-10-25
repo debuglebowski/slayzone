@@ -7,6 +7,7 @@ import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import {
   containsSubmitEnter,
   DEV_SERVER_URL_PATTERN,
@@ -28,7 +29,9 @@ import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 import {
   getPtyBackend,
   NodePtyUnavailableError,
+  type PtyExit,
   type PtyHandle,
+  type PtySpawnAdmission,
   type PtySpawnSpec
 } from './pty-backend'
 import {
@@ -67,7 +70,8 @@ import {
 import {
   shouldShellFallback,
   buildRecoveryMessage,
-  decideRecoveryAdoption
+  decideRecoveryAdoption,
+  shouldArmHubStartupDeadline
 } from '../pty-exit-strategy'
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
@@ -1232,6 +1236,12 @@ export interface CreatePtyOptions {
   cols?: number
   rows?: number
   /**
+   * The tab this session belongs to is the one on screen. An agent spawn then
+   * goes to the front of its computer's admission queue (`PtySpawnAdmission`).
+   * Absent ⇒ background: FIFO behind the visible tab's.
+   */
+  foreground?: boolean
+  /**
    * Adopt an already-spawned, idle login shell instead of spawning a fresh one
    * (warm-process pool). When present, the initial `pty.spawn()` is skipped and
    * this pty is registered under `sessionId` from the start — the session is never
@@ -1688,7 +1698,16 @@ export async function createPty(
     // may return a Promise; only the INITIAL spawn awaits it (`spawnRemote`), and
     // the local -l / shell fallbacks never fire for a remote session — the computer
     // owns its own shell semantics.
-    const buildSpec = (rawFile: string, rawArgs: string[]): PtySpawnSpec => ({
+    // The session's startup deadline, handed to whoever spawns it: the owner of the
+    // process runs it (see `PtySpawnSpec.startupTimeoutMs`), and pty-manager runs
+    // its own only when that owner does not (`armHubStartupDeadlineUnlessOwned`).
+    const startupTimeoutMs = adapter.startupTimeoutMs ?? STARTUP_TIMEOUT_MS
+    const buildSpec = (
+      rawFile: string,
+      rawArgs: string[],
+      deadlineMs: number | undefined,
+      admission?: PtySpawnAdmission
+    ): PtySpawnSpec => ({
       sessionId,
       taskId,
       computerId,
@@ -1696,13 +1715,19 @@ export async function createPty(
       file: rawFile,
       args: rawArgs,
       options: spawnOptions,
-      transport: !!transport
+      transport: !!transport,
+      ...(deadlineMs !== undefined ? { startupTimeoutMs: deadlineMs } : {}),
+      ...(admission ? { admission } : {})
     })
     // Synchronous spawn — the hub-local path (and every recovery re-spawn). Throws
     // if the active backend returns a Promise: only a remote (computerId != null)
     // spawn may be async, and that path never routes through here.
-    const spawn = (rawFile: string, rawArgs: string[]): pty.IPty => {
-      const handle = getPtyBackend().spawn(buildSpec(rawFile, rawArgs))
+    const spawn = (
+      rawFile: string,
+      rawArgs: string[],
+      deadlineMs: number | undefined
+    ): pty.IPty => {
+      const handle = getPtyBackend().spawn(buildSpec(rawFile, rawArgs, deadlineMs))
       if (handle instanceof Promise) {
         throw new Error(
           '[pty-manager] the local PtyBackend must spawn synchronously; a remote (computerId != null) spawn takes the async spawnRemote path'
@@ -1712,8 +1737,15 @@ export async function createPty(
     }
     // Remote spawn — awaits the backend (a network round-trip). Only reached for a
     // computer-routed session (computerId != null); tolerates a sync or async handle.
-    const spawnRemote = async (rawFile: string, rawArgs: string[]): Promise<pty.IPty> =>
-      (await getPtyBackend().spawn(buildSpec(rawFile, rawArgs))) as unknown as pty.IPty
+    const spawnRemote = async (
+      rawFile: string,
+      rawArgs: string[],
+      deadlineMs: number | undefined,
+      admission?: PtySpawnAdmission
+    ): Promise<pty.IPty> =>
+      (await getPtyBackend().spawn(
+        buildSpec(rawFile, rawArgs, deadlineMs, admission)
+      )) as unknown as pty.IPty
     if (opts.adoptPty) {
       // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
       // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
@@ -1736,10 +1768,17 @@ export async function createPty(
       // Remote session: await the computer spawn. No local -l / interactive-shell
       // fallback — a computer owns its shell startup, and its handle can't be
       // re-spawned synchronously inside an onExit callback.
-      ptyProcess = await spawnRemote(spawnFile, initialArgs)
+      //
+      // An AGENT's start goes through the computer's admission queue (a few agent
+      // starts at a time; the tab the user is looking at first) — restoring a
+      // workspace would otherwise start every tab's agent at once. A plain shell
+      // starts at once, as does every recovery shell below.
+      const admission: PtySpawnAdmission | undefined =
+        terminalMode === 'terminal' ? undefined : opts.foreground ? 'foreground' : 'background'
+      ptyProcess = await spawnRemote(spawnFile, initialArgs, startupTimeoutMs, admission)
     } else {
       try {
-        ptyProcess = spawn(spawnFile, initialArgs)
+        ptyProcess = spawn(spawnFile, initialArgs, startupTimeoutMs)
       } catch (err) {
         // Fallback for shells that reject login flag combinations (host only). A
         // switch refusal is policy, not a rejected flag: retrying would only refuse
@@ -1752,7 +1791,7 @@ export async function createPty(
         )
           throw err
         usedArgs = initialArgs.filter((arg) => arg !== '-l')
-        ptyProcess = spawn(spawnFile, usedArgs)
+        ptyProcess = spawn(spawnFile, usedArgs, startupTimeoutMs)
         usedFallback = true
         recordDiagnosticEvent({
           level: 'warn',
@@ -1863,14 +1902,25 @@ export async function createPty(
       }
     })
     let firstOutputTs: number | null = null
+    /** When the owner confirmed the spawn (round-trip backends) — after any admission wait. */
+    let spawnConfirmedTs: number | null = null
+    void spawnConfirmation?.then(
+      () => {
+        spawnConfirmedTs = Date.now()
+      },
+      () => {
+        // Refusals are handled where the confirmation is consumed below.
+      }
+    )
     let commandDispatchedTs: number | null = null
-    let startupTimeout: NodeJS.Timeout | undefined
+    let startupDeadline: StartupDeadline | undefined
     let earlyExitWatchdog: NodeJS.Timeout | undefined
+    /** Lifecycle cause the backend attached to the exit (`startup-timeout`, a transport outcome). */
+    let lastExitReason: string | undefined
 
     const clearStartupTimeout = (): void => {
-      if (!startupTimeout) return
-      clearTimeout(startupTimeout)
-      startupTimeout = undefined
+      startupDeadline?.cancel()
+      startupDeadline = undefined
     }
 
     const clearEarlyExitWatchdog = (): void => {
@@ -1948,7 +1998,8 @@ export async function createPty(
         sessionId,
         taskId: taskIdFromSessionId(sessionId),
         payload: {
-          exitCode
+          exitCode,
+          ...(lastExitReason ? { reason: lastExitReason } : {})
         }
       })
       // Note: the host-kill timestamp (lastPtyKilledAt) is recorded at the
@@ -1995,46 +2046,82 @@ export async function createPty(
     const registeredSession = sessions.get(sessionId)
     if (registeredSession) registeredSession.finalizer = finalizeSessionExit
 
+    const recordStartupTimeout = (armedBy: 'hub' | 'computer'): void => {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.startup_timeout',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId),
+        payload: {
+          timeoutMs: startupTimeoutMs,
+          armedBy,
+          shell: spawnConfig.shell,
+          shellArgs: usedArgs,
+          launchStrategy: spawnConfig.postSpawnCommand ? 'shell_exec' : 'direct_shell'
+        }
+      })
+    }
+
+    // pty-manager's OWN startup deadline — only for a pty whose owner does not run
+    // one (see `armHubStartupDeadlineUnlessOwned`). The shared helper reads output
+    // that is already waiting before it judges, so a hub stall alone can no longer
+    // make every session in flight look silent at once.
     const armStartupTimeout = (target: pty.IPty): void => {
       clearStartupTimeout()
-      const effectiveStartupTimeout = adapter.startupTimeoutMs ?? STARTUP_TIMEOUT_MS
-      startupTimeout = setTimeout(() => {
-        const live = sessions.get(sessionId)
-        if (!live || live.pty !== target || firstOutputTs !== null) return
-        recordDiagnosticEvent({
-          level: 'warn',
-          source: 'pty',
-          event: 'pty.startup_timeout',
-          sessionId,
-          taskId: taskIdFromSessionId(sessionId),
-          payload: {
-            timeoutMs: effectiveStartupTimeout,
-            shell: spawnConfig.shell,
-            shellArgs: usedArgs,
-            launchStrategy: spawnConfig.postSpawnCommand ? 'shell_exec' : 'direct_shell'
+      startupDeadline = armStartupDeadline({
+        timeoutMs: startupTimeoutMs,
+        onExpire: () => {
+          const live = sessions.get(sessionId)
+          if (!live || live.pty !== target || firstOutputTs !== null) return
+          recordStartupTimeout('hub')
+          try {
+            target.kill('SIGKILL')
+          } catch {
+            // ignore
           }
-        })
-        try {
-          target.kill('SIGKILL')
-        } catch {
-          // ignore
+          // Safety net: if onExit doesn't fire within 2s after SIGKILL,
+          // finalize directly to prevent zombie 'starting' sessions
+          setTimeout(() => {
+            const stillLive = sessions.get(sessionId)
+            if (!stillLive || stillLive.pty !== target) return
+            recordDiagnosticEvent({
+              level: 'error',
+              source: 'pty',
+              event: 'pty.startup_timeout_missed_exit',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              payload: { timeoutMs: startupTimeoutMs }
+            })
+            finalizeSessionExit(-1)
+          }, 2000)
         }
-        // Safety net: if onExit doesn't fire within 2s after SIGKILL,
-        // finalize directly to prevent zombie 'starting' sessions
-        setTimeout(() => {
-          const stillLive = sessions.get(sessionId)
-          if (!stillLive || stillLive.pty !== target) return
-          recordDiagnosticEvent({
-            level: 'error',
-            source: 'pty',
-            event: 'pty.startup_timeout_missed_exit',
-            sessionId,
-            taskId: taskIdFromSessionId(sessionId),
-            payload: { timeoutMs: effectiveStartupTimeout }
-          })
-          finalizeSessionExit(-1)
-        }, 2000)
-      }, effectiveStartupTimeout)
+      })
+    }
+
+    /**
+     * Arm the hub's startup deadline for `target` unless whoever owns the process
+     * confirms it runs one itself (`shouldArmHubStartupDeadline`). An in-process
+     * spawn has no confirmation and is armed at once; a remote one waits for the
+     * computer's reply, and a computer that predates computer-side deadlines still
+     * gets the hub's.
+     */
+    const armHubStartupDeadlineUnlessOwned = (target: pty.IPty): void => {
+      const confirmation = (target as unknown as PtyHandle).whenSpawned
+      if (!confirmation) {
+        if (shouldArmHubStartupDeadline('synchronous')) armStartupTimeout(target)
+        return
+      }
+      void confirmation.then(
+        (confirmed) => {
+          const live = sessions.get(sessionId)
+          if (!live || live.pty !== target || finalized || firstOutputTs !== null) return
+          if (shouldArmHubStartupDeadline(confirmed)) armStartupTimeout(target)
+        },
+        () => {
+          // Refused: the spawn-confirmation handler finalizes the session.
+        }
+      )
     }
 
     const schedulePostSpawnCommand = (target: pty.IPty): void => {
@@ -2088,6 +2175,12 @@ export async function createPty(
                 firstOutputAfterCommandMs: commandDispatchedTs
                   ? firstOutputTs - commandDispatchedTs
                   : null,
+                // Split of `firstOutputMs` for a round-trip spawn: time until the
+                // owner started it (incl. waiting for an agent-start slot), then
+                // time from start to first output.
+                spawnConfirmedMs: spawnConfirmedTs !== null ? spawnConfirmedTs - createStartedAt : null,
+                firstOutputAfterSpawnMs:
+                  spawnConfirmedTs !== null ? firstOutputTs - spawnConfirmedTs : null,
                 usedFallback,
                 shell: spawnConfig.shell,
                 shellArgs: usedArgs
@@ -2391,13 +2484,19 @@ export async function createPty(
       )
 
       target.onExit(
-        guardPtyCallback(sessionId, taskId, 'onExit', ({ exitCode }) => {
+        guardPtyCallback(sessionId, taskId, 'onExit', (exit) => {
+          const { exitCode } = exit
           const win = getWin() // Dynamic lookup for redirectSessionWindow()
           clearStartupTimeout()
           clearEarlyExitWatchdog()
 
           const session = sessions.get(sessionId)
           if (!session || session.pty !== target) return
+          // A routed handle carries the lifecycle cause the exit code cannot.
+          lastExitReason = (exit as PtyExit).reason
+          // The owner's deadline fired: record it exactly as the hub's own would,
+          // then let the ordinary exit path below decide on a recovery shell.
+          if (lastExitReason === 'startup-timeout') recordStartupTimeout('computer')
 
           const canAsyncFallback =
             computerId == null && // remote sessions never use the local shell fallback
@@ -2408,7 +2507,7 @@ export async function createPty(
           if (canAsyncFallback) {
             const fallbackArgs = initialArgs.filter((arg) => arg !== '-l')
             try {
-              const fallbackPty = spawn(spawnConfig.shell, fallbackArgs)
+              const fallbackPty = spawn(spawnConfig.shell, fallbackArgs, startupTimeoutMs)
               usedArgs = fallbackArgs
               usedFallback = true
               ptyProcess = fallbackPty
@@ -2427,7 +2526,7 @@ export async function createPty(
                   reason: 'fast_exit_no_output'
                 }
               })
-              armStartupTimeout(fallbackPty)
+              armHubStartupDeadlineUnlessOwned(fallbackPty)
               attachPtyHandlers(fallbackPty)
               schedulePostSpawnCommand(fallbackPty)
               startTitlePolling(session, fallbackPty)
@@ -2511,6 +2610,10 @@ export async function createPty(
           if (shouldShellFallback(exitCtx)) {
             const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
             const previousArgs = [...usedArgs]
+            // The deadline is "until the SESSION's first output", not per pty: a
+            // session that already printed has proven it starts, so its recovery
+            // shell gets none — exactly as the hub's own timer behaved.
+            const recoveryDeadlineMs = firstOutputTs === null ? startupTimeoutMs : undefined
 
             // Adopt a freshly-spawned recovery shell as this session's pty. Shared
             // verbatim by both paths; the ONLY difference upstream is sync vs await.
@@ -2552,7 +2655,7 @@ export async function createPty(
                 }
               })
 
-              armStartupTimeout(fallbackShellPty)
+              armHubStartupDeadlineUnlessOwned(fallbackShellPty)
               attachPtyHandlers(fallbackShellPty)
               startTitlePolling(session, fallbackShellPty)
             }
@@ -2578,7 +2681,7 @@ export async function createPty(
               // continuation rather than falling through synchronously below. On
               // failure we finalize there — the session must never be left with a
               // dead pty and no exit recorded.
-              void spawnRemote(spawnFile, shellOnlyArgs).then(
+              void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs).then(
                 (fallbackShellPty) => {
                   // The session can be torn down (tab closed, task killed, app
                   // quitting) while the spawn is in flight — the local path cannot
@@ -2611,7 +2714,7 @@ export async function createPty(
             }
 
             try {
-              adoptRecoveryShell(spawn(spawnFile, shellOnlyArgs))
+              adoptRecoveryShell(spawn(spawnFile, shellOnlyArgs, recoveryDeadlineMs))
               return
             } catch (fallbackErr) {
               recordFallbackFailure(fallbackErr)
@@ -2624,7 +2727,7 @@ export async function createPty(
     }
 
     attachPtyHandlers(ptyProcess)
-    armStartupTimeout(ptyProcess)
+    armHubStartupDeadlineUnlessOwned(ptyProcess)
     schedulePostSpawnCommand(ptyProcess)
     startTitlePolling(sessions.get(sessionId)!, ptyProcess)
     // Did this session actually start? Three cases, and collapsing them is how a
@@ -2644,7 +2747,8 @@ export async function createPty(
     //      wire like any other.
     //
     // Nothing here is the sole net against a session that starts but never says
-    // anything: `armStartupTimeout` owns that, keyed on OUTPUT rather than pid.
+    // anything: the startup deadline owns that, keyed on OUTPUT rather than pid —
+    // run by the process's owner, or by `armHubStartupDeadlineUnlessOwned`.
     if (spawnConfirmation) {
       void spawnConfirmation.then(
         ({ pid }) => {
@@ -2712,8 +2816,13 @@ export async function createPty(
       }, 300)
     }
 
-    // Stop checking for session errors after 5 seconds.
-    if (resuming) {
+    // Stop checking for session errors 5 seconds after the process STARTS. A
+    // round-trip spawn may wait for an agent-start slot on its computer first
+    // (`PtySpawnSpec.admission`), so the window opens at its confirmation — a
+    // window opened at create could close before a queued resume had even run,
+    // and a stale-resume failure would then go unrecognised. Opened on a refusal
+    // too, so output suppression can never outlive it.
+    const openSessionErrorWindow = (): void => {
       setTimeout(() => {
         const session = sessions.get(sessionId)
         if (session) {
@@ -2726,6 +2835,10 @@ export async function createPty(
           session.suppressOutput = false
         }
       }, 5000)
+    }
+    if (resuming) {
+      if (spawnConfirmation) void spawnConfirmation.then(openSessionErrorWindow, openSessionErrorWindow)
+      else openSessionErrorWindow()
     }
 
     return { success: true }
@@ -2942,6 +3055,16 @@ export function killPty(sessionId: string): boolean {
     }
   }, KILL_FINALIZE_WATCHDOG_MS)
   return true
+}
+
+/**
+ * The user revealed this session's tab: if its agent is still waiting for an
+ * admission slot on its computer, start it next. Fire-and-forget; a no-op for a
+ * session that already started, a local one, or an unknown id.
+ */
+export function prioritizePty(sessionId: string): void {
+  if (!sessions.has(sessionId)) return
+  getPtyBackend().prioritize?.(sessionId)
 }
 
 export function hasPty(sessionId: string): boolean {

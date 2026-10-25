@@ -44,6 +44,7 @@
  * @module computer/server/exec-proxies
  */
 
+import { randomUUID } from 'node:crypto'
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
 import type { LocalWorkspaceFs, WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
@@ -53,9 +54,11 @@ import type {
   ChatSpawnSpec,
   PtyBackend,
   PtyHandle,
+  PtySpawnConfirmation,
   PtySpawnSpec
 } from '@slayzone/terminal/server'
 import {
+  ComputerTransportErrorCodes,
   fsCopyInResultSchema,
   fsDiscoverReposResultSchema,
   projectResolvePathResultSchema,
@@ -86,6 +89,7 @@ import {
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema
 } from '../shared/frames'
+import { RpcDisposedError, RpcError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { HubComputerGateway } from './hub-gateway'
 
@@ -127,6 +131,8 @@ interface ExecDisposable {
 export interface PtyExitEvent {
   exitCode: number | null
   signal?: number | string
+  /** Lifecycle cause: the computer's own (`startup-timeout`) or a transport outcome. */
+  reason?: string
 }
 
 /**
@@ -162,6 +168,22 @@ class BufferingEmitter<T> {
 }
 
 const sessionKey = (computerId: string, sessionId: string): string => `${computerId}:${sessionId}`
+
+/**
+ * Did this request fail because the CONNECTION went away, rather than because the
+ * computer answered with a refusal?
+ *
+ * The distinction is the whole point. A refusal is the computer's verdict. A lost
+ * connection is no verdict at all: the request may have run, may be running, or
+ * may never have arrived — and treating it as a failure is how a dropped socket
+ * used to turn a batch of healthy agents into "Process exited with code -1".
+ * `unknownComputer` is the gateway's own answer for a computer it has no socket
+ * for (the computer never raises it for a spawn).
+ */
+function isConnectionLoss(err: unknown): boolean {
+  if (err instanceof RpcDisposedError) return true
+  return err instanceof RpcError && err.code === ComputerTransportErrorCodes.unknownComputer
+}
 
 const noop = (): void => {
   // Shared rejection sink for the fire-and-forget gateway calls below (write,
@@ -231,6 +253,77 @@ interface DetachableEntry {
   disposed: boolean
   /** Computer unreachable: outcome unknown, still tracked, NOT finalized. */
   detached: boolean
+  /** The spawn attempt this entry belongs to — the idempotency key it was sent with. */
+  spawnId?: string
+  /**
+   * Set while the spawn ITSELF has an unknown outcome: its reply was lost to a
+   * dropped connection, so the computer may or may not be running it. Settled on
+   * reconnect exactly like a detached session — by asking the computer.
+   */
+  pendingSpawn?: PendingSpawn
+}
+
+interface PendingSpawn {
+  /** Re-issue the identical request. Same `spawnId`, so a duplicate is harmless. */
+  resend: () => void
+  /**
+   * The computer holds (or held) this attempt: settle the spawn with its pid.
+   * `listedBySpawnId` — the computer named the attempt by its key, i.e. it is new
+   * enough to have honoured everything the request asked of it.
+   */
+  confirm: (pid: number | null, listedBySpawnId: boolean) => void
+}
+
+/** A live session as the computer reports it in `pty.list` / `proc.list`. */
+interface ListedSession {
+  pid?: number
+  spawnId?: string
+}
+
+/** A session the computer reaped and remembers (a tombstone). */
+interface ListedExit extends ListedSession {
+  exitCode: number | null
+  signal: string | null
+  reason?: string
+}
+
+/** The computer's own account of what it holds, keyed by session id. */
+interface ComputerSessionList {
+  live: Map<string, ListedSession>
+  /** Empty for a computer too old to keep tombstones. */
+  exited: Map<string, ListedExit>
+}
+
+/**
+ * Is a listed process this entry's spawn ATTEMPT, not merely the same session id?
+ *
+ * Session ids repeat — an agent tab reuses its id on every restart — so an older
+ * process can be listed under the id a newer spawn is waiting on. An unknown key on
+ * either side (an older computer, or an entry that never had one) counts as a
+ * match: presence is then the strongest evidence available, as it always was.
+ */
+function sameAttempt(entry: DetachableEntry, listed: ListedSession): boolean {
+  return (
+    entry.spawnId === undefined || listed.spawnId === undefined || entry.spawnId === listed.spawnId
+  )
+}
+
+/** Build {@link ComputerSessionList} from a parsed `pty.list` / `proc.list` reply. */
+function toSessionList(parsed: {
+  sessions: Array<{ sessionId: string; pid?: number; spawnId?: string }>
+  exited?: Array<{
+    sessionId: string
+    pid?: number
+    spawnId?: string
+    exitCode: number | null
+    signal: string | null
+    reason?: string
+  }>
+}): ComputerSessionList {
+  return {
+    live: new Map(parsed.sessions.map((s) => [s.sessionId, { pid: s.pid, spawnId: s.spawnId }])),
+    exited: new Map((parsed.exited ?? []).map((e) => [e.sessionId, e]))
+  }
 }
 
 interface DetachControllerOptions<E extends DetachableEntry> {
@@ -243,12 +336,14 @@ interface DetachControllerOptions<E extends DetachableEntry> {
   listMethod: string
   /** Hub→computer method ending one session, for orphans the hub no longer tracks. */
   killMethod: string
-  /** Parse that reply into session ids; `null` when it does not parse. */
-  parseListedSessionIds: (raw: unknown) => string[] | null
+  /** Parse that reply; `null` when it does not parse. */
+  parseList: (raw: unknown) => ComputerSessionList | null
   /** Report a session as ended, with the reason the hub let go of it. */
   finalize: (entry: E, reason: string) => void
   /** Computer confirmed this session is still alive: resume delivery + backfill. */
-  resume: (entry: E) => void
+  resume: (entry: E, listed: ListedSession) => void
+  /** Computer reaped this session while the hub was away: deliver its tail + real exit. */
+  settleExited: (entry: E, exit: ListedExit) => void
 }
 
 /**
@@ -288,13 +383,23 @@ interface DetachControllerOptions<E extends DetachableEntry> {
 interface DetachParticipant {
   sessions: Map<string, DetachableEntry>
   finalize: (entry: DetachableEntry, reason: string) => void
-  resume: (entry: DetachableEntry) => void
+  resume: (entry: DetachableEntry, listed: ListedSession) => void
+  settleExited: (entry: DetachableEntry, exit: ListedExit) => void
   /** Has this participant ever held a session? Gates pruning — see `prune`. */
   everUsed?: boolean
 }
 
+/** Mark ONE entry's outcome unknown and bound the wait — see `DetachController.detach`. */
+type DetachEntry = (entry: DetachableEntry) => void
+
 interface DetachController {
   join: (participant: DetachParticipant) => void
+  /**
+   * Mark one entry detached outside a computer-wide disconnect: a spawn whose
+   * request was refused for want of a socket. The computer-wide detach already
+   * covers every entry it can see; this covers one registered after it.
+   */
+  detach: DetachEntry
 }
 
 /** Live controllers, keyed by gateway then by kind. Weak so a discarded hub's go too. */
@@ -302,12 +407,13 @@ const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachControll
 
 function joinDetachController<E extends DetachableEntry>(
   options: DetachControllerOptions<E>
-): void {
-  const { gateway, sessions, kind, finalize, resume } = options
+): DetachEntry {
+  const { gateway, sessions, kind, finalize, resume, settleExited } = options
   const participant = {
     sessions,
     finalize,
-    resume
+    resume,
+    settleExited
   } as unknown as DetachParticipant
 
   let byKind = detachControllers.get(gateway)
@@ -318,17 +424,18 @@ function joinDetachController<E extends DetachableEntry>(
   const existing = byKind.get(kind)
   if (existing) {
     existing.join(participant)
-    return
+    return existing.detach
   }
   const controller = createDetachController(options)
   byKind.set(kind, controller)
   controller.join(participant)
+  return controller.detach
 }
 
 function createDetachController<E extends DetachableEntry>(
   options: DetachControllerOptions<E>
 ): DetachController {
-  const { gateway, kind, listMethod, killMethod, parseListedSessionIds } = options
+  const { gateway, kind, listMethod, killMethod, parseList } = options
   const participants: DetachParticipant[] = []
   /**
    * Epoch seen on each computer's LAST connect — the baseline a reconnect is
@@ -469,9 +576,9 @@ function createDetachController<E extends DetachableEntry>(
 
     // Same process. It is the authority on what it still holds; the hub's
     // registry is only a belief about that.
-    let listed: string[] | null = null
+    let listed: ComputerSessionList | null = null
     try {
-      listed = parseListedSessionIds(await gateway.request(computerId, listMethod, {}))
+      listed = parseList(await gateway.request(computerId, listMethod, {}))
     } catch {
       listed = null
     }
@@ -482,29 +589,72 @@ function createDetachController<E extends DetachableEntry>(
       return
     }
 
-    const live = new Set(listed)
+    // Re-read rather than reuse the snapshot: the list was an await, and an entry
+    // closed meanwhile (disposed) must not be resumed or re-spawned.
+    const stillDetached = detached.filter((o) => !o.entry.disposed && o.entry.detached)
     const resumed: Owned[] = []
+    const exited: Owned[] = []
+    const resent: Owned[] = []
     const ended: Owned[] = []
-    for (const o of detached) {
-      if (live.has(o.entry.sessionId)) {
-        o.owner.resume(o.entry)
+    for (const o of stillDetached) {
+      const running = listed.live.get(o.entry.sessionId)
+      if (running && sameAttempt(o.entry, running)) {
+        o.owner.resume(o.entry, running)
         resumed.push(o)
-      } else {
-        o.owner.finalize(o.entry, 'exited-while-detached')
-        ended.push(o)
+        continue
       }
+      const reaped = listed.exited.get(o.entry.sessionId)
+      if (reaped && sameAttempt(o.entry, reaped)) {
+        o.owner.settleExited(o.entry, reaped)
+        exited.push(o)
+        continue
+      }
+      const pending = o.entry.pendingSpawn
+      if (pending) {
+        // Neither running nor reaped: the request never reached the computer. Send
+        // it again — the same attempt, so a copy that did land is answered with
+        // the process it already started rather than a second agent.
+        o.entry.detached = false
+        pending.resend()
+        resent.push(o)
+        continue
+      }
+      o.owner.finalize(o.entry, 'exited-while-detached')
+      ended.push(o)
     }
     // Sessions the computer holds that the hub no longer tracks — e.g. dropped by
-    // an earlier grace expiry. Nothing will ever attach to them again, so end
-    // them here rather than leaving an agent running against no task.
-    const tracked = new Set(liveEntries(computerId).map((o) => o.entry.sessionId))
-    for (const sessionId of live) {
-      if (tracked.has(sessionId)) continue
+    // an earlier grace expiry, or closed while the computer was unreachable.
+    // Nothing will ever attach to them again, so end them here rather than
+    // leaving an agent running against no task.
+    //
+    // "Tracked" means tracked as THIS attempt: a session id can be held by an
+    // older attempt's process that nothing owns. Exception: an id whose spawn was
+    // just re-sent is never swept — the computer replaces the old process with the
+    // new one, and a kill for that id would land after the spawn and end it.
+    const tracked = liveEntries(computerId)
+    for (const [sessionId, running] of listed.live) {
+      const owned = tracked.some(
+        (o) =>
+          o.entry.sessionId === sessionId &&
+          (o.entry.pendingSpawn !== undefined || sameAttempt(o.entry, running))
+      )
+      if (owned) continue
       void gateway.request(computerId, killMethod, { sessionId }).catch(noop)
     }
     if (resumed.length > 0) {
       record('computer.sessions_reattached', 'info', resumed, computerId, {
         message: `Computer reconnected — ${String(resumed.length)} ${kind} session(s) reattached.`
+      })
+    }
+    if (exited.length > 0) {
+      // INFO: these ended on their own, and the computer kept their real exits.
+      record('computer.sessions_exited_while_detached', 'info', exited, computerId, {
+        message: `${String(exited.length)} ${kind} session(s) exited while the computer was unreachable; exits reported by the computer.`
+      })
+    }
+    if (resent.length > 0) {
+      record('computer.spawns_resent', 'info', resent, computerId, {
+        message: `${String(resent.length)} ${kind} spawn(s) lost with the connection were sent again.`
       })
     }
     if (ended.length > 0) {
@@ -523,7 +673,13 @@ function createDetachController<E extends DetachableEntry>(
   })
 
   return {
-    join: (participant) => participants.push(participant)
+    join: (participant) => participants.push(participant),
+    detach: (entry) => {
+      entry.detached = true
+      // Bound the wait like any detached session — but never RESTART a running
+      // window, which would let a flapping connection postpone it forever.
+      if (!graceTimers.has(entry.computerId)) armGrace(entry.computerId)
+    }
   }
 }
 
@@ -540,10 +696,13 @@ export interface RoutingPtyBackendOptions {
   gate?: ComputerWorkGate
 }
 
-interface PtyEntry {
+interface PtyEntry extends DetachableEntry {
   key: string
-  computerId: string
-  sessionId: string
+  /**
+   * Ask the computer to start this session next if its spawn is still waiting
+   * for an agent-start slot. Set only for a spawn sent with `admission`.
+   */
+  prioritize?: () => void
   /**
    * Highest contiguously-delivered seq. Starts at **-1**, not 0: the computer's
    * `RingBuffer` numbers its FIRST chunk seq 0 (`nextSeq = 0`), and `ingest`
@@ -657,11 +816,32 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     drain(entry)
   }
 
-  function finalize(entry: PtyEntry, exitCode: number | null, signal: string | null): void {
+  /** Deliver everything still parked, in seq order, gaps and all — the session is
+   *  ending, so there is no later frame left to wait for. */
+  function flushPending(entry: PtyEntry): void {
+    for (const seq of [...entry.pending.keys()].sort((a, b) => a - b)) {
+      if (seq <= entry.lastSeq) continue
+      entry.lastSeq = seq
+      entry.dataEmitter.emit(entry.pending.get(seq)!)
+    }
+    entry.pending.clear()
+  }
+
+  function finalize(
+    entry: PtyEntry,
+    exitCode: number | null,
+    signal: string | null,
+    reason?: string
+  ): void {
     if (entry.disposed) return
     entry.disposed = true
+    // A spawn ended while its outcome was still unknown (computer restarted, grace
+    // expired) leaves `whenSpawned` unsettled ON PURPOSE: this exit is the verdict,
+    // and settling it either way makes pty-manager overwrite the exit with a
+    // synthetic -1 ("refused" / "confirmed without a pid").
+    entry.pendingSpawn = undefined
     sessions.delete(entry.key)
-    entry.exitEmitter.emit({ exitCode, signal: signal ?? undefined })
+    entry.exitEmitter.emit({ exitCode, signal: signal ?? undefined, ...(reason ? { reason } : {}) })
   }
 
   gateway.events.on('pty.data', (payload) => {
@@ -670,26 +850,41 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   })
   gateway.events.on('pty.exit', (payload) => {
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
-    if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
+    if (entry) finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
   })
-  joinDetachController<PtyEntry>({
+  const detach = joinDetachController<PtyEntry>({
     gateway,
     sessions,
     kind: 'terminal',
     listMethod: HubToComputerMethods.ptyList,
     killMethod: HubToComputerMethods.ptyKill,
-    parseListedSessionIds: (raw) => {
+    parseList: (raw) => {
       const parsed = ptyListResultSchema.safeParse(raw)
-      return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
+      return parsed.success ? toSessionList(parsed.data) : null
     },
-    finalize: (entry, reason) => finalize(entry, null, reason),
-    resume: (entry) => {
+    finalize: (entry, reason) => finalize(entry, null, null, reason),
+    resume: (entry, listed) => {
       entry.detached = false
+      entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
       // Clear the backfill latch: the gap that matters now is whatever the
       // session emitted while the hub was away, which is a different gap from
       // any this entry had already given up on.
       entry.backfilledAt = null
       void backfill(entry)
+    },
+    settleExited: (entry, exit) => {
+      // Confirm FIRST, with the pid it really ran under: a spawn left unsettled
+      // reads downstream as refused, and that verdict would overwrite the real
+      // exit below with a synthetic one.
+      entry.pendingSpawn?.confirm(exit.pid ?? null, exit.spawnId !== undefined)
+      entry.detached = false
+      void (async () => {
+        // The computer keeps a reaped session's output with its tombstone; that
+        // tail (often the line saying WHY it exited) lands before the exit does.
+        await backfill(entry)
+        flushPending(entry)
+        finalize(entry, exit.exitCode, exit.signal, exit.reason)
+      })()
     }
   })
 
@@ -740,11 +935,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       },
       process: processName,
       onData: (listener: (data: string) => void): ExecDisposable => dataEmitter.on(listener),
-      onExit: (cb: (e: { exitCode: number; signal?: number }) => void): ExecDisposable =>
+      onExit: (
+        cb: (e: { exitCode: number; signal?: number; reason?: string }) => void
+      ): ExecDisposable =>
         exitEmitter.on((event) =>
           cb({
             exitCode: event.exitCode ?? 1,
-            signal: typeof event.signal === 'number' ? event.signal : undefined
+            signal: typeof event.signal === 'number' ? event.signal : undefined,
+            ...(event.reason ? { reason: event.reason } : {})
           })
         ),
       write: (data: string): void => {
@@ -754,6 +952,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         void send(HubToComputerMethods.ptyResize, { sessionId, cols, rows }).catch(noop)
       },
       kill: (signal?: string): void => {
+        if (entry.detached) {
+          // Unreachable: the kill cannot be delivered, and the session must not be
+          // resumed or re-spawned on reconnect either. So stop tracking it — the
+          // reconnect sweep then ends the computer's copy as an orphan. Emits
+          // nothing: the caller ending it already owns reporting that.
+          entry.disposed = true
+          entry.pendingSpawn = undefined
+          sessions.delete(entry.key)
+          return
+        }
         void send(HubToComputerMethods.ptyKill, {
           sessionId,
           ...(signal ? { signal } : {})
@@ -781,8 +989,19 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     ) {
       // No session entry: a warm session has no hub-side identity yet, and the
       // computer streams nothing for it. It becomes routable at `adopt`.
-      const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmSpawn, spec)
+      //
+      // Timeout 0 (none): the computer starts a warm agent only once no task's
+      // agent is starting (its admission queue's `warm` lane), which after a
+      // workspace restore can take a while. A timeout would abandon a warm agent
+      // the computer is about to start; a lost connection still rejects.
+      const res = await gateway.request(computerId, HubToComputerMethods.ptyWarmSpawn, spec, 0)
       return ptyWarmSpawnResultSchema.parse(res)
+    },
+
+    prioritize(sessionId: string) {
+      for (const entry of sessions.values()) {
+        if (entry.sessionId === sessionId && !entry.disposed) entry.prioritize?.()
+      }
     },
 
     async warmKill(computerId: string, warmId: string) {
@@ -814,7 +1033,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         drain(entry)
         return handle
       } catch (err) {
-        finalize(entry, null, 'adopt-failed')
+        finalize(entry, null, null, 'adopt-failed')
         throw err
       }
     },
@@ -844,42 +1063,100 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         admitted
       )
 
+      // One key per spawn ATTEMPT, re-sent unchanged if the reply is lost — see
+      // `spawnIdField` in frames.ts.
+      const spawnId = randomUUID()
+      entry.spawnId = spawnId
+      // The startup deadline travels with the spawn: the computer sees the output
+      // directly, so only it can tell a silent session from one whose output is
+      // merely still in flight to a stalled hub.
+      const requestsDeadline = spec.startupTimeoutMs !== undefined
+      const params = {
+        sessionId: spec.sessionId,
+        spawnId,
+        ...(requestsDeadline ? { startupTimeoutMs: spec.startupTimeoutMs } : {}),
+        // An agent start waits on the computer for an admission slot; the reply
+        // (and the computer's startup deadline) come when it has really started.
+        ...(spec.admission ? { admission: spec.admission } : {}),
+        command: spec.file,
+        args: spec.args,
+        // Send cwd only when there IS one — an empty string used to travel as a
+        // "path" and land the agent in the computer's launch directory. Absent,
+        // the computer resolves the project's own checkout from `projectId`,
+        // which is the only side that knows where it is.
+        ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
+        ...(spec.projectId ? { projectId: spec.projectId } : {}),
+        env: spec.options.env,
+        cols: spec.options.cols,
+        rows: spec.options.rows
+      }
+      // Timeout 0 (none): latency here is unbounded in practice — a computer
+      // restoring dozens of sessions at once, or one across a real network — and
+      // whether the computer is still there is the heartbeat's question, not this
+      // request's. A per-request deadline turned a slow spawn into a refused one.
+      const requestSpawn = () =>
+        gateway.request(computerId, HubToComputerMethods.ptySpawn, params, 0)
+      if (spec.admission) {
+        const requestPrioritize = () =>
+          gateway.request(computerId, HubToComputerMethods.ptyPrioritize, {
+            sessionId: spec.sessionId
+          })
+        // Behind the gate like the spawn itself, so it can never overtake it. A
+        // computer that predates admission answers `unimplemented`: nothing to do.
+        entry.prioritize = () => {
+          void (admitted ? admitted.then(requestPrioritize) : requestPrioritize()).catch(noop)
+        }
+      }
+
       // Handed to the caller as `whenSpawned`: the round-trip IS the readiness
       // signal, so anything that needs to know the session really started awaits
-      // this rather than sampling `pid` on a timer. Latency here is unbounded in
-      // practice — a computer restoring a dozen sessions at once, or one across a
-      // real network — and no hub-side deadline can second-guess it correctly.
-      const requestSpawn = () =>
-        gateway.request(computerId, HubToComputerMethods.ptySpawn, {
-          sessionId: spec.sessionId,
-          command: spec.file,
-          args: spec.args,
-          // Send cwd only when there IS one — an empty string used to travel as a
-          // "path" and land the agent in the computer's launch directory. Absent,
-          // the computer resolves the project's own checkout from `projectId`,
-          // which is the only side that knows where it is.
-          ...(spec.options.cwd ? { cwd: spec.options.cwd } : {}),
-          ...(spec.projectId ? { projectId: spec.projectId } : {}),
-          env: spec.options.env,
-          cols: spec.options.cols,
-          rows: spec.options.rows
-        })
-      const whenSpawned = (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
-        (res) => {
-          const parsed = ptySpawnResultSchema.safeParse(res)
-          const spawnedPid = parsed.success ? parsed.data.pid : null
+      // this rather than sampling `pid` on a timer.
+      const whenSpawned = new Promise<PtySpawnConfirmation>((resolve, reject) => {
+        const confirm = (spawnedPid: number | null, ownsStartupDeadline: boolean): void => {
+          entry.pendingSpawn = undefined
+          // Started: nothing left to move up the admission queue.
+          entry.prioritize = undefined
           setPid(spawnedPid)
-          return { pid: spawnedPid }
-        },
-        (err: unknown) => {
-          // The computer refused the spawn: finalize (which emits the exit through
-          // the buffering emitter, so a not-yet-subscribed caller still gets it)
-          // AND propagate, so a caller awaiting confirmation sees the failure
-          // rather than a promise that never settles.
-          finalize(entry, null, 'spawn-failed')
-          throw err
+          resolve({ pid: spawnedPid, ownsStartupDeadline })
         }
-      )
+        const attempt = (): void => {
+          void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
+            (res) => {
+              const parsed = ptySpawnResultSchema.safeParse(res)
+              confirm(
+                parsed.success ? parsed.data.pid : null,
+                requestsDeadline && parsed.success && parsed.data.startupDeadline === true
+              )
+            },
+            (err: unknown) => {
+              // Closed while its outcome was unknown: nothing tracks it any more.
+              if (entry.disposed) return
+              if (isConnectionLoss(err)) {
+                // No verdict — the computer may already be running it. Keep the
+                // session and settle it on reconnect (detach controller): resume
+                // if the computer holds it, report its real exit if it reaped it,
+                // send it again if it never arrived. Deliberately NOT a timer.
+                entry.pendingSpawn = {
+                  resend: attempt,
+                  confirm: (listedPid, listedBySpawnId) =>
+                    confirm(listedPid, requestsDeadline && listedBySpawnId)
+                }
+                // A disconnect already detached every entry it could see; this
+                // one was sent after it, to a computer with no socket.
+                if (!entry.detached) detach(entry)
+                return
+              }
+              // The computer refused the spawn: finalize (which emits the exit
+              // through the buffering emitter, so a not-yet-subscribed caller still
+              // gets it) AND propagate, so a caller awaiting confirmation sees the
+              // failure rather than a promise that never settles.
+              finalize(entry, null, null, 'spawn-failed')
+              reject(err)
+            }
+          )
+        }
+        attempt()
+      })
       // Keep the rejection handled here too — `whenSpawned` is optional in the
       // seam, so a backend consumer that ignores it must not trip an unhandled
       // rejection. Attaching this does not consume it for anyone else.
@@ -916,10 +1193,8 @@ export interface RoutingProcessBackendOptions {
   buildSpawnParams?: (spec: ProcSpawnSpec) => Record<string, unknown>
 }
 
-interface ProcEntry {
+interface ProcEntry extends DetachableEntry {
   key: string
-  computerId: string
-  sessionId: string
   /** Highest contiguously-delivered stdout seq. Starts at **-1** for the same
    *  reason as {@link PtyEntry.lastSeq}: the computer's RingBuffer numbers its
    *  FIRST chunk 0, and `ingest` drops `seq <= lastSeq`, so a 0 here would
@@ -958,8 +1233,19 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
   function finalize(entry: ProcEntry, code: number | null, signal: string | null): void {
     if (entry.disposed) return
     entry.disposed = true
+    entry.pendingSpawn = undefined
     sessions.delete(entry.key)
     entry.exitEmitter.emit({ code, signal })
+  }
+
+  /** Deliver every parked stdout frame in seq order — the process is ending. */
+  function flushPending(entry: ProcEntry): void {
+    for (const seq of [...entry.pending.keys()].sort((a, b) => a - b)) {
+      if (seq <= entry.lastSeq) continue
+      entry.lastSeq = seq
+      entry.dataEmitter.emit({ chunk: entry.pending.get(seq)!, stream: 'stdout' })
+    }
+    entry.pending.clear()
   }
 
   function drain(entry: ProcEntry): void {
@@ -1026,21 +1312,31 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (entry) finalize(entry, payload.exitCode, payload.signal ?? null)
   })
-  joinDetachController<ProcEntry>({
+  const detach = joinDetachController<ProcEntry>({
     gateway,
     sessions,
     kind: 'process',
     listMethod: HubToComputerMethods.procList,
     killMethod: HubToComputerMethods.procKill,
-    parseListedSessionIds: (raw) => {
+    parseList: (raw) => {
       const parsed = procListResultSchema.safeParse(raw)
-      return parsed.success ? parsed.data.sessions.map((s) => s.sessionId) : null
+      return parsed.success ? toSessionList(parsed.data) : null
     },
     finalize: (entry, reason) => finalize(entry, null, reason),
-    resume: (entry) => {
+    resume: (entry, listed) => {
       entry.detached = false
+      entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
       entry.backfilledAt = null
       void backfill(entry)
+    },
+    settleExited: (entry, exit) => {
+      entry.pendingSpawn?.confirm(exit.pid ?? null, exit.spawnId !== undefined)
+      entry.detached = false
+      void (async () => {
+        await backfill(entry)
+        flushPending(entry)
+        finalize(entry, exit.exitCode, exit.signal)
+      })()
     }
   })
 
@@ -1087,6 +1383,15 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
             .catch(noop)
         },
         kill: (signal?: string): void => {
+          if (entry.detached) {
+            // Same rule as the pty handle: undeliverable now, and must not be
+            // resumed or re-spawned later — stop tracking, the reconnect sweep
+            // ends the computer's copy as an orphan.
+            entry.disposed = true
+            entry.pendingSpawn = undefined
+            sessions.delete(entry.key)
+            return
+          }
           void gateway
             .request(computerId, HubToComputerMethods.procKill, {
               sessionId: spec.id,
@@ -1103,30 +1408,53 @@ export function createRoutingProcessBackend(options: RoutingProcessBackendOption
       // same hub-local assumption that makes `whichBinary` wrong for a routed
       // spawn). The computer wraps with ITS own shell. Overridable via
       // `buildSpawnParams` (the chat backend needs literal argv).
-      void gateway
-        .request(
-          computerId,
-          HubToComputerMethods.procSpawn,
-          options.buildSpawnParams?.(spec) ?? {
-            sessionId: spec.id,
-            command: spec.command,
-            shell: true,
-            // Same rule as pty.spawn: an absent cwd lets the computer resolve the
-            // project's checkout, rather than an empty string travelling as a path.
-            ...(spec.cwd ? { cwd: spec.cwd } : {}),
-            ...(spec.projectId ? { projectId: spec.projectId } : {}),
-            env: spec.env
-          }
-        )
-        .then(
+      const spawnId = randomUUID()
+      entry.spawnId = spawnId
+      const params = {
+        ...(options.buildSpawnParams?.(spec) ?? {
+          sessionId: spec.id,
+          command: spec.command,
+          shell: true,
+          // Same rule as pty.spawn: an absent cwd lets the computer resolve the
+          // project's checkout, rather than an empty string travelling as a path.
+          ...(spec.cwd ? { cwd: spec.cwd } : {}),
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
+          env: spec.env
+        }),
+        // After the override: the idempotency key is the transport's, not the
+        // caller's — see `spawnIdField` in frames.ts.
+        spawnId
+      }
+      const setSpawnedPid = (next: number | null): void => {
+        entry.pendingSpawn = undefined
+        // `pid` is nullable on the wire (immediate spawn failure); the handle
+        // exposes `number | undefined`, so map null → undefined.
+        pid = next ?? undefined
+      }
+      // No request timeout, and a lost reply is UNKNOWN rather than failed — the
+      // same rules and reasons as the pty spawn above.
+      const attempt = (): void => {
+        void gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0).then(
           (res) => {
             const parsed = procSpawnResultSchema.safeParse(res)
-            // `pid` is nullable on the wire (immediate spawn failure); the handle
-            // exposes `number | undefined`, so map null → undefined.
-            if (parsed.success) pid = parsed.data.pid ?? undefined
+            if (parsed.success) setSpawnedPid(parsed.data.pid)
+            else entry.pendingSpawn = undefined
           },
-          () => finalize(entry, null, 'spawn-failed')
+          (err: unknown) => {
+            if (entry.disposed) return
+            if (isConnectionLoss(err)) {
+              entry.pendingSpawn = {
+                resend: attempt,
+                confirm: (listedPid) => setSpawnedPid(listedPid)
+              }
+              if (!entry.detached) detach(entry)
+              return
+            }
+            finalize(entry, null, 'spawn-failed')
+          }
         )
+      }
+      attempt()
 
       return handle
     },

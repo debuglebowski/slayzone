@@ -280,4 +280,20 @@ describe('createSuspenseCache', () => {
     expect(screen.getByTestId('result').textContent).toBe('recovered')
     expect(callCount).toBe(2)
   })
+
+  it('prefetch resolves once the entry has settled — never rejects', async () => {
+    let resolveOk!: (v: string) => void
+    const cache = createSuspenseCache({
+      ok: () => new Promise<string>((r) => (resolveOk = r)),
+      bad: () => Promise.reject(new Error('boom'))
+    })
+    let settled = false
+    const p = cache.prefetch('ok').then(() => (settled = true))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    resolveOk('v')
+    await p
+    expect(settled).toBe(true)
+    await expect(cache.prefetch('bad')).resolves.toBeUndefined()
+  })
 })

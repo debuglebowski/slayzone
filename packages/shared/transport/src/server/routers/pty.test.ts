@@ -12,7 +12,8 @@
  * fine at all for a `read`-scoped web session (see scopes.ts). The other ~48
  * procedures on this router are covered by the terminal domain's own tests
  * (pty-manager.ts etc.) and by scopes.test.ts's exhaustiveness check — this
- * file does not attempt a full router audit.
+ * file does not attempt a full router audit. `attach` is here because it is
+ * pure router composition (exists + getState + getBufferSince in one call).
  */
 import { test, expect, describe } from '../../../../test-utils/ipc-harness.js'
 import { TypedEmitter } from '@slayzone/platform/events'
@@ -65,5 +66,29 @@ await describe('pty router', () => {
     events.emit('data', 'sess-a', 'x', 1)
     sub.unsubscribe()
     expect(got).toEqual([])
+  })
+
+  test('attach answers exists + state + buffer in one call (live and missing session)', async () => {
+    const live = { chunks: [{ seq: 4, data: 'hi' }], currentSeq: 4, prelude: '' }
+    setPtyDeps({
+      ops: {
+        ptyExists: (id: string) => id === 'live',
+        ptyGetState: (id: string) => (id === 'live' ? 'running' : null),
+        ptyGetBufferSince: (id: string, after: number) =>
+          id === 'live' ? { ...live, afterSeq: after } : null
+      } as unknown as PtyDeps['ops'],
+      events
+    } as unknown as PtyDeps)
+    const caller = ptyRouter.createCaller(ctx)
+    expect(await caller.attach({ sessionId: 'live', afterSeq: 2 })).toEqual({
+      exists: true,
+      state: 'running',
+      buffer: { ...live, afterSeq: 2 }
+    })
+    expect(await caller.attach({ sessionId: 'gone', afterSeq: -1 })).toEqual({
+      exists: false,
+      state: null,
+      buffer: null
+    })
   })
 })

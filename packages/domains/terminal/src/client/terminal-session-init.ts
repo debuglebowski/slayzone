@@ -13,7 +13,8 @@ import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scr
 import {
   captureDowngradeSnapshot,
   reportDowngradeSnapshot,
-  reportRendererOk
+  reportRendererOk,
+  shouldReportDowngrade
 } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
 import { startMountTimeline } from './mount-timeline'
@@ -33,6 +34,12 @@ import {
   getLiveTerminals
 } from './terminal-cache'
 import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
+import { isParked, parkBeforeOpen, parkRenderer, unparkToDom, wakeRenderer } from './renderer-park'
+import { isLiveWebglAddon, scheduleWebglBudget, trackWebglAddon } from './webgl-budget'
+import { acquireInitSlot } from './terminal-init-scheduler'
+import { touchTerminalMru } from './terminal-mru'
+import { isMainThreadSettled, overlapsLongTask } from './main-thread-jank'
+import { attachPty } from './pty-attach'
 import type { TerminalProps } from './Terminal.types'
 
 // Reopen respawns the CLI with --resume; it re-streams the transcript over the
@@ -77,10 +84,19 @@ export interface TerminalInitContext {
   webglRafIdRef: RefObject<number | null>
   frameTimeStopRef: RefObject<(() => void) | null>
   scrambleProbeRef: RefObject<ScrambleProbe | null>
+  /**
+   * Set by init: give this terminal its on-screen renderer (WebGL when allowed,
+   * else xterm's DOM renderer). Called by the component when the terminal is
+   * revealed — `sync` loads before the next paint so the reveal frame shows
+   * content. Null until init has a terminal.
+   */
+  ensureRendererRef: RefObject<((opts: { sync: boolean }) => void) | null>
   initializedRef: RefObject<boolean>
   lastRenderedSeqRef: RefObject<number>
   resizeDebounceRef: RefObject<ReturnType<typeof setTimeout> | null>
   isResumingRef: RefObject<boolean>
+  /** Is this terminal's tab on screen? Read at create: its agent then starts first. */
+  isActiveRef: RefObject<boolean>
   resumeCapTimerRef: RefObject<ReturnType<typeof setTimeout> | null>
   hasCalledFirstInputRef: RefObject<boolean>
   lastActivityTimeRef: RefObject<number>
@@ -130,10 +146,12 @@ export async function initTerminalSession(
     webglRafIdRef,
     frameTimeStopRef,
     scrambleProbeRef,
+    ensureRendererRef,
     initializedRef,
     lastRenderedSeqRef,
     resizeDebounceRef,
     isResumingRef,
+    isActiveRef,
     resumeCapTimerRef,
     hasCalledFirstInputRef,
     lastActivityTimeRef,
@@ -166,6 +184,8 @@ export async function initTerminalSession(
   setIsInitializing(true)
   setInitError(null)
   let didInit = false
+  // Releases this init's turn in the hidden-terminal queue (idempotent).
+  let releaseSlot: () => void = () => {}
   const timeline = startMountTimeline(sessionId, mode)
 
   try {
@@ -205,7 +225,7 @@ export async function initTerminalSession(
       // fires onDowngrade BEFORE dispose for exactly this reason).
       const liveAddon = webglAddonRef.current
       const liveTerm = terminalRef.current
-      if (liveAddon && liveTerm) {
+      if (liveAddon && liveTerm && shouldReportDowngrade(sessionId, reason)) {
         try {
           const snapshot = captureDowngradeSnapshot(
             liveAddon,
@@ -271,62 +291,162 @@ export async function initTerminalSession(
         onDowngrade: handleDowngrade,
         sessionId
       }
-      frameTimeStopRef.current = monitorFrameTime(shared)
+      frameTimeStopRef.current = monitorFrameTime({
+        ...shared,
+        // The heartbeat measures rAF cadence, which is the WHOLE main thread's:
+        // only sample while this terminal is on screen in a visible document
+        // after boot has settled, and drop frames a long task overlapped — else
+        // a busy boot reads as a slow GPU and latches the session to DOM.
+        canSample: () =>
+          isActiveRef.current &&
+          terminalRef.current === terminalInst &&
+          document.visibilityState === 'visible' &&
+          isMainThreadSettled(),
+        isJanky: overlapsLongTask,
+        verdictDelayMs: 250
+      })
       scrambleProbeRef.current = createScrambleProbe(shared)
     }
 
+    // A WebGL renderer is used only while worth it: never for a terminal that
+    // has not been on screen, and only the most recently used few stay live
+    // (webgl-budget.ts). Otherwise a terminal is parked (renderer-park.ts) or,
+    // when WebGL is off for it, on xterm's DOM renderer.
+    const webglEligible = (): boolean =>
+      !forceCompatRef.current && !downgradedSessions.has(sessionId) && !isWebglDisabled()
+
+    // Budget eviction of an off-screen renderer: dispose it and park the
+    // terminal; its next reveal loads WebGL again (ensureRenderer).
+    const evictWebgl = (addon: WebglAddon, terminalInst: XTerm): void => {
+      if (webglAddonRef.current === addon) {
+        frameTimeStopRef.current?.()
+        frameTimeStopRef.current = null
+        scrambleProbeRef.current?.dispose()
+        scrambleProbeRef.current = null
+        webglAddonRef.current = null
+      }
+      try {
+        addon.dispose()
+      } catch {
+        /* already disposed */
+      }
+      parkRenderer(terminalInst)
+    }
+
+    const trackAddon = (addon: WebglAddon, terminalInst: XTerm): void => {
+      trackWebglAddon({
+        sessionId,
+        addon,
+        // Refs of THIS component: once it unmounts (terminal cached) or a newer
+        // component re-adopts the addon (re-tracked there), this reads false.
+        isOnScreen: () => isActiveRef.current && terminalRef.current === terminalInst,
+        evict: () => evictWebgl(addon, terminalInst)
+      })
+      scheduleWebglBudget()
+    }
+
+    // Load the WebGL renderer now (sync) — then install monitors, or hand a
+    // parked terminal back to the DOM renderer when WebGL did not come up.
+    const loadWebglNow = (terminalInst: XTerm): void => {
+      loadWebglRenderer({
+        terminal: terminalInst,
+        // `preserveDrawingBuffer: true` keeps the WebGL back buffer
+        // valid for readback between rAFs. Required by the Signal C
+        // scramble probe in scramble-detector.ts — without it,
+        // `gl.readPixels` outside the draw frame returns zeros. Costs
+        // a small amount of GPU memory + disables a compositor fast
+        // path; trade is necessary because the CPU-side atlas canvas
+        // is not where scramble manifests.
+        createAddon: () => new WebglAddon({ preserveDrawingBuffer: true }),
+        isAborted: () => signal.aborted,
+        isCurrentTerminal: () => terminalRef.current === terminalInst,
+        isWebglDisabled,
+        onWebglDisabled: markWebglDisabled,
+        getActiveAddon: () => webglAddonRef.current,
+        setActiveAddon: (a) => {
+          webglAddonRef.current = a
+        },
+        requestFrame: (cb) => requestAnimationFrame(cb),
+        requestTimeout: (cb, ms) => window.setTimeout(cb, ms),
+        onDowngrade: handleDowngrade,
+        sessionId,
+        // The startup-window corrections repack the SHARED atlas, so a
+        // terminal coming up scrambles panes that are already running
+        // unless they also get a frame. See correctAtlas.
+        getLiveTerminals
+      })
+      const addon = webglAddonRef.current
+      if (addon && terminalRef.current === terminalInst) {
+        if (!isLiveWebglAddon(addon)) trackAddon(addon, terminalInst)
+        installRendererMonitors(addon, terminalInst)
+        // Emit the downgrade-rate denominator once per session: WebGL
+        // came up clean. Skipped if this session already downgraded.
+        if (!rendererOkReportedSessions.has(sessionId) && !downgradedSessions.has(sessionId)) {
+          rendererOkReportedSessions.add(sessionId)
+          reportRendererOk(terminalInst, sessionId, mode, addon)
+        }
+      } else if (isParked(terminalInst)) {
+        // WebGL unavailable after all (construction failed / disabled since
+        // parking): a parked terminal draws nothing, so give it the DOM renderer.
+        unparkToDom(terminalInst)
+      }
+    }
+
+    // Deferred to the next animation frame so layout (post open()+fit()) has
+    // committed before the addon rasterizes its glyph atlas.
     const triggerWebglLoad = (): void => {
       const terminalInst = terminalRef.current
       if (!terminalInst) return
-      if (forceCompatRef.current) return
-      if (downgradedSessions.has(sessionId)) return
+      if (!webglEligible()) {
+        if (isParked(terminalInst)) unparkToDom(terminalInst)
+        return
+      }
       if (webglRafIdRef.current !== null) {
         cancelAnimationFrame(webglRafIdRef.current)
       }
       webglRafIdRef.current = requestAnimationFrame(() => {
         webglRafIdRef.current = null
-        loadWebglRenderer({
-          terminal: terminalInst,
-          // `preserveDrawingBuffer: true` keeps the WebGL back buffer
-          // valid for readback between rAFs. Required by the Signal C
-          // scramble probe in scramble-detector.ts — without it,
-          // `gl.readPixels` outside the draw frame returns zeros. Costs
-          // a small amount of GPU memory + disables a compositor fast
-          // path; trade is necessary because the CPU-side atlas canvas
-          // is not where scramble manifests.
-          createAddon: () => new WebglAddon({ preserveDrawingBuffer: true }),
-          isAborted: () => signal.aborted,
-          isCurrentTerminal: () => terminalRef.current === terminalInst,
-          isWebglDisabled,
-          onWebglDisabled: markWebglDisabled,
-          getActiveAddon: () => webglAddonRef.current,
-          setActiveAddon: (a) => {
-            webglAddonRef.current = a
-          },
-          requestFrame: (cb) => requestAnimationFrame(cb),
-          requestTimeout: (cb, ms) => window.setTimeout(cb, ms),
-          onDowngrade: handleDowngrade,
-          sessionId,
-          // The startup-window corrections repack the SHARED atlas, so a
-          // terminal coming up scrambles panes that are already running
-          // unless they also get a frame. See correctAtlas.
-          getLiveTerminals
-        })
-        const addon = webglAddonRef.current
-        if (addon) {
-          installRendererMonitors(addon, terminalInst)
-          // Emit the downgrade-rate denominator once per session: WebGL
-          // came up clean. Skipped if this session already downgraded.
-          if (
-            !rendererOkReportedSessions.has(sessionId) &&
-            !downgradedSessions.has(sessionId)
-          ) {
-            rendererOkReportedSessions.add(sessionId)
-            reportRendererOk(terminalInst, sessionId, mode)
-          }
-        }
+        loadWebglNow(terminalInst)
       })
     }
+
+    // On-screen renderer for this terminal (see ensureRendererRef). No-op while
+    // a live WebGL renderer is attached.
+    const ensureRenderer = ({ sync }: { sync: boolean }): void => {
+      const terminalInst = terminalRef.current
+      if (!terminalInst || signal.aborted) return
+      touchTerminalMru(sessionId)
+      if (isLiveWebglAddon(webglAddonRef.current)) return
+      if (!webglEligible()) {
+        if (isParked(terminalInst)) {
+          unparkToDom(terminalInst)
+          if (sync) wakeRenderer(terminalInst)
+        }
+        return
+      }
+      if (!sync) {
+        triggerWebglLoad()
+        return
+      }
+      if (webglRafIdRef.current !== null) {
+        cancelAnimationFrame(webglRafIdRef.current)
+        webglRafIdRef.current = null
+      }
+      loadWebglNow(terminalInst)
+      // The new renderer has drawn nothing yet and xterm still thinks the pane
+      // is off screen (its IntersectionObserver reports after the next paint):
+      // repaint in the coming frame instead, so the reveal never shows a blank.
+      wakeRenderer(terminalInst)
+    }
+
+    // DOM-heavy section (open/fit/append, style injection) — take a turn if
+    // this terminal is not on screen; see terminal-init-scheduler.ts.
+    const slot = await acquireInitSlot(sessionId, {
+      immediate: isActiveRef.current,
+      signal
+    })
+    releaseSlot = slot.release
+    if (signal.aborted) return
 
     // Check if we have a cached terminal for this task
     const cached = getTerminal(sessionId)
@@ -350,7 +470,11 @@ export async function initTerminalSession(
         serializeAddonRef.current = cached.serializeAddon
         searchAddonRef.current = cached.searchAddon
         setSearchAddon(cached.searchAddon)
-        webglAddonRef.current = cached.webglAddon ?? null
+        // A cached addon may have been evicted by the WebGL budget (or disposed
+        // by a downgrade) while detached — only a live one is re-adopted.
+        const cachedWebgl = isLiveWebglAddon(cached.webglAddon) ? (cached.webglAddon ?? null) : null
+        webglAddonRef.current = cachedWebgl
+        ensureRendererRef.current = ensureRenderer
         registerActiveAddon(sessionId, cached.serializeAddon)
         registerActiveTerminal(sessionId, cached.terminal)
         if (cached.lastRenderedSeq !== undefined) {
@@ -378,7 +502,7 @@ export async function initTerminalSession(
         // The WebGL atlas was built under the previous container geometry, and
         // possibly a different monitor DPR, while the terminal was detached —
         // rebuild it and repaint so glyphs don't render scrambled after reattach.
-        if (cached.webglAddon) {
+        if (cachedWebgl) {
           if (forceCompatRef.current) {
             // User flipped the force-compat setting while this terminal
             // was cached — dispose the cached WebGL addon so the DOM
@@ -386,7 +510,7 @@ export async function initTerminalSession(
             // because this runs before the first paint of the remounted
             // terminal.
             try {
-              cached.webglAddon.dispose()
+              cachedWebgl.dispose()
             } catch {
               /* already disposed */
             }
@@ -403,38 +527,35 @@ export async function initTerminalSession(
             // atlas is SHARED across terminals via the module-level
             // CharAtlasCache, so each mutation repacks it for every sharing
             // pane and must stay observable in one place.
-            correctAtlas(
-              cached.webglAddon,
-              cached.terminal,
-              sessionId,
-              'reattach',
-              getLiveTerminals
-            )
+            correctAtlas(cachedWebgl, cached.terminal, sessionId, 'reattach', getLiveTerminals)
+            // Re-own the addon in the WebGL budget with THIS component's refs.
+            trackAddon(cachedWebgl, cached.terminal)
             // Install scramble-detector against the re-adopted addon. The
             // previous component's monitors were disposed on unmount; without
             // re-installing here, Signals B+C would be silent for the rest
             // of this session.
             if (!downgradedSessions.has(sessionId)) {
-              installRendererMonitors(cached.webglAddon, cached.terminal)
+              installRendererMonitors(cachedWebgl, cached.terminal)
             }
           }
+        } else if (isActiveRef.current) {
+          // On screen without a live renderer (evicted / parked while cached):
+          // attach one, a frame from now like a fresh mount.
+          ensureRenderer({ sync: false })
         }
+        // DOM work done — let the next queued terminal go.
+        releaseSlot()
 
-        // Sync state from backend (fixes stuck loading spinner on reattach)
-        const actualState = await trpcClient.pty.getState.query({ sessionId })
-        if (signal.aborted) return // Don't setState if unmounted
-        if (actualState) setPtyState(actualState)
-
-        // Replay any data that arrived while terminal was detached.
-        // During abort/reinit cycles, terminalRef is null so the subscribe
+        // Sync state from backend (fixes stuck loading spinner on reattach), and
+        // replay any data that arrived while terminal was detached — one round
+        // trip. During abort/reinit cycles, terminalRef is null so the subscribe
         // callback's write() is a no-op — this fills that gap.
         // Use lastRenderedSeqRef (tracks xterm writes) not getLastSeq
         // (tracks PtyContext receives — advances even when terminalRef is null).
-        const missed = await trpcClient.pty.getBufferSince.query({
-          sessionId,
-          afterSeq: lastRenderedSeqRef.current
-        })
-        if (signal.aborted) return
+        const attached = await attachPty(trpcClient, sessionId, lastRenderedSeqRef.current)
+        if (signal.aborted) return // Don't setState if unmounted
+        if (attached.state) setPtyState(attached.state)
+        const missed = attached.buffer
         if (missed && missed.chunks.length > 0) {
           cached.terminal.write('\x1b[0m')
           for (const chunk of missed.chunks) {
@@ -495,7 +616,13 @@ export async function initTerminalSession(
     // program's stdin, which wedges Claude Code's key handling.
     suppressXtVersionReply(terminal)
 
+    // Open with the parked renderer whenever WebGL is going to be (or may later
+    // be) this terminal's renderer: no DOM renderer — and no ~790-rule theme
+    // stylesheet in the document — is ever built for it. On screen, WebGL
+    // replaces it a frame from now; off screen, it stays parked until revealed.
+    if (webglEligible()) parkBeforeOpen(terminal)
     terminal.open(containerRef.current)
+    ensureRendererRef.current = ensureRenderer
     onAttachedRef.current?.({ sessionId, focus: () => terminal.focus() })
     terminal.clear() // Ensure terminal starts completely fresh
     // Simple fit - container is guaranteed to have dimensions from waitForDimensions
@@ -529,31 +656,34 @@ export async function initTerminalSession(
     // above) so layout (post open()+fit()) has committed before the addon
     // rasterizes its glyph atlas. The forceCompat re-enable toggle re-enters
     // the same path. See webgl-loader.ts + scramble-detector.ts.
-    triggerWebglLoad()
+    // Only for a terminal on screen: a hidden one stays parked until revealed
+    // (the component calls ensureRenderer then) — see webgl-budget.ts.
+    if (isActiveRef.current) ensureRenderer({ sync: false })
 
     // Let Ctrl+Tab and Ctrl+Shift+Tab bubble up for tab switching
     // Intercept Cmd+F / Ctrl+F for terminal search
     terminal.attachCustomKeyEventHandler(handleTerminalKeyEvent)
+    // DOM work done — let the next queued terminal go.
+    releaseSlot()
 
-    // Check if PTY already exists (e.g., from idle hibernation)
-    const exists = await trpcClient.pty.exists.query({ sessionId })
+    // Check if PTY already exists (e.g., from idle hibernation), and if so its
+    // state + full ring buffer — one round trip (pty.attach).
+    const attached = await attachPty(trpcClient, sessionId, -1)
     if (signal.aborted) return // Don't continue if unmounted
     timeline.mark('exists_checked')
+    const exists = attached.exists
     let createCols = terminal.cols
     let createRows = terminal.rows
     if (exists) {
       // Sync state from main process (fixes stuck loading spinner)
-      const actualState = await trpcClient.pty.getState.query({ sessionId })
-      if (signal.aborted) return // Don't setState if unmounted
-      if (actualState) setPtyState(actualState)
+      if (attached.state) setPtyState(attached.state)
 
       // Restore from backend ring buffer (single source of truth).
-      // Use getBufferSince with -1 to get all chunks. `prelude` resets
+      // afterSeq -1 gets all chunks. `prelude` resets
       // SGR/charset/scroll-region state an evicted prefix left behind —
       // it is '' (a no-op write) unless this buffer has actually evicted,
       // so writing it unconditionally is always correct.
-      const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: -1 })
-      if (signal.aborted) return
+      const result = attached.buffer
       if (result) {
         if (result.prelude) terminal.write(result.prelude)
         for (const chunk of result.chunks) {
@@ -606,7 +736,10 @@ export async function initTerminalSession(
         providerFlags: providerFlagsRef.current,
         executionContext: executionContextRef.current,
         cols: createCols,
-        rows: createRows
+        rows: createRows,
+        // Restoring a workspace starts many agents at once; the computer admits
+        // them a few at a time, and the one the user is looking at goes first.
+        foreground: isActiveRef.current
       })
       timeline.mark('create_done')
       timeline.flush(result.success ? 'created' : 'create_error')
@@ -735,6 +868,7 @@ export async function initTerminalSession(
     setInitError(message)
     setPtyState('error')
   } finally {
+    releaseSlot()
     if (didInit) {
       setIsInitializing(false)
     }

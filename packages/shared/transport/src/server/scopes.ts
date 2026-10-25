@@ -82,7 +82,7 @@ export type ProcedureScope = Scope | 'never'
  * see `trpc.ts` and `scopes.test.ts`.
  *
  * ── pty: "speak to an existing session", never "choose what runs" ──────────
- * Granted (`agent`): write/submit/interrupt/resize/touch, every read
+ * Granted (`agent`): write/submit/interrupt/resize/touch/prioritize, every read
  * (getBuffer*, exists, list, getState, sessionList, sessionGetState, chatList,
  * clearBuffer, ackEnsureAlive) and every `on*` subscription.
  * Denied (`never`): `create` (takes `anyInput` — an UNVALIDATED spawn spec, not
@@ -599,6 +599,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'projects.update': 'tasks',
   'projects.uploadIcon': 'tasks',
   'pty.ackEnsureAlive': 'agent',
+  'pty.attach': 'agent',
   'pty.chatList': 'agent',
   'pty.clearBuffer': 'agent',
   'pty.create': 'never',
@@ -631,6 +632,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.onStateChange': 'agent',
   'pty.onStats': 'agent',
   'pty.onTitleChange': 'agent',
+  'pty.prioritize': 'agent',
   'pty.resize': 'agent',
   'pty.sessionGetState': 'agent',
   'pty.sessionList': 'agent',

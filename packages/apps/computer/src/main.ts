@@ -30,6 +30,7 @@ import { createGitHandlers } from './handlers/git'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
+import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
 import { createComputerConfigHandlers } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
@@ -75,6 +76,11 @@ export interface HubRequestHandlerDeps {
    * register immediately and report "still loading" until it arrives.
    */
   getProjectPaths?: () => ProjectPathStore | null
+  /**
+   * The computer-wide agent-start admission queue, shared by every hub this
+   * computer serves (see spawn-admission.ts). Absent: a private one (tests).
+   */
+  admission?: SpawnAdmission
 }
 
 export interface HubRequestDispatch {
@@ -86,6 +92,8 @@ export interface HubRequestDispatch {
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
   setAgentHookUrl(url: string): void
+  /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
+  hubDisconnected(reason: string): void
 }
 
 /**
@@ -106,7 +114,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {})
   }
 
-  const pty = createPtyHandlers(ctx, deps.getProjectPaths)
+  const pty = createPtyHandlers(
+    ctx,
+    deps.getProjectPaths,
+    deps.admission ? { admission: deps.admission } : {}
+  )
   const proc = createProcHandlers(ctx, deps.getProjectPaths)
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
@@ -145,7 +157,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ctx.agentHookUrl = url
   }
 
-  return { handle, dispose, setAgentHookUrl }
+  const hubDisconnected = (reason: string): void => {
+    pty.dropQueued(`hub disconnected (${reason})`)
+  }
+
+  return { handle, dispose, setAgentHookUrl, hubDisconnected }
 }
 
 export function startComputer(
@@ -185,6 +201,10 @@ export function startComputer(
     })
 
   let handle: ComputerHandle
+
+  // ONE admission queue for every hub connection: agent starts contend for this
+  // machine, whichever hub asked for them.
+  const admission = createSpawnAdmission()
 
   /**
    * Everything that belongs to ONE hub.
@@ -235,7 +255,8 @@ export function startComputer(
       dialer,
       config,
       log,
-      getProjectPaths: () => projectPaths
+      getProjectPaths: () => projectPaths,
+      admission
     })
 
     // Every line carries the hub, because with more than one connection "reconnect
@@ -243,9 +264,10 @@ export function startComputer(
     dialer.events.on('connected', ({ computerId, mode }) =>
       log('connected to hub', { hubUrl, computerId, mode })
     )
-    dialer.events.on('disconnected', ({ reason }) =>
+    dialer.events.on('disconnected', ({ reason }) => {
       log('disconnected from hub', { hubUrl, reason })
-    )
+      dispatch.hubDisconnected(String(reason))
+    })
     dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
       log('reconnect scheduled', { hubUrl, attempt, delayMs })
     )

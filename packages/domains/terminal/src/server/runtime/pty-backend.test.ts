@@ -20,6 +20,7 @@ import {
   resizePty,
   killPty,
   hasPty,
+  prioritizePty,
   setDatabase,
   ptyEvents
 } from './pty-manager'
@@ -66,11 +67,11 @@ interface FakeHandle extends PtyHandle {
   resized: Array<[number, number]>
   killed: string[]
   emitData(d: string): void
-  emitExit(code: number): void
+  emitExit(code: number, reason?: string): void
 }
 function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = {}): FakeHandle {
   const dataCbs: Array<(d: string) => void> = []
-  const exitCbs: Array<(e: { exitCode: number; signal?: number }) => void> = []
+  const exitCbs: Array<(e: { exitCode: number; signal?: number; reason?: string }) => void> = []
   return {
     pid: opts.pid === undefined ? 9191 : opts.pid,
     ...(opts.whenSpawned ? { whenSpawned: opts.whenSpawned } : {}),
@@ -98,8 +99,8 @@ function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = 
     emitData(d) {
       for (const cb of dataCbs) cb(d)
     },
-    emitExit(code) {
-      for (const cb of exitCbs) cb({ exitCode: code })
+    emitExit(code, reason) {
+      for (const cb of exitCbs) cb({ exitCode: code, ...(reason ? { reason } : {}) })
     }
   }
 }
@@ -470,6 +471,173 @@ await test('a session declared dead must not leave a live process behind', async
     `finalize must kill the handle so no process is orphaned, got ${JSON.stringify(handle.killed)}`
   )
   ptyEvents.off('exit', eh)
+  setPtyBackend(null)
+})
+
+// ── Startup deadline: owned by whoever owns the process ─────────────────────
+//
+// 2026-10-23: a ~20s hub stall made the hub's own 10s startup timers fire late,
+// all at once, and it SIGKILLed 13 agents whose output was already waiting in its
+// buffers. The deadline now travels with the spawn so the computer — which sees
+// the output directly — runs it, and the hub keeps its own only for a backend that
+// confirms it does not.
+
+await test('remote backend: the spawn spec carries the startup deadline for the owner to arm', async () => {
+  let capturedSpec: PtySpawnSpec | null = null
+  const handle = makeFakeHandle({
+    whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+  })
+  setPtyBackend({
+    spawn(spec) {
+      capturedSpec = spec
+      return handle
+    }
+  })
+  const sid = 'deadlineSpec:deadlineSpec'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    computerId: 'computer-1'
+  })
+
+  const spec = capturedSpec as PtySpawnSpec | null
+  expect(
+    spec?.startupTimeoutMs === 10_000,
+    `spawn spec must carry the adapter's startup deadline, got ${JSON.stringify(spec?.startupTimeoutMs)}`
+  )
+  killPty(sid)
+  handle.emitExit(-2)
+  setPtyBackend(null)
+})
+
+await test("a computer that OWNS the startup deadline is never second-guessed by the hub; one that does not still gets the hub's", async () => {
+  // Both sessions stay silent past the deadline. Only the one whose owner did NOT
+  // claim the deadline may be killed by the hub.
+  const owned = makeFakeHandle({
+    pid: null,
+    whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+  })
+  const legacy = makeFakeHandle({
+    pid: null,
+    whenSpawned: Promise.resolve({ pid: 4343, ownsStartupDeadline: false })
+  })
+  const handles = [owned, legacy]
+  setPtyBackend({ spawn: () => handles.shift()! })
+
+  const ownedSid = 'deadlineOwned:deadlineOwned'
+  const legacySid = 'deadlineLegacy:deadlineLegacy'
+  for (const sid of [ownedSid, legacySid]) {
+    await createPty({
+      win: fakeWin,
+      sessionId: sid,
+      cwd: '/tmp',
+      mode: 'terminal',
+      type: 'terminal',
+      computerId: 'computer-1'
+    })
+  }
+
+  await new Promise((r) => setTimeout(r, 10_700))
+
+  expect(
+    owned.killed.length === 0 && hasPty(ownedSid),
+    `the hub must not kill a session whose computer owns the deadline, killed=${JSON.stringify(owned.killed)}`
+  )
+  expect(
+    legacy.killed.includes('SIGKILL'),
+    `an older computer's silent session still gets the hub's deadline, killed=${JSON.stringify(legacy.killed)}`
+  )
+
+  killPty(ownedSid)
+  owned.emitExit(-2)
+  killPty(legacySid)
+  legacy.emitExit(-2)
+  setPtyBackend(null)
+})
+
+await test('an exit the owner attributes to its startup deadline goes through the normal exit path', async () => {
+  const handle = makeFakeHandle({
+    whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+  })
+  setPtyBackend({ spawn: () => handle })
+  const sid = 'deadlineExit:deadlineExit'
+  const exits: Array<number | null> = []
+  const eh = (s: string, code: number | null): void => {
+    if (s === sid) exits.push(code)
+  }
+  ptyEvents.on('exit', eh)
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'terminal',
+    type: 'terminal',
+    computerId: 'computer-1'
+  })
+  await new Promise((r) => setTimeout(r, 20))
+
+  handle.emitExit(0, 'startup-timeout')
+  await new Promise((r) => setTimeout(r, 50))
+
+  // The real code, not a synthetic -1: the computer's kill IS the exit.
+  expect(
+    JSON.stringify(exits) === '[0]',
+    `startup-timeout exit must report the owner's code once, got ${JSON.stringify(exits)}`
+  )
+  ptyEvents.off('exit', eh)
+  setPtyBackend(null)
+})
+
+await test('remote backend: an AGENT\'s initial spawn asks for admission (visible tab first); a plain shell never does', async () => {
+  // Restoring a workspace starts every tab's agent; the computer admits them a few
+  // at a time. Only the agent's own start queues — shells start at once.
+  const captured: Array<{ sid: string; admission: PtySpawnSpec['admission'] }> = []
+  setPtyBackend({
+    spawn(spec) {
+      captured.push({ sid: spec.sessionId, admission: spec.admission })
+      return makeFakeHandle({ whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true }) })
+    }
+  })
+  const cases: Array<{ sid: string; mode: string; foreground?: boolean }> = [
+    { sid: 'admShell:admShell', mode: 'terminal', foreground: true },
+    { sid: 'admBg:admBg', mode: 'claude-code' },
+    { sid: 'admFg:admFg', mode: 'claude-code', foreground: true }
+  ]
+  for (const c of cases) {
+    await createPty({
+      win: fakeWin,
+      sessionId: c.sid,
+      cwd: '/tmp',
+      mode: c.mode as never,
+      type: c.mode,
+      computerId: 'computer-1',
+      ...(c.foreground ? { foreground: true } : {})
+    })
+  }
+  const byId = Object.fromEntries(captured.map((c) => [c.sid, c.admission ?? null]))
+  expect(byId['admShell:admShell'] === null, `plain shell must start at once, got ${String(byId['admShell:admShell'])}`)
+  expect(byId['admBg:admBg'] === 'background', `hidden agent → background, got ${String(byId['admBg:admBg'])}`)
+  expect(byId['admFg:admFg'] === 'foreground', `visible agent → foreground, got ${String(byId['admFg:admFg'])}`)
+  for (const c of cases) killPty(c.sid)
+  setPtyBackend(null)
+})
+
+await test('prioritizePty forwards to the backend for a live session only', async () => {
+  const asked: string[] = []
+  setPtyBackend({
+    spawn: () =>
+      makeFakeHandle({ whenSpawned: new Promise<never>(() => {}) as never }),
+    prioritize: (sessionId) => asked.push(sessionId)
+  })
+  const sid = 'prio:prio'
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'claude-code' as never, type: 'claude-code', computerId: 'computer-1' })
+  prioritizePty(sid)
+  prioritizePty('unknown:unknown')
+  expect(JSON.stringify(asked) === JSON.stringify([sid]), `asked=${JSON.stringify(asked)}`)
+  killPty(sid)
   setPtyBackend(null)
 })
 

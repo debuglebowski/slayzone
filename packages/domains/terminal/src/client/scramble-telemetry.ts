@@ -20,6 +20,7 @@ import type { Terminal as XTerm } from '@xterm/xterm'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import type { DowngradeReason } from './webgl-loader'
 import type { DiagEvent } from './terminal-webgl-diag'
+import { liveWebglCount, webglContextFor } from './webgl-budget'
 
 /** What we ship per downgrade — keep field names stable for analysis tooling. */
 export interface DowngradeSnapshot {
@@ -34,7 +35,12 @@ export interface DowngradeSnapshot {
   hasFocus: boolean
   /** Vendor / renderer strings from `WEBGL_debug_renderer_info`, when available. */
   gpu: { vendor?: string; renderer?: string } | null
-  /** `image/png` data URL of the WebGL canvas — present when capture succeeded. */
+  /**
+   * `image/png` data URL of the WebGL canvas — present when capture succeeded.
+   * Throttled: at most one per {@link SCREENSHOT_MIN_INTERVAL_MS} across all
+   * sessions (null for the rest), so a burst of downgrades does not encode a PNG
+   * per pane on the main thread.
+   */
   screenshotDataUrl: string | null
   /** Tail of the per-session terminal-webgl-diag ring buffer. */
   recentDiagEvents: DiagEvent[]
@@ -55,69 +61,38 @@ export interface DowngradeSnapshot {
    * sharer's vertex data, and a pane that does not repaint keeps painting stale
    * texcoords. That made pane count the single most useful correlate of a scramble
    * report, and it previously had to be reconstructed by hand from other records.
-   * Counted from the DOM (a `.xterm` holding a live WebGL canvas), so it needs no
-   * cross-module registry and works for panes this component does not own.
+   * Counted from the WebGL budget registry (live addons whose GL context is not
+   * lost — webgl-budget.ts). It used to be counted by calling `getContext()` on
+   * every canvas of every pane, per downgrade: quadratic in a downgrade burst, and
+   * under GPU pressure the probes themselves failed context creation thousands of
+   * times.
    */
   webglPaneCount: number | null
 }
 
+const reportedDowngrades = new Set<string>()
+
 /**
- * Heuristic: the WebGL render canvas is the first `<canvas>` under
- * `terminal.element` that returns a non-null WebGL context. xterm doesn't
- * expose the canvas directly, but only the renderer's own canvas matches
- * this filter — DOM-renderer overlays / link layers are 2D or absent.
+ * True the first time a (session, reason) downgrade is seen in this renderer —
+ * callers skip capture + report after that. A session downgrades at most once per
+ * addon anyway; this stops a reload/re-attach loop from re-reporting the same fact.
  */
-/**
- * Number of mounted `.xterm` panes currently holding a live (non-context-lost)
- * WebGL canvas. See `DowngradeSnapshot.webglPaneCount` for why this is recorded.
- * Returns null if the DOM is unavailable.
- */
-function countWebglPanes(): number | null {
-  if (typeof document === 'undefined') return null
-  let count = 0
-  for (const root of Array.from(document.querySelectorAll('.xterm'))) {
-    for (const c of Array.from(root.querySelectorAll('canvas'))) {
-      try {
-        const gl =
-          (c as HTMLCanvasElement).getContext('webgl2') ??
-          (c as HTMLCanvasElement).getContext('webgl')
-        if (gl && !gl.isContextLost()) {
-          count++
-          break
-        }
-      } catch {
-        /* getContext can throw on context-type confusion; try the next canvas */
-      }
-    }
-  }
-  return count
+export function shouldReportDowngrade(sessionId: string, reason: DowngradeReason): boolean {
+  const key = `${sessionId}:${reason}`
+  if (reportedDowngrades.has(key)) return false
+  reportedDowngrades.add(key)
+  return true
 }
 
-function findWebglCanvas(terminal: Pick<XTerm, 'element'>): HTMLCanvasElement | null {
-  const root = terminal.element
-  if (!root) return null
-  const candidates = Array.from(root.querySelectorAll('canvas')) as HTMLCanvasElement[]
-  for (const c of candidates) {
-    try {
-      if (c.getContext('webgl2') !== null) return c
-      if (c.getContext('webgl') !== null) return c
-    } catch {
-      /* getContext can throw on context-type confusion; try the next */
-    }
-  }
-  return null
-}
+/** Minimum spacing between two screenshot captures (any session). */
+export const SCREENSHOT_MIN_INTERVAL_MS = 10_000
+let lastScreenshotAt = -Infinity
 
 /** Read GPU vendor + renderer via `WEBGL_debug_renderer_info` (no-op if extension missing). */
 function readGpuInfo(
-  canvas: HTMLCanvasElement | null
+  gl: WebGL2RenderingContext | WebGLRenderingContext | null
 ): { vendor?: string; renderer?: string } | null {
-  if (!canvas) return null
   try {
-    const gl = (canvas.getContext('webgl2') ?? canvas.getContext('webgl')) as
-      | WebGL2RenderingContext
-      | WebGLRenderingContext
-      | null
     if (!gl) return null
     if (gl.isContextLost()) return null
     const ext = gl.getExtension('WEBGL_debug_renderer_info') as {
@@ -145,17 +120,25 @@ function readGpuInfo(
  * the downgrade.
  */
 export function captureDowngradeSnapshot(
-  _addon: WebglAddon,
+  addon: WebglAddon,
   terminal: Pick<XTerm, 'element' | 'cols' | 'rows'>,
   reason: DowngradeReason,
   sessionId: string,
   mode: string | undefined
 ): DowngradeSnapshot {
-  const canvas = findWebglCanvas(terminal)
-  const gpu = readGpuInfo(canvas)
+  // The addon's own GL context — no getContext() probing (see webgl-budget.ts).
+  const { canvas, gl } = webglContextFor(terminal.element, addon)
+  const gpu = readGpuInfo(gl)
 
   let screenshotDataUrl: string | null = null
-  if (canvas && canvas.width > 0 && canvas.height > 0) {
+  const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  if (
+    canvas &&
+    canvas.width > 0 &&
+    canvas.height > 0 &&
+    nowMs - lastScreenshotAt >= SCREENSHOT_MIN_INTERVAL_MS
+  ) {
+    lastScreenshotAt = nowMs
     try {
       screenshotDataUrl = canvas.toDataURL('image/png')
     } catch {
@@ -199,7 +182,7 @@ export function captureDowngradeSnapshot(
       canvasHeight: canvas?.height ?? null
     },
     msSinceLastAtlasCorrect,
-    webglPaneCount: countWebglPanes()
+    webglPaneCount: liveWebglCount()
   }
 }
 
@@ -249,14 +232,15 @@ export interface RendererOkEvent {
 export function reportRendererOk(
   terminal: Pick<XTerm, 'element'>,
   sessionId: string,
-  mode: string | undefined
+  mode: string | undefined,
+  addon?: WebglAddon | null
 ): void {
   try {
     const event: RendererOkEvent = {
       sessionId,
       mode,
       tsMs: Date.now(),
-      gpu: readGpuInfo(findWebglCanvas(terminal))
+      gpu: readGpuInfo(webglContextFor(terminal.element, addon).gl)
     }
     void getTrpcClient().diagnostics.recordClientEvent.mutate({
       event: 'terminal.webgl_renderer_ok',

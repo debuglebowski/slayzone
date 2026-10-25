@@ -151,8 +151,13 @@ if (isFloatingGlobalAgentPanel) {
     // Prefetch task details for open tabs — warms Suspense cache before React mounts.
     // Fire-and-forget: the cache's resolved-value tracking + notify ensures immediate
     // re-render when data arrives, eliminating the 250ms use() scheduling delay.
+    // Keyed by hub exactly as TaskDetailDataLoader reads it (each tab sits in a
+    // HubScope, default hub unless the task is known to live elsewhere — which is
+    // not known yet here). Unkeyed, every entry missed and each tab fetched twice.
     for (const tab of useTabStore.getState().tabs) {
-      if (tab.type === 'task') taskDetailCache.prefetch('taskDetail', tab.taskId)
+      if (tab.type === 'task') {
+        void taskDetailCache.prefetch('taskDetail', tab.taskId, registry.defaultHubId)
+      }
     }
 
     // E2E: expose the vanilla tRPC client so specs can call

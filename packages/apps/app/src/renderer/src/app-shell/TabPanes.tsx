@@ -1,13 +1,26 @@
-import { memo, Suspense, useDeferredValue, type ReactNode } from 'react'
+import {
+  memo,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode
+} from 'react'
 import { HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { useTabStore, type Tab } from '@slayzone/settings'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
+import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
+import { mruRank } from '@slayzone/terminal/client/terminal-mru'
 import { cn } from '@slayzone/ui'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { TaskDetailDataLoader } from './lazy'
+import { paneHydrator } from './pane-hydration'
 
 /** Handlers every task pane shares. Each must be stable, or every pane re-renders. */
 export interface TaskPaneHandlers {
@@ -48,6 +61,10 @@ interface TabPanesProps extends TaskPaneHandlers {
  * cost the same with 3 tabs open as with 50: each pane is memoized on its own
  * props, so only the tab leaving and the tab arriving re-render.
  *
+ * A hidden task pane mounts its detail page a moment later than an on-screen one
+ * — one per idle slice after boot (see pane-hydration.ts) — and from then on
+ * stays mounted like any other.
+ *
  * The content swap trails the tab bar: it reads the active index deferred, so
  * the highlight moves at once and the swap renders at transition priority —
  * re-rendering only these panes, not the whole shell.
@@ -73,8 +90,24 @@ export const TabPanes = memo(function TabPanes({
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
   const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
   const isHomeTabActive = tabs[activeTabIndex]?.type === 'home'
+  // Task-targeted events for tabs whose page is not mounted yet: one listener
+  // per hub that owns an open task tab.
+  const openTaskIds = useMemo(
+    () => new Set(tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))),
+    [tabs]
+  )
+  const catcherHubIds = useMemo(
+    () => [...new Set([...openTaskIds].map((id) => hubIdByTask.get(id) ?? defaultHubId))],
+    [openTaskIds, hubIdByTask, defaultHubId]
+  )
+  const isOpenTask = useCallback((taskId: string) => openTaskIds.has(taskId), [openTaskIds])
   return (
     <>
+      {catcherHubIds.map((hubId) => (
+        <HubScope key={`catcher:${hubId}`} hubId={hubId}>
+          <TaskPaneEventCatcher isOpenTask={isOpenTask} onWake={paneHydrator.hydrateNow} />
+        </HubScope>
+      ))}
       {tabs.map((tab, i) => {
         if (explodeMode && (tab.type !== 'task' || toVisibleIndex(i) < 0)) return null
         const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
@@ -130,6 +163,14 @@ interface PaneFrameProps {
  * Hidden tabs are inert, so their descendant transitions are killed too
  * (`[&_*]:transition-none!`) → the hide is instant for every element.
  *
+ * visibility:hidden does NOT stop CSS animations either: every spinner, pulse and
+ * loader in every hidden tab kept ticking, and a non-composited one restyles its
+ * element each frame (two hidden browser loaders alone cost ~60% of a core).
+ * Hidden tabs pause them (`animation-play-state: paused`) — paused, not removed,
+ * so nothing restarts or replays its entry animation on reveal; a loop simply
+ * resumes where it stopped. (Radix overlays that wait on `animationend` portal
+ * out of the pane, so none of them is held here.)
+ *
  * Multi-hub: each tab's content is scoped to the hub that owns it, so ambient
  * useTRPC() (TaskDetailPage/HomeDetail + the hub-keyed taskDetailCache) resolves
  * to the right hub. Single-hub → HubScope(default) is the same client the app is
@@ -152,7 +193,11 @@ function PaneFrame({
               'rounded overflow-hidden border min-h-0 relative',
               isExplodeFocused ? 'border-primary/60 ring-2 ring-primary/40' : 'border-border'
             )
-          : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
+          : `absolute inset-0 ${
+              !isViewActive
+                ? 'invisible [&_*]:transition-none! [&_*]:[animation-play-state:paused]!'
+                : 'z-10'
+            }`
       }
       inert={!explodeMode && !isViewActive ? true : undefined}
     >
@@ -216,6 +261,12 @@ const TaskPane = memo(function TaskPane({
   onCloseTab,
   onTerminalFocusRequestHandled
 }: TaskPaneProps): React.JSX.Element {
+  const hydrated = usePaneHydrated(
+    taskId,
+    hubId,
+    task?.panel_visibility?.browser === true,
+    explodeMode || isViewActive
+  )
   return (
     <PaneFrame
       isViewActive={isViewActive}
@@ -226,30 +277,82 @@ const TaskPane = memo(function TaskPane({
     >
       <ErrorBoundary onReset={() => taskDetailCache.invalidate('taskDetail', taskId, hubId)}>
         <Suspense fallback={<TaskShell />}>
-          <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
-            <TaskDetailDataLoader
-              taskId={taskId}
-              task={task}
-              project={project}
-              isActive={explodeMode || isViewActive}
-              hasShortcutFocus={explodeMode ? isExplodeFocused : isViewActive}
-              compact={explodeMode}
-              zenMode={zenMode}
-              onBack={onBack}
-              onTaskUpdated={onTaskUpdated}
-              onArchiveTask={onArchiveTask}
-              onDeleteTask={onDeleteTask}
-              onNavigateToTask={onNavigateToTask}
-              onConvertTask={onConvertTask}
-              onCloseTab={onCloseTab}
-              settingsRevision={settingsRevision}
-              terminalFocusRequestId={terminalFocusRequestId}
-              onTerminalFocusRequestHandled={onTerminalFocusRequestHandled}
-              isSidePanelResizing={isSidePanelResizing}
-            />
-          </div>
+          {hydrated ? (
+            <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
+              <TaskDetailDataLoader
+                taskId={taskId}
+                task={task}
+                project={project}
+                isActive={explodeMode || isViewActive}
+                hasShortcutFocus={explodeMode ? isExplodeFocused : isViewActive}
+                compact={explodeMode}
+                zenMode={zenMode}
+                onBack={onBack}
+                onTaskUpdated={onTaskUpdated}
+                onArchiveTask={onArchiveTask}
+                onDeleteTask={onDeleteTask}
+                onNavigateToTask={onNavigateToTask}
+                onConvertTask={onConvertTask}
+                onCloseTab={onCloseTab}
+                settingsRevision={settingsRevision}
+                terminalFocusRequestId={terminalFocusRequestId}
+                onTerminalFocusRequestHandled={onTerminalFocusRequestHandled}
+                isSidePanelResizing={isSidePanelResizing}
+              />
+            </div>
+          ) : (
+            <TaskShell />
+          )}
         </Suspense>
       </ErrorBoundary>
     </PaneFrame>
   )
 })
+
+// Same specifier as lazy.ts's TaskDetailDataLoader → the same chunk.
+let detailChunk: Promise<unknown> | null = null
+const loadDetailChunk = (): Promise<unknown> =>
+  (detailChunk ??= import('@slayzone/task/client/TaskDetailDataLoader'))
+
+/**
+ * Hydration order for hidden panes: tabs with an open browser panel first (their
+ * WebContentsView only exists once the page mounts, and `slay tasks browser`
+ * looks it up), then most recently viewed first (the terminal MRU — the same
+ * order the hidden-terminal init queue uses).
+ */
+function paneRank(taskId: string, browserOpen: boolean): number {
+  const mru = mruRank(`${taskId}:${taskId}`)
+  const recency = mru === Number.MAX_SAFE_INTEGER ? 10_000 : mru
+  return browserOpen ? recency : 100_000 + recency
+}
+
+/**
+ * Whether the pane's detail page is mounted. On screen → at once (and for good);
+ * hidden → after its turn in the idle queue, once its data and chunk are loaded.
+ */
+function usePaneHydrated(
+  taskId: string,
+  hubId: string,
+  browserOpen: boolean,
+  onScreen: boolean
+): boolean {
+  const subscribe = useCallback((cb: () => void) => paneHydrator.subscribe(taskId, cb), [taskId])
+  const hydrated = useSyncExternalStore(subscribe, () => paneHydrator.isHydrated(taskId))
+  const browserOpenRef = useRef(browserOpen)
+  useEffect(() => {
+    browserOpenRef.current = browserOpen
+  }, [browserOpen])
+  useEffect(() => {
+    if (onScreen) {
+      paneHydrator.hydrateNow(taskId)
+      return
+    }
+    return paneHydrator.enqueue(taskId, {
+      rank: () => paneRank(taskId, browserOpenRef.current),
+      // `hubId` matches what TaskDetailDataLoader reads from this pane's HubScope,
+      // so this is the very cache entry the page will render from.
+      ready: Promise.all([loadDetailChunk(), taskDetailCache.prefetch('taskDetail', taskId, hubId)])
+    })
+  }, [taskId, hubId, onScreen])
+  return hydrated || onScreen
+}

@@ -7,6 +7,7 @@
 import {
   useEffect,
   useInsertionEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   useState,
@@ -31,6 +32,9 @@ import { initTerminalSession, type TerminalInitOptions } from './terminal-sessio
 import { watchTerminalFocusLoss } from './terminal-focus-watch'
 import { installTerminalFileInput } from './terminal-file-input'
 import { correctAtlas } from './webgl-loader'
+import { isParked, unparkToDom } from './renderer-park'
+import { promoteInitSlot } from './terminal-init-scheduler'
+import { touchTerminalMru } from './terminal-mru'
 import type { ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
 import { diag } from './terminal-webgl-diag'
@@ -54,6 +58,10 @@ import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
+import {
+  startingWatchdogVerdict,
+  STARTING_WATCHDOG_INTERVAL_MS
+} from './starting-watchdog'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import {
   stripUnderlineCodes,
@@ -103,6 +111,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const frameTimeStopRef = useRef<(() => void) | null>(null)
   // Signal C (WebGL canvas scramble probe) handle.
   const scrambleProbeRef = useRef<ScrambleProbe | null>(null)
+  // Set by init: attach this terminal's on-screen renderer (see the reveal effect).
+  const ensureRendererRef = useRef<((opts: { sync: boolean }) => void) | null>(null)
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
@@ -408,10 +418,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           webglRafIdRef,
           frameTimeStopRef,
           scrambleProbeRef,
+          ensureRendererRef,
           initializedRef,
           lastRenderedSeqRef,
           resizeDebounceRef,
           isResumingRef,
+          isActiveRef,
           resumeCapTimerRef,
           hasCalledFirstInputRef,
           lastActivityTimeRef,
@@ -475,6 +487,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrambleProbeRef.current?.dispose()
       scrambleProbeRef.current = null
       fakeDowngradeRegistry.delete(sessionId)
+      ensureRendererRef.current = null
       unregisterActiveAddon(sessionId)
       // Drop the mounted-terminal registration. The instance stays reachable for
       // the atlas broadcast via the module cache below (setTerminal) when it is
@@ -695,6 +708,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setPtyState((prev) => (storeState === 'starting' && prev !== 'starting' ? prev : storeState))
   }, [storeState])
 
+  // Revealed: this terminal now needs pixels. A terminal that was never on
+  // screen (or whose WebGL renderer the budget evicted) is parked — attach its
+  // renderer before this commit paints, so the reveal frame shows the buffer
+  // (see renderer-park.ts / webgl-budget.ts). One still waiting in the boot init
+  // queue initialises right away instead of in its turn.
+  useLayoutEffect(() => {
+    if (!isActive) return
+    touchTerminalMru(sessionId)
+    if (promoteInitSlot(sessionId)) return
+    ensureRendererRef.current?.({ sync: true })
+  }, [isActive, sessionId])
+
   // Re-fit + re-rasterize on isActive false→true. A task switch is a CSS
   // visibility:hidden flip — no ResizeObserver fires on its own — so a panel
   // width change made while this tab was hidden (or a cell-metric change) can
@@ -737,25 +762,46 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions
   // to 'dead' so the user sees the retry overlay instead of infinite loading.
+  // A session the backend still holds as starting is waited on, not judged —
+  // it may be queued for an agent-start slot (see starting-watchdog.ts).
   useEffect(() => {
     if (isInitializing || initError || ptyState !== 'starting') return
-    const timer = setTimeout(async () => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const armedAt = Date.now()
+    const check = async (): Promise<void> => {
       const exists = await trpcClient.pty.exists.query({ sessionId })
       const actual = await trpcClient.pty.getState.query({ sessionId })
-      if (actual && actual !== 'starting' && actual !== 'dead') {
-        setPtyState(actual)
-        return
-      }
-      if (!exists || !actual || actual === 'starting') {
+      if (cancelled) return
+      const verdict = startingWatchdogVerdict({ exists, actual, waitedMs: Date.now() - armedAt })
+      if (verdict.kind === 'adopt') {
+        setPtyState(verdict.state)
+      } else if (verdict.kind === 'wait') {
+        timer = setTimeout(() => void check(), STARTING_WATCHDOG_INTERVAL_MS)
+      } else if (verdict.kind === 'dead') {
         console.warn(
-          `[terminal] watchdog: ${sessionId} stuck in 'starting' for 20s, transitioning to dead`
+          `[terminal] watchdog: ${sessionId} stuck in 'starting' for ${String(Date.now() - armedAt)}ms, transitioning to dead`
         )
         setPtyState('dead')
         setDeadExitCode(-1)
       }
-    }, 20_000)
-    return () => clearTimeout(timer)
+    }
+    timer = setTimeout(() => void check(), STARTING_WATCHDOG_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [isInitializing, initError, ptyState, sessionId, trpcClient])
+
+  // Revealed while its agent is still starting: it may be waiting for an
+  // agent-start slot behind other tabs' agents (workspace restore), so ask for it
+  // to go next. A no-op for a session that has already started.
+  useEffect(() => {
+    if (!isActive || isInitializing || ptyState !== 'starting') return
+    trpcClient.pty.prioritize.mutate({ sessionId }).catch(() => {
+      // Best-effort ordering hint: an older hub without it just keeps FIFO order.
+    })
+  }, [isActive, isInitializing, ptyState, sessionId, trpcClient])
 
   // Sync terminal theme with app theme / terminal theme settings
   useEffect(() => {
@@ -976,6 +1022,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         scrambleProbeRef.current?.dispose()
         scrambleProbeRef.current = null
       }
+      // A parked terminal (never shown, or evicted from the WebGL budget) draws
+      // nothing — it needs xterm's DOM renderer now.
+      if (terminal && isParked(terminal)) unparkToDom(terminal)
       downgradedSessions.add(sessionId)
     } else {
       downgradedSessions.delete(sessionId)

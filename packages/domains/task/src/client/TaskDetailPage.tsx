@@ -169,6 +169,7 @@ import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
+import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
 import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
@@ -1650,6 +1651,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       onData: handleBrowserCreateTab
     })
   )
+
+  // Events for this task that arrived before this page mounted (a hidden tab
+  // still waiting for its idle hydration, or a tab opened a beat ago) were held
+  // for it by TaskPaneEventCatcher: run them through the same handlers now, then
+  // mark the page live so the catcher stops holding on its behalf.
+  const liveTaskId = task?.id
+  useEffect(() => {
+    if (!liveTaskId) return
+    for (const ev of takeTaskPaneEvents(liveTaskId, [
+      'browser-ensure-panel-open',
+      'browser-create-tab',
+      'open-artifact'
+    ])) {
+      if (ev.kind === 'browser-ensure-panel-open') handleBrowserEnsurePanelOpen(ev.payload)
+      else if (ev.kind === 'browser-create-tab') handleBrowserCreateTab(ev.payload)
+      else if (ev.kind === 'open-artifact') handleOpenArtifact(ev.payload)
+    }
+    return markTaskPaneLive(liveTaskId)
+  }, [liveTaskId, handleBrowserEnsurePanelOpen, handleBrowserCreateTab, handleOpenArtifact])
 
   const handleTagsChange = (newTagIds: string[]): void => {
     setTaskTagIds(newTagIds)
