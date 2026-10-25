@@ -139,6 +139,16 @@ export type SidecarServerHandle = {
    *  to re-open the freshly-migrated DB + re-warm its caches. Resolves once the
    *  old child has exited; the caller then `waitForReady()`s the new one. */
   restart: () => Promise<void>
+  /**
+   * App quit has begun: a child that exits from now on stays down, and
+   * `restart()` / hot-restart become no-ops. A live child is left running — the
+   * quit drain may still need the hub — and `stop()` still reaps it.
+   *
+   * Without this, a hub that died during the drain (SIGINT to the dev process
+   * group) respawned immediately and outlived a stalled quit, holding the port
+   * the next app boot needed.
+   */
+  suspendRestarts: () => void
   stop: () => Promise<void>
 }
 
@@ -214,6 +224,8 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   let attempt = 0
   let spawnCount = 0
   let stopped = false
+  /** Set by `suspendRestarts()` (app quit): no respawn of any kind. */
+  let restartsSuspended = false
   let backoffTimer: NodeJS.Timeout | null = null
   let healthyTimer: NodeJS.Timeout | null = null
   let pollTimer: NodeJS.Timeout | null = null
@@ -248,7 +260,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   }
 
   const scheduleRestart = (lastError: unknown): void => {
-    if (stopped) return
+    if (stopped || restartsSuspended) return
     if (attempt >= backoffMs.length) {
       health = 'failed'
       opts.logger(`[supervisor] giving up after ${attempt} attempts`)
@@ -302,7 +314,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   }
 
   function spawnChild(): void {
-    if (stopped) return
+    if (stopped || restartsSuspended) return
     // Fixed port wins outright — no probing, no sticky-port bookkeeping needed
     // (it's already permanently "stuck" to the one configured value). Otherwise
     // reuse the sticky port if we have one; else probe a fresh free port.
@@ -378,6 +390,12 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           readySince = null
           runningBuildId = null
           if (stopped) return
+          if (restartsSuspended) {
+            opts.logger(
+              `[supervisor] sidecar exited code=${code} signal=${signal} during app quit — not restarting`
+            )
+            return
+          }
           const wasReady = health === 'ready'
           opts.logger(`[supervisor] sidecar exited code=${code} signal=${signal}`)
           if (wasReady) {
@@ -406,7 +424,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   // A deliberate restart (user button / hot-restart) grants a FRESH backoff
   // budget: it must be able to recover from `failed` (attempts exhausted).
   const doRestart = async (): Promise<void> => {
-    if (stopped) return
+    if (stopped || restartsSuspended) return
     attempt = 0
     const proc = child
     if (!proc) {
@@ -489,6 +507,13 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         readyWaiters.push({ resolve, reject })
       }),
     restart: doRestart,
+    suspendRestarts: () => {
+      restartsSuspended = true
+      // A pending backoff respawn is a restart too. Health polling stays: a
+      // live child keeps reporting until stop().
+      if (backoffTimer) clearTimeout(backoffTimer)
+      backoffTimer = null
+    },
     stop: async () => {
       if (stopped) return
       if (opts.hotRestartOnBuildChange) unwatchFile(manifestPath)

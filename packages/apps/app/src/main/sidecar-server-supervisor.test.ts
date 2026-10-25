@@ -549,6 +549,26 @@ test('stop() is graceful and idempotent', async () => {
   }
 })
 
+test('suspendRestarts: a hub that dies during app quit stays down', async () => {
+  // App quit drains subprocesses BEFORE will-quit runs stop(). A ready hub that
+  // dies in that window (SIGINT to the dev process group) used to respawn
+  // immediately — and outlived the stalled quit, holding the port the next app
+  // boot needed.
+  const dir = mkTmp()
+  const { handle, ctx } = makeHarness(dir, {}, { healthPollIntervalMs: 40 })
+  try {
+    await handle.waitForReady()
+    const pid = handle.getStatus().pid!
+    handle.suspendRestarts()
+    process.kill(pid, 'SIGKILL')
+    await waitFor(() => handle.getStatus().pid === null, 5_000, 'killed hub detached')
+    await delay(300)
+    assertEq(ctx.spawnTimes.length, 1, 'no respawn after suspendRestarts')
+  } finally {
+    await handle.stop()
+  }
+})
+
 test('parent-death: the real built side-car self-exits when stdin closes', async () => {
   const here = path.dirname(fileURLToPath(import.meta.url))
   const binJs = path.resolve(here, '../../..', 'hub/dist/bin.cjs')

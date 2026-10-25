@@ -133,6 +133,16 @@ export type LocalComputerHandle = {
    * that. Concurrent calls coalesce onto the first.
    */
   restart: () => Promise<void>
+  /**
+   * App quit has begun: a computer that exits from now on stays down, and
+   * `restart()` becomes a no-op. A live computer is left running — the quit
+   * drain may still need it — and `stop()` still reaps it.
+   *
+   * Without this, a computer that died during the drain (SIGINT to the dev
+   * process group) was respawned, outlived a stalled quit, and fought the next
+   * app's computer for the same id — every takeover killing every agent.
+   */
+  suspendRestarts: () => void
   stop: () => Promise<void>
 }
 
@@ -149,6 +159,8 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   let currentJoinToken: string | null = null
   let attempt = 0
   let stopped = false
+  /** Set by `suspendRestarts()` (app quit): no respawn of any kind. */
+  let restartsSuspended = false
   let backoffTimer: NodeJS.Timeout | null = null
   let healthyTimer: NodeJS.Timeout | null = null
   /** In-flight `restart()`, so concurrent calls coalesce instead of double-spawning. */
@@ -202,7 +214,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   const NO_RESTART: RestartDecision = { restartAttempt: null, restartDelayMs: null }
 
   const scheduleRestart = (lastError: unknown): RestartDecision => {
-    if (stopped) return NO_RESTART
+    if (stopped || restartsSuspended) return NO_RESTART
     if (needsReEnrollment) {
       opts.logger(
         '[local-computer] not restarting: this computer must be enrolled again before it can connect'
@@ -228,7 +240,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   }
 
   function spawnChild(): void {
-    if (stopped) return
+    if (stopped || restartsSuspended) return
     // stdin is 'pipe' so the child detects parent death via stdin close.
     const proc = spawn(opts.execPath, [opts.scriptPath], {
       env: {
@@ -284,6 +296,12 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       child = null
       if (healthyTimer) clearTimeout(healthyTimer)
       if (stopped) return
+      if (restartsSuspended) {
+        opts.logger(
+          `[local-computer] computer exited code=${code} signal=${signal} during app quit — not restarting`
+        )
+        return
+      }
       opts.logger(`[local-computer] computer exited code=${code} signal=${signal}`)
       // A crash after a long healthy run gets a fresh backoff budget (the reset
       // timer already zeroed `attempt`); a quick crash consumes an attempt.
@@ -317,7 +335,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
    *  3. It re-mints unconditionally rather than on a backoff timer.
    */
   const doRestart = async (): Promise<void> => {
-    if (stopped) return
+    if (stopped || restartsSuspended) return
     clearTimers()
     attempt = 0
     needsReEnrollment = false
@@ -346,6 +364,11 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
         restartInFlight = null
       })
       return restartInFlight
+    },
+    suspendRestarts: () => {
+      restartsSuspended = true
+      // A pending backoff respawn is a restart too.
+      clearTimers()
     },
     stop: async () => {
       if (stopped) return
