@@ -34,6 +34,7 @@ import { installTerminalFileInput } from './terminal-file-input'
 import { correctAtlas } from './webgl-loader'
 import { isParked, unparkToDom } from './renderer-park'
 import { promoteInitSlot } from './terminal-init-scheduler'
+import { noteTerminalMounted } from './open-trace'
 import { touchTerminalMru } from './terminal-mru'
 import type { ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
@@ -128,6 +129,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [isResuming, setIsResuming] = useState(false)
   const isResumingRef = useRef(false)
   const resumeCapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    noteTerminalMounted(sessionId)
+  }, [sessionId])
   useEffect(() => {
     return () => {
       if (resumeCapTimerRef.current) clearTimeout(resumeCapTimerRef.current)

@@ -1420,7 +1420,7 @@ export async function createPty(
     // conversation for it, and its own id is adopted below regardless — asking
     // would only sleep through the null retries.
     let ledgerConversationId: string | null = null
-    if (!existingConversationId && conversationResolver) {
+    if (!existingConversationId && conversationResolver && !opts.adoptPty?.preWarmedAgent) {
       // Resolve the authoritative id from the ledger, RETRYING on null. During
       // early boot the async db worker can momentarily return null for a query
       // that has a real answer — the first-spawn race that re-clobbered the

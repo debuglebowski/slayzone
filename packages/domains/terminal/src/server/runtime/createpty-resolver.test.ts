@@ -220,6 +220,46 @@ await test('retry is bounded: resolver ALWAYS null → fresh mint, no hang', asy
   expect(!cmd.includes('--resume'), `must not resume when nothing is ever found: ${cmd}`)
 })
 
+// A pre-warmed agent is claimed only by a task created this instant (single-use
+// reserved id, fresh start), so the ledger cannot know a conversation for it —
+// and the agent's own id is adopted regardless. Consulting the resolver there
+// only burns the null-retry sleeps (~300ms) on every warm Cmd+Shift+N.
+await test('preWarmedAgent adoption never consults the resolver (no retry sleep)', async () => {
+  let calls = 0
+  setConversationResolver(async () => {
+    calls++
+    return null
+  })
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'warmNoResolve:warmNoResolve'
+  const started = Date.now()
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: {
+      warmId: 'warm-1',
+      computerId: 'computer-1',
+      preWarmedAgent: true,
+      sessionId: 'pooled-1',
+      conversationId: 'WARM-CONV'
+    }
+  })
+  const elapsed = Date.now() - started
+  expect(calls === 0, `warm adoption must not consult the resolver (calls=${calls})`)
+  expect(elapsed < 250, `warm adoption must not sleep on resolver retries (${elapsed}ms)`)
+  killPty(sid)
+  setConversationResolver(null)
+})
+
 // ── Real-db resolver chain (not a stub): a ledger READ drives the resume ──────
 // Closes the gap the stubbed wiring test left: proves a resolver backed by a
 // real async db read (the production shape) drives a resume when the renderer

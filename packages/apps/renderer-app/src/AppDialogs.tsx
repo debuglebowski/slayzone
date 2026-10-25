@@ -50,6 +50,7 @@ import {
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
 import type { useTasksData } from '@slayzone/tasks/client'
+import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
 import type { Project } from '@slayzone/projects/shared'
 import type { Task } from '@slayzone/task/shared'
 
@@ -232,6 +233,10 @@ export function AppDialogs({
     // this patch the fresh tab renders untitled until the next board load.
     const lookup = useTabStore.getState()._taskLookup
     useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+    // Brand-new task: its main terminal has no PTY yet, so skip the attach probe;
+    // trace the open so the mount timeline covers tab open → terminal init.
+    markSessionUnspawned(`${task.id}:${task.id}`)
+    traceSessionOpen(`${task.id}:${task.id}`)
     onOpenTask(task.id)
   }, [selectedProjectId, data, trpcClient, onOpenTask])
 

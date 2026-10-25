@@ -30,6 +30,33 @@ export interface PtyAttachClient {
 // attach goes straight to the legacy three-call path.
 let attachUnsupported = false
 
+/**
+ * How long an unspawned mark is trusted. The create and the first attach are one
+ * user action (well under a second); past this the mark is ignored, so a mark
+ * whose terminal never mounted cannot hide a session spawned much later.
+ */
+export const UNSPAWNED_MARK_TTL_MS = 10_000
+
+// Sessions this renderer KNOWS have no PTY yet: the main tab of a task it created
+// this instant to open it. Only the renderer spawns a task PTY (`pty.create`), so
+// the first attach for one can only answer "absent" — skip asking.
+const unspawned = new Map<string, number>()
+
+/**
+ * Mark `sessionId` as having no PTY yet, so its next `attachPty` answers "absent"
+ * without a round trip. One-shot: consumed by that attach.
+ */
+export function markSessionUnspawned(sessionId: string, at: number = Date.now()): void {
+  unspawned.set(sessionId, at)
+}
+
+function consumeUnspawned(sessionId: string): boolean {
+  const at = unspawned.get(sessionId)
+  if (at === undefined) return false
+  unspawned.delete(sessionId)
+  return Date.now() - at <= UNSPAWNED_MARK_TTL_MS
+}
+
 function isMissingProcedure(e: unknown): boolean {
   const err = e as { data?: { code?: string }; message?: string } | null
   if (err?.data?.code === 'NOT_FOUND') return true
@@ -49,6 +76,7 @@ export async function attachPty(
   sessionId: string,
   afterSeq: number
 ): Promise<PtyAttachResult> {
+  if (consumeUnspawned(sessionId)) return { exists: false, state: null, buffer: null }
   if (!attachUnsupported) {
     try {
       return await client.pty.attach.query({ sessionId, afterSeq })
@@ -66,4 +94,5 @@ export async function attachPty(
 /** Test seam. */
 export function __resetPtyAttachForTest(): void {
   attachUnsupported = false
+  unspawned.clear()
 }

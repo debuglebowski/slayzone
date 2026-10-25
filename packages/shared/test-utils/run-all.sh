@@ -430,6 +430,7 @@ run_test packages/domains/terminal/src/client/paint-throttle.test.ts
 # init queue and the one-round-trip pty.attach (with fallback for older servers).
 run_test packages/domains/terminal/src/client/webgl-budget.test.ts
 run_test packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
+run_test packages/domains/terminal/src/client/open-trace.test.ts
 # Stuck-'starting' watchdog: waits on a session the backend still holds as starting
 # (queued for an agent-start slot) instead of showing it dead.
 run_test packages/domains/terminal/src/client/starting-watchdog.test.ts

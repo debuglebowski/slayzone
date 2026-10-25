@@ -53,7 +53,7 @@ import {
 } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
-import { usePtyStatus } from '@slayzone/terminal/client'
+import { markSessionUnspawned, traceSessionOpen, usePtyStatus } from '@slayzone/terminal/client'
 // Shared
 import { Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
 import {
@@ -895,6 +895,10 @@ function App(): React.JSX.Element {
       setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
       const lookup = useTabStore.getState()._taskLookup
       useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+      // Brand-new task: its main terminal has no PTY yet, so skip the attach probe;
+      // trace the open so the mount timeline covers tab open → terminal init.
+      markSessionUnspawned(`${task.id}:${task.id}`)
+      traceSessionOpen(`${task.id}:${task.id}`)
       openTask(task.id, project)
     },
     [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked, trpcClient]

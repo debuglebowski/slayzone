@@ -4,7 +4,13 @@
  * Run with: pnpm exec tsx packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
  */
 import { createInitScheduler, MAX_HOLD_MS, type InitSlot } from './terminal-init-scheduler'
-import { __resetPtyAttachForTest, attachPty, type PtyAttachClient } from './pty-attach'
+import {
+  __resetPtyAttachForTest,
+  attachPty,
+  markSessionUnspawned,
+  UNSPAWNED_MARK_TTL_MS,
+  type PtyAttachClient
+} from './pty-attach'
 
 let passed = 0
 let failed = 0
@@ -220,6 +226,38 @@ async function run(): Promise<void> {
     let threw = false
     await attachPty(client, 's', -1).catch(() => (threw = true))
     ok(threw, 'rejected')
+  })
+
+  await test('session marked unspawned: first attach skips the round trip, once', async () => {
+    __resetPtyAttachForTest()
+    const { client, calls } = fakeClient(async () => ({
+      exists: true,
+      state: 'running',
+      buffer: { chunks: [], currentSeq: 3 }
+    }))
+    markSessionUnspawned('fresh')
+    const first = await attachPty(client, 'fresh', -1)
+    ok(calls.length === 0, `no round trip for a just-created session (calls ${calls})`)
+    ok(!first.exists && first.state === null && first.buffer === null, 'reports absent')
+    // One-shot: a remount (hibernate wake, re-init) must ask the server again.
+    await attachPty(client, 'fresh', -1)
+    ok(calls.join() === 'attach', `second attach asks the server (calls ${calls})`)
+    // Scoped to its own session id.
+    markSessionUnspawned('a')
+    await attachPty(client, 'b', -1)
+    ok(calls.join() === 'attach,attach', `other sessions unaffected (calls ${calls})`)
+  })
+
+  await test('unspawned mark expires: a stale mark never hides a live session', async () => {
+    __resetPtyAttachForTest()
+    const { client, calls } = fakeClient(async () => ({
+      exists: true,
+      state: 'running',
+      buffer: { chunks: [], currentSeq: 3 }
+    }))
+    markSessionUnspawned('old', Date.now() - UNSPAWNED_MARK_TTL_MS - 1)
+    const r = await attachPty(client, 'old', -1)
+    ok(calls.join() === 'attach' && r.exists, `expired mark ignored (calls ${calls})`)
   })
 
   console.log('\n' + '─'.repeat(40))

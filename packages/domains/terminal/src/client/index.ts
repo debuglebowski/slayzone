@@ -18,6 +18,8 @@ export {
   type PtyProgressDotProps
 } from './PtyStateDot'
 export { usePtyStatus } from './usePtyStatus'
+export { markSessionUnspawned } from './pty-attach'
+export { traceSessionOpen } from './open-trace'
 export { useTerminalModes } from './useTerminalModes'
 export { markSkipCache, serializeTerminalHistory } from './terminal-cache'
 export {

@@ -1,4 +1,5 @@
 import { getTrpcClient } from '@slayzone/transport/client'
+import { takeOpenTrace } from './open-trace'
 
 /**
  * Per-mount timing trace for the Terminal component's init path. Collects
@@ -16,6 +17,8 @@ export interface MountTimeline {
 
 export function startMountTimeline(sessionId: string, mode: string | undefined): MountTimeline {
   const t0 = performance.now()
+  // Open action → init start, when the opener traced it (see open-trace.ts).
+  const preInit = takeOpenTrace(sessionId, t0)
   const marks: Record<string, number> = {}
   let flushed = false
   return {
@@ -35,7 +38,8 @@ export function startMountTimeline(sessionId: string, mode: string | undefined):
             mode,
             outcome,
             totalMs: Math.round(performance.now() - t0),
-            marks
+            marks,
+            preInit
           }
         })
       } catch {
