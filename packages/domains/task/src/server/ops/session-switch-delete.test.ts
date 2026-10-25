@@ -26,7 +26,8 @@ import {
   deleteSession,
   getCurrentConversationId,
   isHonoredConversation,
-  listTaskSessions
+  listTaskSessions,
+  markSessionFirstTurn
 } from './agent-sessions.js'
 
 let failures = 0
@@ -369,6 +370,10 @@ async function main(): Promise<void> {
       conversationId: 'B',
       origin: 'slay-spawned-fresh'
     })
+    // A fresh claude-code id is only resumable once it has taken a turn (Claude
+    // writes no transcript before its first prompt) — see recordConversation.
+    await markSessionFirstTurn(db, 'A')
+    await markSessionFirstTurn(db, 'B')
     assert(
       (await getCurrentConversationId(db, 't1', M)) === 'B',
       'newest session should start current'
@@ -448,6 +453,10 @@ async function main(): Promise<void> {
       conversationId: 'B',
       origin: 'slay-spawned-fresh'
     })
+    // A fresh claude-code id is only resumable once it has taken a turn (Claude
+    // writes no transcript before its first prompt) — see recordConversation.
+    await markSessionFirstTurn(db, 'A')
+    await markSessionFirstTurn(db, 'B')
     insPrompt(raw).run('p-a', 't1', M, 'A', 'hello from A', 1)
     insPrompt(raw).run('p-b', 't1', M, 'B', 'hello from B', 2)
 
