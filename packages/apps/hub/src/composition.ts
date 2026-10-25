@@ -57,6 +57,7 @@ import {
   registerConversationHealer,
   registerConversationResolver
 } from '@slayzone/task/server'
+import type { TasksChange } from '@slayzone/task/shared'
 import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
 import {
   createPtyOps,
@@ -230,7 +231,7 @@ const noop = (): void => {
 }
 
 export type ServerComposition = {
-  notifyRenderer: () => void
+  notifyRenderer: (change?: TasksChange) => void
   automationEngine: AutomationEngine
   restDeps: RestApiDeps
   /** Late-bound by the server once listen() resolves the actual port. */
@@ -397,9 +398,19 @@ export function composeServer(opts: {
   // on THIS process now (pty runs here), so the side-car owns this bus.
   const agentLifecycleEvents = new TypedEmitter<AgentLifecycleEventMap>()
 
-  const notifyRenderer = (): void => {
-    notifyEvents.emit('tasks-changed')
-    notifyEvents.emit('settings-changed')
+  // Task-row refresh signal. A `TasksChange` names exactly the rows a writer
+  // touched, so the renderer patches those instead of reloading the board.
+  const notifyTasksChanged = (change?: TasksChange): void => {
+    notifyEvents.emit('tasks-changed', change)
+  }
+  // The generic "something changed" ping (REST/MCP/CLI writes, automations,
+  // integrations): refresh tasks AND settings — the caller may have touched
+  // either. A caller that names its task rows (`TasksChange`) is a pure
+  // task-row write, so it skips the settings refresh: re-reading every
+  // settings consumer for a task status flip was the bulk of idle traffic.
+  const notifyRenderer = (change?: TasksChange): void => {
+    notifyTasksChanged(change)
+    if (!change) notifyEvents.emit('settings-changed')
   }
 
   // Fire-and-forget a best-effort boot task so a rejection can't become an
@@ -458,7 +469,14 @@ export function composeServer(opts: {
   setOnTaskReachedTerminalHandler(runtimeOnTaskReachedTerminal)
   // The warm pool runs here (initWarmProcessManager below), so this is the one host
   // where a task created to be opened at once can take a warm agent's id.
-  setTaskDeps({ ops: taskOps, onMutation: notifyRenderer, reserveWarmTaskId, bus: taskBus })
+  // Task ops write task data only — never settings — so they signal tasks-changed
+  // alone (`notifyTasksChanged`, not `notifyRenderer`).
+  setTaskDeps({
+    ops: taskOps,
+    onMutation: notifyTasksChanged,
+    reserveWarmTaskId,
+    bus: taskBus
+  })
 
   // Conversation self-heal + authoritative resolver. `createPty` runs in THIS
   // process post-slice-9, so the healer/resolver seams it calls must be wired
@@ -466,7 +484,7 @@ export function composeServer(opts: {
   // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
   // ("No conversation found") forever with no self-heal. Same orphaned-listener
   // class as the state-change consumers wired just below.
-  registerConversationHealer(db, notifyRenderer)
+  registerConversationHealer(db, notifyTasksChanged)
   registerConversationResolver(db)
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.
@@ -480,7 +498,7 @@ export function composeServer(opts: {
       sessionId,
       newState,
       oldState,
-      () => notifyEvents.emit('tasks-changed'),
+      notifyTasksChanged,
       onTaskReachedTerminal
     )
 
@@ -509,7 +527,8 @@ export function composeServer(opts: {
         message: `${oldState} -> ${newState}`,
         payload: { hasUserInput, changed }
       })
-      if (changed) notifyEvents.emit('tasks-changed')
+      // `needs_attention` lives on this task's row only.
+      if (changed) notifyTasksChanged({ taskIds: [sessionId.split(':')[0]] })
     } catch (err) {
       recordDiagnosticEvent({
         level: 'error',
@@ -716,7 +735,11 @@ export function composeServer(opts: {
     }
   }
   void refreshPrewarm()
-  notifyEvents.on('settings-changed', () => void refreshPrewarm())
+  // Every `settings.set` signals its key now: re-read only for this setting (or an
+  // unscoped ping, which may have written anything).
+  notifyEvents.on('settings-changed', (change) => {
+    if (!change || change.keys.includes(AGENT_STARTUP_SETTING)) void refreshPrewarm()
+  })
   initWarmProcessManager({
     db,
     isEnabled: () => prewarmEnabled,
@@ -1087,6 +1110,7 @@ export function composeServer(opts: {
         // Event-shaped nav-state replay for late onEvent subscribers — none exist
         // in a WCV-less host.
         getAllStateSnapshots: () => [],
+        getStateSnapshot: () => null,
         events: silentEmitter as AppDeps['browser']['events']
       },
 

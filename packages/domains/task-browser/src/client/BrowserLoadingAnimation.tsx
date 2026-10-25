@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useState } from 'react'
 import { useVisibleInterval } from '@slayzone/ui'
 
 const LOADING_TEXTS = [
@@ -21,12 +21,42 @@ const LOADING_TEXTS = [
 
 const SIZE = 18
 
-/** Per-dot style; `--edge-fade` feeds the browser-pulse-grid keyframes. */
-function dotStyle(edgeFade: number, delay: number): CSSProperties {
-  return {
-    opacity: edgeFade * 0.12,
-    animation: `browser-pulse-grid 2.5s ease-in-out ${delay}s infinite`,
-    ['--edge-fade' as string]: edgeFade
+/**
+ * The pulse runs entirely on the compositor — no main-thread style work per frame.
+ * The old per-dot CSS animation cost ~180ms/s of style recalc (measured, Electron):
+ *  - its keyframes scaled opacity by `calc(… * var(--edge-fade))`, which can't be
+ *    composited, so every frame restyled the dots;
+ *  - and with 324 distinct `animation-delay`s, a CSS animation's iteration
+ *    boundaries (`animationiteration` dispatch) landed on the main thread ~130×/s
+ *    even once composited.
+ * So: the edge fade is a STATIC opacity on a wrapper (opacity multiplies through
+ * nesting — wrapper `edgeFade` × dot `0.12…0.6` is exactly the old
+ * `0.12…0.6 × edgeFade`), and each dot pulses via a Web Animation (no iteration
+ * events) of opacity/transform only. Same keyframes, timing, easing and stagger;
+ * before its delay elapses a dot rests at its inline opacity, as before.
+ */
+const PULSE_KEYFRAMES: Keyframe[] = [
+  { opacity: 0.12, transform: 'scale(0.85)', easing: 'ease-in-out' },
+  { opacity: 0.6, transform: 'scale(1.15)', easing: 'ease-in-out' },
+  { opacity: 0.12, transform: 'scale(0.85)' }
+]
+const PULSE_MS = 2500
+
+/** Callback ref (module-level → stable): starts every dot's pulse, cancels on unmount. */
+function startPulse(grid: HTMLDivElement | null): (() => void) | undefined {
+  if (!grid || typeof grid.animate !== 'function') return undefined
+  const animations: Animation[] = []
+  for (const dot of grid.querySelectorAll<HTMLElement>('[data-pulse-delay]')) {
+    animations.push(
+      dot.animate(PULSE_KEYFRAMES, {
+        duration: PULSE_MS,
+        delay: Number(dot.dataset.pulseDelay) * 1000,
+        iterations: Infinity
+      })
+    )
+  }
+  return () => {
+    for (const a of animations) a.cancel()
   }
 }
 
@@ -45,7 +75,11 @@ export function BrowserLoadingAnimation() {
   return (
     <div className="flex items-center justify-center h-full">
       <div className="relative">
-        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${SIZE}, 6px)` }}>
+        <div
+          ref={startPulse}
+          className="grid gap-3"
+          style={{ gridTemplateColumns: `repeat(${SIZE}, 6px)` }}
+        >
           {Array.from({ length: SIZE * SIZE }, (_, i) => {
             const row = Math.floor(i / SIZE)
             const col = i % SIZE
@@ -57,11 +91,12 @@ export function BrowserLoadingAnimation() {
             const delay = dist * 0.12
 
             return (
-              <div
-                key={i}
-                className="w-[6px] h-[6px] rounded-full bg-blue-500"
-                style={dotStyle(edgeFade, delay)}
-              />
+              <div key={i} className="w-[6px] h-[6px]" style={{ opacity: edgeFade }}>
+                <div
+                  className="size-full rounded-full bg-blue-500 opacity-[0.12]"
+                  data-pulse-delay={delay}
+                />
+              </div>
             )
           })}
         </div>
@@ -74,12 +109,6 @@ export function BrowserLoadingAnimation() {
           </span>
         </div>
       </div>
-      <style>{`
-        @keyframes browser-pulse-grid {
-          0%, 100% { opacity: calc(0.12 * var(--edge-fade)); transform: scale(0.85); }
-          50% { opacity: calc(0.6 * var(--edge-fade)); transform: scale(1.15); }
-        }
-      `}</style>
     </div>
   )
 }

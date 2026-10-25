@@ -635,6 +635,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'task.getByProject': 'user',
   'task.getSubTasks': 'user',
   'task.loadBoardData': 'user',
+  'task.loadBoardRows': 'user',
   'task.onChanged': 'user',
   'task.removeBlocker': 'user',
   'task.reorder': 'user',

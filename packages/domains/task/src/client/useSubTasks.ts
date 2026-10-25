@@ -2,7 +2,6 @@ import { useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useTRPC,
-  useSubscription,
   useClientForTask,
   useHubIdForTask,
   useHubOwnershipStore
@@ -58,17 +57,9 @@ export function useSubTasks(
   const { mutateAsync: deleteTask } = useMutation(trpc.task.delete.mutationOptions())
   const { mutateAsync: reorderTasks } = useMutation(trpc.task.reorder.mutationOptions())
 
-  // Re-fetch subtasks on external changes (CLI, MCP, bulk ops). Mirrors the
-  // legacy `app.onTasksChanged` IPC listener via the `tasks-changed` subscription.
-  useSubscription(
-    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
-      enabled: !!parentId,
-      onData: () => {
-        if (!parentId) return
-        void queryClient.invalidateQueries(trpc.task.getSubTasks.queryFilter({ parentId }))
-      }
-    })
-  )
+  // External changes (CLI, MCP, bulk ops) refetch this query through the app's
+  // single `tasks-changed` subscription (`refreshTaskScopedQueries`), which
+  // defers it while this tab is hidden.
 
   const createSubTask = useCallback(
     async (params: { projectId: string; title: string; status: string }): Promise<Task | null> => {

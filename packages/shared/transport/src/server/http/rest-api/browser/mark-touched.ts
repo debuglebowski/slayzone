@@ -1,5 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
+import type { TasksChange } from '@slayzone/task/shared'
 import type { MenuEventMap } from '../../../app-deps'
 
 interface StoredTab {
@@ -29,7 +30,7 @@ interface StoredState {
  */
 export async function markTabAgentTouched(
   db: SlayzoneDb,
-  notifyRenderer: () => void,
+  notifyRenderer: (change?: TasksChange) => void,
   taskId: string,
   tabId: string | null,
   legacyBroadcast?: (channel: string, ...args: unknown[]) => void,
@@ -63,5 +64,6 @@ export async function markTabAgentTouched(
   await db
     .prepare('UPDATE tasks SET browser_tabs = ? WHERE id = ?')
     .run(JSON.stringify(state), taskId)
-  notifyRenderer()
+  // Only this task's `browser_tabs` column changed.
+  notifyRenderer({ taskIds: [taskId] })
 }

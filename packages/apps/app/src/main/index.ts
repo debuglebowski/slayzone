@@ -2341,6 +2341,7 @@ app
                   if (win) browserViewManager.reparentView(viewId, win)
                 },
                 getAllStateSnapshots: () => browserViewManager.getAllStateSnapshots(),
+                getStateSnapshot: (viewId) => browserViewManager.getStateSnapshot(viewId),
                 events: browserViewEvents
               },
               floatingAgent: {

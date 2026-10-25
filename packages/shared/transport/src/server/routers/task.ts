@@ -286,6 +286,12 @@ export const taskRouter = router({
 
   // --- Board ---
   loadBoardData: publicProcedure.query(({ ctx }) => ops().loadBoardDataOp(ctx.db)),
+  // A few rows of the board — what the renderer patches in when a
+  // `notify.onTasksChanged` event names the changed tasks. Capped: an event
+  // naming more rows than this is cheaper as a full board reload.
+  loadBoardRows: publicProcedure
+    .input(z.object({ ids: z.array(z.string()).max(500) }))
+    .query(({ ctx, input }) => ops().loadBoardRowsOp(ctx.db, input.ids)),
 
   // --- Subscription ---
   // Fires on any task mutation. Replaces the renderer's `tasks:changed` polling once

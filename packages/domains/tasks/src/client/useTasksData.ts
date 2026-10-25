@@ -10,11 +10,22 @@ import {
   getClientForHub,
   type TrpcVanillaClient
 } from '@slayzone/transport/client'
-import type { Task, TaskStatus } from '@slayzone/task/shared'
+import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task/shared'
+import { refreshTaskScopedQueries } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
+import {
+  MAX_PATCH_ROWS,
+  parentIdsOf,
+  patchBoardRows,
+  patchMirrorBlocked,
+  patchMirrorTaskTags,
+  patchMirrorTasks,
+  type BoardData,
+  type BoardRows
+} from './board-patch'
 
 function hasTaskIdentity(task: Task | null | undefined): task is Task {
   return !!task && typeof task.id === 'string' && task.id.length > 0
@@ -31,17 +42,6 @@ const LOCAL_FALLBACK_HUB_ID = 'local'
  *  subscription — the reactive copies come from the hook selectors instead). */
 const ownedProjects = (): Map<string, string> => useHubOwnershipStore.getState().hubIdByProject
 const ownedTasks = (): Map<string, string> => useHubOwnershipStore.getState().hubIdByTask
-
-/** Structural shape of `task.loadBoardData` (client view — rows are the shared
- *  Task/Project/Tag types). Mirrors the server op's return without importing
- *  the electron-coupled server module into renderer code. */
-type BoardData = {
-  tasks: Task[]
-  projects: Project[]
-  tags: Tag[]
-  taskTags: Record<string, string[]>
-  blockedTaskIds: string[]
-}
 
 /** Partition an id list by owning hub (preserving order within each hub), for
  *  ops that can legitimately span hubs (e.g. the tree-global pinned list). Ids
@@ -313,10 +313,29 @@ export function useTasksData(): UseTasksDataReturn {
     })
   }, [trpcClient, recomposeGroups])
 
+  // The board object a row patch produced. The patch already applied itself to
+  // the mirrors (three-way, keeping pending optimistic edits — see
+  // patchMirrorTasks), so the seeding effect below must not rebuild them from it.
+  const patchedBoardRef = useRef<BoardData | null>(null)
+
+  // A full reload whose answer equals the patched board keeps that very object
+  // (react-query structural sharing), so the seeding effect never re-runs. Rebuild
+  // the mirrors anyway: a full reload is where every optimistic leftover ends. A
+  // different answer re-runs the seeding effect itself, with the new data.
+  const afterFullBoardReload = useStableCallback((): void => {
+    const patched = patchedBoardRef.current
+    if (patched === null) return
+    patchedBoardRef.current = null
+    if (queryClient.getQueryData(trpc.task.loadBoardData.queryKey()) === patched) {
+      recomposeBoards()
+    }
+  })
+
   // Seed the useState mirrors from the (default hub) board query result, merged
   // with any extra-hub boards already fetched.
   useEffect(() => {
     if (!boardQ.data) return
+    if (boardQ.data === patchedBoardRef.current) return
     recomposeBoards()
   }, [boardQ.data, recomposeBoards])
 
@@ -367,7 +386,12 @@ export function useTasksData(): UseTasksDataReturn {
       loadHub(hub.id, client)
       try {
         const sub = client.notify.onTasksChanged.subscribe(undefined, {
-          onData: () => loadHub(hub.id, client)
+          onData: (event: TasksChangedEvent | undefined) => {
+            loadHub(hub.id, client)
+            // That hub's task tabs read their per-task queries from its own
+            // QueryClient — refresh them there (scoped, hidden tabs deferred).
+            void refreshTaskScopedQueries(resolved.queryClient, event?.taskIds ?? null)
+          }
         })
         unsubs.push(() => sub.unsubscribe())
       } catch {
@@ -445,7 +469,7 @@ export function useTasksData(): UseTasksDataReturn {
     w.__slayzone_refreshData = () => {
       void queryClient.invalidateQueries()
       return Promise.all([
-        queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()),
+        queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()).then(afterFullBoardReload),
         loadGroups()
       ])
     }
@@ -454,12 +478,73 @@ export function useTasksData(): UseTasksDataReturn {
     }
   }, [queryClient, trpc, loadGroups])
 
-  // External changes: when a `tasks-changed` signal fires (CLI → REST → notify
-  // bus), invalidate the board query and reload groups. Replaces the legacy
-  // `app.onTasksChanged` IPC listener.
-  const handleTasksChanged = useStableCallback(() => {
-    void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+  // External changes: the app's ONE `tasks-changed` subscription (CLI → REST →
+  // notify bus, agent state, other windows). It refreshes the board AND every
+  // open task tab's per-task queries (`refreshTaskScopedQueries` — tabs hold no
+  // subscriptions of their own).
+  //
+  // An event that names its task rows patches just those rows into the board
+  // (`task.loadBoardRows`, a few KB) instead of reloading every task (MBs) —
+  // the common case: agent state / attention / conversation-id flips. An event
+  // of unknown scope reloads the board and project groups as before.
+  //
+  // Patches run one at a time, so a slower older patch can never land over a
+  // newer one. A full board fetch overlapping a patch wins: it is at least as
+  // new as the event, so the patch is dropped (or, when the fetch was already in
+  // flight before the event, the board is reloaded again).
+  const boardPatchChainRef = useRef<Promise<void>>(Promise.resolve())
+  const patchBoardFor = useStableCallback(async (taskIds: string[]): Promise<void> => {
+    const boardFilter = trpc.task.loadBoardData.queryFilter()
+    const boardKey = trpc.task.loadBoardData.queryKey()
+    const before = queryClient.getQueryData<BoardData>(boardKey)
+    const reload = (): Promise<void> => queryClient.invalidateQueries(boardFilter)
+    const refreshTabs = (after: readonly Task[]): Promise<void> =>
+      refreshTaskScopedQueries(queryClient, [
+        ...taskIds,
+        ...parentIdsOf(taskIds, before?.tasks, after)
+      ])
+    if (!before || taskIds.length > MAX_PATCH_ROWS || queryClient.isFetching(boardFilter) > 0) {
+      await Promise.all([reload(), refreshTabs([])])
+      return
+    }
+    const startedAt = Date.now()
+    const rows = await trpcClient.task.loadBoardRows.query({ ids: taskIds }).catch(() => null)
+    if (!rows) {
+      await Promise.all([reload(), refreshTabs([])])
+      return
+    }
+    const state = queryClient.getQueryState(boardKey)
+    const fetchedSince = !state || state.dataUpdatedAt > startedAt
+    if (!fetchedSince && queryClient.isFetching(boardFilter) === 0) {
+      const current = queryClient.getQueryData<BoardData>(boardKey)
+      const next = current ? patchBoardRows(current, taskIds, rows as unknown as BoardRows) : null
+      if (current && next) {
+        patchedBoardRef.current = next
+        queryClient.setQueryData<BoardData>(boardKey, next)
+        setTasks((prev) => patchMirrorTasks(prev, taskIds, current, next))
+        setTaskTags((prev) => patchMirrorTaskTags(prev, taskIds, current, next))
+        setBlockedTaskIds((prev) => patchMirrorBlocked(prev, taskIds, current, next))
+      } else {
+        void reload()
+      }
+    }
+    await refreshTabs((rows as unknown as BoardRows).tasks)
+  })
+  const handleTasksChanged = useStableCallback((event: TasksChangedEvent | undefined) => {
+    // Hubs that predate the payload send nothing: unknown scope.
+    const taskIds = event?.taskIds ?? null
+    if (taskIds) {
+      if (taskIds.length === 0) return
+      boardPatchChainRef.current = boardPatchChainRef.current
+        .then(() => patchBoardFor(taskIds))
+        .catch(() => undefined)
+      return
+    }
+    void queryClient
+      .invalidateQueries(trpc.task.loadBoardData.queryFilter())
+      .then(afterFullBoardReload)
     void loadGroups()
+    void refreshTaskScopedQueries(queryClient, null)
   })
   useSubscription(
     trpc.notify.onTasksChanged.subscriptionOptions(undefined, { onData: handleTasksChanged })

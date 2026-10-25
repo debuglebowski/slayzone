@@ -9,7 +9,9 @@
  */
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
 import { SettingsService } from '@slayzone/settings/server'
+import { TypedEmitter } from '@slayzone/platform/events'
 import { settingsRouter } from './settings.js'
+import { setNotifyEvents, type NotifyEventMap } from '../app-deps.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb }
@@ -41,6 +43,17 @@ test('settings router: getAll returns object incl. migration-seeded defaults', a
 test('settings router: set updates the value warmed getCached() readers see', async () => {
   await caller.set({ key: 'terminal_idle_close_value', value: '1800' })
   expect(settings.getCached('terminal_idle_close_value')).toBe('1800')
+})
+
+test('settings router: set tells every window which key changed (cross-window sync)', async () => {
+  // A second window (secondary task window) learns of this window's settings writes
+  // only through notify.onSettingsChanged — set must signal it, scoped to the key.
+  const ev = new TypedEmitter<NotifyEventMap>()
+  setNotifyEvents(ev)
+  const seen: unknown[] = []
+  ev.on('settings-changed', (change) => seen.push(change))
+  await caller.set({ key: 'panel_config', value: '{"webPanels":[]}' })
+  expect(seen).toEqual([{ keys: ['panel_config'] }])
 })
 
 test('settings router: forDatabase returns one shared instance per db (no cache fork)', () => {

@@ -22,6 +22,8 @@ export interface TaskDetailData {
   project: Project | null
   tags: Tag[]
   taskTagIds: string[]
+  /** The task's tags as fetched (seeds the tab's tag query — no refetch on mount). */
+  taskTags?: Tag[]
   subTasks: Task[]
   parentTask: Task | null
   projectPathMissing: boolean
@@ -175,6 +177,7 @@ async function fetchTaskDetailUncapped(
     project,
     tags: loadedTags.filter((t) => t.project_id === loadedTask.project_id),
     taskTagIds: loadedTaskTags.map((t) => t.id),
+    taskTags: loadedTaskTags,
     subTasks: loadedSubTasks,
     parentTask,
     projectPathMissing,

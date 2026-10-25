@@ -1328,6 +1328,32 @@ test('task router: loadBoardData', async () => {
   expect(Array.isArray(board.tasks)).toBeTruthy()
 })
 
+test('task router: loadBoardRows is exactly those rows of loadBoardData', async () => {
+  const a = await caller.create(mk('rows-a'))
+  const b = await caller.create(mk('rows-b'))
+  const c = await caller.create(mk('rows-c'))
+  await caller.addBlocker({ taskId: b.id, blockerTaskId: a.id })
+  await caller.update({ id: c.id, isBlocked: true })
+  const board = await caller.loadBoardData()
+  const rows = await caller.loadBoardRows({ ids: [a.id, b.id, c.id] })
+  const pick = (id: string) => board.tasks.find((t) => t.id === id)
+  expect(rows.tasks.map((t) => t.id).sort()).toEqual([a.id, b.id, c.id].sort())
+  for (const t of rows.tasks) expect(t).toEqual(pick(t.id))
+  expect(rows.blockedTaskIds.sort()).toEqual(
+    board.blockedTaskIds.filter((id) => [a.id, b.id, c.id].includes(id)).sort()
+  )
+  expect(rows.blockedTaskIds.sort()).toEqual([b.id, c.id].sort())
+  // A deleted row is absent (the client drops it from the board).
+  await caller.delete({ id: c.id })
+  const after = await caller.loadBoardRows({ ids: [c.id] })
+  expect(after.tasks).toEqual([])
+  expect(await caller.loadBoardRows({ ids: [] })).toEqual({
+    tasks: [],
+    taskTags: {},
+    blockedTaskIds: []
+  })
+})
+
 test('task router: create fires taskEvents (backs the onChanged subscription)', async () => {
   let fired = 0
   const handler = (): void => {

@@ -10,7 +10,7 @@ export async function handleTerminalStateChange(
   sessionId: string,
   newState: string,
   oldState: string,
-  notifyTasksChanged: () => void,
+  notifyTasksChanged: (change?: { taskIds: readonly string[] }) => void,
   onReachedTerminal?: (taskId: string) => void
 ): Promise<void> {
   let targetField: 'on_terminal_active' | 'on_terminal_idle' | null = null
@@ -50,7 +50,8 @@ export async function handleTerminalStateChange(
       task.id
     ])
     if (isTerminalStatus(newStatus, columns)) onReachedTerminal?.(task.id)
-    notifyTasksChanged()
+    // Only this task's status column changed.
+    notifyTasksChanged({ taskIds: [task.id] })
   } catch {
     /* ignore errors — automation is best-effort */
   }

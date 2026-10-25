@@ -27,6 +27,7 @@ import {
   getAutomationsEvents,
   getChatDeps,
   getMenuEvents,
+  getNotifyEvents,
   getProcessesDeps,
   getPtyDeps,
   type AppRouter
@@ -511,8 +512,12 @@ export const EMIT: Record<string, (o: Owned) => void> = {
     getMenuEvents().emit('browser-create-tab', { taskId: o.task, tabId: o.tab }),
   'menu.onBrowserAgentTouched': (o) =>
     getMenuEvents().emit('browser-agent-touched', { taskId: o.task, tabId: o.tab }),
-  // notify.onTasksChanged / onSettingsChanged and task.onChanged are produced by a REAL
-  // `task.update` from the owner's own client (see the test), not by an emit here.
+  // notify.onTasksChanged and task.onChanged are produced by a REAL `task.update` from
+  // the owner's own client (see the test), not by an emit here. A task write no longer
+  // signals settings-changed (it changes no setting), so that ping — a void signal
+  // attributed to who caused it — is emitted as the owner, like the menu events.
+  'notify.onSettingsChanged': (o) =>
+    asUser(o.userId, () => getNotifyEvents().emit('settings-changed')),
   'settings.onThemeChanged': (o) =>
     asUser(o.userId, () => settingsEvents.emit('theme:changed', 'dark')),
   'processes.onLog': (o) => getProcessesDeps().events.emit('log', o.process, o.mark),
@@ -546,4 +551,4 @@ export const EMIT: Record<string, (o: Owned) => void> = {
 }
 
 /** Subscriptions an owner's own `task.update` (a real mutation) produces events on. */
-export const BY_MUTATION = ['notify.onTasksChanged', 'notify.onSettingsChanged', 'task.onChanged']
+export const BY_MUTATION = ['notify.onTasksChanged', 'task.onChanged']

@@ -5,6 +5,7 @@ export { useDialogStore, type SearchFileContext } from './useDialogStore'
 // `@slayzone/settings/client/CliInstallDialog`.
 export { ThemeProvider, useTheme } from './ThemeContext'
 export { applyTheme } from './apply-theme'
+export { readThemeCache, resolveThemeCache } from './theme-cache'
 export {
   useTabStore,
   tabStoreReady,

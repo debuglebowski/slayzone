@@ -305,7 +305,9 @@ async function main(): Promise<void> {
       'projectGroups.reorderProjectsInGroup': { groupId: B.projectGroup, projectIds: [B.project] },
       'projectGroups.createFolderWithProjects': { projectIds: [B.project] },
       'projectGroups.delete': { id: B.projectGroup },
-      'task.getBlockers': { taskId: B.task }
+      'task.getBlockers': { taskId: B.task },
+      // Names BOTH users' tasks: each caller must get back only its own row.
+      'task.loadBoardRows': { ids: [A.task, B.task] }
     }
     const listPaths = Object.entries(TRPC_OWNER_POLICY)
       .filter(([path, r]) => r.output && typeOf(path) !== 'subscription')
@@ -327,6 +329,7 @@ async function main(): Promise<void> {
       'projects.list',
       'task.getAll',
       'task.loadBoardData',
+      'task.loadBoardRows',
       'tags.list',
       'tags.getAllTaskTagIds',
       'taskTerminals.listHibernatedSessions',

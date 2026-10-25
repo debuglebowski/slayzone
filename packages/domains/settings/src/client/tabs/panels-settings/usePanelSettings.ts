@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { safeRandomUUID } from '@slayzone/ui'
 import {
   AGENT_STARTUP_SETTING,
@@ -37,6 +37,7 @@ export type DiffContextLines = '0' | '3' | '5' | 'all'
  *  sub-views consume the returned view-model; nothing here owns layout/render. */
 export function usePanelSettings(activeTab: string, navigateTo: (tab: string) => void) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   // staleTime:0 — settings are real-time (CLI / other windows write them out of
   // band). The dialog unmounts on close, so the onSettingsChanged refetch below
   // is inactive when an external write lands; on re-open the query must hit the
@@ -218,15 +219,28 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   }, [allSettingsQuery.data])
 
   // Replaces the app:settings-changed IPC listener: re-read panel_config when a
-  // settings change is broadcast (CLI / other window).
+  // settings change is broadcast (CLI / other window). An unscoped ping (CLI/REST,
+  // older hub) refetches everything as before. A keyed one comes from a
+  // `settings.set` — including this dialog's own writes — so it re-reads ONLY
+  // panel_config: refetching all settings would re-seed every field of the open
+  // dialog from the server and could drop an edit the user has not saved yet.
+  const applyPanelConfig = (pc: string | null | undefined): void => {
+    if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
+  }
   useSubscription(
     trpc.notify.onSettingsChanged.subscriptionOptions(undefined, {
-      onData: () => {
-        void allSettingsQuery.refetch().then(({ data }) => {
-          const pc = data?.['panel_config']
-          if (pc)
-            setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
-        })
+      onData: (event) => {
+        if (!event?.keys) {
+          void allSettingsQuery
+            .refetch()
+            .then(({ data }) => applyPanelConfig(data?.['panel_config']))
+          return
+        }
+        if (!event.keys.includes('panel_config')) return
+        void trpcClient.settings.get
+          .query({ key: 'panel_config' })
+          .then(applyPanelConfig)
+          .catch(() => undefined)
       }
     })
   )

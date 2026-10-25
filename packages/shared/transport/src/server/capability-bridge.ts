@@ -72,6 +72,14 @@ export type CapabilityEventFrame = {
   channel: CapabilityEventChannel
   event: string
   args: unknown[]
+  /**
+   * Browser nav events only (`channel: 'browser'`, `event: 'event'`): the view's
+   * `state-snapshot` taken as the event fires (null once the view is gone). The
+   * side-car's `getAllStateSnapshots` replay cache applies it in the same tick it
+   * re-emits the event, so a subscriber attaching right after an event is
+   * replayed that event's state — never an older one it can't recover from.
+   */
+  snapshot?: unknown
 }
 
 // Event names per channel — kept here next to the bridge (TypedEmitter has no
@@ -164,7 +172,29 @@ export const capabilityBridgeRouter = router({
         }
       }
 
-      wire('browser', deps.browser.events, BROWSER_EVENTS)
+      // Browser nav events carry the view's state as of the event (see
+      // `CapabilityEventFrame.snapshot`); the other browser events don't move it.
+      const browserNavHandler = (e: unknown): void => {
+        const viewId = (e as { viewId?: unknown } | null)?.viewId
+        const frame: CapabilityEventFrame = { channel: 'browser', event: 'event', args: [e] }
+        if (typeof viewId === 'string') {
+          try {
+            frame.snapshot = deps.browser.getStateSnapshot(viewId) ?? null
+          } catch {
+            // Leave it off: the side-car then re-reads every snapshot instead.
+          }
+        }
+        emit.next(frame)
+      }
+      deps.browser.events.on('event', browserNavHandler)
+      offs.push(() => {
+        deps.browser.events.off('event', browserNavHandler as (...args: unknown[]) => void)
+      })
+      wire(
+        'browser',
+        deps.browser.events,
+        BROWSER_EVENTS.filter((ev) => ev !== 'event')
+      )
       wire('floatingAgent', deps.floatingAgent.events, FLOATING_EVENTS)
       wire('webview', deps.webview.events, WEBVIEW_EVENTS)
       wire('taskWindows', deps.taskWindows.events, TASK_WINDOWS_EVENTS)

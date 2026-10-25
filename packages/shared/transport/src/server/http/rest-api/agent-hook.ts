@@ -17,7 +17,8 @@ import {
   findOwnedSpawnForConversation,
   getCurrentConversationId,
   confirmSessionConversation,
-  markSessionFirstTurn
+  markSessionFirstTurn,
+  getTaskOp
 } from '@slayzone/task/server'
 import { capturePrompt } from '@slayzone/agent-turns/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
@@ -441,6 +442,19 @@ async function persistConversationId(
   source?: string
 ): Promise<void> {
   try {
+    // The task's board row as the renderer sees it (`provider_config` legacy
+    // mirror + `currentConversationByMode`), captured before the write so the
+    // refresh below fires only when the row actually changed. Every resume of a
+    // conversation already bound — each agent respawn, ~60 at a hub boot —
+    // re-records the same id and changes nothing on the board; pinging every
+    // renderer for those was pure refetch traffic.
+    const rowBefore = await boardRowSnapshot(deps, taskId)
+    const notifyIfRowChanged = async (): Promise<void> => {
+      const rowAfter = await boardRowSnapshot(deps, taskId)
+      // Unreadable either side → can't prove "unchanged": notify.
+      if (rowAfter !== null && rowAfter === rowBefore) return
+      deps.notifyRenderer({ taskIds: [taskId] })
+    }
     // ── In-band id rotation (`/clear`) ────────────────────────────────────────
     // The agent dropped its conversation and minted a NEW session id without
     // restarting its process. The id-match gate below cannot classify this: the
@@ -482,7 +496,7 @@ async function persistConversationId(
           conversationId: sessionId,
           origin: 'in-band-clear'
         })
-        deps.notifyRenderer()
+        await notifyIfRowChanged()
         return
       }
       // No ownership claim → fall through to the standard gate, which will
@@ -521,9 +535,18 @@ async function persistConversationId(
     // Pending row stays — repeated SessionStart payloads on the same spawn
     // are idempotent (we just append another row with the same origin).
     // The row is pruned by the PTY-exit hook OR the periodic TTL sweep.
-    if (origin !== 'foreign-observed') deps.notifyRenderer()
+    if (origin !== 'foreign-observed') await notifyIfRowChanged()
   } catch {
     // Best-effort — adapter `/status` + disk-scan fallbacks still cover capture.
+  }
+}
+
+/** Serialized board row of a task (null when it does not exist / cannot be read). */
+async function boardRowSnapshot(deps: RestApiDeps, taskId: string): Promise<string | null> {
+  try {
+    return JSON.stringify(await getTaskOp(deps.db, taskId))
+  } catch {
+    return null
   }
 }
 

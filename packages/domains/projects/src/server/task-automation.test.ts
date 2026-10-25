@@ -56,11 +56,14 @@ function getStatus(taskId: string): string {
 }
 
 let notifyCalls = 0
+let lastChange: { taskIds: readonly string[] } | undefined
 function resetNotify(): void {
   notifyCalls = 0
+  lastChange = undefined
 }
-function notifyTasksChanged(): void {
+function notifyTasksChanged(change?: { taskIds: readonly string[] }): void {
   notifyCalls++
+  lastChange = change
 }
 
 await describe('task automation: state change triggers', async () => {
@@ -71,6 +74,8 @@ await describe('task automation: state change triggers', async () => {
     await handleTerminalStateChange(h.slayDb, `${taskId}:0`, 'running', 'idle', notifyTasksChanged)
     expect(getStatus(taskId)).toBe('in_progress')
     expect(notifyCalls).toBe(1)
+    // Names the one row it moved, so renderers patch it instead of reloading the board.
+    expect(lastChange).toEqual({ taskIds: [taskId] })
   })
 
   test('running->idle triggers on_terminal_idle', async () => {

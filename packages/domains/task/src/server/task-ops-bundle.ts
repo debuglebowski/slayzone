@@ -21,7 +21,8 @@ import {
   addBlockerOp,
   removeBlockerOp,
   setBlockersOp,
-  loadBoardDataOp
+  loadBoardDataOp,
+  loadBoardRowsOp
 } from './ops/index.js'
 
 // The task CRUD/deps/board ops are electron-coupled (createTaskOp pulls
@@ -52,7 +53,8 @@ export const taskOps = {
   addBlockerOp,
   removeBlockerOp,
   setBlockersOp,
-  loadBoardDataOp
+  loadBoardDataOp,
+  loadBoardRowsOp
 }
 
 export type TaskOps = typeof taskOps

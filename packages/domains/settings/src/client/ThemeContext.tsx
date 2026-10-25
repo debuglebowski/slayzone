@@ -4,6 +4,7 @@ import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { applyTheme } from './apply-theme'
+import { readThemeCache, resolveThemeCache, systemTheme, writeThemeCache } from './theme-cache'
 
 interface ThemeContextValue {
   // Core
@@ -52,14 +53,9 @@ function migrateThemeId(id: string): string {
   return LEGACY_ID_MAP[id] ?? id
 }
 
-// Resolve the OS dark/light setting in the renderer. The chromium-fork sidecar
-// has no Electron `nativeTheme`, so its server-side effective-theme is a constant
-// — "system" MUST be resolved here via `prefers-color-scheme`. matchMedia works
-// identically in the Electron renderer (reflects nativeTheme), so this is shared.
-function systemTheme(): Theme {
-  if (typeof window === 'undefined' || !window.matchMedia) return 'dark'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+// "system" is resolved in the renderer (`systemTheme`, theme-cache.ts): the
+// chromium-fork sidecar has no Electron `nativeTheme`, so its server-side
+// effective-theme is a constant. matchMedia reflects nativeTheme in Electron too.
 
 // Effective dark/light from the user's preference: explicit wins, "system" maps
 // to the OS, and a non-preference value falls back to the server's answer.
@@ -77,20 +73,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setThemeMutation = useMutation(trpc.settings.setTheme.mutationOptions())
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  const [theme, setTheme] = useState<Theme>('dark')
-  const [preference, setPreferenceState] = useState<ThemePreference>('dark')
+  // First paint uses the last-applied settings (theme-cache.ts, also applied by
+  // the pre-React theme-init) so the window never flashes the default theme while
+  // the settings load queues behind the board; the server values below still win.
+  const [cached] = useState(readThemeCache)
+  const [theme, setTheme] = useState<Theme>(() =>
+    cached ? resolveThemeCache(cached).theme : 'dark'
+  )
+  const [preference, setPreferenceState] = useState<ThemePreference>(
+    cached?.preference ?? 'dark'
+  )
 
   // Single theme (when split off)
-  const [singleThemeId, setSingleThemeId] = useState(DEFAULT_THEME_ID)
+  const [singleThemeId, setSingleThemeId] = useState(cached?.singleThemeId ?? DEFAULT_THEME_ID)
 
   // Split themes
-  const [splitThemes, setSplitThemesState] = useState(false)
-  const [themeIdDark, setThemeIdDarkState] = useState(DEFAULT_THEME_ID)
-  const [themeIdLight, setThemeIdLightState] = useState(DEFAULT_THEME_ID)
+  const [splitThemes, setSplitThemesState] = useState(cached?.split ?? false)
+  const [themeIdDark, setThemeIdDarkState] = useState(cached?.themeIdDark ?? DEFAULT_THEME_ID)
+  const [themeIdLight, setThemeIdLightState] = useState(cached?.themeIdLight ?? DEFAULT_THEME_ID)
 
   // Per-section overrides (empty = same as app)
-  const [terminalOverrideThemeId, setTerminalOverrideThemeIdState] = useState('')
-  const [editorOverrideThemeId, setEditorOverrideThemeIdState] = useState('')
+  const [terminalOverrideThemeId, setTerminalOverrideThemeIdState] = useState(
+    cached?.terminalOverrideThemeId ?? ''
+  )
+  const [editorOverrideThemeId, setEditorOverrideThemeIdState] = useState(
+    cached?.editorOverrideThemeId ?? ''
+  )
 
   // Resolved
   const themeId = splitThemes ? (theme === 'dark' ? themeIdDark : themeIdLight) : singleThemeId
@@ -198,6 +206,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(theme, themeId)
   }, [theme, themeId])
+
+  // Remember what is applied, for the next window's first paint.
+  useEffect(() => {
+    writeThemeCache({
+      preference,
+      effective: theme,
+      singleThemeId,
+      split: splitThemes,
+      themeIdDark,
+      themeIdLight,
+      terminalOverrideThemeId,
+      editorOverrideThemeId
+    })
+  }, [
+    preference,
+    theme,
+    singleThemeId,
+    splitThemes,
+    themeIdDark,
+    themeIdLight,
+    terminalOverrideThemeId,
+    editorOverrideThemeId
+  ])
 
   const setPreference = async (nextPreference: ThemePreference) => {
     const serverEffective = await setThemeMutation.mutateAsync(nextPreference)

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useSubscription } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import type {
   TaskArtifact,
   RenderMode,
@@ -140,17 +140,9 @@ export function useArtifacts(
 
   const isLoading = !!taskId && (artifactsQuery.isPending || foldersQuery.isPending)
 
-  // External changes: refetch both lists when a `tasks-changed` signal fires
-  // (replaces the legacy `app.onTasksChanged` IPC listener).
-  useSubscription(
-    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
-      enabled: !!taskId,
-      onData: () => {
-        void artifactsQuery.refetch()
-        void foldersQuery.refetch()
-      }
-    })
-  )
+  // External changes refetch both lists through the app's single `tasks-changed`
+  // subscription (`refreshTaskScopedQueries` in @slayzone/task), which scopes it
+  // to the changed tasks and defers it while this task's tab is hidden.
 
   // --- Mutations ---
   // mutateAsync is a stable (bound) function across renders — the callbacks below

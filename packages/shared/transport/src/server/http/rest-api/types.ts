@@ -2,6 +2,7 @@ import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
+import type { TasksChange } from '@slayzone/task/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '../../context'
 import type { FindJoinTokenAccount } from '../../join-token-policy'
@@ -168,8 +169,10 @@ export interface ArtifactExportAccess {
 
 export interface RestApiDeps {
   db: SlayzoneDb
-  /** Cross-cutting "data changed" ping (tasks + settings refetch). */
-  notifyRenderer: () => void
+  /** Cross-cutting "data changed" ping (tasks + settings refetch). A caller that
+   *  touched only known task rows passes them (`TasksChange`): the renderer then
+   *  patches those rows, and no settings refetch is signalled. */
+  notifyRenderer: (change?: TasksChange) => void
   automationEngine?: { executeManual(id: string): Promise<unknown> }
   /** Legacy test-only broadcast spy. Production hosts should not set this. */
   legacyBroadcast?: (channel: string, ...args: unknown[]) => void

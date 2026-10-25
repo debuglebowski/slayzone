@@ -18,3 +18,8 @@ export {
 export { TaskProgressPopover } from './TaskProgressPopover'
 export { usePanelOwnership } from './usePanelOwnership'
 export { PanelOwnerStub } from './PanelOwnerStub'
+export {
+  refreshTaskScopedQueries,
+  useTaskScopedQueriesFreshOnReveal,
+  taskIdOfScopedQuery
+} from './taskScopedQueries'

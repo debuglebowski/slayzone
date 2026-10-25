@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { ProviderConfig, Task, TasksChange, UpdateTaskInput } from '@slayzone/task/shared'
 import {
   prioritySchema,
   validateReparent,
@@ -1417,7 +1417,10 @@ export interface OpDeps {
    *  app/main listeners. Absent when ops are called from a tRPC procedure (the task
    *  router injects ops with `{}` deps). Emit sites guard with `?.`. */
   ipcMain?: { emit(channel: string, ...args: unknown[]): boolean }
-  onMutation?: () => void
+  /** Post-mutation refresh signal. An op passes a `TasksChange` only when it
+   *  touched exactly those task rows and nothing else the board shows; without
+   *  one the renderer reloads the whole board (see `TasksChange`). */
+  onMutation?: (change?: TasksChange) => void
   /**
    * The warm pool's `reserveWarmTaskId` (terminal domain). Injected rather than
    * imported because terminal depends on task, never the reverse. Wired only where

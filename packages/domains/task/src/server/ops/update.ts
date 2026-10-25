@@ -32,7 +32,10 @@ export async function updateTaskOp(
         oldStatus: result.previousTask?.status
       })
     }
-    onMutation?.()
+    // `updateTask` writes only this task's row (+ its conversation ledger, which
+    // feeds the same row's `currentConversationByMode`), so the renderer can
+    // patch just this row instead of reloading the board.
+    onMutation?.({ taskIds: [data.id] })
   }
   return colorOne(db, result.nextTask)
 }

@@ -73,7 +73,14 @@ const findOwnedSpawnForConversationSpy = vi.fn<
 const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(() =>
   Promise.resolve()
 )
+// The task's board row, read before and after a conversation write to tell a real
+// change from a no-op re-record. Default: the row reflects the ledger (it changes
+// with every recordConversation), so pre-existing tests see "changed → notify".
+const getTaskOpSpy = vi.fn<(db: unknown, id: string) => Promise<unknown>>((_db, id) =>
+  Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
+)
 vi.mock('@slayzone/task/server', () => ({
+  getTaskOp: (db: unknown, id: string) => getTaskOpSpy(db, id),
   recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
   findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
     findPendingSpawnSpy(db, taskId, mode),
@@ -95,7 +102,9 @@ interface ServerHandle {
   close(): Promise<void>
 }
 
-function startServer(deps?: { notifyRenderer?: () => void }): Promise<ServerHandle> {
+function startServer(deps?: {
+  notifyRenderer?: (change?: { taskIds: readonly string[] }) => void
+}): Promise<ServerHandle> {
   const app = express()
   registerAgentHookRoute(app, {
     db: {} as never,
@@ -1013,8 +1022,42 @@ describe('POST /api/agent-hook', () => {
         origin: 'slay-spawned-fresh'
       })
       expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+      // Names the one row it changed → the renderer patches just that row.
+      expect(notifyRendererSpy).toHaveBeenCalledWith({ taskIds: ['cc-task'] })
     } finally {
       await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart re-recording the bound id (resume) → no renderer ping', async () => {
+    // A respawn resumes the conversation the task already shows: the ledger gains a
+    // row but the board row is identical, so no renderer should refetch for it.
+    getTaskOpSpy.mockImplementation((_db, id) =>
+      Promise.resolve({ id, currentConversationByMode: { 'claude-code': 'same' } })
+    )
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: '77777777-7777-4777-8777-777777777777',
+      usedResume: true
+    })
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        sessionId: '77777777-7777-4777-8777-777777777777'
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-resume'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+      getTaskOpSpy.mockImplementation((_db, id) =>
+        Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
+      )
     }
   })
 

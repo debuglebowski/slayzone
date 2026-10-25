@@ -192,7 +192,8 @@ const oneOrNull =
     return r && (await scope.allows(r)) ? data : null
   }
 
-/** `task.loadBoardData`: the whole board, cut to the caller's projects. */
+/** `task.loadBoardData` / `task.loadBoardRows`: the board (or a few of its rows),
+ *  cut to the caller's projects. */
 const board: OutputFilter = async (data, scope) => {
   if (!isRecord(data)) return data
   return {
@@ -318,6 +319,20 @@ const onFirst =
 const byActor: EventFilter = (event, { userId }) => {
   const actor = currentSecurityContext()?.actor
   return actor && actor !== userId ? DROP : event
+}
+
+/**
+ * `notify.onTasksChanged`: a refetch ping attributed like {@link byActor}, which may
+ * also name the changed task ids (`TasksChangedEvent`). Named ids are cut to the
+ * caller's tasks — a ping naming only other users' tasks is not sent (nothing the
+ * caller can see changed). `taskIds: null` (unknown scope) names nothing and passes.
+ */
+const tasksChangedEvents: EventFilter = async (event, state) => {
+  // byActor reads the async context: call it before any await.
+  if (byActor(event, state) === DROP) return DROP
+  if (!isRecord(event) || !Array.isArray(event.taskIds)) return event
+  const taskIds = (await ids('task')(event.taskIds, state.scope)) as unknown[]
+  return taskIds.length > 0 ? { ...event, taskIds } : DROP
 }
 
 // ── reasons for `no-owned-input` ──────────────────────────────────────────────
@@ -902,7 +917,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'menu.onBrowserAgentTouched': streamed(on('taskId', 'task')),
 
   // ── refresh signals ──
-  'notify.onTasksChanged': streamed(byActor),
+  'notify.onTasksChanged': streamed(tasksChangedEvents),
   'notify.onSettingsChanged': streamed(byActor),
   'notify.onEmbeddedServerFailed': none(`${HOST} (the desktop's sidecar supervisor)`),
   'settings.onThemeChanged': streamed(byActor),
@@ -1084,6 +1099,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.removeBlocker': checked(task('taskId'), task('blockerTaskId')),
   'task.setBlockers': checked(task('taskId'), task('blockerTaskIds[]')),
   'task.loadBoardData': listed(board),
+  'task.loadBoardRows': listed(board),
   'task.onChanged': streamed(on('projectId', 'project')),
 
   // ── templates, terminal tabs ──

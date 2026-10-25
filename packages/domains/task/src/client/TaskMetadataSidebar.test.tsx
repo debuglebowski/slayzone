@@ -216,7 +216,7 @@ const allTasksList = [blockerTask, extraBlockerTask, availableTask, doneTask]
 const blockersList = [blockerTask, extraBlockerTask]
 
 const queryData: Record<string, () => unknown> = {
-  'task.getAll': () => allTasksList,
+  'task.loadBoardData': () => ({ tasks: allTasksList }),
   'task.getBlockers': () => blockersList,
   'projects.list': () => projects,
   // No computers enrolled in the sidebar tests → ComputerCard shows its minimal
@@ -239,8 +239,13 @@ const mutationMocks: Record<string, ReturnType<typeof vi.fn>> = {
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     task: {
-      getAll: {
-        queryOptions: () => ({ queryKey: ['task.getAll'], queryFn: queryData['task.getAll'] })
+      // The blocker picker's task list comes from the app's board query.
+      loadBoardData: {
+        queryOptions: (_input: undefined, opts?: Record<string, unknown>) => ({
+          ...opts,
+          queryKey: ['task.loadBoardData'],
+          queryFn: queryData['task.loadBoardData']
+        })
       },
       getBlockers: {
         queryOptions: (input: { taskId: string }) => ({
@@ -277,8 +282,8 @@ vi.mock('@slayzone/transport/client', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (opts: { queryFn: () => unknown }) => ({
-    data: opts.queryFn(),
+  useQuery: (opts: { queryFn: () => unknown; select?: (d: never) => unknown }) => ({
+    data: opts.select ? opts.select(opts.queryFn() as never) : opts.queryFn(),
     isLoading: false,
     isPending: false,
     error: null,

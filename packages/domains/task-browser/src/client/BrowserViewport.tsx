@@ -66,7 +66,9 @@ export function BrowserViewport({
       ))}
       {!hasLoadedRealPage && !loadError && !hiddenByOverlay && (
         <div data-testid="browser-loading-animation" className="absolute inset-0 z-10 bg-surface-0">
-          <BrowserLoadingAnimation />
+          {/* The cover stays (it hides the not-yet-loaded view); the 324-dot pulse
+              only runs while the task tab is showing — nothing sees it otherwise. */}
+          {isActive !== false && <BrowserLoadingAnimation />}
         </div>
       )}
       {loadError && (

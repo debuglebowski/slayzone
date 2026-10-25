@@ -25,6 +25,7 @@ import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { OpDeps, TaskOps } from '@slayzone/task/server'
+import type { TasksChange } from '@slayzone/task/shared'
 import type {
   BackupInfo,
   BackupSettings,
@@ -144,7 +145,7 @@ let taskOps: TaskOps | null = null
 // Host-injected post-mutation callback (`notifyTasksChanged`) — the same renderer
 // refresh signal the legacy IPC handlers fire. Threaded into the task router's
 // OpDeps so tRPC mutations broadcast `notify.onTasksChanged` like the IPC path.
-let taskOnMutation: (() => void) | undefined
+let taskOnMutation: OpDeps['onMutation']
 // The warm pool's `reserveWarmTaskId`, wired only where the pool runs (the hub). The
 // task router hands it to `createTaskOp` so a task created to be opened at once can
 // take a warm agent's id. Unset (the Electron host): no task ever does.
@@ -158,7 +159,7 @@ let taskBus: TaskBus | undefined
 
 export function setTaskDeps(deps: {
   ops: TaskOps
-  onMutation?: () => void
+  onMutation?: OpDeps['onMutation']
   reserveWarmTaskId?: ReserveWarmTaskId
   bus?: TaskBus
 }): void {
@@ -173,7 +174,7 @@ export function getTaskOps(): TaskOps {
   return taskOps
 }
 
-export function getTaskOnMutation(): (() => void) | undefined {
+export function getTaskOnMutation(): OpDeps['onMutation'] {
   return taskOnMutation
 }
 
@@ -193,10 +194,12 @@ export function getTaskBus(): TaskBus | undefined {
 // `NotifyEventMap` lives transport-side because transport cannot import from
 // `apps/app` (apps depend on packages, not vice-versa); the host conforms to it.
 export type NotifyEventMap = {
-  /** Any task data mutation — renderer refetches the board. No payload. */
-  'tasks-changed': []
-  /** Settings changed — renderer refetches affected config. No payload. */
-  'settings-changed': []
+  /** Task data mutation. With a `TasksChange` the renderer patches just those
+   *  rows; without one it reloads the board (see `TasksChange`). */
+  'tasks-changed': [change?: TasksChange]
+  /** Settings changed — renderer refetches affected config. With a `SettingsChange`
+   *  only consumers of those keys refetch; without one, every consumer does. */
+  'settings-changed': [change?: SettingsChange]
   /**
    * The supervised embedded @slayzone/hub exhausted its restart backoff
    * (slice 7) — renderer shows a persistent toast. Emitted by the Electron
@@ -205,7 +208,20 @@ export type NotifyEventMap = {
   'embedded-server-failed': [{ attempts: number; message: string }]
 }
 
+/** The setting keys a write changed (see `NotifyEventMap['settings-changed']`). */
+export interface SettingsChange {
+  keys: readonly string[]
+}
+
 let notifyEvents: TypedEmitter<NotifyEventMap> | null = null
+
+/**
+ * Signal that settings were written. Best-effort: a host that wired no notify bus
+ * (unit harnesses) has no subscriber to tell.
+ */
+export function emitSettingsChanged(change?: SettingsChange): void {
+  notifyEvents?.emit('settings-changed', change)
+}
 
 export function setNotifyEvents(ev: TypedEmitter<NotifyEventMap>): void {
   notifyEvents = ev
@@ -683,6 +699,10 @@ export type AppDeps = {
     /** Event-shaped (`type: 'state-snapshot'`) nav state per live view — replayed
      * to each new `onEvent` subscriber so late subscribes can't miss load events. */
     getAllStateSnapshots: () => unknown[]
+    /** One view's `state-snapshot` (null once the view is gone). The desktop
+     * bridge stamps it onto every relayed browser event, so the side-car's
+     * replay cache moves in lockstep with the events it relays. */
+    getStateSnapshot: (viewId: string) => unknown
     events: EventEmitter & {
       on(event: 'event', listener: (e: unknown) => void): EventEmitter
       on(event: 'shortcut', listener: (payload: BrowserShortcutPayload) => void): EventEmitter

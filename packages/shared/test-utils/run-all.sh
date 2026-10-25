@@ -397,6 +397,9 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/art
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB, plain tsx
 run_test packages/shared/transport/src/server/routers/app.browser-events.test.ts
+# Desktop bridge replay cache: a browser tab subscribing right after a relayed
+# dom-ready/did-stop-loading is replayed THAT state (stale "loading" stranded the overlay).
+run_test packages/apps/hub/src/host-bridge.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
@@ -739,6 +742,16 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/shared/suspense/src/suspense-cache.test.tsx \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \
   packages/shared/transport/src/txns/txns.test.ts
+
+# tasks-changed refresh: per-subscriber burst coalescing, board row patching, the
+# per-task query refresh that defers hidden tabs until they are revealed, the one
+# shared panel config, and the first-paint theme cache.
+run_vitest_files "vitest (tasks-changed refresh)" \
+  packages/shared/transport/src/server/notify-coalescer.test.ts \
+  packages/domains/tasks/src/client/board-patch.test.ts \
+  packages/domains/task/src/client/taskScopedQueries.test.tsx \
+  packages/domains/task/src/client/usePanelConfig.test.tsx \
+  packages/domains/settings/src/client/theme-cache.test.ts
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
 # hub's open REST routes.

@@ -48,7 +48,7 @@ export { getBlockingOp } from './deps-get-blocking.js'
 export { addBlockerOp } from './deps-add-blocker.js'
 export { removeBlockerOp } from './deps-remove-blocker.js'
 export { setBlockersOp } from './deps-set-blockers.js'
-export { loadBoardDataOp, type BoardData } from './load-board-data.js'
+export { loadBoardDataOp, loadBoardRowsOp, type BoardData, type BoardRows } from './load-board-data.js'
 export {
   collectReferencedConversationIds,
   casRepointConversationId

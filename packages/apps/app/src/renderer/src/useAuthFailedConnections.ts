@@ -70,10 +70,16 @@ export function useAuthFailedConnections(): {
     }
   }, [connectionsQuery.data, trpcClient])
 
-  // `tasks:changed` fan-out — refetch the connections list when it fires.
+  // `tasks:changed` fan-out — refetch the connections list when it fires. An event
+  // naming its task rows is a pure task-row write (agent state, a task edit) that
+  // cannot touch an integration connection: skip it. Unknown scope (integration
+  // pollers/push, REST, CLI) refetches as before.
   useSubscription(
     trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
-      onData: () => void connectionsQuery.refetch()
+      onData: (event) => {
+        if (event?.taskIds) return
+        void connectionsQuery.refetch()
+      }
     })
   )
 

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { SettingsService, settingsEvents } from '@slayzone/settings/server'
 import { router, publicProcedure } from '../trpc'
-import { getAppDeps } from '../app-deps'
+import { emitSettingsChanged, getAppDeps } from '../app-deps'
 import type { TrpcContext } from '../context'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
@@ -41,9 +41,17 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => (await settingsFor(ctx).get(input.key)) ?? null),
 
+  // Every write tells every window (`notify.onSettingsChanged`, scoped to the key),
+  // so a second window — a secondary task window — picks up panel config, layout
+  // and the rest. Consumers refetch only the keys they read; the writing window's
+  // own refetch finds the value it already holds and re-renders nothing.
   set: settingsWriteProcedure
     .input(z.object({ key: z.string(), value: z.string() }))
-    .mutation(({ ctx, input }) => settingsFor(ctx).set(input.key, input.value)),
+    .mutation(async ({ ctx, input }) => {
+      const result = await settingsFor(ctx).set(input.key, input.value)
+      emitSettingsChanged({ keys: [input.key] })
+      return result
+    }),
 
   getAll: publicProcedure.query(({ ctx }) => settingsFor(ctx).getAll()),
 

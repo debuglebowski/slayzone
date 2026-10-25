@@ -56,3 +56,51 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
     blockedTaskIds: blockedRows.map((r) => r.id)
   }
 }
+
+/** The board rows of specific tasks — `loadBoardRowsOp`'s answer. */
+export interface BoardRows {
+  /** Current rows of the requested tasks that are still on the board. A
+   *  requested id absent here was deleted (or never existed). */
+  tasks: Task[]
+  /** Tag ids per requested task; a requested task without tags is absent. */
+  taskTags: Record<string, string[]>
+  /** The requested tasks that are blocked (same rule as the board). */
+  blockedTaskIds: string[]
+}
+
+/**
+ * Just the given tasks' slice of `loadBoardDataOp` — same row SQL, same
+ * hydration, same blocked rule — so the renderer can patch a few changed rows
+ * into its board instead of reloading every task (multi-MB) on each
+ * `tasks-changed` that names its rows.
+ */
+export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): Promise<BoardRows> {
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return { tasks: [], taskTags: {}, blockedTaskIds: [] }
+  const ph = unique.map(() => '?').join(',')
+  const taskRows = await db.all<Record<string, unknown>>(
+    `SELECT t.*, el.external_url AS linear_url
+      FROM tasks t
+      LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
+      WHERE t.deleted_at IS NULL AND t.id IN (${ph})
+      ${TASK_ORDER_BY}`,
+    unique
+  )
+  const taskTagRows = await db.all<{ task_id: string; tag_id: string }>(
+    `SELECT task_id, tag_id FROM task_tags WHERE task_id IN (${ph})`,
+    unique
+  )
+  const taskTags: Record<string, string[]> = {}
+  for (const row of taskTagRows) (taskTags[row.task_id] ??= []).push(row.tag_id)
+  const blockedRows = await db.all<{ id: string }>(
+    `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies WHERE blocks_task_id IN (${ph})
+      UNION
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL AND id IN (${ph})`,
+    [...unique, ...unique]
+  )
+  return {
+    tasks: await parseAndColorTasks(db, taskRows),
+    taskTags,
+    blockedTaskIds: blockedRows.map((r) => r.id)
+  }
+}

@@ -168,6 +168,7 @@ import { usePanelOwnership } from './usePanelOwnership'
 import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
+import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
@@ -343,8 +344,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [])
   const { tagIds: taskTagIds, setTagIds: setTaskTagIds } = useTaskTagIds(
     task?.id,
-    initialData?.taskTagIds
+    initialData?.taskTagIds,
+    initialData?.taskTags
   )
+  // Per-task queries (tags, sub-tasks, artifacts) of a hidden tab refresh on reveal.
+  useTaskScopedQueriesFreshOnReveal(task?.id, isActive ?? true)
   const statusOptions = useMemo(
     () => buildStatusOptions(project?.columns_config),
     [project?.columns_config]

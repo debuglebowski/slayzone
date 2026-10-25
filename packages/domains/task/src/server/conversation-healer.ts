@@ -11,7 +11,12 @@ import {
 } from '@slayzone/terminal/server'
 import { getCurrentBranch } from '@slayzone/worktrees/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '../shared/index.js'
+import {
+  decideConversationHeal,
+  parseSqliteUtc,
+  type HealTranscriptMeta,
+  type TasksChange
+} from '../shared/index.js'
 import {
   getTaskOp,
   collectReferencedConversationIds,
@@ -52,7 +57,10 @@ const FIX_SHIP_TS = Date.parse('2026-06-04T00:00:00Z')
  * the IO (disk stats, transcript head parsing, referenced-id lookup) and the
  * atomic compare-and-swap repoint.
  */
-export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () => void): void {
+export function registerConversationHealer(
+  db: SlayzoneDb,
+  notifyRenderer: (change?: TasksChange) => void
+): void {
   setConversationHealer(async ({ taskId, mode, cwd, storedId }: ConversationHealRequest) => {
     // Only claude-code persists transcripts at the path we read.
     if (mode !== 'claude-code') return { id: storedId, healed: false }
@@ -176,7 +184,8 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
         conversationId: decision.id,
         origin: 'cas-repoint-heal'
       })
-      notifyRenderer()
+      // The repoint lives in this task's ledger → only its board row changes.
+      notifyRenderer({ taskIds: [taskId] })
       recordDiagnosticEvent({
         level: 'info',
         source: 'pty',
