@@ -2,14 +2,20 @@ appId: com.slayzone.app
 productName: SlayZone
 directories:
   buildResources: build
+# An ALLOWLIST: the app is its electron-vite output plus the files main reads by path.
+# A denylist shipped whatever happened to sit in this directory (e2e specs and runtime
+# dirs, test-results, bundle-report.html, tsbuildinfo). package.json and the production
+# node_modules (= `dependencies`: main/preload's runtime externals plus the natives the
+# hub/computer bundles load through NODE_PATH) are added by electron-builder itself.
+# Everything else, @slayzone/* included, is a devDependency bundled into out/.
+# scripts/release/smoke-packaged-app.mjs fails the release when the asar's
+# node_modules grows past its budget.
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-  - '!**/node_modules/@slayzone/**'
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  # main's `?asset` imports of these resolve to app-root/resources (unpacked below).
+  - resources/**
 asarUnpack:
   - resources/**
   - '**/node_modules/better-sqlite3/**'

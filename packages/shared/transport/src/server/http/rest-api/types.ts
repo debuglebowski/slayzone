@@ -151,7 +151,7 @@ export interface BrowserAccess {
  *  - the `*ToFile` methods write straight to destPath, so multi-MB buffers never
  *    cross the bridge;
  *  - HTML building stays on the desktop side of the bridge, because
- *    `buildMermaidPdfHtml` resolves mermaid via `require.resolve` and silently
+ *    `buildMermaidPdfHtml` reads the mermaid bundle only the host's build ships and silently
  *    downgrades to plain-code rendering on a miss — from the side-car bundle it
  *    would miss every time and quietly degrade every mermaid export.
  */

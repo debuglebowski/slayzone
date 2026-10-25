@@ -75,6 +75,40 @@ importers:
 
   packages/apps/app:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.26.0
+        version: 1.26.0(zod@4.6.5)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@5.9.3)
+      better-sqlite3:
+        specifier: ^12.11.1
+        version: 12.11.1
+      bufferutil:
+        specifier: ^4.1.0
+        version: 4.1.0
+      electron-chrome-extensions:
+        specifier: ^4.9.0
+        version: 4.9.0
+      electron-chrome-web-store:
+        specifier: ^0.13.0
+        version: 0.13.0
+      electron-updater:
+        specifier: ^6.8.9
+        version: 6.8.9
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
+    devDependencies:
       '@convex-dev/auth':
         specifier: ^0.0.95
         version: 0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
@@ -87,9 +121,15 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.26.0
-        version: 1.26.0(zod@4.6.5)
+      '@electron-toolkit/tsconfig':
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@22.19.7)
+      '@electron/rebuild':
+        specifier: ^4.2.0
+        version: 4.2.0
+      '@playwright/test':
+        specifier: ^1.63.0
+        version: 1.63.0
       '@radix-ui/react-collapsible':
         specifier: ^1.1.20
         version: 1.1.20(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -108,6 +148,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/build-guards':
+        specifier: workspace:*
+        version: link:../../shared/build-guards
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../../domains/computers
@@ -129,6 +172,9 @@ importers:
       '@slayzone/hooks':
         specifier: workspace:*
         version: link:../../shared/hooks
+      '@slayzone/hub':
+        specifier: workspace:*
+        version: link:../hub
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
@@ -219,100 +265,12 @@ importers:
       '@tailwindcss/typography':
         specifier: ^0.5.20
         version: 0.5.20(tailwindcss@4.3.3)
-      '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
-      '@trpc/server':
-        specifier: ^11.19.0
-        version: 11.19.0(typescript@5.9.3)
-      '@xyflow/react':
-        specifier: ^12.12.0
-        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.8)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      better-sqlite3:
-        specifier: ^12.11.1
-        version: 12.11.1
-      clsx:
-        specifier: ^2.1.1
-        version: 2.1.1
-      convex:
-        specifier: ^1.46.0
-        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
-      date-fns:
-        specifier: ^4.4.0
-        version: 4.4.0
-      electron-chrome-extensions:
-        specifier: ^4.9.0
-        version: 4.9.0
-      electron-chrome-web-store:
-        specifier: ^0.13.0
-        version: 0.13.0
-      electron-updater:
-        specifier: ^6.8.9
-        version: 6.8.9
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1
-      fzf:
-        specifier: ^0.5.2
-        version: 0.5.2
-      lucide-react:
-        specifier: ^0.562.0
-        version: 0.562.0(react@19.3.1)
-      mermaid:
-        specifier: ^11.17.2
-        version: 11.17.2
-      motion:
-        specifier: ^12.43.0
-        version: 12.43.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.3.1
-        version: 19.3.1(react@19.3.1)
-      react-hotkeys-hook:
-        specifier: ^5.3.3
-        version: 5.3.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      tailwind-merge:
-        specifier: ^3.7.0
-        version: 3.7.0
-      tailwindcss:
-        specifier: ^4.3.3
-        version: 4.3.3
-      tw-animate-css:
-        specifier: ^1.4.0
-        version: 1.4.0
-      ws:
-        specifier: ^8.21.3
-        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod:
-        specifier: ^4.5.4
-        version: 4.6.5
-      zustand:
-        specifier: ^5.0.15
-        version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
-    devDependencies:
-      '@electron-toolkit/tsconfig':
-        specifier: ^2.0.0
-        version: 2.0.0(@types/node@22.19.7)
-      '@electron/rebuild':
-        specifier: ^4.2.0
-        version: 4.2.0
-      '@playwright/test':
-        specifier: ^1.63.0
-        version: 1.63.0
-      '@slayzone/build-guards':
-        specifier: workspace:*
-        version: link:../../shared/build-guards
-      '@slayzone/hub':
-        specifier: workspace:*
-        version: link:../hub
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@22.19.7)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+      '@tanstack/react-query':
+        specifier: ^5.103.2
+        version: 5.103.2(react@19.3.1)
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -337,9 +295,21 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^5.2.0
         version: 5.2.0(vite@7.3.6(@types/node@22.19.7)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+      '@xyflow/react':
+        specifier: ^12.12.0
+        version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.8)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      convex:
+        specifier: ^1.46.0
+        version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
+      date-fns:
+        specifier: ^4.4.0
+        version: 4.4.0
       electron:
         specifier: 41.10.7
         version: 41.10.7
@@ -349,12 +319,42 @@ importers:
       electron-vite:
         specifier: ^5.0.0
         version: 5.0.0(@swc/core@1.15.33)(vite@7.3.6(@types/node@22.19.7)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+      fzf:
+        specifier: ^0.5.2
+        version: 0.5.2
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.3.1)
+      mermaid:
+        specifier: ^11.17.2
+        version: 11.17.2
+      motion:
+        specifier: ^12.43.0
+        version: 12.43.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
+      react-hotkeys-hook:
+        specifier: ^5.3.3
+        version: 5.3.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       rollup-plugin-visualizer:
         specifier: ^7.1.1
         version: 7.1.1(rolldown@1.2.11)(rollup@4.63.5)
+      tailwind-merge:
+        specifier: ^3.7.0
+        version: 3.7.0
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -364,6 +364,9 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.6(@types/node@22.19.7)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+      zustand:
+        specifier: ^5.0.15
+        version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     optionalDependencies:
       posix:
         specifier: ^4.2.0

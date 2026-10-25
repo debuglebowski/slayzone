@@ -587,7 +587,7 @@ export type AppDeps = {
 
   // Artifact export — offscreen BrowserWindow rendering, unavailable off the
   // Electron host. HTML building lives here too (not side-car side) because
-  // buildMermaidPdfHtml resolves mermaid via require.resolve and silently falls
+  // buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
   // back to plain-code rendering when it misses; from the side-car bundle it
   // would miss every time and quietly downgrade mermaid exports. The renderers
   // write straight to destPath so multi-MB buffers never cross the bridge.

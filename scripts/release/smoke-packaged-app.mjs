@@ -19,13 +19,23 @@
  *      hands the child (`better-sqlite3` must OPEN a database, not just `require`);
  *   3. the packaged hub boots against an empty root, creates `slayzone.data.sqlite`
  *      and answers `/health`;
- *   4. the packaged computer bundle loads its natives (a missing one exits at load).
+ *   4. the packaged computer bundle loads its natives (a missing one exits at load);
+ *   5. app.asar carries only what the app loads: its node_modules stays under a size
+ *      budget, and the mermaid bundle the artifact exporter reads by path is inside it.
  *
  * The packaged Electron binary is the interpreter (ELECTRON_RUN_AS_NODE=1), exactly as
  * in production: same ABI, same asar-aware `fs`.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readSync,
+  rmSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -188,8 +198,78 @@ if (have('computer/bin.cjs')) {
   }
 }
 
+// 5. What app.asar packs. electron-builder ships the whole production tree of the app's
+// `dependencies`; the app bundles everything else into out/, so that list must stay the
+// runtime externals of main/preload plus the natives. A renderer library or @slayzone/*
+// package back in `dependencies` drags its whole tree in (v0.35.0 carried ~570 MB of
+// node_modules nothing loaded). Measured from the asar header: packed bytes only —
+// asarUnpack'd natives live beside it in app.asar.unpacked.
+console.log('\n5. app.asar contents')
+// ~17.5 MB measured on macOS arm64 (2026-10-25). Raise it only for a new runtime dependency.
+const ASAR_NODE_MODULES_BUDGET_MB = 22
+const asarPath = path.join(resources, 'app.asar')
+if (!existsSync(asarPath)) {
+  fail('app.asar is missing from Resources')
+} else {
+  const header = readAsarHeader(asarPath)
+  const nodeModules = header.files.node_modules
+  const perPackage = new Map()
+  for (const [rel, size] of packedFiles(nodeModules, [])) {
+    const name = rel[0].startsWith('@') ? `${rel[0]}/${rel[1]}` : rel[0]
+    perPackage.set(name, (perPackage.get(name) ?? 0) + size)
+  }
+  const totalMb = [...perPackage.values()].reduce((a, b) => a + b, 0) / 1048576
+  const summary = `${totalMb.toFixed(1)} MB in ${perPackage.size} packages`
+  if (totalMb <= ASAR_NODE_MODULES_BUDGET_MB) {
+    pass(`node_modules ${summary} (budget ${ASAR_NODE_MODULES_BUDGET_MB} MB)`)
+  } else {
+    const top = [...perPackage.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, bytes]) => `${name} ${(bytes / 1048576).toFixed(1)} MB`)
+      .join(', ')
+    fail(
+      `node_modules ${summary} exceeds the ${ASAR_NODE_MODULES_BUDGET_MB} MB budget — ` +
+        `a bundled-only package is in the app's \`dependencies\`? largest: ${top}`
+    )
+  }
+  // The artifact exporter reads mermaid's standalone bundle by path (an electron-vite
+  // `?asset` import into out/main/chunks) and silently degrades to plain code without it.
+  const chunks = header.files.out?.files?.main?.files?.chunks?.files ?? {}
+  Object.keys(chunks).some((f) => /^mermaid\.min-[\w-]+\.js$/.test(f))
+    ? pass('mermaid bundle for artifact export is in out/main/chunks')
+    : fail('out/main/chunks has no mermaid.min-*.js — mermaid artifact exports would degrade')
+}
+
 rmSync(root, { recursive: true, force: true })
 finish()
+
+/** The asar header JSON: a Chromium pickle holding a pickle holding the JSON string. */
+function readAsarHeader(file) {
+  const fd = openSync(file, 'r')
+  try {
+    const prefix = Buffer.alloc(16)
+    readSync(fd, prefix, 0, 16, 0)
+    const json = Buffer.alloc(prefix.readUInt32LE(12))
+    readSync(fd, json, 0, json.length, 16)
+    return JSON.parse(json.toString('utf8'))
+  } catch (err) {
+    throw new Error(`cannot read the asar header of ${file}: ${err.message}`)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** [relativePathParts, size] for every file packed inside the asar (not unpacked, not links). */
+function* packedFiles(node, parts) {
+  if (!node) return
+  if (node.files) {
+    for (const [name, child] of Object.entries(node.files))
+      yield* packedFiles(child, [...parts, name])
+  } else if (!node.unpacked && !node.link) {
+    yield [parts, Number(node.size ?? 0)]
+  }
+}
 
 function finish() {
   console.log(failures.length ? `\nSMOKE FAILED (${failures.length})` : '\nSMOKE OK')

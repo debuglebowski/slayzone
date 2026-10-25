@@ -254,9 +254,6 @@ jobs:
         shell: bash
         run: echo "ELECTRON_VERSION=$(cd packages/apps/app && node -p "require('electron/package.json').version")" >> "$GITHUB_ENV"
 
-      - name: Strip workspace deps (bundled by electron-vite)
-        run: node -e "const fs=require('fs'),p='packages/apps/app/package.json',pkg=JSON.parse(fs.readFileSync(p));Object.keys(pkg.dependencies).filter(k=>k.startsWith('@slayzone/')).forEach(k=>delete pkg.dependencies[k]);fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n')"
-
       - name: Strip posix on Windows (unix-only native module)
         if: runner.os == 'Windows'
         shell: bash

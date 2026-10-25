@@ -15,7 +15,7 @@
  * `buildMermaidPdfHtml`, `buildPngHtml`, `renderToPdf`, `renderToPng`). The
  * `*ToFile` methods write straight to destPath so multi-MB buffers never cross
  * the bridge, and the mermaid/plain branch moves behind the bridge with them —
- * `buildMermaidPdfHtml` resolves mermaid through `require.resolve` and silently
+ * `buildMermaidPdfHtml` reads the mermaid bundle only the host's build ships and silently
  * downgrades to plain-code rendering when it misses, which it would do every time
  * from the side-car bundle.
  *
