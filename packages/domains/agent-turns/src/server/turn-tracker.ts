@@ -86,7 +86,7 @@ export async function recordTurnBoundary(
   const prev = await getLatestTurnForWorktree(db, ctx.worktreePath)
   // Dedupe semantically — commit SHA always differs (commit message includes
   // turn id). Compare actual diff content.
-  if (prev && diffIsEmptyCached(ctx.worktreePath, prev.snapshot_sha, sha)) {
+  if (prev && (await diffIsEmptyCached(ctx.worktreePath, prev.snapshot_sha, sha))) {
     await deleteTurnRef(ctx.worktreePath, id)
     return
   }

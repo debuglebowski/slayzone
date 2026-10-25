@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,11 +14,6 @@ const gitSpawn = ((...args: unknown[]): ChildProcess => {
   refuseOnSwitchedOffHub()
   return (spawn as (...a: unknown[]) => ChildProcess)(...args)
 }) as typeof spawn
-
-const gitSpawnSync = ((...args: unknown[]) => {
-  refuseOnSwitchedOffHub()
-  return (spawnSync as (...a: unknown[]) => unknown)(...args)
-}) as typeof spawnSync
 
 interface ExecResult {
   stdout: string
@@ -138,45 +133,111 @@ export async function diffIsEmpty(
   return res.status === 0
 }
 
-/** Synchronous variant for list-time filtering. Returns true if SHAs are
- * identical OR `git diff --quiet` exits 0. */
-export function diffIsEmptySync(repoPath: string, fromSha: string, toSha: string): boolean {
-  if (fromSha === toSha) return true
-  const r = gitSpawnSync('git', ['diff', '--quiet', fromSha, toSha], { cwd: repoPath })
-  return r.status === 0
+/**
+ * Bounded memo for git reads whose answer is a pure function of content-addressed
+ * SHAs, so it never changes. Holds the PROMISE, not the value: concurrent callers
+ * (two list refetches racing) share one git run instead of spawning twice. FIFO
+ * eviction, refreshed on hit, so a long-running hub cannot grow it unboundedly.
+ */
+function memoAsync<T>(max: number): {
+  get(key: string, load: () => Promise<T>): Promise<T>
+  clear(): void
+} {
+  const cache = new Map<string, Promise<T>>()
+  return {
+    get(key, load) {
+      const hit = cache.get(key)
+      if (hit !== undefined) {
+        cache.delete(key)
+        cache.set(key, hit)
+        return hit
+      }
+      const loaded = load()
+      cache.set(key, loaded)
+      if (cache.size > max) {
+        const oldestKey = cache.keys().next().value
+        if (oldestKey !== undefined) cache.delete(oldestKey)
+      }
+      return loaded
+    },
+    clear: () => cache.clear()
+  }
 }
+
+// Every read below is ASYNC on purpose. They run on the hub's main thread for
+// every agent-turns list refetch, and used to block it: one synchronous git
+// spawn per turn. On 2026-10-25 the hub's stall detector caught them freezing it
+// for 4.9s during a restart burst (a ~20s freeze two days earlier dropped the
+// computer connection). Nothing here may block the event loop.
+
+const diffEmptyCache = memoAsync<boolean>(2000)
 
 /**
- * Memoized version of diffIsEmptySync. Result is a pure function of the
- * `(repoPath, fromSha, toSha)` tuple — both SHAs are content-addressed git
- * objects, so the answer never changes. Bounded LRU cache (FIFO eviction) so
- * a long-running app can't grow it unboundedly. Used by `agent-turns:list` to
- * avoid spawning git for every row on every refetch.
+ * Memoized `git diff --quiet fromSha toSha`: true if the SHAs are identical or
+ * the diff is empty. Used by `agent-turns:list` and turn dedupe to avoid
+ * spawning git for every row on every refetch.
  */
-const DIFF_EMPTY_CACHE_MAX = 2000
-const diffEmptyCache = new Map<string, boolean>()
-
-export function diffIsEmptyCached(repoPath: string, fromSha: string, toSha: string): boolean {
-  if (fromSha === toSha) return true
-  const key = `${repoPath}\x00${fromSha}\x00${toSha}`
-  const hit = diffEmptyCache.get(key)
-  if (hit !== undefined) {
-    // Refresh insertion order for LRU-ish behavior.
-    diffEmptyCache.delete(key)
-    diffEmptyCache.set(key, hit)
-    return hit
-  }
-  const result = diffIsEmptySync(repoPath, fromSha, toSha)
-  diffEmptyCache.set(key, result)
-  if (diffEmptyCache.size > DIFF_EMPTY_CACHE_MAX) {
-    // Evict oldest (Map preserves insertion order).
-    const oldestKey = diffEmptyCache.keys().next().value
-    if (oldestKey !== undefined) diffEmptyCache.delete(oldestKey)
-  }
-  return result
+export function diffIsEmptyCached(
+  repoPath: string,
+  fromSha: string,
+  toSha: string
+): Promise<boolean> {
+  if (fromSha === toSha) return Promise.resolve(true)
+  return diffEmptyCache.get(`${repoPath}\x00${fromSha}\x00${toSha}`, () =>
+    diffIsEmpty(repoPath, fromSha, toSha)
+  )
 }
 
-/** Test-only: clear the cache between scenarios. */
+const turnFilesCache = memoAsync<string[]>(2000)
+
+/**
+ * Cached `git diff --name-only fromSha..toSha`. Files in a turn's range are a
+ * pure function of the SHA pair (content-addressed). Used by the list-time
+ * intersection filter.
+ */
+export function listTurnFilesCached(
+  repoPath: string,
+  fromSha: string,
+  toSha: string
+): Promise<string[]> {
+  return turnFilesCache.get(`${repoPath}\x00${fromSha}\x00${toSha}`, async () => {
+    const r = await exec(['diff', '--name-only', '-z', fromSha, toSha], repoPath)
+    return r.status === 0 ? r.stdout.split('\0').filter((s) => s.length > 0) : []
+  })
+}
+
+const treeBlobsCache = memoAsync<Map<string, string> | null>(2000)
+
+/**
+ * Per-path blob SHA map for a tree-ish (commit or tree). Pure function of
+ * `(repoPath, treeIsh)` once `treeIsh` resolves to a content-addressed object.
+ * Resolves null on ls-tree failure (GC'd snap, missing ref, broken repo) —
+ * callers fail-closed on null. Caching the null result is intentional so a
+ * missing snap doesn't re-spawn ls-tree on every poll.
+ */
+export function listTreeBlobsCached(
+  repoPath: string,
+  treeIsh: string
+): Promise<Map<string, string> | null> {
+  return treeBlobsCache.get(`${repoPath}\x00${treeIsh}`, async () => {
+    const r = await exec(['ls-tree', '-r', '-z', treeIsh], repoPath)
+    if (r.status !== 0) return null
+    const map = new Map<string, string>()
+    // ls-tree -r -z: each NUL-terminated record = `<mode> <type> <obj>\t<path>`
+    for (const rec of r.stdout.split('\0')) {
+      if (!rec) continue
+      const tabIdx = rec.indexOf('\t')
+      if (tabIdx < 0) continue
+      const parts = rec.slice(0, tabIdx).split(' ')
+      // Skip non-blobs (submodules show as 'commit', symlinks/dirs handled by -r).
+      if (parts.length < 3 || parts[1] !== 'blob') continue
+      map.set(rec.slice(tabIdx + 1), parts[2])
+    }
+    return map
+  })
+}
+
+/** Test-only: clear the caches between scenarios. */
 export function _resetDiffEmptyCacheForTests(): void {
   diffEmptyCache.clear()
   turnFilesCache.clear()
@@ -184,94 +245,13 @@ export function _resetDiffEmptyCacheForTests(): void {
 }
 
 /**
- * Cached `git diff --name-only fromSha..toSha`. Files in a turn's range are a
- * pure function of the SHA pair (content-addressed), so cache forever within
- * the bounded LRU. Used by list-time intersection filter.
- */
-const TURN_FILES_CACHE_MAX = 2000
-const turnFilesCache = new Map<string, string[]>()
-
-export function listTurnFilesCached(repoPath: string, fromSha: string, toSha: string): string[] {
-  const key = `${repoPath}\x00${fromSha}\x00${toSha}`
-  const hit = turnFilesCache.get(key)
-  if (hit !== undefined) {
-    turnFilesCache.delete(key)
-    turnFilesCache.set(key, hit)
-    return hit
-  }
-  const r = gitSpawnSync('git', ['diff', '--name-only', '-z', fromSha, toSha], {
-    cwd: repoPath,
-    encoding: 'utf-8'
-  })
-  const files = r.status === 0 ? r.stdout.split('\0').filter((s) => s.length > 0) : []
-  turnFilesCache.set(key, files)
-  if (turnFilesCache.size > TURN_FILES_CACHE_MAX) {
-    const oldestKey = turnFilesCache.keys().next().value
-    if (oldestKey !== undefined) turnFilesCache.delete(oldestKey)
-  }
-  return files
-}
-
-/**
- * Per-path blob SHA map for a tree-ish (commit or tree). Pure function of
- * `(repoPath, treeIsh)` once `treeIsh` resolves to a content-addressed object,
- * so cache forever within the bounded LRU. Returns null on ls-tree failure
- * (GC'd snap, missing ref, broken repo) — callers fail-closed on null. Caching
- * the null result is intentional so a missing snap doesn't re-spawn ls-tree
- * on every poll.
- */
-const TREE_BLOBS_CACHE_MAX = 2000
-const treeBlobsCache = new Map<string, Map<string, string> | null>()
-
-export function listTreeBlobsCached(repoPath: string, treeIsh: string): Map<string, string> | null {
-  const key = `${repoPath}\x00${treeIsh}`
-  if (treeBlobsCache.has(key)) {
-    const hit = treeBlobsCache.get(key) ?? null
-    treeBlobsCache.delete(key)
-    treeBlobsCache.set(key, hit)
-    return hit
-  }
-  const r = gitSpawnSync('git', ['ls-tree', '-r', '-z', treeIsh], {
-    cwd: repoPath,
-    encoding: 'utf-8'
-  })
-  let result: Map<string, string> | null
-  if (r.status !== 0) {
-    result = null
-  } else {
-    const map = new Map<string, string>()
-    // ls-tree -r -z: each NUL-terminated record = `<mode> <type> <obj>\t<path>`
-    const records = r.stdout.split('\0')
-    for (const rec of records) {
-      if (!rec) continue
-      const tabIdx = rec.indexOf('\t')
-      if (tabIdx < 0) continue
-      const meta = rec.slice(0, tabIdx)
-      const path = rec.slice(tabIdx + 1)
-      const parts = meta.split(' ')
-      // Skip non-blobs (submodules show as 'commit', symlinks/dirs handled by -r).
-      if (parts.length < 3 || parts[1] !== 'blob') continue
-      map.set(path, parts[2])
-    }
-    result = map
-  }
-  treeBlobsCache.set(key, result)
-  if (treeBlobsCache.size > TREE_BLOBS_CACHE_MAX) {
-    const oldestKey = treeBlobsCache.keys().next().value
-    if (oldestKey !== undefined) treeBlobsCache.delete(oldestKey)
-  }
-  return result
-}
-
-/**
  * Current HEAD sha for a repo. Working-tree-volatile (commits move it), so
- * not cached. Returns null on failure.
+ * not cached. Resolves null on failure.
  */
-export function getHeadSha(repoPath: string): string | null {
-  const r = gitSpawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf-8' })
+export async function getHeadSha(repoPath: string): Promise<string | null> {
+  const r = await exec(['rev-parse', 'HEAD'], repoPath)
   if (r.status !== 0) return null
-  const out = r.stdout.trim()
-  return out || null
+  return r.stdout.trim() || null
 }
 
 /**
@@ -280,11 +260,8 @@ export function getHeadSha(repoPath: string): string | null {
  * by list-time filter to drop turns whose files no longer have any current
  * change in the worktree.
  */
-export function listWorkingChangedFiles(repoPath: string): Set<string> {
-  const r = gitSpawnSync('git', ['status', '--porcelain=v1', '-uall', '-z'], {
-    cwd: repoPath,
-    encoding: 'utf-8'
-  })
+export async function listWorkingChangedFiles(repoPath: string): Promise<Set<string>> {
+  const r = await exec(['status', '--porcelain=v1', '-uall', '-z'], repoPath)
   const set = new Set<string>()
   if (r.status !== 0) return set
   // -z output: each entry = `XY <path>\0` (renames add `<orig>\0` after).

@@ -3,7 +3,17 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/git-snapshot.test.ts
  */
 import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
-import { snapshotWorktree, deleteTurnRef, diffIsEmpty } from './git-snapshot.js'
+import {
+  snapshotWorktree,
+  deleteTurnRef,
+  diffIsEmpty,
+  diffIsEmptyCached,
+  listTurnFilesCached,
+  listTreeBlobsCached,
+  getHeadSha,
+  listWorkingChangedFiles,
+  _resetDiffEmptyCacheForTests
+} from './git-snapshot.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -205,6 +215,66 @@ await describe('snapshot is non-destructive', () => {
     const tree = git(repo, 'ls-tree', '-r', sha)
     expect(tree.includes('public.txt')).toBe(true)
     expect(tree.includes('secret.txt')).toBe(false)
+  })
+})
+
+// 2026-10-25: the hub's stall detector caught `listAgentTurnsForWorktree` freezing
+// the hub's main thread for 4.9s — these list-time reads ran git synchronously,
+// one blocking spawn per turn. Every git call must leave the event loop running.
+await describe('list-time git reads never block the event loop', () => {
+  /** Did the event loop get a turn while `run` was in flight? */
+  async function loopTurnedDuring(run: () => unknown): Promise<boolean> {
+    let turned = false
+    setImmediate(() => {
+      turned = true
+    })
+    const pending = run()
+    const sawBeforeAwait = turned
+    await pending
+    return !sawBeforeAwait && turned
+  }
+
+  test('getHeadSha / listWorkingChangedFiles / cached diff + tree reads all yield', async () => {
+    _resetDiffEmptyCacheForTests()
+    const repo = freshRepo()
+    fs.writeFileSync(path.join(repo, 'f.txt'), 'one')
+    const snap = (await snapshotWorktree(repo, 'turn-Y'))!
+    const head = git(repo, 'rev-parse', 'HEAD')
+    expect(await loopTurnedDuring(() => getHeadSha(repo))).toBe(true)
+    expect(await loopTurnedDuring(() => listWorkingChangedFiles(repo))).toBe(true)
+    expect(await loopTurnedDuring(() => diffIsEmptyCached(repo, head, snap.snapshotSha))).toBe(true)
+    expect(await loopTurnedDuring(() => listTurnFilesCached(repo, head, snap.snapshotSha))).toBe(
+      true
+    )
+    expect(await loopTurnedDuring(() => listTreeBlobsCached(repo, snap.snapshotSha))).toBe(true)
+  })
+
+  test('the async reads return what git says', async () => {
+    _resetDiffEmptyCacheForTests()
+    const repo = freshRepo()
+    fs.writeFileSync(path.join(repo, 'g.txt'), 'one')
+    const snap = (await snapshotWorktree(repo, 'turn-Z'))!
+    const head = git(repo, 'rev-parse', 'HEAD')
+    expect(await getHeadSha(repo)).toBe(head)
+    expect([...(await listWorkingChangedFiles(repo))]).toEqual(['g.txt'])
+    expect(await diffIsEmptyCached(repo, head, snap.snapshotSha)).toBe(false)
+    expect(await diffIsEmptyCached(repo, head, head)).toBe(true)
+    expect(await listTurnFilesCached(repo, head, snap.snapshotSha)).toEqual(['g.txt'])
+    expect((await listTreeBlobsCached(repo, snap.snapshotSha))?.has('g.txt')).toBe(true)
+    expect(await listTreeBlobsCached(repo, 'deadbeef')).toBe(null)
+  })
+
+  test('concurrent callers share one git run per cached key', async () => {
+    _resetDiffEmptyCacheForTests()
+    const repo = freshRepo()
+    fs.writeFileSync(path.join(repo, 'h.txt'), 'one')
+    const snap = (await snapshotWorktree(repo, 'turn-W'))!
+    const [a, b] = [
+      listTreeBlobsCached(repo, snap.snapshotSha),
+      listTreeBlobsCached(repo, snap.snapshotSha)
+    ]
+    expect(a === b).toBe(true)
+    await a
   })
 })
 

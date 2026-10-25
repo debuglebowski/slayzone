@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { listTurnsForWorktree } from './db'
@@ -11,9 +11,9 @@ import {
 } from './git-snapshot'
 import type { AgentTurnRange } from '../shared/types'
 
-function canonical(p: string): string {
+async function canonical(p: string): Promise<string> {
   try {
-    return realpathSync(p)
+    return await realpath(p)
   } catch {
     return p
   }
@@ -43,16 +43,21 @@ function canonical(p: string): string {
  * each surviving row's prev points at the prior surviving row's snapshot, so
  * consecutive diffs remain meaningful.
  */
-function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnRange[] {
-  const workingSet = listWorkingChangedFiles(repoPath)
-  const headSha = getHeadSha(repoPath)
+async function filterAndRethread(
+  repoPath: string,
+  rows: AgentTurnRange[]
+): Promise<AgentTurnRange[]> {
+  const [workingSet, headSha] = await Promise.all([
+    listWorkingChangedFiles(repoPath),
+    getHeadSha(repoPath)
+  ])
   const out: AgentTurnRange[] = []
   let prevSha: string | null = null
   // Fail-closed: if `git rev-parse HEAD` failed (broken repo, perms, etc.) we
   // can't safely classify any row as fresh, so drop everything. Better an empty
   // turn list than ghost turns from random history.
   if (headSha === null) return out
-  const headBlobs = listTreeBlobsCached(repoPath, headSha)
+  const headBlobs = await listTreeBlobsCached(repoPath, headSha)
   // Same fail-closed posture for HEAD's tree: if ls-tree fails we can't
   // distinguish landed vs pending.
   if (headBlobs === null) return out
@@ -60,20 +65,23 @@ function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnR
     // Rule 1: legacy NULL drop (head_sha_at_snap backfill failed).
     if (r.head_sha_at_snap === null) continue
     const from = prevSha
-    if (from !== null && diffIsEmptyCached(repoPath, from, r.snapshot_sha)) {
+    if (from !== null && (await diffIsEmptyCached(repoPath, from, r.snapshot_sha))) {
       // Dropped: keep prevSha — next surviving row will diff against the older base.
       continue
     }
-    if (from === null && diffIsEmptyCached(repoPath, `${r.snapshot_sha}^`, r.snapshot_sha)) {
+    if (
+      from === null &&
+      (await diffIsEmptyCached(repoPath, `${r.snapshot_sha}^`, r.snapshot_sha))
+    ) {
       // First turn but identical to its parent (HEAD-at-snap-time) — no real changes. Drop.
       continue
     }
     const fromForFiles = from ?? `${r.snapshot_sha}^`
-    const turnFiles = listTurnFilesCached(repoPath, fromForFiles, r.snapshot_sha)
+    const turnFiles = await listTurnFilesCached(repoPath, fromForFiles, r.snapshot_sha)
     // Rule 3: consumed check. Fail-closed when head-at-snap tree is unreadable
     // (commit GC'd, repo corruption): drop, matching the getHeadSha-null
     // posture above.
-    const headAtSnapBlobs = listTreeBlobsCached(repoPath, r.head_sha_at_snap)
+    const headAtSnapBlobs = await listTreeBlobsCached(repoPath, r.head_sha_at_snap)
     if (headAtSnapBlobs === null) continue
     if (turnFiles.length > 0) {
       const consumed = turnFiles.every((f) => {
@@ -111,7 +119,7 @@ export async function listAgentTurnsForWorktree(
   // Resolves and runs git on a path on the hub's own disk: refused on a hub with
   // processes switched off (T-06), before the realpath probe.
   assertHubLocalExecEnabled({ op: 'git.turns' })
-  const path = canonical(worktreePath)
+  const path = await canonical(worktreePath)
   const raw = await listTurnsForWorktree(db, path)
   return filterAndRethread(path, raw)
 }
