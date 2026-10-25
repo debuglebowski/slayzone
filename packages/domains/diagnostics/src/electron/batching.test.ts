@@ -1,8 +1,8 @@
 /**
  * Batched async write tests
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/main/batching.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/electron/batching.test.ts
  */
-import { expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { expect, createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import Database from 'better-sqlite3'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -38,22 +38,19 @@ const DIAG_SCHEMA = `
   CREATE INDEX idx_diag_ts ON diagnostics_events(ts_ms);
 `
 
-const SETTINGS_SCHEMA = `
-  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
-  INSERT INTO settings (key, value) VALUES ('diagnostics_enabled', '1');
-`
-
+// The store writes through the async `SlayzoneDb` surface (`batchTxn`). Handing
+// it the raw better-sqlite3 handle made every flush throw inside the store's
+// swallow-all catch, so every row count read 0. `eventsDb` is the raw handle for
+// assertions; `slayDb` is the adapter over the SAME connection, given to the store.
 function makeHarness(): {
-  settingsDb: Database.Database
   eventsDb: Database.Database
+  slayDb: ReturnType<typeof createSlayzoneDbAdapter>
   ipcMain: {
     handle: (c: string, h: (...a: unknown[]) => unknown) => void
     handlers: Map<string, (...a: unknown[]) => unknown>
   }
   reset: () => void
 } {
-  const settingsDb = new Database(':memory:')
-  settingsDb.exec(SETTINGS_SCHEMA)
   const eventsDb = new Database(':memory:')
   eventsDb.exec(DIAG_SCHEMA)
   const handlers = new Map<string, (...a: unknown[]) => unknown>()
@@ -64,8 +61,8 @@ function makeHarness(): {
     handlers
   }
   return {
-    settingsDb,
     eventsDb,
+    slayDb: createSlayzoneDbAdapter(eventsDb),
     ipcMain,
     reset() {
       eventsDb.exec('DELETE FROM diagnostics_events')
@@ -77,7 +74,14 @@ function countRows(db: Database.Database): number {
   return (db.prepare('SELECT COUNT(*) as c FROM diagnostics_events').get() as { c: number }).c
 }
 
-async function run(): Promise<void> {
+// Flushes are async (worker-thread DB in production). A flush the store kicks
+// off on its own (error level, batch size) lands within a macrotask; the 2s
+// interval timer does not — so this separates "flushed now" from "flushed later".
+function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+async function run(clientRoot: string): Promise<void> {
   console.log('\nbatched writes')
 
   const h = makeHarness()
@@ -87,8 +91,7 @@ async function run(): Promise<void> {
   // writes to it. Signature is (ipcMain, eventsDb, options); it used to take the
   // shared settings DB as its second argument, and this call was left behind when
   // that parameter went away.
-  const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
-  registerDiagnosticsHandlers(h.ipcMain as never, h.eventsDb as never, {
+  registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, {
     clientRoot,
     blobDir: path.join(clientRoot, 'diagnostics')
   })
@@ -98,12 +101,14 @@ async function run(): Promise<void> {
     h.reset()
     recordDiagnosticEvent({
       level: 'info',
-      source: 'test',
+      source: 'diagnostics',
       event: 'test.batch',
       message: 'one'
     })
     expect(countRows(h.eventsDb)).toBe(0)
-    console.log('  ✓ recordDiagnosticEvent does not write synchronously')
+    await settle()
+    expect(countRows(h.eventsDb)).toBe(0)
+    console.log('  ✓ recordDiagnosticEvent does not write immediately')
   }
 
   // 2. flushWriteQueue drains
@@ -118,12 +123,13 @@ async function run(): Promise<void> {
     h.reset()
     recordDiagnosticEvent({
       level: 'error',
-      source: 'test',
+      source: 'diagnostics',
       event: 'test.err',
       message: 'boom'
     })
+    await settle()
     expect(countRows(h.eventsDb)).toBe(1)
-    console.log('  ✓ error-level events flush synchronously')
+    console.log('  ✓ error-level events flush immediately')
   }
 
   // 4. batch size triggers flush
@@ -133,20 +139,22 @@ async function run(): Promise<void> {
     for (let i = 0; i < 999; i++) {
       recordDiagnosticEvent({
         level: 'info',
-        source: 'test',
+        source: 'diagnostics',
         event: 'test.batch',
         message: `n-${i}`
       })
     }
+    await settle()
     expect(countRows(h.eventsDb)).toBe(0)
 
     // 1000th triggers flush
     recordDiagnosticEvent({
       level: 'info',
-      source: 'test',
+      source: 'diagnostics',
       event: 'test.batch',
       message: 'n-999'
     })
+    await settle()
     expect(countRows(h.eventsDb)).toBe(1000)
     console.log('  ✓ flushes on reaching WRITE_BATCH_SIZE (1000)')
   }
@@ -168,7 +176,7 @@ async function run(): Promise<void> {
     for (let i = 0; i < TOTAL; i++) {
       recordDiagnosticEvent({
         level: 'info',
-        source: 'test',
+        source: 'diagnostics',
         event: 'test.bulk',
         message: `b-${i}`
       })
@@ -183,7 +191,7 @@ async function run(): Promise<void> {
     h.reset()
     recordDiagnosticEvent({
       level: 'debug',
-      source: 'test',
+      source: 'diagnostics',
       event: 'test.debug',
       message: 'should-drop'
     })
@@ -195,18 +203,14 @@ async function run(): Promise<void> {
   // 7. debug events kept when verbose
   {
     h.reset()
-    h.settingsDb
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('diagnostics_verbose', '1')
-    // bust cache by calling setConfig path: easiest = directly poke via the public API
-    // The cachedConfig invalidates only via saveDiagnosticsConfig. Without that, the
-    // cache returns the old verbose=false value. Use the IPC handler to invalidate.
+    // Config lives in the client store under `clientRoot`; the setConfig IPC
+    // handler persists it there and refreshes the store's cache.
     const setConfig = h.ipcMain.handlers.get('diagnostics:setConfig')!
     await setConfig({}, { verbose: true })
 
     recordDiagnosticEvent({
       level: 'debug',
-      source: 'test',
+      source: 'diagnostics',
       event: 'test.debug',
       message: 'should-keep'
     })
@@ -225,14 +229,15 @@ async function run(): Promise<void> {
     await flushWriteQueue()
     h.reset() // wipe eventsDb rows
 
-    // Close the events DB so flushes no-op and the queue accumulates.
+    // Close the events DB so the queue accumulates. The batch-size flushes this
+    // loop kicks off are async and only drain after the rebind below.
     h.eventsDb.close()
 
     const OVERFLOW = 6_000 // 1000 over the 5000 cap
     for (let i = 0; i < OVERFLOW; i++) {
       recordDiagnosticEvent({
         level: 'info',
-        source: 'test',
+        source: 'diagnostics',
         event: 'test.overflow',
         message: `o-${i}`
       })
@@ -241,7 +246,7 @@ async function run(): Promise<void> {
     // Re-open eventsDb and rewire so flush has somewhere to write.
     const fresh = new Database(':memory:')
     fresh.exec(DIAG_SCHEMA)
-    registerDiagnosticsHandlers(h.ipcMain as never, fresh as never, {
+    registerDiagnosticsHandlers(h.ipcMain as never, createSlayzoneDbAdapter(fresh), {
       clientRoot,
       blobDir: path.join(clientRoot, 'diagnostics')
     })
@@ -267,20 +272,25 @@ async function run(): Promise<void> {
     expect(payload.droppedCount).toBe(1000)
     expect(payload.queueCap).toBe(5000)
 
-    fresh.close()
     console.log('  ✓ queue cap drops surfaced as diag.dropped event (count=1000)')
+    // Stop while `fresh` is still open so the final flush has somewhere to write.
+    await stopDiagnostics()
+    fresh.close()
   }
-
-  stopDiagnostics()
-  h.settingsDb.close()
 }
 
+const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
 try {
-  await run()
+  await run(clientRoot)
 } catch (e) {
   console.error(`  ✗ ${e}`)
   if (e instanceof Error && e.stack) console.error(e.stack)
   process.exitCode = 1
+} finally {
+  // Always stop: a failed case left the 2s flush timer pending, which kept the
+  // process alive forever. Idempotent after the in-run stop.
+  await stopDiagnostics()
+  fs.rmSync(clientRoot, { recursive: true, force: true })
 }
 
 console.log('\nDone')

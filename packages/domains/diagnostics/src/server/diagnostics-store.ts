@@ -410,7 +410,26 @@ export function recordDiagnosticEvent(event: DiagnosticEvent): void {
 
   if (!flushTimer) {
     flushTimer = setTimeout(() => void flushWriteQueue(), WRITE_FLUSH_INTERVAL_MS)
+    // The timer must never keep a process alive on its own (it held short-lived
+    // processes open for up to 2s); the beforeExit hook flushes what it would have.
+    flushTimer.unref()
+    ensureExitFlush()
   }
+}
+
+let exitFlushRegistered = false
+
+// On a natural exit (event loop empty) flush the queue the unref'd timer left
+// behind; the async DB work keeps the loop alive until it lands. Not reached on
+// `process.exit()` or signals — shutdown paths that need those call
+// `flushWriteQueue()` themselves. Guarded on pending work so the empty-queue
+// re-emit of beforeExit schedules nothing and the process exits.
+function ensureExitFlush(): void {
+  if (exitFlushRegistered) return
+  exitFlushRegistered = true
+  process.on('beforeExit', () => {
+    if (writeQueue.length > 0 || droppedSinceLastFlush > 0) void flushWriteQueue()
+  })
 }
 
 const INSERT_EVENT_SQL = `

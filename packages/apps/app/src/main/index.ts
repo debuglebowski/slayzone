@@ -556,6 +556,7 @@ import {
   writeCleanShutdownSentinel,
   scanCrashDumps
 } from './lifecycle/sentinel'
+import { drainDiagnosticsForQuit } from './lifecycle/quit-diagnostics'
 import {
   acquireLockWithSelfHeal,
   lockOutcomeIsAcquired,
@@ -1051,6 +1052,10 @@ const QUIT_SUBPROCESS_HARD_TIMEOUT_MS = 5000
  */
 const QUIT_WATCHDOG_MS = 15_000
 let quitWatchdog: NodeJS.Timeout | null = null
+/** Deadline for flushing + closing diagnostics on quit (see drainDiagnosticsForQuit). */
+const QUIT_DIAGNOSTICS_DRAIN_MS = 2_000
+/** Set once `will-quit` has started its async diagnostics tail; the re-quit after it passes straight through. */
+let willQuitTailStarted = false
 /** Set on the first `before-quit`; never cleared (a started quit always ends the process). */
 let quitRequested = false
 type OAuthCallbackPayload = { code?: string; error?: string }
@@ -4593,7 +4598,12 @@ app.on('before-quit', (event) => {
       // synchronously, which is all a force-exit can wait for.
       sidecarCleanup?.()
       localComputerCleanup?.()
-      app.exit(1)
+      // Bounded flush first, so the watchdog event above survives the force-exit.
+      void drainDiagnosticsForQuit({
+        stop: stopDiagnostics,
+        closeDb: closeDiagnosticsDatabase,
+        timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
+      }).finally(() => app.exit(1))
     }, QUIT_WATCHDOG_MS)
   }
   if (quitDrainComplete) return
@@ -4605,9 +4615,15 @@ app.on('before-quit', (event) => {
 })
 
 // Clean up database connection and active processes before quitting
-app.on('will-quit', () => {
+app.on('will-quit', (event) => {
+  // Cleared on both passes: the re-quit below runs before-quit again, which re-arms it.
   if (quitWatchdog) clearTimeout(quitWatchdog)
   quitWatchdog = null
+  if (willQuitTailStarted) return
+  willQuitTailStarted = true
+  // Hold the quit for the async diagnostics tail, then quit again (not app.exit,
+  // which would skip the `quit` event other listeners rely on).
+  event.preventDefault()
   oauthCallbackQueue.length = 0
   oauthCallbackWaiters.clear()
   if (linearSyncPoller) {
@@ -4622,22 +4638,28 @@ app.on('will-quit', () => {
   sidecarCleanup?.()
   localComputerCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
-  // event of the session and proves the chain ran. stopDiagnostics() can clear timers
-  // safely after.
+  // event of the session and proves the chain ran.
   recordDiagnosticEvent({
     level: 'info',
     source: 'main',
     event: 'app.will-quit.complete',
     payload: { version: app.getVersion() }
   })
-  stopDiagnostics()
   stopIdleChecker()
   closeArtifactWatcher()
   closeGitWatcher()
-  closeDiagnosticsDatabase()
-  // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
-  // Pure fs (no DB needed), so survives any prior close failure.
-  writeCleanShutdownSentinel()
+  // Flush, THEN close: unawaited, the close overtook the flush and lost the
+  // queue's tail, the canary above included.
+  void drainDiagnosticsForQuit({
+    stop: stopDiagnostics,
+    closeDb: closeDiagnosticsDatabase,
+    timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
+  }).finally(() => {
+    // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
+    // Pure fs (no DB needed), so survives any prior close failure.
+    writeCleanShutdownSentinel()
+    app.quit()
+  })
 })
 
 // In this file you can include the rest of your app's specific main process

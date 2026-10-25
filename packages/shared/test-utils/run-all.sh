@@ -214,6 +214,10 @@ run_test packages/domains/processes/src/server/process-switch.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/ai-config.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/file-editor.test.ts
 run_test_electron_strict_loader packages/domains/diagnostics/src/electron/service.test.ts
+# Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
+run_test_electron_strict_loader packages/domains/diagnostics/src/electron/batching.test.ts
+# Write-queue flush timer never holds a process open; beforeExit flushes what it held.
+run_test_electron_strict_loader packages/domains/diagnostics/src/server/flush-on-exit.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_test packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
@@ -317,6 +321,8 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/tag-c
 # v169 project owner + per-user settings, on an empty and a populated v168 DB.
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
+# Quit drains diagnostics (flush THEN close) inside a deadline.
+run_test packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -682,8 +688,6 @@ run_test packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 
 # Known-red suites, skipped visibly with the reason instead of failing every run. Each
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
-skip_suite packages/domains/diagnostics/src/electron/batching.test.ts \
-  "1 assertion fails (Expected 1, got 0). Fix the flush expectation"
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 
