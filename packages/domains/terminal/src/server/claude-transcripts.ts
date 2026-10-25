@@ -1,4 +1,4 @@
-import { existsSync, createReadStream } from 'fs'
+import { existsSync, createReadStream, readFileSync } from 'fs'
 import { readdir } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -30,6 +30,28 @@ export function claudeProjectDir(cwd: string): string {
 
 export function claudeTranscriptPath(cwd: string, conversationId: string): string {
   return join(claudeProjectDir(cwd), `${conversationId}.jsonl`)
+}
+
+/** Claude Code's default `cleanupPeriodDays`. */
+const DEFAULT_CLEANUP_PERIOD_DAYS = 30
+
+/**
+ * How long Claude Code keeps a transcript before pruning it (`cleanupPeriodDays`
+ * in `~/.claude/settings.json`, default 30), in ms. Read per call — the user can
+ * edit it at any time. An unreadable/absent file means the default; a present
+ * but non-numeric value means unknown (null), so callers stay conservative.
+ */
+export function claudeTranscriptRetentionMs(): number | null {
+  let days: unknown = DEFAULT_CLEANUP_PERIOD_DAYS
+  try {
+    const settings = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8'))
+    if (settings && typeof settings === 'object' && 'cleanupPeriodDays' in settings) {
+      days = settings.cleanupPeriodDays
+    }
+  } catch {
+    // no/invalid settings file → Claude uses its default too
+  }
+  return typeof days === 'number' && Number.isFinite(days) ? days * 24 * 60 * 60 * 1000 : null
 }
 
 /** Does the transcript for `conversationId` exist in `cwd`'s project dir? */

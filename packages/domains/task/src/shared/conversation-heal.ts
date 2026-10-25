@@ -20,6 +20,9 @@
  *  3. `orphan`  — only for legacy tasks with no usable history: a disk transcript
  *                 in the task's own working dir, matched conservatively. Gated to
  *                 a near-certain single match (see `decideConversationHeal`).
+ *  4. `fresh`   — nothing to reconnect to, and the stored id provably NEVER had a
+ *                 transcript (see `wasNeverWritten`): start it fresh under the same
+ *                 id. Nothing is lost, so "session expired" would be false.
  *
  * See plans/conv-id-robustness-v2.md.
  */
@@ -60,15 +63,48 @@ export interface HealInput {
   candidates: HealTranscriptMeta[]
   /** Max gap between task creation and the real session's first message. */
   windowMs: number
+  /** Epoch-ms slay first recorded `storedId` (earliest `agent_sessions` row), or
+   *  null if unknown. A lower bound on its transcript's mtime. */
+  storedFirstSeenAtMs: number | null
+  /** Claude's transcript retention (`cleanupPeriodDays`) in ms, or null if
+   *  unknown. */
+  retentionMs: number | null
+  nowMs: number
 }
 
 export type HealDecision =
   | { action: 'keep' }
   | { action: 'history'; id: string }
   | { action: 'orphan'; id: string }
+  | { action: 'fresh' }
   | { action: 'overlay' }
 
+/**
+ * Did `storedId` provably never have a transcript? Claude writes `<id>.jsonl` at
+ * the first prompt (not at launch) and prunes it only once its mtime is older
+ * than `cleanupPeriodDays`. The transcript cannot predate slay's first record of
+ * the id, so if that record is younger than one retention period, retention
+ * cannot have removed it: a missing file means no prompt was ever submitted.
+ *
+ * Disk + clock evidence on purpose — NOT `session_turns`, whose v158 backfill and
+ * pre-fix write path stamped never-prompted ids as proven. Unknown inputs (or a
+ * retention of 0) answer false, which keeps the honest overlay.
+ */
+function wasNeverWritten(input: HealInput): boolean {
+  const { storedFirstSeenAtMs, retentionMs, nowMs } = input
+  if (storedFirstSeenAtMs == null || retentionMs == null || retentionMs <= 0) return false
+  return nowMs - storedFirstSeenAtMs < retentionMs
+}
+
 export function decideConversationHeal(input: HealInput): HealDecision {
+  const decision = decideReconnect(input)
+  // Nothing to reconnect to. If the stored id never had a transcript there is no
+  // conversation to lose, so start fresh rather than report it expired.
+  if (decision.action === 'overlay' && wasNeverWritten(input)) return { action: 'fresh' }
+  return decision
+}
+
+function decideReconnect(input: HealInput): HealDecision {
   // `storedInHistory` is intentionally NOT destructured/used: history membership
   // is no longer treated as proof-of-life (see the storedExists gate below). The
   // field stays on HealInput for callers + the pre-fix decision matrix's audit.

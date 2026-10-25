@@ -28,6 +28,7 @@ export {
   claudeProjectDir,
   claudeTranscriptPath,
   claudeTranscriptExists,
+  claudeTranscriptRetentionMs,
   readClaudeTranscriptMeta,
   listClaudeTranscriptIds,
   type ClaudeTranscriptMeta

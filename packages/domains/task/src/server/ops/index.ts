@@ -83,5 +83,6 @@ export {
   markSessionDead,
   markSessionFirstTurn,
   listResumeCandidates,
+  getConversationFirstSeenAt,
   bindSessionToTask
 } from './agent-sessions.js'

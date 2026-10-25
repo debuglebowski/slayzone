@@ -27,6 +27,8 @@ assert(Number.isNaN(parseSqliteUtc('')), 'empty → NaN')
 // ---- decideConversationHeal ---------------------------------------------
 const T0 = Date.parse('2026-06-03T21:22:20Z') // task creation
 const WINDOW = 5 * 60 * 1000
+const NOW = T0 + 24 * 60 * 60 * 1000
+const DAY = 24 * 60 * 60 * 1000
 
 const cand = (o: Partial<HealTranscriptMeta>): HealTranscriptMeta => ({
   id: 'orphan',
@@ -46,6 +48,9 @@ const base = (o: Partial<HealInput>): HealInput => ({
   task: { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: true },
   candidates: [],
   windowMs: WINDOW,
+  storedFirstSeenAtMs: null,
+  retentionMs: null,
+  nowMs: NOW,
   ...o
 })
 
@@ -179,6 +184,44 @@ assert(
   act(base({ candidates: [cand({ id: 'mine' }), cand({ id: 'neighbor', referenced: true })] })) ===
     'overlay',
   'a referenced sibling in dir+window → ambiguous → overlay'
+)
+
+// NEVER-WRITTEN: Claude writes `<id>.jsonl` at the first prompt, and prunes it
+// only once its mtime is older than `cleanupPeriodDays`. So a missing transcript
+// for an id slay first saw less than one retention period ago cannot have been
+// pruned — nothing was ever written, nothing is lost, and the honest answer is a
+// fresh start under the same id, not "session expired" (task fa117add: agent
+// spawned, never prompted, every reopen showed the overlay).
+const young = { storedFirstSeenAtMs: NOW - 60 * 60 * 1000, retentionMs: 90 * DAY }
+const nonLegacy = { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false }
+assert(act(base(young)) === 'fresh', 'young id, no transcript, nothing on disk → fresh')
+assert(
+  act(base({ ...young, task: nonLegacy })) === 'fresh',
+  'non-legacy task: young never-written id → fresh'
+)
+assert(
+  act(base({ ...young, storedFirstSeenAtMs: NOW - 91 * DAY })) === 'overlay',
+  'older than retention → may have been pruned → overlay'
+)
+assert(
+  act(base({ ...young, storedFirstSeenAtMs: NOW - 90 * DAY })) === 'overlay',
+  'exactly one retention period old → overlay (boundary is conservative)'
+)
+assert(
+  act(base({ ...young, storedFirstSeenAtMs: null })) === 'overlay',
+  'first-seen unknown → overlay'
+)
+assert(act(base({ ...young, retentionMs: null })) === 'overlay', 'retention unknown → overlay')
+assert(act(base({ ...young, retentionMs: 0 })) === 'overlay', 'retention 0 → overlay')
+assert(act(base({ ...young, storedExists: true })) === 'keep', 'young AND on disk → keep')
+assert(
+  act(base({ ...young, history: [{ id: 'survivor', exists: true }] })) === 'history',
+  'a surviving sibling beats fresh'
+)
+assert(act(base({ ...young, candidates: [cand({})] })) === 'orphan', 'a legacy orphan beats fresh')
+assert(
+  act(base({ ...young, candidates: [cand({ id: 'a' }), cand({ id: 'b' })] })) === 'fresh',
+  'ambiguous orphans are never attached; young id still → fresh'
 )
 
 console.log('conversation-heal: all passed')

@@ -1,7 +1,11 @@
-import { writeFileSync, mkdtempSync } from 'fs'
+import { writeFileSync, mkdtempSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { encodeClaudeProjectDir, readClaudeTranscriptMeta } from './claude-transcripts'
+import {
+  encodeClaudeProjectDir,
+  readClaudeTranscriptMeta,
+  claudeTranscriptRetentionMs
+} from './claude-transcripts'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -83,6 +87,26 @@ async function main(): Promise<void> {
   const meta2 = await readClaudeTranscriptMeta(file2)
   assert(meta2.hasHumanTurn === false, 'sidechain-only → no human turn')
   assert(meta2.cwd === '/repo', 'still reads cwd from sidechain record')
+
+  // ---- claudeTranscriptRetentionMs (`cleanupPeriodDays` in ~/.claude/settings.json) ----
+  const DAY = 24 * 60 * 60 * 1000
+  const home = mkdtempSync(join(tmpdir(), 'ct-home-'))
+  const prevHome = process.env.HOME
+  process.env.HOME = home
+  const settings = (body: string): void => {
+    mkdirSync(join(home, '.claude'), { recursive: true })
+    writeFileSync(join(home, '.claude', 'settings.json'), body)
+  }
+  assert(claudeTranscriptRetentionMs() === 30 * DAY, 'no settings file → Claude default 30d')
+  settings('{"cleanupPeriodDays": 90}')
+  assert(claudeTranscriptRetentionMs() === 90 * DAY, 'reads cleanupPeriodDays')
+  settings('{"model": "x"}')
+  assert(claudeTranscriptRetentionMs() === 30 * DAY, 'key absent → default')
+  settings('{"cleanupPeriodDays": "soon"}')
+  assert(claudeTranscriptRetentionMs() === null, 'non-numeric → unknown')
+  settings('not json')
+  assert(claudeTranscriptRetentionMs() === 30 * DAY, 'unparseable file → default')
+  process.env.HOME = prevHome
 
   console.log('claude-transcripts: all passed')
 }

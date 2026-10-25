@@ -197,6 +197,23 @@ export async function listResumeCandidates(
 }
 
 /**
+ * When slay first recorded `conversationId` (epoch-ms), across every task and
+ * origin — or null if it never did. Spawn time, not `OWNED_AT_SQL`: a warm-pool
+ * agent's transcript can be written from pre-boot onward, and this is used as a
+ * lower bound on the transcript's mtime (the healer's never-written test).
+ */
+export async function getConversationFirstSeenAt(
+  db: SlayzoneDb,
+  conversationId: string
+): Promise<number | null> {
+  const row = await db.get<{ at: number | null }>(
+    `SELECT min(created_at) AS at FROM agent_sessions WHERE conversation_id = ?`,
+    [conversationId]
+  )
+  return row?.at ?? null
+}
+
+/**
  * Is `conversationId` a session this task+mode actually owns and still has?
  *
  * The guard on every user-driven session action (switch, delete). It answers

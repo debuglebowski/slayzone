@@ -647,7 +647,9 @@ export function setOnHostKillHandler(handler: ((taskId: string) => void) | null)
  *  Invoked just before a resume builds `--resume <id>`; returns the id to actually
  *  resume — repointed to the task's real conversation (recorded history, or a
  *  near-certain orphan transcript) — or the original id when nothing safe is
- *  found (→ the honest "session expired" overlay). Registered from the app
+ *  found (→ the honest "session expired" overlay). `fresh: true` means the id
+ *  never had a transcript (never prompted): spawn it with the INITIAL command
+ *  under that same id instead of resuming. Registered from the app
  *  (apps/app) because the decision needs task-DB access, and the package
  *  dependency runs task → terminal (so terminal/main must not import task/main).
  *  No-op when unset. See plans/conv-id-robustness-v2.md. */
@@ -659,7 +661,7 @@ export interface ConversationHealRequest {
 }
 export type ConversationHealer = (
   req: ConversationHealRequest
-) => Promise<{ id: string | null; healed: boolean }>
+) => Promise<{ id: string | null; healed: boolean; fresh?: boolean }>
 
 let conversationHealer: ConversationHealer | null = null
 
@@ -1445,6 +1447,9 @@ export async function createPty(
     // conversation (recorded history, or a near-certain orphan). Best-effort — on
     // any failure we keep the original id and let the stale-resume overlay surface.
     let resolvedExistingId = decision.resolvedExistingId
+    // Set when the healer proves the resume target never had a transcript: the
+    // spawn starts that same id fresh (`--session-id`) rather than `--resume`.
+    let neverWrittenId: string | null = null
     if (resolvedExistingId && conversationHealer) {
       try {
         const healed = await conversationHealer({
@@ -1453,7 +1458,12 @@ export async function createPty(
           cwd,
           storedId: resolvedExistingId
         })
-        if (healed?.id && healed.id !== resolvedExistingId) resolvedExistingId = healed.id
+        if (healed?.fresh) {
+          neverWrittenId = resolvedExistingId
+          resolvedExistingId = null
+        } else if (healed?.id && healed.id !== resolvedExistingId) {
+          resolvedExistingId = healed.id
+        }
       } catch {
         // keep resolvedExistingId as-is
       }
@@ -1473,7 +1483,7 @@ export async function createPty(
     // time — adopt it directly (no resolve / heal / mint).
     const effectiveConversationId = opts.adoptPty?.preWarmedAgent
       ? (opts.adoptPty.conversationId ?? null)
-      : resolvedExistingId || conversationId || mintedFreshId
+      : resolvedExistingId || neverWrittenId || conversationId || mintedFreshId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial
     const template = resuming && resumeCommand ? resumeCommand : initialCommand || undefined

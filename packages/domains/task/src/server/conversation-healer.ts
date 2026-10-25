@@ -4,6 +4,7 @@ import {
   setConversationResolver,
   claudeTranscriptExists,
   claudeTranscriptPath,
+  claudeTranscriptRetentionMs,
   listClaudeTranscriptIds,
   readClaudeTranscriptMeta,
   type ConversationHealRequest
@@ -16,6 +17,7 @@ import {
   collectReferencedConversationIds,
   recordConversation,
   getCurrentConversationId,
+  getConversationFirstSeenAt,
   listResumeCandidates
 } from './ops/index.js'
 
@@ -114,6 +116,8 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
         }
       }
 
+      const storedFirstSeenAtMs = await getConversationFirstSeenAt(db, storedId).catch(() => null)
+      const retentionMs = claudeTranscriptRetentionMs()
       const decision = decideConversationHeal({
         storedId,
         storedExists,
@@ -121,10 +125,27 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
         history: historyExists,
         task: { cwd, gitBranch: taskBranch, createdAtMs, isLegacy },
         candidates,
-        windowMs: HEAL_WINDOW_MS
+        windowMs: HEAL_WINDOW_MS,
+        storedFirstSeenAtMs,
+        retentionMs,
+        nowMs: Date.now()
       })
 
       if (decision.action === 'keep') return { id: storedId, healed: false }
+      if (decision.action === 'fresh') {
+        // Never prompted (no transcript was ever written) — e.g. an agent spawned
+        // and closed before anyone typed. `--resume` could only fail, so start the
+        // same id fresh: nothing is lost, and no false "session expired".
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'pty',
+          event: 'conv_id.heal_fresh',
+          taskId,
+          message: storedId,
+          payload: { firstSeenAgoMs: Date.now() - (storedFirstSeenAtMs ?? 0), retentionMs }
+        })
+        return { id: storedId, healed: false, fresh: true }
+      }
       if (decision.action === 'overlay') {
         recordDiagnosticEvent({
           level: 'info',
