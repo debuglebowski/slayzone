@@ -1,0 +1,120 @@
+diff --git a/dist/index.js b/dist/index.js
+index 4d102d0cf4c9f82dcf13a384e5af0af36a4285d3..32cadd4921307ffd26ef224473a6ae54086401df 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -113,27 +113,40 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
+ var useRovingFocusGroupScope = (0, import_react_roving_focus.createRovingFocusGroupScope)();
+ var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
+ var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
++// SlayZone patch: ONE keyboard-modality tracker shared by every mounted Menu root.
++// Upstream registered a document keydown capture listener per root, closed or not, so
++// every keystroke ran one listener per mounted menu (hundreds with many kanban cards /
++// hidden tabs) and each added two pointer listeners. Same semantics: keyboard use
++// since the last pointer event; reset when the last root unmounts (as a fresh root's
++// ref started false).
++var keyboardModalityRef = { current: false };
++var keyboardModalitySubscribers = 0;
++var handleModalityPointer = () => keyboardModalityRef.current = false;
++var handleModalityKeyDown = () => {
++  keyboardModalityRef.current = true;
++  document.addEventListener("pointerdown", handleModalityPointer, { capture: true, once: true });
++  document.addEventListener("pointermove", handleModalityPointer, { capture: true, once: true });
++};
++var subscribeKeyboardModality = () => {
++  if (keyboardModalitySubscribers++ === 0) {
++    document.addEventListener("keydown", handleModalityKeyDown, { capture: true });
++  }
++  return () => {
++    if (--keyboardModalitySubscribers !== 0) return;
++    document.removeEventListener("keydown", handleModalityKeyDown, { capture: true });
++    document.removeEventListener("pointerdown", handleModalityPointer, { capture: true });
++    document.removeEventListener("pointermove", handleModalityPointer, { capture: true });
++    keyboardModalityRef.current = false;
++  };
++};
+ var Menu = (props) => {
+   const { __scopeMenu, open = false, children, dir, onOpenChange, modal = true } = props;
+   const popperScope = usePopperScope(__scopeMenu);
+   const [content, setContent] = React.useState(null);
+-  const isUsingKeyboardRef = React.useRef(false);
++  const isUsingKeyboardRef = keyboardModalityRef;
+   const handleOpenChange = (0, import_react_use_callback_ref.useCallbackRef)(onOpenChange);
+   const direction = (0, import_react_direction.useDirection)(dir);
+-  React.useEffect(() => {
+-    const handleKeyDown = () => {
+-      isUsingKeyboardRef.current = true;
+-      document.addEventListener("pointerdown", handlePointer, { capture: true, once: true });
+-      document.addEventListener("pointermove", handlePointer, { capture: true, once: true });
+-    };
+-    const handlePointer = () => isUsingKeyboardRef.current = false;
+-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+-    return () => {
+-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+-      document.removeEventListener("pointerdown", handlePointer, { capture: true });
+-      document.removeEventListener("pointermove", handlePointer, { capture: true });
+-    };
+-  }, []);
++  React.useEffect(subscribeKeyboardModality, []);
+   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PopperPrimitive.Root, { ...popperScope, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+     MenuProvider,
+     {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 10eefb0533ee4fa16b7f0e42671969c2c4464835..bea2b992c53c7b928fe3450060db396691ad8851 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -46,27 +46,40 @@ var usePopperScope = createPopperScope();
+ var useRovingFocusGroupScope = createRovingFocusGroupScope();
+ var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
+ var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
++// SlayZone patch: ONE keyboard-modality tracker shared by every mounted Menu root.
++// Upstream registered a document keydown capture listener per root, closed or not, so
++// every keystroke ran one listener per mounted menu (hundreds with many kanban cards /
++// hidden tabs) and each added two pointer listeners. Same semantics: keyboard use
++// since the last pointer event; reset when the last root unmounts (as a fresh root's
++// ref started false).
++var keyboardModalityRef = { current: false };
++var keyboardModalitySubscribers = 0;
++var handleModalityPointer = () => keyboardModalityRef.current = false;
++var handleModalityKeyDown = () => {
++  keyboardModalityRef.current = true;
++  document.addEventListener("pointerdown", handleModalityPointer, { capture: true, once: true });
++  document.addEventListener("pointermove", handleModalityPointer, { capture: true, once: true });
++};
++var subscribeKeyboardModality = () => {
++  if (keyboardModalitySubscribers++ === 0) {
++    document.addEventListener("keydown", handleModalityKeyDown, { capture: true });
++  }
++  return () => {
++    if (--keyboardModalitySubscribers !== 0) return;
++    document.removeEventListener("keydown", handleModalityKeyDown, { capture: true });
++    document.removeEventListener("pointerdown", handleModalityPointer, { capture: true });
++    document.removeEventListener("pointermove", handleModalityPointer, { capture: true });
++    keyboardModalityRef.current = false;
++  };
++};
+ var Menu = (props) => {
+   const { __scopeMenu, open = false, children, dir, onOpenChange, modal = true } = props;
+   const popperScope = usePopperScope(__scopeMenu);
+   const [content, setContent] = React.useState(null);
+-  const isUsingKeyboardRef = React.useRef(false);
++  const isUsingKeyboardRef = keyboardModalityRef;
+   const handleOpenChange = useCallbackRef(onOpenChange);
+   const direction = useDirection(dir);
+-  React.useEffect(() => {
+-    const handleKeyDown = () => {
+-      isUsingKeyboardRef.current = true;
+-      document.addEventListener("pointerdown", handlePointer, { capture: true, once: true });
+-      document.addEventListener("pointermove", handlePointer, { capture: true, once: true });
+-    };
+-    const handlePointer = () => isUsingKeyboardRef.current = false;
+-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+-    return () => {
+-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+-      document.removeEventListener("pointerdown", handlePointer, { capture: true });
+-      document.removeEventListener("pointermove", handlePointer, { capture: true });
+-    };
+-  }, []);
++  React.useEffect(subscribeKeyboardModality, []);
+   return /* @__PURE__ */ jsx(PopperPrimitive.Root, { ...popperScope, children: /* @__PURE__ */ jsx(
+     MenuProvider,
+     {
