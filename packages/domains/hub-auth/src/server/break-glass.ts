@@ -1,5 +1,5 @@
 import { securityEvent } from '@slayzone/platform/security-log'
-import { BREAK_GLASS_EMAIL, isBreakGlassEmail } from './account'
+import { BREAK_GLASS_EMAIL, isBreakGlassEmail, OPERATOR_PROVISIONED } from './account'
 import type { HubAuth } from './auth'
 import { type DisableHubUserOptions, type HubUserRow, listHubUsers } from './users'
 
@@ -52,12 +52,15 @@ export async function openBreakGlassAccount(auth: HubAuth): Promise<{ userId: st
   const ctx = await auth.$context
   const found = await ctx.internalAdapter.findUserByEmail(BREAK_GLASS_EMAIL)
   if (!found) {
-    const created = await ctx.internalAdapter.createUser({
-      email: BREAK_GLASS_EMAIL,
-      name: BREAK_GLASS_NAME,
-      emailVerified: true,
-      role: 'admin'
-    })
+    const created = await ctx.internalAdapter.createUser(
+      {
+        email: BREAK_GLASS_EMAIL,
+        name: BREAK_GLASS_NAME,
+        emailVerified: true,
+        role: 'admin'
+      },
+      OPERATOR_PROVISIONED
+    )
     securityEvent({
       event: 'user.create',
       outcome: 'success',

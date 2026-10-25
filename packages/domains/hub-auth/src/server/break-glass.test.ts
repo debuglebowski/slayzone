@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { OPERATOR_PROVISIONED } from './account'
 import { createHubAuth, type HubAuth } from './auth'
 import {
   BREAK_GLASS_EMAIL,
@@ -168,12 +169,15 @@ describe('break-glass account', () => {
     if ('error' in alice) throw new Error(alice.error)
     // A v1 account, as T-10 left it: a password account named by its address.
     const ctx = await auth.$context
-    const v1 = await ctx.internalAdapter.createUser({
-      email: V1_EMAIL,
-      name: 'Break-glass (temporary)',
-      emailVerified: true,
-      role: 'user'
-    })
+    const v1 = await ctx.internalAdapter.createUser(
+      {
+        email: V1_EMAIL,
+        name: 'Break-glass (temporary)',
+        emailVerified: true,
+        role: 'user'
+      },
+      OPERATOR_PROVISIONED
+    )
     await ctx.internalAdapter.createSession(v1.id)
     expect((await listOpenBreakGlassAccounts(auth)).map((u) => u.id)).toEqual([v1.id])
 

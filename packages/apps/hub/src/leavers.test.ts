@@ -527,12 +527,15 @@ async function main(): Promise<void> {
     /** An account as an Entra sign-in leaves it, with a session and its bearer token. */
     async function entraPerson(oid: string, role: 'admin' | 'user') {
       const ctx = await ssoAuth.$context
-      const user = await ctx.internalAdapter.createUser({
-        email: `${oid}@normain.test`,
-        name: oid,
-        emailVerified: true,
-        role
-      })
+      const user = await ctx.internalAdapter.createUser(
+        {
+          email: `${oid}@normain.test`,
+          name: oid,
+          emailVerified: true,
+          role
+        },
+        { method: 'oauth', oauth: { providerId: ENTRA_PROVIDER_ID } }
+      )
       await ctx.internalAdapter.linkAccount({
         userId: user.id,
         providerId: ENTRA_PROVIDER_ID,

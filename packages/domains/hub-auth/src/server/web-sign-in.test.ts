@@ -180,10 +180,10 @@ describe('web sign-in through Entra', () => {
 
     // Minted for the Entra account, with that account as the audit actor.
     const ctx = await auth.$context
-    const account = await ctx.internalAdapter.findAccountByProviderId(
-      `ada.${TENANT}`,
-      ENTRA_PROVIDER_ID
-    )
+    const account = await ctx.internalAdapter.findAccountByKey({
+      providerId: ENTRA_PROVIDER_ID,
+      accountId: `ada.${TENANT}`
+    })
     expect(mint).toHaveBeenCalledTimes(1)
     expect(mint.mock.calls[0]![0]).toBe(account!.userId)
     expect(mintActor).toBe(account!.userId)

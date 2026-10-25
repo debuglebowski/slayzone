@@ -492,10 +492,10 @@ describe('device sign-in', () => {
     await browser.open(code.user_code, MFA)
     await browser.approve(code.user_code)
     const ctx = await auth.$context
-    const account = await ctx.internalAdapter.findAccountByProviderId(
-      `ada.${TENANT}`,
-      ENTRA_PROVIDER_ID
-    )
+    const account = await ctx.internalAdapter.findAccountByKey({
+      providerId: ENTRA_PROVIDER_ID,
+      accountId: `ada.${TENANT}`
+    })
     await ctx.internalAdapter.updateUser(account!.userId, { disabledAt: new Date() })
     const token = await poll(code.device_code)
     expect(token.status).toBe(403)

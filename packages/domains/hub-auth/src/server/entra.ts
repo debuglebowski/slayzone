@@ -487,12 +487,17 @@ export async function evaluateRefreshedIdToken(
 // Provider + plugin
 // ---------------------------------------------------------------------------
 
+/** What `getUserInfo` hands better-auth as the profile: only the verified account key. */
+interface EntraProfile {
+  accountId: string
+}
+
 /** The provider better-auth calls; see the module note for why it is not better-auth's. */
 function entraProvider(
   cfg: EntraSsoConfig,
   keys: KeyResolver,
   getContext: () => AuthContext | null
-): OAuthProvider {
+): OAuthProvider<EntraProfile> {
   const authorizationEndpoint = `${authorityOf(cfg)}/${cfg.tenantId.toLowerCase()}/oauth2/v2.0/authorize`
   return {
     id: ENTRA_PROVIDER_ID,
@@ -530,9 +535,10 @@ function entraProvider(
     // better-auth's `/refresh-token` and `/get-access-token` (and the re-check of T-12)
     // land here: same client assertion, no secret.
     refreshAccessToken: (refreshToken) => refreshEntraTokens(cfg, refreshToken),
-    // No ID-token sign-in: a client handing the hub a token it obtained elsewhere is
-    // refused. Only the code flow this hub runs itself signs anyone in.
-    verifyIdToken: async () => false,
+    // The account key: `<oid>.<tid>` from the verdict `getUserInfo` hands over as the
+    // profile. better-auth calls this only with a profile `getUserInfo` returned, i.e.
+    // after the ID token passed every check.
+    accountSubject: ({ profile }) => profile.accountId,
     async getUserInfo(tokens) {
       // Only inside the callback whose code exchange produced this very token.
       // Anything else that asks (better-auth's account-info route) gets nothing.
@@ -545,20 +551,22 @@ function entraProvider(
         return null
       }
       return {
-        user: {
-          id: verdict.accountId,
-          email: verdict.email,
-          name: verdict.name,
-          emailVerified: false
-        },
-        data: {}
+        user: { email: verdict.email, name: verdict.name, emailVerified: false },
+        data: { accountId: verdict.accountId }
       }
     },
     // New accounts are created on first sign-in (who may sign in is decided by the
     // checks above, not by an operator pre-creating rows); profile fields are not
     // rewritten on later sign-ins.
     disableSignUp: false,
-    options: { clientId: cfg.clientId, overrideUserInfoOnSignIn: false }
+    options: {
+      clientId: cfg.clientId,
+      overrideUserInfoOnSignIn: false,
+      // No ID-token sign-in: a client handing the hub a token it obtained elsewhere is
+      // refused. Only the code flow this hub runs itself signs anyone in. (No `idToken`
+      // config already fails closed; written explicitly so adding one cannot open it.)
+      disableIdTokenSignIn: true
+    }
   }
 }
 
@@ -571,10 +579,10 @@ async function auditRefusal(
   try {
     let userId: string | null = null
     if (verdict.accountId && ctx) {
-      const account = await ctx.internalAdapter.findAccountByProviderId(
-        verdict.accountId,
-        ENTRA_PROVIDER_ID
-      )
+      const account = await ctx.internalAdapter.findAccountByKey({
+        providerId: ENTRA_PROVIDER_ID,
+        accountId: verdict.accountId
+      })
       userId = account?.userId ?? null
     }
     securityEvent({
@@ -667,7 +675,10 @@ export async function syncEntraRole(
   if (!verdict) return
   const adapter = ctx?.context.internalAdapter
   if (!adapter) throw new Error('[hub-auth] Entra sign-in without an auth context')
-  const account = await adapter.findAccountByProviderId(verdict.accountId, ENTRA_PROVIDER_ID)
+  const account = await adapter.findAccountByKey({
+    providerId: ENTRA_PROVIDER_ID,
+    accountId: verdict.accountId
+  })
   if (!account || account.userId !== session.userId) {
     throw new Error('[hub-auth] Entra sign-in session does not match the signed-in identity')
   }

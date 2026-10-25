@@ -19,6 +19,7 @@ import { betterAuth } from 'better-auth'
 import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { OPERATOR_PROVISIONED } from './account'
 import { createHubAuth, type HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import { listHubUsers } from './users'
@@ -84,12 +85,15 @@ async function seedLegacyHub(): Promise<LegacyState> {
   const password = 'legacy-password-123456'
   const hash = await ctx.password.hash(password)
   const human = async (email: string, createdAt: string): Promise<string> => {
-    const user = await ctx.internalAdapter.createUser({
-      email,
-      name: email.split('@')[0]!,
-      emailVerified: true,
-      createdAt: new Date(createdAt)
-    })
+    const user = await ctx.internalAdapter.createUser(
+      {
+        email,
+        name: email.split('@')[0]!,
+        emailVerified: true,
+        createdAt: new Date(createdAt)
+      },
+      OPERATOR_PROVISIONED
+    )
     await ctx.internalAdapter.linkAccount({
       userId: user.id,
       providerId: 'credential',
@@ -104,11 +108,14 @@ async function seedLegacyHub(): Promise<LegacyState> {
   const { token } = await legacy.api.signInEmail({
     body: { email: 'alice@example.com', password }
   })
-  const service = await ctx.internalAdapter.createUser({
-    email: COMPUTER_SERVICE_USER_EMAIL,
-    name: 'SlayZone Computer Service',
-    emailVerified: true
-  })
+  const service = await ctx.internalAdapter.createUser(
+    {
+      email: COMPUTER_SERVICE_USER_EMAIL,
+      name: 'SlayZone Computer Service',
+      emailVerified: true
+    },
+    OPERATOR_PROVISIONED
+  )
   const key = await legacy.api.createApiKey({
     body: { name: 'ci-computer', userId: service.id, metadata: { computerId: 'computer-1' } }
   })

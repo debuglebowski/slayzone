@@ -11,7 +11,7 @@
       "posix"
     ],
     "overrides": {
-      "zod": "^4",
+      "zod": "^4.5.4",
       "d3-shape>d3-path": "^3.1.0",
       "node-abi": "^4.28.0",
       "electron-chrome-web-store>adm-zip": "^0.6.1",

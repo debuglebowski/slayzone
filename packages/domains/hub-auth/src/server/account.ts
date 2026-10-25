@@ -18,12 +18,21 @@
  * @module hub-auth/account
  */
 import { securityEvent } from '@slayzone/platform/security-log'
+import type { UserProvisioningSource } from 'better-auth'
 import { APIError } from 'better-auth/api'
 import type { HubRole } from '../shared/types'
 import type { HubAuth } from './auth'
 
 /** Error code of a session request for a disabled account. */
 export const ACCOUNT_DISABLED_CODE = 'ACCOUNT_DISABLED'
+
+/**
+ * Provisioning source (better-auth's `createUser` 2nd argument) of every account the hub
+ * creates itself — `slay hub users add`, break-glass, the computer service user —
+ * as opposed to a sign-in. better-auth reads it only for `user.validateUserInfo`, which
+ * the hub does not set; `admin` is the method better-auth's own admin plugin passes.
+ */
+export const OPERATOR_PROVISIONED: UserProvisioningSource = { method: 'admin' }
 
 /** A stored role, read fail-safe: anything but exactly `'admin'` is `'user'`. A row
  *  from before the column existed reads NULL. */
