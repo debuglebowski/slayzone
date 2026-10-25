@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPaneHydrator, HYDRATE_IDLE_TIMEOUT_MS } from './pane-hydration'
+import { ALL_HYDRATED_MARK, createPaneHydrator, HYDRATE_IDLE_TIMEOUT_MS } from './pane-hydration'
 
 type IdleCb = (d: { didTimeout: boolean; timeRemaining: () => number }) => void
 
@@ -146,5 +146,22 @@ describe('pane hydrator', () => {
     idle.shift()!.cb({ didTimeout: true, timeRemaining: () => 49 })
     expect(h.isHydrated('a')).toBe(true)
     expect(h.isHydrated('b')).toBe(false)
+  })
+
+  it('marks the drain of the boot queue once, not the on-screen pane before it', async () => {
+    performance.clearMarks(ALL_HYDRATED_MARK)
+    const { h, runIdle, flush } = harness()
+    h.hydrateNow('active')
+    expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(0)
+    for (const id of ['a', 'b']) h.enqueue(id, { rank: () => 0, ready: Promise.resolve() })
+    await flush()
+    runIdle([0])
+    expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(0)
+    runIdle([0])
+    expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
+    h.enqueue('c', { rank: () => 0, ready: Promise.resolve() })
+    await flush()
+    runIdle([0])
+    expect(performance.getEntriesByName(ALL_HYDRATED_MARK)).toHaveLength(1)
   })
 })

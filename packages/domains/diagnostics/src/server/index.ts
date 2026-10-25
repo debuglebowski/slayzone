@@ -1,6 +1,12 @@
 export { createDiagnosticsSchema, applyDiagnosticsPragmas } from './schema'
 export { diagnosticsBlobDirBeside } from './blob-retention'
 export {
+  createBootStepRecorder,
+  type BootStep,
+  type BootStepRecorder,
+  type BootStepsSummary
+} from './boot-steps'
+export {
   startRetentionScheduler,
   stopRetentionScheduler,
   runScheduledRetentionNow

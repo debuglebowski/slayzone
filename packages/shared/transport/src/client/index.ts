@@ -14,6 +14,7 @@ export {
   type AppRouter
 } from './trpc'
 export { TrpcProvider, makeQueryClient, type TrpcProviderProps } from './provider'
+export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
   FederationProvider,
   useFederation,

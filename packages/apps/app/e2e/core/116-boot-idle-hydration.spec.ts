@@ -50,6 +50,9 @@ function installBootProbe({
   total: number
   detailSelector: string
 }): void {
+  // Registered once per test that needs it; a page keeps every init script, so
+  // a later registration must not install a second census.
+  if ((window as unknown as { __szBoot?: BootProbe }).__szBoot) return
   const probe: BootProbe = {
     longTasks: [],
     activeReadyAt: -1,
@@ -283,5 +286,114 @@ test.describe('boot idle hydration', () => {
       `hydrated reveal=${warm.ms}ms`
     test.info().annotations.push({ type: 'reveal', description: summary })
     console.log(summary)
+  })
+
+  /**
+   * Boot budget guard. A restored 40-tab session must: show the active tab's
+   * detail page within 1s of navigation start, run no long task over 200ms in
+   * the first 5s, sit under 15% main-thread busy once settled, and run no CSS
+   * animation inside a hidden pane. Each threshold sits well above what a healthy
+   * boot measures here (see the summary line) and well below what the
+   * regressions it guards produced: all-tabs-mount-at-once (active ready ~1.1s,
+   * long tasks up to ~2s), hidden-pane loading animations (~85% main thread
+   * busy at idle), and a reload stuck behind a WebSocket throttle (+2.4s).
+   */
+  test('boot stays within budget (active tab, long tasks, idle CPU, hidden animations)', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(240_000)
+    // Self-contained: (re)open every tab — a no-op when an earlier test left them open.
+    await openTaskById(mainWindow, taskIds[0])
+    await mainWindow.evaluate((ids) => {
+      const st = (window as unknown as ProbeWindow).__slayzone_tabStore.getState()
+      for (const id of ids) st.openTaskInBackground(id)
+    }, taskIds.slice(1))
+    await expect
+      .poll(() => mainWindow.locator(DETAIL).count(), { timeout: 90_000, intervals: [500] })
+      .toBeGreaterThanOrEqual(TABS)
+    for (const id of taskIds) await waitForPtySession(mainWindow, getMainSessionId(id), 30_000)
+    await mainWindow.waitForTimeout(1_500)
+
+    await mainWindow.addInitScript(installBootProbe, { total: TABS, detailSelector: DETAIL })
+    const cdp = await mainWindow.context().newCDPSession(mainWindow)
+    await cdp.send('Performance.enable')
+    const taskSeconds = async (): Promise<number> => {
+      const { metrics } = (await cdp.send('Performance.getMetrics')) as {
+        metrics: Array<{ name: string; value: number }>
+      }
+      return metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0
+    }
+
+    const busyBeforeReload = await taskSeconds()
+    await mainWindow.reload({ waitUntil: 'domcontentloaded' })
+    // Settled = every hidden pane hydrated and every terminal attached.
+    await expect
+      .poll(() => mainWindow.locator(DETAIL).count(), { timeout: 60_000, intervals: [250] })
+      .toBeGreaterThanOrEqual(TABS)
+    const sids = taskIds.map(getMainSessionId)
+    await expect
+      .poll(
+        () =>
+          mainWindow.evaluate(
+            (ids) =>
+              ids.filter(
+                (id) =>
+                  !!(window as unknown as ProbeWindow).__slayzone_terminalLinks?.[id]?._terminal
+                    ?.element
+              ).length,
+            sids
+          ),
+        { timeout: 60_000, intervals: [250] }
+      )
+      .toBe(TABS)
+    // Past the 5s long-task window, plus a margin for post-hydration work.
+    const sinceBoot = await mainWindow.evaluate(() => Math.round(performance.now()))
+    await mainWindow.waitForTimeout(Math.max(2_000, 7_000 - sinceBoot))
+
+    const IDLE_WINDOW_MS = 3_000
+    const busy0 = await taskSeconds()
+    // Sanity for the metric itself: the boot up to here was real main-thread work.
+    const bootBusyMs = Math.round((busy0 - busyBeforeReload) * 1000)
+    const t0 = Date.now()
+    await mainWindow.waitForTimeout(IDLE_WINDOW_MS)
+    const idleBusy = (await taskSeconds()) - busy0
+    const idleFraction = idleBusy / ((Date.now() - t0) / 1000)
+
+    const { probe, hiddenAnimations, detailMark } = await mainWindow.evaluate(() => {
+      const hidden = document
+        .getAnimations()
+        .filter((a) => a.playState === 'running')
+        .map((a) => (a.effect as KeyframeEffect | null)?.target ?? null)
+        .filter(
+          (t): t is Element =>
+            t instanceof Element && !t.checkVisibility({ visibilityProperty: true })
+        )
+        .map((t) => `${t.tagName.toLowerCase()}.${String(t.className).slice(0, 60)}`)
+      return {
+        probe: (window as unknown as ProbeWindow).__szBoot!,
+        hiddenAnimations: hidden,
+        detailMark: Math.round(
+          performance.getEntriesByName('sz:activeTab:detail', 'mark')[0]?.startTime ?? -1
+        )
+      }
+    })
+    const early = probe.longTasks.filter((t) => t.start < 5_000)
+    const maxLongTask = Math.max(0, ...early.map((t) => t.duration))
+    const summary =
+      `[boot-budget] activeReadyAt=${probe.activeReadyAt}ms (mark ${detailMark}ms) ` +
+      `longTasks<5s n=${early.length} max=${maxLongTask}ms ` +
+      `boot main-thread=${bootBusyMs}ms idle main-thread=${(idleFraction * 100).toFixed(1)}% ` +
+      `over ${IDLE_WINDOW_MS}ms ` +
+      `hiddenAnimations=${hiddenAnimations.length}` +
+      (hiddenAnimations.length ? ` ${JSON.stringify(hiddenAnimations.slice(0, 5))}` : '')
+    test.info().annotations.push({ type: 'boot-budget', description: summary })
+    console.log(summary)
+
+    expect(bootBusyMs, summary).toBeGreaterThan(0)
+    expect(probe.activeReadyAt, summary).toBeGreaterThan(0)
+    expect(probe.activeReadyAt, summary).toBeLessThan(1_000)
+    expect(maxLongTask, summary).toBeLessThanOrEqual(200)
+    expect(idleFraction, summary).toBeLessThan(0.15)
+    expect(hiddenAnimations, summary).toEqual([])
   })
 })

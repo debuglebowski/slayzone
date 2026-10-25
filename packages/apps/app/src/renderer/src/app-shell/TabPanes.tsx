@@ -299,6 +299,7 @@ const TaskPane = memo(function TaskPane({
                 onTerminalFocusRequestHandled={onTerminalFocusRequestHandled}
                 isSidePanelResizing={isSidePanelResizing}
               />
+              {isViewActive && !explodeMode ? <ActiveDetailMark /> : null}
             </div>
           ) : (
             <TaskShell />
@@ -308,6 +309,21 @@ const TaskPane = memo(function TaskPane({
     </PaneFrame>
   )
 })
+
+/**
+ * Marked once per page load when the on-screen task's detail page first commits
+ * (its Suspense boundary resolved). Read by the renderer boot telemetry.
+ */
+export const ACTIVE_DETAIL_MARK = 'sz:activeTab:detail'
+let activeDetailMarked = false
+function ActiveDetailMark(): null {
+  useEffect(() => {
+    if (activeDetailMarked) return
+    activeDetailMarked = true
+    performance.mark(ACTIVE_DETAIL_MARK)
+  }, [])
+  return null
+}
 
 // Same specifier as lazy.ts's TaskDetailDataLoader → the same chunk.
 let detailChunk: Promise<unknown> | null = null

@@ -2,6 +2,7 @@ import { createTRPCContext } from '@trpc/tanstack-react-query'
 import { createTRPCClient, createWSClient, wsLink, type TRPCLink } from '@trpc/client'
 import superjson from 'superjson'
 import { connectDeadlineLink } from './connectDeadlineLink'
+import { createConnectPacer } from './connectPacing'
 import type { AppRouter } from '../server/router'
 
 // New TanStack React Query integration (replaces classic createTRPCReact).
@@ -42,8 +43,15 @@ export type CreateTrpcClientOpts = {
 // Vanilla (non-React) client — used by the provider boot and by e2e via
 // window.getTrpcVanillaClient(). Shape: client.<router>.<proc>.query/mutate(input).
 export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
+  // Paces connects while the hub is down (see connectPacing.ts): without an
+  // installed probe it only reproduces @trpc/client's own defaults.
+  const pacer = createConnectPacer(opts.url)
   const wsClient = createWSClient({
-    url: opts.url,
+    url: pacer.url,
+    retryDelayMs: pacer.retryDelayMs,
+    onOpen: pacer.onOpen,
+    onClose: pacer.onCloseOrError,
+    onError: pacer.onCloseOrError,
     // Only attach connectionParams when a token is present — an absent token
     // keeps the connect frame identical to the untokened (local) path.
     ...(opts.token ? { connectionParams: async () => ({ token: opts.token as string }) } : {})

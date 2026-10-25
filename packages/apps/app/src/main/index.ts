@@ -486,7 +486,11 @@ import {
   stopDiagnostics,
   setIpcSuccessHook
 } from '@slayzone/diagnostics/electron'
-import { recordDiagnosticEvent, saveDiagnosticsConfig } from '@slayzone/diagnostics/server'
+import {
+  createBootStepRecorder,
+  recordDiagnosticEvent,
+  saveDiagnosticsConfig
+} from '@slayzone/diagnostics/server'
 import {
   detectPreviousCrash,
   writeBootStub,
@@ -1055,8 +1059,10 @@ const OAUTH_DEEP_LINK_REDIRECT_URI = `${APP_PROTOCOL_SCHEME}://auth/callback`
 const OAUTH_CALLBACK_TIMEOUT_MS = 120_000
 
 const BOOT_START_MS = performance.now()
-let bootLastStepMs = BOOT_START_MS
-const bootSteps: { step: string; t: number; delta: number }[] = []
+// Always recorded (an array push per step); printed only with SLAYZONE_DEBUG_BOOT=1,
+// summarized into one `main.boot.timings` diagnostics event per boot.
+const bootSteps = createBootStepRecorder(() => performance.now(), BOOT_START_MS)
+let bootTimingsRecorded = false
 const isBootDebug = (): boolean => !app.isPackaged && process.env.SLAYZONE_DEBUG_BOOT === '1'
 
 // Optional sync file sink. stdout capture in Playwright drops data emitted
@@ -1067,12 +1073,8 @@ function bootLogFilePath(): string | null {
 }
 
 function logBoot(step: string): void {
+  const { t, delta } = bootSteps.step(step)
   if (!isBootDebug()) return
-  const now = performance.now()
-  const t = Math.round(now - BOOT_START_MS)
-  const delta = Math.round(now - bootLastStepMs)
-  bootLastStepMs = now
-  bootSteps.push({ step, t, delta })
   const line = `[boot] t=${String(t).padStart(5)}ms Δ=${String(delta).padStart(5)}ms ${step}`
   console.log(line)
   const file = bootLogFilePath()
@@ -1086,11 +1088,23 @@ function logBoot(step: string): void {
 }
 
 function dumpBootSummary(label: string): void {
-  if (!isBootDebug() || bootSteps.length === 0) return
-  const sorted = [...bootSteps].sort((a, b) => b.delta - a.delta).slice(0, 12)
-  const last = bootSteps[bootSteps.length - 1]
+  if (!bootTimingsRecorded && bootSteps.all().length > 0) {
+    bootTimingsRecorded = true
+    const summary = bootSteps.summary()
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'main',
+      event: 'main.boot.timings',
+      message: `main boot ${summary.totalMs}ms to ${label}`,
+      payload: { at: label, packaged: app.isPackaged, ...summary }
+    })
+  }
+  const all = bootSteps.all()
+  if (!isBootDebug() || all.length === 0) return
+  const sorted = [...all].sort((a, b) => b.delta - a.delta).slice(0, 12)
+  const last = all[all.length - 1]
   const lines: string[] = []
-  lines.push(`[boot] ── summary @ ${label} ── total=${last.t}ms steps=${bootSteps.length}`)
+  lines.push(`[boot] ── summary @ ${label} ── total=${last.t}ms steps=${all.length}`)
   lines.push(`[boot] top gaps:`)
   for (const s of sorted) {
     lines.push(

@@ -700,6 +700,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
+  packages/shared/transport/src/client/connectPacing.test.ts \
+  packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
@@ -774,6 +776,7 @@ run_vitest_files "vitest (tasks-changed refresh)" \
 # a tab's page is mounted are held for it.
 run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
+  packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the

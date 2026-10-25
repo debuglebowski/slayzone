@@ -68,6 +68,7 @@ import {
   webSessionCookieSecure
 } from './web-sessions.js'
 import {
+  createBootStepRecorder,
   diagnosticsBlobDirBeside,
   getDiagnosticsConfig,
   getDiagnosticsDb,
@@ -104,6 +105,8 @@ import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
 const WEB_ROOT = join(__dirname, '..', 'dist', 'web')
 
 export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHandle> {
+  // Boot timings, summarized into the `sidecar.boot` event below.
+  const bootSteps = createBootStepRecorder()
   const host = cfg.host ?? getServerHost()
   const supervised = process.env.SLAYZONE_SUPERVISED === '1'
 
@@ -140,6 +143,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const db = cfg.db ?? (await openServerDatabase())
   const ownsDb = cfg.db === undefined
   log(`db opened: ${dbPath} (schema bootstrapped)`)
+  bootSteps.step('db opened')
 
   // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
   // (pty + agent pool run here) persist + are queryable, instead of buffering +
@@ -182,6 +186,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   })
   const mcpRest = createMcpRestApp(composition.restDeps)
   log('composition wired (tRPC registries + MCP/REST app)')
+  bootSteps.step('composition wired')
 
   // Diagnostics retention: one pruner per diagnostics DB file. A supervised hub
   // writes its desktop host's file, and the host prunes it; any other hub
@@ -199,6 +204,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // degradation (createHubAuth threw) — not a mode — so a broken auth DB can't
   // crash the whole hub, it just leaves computer enroll unavailable.
   await composition.computersReady
+  bootSteps.step('computers ready')
   const computerGateway = composition.computerGateway
   const hubAuth = composition.hubAuth
   // better-auth express app for `/api/auth/*`. Mounted via a direct dispatch in
@@ -701,6 +707,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   }
   state.port = actualPort
   state.ready = true
+  bootSteps.step('listening')
   composition.setBoundPort(actualPort)
 
   // Computer `/computers` rides the SAME listener as `/trpc` (bound above) — no
@@ -745,6 +752,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // Phase 4, see port-claim.ts).
   await claimServerPort(db, host, actualPort, log)
   log(`listening on http://${host}:${actualPort} (/trpc + /health + /api + /mcp)`)
+  bootSteps.step('port claimed')
 
   // Audit (T-10): a hub that requires login records how it can be signed in to at each
   // boot. Not on a hub with login off (the desktop app's), which has no sign-in.
@@ -799,7 +807,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       port: actualPort,
       dbPath,
       supervised,
-      switches
+      switches,
+      // ms from startServer() entry; processUptimeMs adds module load before it.
+      bootTimings: {
+        ...bootSteps.summary(),
+        processUptimeMs: Math.round(process.uptime() * 1000)
+      }
     }
   })
   // Force the batch out now: the boot canary is `info` (not the error level that

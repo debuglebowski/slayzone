@@ -11,6 +11,7 @@ import {
   electronBootstrap,
   getTrpcClient,
   initTrpcClient,
+  setHubConnectProbe,
   useHubRegistryStore
 } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/types'
@@ -20,7 +21,12 @@ import App from './App'
 import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
-import { getDiagnosticsContext, recordClientError } from './lib/diagnosticsClient'
+import {
+  getDiagnosticsContext,
+  recordClientError,
+  recordRendererEvent
+} from './lib/diagnosticsClient'
+import { startBootTimingsReport } from './lib/bootTimings'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
 
@@ -36,6 +42,13 @@ function withWindowId(serverUrl: string, windowId: number | null | undefined): s
   if (windowId == null) return serverUrl
   return `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}windowId=${windowId}`
 }
+
+// While a hub is unreachable, ask main's GET /health before opening another
+// socket outside the reconnect schedule. Failed WebSocket connects are counted
+// per renderer process by Chromium and throttle EVERY later socket — a dead
+// federated hub was delaying the default hub's handshake on reload by ~2.4s.
+// Main-side probes don't touch that counter. See transport connectPacing.ts.
+setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url)).ok)
 
 window.addEventListener('error', (event) => {
   recordClientError({
@@ -102,6 +115,15 @@ if (isFloatingGlobalAgentPanel) {
   )
 } else {
   electronBootstrap.bootMark('renderer script entered')
+  // One `renderer.boot.timings` diagnostics row per boot (sends ~10s in).
+  startBootTimingsReport((payload) =>
+    recordRendererEvent(
+      'renderer.boot.timings',
+      `renderer boot: active tab ${payload.marks.activeTabDetail ?? '-'}ms, ` +
+        `${payload.longTasks.n} long tasks / ${payload.longTasks.totalMs}ms in 10s`,
+      { ...payload }
+    )
+  )
   // Wait for tab store + server URL discovery before rendering. Tab store
   // hydrates from SQLite (prevents effect race wiping persisted tabs); the
   // server URL (local: embedded port; remote: configured host) is needed to
