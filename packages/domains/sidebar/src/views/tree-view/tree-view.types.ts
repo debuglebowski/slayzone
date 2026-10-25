@@ -1,5 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { Task } from '@slayzone/task/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type { SidebarViewContext } from '../types'
 
 export type ProjDropMode = 'before' | 'after' | 'merge'
@@ -42,6 +43,8 @@ export interface TaskBranchCtx {
   treeShowStatus: boolean
   treeShowPriority: boolean
   treeShowWorktree: boolean
+  /** Task id → tags to render as chips. Empty when "Show tags" is off. */
+  tagsByTaskId: Map<string, Tag[]>
   treeCrossOutDone: boolean
   treeGroupBy: 'none' | 'status' | 'priority'
   treeGroupPinned: boolean

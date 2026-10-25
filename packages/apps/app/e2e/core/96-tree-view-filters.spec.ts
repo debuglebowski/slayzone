@@ -174,7 +174,8 @@ test.describe('TreeView setting combinations', () => {
       treeCrossOutDone: false,
       treeShowStatus: false,
       treeShowPriority: false,
-      treeShowWorktree: false
+      treeShowWorktree: false,
+      treeShowTags: false
     })
     await setPinned(mainWindow, [])
     // Anchor open tab keeps the project in TreeView's "active" set.
@@ -545,5 +546,21 @@ test.describe('TreeView setting combinations', () => {
     await setTabs(mainWindow, [rootInProgress, rootDone])
     const struck = taskRow(mainWindow, rootDone).locator('span.line-through')
     await expect(struck).toHaveCount(0)
+  })
+
+  test('treeShowTags toggles tag chips on rows', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    const a = await s.createTag({ name: 'Tree tag A', color: '#ef4444', projectId })
+    const b = await s.createTag({ name: 'Tree tag B', color: '#22c55e', projectId })
+    await s.setTagsForTask(rootInProgress, [a.id, b.id])
+    await s.refreshData()
+    const chips = taskRow(mainWindow, rootInProgress).getByLabel('Tags: Tree tag A, Tree tag B')
+    await expect(taskRow(mainWindow, rootInProgress)).toBeVisible()
+    await expect(chips).toHaveCount(0)
+    await patchStore(mainWindow, { treeShowTags: true })
+    await expect(chips).toBeVisible()
+    await expect(chips).toContainText('Tree tag A')
+    await patchStore(mainWindow, { treeShowTags: false })
+    await expect(chips).toHaveCount(0)
   })
 })

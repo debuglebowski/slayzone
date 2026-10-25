@@ -31,6 +31,7 @@ import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
 import { resolveProjectDrop, applyProjectDrop } from './projectDrop'
 import logo from '../assets/logo.svg'
 import type { SidebarViewContext } from './types'
+import type { Tag } from '@slayzone/tags/shared'
 import {
   TreeGroupHeader,
   ContextStaleDot,
@@ -80,6 +81,8 @@ export function TreeView({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
+  tags,
+  taskTags,
   onTaskReorder,
   onTaskMove,
   onTaskReparent,
@@ -119,6 +122,20 @@ export function TreeView({
   const treeShowSnoozed = useTabStore((s) => s.treeShowSnoozed)
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  const treeShowTags = useTabStore((s) => s.treeShowTags)
+  // Task id → resolved tags in tag sort order. Empty when the toggle is off so
+  // rows skip the lookup entirely.
+  const tagsByTaskId = useMemo(() => {
+    const out = new Map<string, Tag[]>()
+    if (!treeShowTags || !tags || !taskTags) return out
+    for (const [taskId, tagIds] of taskTags) {
+      if (tagIds.length === 0) continue
+      const idSet = new Set(tagIds)
+      const resolved = tags.filter((t) => idSet.has(t.id))
+      if (resolved.length > 0) out.set(taskId, resolved)
+    }
+    return out
+  }, [treeShowTags, tags, taskTags])
   // Pinned / collapsed are task-intrinsic columns (tasks.pinned / tree_collapsed)
   // — derived straight from the task list so optimistic updates flow through.
   const pinnedSet = useMemo(() => new Set(tasks.filter((t) => t.pinned).map((t) => t.id)), [tasks])
@@ -1278,6 +1295,7 @@ export function TreeView({
       treeShowStatus,
       treeShowPriority,
       treeShowWorktree,
+      tagsByTaskId,
       treeCrossOutDone,
       treeGroupBy,
       treeGroupPinned,

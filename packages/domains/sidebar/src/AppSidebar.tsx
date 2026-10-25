@@ -11,6 +11,7 @@ import {
 import { useTabStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type {
   Project,
   ProjectGroup,
@@ -83,6 +84,8 @@ interface AppSidebarProps {
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
+  tags?: Tag[]
+  taskTags?: Map<string, string[]>
   compactFooter?: ReactNode
   updateState?: UpdateState | null
 }
@@ -191,6 +194,8 @@ export function AppSidebar({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
+  tags,
+  taskTags,
   compactFooter,
   updateState
 }: AppSidebarProps) {
@@ -294,7 +299,9 @@ export function AppSidebar({
               taskBulkContextMenuRender,
               taskProgress,
               doneTaskIds,
-              columnsByProjectId
+              columnsByProjectId,
+              tags,
+              taskTags
             })}
           </SidebarGroupContent>
         </SidebarGroup>

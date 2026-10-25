@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type {
   Project,
   ProjectGroup,
@@ -53,6 +54,10 @@ export interface SidebarViewContext {
   doneTaskIds?: Set<string>
   /** Per-project kanban column config (used for task-status icon lookup). */
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
+  /** All tags (any project) — resolves `taskTags` ids for the tree's tag chips. */
+  tags?: Tag[]
+  /** Task id → assigned tag ids. */
+  taskTags?: Map<string, string[]>
   /** Reorder a flat list of task ids (writes "order" col). */
   onTaskReorder?: (taskIds: string[]) => void
   /**

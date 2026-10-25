@@ -170,6 +170,7 @@ export function LayoutSettingsTab() {
   const treeShowOnlyActive = useTabStore((s) => s.treeShowOnlyActive)
   const treeShowTemporary = useTabStore((s) => s.treeShowTemporary)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  const treeShowTags = useTabStore((s) => s.treeShowTags)
   const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
@@ -192,6 +193,7 @@ export function LayoutSettingsTab() {
   const setTreeShowOnlyActive = useTabStore((s) => s.setTreeShowOnlyActive)
   const setTreeShowTemporary = useTabStore((s) => s.setTreeShowTemporary)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
+  const setTreeShowTags = useTabStore((s) => s.setTreeShowTags)
   const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
 
   const statusOptions = useMemo(() => buildStatusOptions(null), [])
@@ -402,6 +404,12 @@ export function LayoutSettingsTab() {
                 tip="Branch icon when task has a worktree"
                 checked={treeShowWorktree}
                 onChange={setTreeShowWorktree}
+              />
+              <ToggleRow
+                label="Show tags"
+                tip="Tag chips after the title"
+                checked={treeShowTags}
+                onChange={setTreeShowTags}
               />
               <ToggleRow
                 label="Cross out completed"

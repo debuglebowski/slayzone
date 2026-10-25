@@ -14,9 +14,37 @@ import {
   TooltipTrigger
 } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type { TaskBranchCtx, TaskRowDragData } from './tree-view.types'
 import { rowGroupValue } from './tree-view.utils'
 import { TreeGuides, tgGuideX, tgPaddingLeft, TG_ROW_HEIGHT } from './tree-guides'
+
+/** First tag as a named pill, the rest as overlapping color dots (mirrors KanbanCard). */
+function TagChips({ tags }: { tags: Tag[] | undefined }): ReactNode {
+  if (!tags || tags.length === 0) return null
+  const [first, ...rest] = tags
+  return (
+    <span
+      aria-label={`Tags: ${tags.map((t) => t.name).join(', ')}`}
+      title={tags.map((t) => t.name).join(', ')}
+      className="flex shrink-0 items-center"
+    >
+      <span
+        className="z-10 flex h-4 max-w-[80px] items-center truncate rounded-full px-1.5 text-[10px] leading-none"
+        style={{ backgroundColor: first.color, color: first.text_color }}
+      >
+        {first.name}
+      </span>
+      {rest.map((tag, i) => (
+        <span
+          key={tag.id}
+          className="size-4 shrink-0 rounded-full border-2 border-background"
+          style={{ backgroundColor: tag.color, marginLeft: -8, zIndex: 9 - i }}
+        />
+      ))}
+    </span>
+  )
+}
 
 function RenameInput({
   initialValue,
@@ -245,6 +273,7 @@ function TaskRowView({
             {task.title || 'Untitled'}
           </span>
         )}
+        <TagChips tags={ctx.tagsByTaskId.get(task.id)} />
         {task.needs_attention && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
             Unread

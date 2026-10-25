@@ -39,6 +39,7 @@ export function TreeDisplaySettings() {
   const treeShowSnoozed = useTabStore((s) => s.treeShowSnoozed)
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  const treeShowTags = useTabStore((s) => s.treeShowTags)
   const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
   const treePriorityFilter = useTabStore((s) => s.treePriorityFilter)
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
@@ -65,6 +66,7 @@ export function TreeDisplaySettings() {
   const setTreeShowSnoozed = useTabStore((s) => s.setTreeShowSnoozed)
   const setTreeShowAllOpen = useTabStore((s) => s.setTreeShowAllOpen)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
+  const setTreeShowTags = useTabStore((s) => s.setTreeShowTags)
   const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
   const setTreePriorityFilter = useTabStore((s) => s.setTreePriorityFilter)
 
@@ -268,6 +270,13 @@ export function TreeDisplaySettings() {
               hint="Branch icon when task has a worktree"
               checked={treeShowWorktree}
               onChange={setTreeShowWorktree}
+            />
+            <Row
+              id="tree-show-tags"
+              label="Show tags"
+              hint="Tag chips after the title"
+              checked={treeShowTags}
+              onChange={setTreeShowTags}
             />
             <Row
               id="tree-cross-out-done"

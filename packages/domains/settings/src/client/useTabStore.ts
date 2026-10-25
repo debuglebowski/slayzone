@@ -131,6 +131,7 @@ interface TabState {
   treeShowAllOpen: boolean
   // Tree-view: show worktree pill on tasks that have a worktree_path.
   treeShowWorktree: boolean
+  treeShowTags: boolean
   // Tree-view: group root tasks by status within each project.
   // Tree-view layout — decoupled from kanban filter.
   treeGroupBy: TreeGroupBy
@@ -184,6 +185,7 @@ interface TabState {
   setTreeShowSnoozed: (show: boolean) => void
   setTreeShowAllOpen: (show: boolean) => void
   setTreeShowWorktree: (show: boolean) => void
+  setTreeShowTags: (show: boolean) => void
   setTreeGroupBy: (groupBy: TreeGroupBy) => void
   setTreeOrderBy: (orderBy: TreeOrderBy) => void
   setTreeOrderDir: (dir: TreeOrderDir) => void
@@ -237,6 +239,7 @@ interface TabState {
     treeHideInactive?: boolean
     treeHideClosed?: boolean
     treeShowWorktree?: boolean
+    treeShowTags?: boolean
     treeGroupBy?: TreeGroupBy
     treeOrderBy?: TreeOrderBy
     treeOrderDir?: TreeOrderDir
@@ -312,6 +315,7 @@ export const useTabStore = create<TabState>()(
     treeShowSnoozed: true,
     treeShowAllOpen: true,
     treeShowWorktree: true,
+    treeShowTags: false,
     treeGroupBy: 'status',
     treeOrderBy: 'manual',
     treeOrderDir: 'asc',
@@ -380,6 +384,7 @@ export const useTabStore = create<TabState>()(
     setTreeShowAllOpen: (show) => set({ treeShowAllOpen: show }),
 
     setTreeShowWorktree: (show) => set({ treeShowWorktree: show }),
+    setTreeShowTags: (show) => set({ treeShowTags: show }),
 
     setTreeGroupBy: (groupBy) => set({ treeGroupBy: groupBy }),
     setTreeOrderBy: (orderBy) => set({ treeOrderBy: orderBy }),
@@ -587,6 +592,7 @@ export const useTabStore = create<TabState>()(
         treeShowAllOpen: typeof state.treeShowAllOpen === 'boolean' ? state.treeShowAllOpen : true,
         treeShowWorktree:
           typeof state.treeShowWorktree === 'boolean' ? state.treeShowWorktree : true,
+        treeShowTags: typeof state.treeShowTags === 'boolean' ? state.treeShowTags : false,
         treeGroupBy:
           state.treeGroupBy === 'priority' || state.treeGroupBy === 'none'
             ? state.treeGroupBy
@@ -703,6 +709,7 @@ useTabStore.subscribe(
     treeShowSnoozed: state.treeShowSnoozed,
     treeShowAllOpen: state.treeShowAllOpen,
     treeShowWorktree: state.treeShowWorktree,
+    treeShowTags: state.treeShowTags,
     treeGroupBy: state.treeGroupBy,
     treeOrderBy: state.treeOrderBy,
     treeOrderDir: state.treeOrderDir,

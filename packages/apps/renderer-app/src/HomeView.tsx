@@ -736,6 +736,8 @@ export function HomeView(): React.JSX.Element {
         onSetTasksPinned={data.setTasksPinned}
         onSetCollapsed={data.setTaskCollapsed}
         onPinnedReorder={data.reorderPinnedTasks}
+        tags={data.tags}
+        taskTags={data.taskTags}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {sidebarView !== 'tree' && (

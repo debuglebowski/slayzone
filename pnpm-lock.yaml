@@ -1496,6 +1496,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../tags
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task

@@ -1352,6 +1352,8 @@ function App(): React.JSX.Element {
             taskProgress={taskProgress}
             doneTaskIds={doneTaskIds}
             columnsByProjectId={columnsByProjectId}
+            tags={tags}
+            taskTags={taskTags}
             compactFooter={headerHidden ? compactFooterContent : undefined}
             updateState={
               updateDownloadPercent != null
