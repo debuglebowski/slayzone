@@ -157,6 +157,10 @@ function SortableKanbanCard({
     )
   }
 
+  // A boolean, not the set: a change to which OTHER tasks have an agent must not
+  // rebuild this card's handler (and re-render its menu).
+  const hasActiveAgent = !!activeAgentTaskIds?.has(task.id)
+
   // Wrap with single-task context menu if handlers provided
   if (allProjects && onUpdateTask && onArchiveTask && onDeleteTask) {
     return (
@@ -172,9 +176,7 @@ function SortableKanbanCard({
         onDeleteTask={onDeleteTask}
         onTaskTagsChange={onTaskTagsChange}
         onShutdownAgent={
-          activeAgentTaskIds?.has(task.id) && onShutdownAgent
-            ? () => onShutdownAgent(task.id)
-            : undefined
+          hasActiveAgent && onShutdownAgent ? () => onShutdownAgent(task.id) : undefined
         }
       >
         {card}

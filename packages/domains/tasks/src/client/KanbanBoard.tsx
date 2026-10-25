@@ -28,6 +28,7 @@ import { useKanbanSelection } from './useKanbanSelection'
 import { BlockerDialog } from '@slayzone/task/client'
 import { useAppearance, useDialogStore } from '@slayzone/settings/client'
 import { track } from '@slayzone/telemetry/client'
+import { useStableCallback } from '@slayzone/ui'
 
 interface KanbanBoardProps {
   tasks: Task[]
@@ -119,27 +120,28 @@ export function KanbanBoard({
   const dragSetRef = useRef<string[]>([])
   const [dragSetSize, setDragSetSize] = useState(1)
 
-  // Wrap onTaskClick: meta/ctrl = toggle selection (multi-choose); shift = range-add; plain = clear + open
-  const handleCardClick = (
-    task: Task,
-    e: { metaKey: boolean; ctrlKey?: boolean; shiftKey?: boolean }
-  ): void => {
-    if (e.metaKey || e.ctrlKey) {
-      selection.toggle(task.id)
-      return
+  // Wrap onTaskClick: meta/ctrl = toggle selection (multi-choose); shift = range-add; plain = clear + open.
+  // Stable (as is the context-menu one): handed to every card, so a new identity —
+  // e.g. from a selection change — would re-render all of them.
+  const handleCardClick = useStableCallback(
+    (task: Task, e: { metaKey: boolean; ctrlKey?: boolean; shiftKey?: boolean }): void => {
+      if (e.metaKey || e.ctrlKey) {
+        selection.toggle(task.id)
+        return
+      }
+      if (e.shiftKey) {
+        selection.selectRange(task.id)
+        return
+      }
+      selection.clear()
+      onTaskClick?.(task, e)
     }
-    if (e.shiftKey) {
-      selection.selectRange(task.id)
-      return
-    }
-    selection.clear()
-    onTaskClick?.(task, e)
-  }
+  )
 
   // Right-click intercept: if not in selection, replace with this card; else keep selection
-  const handleCardContextMenu = (taskId: string): void => {
+  const handleCardContextMenu = useStableCallback((taskId: string): void => {
     if (!selection.selectedIds.has(taskId)) selection.replace(taskId)
-  }
+  })
 
   const subTaskCounts = useMemo(() => {
     const counts = new Map<string, { done: number; total: number }>()

@@ -521,8 +521,13 @@ export function useTasksData(): UseTasksDataReturn {
       const current = queryClient.getQueryData<BoardData>(boardKey)
       const next = current ? patchBoardRows(current, taskIds, rows as unknown as BoardRows) : null
       if (current && next) {
-        patchedBoardRef.current = next
         queryClient.setQueryData<BoardData>(boardKey, next)
+        // What the cache STORED, not `next`: structural sharing keeps the previous
+        // board's unchanged parts, so the stored object is a different one. Marking
+        // `next` let the seeding effect take its own patch for a foreign board and
+        // rebuild the mirror from it — a new object for every task, re-rendering
+        // every open tab and board card on each row patch.
+        patchedBoardRef.current = queryClient.getQueryData<BoardData>(boardKey) ?? next
         setTasks((prev) => patchMirrorTasks(prev, taskIds, current, next))
         setTaskTags((prev) => patchMirrorTaskTags(prev, taskIds, current, next))
         setBlockedTaskIds((prev) => patchMirrorBlocked(prev, taskIds, current, next))

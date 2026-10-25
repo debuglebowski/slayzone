@@ -1,4 +1,4 @@
-import { use, useSyncExternalStore } from 'react'
+import { use, useCallback, useSyncExternalStore } from 'react'
 
 // `never[]` params keep the constraint contravariance-safe: a concrete
 // `(id: string) => Promise<T>` is assignable to it, which `unknown[]` would
@@ -19,7 +19,8 @@ interface CacheEntry {
  * React-aware Suspense cache for async data fetching.
  *
  * - Caches promises by key+args, deduplicates in-flight requests
- * - Integrates with React via useSyncExternalStore — invalidation triggers re-renders
+ * - Integrates with React via useSyncExternalStore — a change to an entry re-renders
+ *   only that entry's readers (one open task tab per entry must not wake the others)
  * - Components use the `useData` hook which calls React 19's `use()` internally
  * - Tracks resolved values so prefetched data returns synchronously (no Suspense delay)
  * - Eviction prevents unbounded memory growth
@@ -51,22 +52,23 @@ export interface SuspenseCache<F extends Fetchers> {
 
 export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCache<F> {
   const cache = new Map<string, CacheEntry>()
-  const listeners = new Set<() => void>()
-  // Version counter — useSyncExternalStore uses this to detect changes
-  let version = 0
+  // Per entry key: its readers, and a version useSyncExternalStore compares.
+  const listeners = new Map<string, Set<() => void>>()
+  const versions = new Map<string, number>()
 
-  function subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
+  function subscribe(k: string, listener: () => void): () => void {
+    let set = listeners.get(k)
+    if (!set) listeners.set(k, (set = new Set()))
+    set.add(listener)
+    return () => {
+      set.delete(listener)
+      if (set.size === 0 && listeners.get(k) === set) listeners.delete(k)
+    }
   }
 
-  function getSnapshot(): number {
-    return version
-  }
-
-  function notify(): void {
-    version++
-    listeners.forEach((l) => l())
+  function notify(k: string): void {
+    versions.set(k, (versions.get(k) ?? 0) + 1)
+    listeners.get(k)?.forEach((l) => l())
   }
 
   function cacheKey(key: string, args: unknown[]): string {
@@ -88,12 +90,12 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
         (value) => {
           e.value = value
           e.settled = true
-          notify()
+          notify(k)
         },
         (error) => {
           e.error = error
           e.settled = true
-          notify()
+          notify(k)
         }
       )
       // Prevent unhandled rejection warnings. The original promise still rejects —
@@ -111,8 +113,11 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
 
   return {
     useData(key, ...args) {
-      // Subscribe to cache changes so invalidation triggers re-render
-      useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+      // Subscribe to THIS entry's changes, so its invalidation re-renders the reader.
+      const k = cacheKey(key, args)
+      const subscribeEntry = useCallback((l: () => void) => subscribe(k, l), [k])
+      const getVersion = useCallback(() => versions.get(k) ?? 0, [k])
+      useSyncExternalStore(subscribeEntry, getVersion, getVersion)
       const entry = getOrFetch(key, args)
       // Entries are stored untyped (one string-keyed map for every fetcher);
       // the public signature is what ties a key back to its fetcher's return.
@@ -136,19 +141,17 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
 
     invalidate(key, ...args) {
       const k = cacheKey(key, args)
-      if (cache.delete(k)) notify()
+      if (cache.delete(k)) notify(k)
     },
 
     invalidateAll(key) {
       const prefix = `${key}:`
-      let deleted = false
-      for (const k of cache.keys()) {
+      for (const k of [...cache.keys()]) {
         if (k === key || k.startsWith(prefix)) {
           cache.delete(k)
-          deleted = true
+          notify(k)
         }
       }
-      if (deleted) notify()
     },
 
     evict(key, ...args) {

@@ -1050,9 +1050,10 @@ function App(): React.JSX.Element {
       useDialogStore.getState().closeDeleteTask()
     }
   }
-  const handleTaskClick = (task: Task): void => {
+  // Stable: handed to every board card, so a new identity re-renders all of them.
+  const handleTaskClick = useStableCallback((task: Task): void => {
     openTask(task.id)
-  }
+  })
   const handleTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void => {
     moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy)
   }

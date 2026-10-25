@@ -175,6 +175,42 @@ describe('createSuspenseCache', () => {
     expect(renderCount).toHaveBeenCalledTimes(countAfterMount)
   })
 
+  it('a change to one entry does not re-render readers of other entries', async () => {
+    const cache = createSuspenseCache({ item: (id: string) => Promise.resolve(id) })
+    const renders: Record<string, number> = {}
+    function Inner({ id }: { id: string }) {
+      renders[id] = (renders[id] ?? 0) + 1
+      return <div>{cache.useData('item', id)}</div>
+    }
+    await cache.prefetch('item', 'a')
+    await cache.prefetch('item', 'b')
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>loading</div>}>
+          <Inner id="a" />
+          <Inner id="b" />
+        </Suspense>
+      )
+    })
+    const a = renders.a
+    const b = renders.b
+    // A third entry settling, and another entry's invalidation, are not `a`'s business.
+    await act(async () => {
+      await cache.prefetch('item', 'c')
+    })
+    expect(renders.a).toBe(a)
+    await act(async () => {
+      cache.invalidate('item', 'b')
+    })
+    expect(renders.a).toBe(a)
+    expect(renders.b).toBeGreaterThan(b)
+    // invalidateAll still reaches every reader of that fetcher.
+    await act(async () => {
+      cache.invalidateAll('item')
+    })
+    expect(renders.a).toBeGreaterThan(a)
+  })
+
   it('handles rejection — error propagates through error boundary', async () => {
     const cache = createSuspenseCache({
       failing: () => Promise.reject(new Error('fetch failed'))

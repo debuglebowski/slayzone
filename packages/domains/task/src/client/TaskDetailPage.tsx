@@ -310,8 +310,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // object — that would churn the ref every render and could loop the WS).
   const lastPanelTouchAtRef = useRef(0)
   const panelEngagementCleanupRef = useRef<(() => void) | null>(null)
+  // This page's own root, for listeners that must hear only THIS page's DOM.
+  const [taskRootEl, setTaskRootEl] = useState<HTMLDivElement | null>(null)
   const taskRootRef = useCallback(
     (node: HTMLDivElement | null) => {
+      setTaskRootEl(node)
       panelEngagementCleanupRef.current?.()
       panelEngagementCleanupRef.current = null
       if (!node || !taskId) return
@@ -1055,10 +1058,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     browserTabsRef.current = browserTabs
   }, [browserTabs])
 
-  // Track last-focused sub-panel via focusin (macOS native menu accelerators clear activeElement by callback time)
+  // Track last-focused sub-panel via focusin (macOS native menu accelerators clear activeElement by callback time).
+  // Listened on this page's root, not the window: every open tab mounts a page, and a
+  // window listener let a focus move in ANY tab re-render all of them (and record
+  // another tab's panel as this one's Cmd+W target).
   const lastFocusedPanelRef = useRef<'terminal' | 'editor' | 'browser' | null>(null)
   const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
   useEffect(() => {
+    if (!taskRootEl) return
     const handleFocusIn = (e: FocusEvent): void => {
       const target = e.target as HTMLElement | null
       // Cmd+W tracking (sticky ref, specific selectors)
@@ -1077,13 +1084,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const related = e.relatedTarget as HTMLElement | null
       if (!related?.closest('[data-panel-id]')) setFocusedPanel(null)
     }
-    window.addEventListener('focusin', handleFocusIn)
-    window.addEventListener('focusout', handleFocusOut)
+    taskRootEl.addEventListener('focusin', handleFocusIn)
+    taskRootEl.addEventListener('focusout', handleFocusOut)
     return () => {
-      window.removeEventListener('focusin', handleFocusIn)
-      window.removeEventListener('focusout', handleFocusOut)
+      taskRootEl.removeEventListener('focusin', handleFocusIn)
+      taskRootEl.removeEventListener('focusout', handleFocusOut)
     }
-  }, [])
+  }, [taskRootEl])
 
   // Cmd+R browser reload is handled globally in App.tsx
 
