@@ -1256,6 +1256,7 @@ export function TreeView({
     const isContextActive = selectedProjectId === project.id && activeView === 'context'
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
+    const staleSkillCount = staleSkillCounts.get(project.id) ?? 0
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
     const cols = columnsByProjectId?.get(project.id) ?? null
     // Flat row list: headers + tasks in DFS order. Non-temp header rows
@@ -1343,57 +1344,87 @@ export function TreeView({
                   <span className="truncate flex-1 text-left">{project.name}</span>
                 </button>
               </Collapsible.Trigger>
-              <button
-                type="button"
-                onClick={() => onSetProjectStarred?.(project.id, !project.starred)}
-                aria-label={project.starred ? `Unstar ${project.name}` : `Star ${project.name}`}
-                className={cn(
-                  'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
-                  project.starred
-                    ? 'text-foreground'
-                    : 'text-muted-foreground/70 hover:text-foreground'
-                )}
-              >
-                <Star className={cn('size-3.5', project.starred && 'fill-current')} />
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectProject(project.id, { home: true })}
-                aria-label={`Open ${project.name} home`}
-                className={cn(
-                  'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',
-                  isHomeActive
-                    ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
-                    : 'text-muted-foreground/70 hover:text-foreground'
-                )}
-              >
-                <Home className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  useTabStore.getState().setSelectedProjectId(project.id)
-                  useTabStore.getState().setActiveView('context')
-                }}
-                aria-label={`Context Manager for ${project.name}`}
-                className={cn(
-                  'relative inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',
-                  isContextActive
-                    ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
-                    : 'text-muted-foreground/70 hover:text-foreground'
-                )}
-              >
-                <BookOpen className="size-3.5" />
-                <ContextStaleDot count={staleSkillCounts.get(project.id) ?? 0} />
-              </button>
-              <button
-                type="button"
-                onClick={() => onProjectSettings(project)}
-                aria-label={`Settings for ${project.name}`}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-colors mr-0.5"
-              >
-                <Settings className="size-3.5" />
-              </button>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onSetProjectStarred?.(project.id, !project.starred)}
+                    aria-label={project.starred ? `Unstar ${project.name}` : `Star ${project.name}`}
+                    className={cn(
+                      'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                      project.starred
+                        ? 'text-foreground'
+                        : 'text-muted-foreground/70 hover:text-foreground'
+                    )}
+                  >
+                    <Star className={cn('size-3.5', project.starred && 'fill-current')} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  {project.starred ? 'Unstar project' : 'Star project'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onSelectProject(project.id, { home: true })}
+                    aria-label={`Open ${project.name} home`}
+                    className={cn(
+                      'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',
+                      isHomeActive
+                        ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
+                        : 'text-muted-foreground/70 hover:text-foreground'
+                    )}
+                  >
+                    <Home className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Project home
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      useTabStore.getState().setSelectedProjectId(project.id)
+                      useTabStore.getState().setActiveView('context')
+                    }}
+                    aria-label={`Context Manager for ${project.name}`}
+                    className={cn(
+                      'relative inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',
+                      isContextActive
+                        ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
+                        : 'text-muted-foreground/70 hover:text-foreground'
+                    )}
+                  >
+                    <BookOpen className="size-3.5" />
+                    <ContextStaleDot count={staleSkillCount} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  {staleSkillCount > 0
+                    ? `Context Manager (${staleSkillCount} stale skill${staleSkillCount === 1 ? '' : 's'})`
+                    : 'Context Manager'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onProjectSettings(project)}
+                    aria-label={`Settings for ${project.name}`}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-colors mr-0.5"
+                  >
+                    <Settings className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Project settings
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
               <div className="flex flex-col pr-2 pt-2 pb-3">
