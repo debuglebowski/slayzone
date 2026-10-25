@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import type {
   PanelLayout,
   PanelDimension,
@@ -307,6 +308,13 @@ export function normalizeOverrides(raw: unknown): PanelSizes {
   return out
 }
 
+/** `sizes` minus one panel's override (the React Compiler cannot lower a computed rest-destructure). */
+function withoutPanel(sizes: PanelSizes, panel: string): PanelSizes {
+  const rest = { ...sizes }
+  delete rest[panel]
+  return rest
+}
+
 /**
  * Per-task panel size overrides. Live state updates on every drag frame; `commit`
  * persists (call on drag end). `resetPanel`/`resetAll` delete overrides so the
@@ -324,21 +332,21 @@ export function usePanelSizes(
   () => void
 ] {
   const [sizes, setSizes] = useState<PanelSizes>(() => ({ ...(initial ?? {}) }))
-  const sizesRef = useRef(sizes)
-  sizesRef.current = sizes
 
   const updateSizes = useCallback((updates: Partial<PanelSizes>) => {
     setSizes((prev) => ({ ...prev, ...updates }) as PanelSizes)
   }, [])
 
-  const commit = useCallback(() => {
-    persist(sizesRef.current)
-  }, [persist])
+  // Stable (no `sizes` dep) yet persists the latest rendered sizes — the drag's last
+  // frame has rendered by the time the drag ends.
+  const commit = useStableCallback(() => {
+    persist(sizes)
+  })
 
   const resetPanel = useCallback(
     (panel: string) => {
       setSizes((prev) => {
-        const { [panel]: _drop, ...rest } = prev
+        const rest = withoutPanel(prev, panel)
         persist(rest)
         return rest
       })
@@ -368,7 +376,8 @@ export function useGlobalPanelSizes(): [
 ] {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const setSetting = useMutation(trpc.settings.set.mutationOptions())
+  // `mutate` is stable across renders (TanStack), so the callbacks below are too.
+  const { mutate: saveSetting } = useMutation(trpc.settings.set.mutationOptions())
   const [sizes, setSizes] = useState<PanelSizes>({})
   const loaded = useRef(false)
 
@@ -385,25 +394,34 @@ export function useGlobalPanelSizes(): [
     })
   }, [trpcClient])
 
-  const persist = (next: PanelSizes): void => {
-    setSetting.mutate({ key: GLOBAL_SETTINGS_KEY, value: JSON.stringify(next) })
-  }
+  const persist = useCallback(
+    (next: PanelSizes): void => {
+      saveSetting({ key: GLOBAL_SETTINGS_KEY, value: JSON.stringify(next) })
+    },
+    [saveSetting]
+  )
 
-  const updateSizes = useCallback((updates: Partial<PanelSizes>) => {
-    setSizes((prev) => {
-      const next = { ...prev, ...updates } as PanelSizes
-      if (loaded.current) persist(next)
-      return next
-    })
-  }, [])
+  const updateSizes = useCallback(
+    (updates: Partial<PanelSizes>) => {
+      setSizes((prev) => {
+        const next = { ...prev, ...updates } as PanelSizes
+        if (loaded.current) persist(next)
+        return next
+      })
+    },
+    [persist]
+  )
 
-  const resetPanel = useCallback((panel: string) => {
-    setSizes((prev) => {
-      const { [panel]: _drop, ...rest } = prev
-      if (loaded.current) persist(rest)
-      return rest
-    })
-  }, [])
+  const resetPanel = useCallback(
+    (panel: string) => {
+      setSizes((prev) => {
+        const rest = withoutPanel(prev, panel)
+        if (loaded.current) persist(rest)
+        return rest
+      })
+    },
+    [persist]
+  )
 
   return [sizes, updateSizes, resetPanel]
 }

@@ -9,7 +9,6 @@ export function useTabLifecycle({
   tasks,
   projects,
   tabs,
-  activeTabIndex,
   setTerminalFocusRequests,
   hubIdByProject,
   hubIdByTask
@@ -17,7 +16,6 @@ export function useTabLifecycle({
   tasks: Task[]
   projects: Project[]
   tabs: Tab[]
-  activeTabIndex: number
   setTerminalFocusRequests: React.Dispatch<React.SetStateAction<Record<string, number>>>
   /** Multi-hub: project→hub / task→hub origin maps (empty when single-hub). */
   hubIdByProject?: Map<string, string>
@@ -104,8 +102,13 @@ export function useTabLifecycle({
       return changed ? next : prev
     })
   }, [tasks])
+}
 
-  // Track page views on tab switch
+/**
+ * Track a page view per tab switch. Separate from useTabLifecycle because it needs
+ * the active index: call it from a component that re-renders on a switch, not App.
+ */
+export function useTabPageViews(tabs: Tab[], activeTabIndex: number): void {
   const prevTabIndexRef = useRef(-1)
   useEffect(() => {
     if (activeTabIndex === prevTabIndexRef.current) return

@@ -13,11 +13,7 @@ import type {
   ContextManagerSection
 } from './constants'
 
-type Tabs = ReturnType<typeof useTabStore.getState>['tabs']
-
 export interface AppIpcListenersDeps {
-  tabs: Tabs
-  activeTabIndex: number
   closeTab: (index: number) => void
   guardTaskOpen: (taskId: string, fn: (id: string) => void, projectOverride?: Project) => void
   openTaskInBackground: (taskId: string) => void
@@ -45,8 +41,6 @@ export interface AppIpcListenersDeps {
 // focus relay, create-task-from-link).
 export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   const {
-    tabs,
-    activeTabIndex,
     closeTab,
     guardTaskOpen,
     openTaskInBackground,
@@ -71,16 +65,17 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   const trpcClient = useTRPCClient()
   const closeWindow = useMutation(trpc.app.window.close.mutationOptions())
 
-  // Stable handlers for the close subscriptions: they always see the latest
-  // tabs/activeTabIndex without re-binding the WS subscription.
+  // Stable handlers for the close subscriptions: they read the active tab from the
+  // store when the event fires (the shell does not re-render on a tab switch) and
+  // never re-bind the WS subscription.
   const closeActiveTask = useStableCallback(() => {
-    const activeTab = tabs[activeTabIndex]
-    if (activeTab?.type === 'task') closeTab(activeTabIndex)
+    const { tabs, activeTabIndex } = useTabStore.getState()
+    if (tabs[activeTabIndex]?.type === 'task') closeTab(activeTabIndex)
     else void closeWindow.mutate()
   })
   const closeCurrentHome = useStableCallback(() => {
-    const activeTab = tabs[activeTabIndex]
-    if (activeTab?.type === 'home') void closeWindow.mutate()
+    const { tabs, activeTabIndex } = useTabStore.getState()
+    if (tabs[activeTabIndex]?.type === 'home') void closeWindow.mutate()
   })
 
   useSubscription(

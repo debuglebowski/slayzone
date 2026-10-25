@@ -8,7 +8,7 @@ export function useDiagnosticsSync({
   activeView,
   selectedProjectId,
   projects,
-  tasks,
+  taskCount,
   displayTaskCount,
   projectPathMissing
 }: {
@@ -17,7 +17,7 @@ export function useDiagnosticsSync({
   activeView: ActiveView
   selectedProjectId: string
   projects: { id: string; name: string }[]
-  tasks: { length: number }
+  taskCount: number
   displayTaskCount: number
   projectPathMissing: boolean
 }): void {
@@ -30,7 +30,7 @@ export function useDiagnosticsSync({
       openTaskTabs: tabs.filter((t) => t.type === 'task').length,
       selectedProjectId,
       selectedProjectName: projects.find((p) => p.id === selectedProjectId)?.name ?? null,
-      taskCount: tasks.length,
+      taskCount,
       visibleTaskCount: displayTaskCount,
       projectPathMissing
     })
@@ -39,7 +39,7 @@ export function useDiagnosticsSync({
     tabs,
     selectedProjectId,
     projects,
-    tasks.length,
+    taskCount,
     displayTaskCount,
     projectPathMissing
   ])

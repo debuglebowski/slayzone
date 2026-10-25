@@ -213,10 +213,6 @@
   "packages/domains/task/src/client/TemplatesSettingsTab.tsx": [
     "TemplateFormDialog"
   ],
-  "packages/domains/task/src/client/usePanelSizes.ts": [
-    "usePanelSizes",
-    "useGlobalPanelSizes"
-  ],
   "packages/domains/task/src/client/useSharedCardHeights.ts": [
     "useSharedCardHeights"
   ],

@@ -67,7 +67,6 @@ import {
 import { AppSidebar } from '@slayzone/sidebar'
 import { useChangelogAutoOpen, useOnboardingChecklist } from '@slayzone/onboarding'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
-import { TabBar } from '@slayzone/tabs'
 import {
   useGlobalAgentPanelState,
   type FloatingStateKind,
@@ -87,10 +86,11 @@ import { useHomePanel } from '@slayzone/home/client'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
-import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
 // Extracted shell: lazy components, types/constants, hooks, panels (see ./app-shell)
 import {
   TabPanes,
+  AppTabBar,
+  ActiveTabSync,
   LeaderboardPage,
   UsageAnalyticsPage,
   ContextManagerPage,
@@ -227,7 +227,9 @@ function App(): React.JSX.Element {
   // View state (tabs + selected project, persisted via zustand)
   const tabs = useTabStore((s) => s.tabs)
   const closedTabs = useTabStore((s) => s.closedTabs)
-  const activeTabIndex = useTabStore((s) => s.activeTabIndex)
+  // Deliberately no `activeTabIndex` here: a tab switch must not re-render App. What
+  // depends on the active tab subscribes itself — AppTabBar, TabPanes, ActiveTabSync,
+  // the search dialog — and handlers read it from the store when they fire.
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const sidebarView = useTabStore((s) => s.sidebarView)
@@ -365,14 +367,13 @@ function App(): React.JSX.Element {
 
   // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + width
   const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
-    useExplodeMode(openTaskIds, tabs, activeTabIndex)
+    useExplodeMode(openTaskIds)
 
-  // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
+  // Tab lifecycle (extracted — manages sync, cleanup, cache eviction; page views: ActiveTabSync)
   useTabLifecycle({
     tasks,
     projects,
     tabs,
-    activeTabIndex,
     setTerminalFocusRequests,
     hubIdByProject,
     hubIdByTask
@@ -646,63 +647,11 @@ function App(): React.JSX.Element {
   const tasksMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
   // Visible tabs (project-scoped filtering — purely visual, full tabs stay mounted)
-  const { visibleTabs, visibleActiveIndex, toFullIndex, toVisibleIndex } = useVisibleTabs(
-    tabs,
-    tasksMap
-  )
+  const { visibleTabs, toFullIndex, toVisibleIndex } = useVisibleTabs(tabs, tasksMap)
   const visibleTaskCount = useMemo(
     () => visibleTabs.filter((t) => t.type === 'task').length,
     [visibleTabs]
   )
-
-  // Auto-switch project when activating a task tab
-  const activeTab = tabs[activeTabIndex]
-  const activeTaskProjectId =
-    activeTab?.type === 'task' ? tasksMap.get(activeTab.taskId)?.project_id : undefined
-
-  // Broadcast primary's active task ID so secondary windows in "Follow current tab" mode swap
-  useEffect(() => {
-    const id = activeTab?.type === 'task' ? activeTab.taskId : null
-    void trpcClient.app.taskWindows.setPrimaryActive.mutate({ taskId: id })
-  }, [activeTab, trpcClient])
-
-  // Mark a task "read" (clear needs_attention) when the user *navigates into* it —
-  // i.e. it becomes the active tab. Deliberately NOT cleared while the task merely
-  // stays active: that is what lets "Mark as unread" stick even though the task is
-  // on screen. Two refs handle the timing:
-  //  - activatedTaskRef: id of the current activation. A change => a fresh open.
-  //  - readConsumedRef: the id we've already issued the read-clear for this
-  //    activation. Ensures a late tasksMap update (task data arriving after the tab
-  //    switch) still clears exactly once, and a tasksMap update caused by a later
-  //    "Mark as unread" does NOT re-clear it.
-  const activatedTaskRef = useRef<string | null>(null)
-  const readConsumedRef = useRef<string | null>(null)
-  useEffect(() => {
-    const activeTaskId = activeTab?.type === 'task' ? activeTab.taskId : null
-    if (!activeTaskId) {
-      activatedTaskRef.current = null
-      return
-    }
-    // Fresh activation: reset the once-per-activation read guard.
-    if (activeTaskId !== activatedTaskRef.current) {
-      activatedTaskRef.current = activeTaskId
-      readConsumedRef.current = null
-    }
-    if (readConsumedRef.current === activeTaskId) return
-    const task = tasksMap.get(activeTaskId)
-    if (!task) return // data not loaded yet — wait for the next tasksMap update
-    readConsumedRef.current = activeTaskId
-    if (task.needs_attention) {
-      void trpcClient.task.update.mutate({ id: activeTaskId, needsAttention: false }).catch(() => {
-        // Clearing the unread dot is cosmetic — a failed write just means the
-        // dot survives until the next activation, which retries.
-      })
-    }
-  }, [activeTab, tasksMap, trpcClient])
-  useEffect(() => {
-    if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId)
-      setSelectedProjectId(activeTaskProjectId)
-  }, [activeTaskProjectId, selectedProjectId, setSelectedProjectId])
 
   // Read settings on mount and whenever settings change
   useEffect(() => {
@@ -751,25 +700,11 @@ function App(): React.JSX.Element {
     })
   }
 
-  // Diagnostics (extracted — fire-and-forget side effects)
-  useDiagnosticsSync({
-    tabs,
-    activeTabIndex,
-    activeView,
-    selectedProjectId,
-    projects,
-    tasks,
-    displayTaskCount: displayTasks.length,
-    projectPathMissing
-  })
-
   // Global keyboard shortcuts (extracted — react-hotkeys + home-tab keydown listener)
   useAppShortcuts({
     projects,
     homePanel,
     selectedProjectId,
-    tabs,
-    activeTabIndex,
     visibleTabs,
     toFullIndex,
     toVisibleIndex,
@@ -892,8 +827,6 @@ function App(): React.JSX.Element {
 
   // Main↔renderer IPC subscriptions (extracted — close/open/toggle/settings + browser view wiring)
   useAppIpcListeners({
-    tabs,
-    activeTabIndex,
     closeTab,
     guardTaskOpen,
     openTaskInBackground,
@@ -915,8 +848,9 @@ function App(): React.JSX.Element {
   })
 
   const handleCompleteTaskConfirm = async (): Promise<void> => {
-    const activeTab = tabs[activeTabIndex]
-    if (activeTab.type !== 'task') return
+    const { tabs: currentTabs, activeTabIndex } = useTabStore.getState()
+    const activeTab = currentTabs[activeTabIndex]
+    if (activeTab?.type !== 'task') return
     await completeAndCloseTask(activeTab.taskId)
     useDialogStore.getState().closeCompleteTaskDialog()
   }
@@ -1230,8 +1164,7 @@ function App(): React.JSX.Element {
     }
   }, [projects, openProjectSettings])
 
-  const isHomeTabActive = tabs[activeTabIndex]?.type === 'home'
-  const renderHome = (isViewActive: boolean): React.JSX.Element => (
+  const renderHome = (isViewActive: boolean, isHomeTabActive: boolean): React.JSX.Element => (
     <HomeDetail
       durationLocked={durationLocked}
       selectedProject={selectedProject}
@@ -1483,10 +1416,10 @@ function App(): React.JSX.Element {
             <div id="right-main" className="flex-1 flex flex-col min-w-0 min-h-0">
               {!headerHidden && (
                 <div className={zenMode || sidebarAutoHide ? 'pl-16' : ''}>
-                  <TabBar
+                  <AppTabBar
                     hideTabs={explodeMode}
                     tabs={visibleTabs}
-                    activeIndex={visibleActiveIndex}
+                    toVisibleIndex={toVisibleIndex}
                     activeView={activeView}
                     projectColors={taskProjectColors}
                     worktreeColors={taskWorktreeColors}
@@ -1701,6 +1634,16 @@ function App(): React.JSX.Element {
             </div>
           </div>
 
+          <ActiveTabSync
+            tabs={tabs}
+            tasksMap={tasksMap}
+            selectedProjectId={selectedProjectId}
+            activeView={activeView}
+            projects={projects}
+            taskCount={tasks.length}
+            displayTaskCount={displayTasks.length}
+            projectPathMissing={projectPathMissing}
+          />
           <AppDialogs
             shouldMount={shouldMount}
             createTaskOpen={createTaskOpen}
@@ -1743,10 +1686,6 @@ function App(): React.JSX.Element {
             openTaskTabs={tabs.filter(
               (t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task'
             )}
-            activeTaskId={(() => {
-              const t = tabs[activeTabIndex]
-              return t && t.type === 'task' ? t.taskId : null
-            })()}
             openTask={openTask}
             setSelectedProjectId={setSelectedProjectId}
             setActiveTabIndex={setActiveTabIndex}

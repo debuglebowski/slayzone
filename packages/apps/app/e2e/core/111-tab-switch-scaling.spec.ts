@@ -102,7 +102,11 @@ function installRenderProbe(): void {
 async function rendersPerSwitch(
   page: Page,
   taskIds: string[]
-): Promise<{ median: number; top: string }> {
+): Promise<{
+  median: number
+  top: string
+  perSwitch: (name: string) => number
+}> {
   const { counts, byName } = await page.evaluate(async (ids) => {
     const w = window as unknown as ProbeWindow
     const probe = w.__szRenderProbe
@@ -134,7 +138,11 @@ async function rendersPerSwitch(
     .slice(0, 15)
     .map(([name, n]) => `${name} ${Math.round(n / counts.length)}`)
     .join(', ')
-  return { median: sorted[Math.floor(sorted.length / 2)], top }
+  return {
+    median: sorted[Math.floor(sorted.length / 2)],
+    top,
+    perSwitch: (name) => (byName[name] ?? 0) / counts.length
+  }
 }
 
 /** Open every task (hidden, in the background) and wait until each tab's detail page is mounted. */
@@ -218,6 +226,26 @@ test.describe('Tab switch cost does not scale with open tabs', () => {
     // 10× the tabs must not mean (meaningfully) more renders per switch. Before the
     // fix every hidden tab re-rendered: 14.5k renders with 3 tabs, 40.5k with 30.
     expect(many, summary).toBeLessThan(few * 1.5)
+  })
+
+  test('a switch between tabs of one project does not re-render the app shell', async ({
+    mainWindow
+  }) => {
+    // App owns the whole shell (sidebar, tab bar, dialogs, side panels). When it
+    // subscribed to the active tab index, every switch re-ran it and its uncompiled
+    // hooks, rebuilding the tab bar's callbacks and right-hand content. Only the
+    // components that show which tab is active may render on a switch.
+    test.setTimeout(120_000)
+    const switching = taskIds.slice(0, 3)
+    for (const id of switching) await openTaskById(mainWindow, id)
+    const cycle = [...switching, ...switching, ...switching]
+    await rendersPerSwitch(mainWindow, cycle)
+    const { perSwitch, top } = await rendersPerSwitch(mainWindow, cycle)
+    expect(perSwitch('App'), top).toBe(0)
+    // The tab bar re-renders once (new active index); its tooltips and header
+    // actions do not.
+    expect(perSwitch('TabBar'), top).toBeLessThanOrEqual(1)
+    expect(perSwitch('AppHeaderActions'), top).toBe(0)
   })
 
   test('a keystroke checks for an open modal at most once', async ({ mainWindow }) => {

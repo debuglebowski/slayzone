@@ -8,8 +8,6 @@ import {
 } from 'react'
 import { useTabStore } from '@slayzone/settings'
 
-type Tabs = ReturnType<typeof useTabStore.getState>['tabs']
-
 export interface ExplodeModeApi {
   explodeMode: boolean
   setExplodeMode: Dispatch<SetStateAction<boolean>>
@@ -20,12 +18,9 @@ export interface ExplodeModeApi {
 
 // Explode mode = multi-task grid. Owns its toggle, the keyboard-focused cell,
 // the grid ref, and the responsive grid width. Effects keep all three in sync
-// with the open task tabs.
-export function useExplodeMode(
-  openTaskIds: string[],
-  tabs: Tabs,
-  activeTabIndex: number
-): ExplodeModeApi {
+// with the open task tabs. Blind to the active tab index on purpose: the shell that
+// calls it must not re-render on a tab switch (the seed reads the store instead).
+export function useExplodeMode(openTaskIds: string[]): ExplodeModeApi {
   const [explodeMode, setExplodeMode] = useState(false)
   // In explode mode, tracks which grid cell owns keyboard shortcuts (Cmd+D etc.).
   // Null outside explode mode. Updated via focusin bubble on the grid wrapper.
@@ -49,11 +44,12 @@ export function useExplodeMode(
     if (!explodeMode) return
     setFocusedExplodeTaskId((prev) => {
       if (prev && openTaskIds.includes(prev)) return prev
+      const { tabs, activeTabIndex } = useTabStore.getState()
       const activeTab = tabs[activeTabIndex]
       if (activeTab?.type === 'task') return activeTab.taskId
       return openTaskIds[0] ?? null
     })
-  }, [explodeMode, openTaskIds, activeTabIndex, tabs])
+  }, [explodeMode, openTaskIds])
 
   // Delegated focusin: bubble from xterm / editor / browser → grid cell; resolve task id.
   useEffect(() => {

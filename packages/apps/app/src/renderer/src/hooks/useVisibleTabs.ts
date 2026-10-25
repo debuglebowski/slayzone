@@ -8,9 +8,9 @@ const identity = (i: number) => i
 export function useVisibleTabs(tabs: Tab[], tasksMap: Map<string, Task>) {
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
-  const activeTabIndex = useTabStore((s) => s.activeTabIndex)
 
-  // Mapping: stable when tabs/project/scoping don't change (independent of activeTabIndex)
+  // Mapping: stable when tabs/project/scoping don't change. Deliberately blind to the
+  // active tab: the caller (App) must not re-render on a tab switch.
   const { visibleTabs, toFullIndex, toVisibleIndex } = useMemo(() => {
     if (!projectScopedTabs || !selectedProjectId) {
       return { visibleTabs: tabs, toFullIndex: identity, toVisibleIndex: identity }
@@ -44,9 +44,15 @@ export function useVisibleTabs(tabs: Tab[], tasksMap: Map<string, Task>) {
     }
   }, [tabs, selectedProjectId, projectScopedTabs, tasksMap])
 
-  // Active index: cheap derivation, changes on tab switch
-  const visibleActiveIndex = toVisibleIndex(activeTabIndex)
-  const safeVisibleActiveIndex = visibleActiveIndex >= 0 ? visibleActiveIndex : 0
+  return { visibleTabs, toFullIndex, toVisibleIndex }
+}
 
-  return { visibleTabs, visibleActiveIndex: safeVisibleActiveIndex, toFullIndex, toVisibleIndex }
+/**
+ * The active tab's position among the visible tabs (0 when it is filtered out).
+ * Subscribes to the active index — call it only in components that must re-render
+ * on a tab switch.
+ */
+export function useVisibleActiveIndex(toVisibleIndex: (fullIndex: number) => number): number {
+  const visibleActiveIndex = toVisibleIndex(useTabStore((s) => s.activeTabIndex))
+  return visibleActiveIndex >= 0 ? visibleActiveIndex : 0
 }

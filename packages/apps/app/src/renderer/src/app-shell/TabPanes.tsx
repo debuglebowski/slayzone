@@ -36,8 +36,11 @@ interface TabPanesProps extends TaskPaneHandlers {
   settingsRevision: number
   terminalFocusRequests: Record<string, number>
   isSidePanelResizing: boolean
-  /** The home tab's content, given whether home is the visible view. */
-  renderHome: (isViewActive: boolean) => ReactNode
+  /**
+   * The home tab's content, given whether home is the visible view (deferred) and
+   * whether home is the active tab (urgent, regardless of the active view).
+   */
+  renderHome: (isViewActive: boolean, isHomeTabActive: boolean) => ReactNode
 }
 
 /**
@@ -69,6 +72,7 @@ export const TabPanes = memo(function TabPanes({
 }: TabPanesProps): React.JSX.Element {
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
   const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
+  const isHomeTabActive = tabs[activeTabIndex]?.type === 'home'
   return (
     <>
       {tabs.map((tab, i) => {
@@ -80,6 +84,7 @@ export const TabPanes = memo(function TabPanes({
               key="home"
               hubId={selectedProjectHubId}
               isViewActive={isViewActive}
+              isHomeTabActive={isHomeTabActive}
               explodeMode={explodeMode}
               renderHome={renderHome}
             />
@@ -159,17 +164,19 @@ function PaneFrame({
 const HomePane = memo(function HomePane({
   hubId,
   isViewActive,
+  isHomeTabActive,
   explodeMode,
   renderHome
 }: {
   hubId: string
   isViewActive: boolean
+  isHomeTabActive: boolean
   explodeMode: boolean
-  renderHome: (isViewActive: boolean) => ReactNode
+  renderHome: TabPanesProps['renderHome']
 }): React.JSX.Element {
   return (
     <PaneFrame isViewActive={isViewActive} explodeMode={explodeMode} hubId={hubId}>
-      {renderHome(isViewActive)}
+      {renderHome(isViewActive, isHomeTabActive)}
     </PaneFrame>
   )
 })

@@ -94,7 +94,6 @@ interface AppDialogsProps {
   projects: Project[]
   closedTabs: SearchDialogProps['closedTabs']
   openTaskTabs: SearchDialogProps['openTaskTabs']
-  activeTaskId: SearchDialogProps['activeTaskId']
   openTask: (taskId: string) => void
   setSelectedProjectId: (id: string) => void
   setActiveTabIndex: (index: number) => void
@@ -120,6 +119,22 @@ interface AppDialogsProps {
   updateToastDismissed: boolean
   updateVersion: string | null
   setUpdateToastDismissed: Dispatch<SetStateAction<boolean>>
+}
+
+const selectActiveTaskId = (s: ReturnType<typeof useTabStore.getState>): string | null => {
+  const tab = s.tabs[s.activeTabIndex]
+  return tab?.type === 'task' ? tab.taskId : null
+}
+
+/**
+ * The search dialog, fed the active task from the store: it alone re-renders on a
+ * tab switch, not App and every other dialog.
+ */
+function SearchDialogWithActiveTask(
+  props: Omit<SearchDialogProps, 'activeTaskId'>
+): React.JSX.Element {
+  const activeTaskId = useTabStore(selectActiveTaskId)
+  return <SearchDialog {...props} activeTaskId={activeTaskId} />
 }
 
 export function AppDialogs({
@@ -162,7 +177,6 @@ export function AppDialogs({
   projects,
   closedTabs,
   openTaskTabs,
-  activeTaskId,
   openTask,
   setSelectedProjectId,
   setActiveTabIndex,
@@ -303,7 +317,7 @@ export function AppDialogs({
       )}
       {shouldMount('search', searchOpen) && (
         <Suspense fallback={null}>
-          <SearchDialog
+          <SearchDialogWithActiveTask
             open={searchOpen}
             onOpenChange={(open) => {
               if (!open) useDialogStore.getState().closeSearch()
@@ -312,7 +326,6 @@ export function AppDialogs({
             projects={projects}
             closedTabs={closedTabs}
             openTaskTabs={openTaskTabs}
-            activeTaskId={activeTaskId}
             onSelectTask={openTask}
             onSelectProject={setSelectedProjectId}
             onNewTask={() => useDialogStore.getState().openCreateTask()}

@@ -8,7 +8,7 @@ import {
   toast
 } from '@slayzone/ui'
 import { useUndo, focusOwnsUndoKey } from '@slayzone/ui'
-import { useTabStore, useDialogStore, type SearchFileContext } from '@slayzone/settings'
+import { useTabStore, useDialogStore, type SearchFileContext, type Tab } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import type { Project } from '@slayzone/projects/shared'
 import { useHomePanel } from '@slayzone/home/client'
@@ -16,7 +16,11 @@ import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
 
-type Tabs = ReturnType<typeof useTabStore.getState>['tabs']
+/** The active tab, read when a key fires — the shell does not re-render on a tab switch. */
+function activeTabType(): Tab['type'] | undefined {
+  const { tabs, activeTabIndex } = useTabStore.getState()
+  return tabs[activeTabIndex]?.type
+}
 type VisibleTabsApi = ReturnType<typeof useVisibleTabs>
 type UndoApi = ReturnType<typeof useUndo>
 
@@ -24,8 +28,6 @@ export interface AppShortcutsDeps {
   projects: Project[]
   homePanel: ReturnType<typeof useHomePanel>
   selectedProjectId: string
-  tabs: Tabs
-  activeTabIndex: number
   visibleTabs: VisibleTabsApi['visibleTabs']
   toFullIndex: VisibleTabsApi['toFullIndex']
   toVisibleIndex: VisibleTabsApi['toVisibleIndex']
@@ -57,8 +59,6 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     projects,
     homePanel,
     selectedProjectId,
-    tabs,
-    activeTabIndex,
     visibleTabs,
     toFullIndex,
     toVisibleIndex,
@@ -137,7 +137,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     getKeys('search'),
     (e) => {
       // Only fire on home tab; TaskDetailPage owns the search shortcut when a task tab is active.
-      if (tabs[activeTabIndex]?.type !== 'home') return
+      if (activeTabType() !== 'home') return
       e.preventDefault()
       trackShortcut(getKeys('search'))
       useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
@@ -275,7 +275,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     getKeys('complete-close-tab'),
     (e) => {
       e.preventDefault()
-      if (tabs[activeTabIndex].type === 'task') useDialogStore.getState().openCompleteTaskDialog()
+      if (activeTabType() === 'task') useDialogStore.getState().openCompleteTaskDialog()
     },
     { enableOnFormTags: true, enabled: !isRecording }
   )
@@ -346,7 +346,7 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   // Home tab panel shortcuts
   useEffect(() => {
     const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
-      if (tabs[activeTabIndex]?.type !== 'home') return
+      if (activeTabType() !== 'home') return
       if (!selectedProjectId) return
       if (isRecording) return
 
@@ -418,13 +418,5 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     })
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    tabs,
-    activeTabIndex,
-    selectedProjectId,
-    homePanel.homePanelVisibility,
-    getKeys,
-    isRecording,
-    buildHomeFileContext
-  ])
+  }, [selectedProjectId, homePanel.homePanelVisibility, getKeys, isRecording, buildHomeFileContext])
 }

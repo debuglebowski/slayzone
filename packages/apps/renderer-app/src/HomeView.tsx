@@ -181,7 +181,7 @@ export function HomeView(): React.JSX.Element {
     [tabs]
   )
   const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
-    useExplodeMode(openTaskIds, tabs, activeTabIndex)
+    useExplodeMode(openTaskIds)
   const visibleTaskCount = openTaskIds.length
 
   // Expose the tab + dialog stores for e2e / CDP introspection (mirrors the
