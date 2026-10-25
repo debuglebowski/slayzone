@@ -4,11 +4,19 @@ import { pressShortcut } from '../fixtures/shortcuts'
 
 // Cmd+K inside a task shows a "Current task" section with the task's own commands;
 // value commands (status, priority…) open a sub-page, and their values are also
-// reachable straight from search ("done" → "Status → Done").
+// reachable straight from search, nested under their command.
 test.describe('Cmd+K task commands', () => {
   const getTask = (page: Page, id: string) =>
     page.evaluate((i) => window.getTrpcVanillaClient().task.get.query({ id: i }), id)
   const palette = (page: Page) => page.locator('[cmdk-root]')
+  /** Cmd+K, then wait until the input has focus (the dialog mounts lazily). */
+  const openPalette = async (page: Page) => {
+    await pressShortcut(page, 'search')
+    await expect(palette(page).locator('[cmdk-input]')).toBeFocused()
+  }
+  /** The highlighted row's cmdk value (what Enter runs). */
+  const selected = (page: Page) =>
+    palette(page).locator('[cmdk-item][aria-selected="true"]').getAttribute('data-value')
   const item = (page: Page, text: string) =>
     palette(page).locator('[cmdk-item]').filter({ hasText: text })
 
@@ -31,7 +39,7 @@ test.describe('Cmd+K task commands', () => {
   test('the section belongs to the active tab only', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
     await openTaskById(mainWindow, taskB)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await expect(palette(mainWindow).getByText('Current task · CK task B')).toBeVisible({
       timeout: 5_000
     })
@@ -41,7 +49,7 @@ test.describe('Cmd+K task commands', () => {
 
   test('status sub-page sets the status; Backspace goes back', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await item(mainWindow, 'Change status…').click()
     await expect(mainWindow.getByPlaceholder('Search status...')).toBeVisible()
 
@@ -57,16 +65,16 @@ test.describe('Cmd+K task commands', () => {
 
   test('a sub-page value is reachable straight from search', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskB)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('status review')
-    await expect(item(mainWindow, 'Status → Review')).toBeVisible()
+    await expect.poll(() => selected(mainWindow)).toBe('task-command:cmd:status:review')
     await mainWindow.keyboard.press('Enter')
     await expect.poll(async () => (await getTask(mainWindow, taskB))?.status).toBe('review')
   })
 
   test('rename focuses the header title, selected', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskB)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('rename task')
     await expect(item(mainWindow, 'Rename task')).toBeVisible()
     await mainWindow.keyboard.press('Enter')
@@ -86,7 +94,7 @@ test.describe('Cmd+K task commands', () => {
 
   test('new subtask prompt creates a subtask', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await item(mainWindow, 'New subtask…').click()
     await mainWindow.keyboard.type('CK sub one')
     await mainWindow.keyboard.press('Enter')
@@ -105,13 +113,13 @@ test.describe('Cmd+K task commands', () => {
   test('snooze preset, blocked and due date write the task', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
 
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('snooze tomorrow')
-    await expect(item(mainWindow, 'Snooze → Tomorrow')).toBeVisible()
+    await expect.poll(() => selected(mainWindow)).toBe('task-command:cmd:snooze:Tomorrow')
     await mainWindow.keyboard.press('Enter')
     await expect.poll(async () => !!(await getTask(mainWindow, taskA))?.snoozed_until).toBe(true)
 
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('mark blocked')
     await expect(
       palette(mainWindow).getByRole('option', { name: 'Mark blocked', exact: true })
@@ -119,16 +127,29 @@ test.describe('Cmd+K task commands', () => {
     await mainWindow.keyboard.press('Enter')
     await expect.poll(async () => (await getTask(mainWindow, taskA))?.is_blocked).toBe(true)
 
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('due date tomorrow')
-    await expect(item(mainWindow, 'Due date → Tomorrow')).toBeVisible()
+    await expect.poll(() => selected(mainWindow)).toBe('task-command:cmd:due:tomorrow')
     await mainWindow.keyboard.press('Enter')
     await expect.poll(async () => (await getTask(mainWindow, taskA))?.due_date).toBeTruthy()
   })
 
+  test('an exact command name tops the list, its options nested beneath', async ({
+    mainWindow
+  }) => {
+    await openTaskById(mainWindow, taskB)
+    await openPalette(mainWindow)
+    await mainWindow.keyboard.type('snooze')
+    const values = palette(mainWindow).locator('[cmdk-item]')
+    await expect(values.first()).toHaveAttribute('data-value', 'task-command:cmd:snooze')
+    await expect(values.nth(1)).toHaveAttribute('data-value', 'task-command:cmd:snooze:In 1 hour')
+    await expect(values.nth(1)).toHaveText('In 1 hour')
+    await mainWindow.keyboard.press('Escape')
+  })
+
   test('blocked by toggles a blocker and stays open', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
-    await pressShortcut(mainWindow, 'search')
+    await openPalette(mainWindow)
     await mainWindow.keyboard.type('blocked by')
     await item(mainWindow, 'Blocked by…').click()
     await item(mainWindow, 'CK task B').click()

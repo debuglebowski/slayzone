@@ -13,6 +13,12 @@ export interface RankedResult {
   positions: Set<number>
   usedPath: boolean
   weightedScore: number
+  /** A sub-page item rendered under its command (shows its own label, indented). */
+  nested?: boolean
+  /** Shown only because one of its sub-page items matched — not itself a hit. */
+  context?: boolean
+  /** Position in match order before nesting (0 = best hit). Absent on context rows. */
+  rank?: number
 }
 
 export interface GroupedResults {
@@ -49,7 +55,7 @@ export function buildSearchItems({
   const showProjects = filter === 'all' || filter === 'projects'
 
   if (showTaskCommands) {
-    for (const { command, trail, limit } of flattenPaletteCommands(taskCommands)) {
+    for (const { command, trail, limit, rootId } of flattenPaletteCommands(taskCommands)) {
       list.push({
         kind: 'task-command',
         // Prefixed: rankResults dedupes by id across kinds.
@@ -58,7 +64,8 @@ export function buildSearchItems({
         sublabel: '',
         keywords: command.keywords ?? '',
         command,
-        limit
+        limit,
+        rootItemId: rootId ? `cmd:${rootId}` : undefined
       })
     }
   }
@@ -121,7 +128,9 @@ export function createFzf(items: SearchItem[]): {
 export function rankResults(
   fzfLabel: Fzf<SearchItem[]>,
   fzfPath: Fzf<SearchItem[]>,
-  search: string
+  search: string,
+  /** The searched items — supplies a sub-page item's command when only the item matched. */
+  items: SearchItem[]
 ): RankedResult[] {
   if (!search) return []
   const labelHits = fzfLabel.find(search)
@@ -161,11 +170,15 @@ export function rankResults(
     weightedScore: r.score * KIND_WEIGHT[r.item.kind]
   }))
   // Match quality first (fzf scores exact, prefix and mid-word hits alike), then score.
+  // Task commands tie-break on their defined order (stable, as authored); the rest on length.
+  const order = new Map(items.map((item, i) => [item.id, i]))
   weighted.sort(
     (a, b) =>
       a.tier - b.tier ||
       b.weightedScore - a.weightedScore ||
-      selectorForItem(a.item).length - selectorForItem(b.item).length
+      (a.item.kind === 'task-command' && b.item.kind === 'task-command'
+        ? (order.get(a.item.id) ?? 0) - (order.get(b.item.id) ?? 0)
+        : selectorForItem(a.item).length - selectorForItem(b.item).length)
   )
   // Entity pages (tasks, projects…) contribute at most `limit.max` hits each.
   const perPage = new Map<string, number>()
@@ -176,28 +189,102 @@ export function rankResults(
     perPage.set(limit.key, n)
     return n <= limit.max
   })
-  return capped.slice(0, MAX_RESULTS).map(({ tier: _tier, ...r }) => r)
+  const ranked = capped.map(({ tier: _tier, ...r }, rank) => ({ ...r, rank }))
+  return nestUnderCommands(ranked, items, search).slice(0, MAX_RESULTS)
 }
 
-/** The texts an item can match "as a whole": its label, plus a sub-page item's own label and its trail joined by spaces. */
+/**
+ * Sub-page items render directly beneath their top-level command: each command and its
+ * matching items form one block, placed where its best member ranks. A command that did
+ * not match itself still heads its block, as context.
+ */
+function nestUnderCommands(
+  ranked: RankedResult[],
+  items: SearchItem[],
+  search: string
+): RankedResult[] {
+  const rootOf = (r: RankedResult): string | undefined =>
+    r.item.kind === 'task-command' ? r.item.rootItemId : undefined
+  const children = new Map<string, RankedResult[]>()
+  for (const r of ranked) {
+    const root = rootOf(r)
+    if (!root) continue
+    const list = children.get(root) ?? []
+    list.push({ ...r, nested: true })
+    children.set(root, list)
+  }
+  if (children.size === 0) return ranked
+  // Within a block: items whose own label matches first, then the page's own order
+  // (an item matched only through its page title is just one of the page's options).
+  const order = new Map(items.map((item, i) => [item.id, i]))
+  const leafTier = (r: RankedResult): number =>
+    r.item.kind === 'task-command' ? labelTier(r.item.command.label, search) : 4
+  for (const list of children.values()) {
+    list.sort(
+      (a, b) =>
+        leafTier(a) - leafTier(b) || (order.get(a.item.id) ?? 0) - (order.get(b.item.id) ?? 0)
+    )
+  }
+
+  const byId = new Map(ranked.map((r) => [r.item.id, r]))
+  const itemById = new Map(items.map((i) => [i.id, i]))
+  const out: RankedResult[] = []
+  const placed = new Set<string>()
+  for (const r of ranked) {
+    const blockId = rootOf(r) ?? r.item.id
+    if (placed.has(blockId)) continue
+    placed.add(blockId)
+    const nestedRows = children.get(blockId)
+    if (!nestedRows) {
+      out.push(r)
+      continue
+    }
+    const head = byId.get(blockId)
+    if (head) out.push(head)
+    else {
+      const rootItem = itemById.get(blockId)
+      if (rootItem) {
+        out.push({
+          item: rootItem,
+          score: 0,
+          positions: new Set(),
+          usedPath: false,
+          weightedScore: 0,
+          context: true
+        })
+      }
+    }
+    out.push(...nestedRows)
+  }
+  return out
+}
+
+/**
+ * The texts an item can match "as a whole": its label, plus a sub-page item's own label
+ * and its trail joined by spaces. A trailing "…" (opens a page) is not part of the name.
+ */
 function wholeMatchTexts(item: SearchItem): string[] {
-  if (item.kind !== 'task-command') return [item.label]
-  return [item.label, item.command.label, item.label.replaceAll(' → ', ' ')]
+  const texts =
+    item.kind === 'task-command'
+      ? [item.label, item.command.label, item.label.replaceAll(' → ', ' ')]
+      : [item.label]
+  return texts.map((t) => t.replace(/…$/, ''))
+}
+
+/** Best tier over the item's whole-match texts. */
+function matchTier(item: SearchItem, search: string): number {
+  return Math.min(...wholeMatchTexts(item).map((t) => labelTier(t, search)))
 }
 
 /** 0 exact, 1 prefix, 2 a word starts with the query, 3 substring, 4 fuzzy only. */
-function matchTier(item: SearchItem, search: string): number {
+function labelTier(text: string, search: string): number {
   const q = search.trim().toLowerCase()
-  let best = 4
-  for (const raw of wholeMatchTexts(item)) {
-    const t = raw.toLowerCase()
-    if (t === q) return 0
-    if (t.startsWith(q)) best = Math.min(best, 1)
-    else if (new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(q)}`, 'u').test(t))
-      best = Math.min(best, 2)
-    else if (t.includes(q)) best = Math.min(best, 3)
-  }
-  return best
+  const t = text.replace(/…$/, '').toLowerCase()
+  if (t === q) return 0
+  if (t.startsWith(q)) return 1
+  if (new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(q)}`, 'u').test(t)) return 2
+  if (t.includes(q)) return 3
+  return 4
 }
 
 function escapeRegExp(s: string): string {
@@ -209,15 +296,26 @@ export function resultValue(r: RankedResult): string {
   return r.item.kind === 'file' ? r.item.id : `${r.item.kind}:${r.item.id}`
 }
 
-/** The first row on screen: groups render in a fixed order, not by best hit. */
+/**
+ * The row selected on open: the best hit of the first group on screen. Groups render in a
+ * fixed order, and inside a group a command row can head a better-matching sub-page item.
+ */
 export function firstResultValue(groups: GroupedResults): string {
-  const first =
-    groups.taskCommands[0] ??
-    groups.actions[0] ??
-    groups.files[0] ??
-    groups.tasks[0] ??
-    groups.projects[0]
-  return first ? resultValue(first) : ''
+  for (const group of [
+    groups.taskCommands,
+    groups.actions,
+    groups.files,
+    groups.tasks,
+    groups.projects
+  ]) {
+    let best: RankedResult | undefined
+    for (const r of group) {
+      if (r.context) continue
+      if (!best || (r.rank ?? 0) < (best.rank ?? 0)) best = r
+    }
+    if (best) return resultValue(best)
+  }
+  return ''
 }
 
 export function groupResults(results: RankedResult[]): GroupedResults {

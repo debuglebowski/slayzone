@@ -104,22 +104,32 @@ export interface FlatPaletteCommand {
   trail: string[]
   /** The nearest enclosing page's `searchLimit`, keyed by that page's command id. */
   limit?: { key: string; max: number }
+  /** Id of the top-level command whose page (sub-pages included) holds this one. */
+  rootId?: string
 }
 
 /** Every command in `commands`, sub-page items included, with the trail of page titles above it. */
 export function flattenPaletteCommands(
   commands: PaletteCommand[],
   trail: string[] = [],
-  limit?: FlatPaletteCommand['limit']
+  limit?: FlatPaletteCommand['limit'],
+  rootId?: string
 ): FlatPaletteCommand[] {
   const out: FlatPaletteCommand[] = []
   for (const command of commands) {
-    out.push({ command, trail, limit })
+    out.push({ command, trail, limit, rootId })
     const page = command.page
     if (page?.kind === 'list') {
       const pageLimit =
         page.searchLimit !== undefined ? { key: command.id, max: page.searchLimit } : limit
-      out.push(...flattenPaletteCommands(page.items, [...trail, page.title], pageLimit))
+      out.push(
+        ...flattenPaletteCommands(
+          page.items,
+          [...trail, page.title],
+          pageLimit,
+          rootId ?? command.id
+        )
+      )
     }
   }
   return out

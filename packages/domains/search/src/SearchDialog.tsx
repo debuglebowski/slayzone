@@ -115,7 +115,10 @@ export function SearchDialog({
 
   const { fzfLabel, fzfPath } = useMemo(() => createFzf(items), [items])
 
-  const results = useMemo(() => rankResults(fzfLabel, fzfPath, search), [fzfLabel, fzfPath, search])
+  const results = useMemo(
+    () => rankResults(fzfLabel, fzfPath, search, items),
+    [fzfLabel, fzfPath, search, items]
+  )
 
   const groupedResults = useMemo(() => groupResults(results), [results])
 
@@ -161,6 +164,18 @@ export function SearchDialog({
   if (firstValue !== prevFirstValue) {
     setPrevFirstValue(firstValue)
     setSelected(firstValue)
+  }
+
+  // cmdk selects the first row on screen after every search edit. Our selection is the
+  // best hit, which can sit below its command row, so that one re-select is ignored.
+  // It runs in cmdk's layout effect; the frame clears the flag should it not come.
+  const searchEditedRef = useRef(false)
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
+    searchEditedRef.current = true
+    requestAnimationFrame(() => {
+      searchEditedRef.current = false
+    })
   }
 
   const pushPage = (next: PalettePage) => {
@@ -258,7 +273,17 @@ export function SearchDialog({
         <Command
           shouldFilter={false}
           value={selected}
-          onValueChange={setSelected}
+          onValueChange={(value) => {
+            if (searchEditedRef.current) {
+              // cmdk's own select-first-row after a search edit. It has already moved its
+              // internal selection, and re-reads ours only when our prop changes — so toggle
+              // a trailing space (cmdk trims values, per its docs) to make it re-sync.
+              searchEditedRef.current = false
+              setSelected((cur) => (cur.endsWith(' ') ? cur.trimEnd() : `${cur} `))
+              return
+            }
+            setSelected(value)
+          }}
           onKeyDown={handleKeyDown}
           className="bg-transparent [&_[cmdk-input-wrapper]]:border-b-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-16 [&_[cmdk-input]]:text-base [&_[cmdk-item]]:rounded-xl [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-2.5 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
         >
@@ -270,7 +295,7 @@ export function SearchDialog({
                 : 'Search files, folders, commands, projects, and tasks...'
             }
             value={search}
-            onValueChange={setSearch}
+            onValueChange={handleSearchChange}
           />
           <div className="bg-card rounded-t-3xl">
             {page && (

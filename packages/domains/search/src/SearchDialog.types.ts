@@ -32,6 +32,8 @@ export type SearchItem =
       command: PaletteCommand
       /** Max hits root search shows from this item's page (entity pages). */
       limit?: { key: string; max: number }
+      /** Item id of the top-level command this sub-page item sits under. */
+      rootItemId?: string
     }
 
 export interface SearchDialogProps {

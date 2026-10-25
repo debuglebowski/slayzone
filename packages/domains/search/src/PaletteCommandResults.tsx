@@ -4,6 +4,7 @@ import type { RankedResult } from './SearchDialog.algorithm'
 import type { SearchItem } from './SearchDialog.types'
 import { ActionShortcut } from './ActionShortcut'
 import { Highlight } from './Highlight'
+import { offsetPositions } from './SearchDialog.utils'
 
 /** cmdk value of a task command row — the same everywhere it renders. */
 export const taskCommandValue = (commandId: string): string => `task-command:cmd:${commandId}`
@@ -16,16 +17,23 @@ function TaskCommandRow({
   command,
   label,
   positions,
+  nested,
   onSelect
 }: {
   command: PaletteCommand
   label: string
   positions: Set<number>
+  /** Sits under its command: indented. */
+  nested?: boolean
   onSelect: (command: PaletteCommand) => void
 }) {
   const Icon = command.icon ?? Dot
   return (
-    <CommandItem value={taskCommandValue(command.id)} onSelect={() => onSelect(command)}>
+    <CommandItem
+      value={taskCommandValue(command.id)}
+      onSelect={() => onSelect(command)}
+      className={cn(nested && '!pl-10')}
+    >
       <Icon className={cn('text-muted-foreground', command.iconClassName)} />
       <span className="truncate">
         <Highlight text={label} positions={positions} />
@@ -59,12 +67,19 @@ export function TaskCommandGroup({
       <CommandGroup heading={heading}>
         {results.map((r) => {
           const item = r.item as Extract<SearchItem, { kind: 'task-command' }>
+          // Nested under its command: just its own label ("Tomorrow", not "Snooze → Tomorrow").
+          const label = r.nested ? item.command.label : item.label
           return (
             <TaskCommandRow
               key={item.id}
               command={item.command}
-              label={item.label}
-              positions={r.positions}
+              label={label}
+              positions={
+                r.nested
+                  ? offsetPositions(r.positions, item.label.length - label.length)
+                  : r.positions
+              }
+              nested={r.nested}
               onSelect={onSelect}
             />
           )

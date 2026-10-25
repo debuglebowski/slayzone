@@ -53,8 +53,8 @@ describe('rankResults — task commands', () => {
   it('typing a status value finds the flattened sub-page item', () => {
     const items = buildSearchItems({ ...base, filter: 'all', taskCommands })
     const { fzfLabel, fzfPath } = createFzf(items)
-    const results = rankResults(fzfLabel, fzfPath, 'done')
-    expect(results[0]?.item.label).toBe('Status → Done')
+    const results = rankResults(fzfLabel, fzfPath, 'done', items)
+    expect(results.find((r) => !r.context)?.item.label).toBe('Status → Done')
   })
 
   it('task commands outrank an equally matching global action', () => {
@@ -64,7 +64,7 @@ describe('rankResults — task commands', () => {
       taskCommands: [{ id: 'settings', label: 'Open settings', run: () => {} }]
     })
     const { fzfLabel, fzfPath } = createFzf(items)
-    const results = rankResults(fzfLabel, fzfPath, 'open settings')
+    const results = rankResults(fzfLabel, fzfPath, 'open settings', items)
     expect(results[0]?.item.kind).toBe('task-command')
     expect(groupResults(results).taskCommands).toHaveLength(1)
   })
@@ -83,7 +83,7 @@ describe('rankResults — match tiers', () => {
       tasks: tasks.map((t) => ({ ...t, project_id: 'p', status: 'todo', priority: 3 })) as never
     })
     const { fzfLabel, fzfPath } = createFzf(items)
-    return groupResults(rankResults(fzfLabel, fzfPath, q))
+    return groupResults(rankResults(fzfLabel, fzfPath, q, items))
   }
 
   it('orders a group exact, then prefix, then word start (fzf scores these equal)', () => {
@@ -106,9 +106,9 @@ describe('rankResults — match tiers', () => {
       [{ id: 'mark-done', label: 'Mark done', run: () => {} }, ...taskCommands],
       'done'
     )
-    expect(groups.taskCommands[0]?.item.label).toBe('Status → Done')
+    expect(groups.taskCommands.find((r) => !r.context)?.item.label).toBe('Status → Done')
     const withTitle = rank(taskCommands, 'status done')
-    expect(withTitle.taskCommands[0]?.item.label).toBe('Status → Done')
+    expect(withTitle.taskCommands.find((r) => !r.context)?.item.label).toBe('Status → Done')
   })
 })
 
@@ -131,7 +131,7 @@ describe('rankResults — entity pages capped in root search', () => {
   it('shows at most searchLimit hits from one page', () => {
     const items = buildSearchItems({ ...base, filter: 'all', taskCommands: [blockers] })
     const { fzfLabel, fzfPath } = createFzf(items)
-    const hits = rankResults(fzfLabel, fzfPath, 'alpha task')
+    const hits = rankResults(fzfLabel, fzfPath, 'alpha task', items)
     expect(hits.filter((r) => r.item.label.startsWith('Blocked by →'))).toHaveLength(5)
   })
 
@@ -139,7 +139,7 @@ describe('rankResults — entity pages capped in root search', () => {
     const page = blockers.page as Extract<PaletteCommand['page'], { kind: 'list' }>
     const items = buildSearchItems({ ...base, filter: 'task', taskCommands: page.items })
     const { fzfLabel, fzfPath } = createFzf(items)
-    expect(rankResults(fzfLabel, fzfPath, 'alpha task')).toHaveLength(8)
+    expect(rankResults(fzfLabel, fzfPath, 'alpha task', items)).toHaveLength(8)
   })
 })
 
@@ -154,8 +154,60 @@ describe('firstResultValue', () => {
       ] as never
     })
     const { fzfLabel, fzfPath } = createFzf(items)
-    const groups = groupResults(rankResults(fzfLabel, fzfPath, 'settings'))
+    const groups = groupResults(rankResults(fzfLabel, fzfPath, 'settings', items))
     // The exact task match is the best hit overall, but the task group renders first.
     expect(firstResultValue(groups)).toBe('task-command:cmd:x')
+  })
+})
+
+describe('rankResults — sub-page items nest under their command', () => {
+  const list = (id: string, label: string, title: string, values: string[]): PaletteCommand => ({
+    id,
+    label,
+    page: {
+      kind: 'list',
+      title,
+      items: values.map((v) => ({ id: `${id}:${v}`, label: v, run: () => {} }))
+    }
+  })
+  const commands = [
+    list('due', 'Set due date…', 'Due date', ['Today', 'Tomorrow']),
+    { id: 'unsnooze', label: 'Unsnooze', run: () => {} },
+    list('snooze', 'Snooze…', 'Snooze', ['In 1 hour', 'Tomorrow'])
+  ]
+  const search = (q: string) => {
+    const items = buildSearchItems({ ...base, filter: 'all', taskCommands: commands })
+    const { fzfLabel, fzfPath } = createFzf(items)
+    return groupResults(rankResults(fzfLabel, fzfPath, q, items))
+  }
+  const rows = (q: string) =>
+    search(q).taskCommands.map(
+      (r) =>
+        `${r.nested ? '  ' : ''}${r.nested ? (r.item as { command: PaletteCommand }).command.label : r.item.label}`
+    )
+
+  it('the command matching exactly ("…" ignored) tops the group, its items beneath', () => {
+    expect(rows('snooze')).toEqual(['Snooze…', '  In 1 hour', '  Tomorrow', 'Unsnooze'])
+  })
+
+  it('an item matching alone brings its command along as context, but is the selection', () => {
+    expect(rows('tomorrow')).toEqual(['Set due date…', '  Tomorrow', 'Snooze…', '  Tomorrow'])
+    const groups = search('tomorrow')
+    expect(firstResultValue(groups)).toBe('task-command:cmd:due:Tomorrow')
+  })
+})
+
+describe('firstResultValue — best hit inside the top group', () => {
+  it('selects the exact sub-page item even when its command row (a weaker hit) heads the block', () => {
+    // Keywords make the command row itself a (fuzzy) hit for the query.
+    const withKeywords = taskCommands.map((c) =>
+      c.id === 'status' ? { ...c, keywords: 'status column done' } : c
+    )
+    const items = buildSearchItems({ ...base, filter: 'all', taskCommands: withKeywords })
+    const { fzfLabel, fzfPath } = createFzf(items)
+    const groups = groupResults(rankResults(fzfLabel, fzfPath, 'status done', items))
+    expect(groups.taskCommands[0]?.context).toBeFalsy()
+    expect(groups.taskCommands[0]?.item.label).toBe('Change status…')
+    expect(firstResultValue(groups)).toBe('task-command:cmd:status:done')
   })
 })
