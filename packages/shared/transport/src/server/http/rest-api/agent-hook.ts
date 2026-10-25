@@ -762,6 +762,10 @@ export async function processAgentHook(
  * The actual work is `processAgentHook` (shared with the hub's ws-relay
  * consumer); this is a thin Express wrapper mapping its result to a status code.
  */
+export const AGENT_HOOK_PATH = '/api/agent-hook'
+/** Above the 100 KB default — SessionStart payloads can carry the full tool list. */
+export const AGENT_HOOK_BODY_LIMIT = '1mb'
+
 export function registerAgentHookRoute(
   app: Express,
   deps: RestApiDeps,
@@ -771,10 +775,11 @@ export function registerAgentHookRoute(
   // the pty runtime lands there): conversation-id capture + diagnostics still
   // run, state transitions are skipped.
   const bridge = bridgeOverride ?? deps.terminalStateBridge
-  // Bumped from default 100kb — SessionStart payloads can carry the full tool list.
-  const jsonParser = jsonBodyParser({ limit: '1mb' })
+  // createMcpRestApp's app-wide parser already applies this limit to the path; this
+  // one serves an app that mounts the route without it (it is a no-op on a parsed body).
+  const jsonParser = jsonBodyParser({ limit: AGENT_HOOK_BODY_LIMIT })
 
-  app.post('/api/agent-hook', jsonParser, async (req, res) => {
+  app.post(AGENT_HOOK_PATH, jsonParser, async (req, res) => {
     // On a hub with login the bearer gate bound the caller: the event is reported as
     // them (agent-hook-owner.ts). Absent on the desktop app's hub, where nothing checks.
     const principal = restPrincipalOf(req)

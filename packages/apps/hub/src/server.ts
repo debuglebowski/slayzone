@@ -37,6 +37,7 @@ import {
   openServerDiagnosticsDatabase
 } from './db.js'
 import { assertAuthLoaded, assertHubBootRules, assertSsoCredential } from './boot-rules.js'
+import { guardAuthRequestBody } from './auth-body-limit'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
 import { startSidecarSocketServer, type SidecarSocketServer } from './sidecar-socket.js'
@@ -480,6 +481,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         res.end(JSON.stringify({ error: 'Not found' }))
         return
       }
+      // better-auth reads the raw body with no limit of its own: cap it first.
+      if (!guardAuthRequestBody(req, res)) return
       authApp(req, res)
       return
     }

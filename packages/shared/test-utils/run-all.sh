@@ -861,6 +861,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/http/rest-a
 # Flood limits (T-26): the hub's front-door limits (web-login, break-glass redemption,
 # /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.
 run_test packages/apps/hub/src/flood-limits.test.ts
+# better-auth /api/auth/* body cap: declared length ≤ 64 KiB (413), chunked refused (411).
+run_test packages/apps/hub/src/auth-body-limit.test.ts
 
 # Web shell sign-in and sign-out through Entra (T-13): the session routes over real
 # hub-auth + app DB, and the shell's cookie-only session (hub-auth's web sign-in runs in

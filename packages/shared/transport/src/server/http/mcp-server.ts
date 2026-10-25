@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
 import { getAuthGate } from '../app-deps'
 import { jsonBodyParser } from './json-body'
+import { AGENT_HOOK_BODY_LIMIT, AGENT_HOOK_PATH } from './rest-api/agent-hook'
 import { registerRestApi } from './rest-api'
 import type { RestApiDeps } from './rest-api/types'
 import { registerMcpTools } from './mcp-tools'
@@ -48,7 +49,14 @@ export type McpRestAppHandle = {
  */
 export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   const app = express()
-  app.use(jsonBodyParser())
+  // One app-wide JSON parser, so its limit must be the route's: a body parsed (or
+  // refused) here never reaches a route-level parser. Default 100 KB; the agent-hook
+  // route takes up to its own larger limit.
+  const defaultJson = jsonBodyParser()
+  const agentHookJson = jsonBodyParser({ limit: AGENT_HOOK_BODY_LIMIT })
+  app.use((req, res, next) =>
+    (req.path === AGENT_HOOK_PATH ? agentHookJson : defaultJson)(req, res, next)
+  )
 
   const transports = new Map<string, StreamableHTTPServerTransport>()
   const sessionActivity = new Map<string, number>()

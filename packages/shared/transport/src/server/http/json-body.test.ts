@@ -136,6 +136,30 @@ await test('an uncompressed request still parses afterwards', async () => {
   assertEq(uncaught.length, 0, 'uncaught exceptions')
 })
 
+console.log('per-route body size limits')
+
+/** A JSON object of roughly `bytes` bytes. */
+function jsonOfSize(bytes: number): Buffer {
+  return Buffer.from(JSON.stringify({ hook_event_name: 'SessionStart', pad: 'x'.repeat(bytes) }))
+}
+
+await test('/api/agent-hook takes a body over 100 KB (its limit is 1 MB)', async () => {
+  // SessionStart payloads can carry the full tool list; the app-wide 100 KB parser
+  // used to answer 413 before the route's own 1 MB parser ever ran.
+  const res = await post(port, '/api/agent-hook', jsonOfSize(300 * 1024), json)
+  assertEq(res.status === 413, false, `status ${res.status} (${res.body.slice(0, 120)})`)
+})
+
+await test('/api/agent-hook still refuses a body over 1 MB', async () => {
+  const res = await post(port, '/api/agent-hook', jsonOfSize(1100 * 1024), json)
+  assertEq(res.status, 413, 'status')
+})
+
+await test('other routes keep the 100 KB default', async () => {
+  const res = await post(port, '/api/tasks', jsonOfSize(300 * 1024), json)
+  assertEq(res.status, 413, 'status')
+})
+
 console.log('one way to build a body parser')
 
 await test('no source file builds an Express body parser except json-body.ts', () => {
