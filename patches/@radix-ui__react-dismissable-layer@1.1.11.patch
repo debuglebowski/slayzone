@@ -1,0 +1,50 @@
+diff --git a/dist/index.js b/dist/index.js
+index 16c48898e85048392a31e654c9c072c0d8d7ad18..bee80542c4cb532eb0b5016b12cfaf3c0ae93092 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -115,8 +115,18 @@ var DismissableLayer = React.forwardRef(
+       context.layers.add(node);
+       dispatchUpdate();
+       return () => {
+-        if (disableOutsidePointerEvents && context.layersWithOutsidePointerEventsDisabled.size === 1) {
+-          ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++        // SlayZone patch: leave the pointer-events-disabled set as soon as this layer
++        // stops disabling, not only on unmount. A closing menu flips
++        // `disableOutsidePointerEvents` (= open) to false but stays mounted for its exit
++        // animation; upstream kept it in the set, so when a dialog opened from that menu
++        // closed first (set size 2 -> no restore) and the menu unmounted after (prop now
++        // false -> no restore), <body> kept `pointer-events: none` and the whole app
++        // stopped taking clicks. Restore exactly when the set becomes empty.
++        if (disableOutsidePointerEvents) {
++          context.layersWithOutsidePointerEventsDisabled.delete(node);
++          if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
++            ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++          }
+         }
+       };
+     }, [node, ownerDocument, disableOutsidePointerEvents, context]);
+diff --git a/dist/index.mjs b/dist/index.mjs
+index d668167e42ed3bacb20bf72ae6bbb78e411c378e..75c06e98ca2f5840a6b6aa331aeac80811c33c9e 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -77,8 +77,18 @@ var DismissableLayer = React.forwardRef(
+       context.layers.add(node);
+       dispatchUpdate();
+       return () => {
+-        if (disableOutsidePointerEvents && context.layersWithOutsidePointerEventsDisabled.size === 1) {
+-          ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++        // SlayZone patch: leave the pointer-events-disabled set as soon as this layer
++        // stops disabling, not only on unmount. A closing menu flips
++        // `disableOutsidePointerEvents` (= open) to false but stays mounted for its exit
++        // animation; upstream kept it in the set, so when a dialog opened from that menu
++        // closed first (set size 2 -> no restore) and the menu unmounted after (prop now
++        // false -> no restore), <body> kept `pointer-events: none` and the whole app
++        // stopped taking clicks. Restore exactly when the set becomes empty.
++        if (disableOutsidePointerEvents) {
++          context.layersWithOutsidePointerEventsDisabled.delete(node);
++          if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
++            ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++          }
+         }
+       };
+     }, [node, ownerDocument, disableOutsidePointerEvents, context]);

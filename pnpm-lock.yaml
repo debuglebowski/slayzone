@@ -16,6 +16,9 @@ patchedDependencies:
   '@convex-dev/auth@0.0.90':
     hash: 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
     path: patches/@convex-dev__auth@0.0.90.patch
+  '@radix-ui/react-dismissable-layer@1.1.11':
+    hash: c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37
+    path: patches/@radix-ui__react-dismissable-layer@1.1.11.patch
   '@radix-ui/react-menu@2.1.16':
     hash: 557563d817050e295546e6d3b724d6319a35be6fd152b77ee4240535a41985d3
     path: patches/@radix-ui__react-menu@2.1.16.patch
@@ -14314,7 +14317,7 @@ snapshots:
       '@radix-ui/primitive': 1.1.3
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-context': 1.1.2(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-dismissable-layer': 1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dismissable-layer': 1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-focus-guards': 1.1.3(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-focus-scope': 1.1.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-id': 1.1.1(@types/react@19.3.0)(react@19.3.1)
@@ -14337,7 +14340,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
-  '@radix-ui/react-dismissable-layer@1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@radix-ui/react-dismissable-layer@1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@radix-ui/primitive': 1.1.3
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
@@ -14405,7 +14408,7 @@ snapshots:
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-context': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-direction': 1.1.1(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-dismissable-layer': 1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dismissable-layer': 1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-focus-guards': 1.1.3(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-focus-scope': 1.1.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-id': 1.1.1(@types/react@19.3.0)(react@19.3.1)
@@ -14429,7 +14432,7 @@ snapshots:
       '@radix-ui/primitive': 1.1.3
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-context': 1.1.2(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-dismissable-layer': 1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dismissable-layer': 1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-focus-guards': 1.1.3(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-focus-scope': 1.1.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-id': 1.1.1(@types/react@19.3.0)(react@19.3.1)
@@ -14528,7 +14531,7 @@ snapshots:
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-context': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-direction': 1.1.1(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-dismissable-layer': 1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dismissable-layer': 1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-focus-guards': 1.1.3(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-focus-scope': 1.1.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-id': 1.1.1(@types/react@19.3.0)(react@19.3.1)
@@ -14627,7 +14630,7 @@ snapshots:
       '@radix-ui/primitive': 1.1.3
       '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-context': 1.1.2(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-dismissable-layer': 1.1.11(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dismissable-layer': 1.1.11(patch_hash=c1bf93f644016859f3a2f1d9b5822edcf1fe70a6e3f1bb562d6777ed8b66eb37)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-id': 1.1.1(@types/react@19.3.0)(react@19.3.1)
       '@radix-ui/react-popper': 1.2.8(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@radix-ui/react-portal': 1.1.9(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
