@@ -9,6 +9,9 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 // scattered across the codebase don't trigger "Definition for rule not
 // found" errors.
 
+const BLOCKING_SPAWN_MESSAGE =
+  'Blocking child-process call in hub code: it freezes every hub connection until the child exits. Use the async variant (execFile/spawn). If it truly cannot block the hub (boot-only, CLI-only), add `// eslint-disable-next-line <rule> -- <reason>`.'
+
 export default defineConfig(
   {
     ignores: [
@@ -77,6 +80,42 @@ export default defineConfig(
             "CallExpression[callee.name='setInterval'], CallExpression[callee.object.name='window'][callee.property.name='setInterval']",
           message:
             'Use useVisibleInterval from @slayzone/ui to avoid burning background CPU while the window is hidden. If the timer must fire while hidden, add `// eslint-disable-next-line no-restricted-syntax` with a comment explaining why.'
+        }
+      ]
+    }
+  },
+  // Ban BLOCKING child-process calls in code the hub runs. The hub is one Node
+  // event loop serving every connection: a synchronous spawn freezes all of them
+  // until the child exits — computer heartbeats go unanswered, sockets drop,
+  // timers fire late. On 2026-10-23 a ~20s freeze from per-turn sync `git`
+  // (agent-turns listing) dropped the computer connection and 39 tabs died.
+  // Use the async variant (`execFile`/`spawn` + a promise). An exception needs
+  // `// eslint-disable-next-line no-restricted-imports -- <why it can't block the
+  // hub>` (boot-only, CLI-only, …); the hub's stall detector
+  // (`server.event_loop_stall`) catches anything that slips through anyway.
+  {
+    files: [
+      'packages/apps/hub/src/**/*.ts',
+      'packages/shared/transport/src/**/*.ts',
+      'packages/shared/platform/src/**/*.ts',
+      'packages/domains/*/src/server/**/*.ts'
+    ],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        ...['child_process', 'node:child_process'].map((name) => ({
+          name,
+          importNames: ['execSync', 'execFileSync', 'spawnSync'],
+          message: BLOCKING_SPAWN_MESSAGE
+        }))
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Namespace / default imports (`cp.execSync(...)`) dodge importNames.
+          selector: 'MemberExpression[property.name=/^(execSync|execFileSync|spawnSync)$/]',
+          message: BLOCKING_SPAWN_MESSAGE
         }
       ]
     }

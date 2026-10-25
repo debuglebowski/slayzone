@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: hubSpawnSync runs worktree setup scripts + submodule update synchronously and can block the hub for minutes; convert callers to hubSpawn.
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { basename } from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'

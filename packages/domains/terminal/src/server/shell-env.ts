@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: getEnrichedPath runs the login shell once (cached) and can block the hub up to 10s; convert to async.
 import { execFile, execFileSync } from 'child_process'
 import { platform } from 'os'
 import { promisify } from 'util'

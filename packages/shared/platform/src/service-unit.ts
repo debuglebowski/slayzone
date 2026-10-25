@@ -40,6 +40,7 @@
  * @module platform/service-unit
  */
 
+// eslint-disable-next-line no-restricted-imports -- service-unit runs in the CLI (install/status of the systemd unit), not in the hub process.
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,

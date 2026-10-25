@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+// eslint-disable-next-line no-restricted-imports -- boot-time DB migration, finishes before the hub serves anything.
 import { spawnSync } from 'node:child_process'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'

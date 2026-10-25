@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+// eslint-disable-next-line no-restricted-imports -- Windows-only `reg` PATH edit during CLI install, never on a request path.
 import { execSync, execFile } from 'child_process'
 import { promisify } from 'util'
 

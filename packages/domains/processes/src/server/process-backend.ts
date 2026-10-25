@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports -- Windows-only `taskkill` on process kill (returns at once); hub runs it only with processes enabled.
 import { spawn, execFile, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { buildShellInvocation, sanitizeSpawnEnv } from '@slayzone/platform'

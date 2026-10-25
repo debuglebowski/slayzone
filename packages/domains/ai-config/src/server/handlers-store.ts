@@ -2,6 +2,7 @@ import * as fs from 'node:fs'
 import { homedir } from 'node:os'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
+// eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: `slay init` (setupSlay) can block the hub up to 10s; convert to async.
 import { execFileSync } from 'node:child_process'
 import { buildShellInvocation, quoteForShell } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'

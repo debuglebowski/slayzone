@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: `pgrep` group checks (2s timeout each, polled on stop) block the hub; convert to async.
 import { execFile, execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
