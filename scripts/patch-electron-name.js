@@ -113,6 +113,10 @@ if (fs.existsSync(appIconPath)) {
   console.log('Skipping icon replacement (source icon not found)')
 }
 
+// Step 5: The Info.plist edit voids the bundle signature; re-seal it so macOS
+// notifications keep working (Electron 42+ needs a signed bundle).
+require('./sign-dev-electron').signDevElectron()
+
 console.log(
   `\n✅ Electron patched successfully! "${APP_NAME}" will appear in macOS menu bar and Cmd+Tab.`
 )

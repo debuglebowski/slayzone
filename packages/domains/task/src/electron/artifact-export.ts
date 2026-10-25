@@ -2,7 +2,7 @@ import { marked } from 'marked'
 import { readFileSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, screen } from 'electron'
 
 export const PDF_CSS = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -173,8 +173,9 @@ export async function renderToPdf(html: string, isMermaid: boolean): Promise<Buf
     return Buffer.from(
       await offscreen.webContents.printToPDF({
         printBackground: true,
-        pageSize: 'A4',
-        margins: { marginType: 'default' }
+        // Margins left at printToPDF's default (1cm each side), which is what the
+        // old `marginType: 'default'` selected; Electron 44's types dropped it.
+        pageSize: 'A4'
       })
     )
   } finally {
@@ -200,7 +201,14 @@ export async function renderToPng(html: string): Promise<Buffer> {
       show: false,
       width: 2000,
       height: 2000,
-      webPreferences: { offscreen: true, nodeIntegration: false, contextIsolation: true }
+      webPreferences: {
+        // Render at the screen's pixel density (2x on Retina) so the PNG is as sharp
+        // as the diagram on screen. Offscreen rendering used the primary display's
+        // scale by default until Electron 42 made it 1.0.
+        offscreen: { deviceScaleFactor: screen.getPrimaryDisplay().scaleFactor },
+        nodeIntegration: false,
+        contextIsolation: true
+      }
     })
     await offscreen.loadFile(tempPath)
 

@@ -149,7 +149,7 @@ export function createGitWatcher(): GitWatcher {
       //   - macOS: supported since Node 7 (FSEvents backend)
       //   - Windows: supported since Node 7 (ReadDirectoryChangesW)
       //   - Linux: supported natively since Node 20 (inotify walk)
-      // Electron 41 bundles Node 22.x, so we never hit the pre-Node-20 Linux
+      // Electron 44 bundles Node 24.x, so we never hit the pre-Node-20 Linux
       // silent-no-op path. If the Electron baseline ever drops below Node 20,
       // add a Linux guard here that falls back to watching .git/{index,HEAD,refs/heads}
       // non-recursively.

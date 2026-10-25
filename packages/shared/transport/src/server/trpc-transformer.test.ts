@@ -39,6 +39,7 @@ describe('serializeOutput', () => {
     const shared = { s: 1 }
     const cyclic: Record<string, unknown> = { a: 1 }
     cyclic.self = cyclic
+    // biome-ignore lint/suspicious/noSparseArray: the hole is the case under test
     const holey = [1, , 3] // eslint-disable-line no-sparse-arrays
     const extraKey = Object.assign([1, 2], { when: new Date(0) })
     const special = [

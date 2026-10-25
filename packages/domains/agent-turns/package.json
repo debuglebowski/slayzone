@@ -22,7 +22,7 @@
     "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
-    "electron": "^41.10.7",
+    "electron": "^44.5.1",
     "react": "^19.3.1"
   },
   "devDependencies": {

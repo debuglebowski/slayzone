@@ -8,6 +8,7 @@ overrides:
   zod: ^4.5.4
   d3-shape>d3-path: ^3.1.0
   node-abi: ^4.35.0
+  posix>nan: ^2.29.0
   electron-chrome-web-store>adm-zip: ^0.6.1
   prosemirror-view: ^1.42.3
   prosemirror-model: ^1.25.12
@@ -311,8 +312,8 @@ importers:
         specifier: ^4.4.0
         version: 4.4.0
       electron:
-        specifier: 41.10.7
-        version: 41.10.7
+        specifier: 44.5.1
+        version: 44.5.1
       electron-builder:
         specifier: ~26.17.0
         version: 26.17.0(electron-builder-squirrel-windows@26.17.0)
@@ -778,8 +779,8 @@ importers:
         specifier: ^5.103.2
         version: 5.103.2(react@19.3.1)
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -988,8 +989,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/platform
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1237,8 +1238,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/workflow
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1450,8 +1451,8 @@ importers:
         specifier: ^5.103.2
         version: 5.103.2(react@19.3.1)
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.3.1)
@@ -1664,8 +1665,8 @@ importers:
         specifier: ^4.4.0
         version: 4.4.0
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.3.1)
@@ -1823,8 +1824,8 @@ importers:
         specifier: ^5.103.2
         version: 5.103.2(react@19.3.1)
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
       fzf:
         specifier: ^0.5.2
         version: 0.5.2
@@ -1967,8 +1968,8 @@ importers:
         specifier: 6.1.0-beta.292
         version: 6.1.0-beta.292
       electron:
-        specifier: ^41.10.7
-        version: 41.10.7
+        specifier: ^44.5.1
+        version: 44.5.1
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.3.1)
@@ -8124,8 +8125,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@41.10.7:
-    resolution: {integrity: sha512-AqIiefddlf5i+HYCGatr8VlBuEbWJpad4/yloBFYcMB2r57j7xhW1ogiJ+BfA5kxQyfmSs5yjwy54Me+wJn1jw==}
+  electron@44.5.1:
+    resolution: {integrity: sha512-lx7AYoFIiyvEvgvpyWO9kOC60xtNPpiPZAth6Fmg9NutzpCAMLwpUlaBY2EXfZyIgUdzEmLMj9KvK0Vrokl1yQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -9695,8 +9696,8 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  nan@2.26.2:
-    resolution: {integrity: sha512-0tTvBTYkt3tdGw22nrAy50x7gpbGCCFH3AFcyS5WiUu7Eu4vWlri1woE6qHBSfy11vksDqkiwjOnlR7WV8G1Hw==}
+  nan@2.29.0:
+    resolution: {integrity: sha512-GlGk3HIvitbvs+LT3g6XUP1kpirKNvmDFwF/bmo6XNWSb/eYEs/O4bfgIEIXCZ+lIOTS5xNwDvSGMw6FJdAhtA==}
 
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
@@ -12602,7 +12603,7 @@ snapshots:
       env-paths: 3.0.0
       graceful-fs: 4.2.11
       progress: 2.0.3
-      semver: 7.7.3
+      semver: 7.8.5
       sumchecker: 3.0.1
     optionalDependencies:
       undici: 7.29.1
@@ -17370,7 +17371,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@41.10.7:
+  electron@44.5.1:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
@@ -19411,7 +19412,7 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nan@2.26.2:
+  nan@2.29.0:
     optional: true
 
   nanoid@3.3.11: {}
@@ -19728,7 +19729,7 @@ snapshots:
 
   posix@4.2.0(patch_hash=804705bb712bef4c375046af1f0be81ebf77c27a9a4c5f9816a3da1289b29ebd):
     dependencies:
-      nan: 2.26.2
+      nan: 2.29.0
     optional: true
 
   postcss-selector-parser@6.0.10:

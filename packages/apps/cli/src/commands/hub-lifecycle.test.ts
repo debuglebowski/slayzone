@@ -1177,7 +1177,7 @@ async function main(): Promise<void> {
 
     await test('the hub bin is matched to an interpreter that can actually run it', async () => {
       // REGRESSION (found running `hub start` for real): the dev-tree hub bundle's
-      // better-sqlite3 is compiled for ELECTRON's ABI (NODE_MODULE_VERSION 145), so
+      // better-sqlite3 is compiled for ELECTRON's ABI (NODE_MODULE_VERSION 149), so
       // the unit launched it with plain node (137) and it died instantly on
       // `require('better-sqlite3')` — which under a supervisor is an invisible
       // crash-loop.
