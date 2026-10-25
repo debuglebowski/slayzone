@@ -25,9 +25,10 @@ import {
   LayoutTemplate,
   Paperclip,
   Power,
-  PanelsTopLeft
+  PanelsTopLeft,
+  MoveVertical,
+  Expand
 } from 'lucide-react'
-import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { ArtifactsPanelHandle } from '@slayzone/task-artifacts/client'
@@ -1932,7 +1933,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             })
                           }
                         >
-                          <IconArrowsVertical size={12} />
+                          <MoveVertical size={12} />
                         </IconButton>
                       </TooltipTrigger>
                       <TooltipContent>
@@ -1948,7 +1949,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           className="size-5 text-muted-foreground hover:text-foreground"
                           onClick={() => setDescriptionFullscreen(true)}
                         >
-                          <IconArrowsMaximize size={12} />
+                          <Expand size={12} />
                         </IconButton>
                       </TooltipTrigger>
                       <TooltipContent>Fullscreen</TooltipContent>

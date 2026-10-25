@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import { Plus } from 'lucide-react'
 import { SceneShell } from './SceneShell'
 import { AnimatedCursor } from './AnimatedCursor'

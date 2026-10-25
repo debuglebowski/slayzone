@@ -56,8 +56,9 @@ const options = {
   plugins: [
     rawImportPlugin,
     // Fails the build if an external would not resolve where the computer runs.
-    // bufferutil/utf-8-validate stay undeclared on purpose: ws probes them in
-    // try/catch and runs without them. See build-guards.
+    // bufferutil/utf-8-validate stay undeclared on purpose: ws probes bufferutil in
+    // try/catch and runs without it, and requires utf-8-validate only when
+    // buffer.isUtf8 is missing (Node < 18.14). See build-guards.
     runtimeImportsEsbuildPlugin({
       bundleName: 'computer',
       packageJson: pkg,
@@ -97,7 +98,9 @@ if (process.argv.includes('--watch')) {
     try {
       watcher.update((await esbuild.build(options)).metafile)
     } catch (err) {
-      process.stderr.write(`[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`)
+      process.stderr.write(
+        `[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`
+      )
     } finally {
       building = false
       if (pending) {

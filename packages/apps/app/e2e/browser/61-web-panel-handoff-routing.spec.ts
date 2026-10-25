@@ -7,7 +7,9 @@ test.describe('Web panel handoff routing', () => {
   const PANEL_SHORTCUT = 'o'
   let projectAbbrev: string
 
-  const clearOpenExternalCalls = async (electronApp: import('playwright').ElectronApplication) => {
+  const clearOpenExternalCalls = async (
+    electronApp: import('@playwright/test').ElectronApplication
+  ) => {
     await electronApp.evaluate(() => {
       const globalState = globalThis as unknown as {
         __handoffOpenExternalCalls?: Array<{ url: string }>
@@ -16,7 +18,9 @@ test.describe('Web panel handoff routing', () => {
     })
   }
 
-  const getOpenExternalCalls = async (electronApp: import('playwright').ElectronApplication) => {
+  const getOpenExternalCalls = async (
+    electronApp: import('@playwright/test').ElectronApplication
+  ) => {
     return await electronApp.evaluate(() => {
       const globalState = globalThis as unknown as {
         __handoffOpenExternalCalls?: Array<{ url: string }>

@@ -1,5 +1,4 @@
 import { app, BrowserWindow, powerMonitor, autoUpdater as nativeAutoUpdater } from 'electron'
-import { is } from '@electron-toolkit/utils'
 // electron-updater is CJS. electron-vite v5 outputs ESM for main, and Node's
 // CJS→ESM interop doesn't detect Object.defineProperty getters as named exports.
 // A default import gives us the raw CJS exports object where the getter works.
@@ -57,7 +56,7 @@ function getAutoUpdater() {
 const CHECK_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 
 export function initAutoUpdater(): void {
-  if (is.dev) return
+  if (!app.isPackaged) return
   try {
     getAutoUpdater().checkForUpdatesAndNotify()
   } catch (err) {
@@ -135,7 +134,7 @@ function sendUpdateStatus(status: import('@slayzone/types').UpdateStatus): void 
 export async function checkForUpdates(): Promise<void> {
   sendUpdateStatus({ type: 'checking' })
 
-  if (is.dev) {
+  if (!app.isPackaged) {
     sendUpdateStatus({ type: 'not-available' })
     return
   }

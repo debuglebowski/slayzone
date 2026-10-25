@@ -21,7 +21,6 @@
     "@milkdown/preset-commonmark": "^7.22.2",
     "@milkdown/preset-gfm": "^7.22.2",
     "@milkdown/prose": "^7.22.2",
-    "@milkdown/transformer": "^7.22.2",
     "@milkdown/utils": "^7.22.2",
     "@slayzone/markdown": "workspace:*",
     "@slayzone/transport": "workspace:*",
@@ -43,7 +42,6 @@
     "jsdom": "^26.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }
 }

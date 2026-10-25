@@ -5,7 +5,7 @@
  */
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import type { ElectronApplication } from 'playwright'
+import type { ElectronApplication } from '@playwright/test'
 
 type State = 'starting' | 'running' | 'idle' | 'error' | 'dead'
 

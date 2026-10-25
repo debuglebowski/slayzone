@@ -1,7 +1,6 @@
 import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
-import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince, ptyEvents } from '@slayzone/terminal/electron'
 import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -425,7 +424,7 @@ function createFloatingGlobalAgentPanelWindow(): BrowserWindow {
   })
 
   const url =
-    is.dev && process.env['ELECTRON_RENDERER_URL']
+    !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
       ? `${process.env['ELECTRON_RENDERER_URL']}?floating=global-agent-panel`
       : `file://${join(__dirname, '../renderer/index.html')}?floating=global-agent-panel`
   win.setAlwaysOnTop(true, 'pop-up-menu')

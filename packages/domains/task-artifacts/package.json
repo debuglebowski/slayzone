@@ -28,7 +28,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.103.2",
-    "diff": "^8.0.0",
+    "diff": "^8.0.4",
     "lucide-react": "^0.562.0",
     "zod": "^4.3.5"
   },
@@ -37,10 +37,8 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/diff": "^7.0.0",
     "@types/react": "^19.3.0",
-    "better-sqlite3": "^12.4.1",
-    "typescript": "^5.9.3",
+    "better-sqlite3": "^12.11.1",
     "vitest": "^4.1.11"
   }
 }

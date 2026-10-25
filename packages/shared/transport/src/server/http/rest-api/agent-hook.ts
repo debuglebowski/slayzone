@@ -1,5 +1,4 @@
 import type { Express } from 'express'
-import express from 'express'
 import { z } from 'zod'
 import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal/shared'
 import { mapEventType } from '@slayzone/terminal/shared'
@@ -25,6 +24,7 @@ import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
 import { getAuthGate } from '../../app-deps'
+import { jsonBodyParser } from '../json-body'
 import { restPrincipalOf } from './principal'
 import { hookReporterMayTouch, type HookReporter } from './agent-hook-owner'
 
@@ -772,7 +772,7 @@ export function registerAgentHookRoute(
   // run, state transitions are skipped.
   const bridge = bridgeOverride ?? deps.terminalStateBridge
   // Bumped from default 100kb — SessionStart payloads can carry the full tool list.
-  const jsonParser = express.json({ limit: '1mb' })
+  const jsonParser = jsonBodyParser({ limit: '1mb' })
 
   app.post('/api/agent-hook', jsonParser, async (req, res) => {
     // On a hub with login the bearer gate bound the caller: the event is reported as

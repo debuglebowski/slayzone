@@ -91,7 +91,7 @@ const SearchDialog = lazy(() =>
 // First-run / informational dialogs — extracted to packages, shared with the
 // Electron renderer. Static `useChangelogAutoOpen` import above only reaches the
 // hook's module graph (changelog-data + settings store), so these heavy component
-// chunks (framer-motion, scenes) still split out of the initial bundle.
+// chunks (motion, scenes) still split out of the initial bundle.
 const OnboardingDialog = lazy(() =>
   import('@slayzone/onboarding/client/OnboardingDialog').then((m) => ({
     default: m.OnboardingDialog

@@ -5,6 +5,7 @@ import express, { type Express, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
 import { getAuthGate } from '../app-deps'
+import { jsonBodyParser } from './json-body'
 import { registerRestApi } from './rest-api'
 import type { RestApiDeps } from './rest-api/types'
 import { registerMcpTools } from './mcp-tools'
@@ -47,7 +48,7 @@ export type McpRestAppHandle = {
  */
 export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
   const app = express()
-  app.use(express.json())
+  app.use(jsonBodyParser())
 
   const transports = new Map<string, StreamableHTTPServerTransport>()
   const sessionActivity = new Map<string, number>()

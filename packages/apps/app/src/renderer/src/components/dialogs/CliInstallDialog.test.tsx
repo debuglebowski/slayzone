@@ -18,7 +18,7 @@ vi.mock('@slayzone/ui', () => {
   }
 })
 
-vi.mock('framer-motion', () => ({
+vi.mock('motion/react', () => ({
   motion: {
     div: ({ children, ...props }: ComponentProps<'div'>) => <div {...props}>{children}</div>,
     path: (props: ComponentProps<'path'>) => <path {...props} />,

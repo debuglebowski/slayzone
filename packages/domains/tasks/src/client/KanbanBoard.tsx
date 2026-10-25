@@ -12,7 +12,7 @@ import {
   type DragOverEvent
 } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import type { Task } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'

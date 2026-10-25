@@ -1,5 +1,11 @@
-import { test as base, expect, type Page, type Locator } from '@playwright/test'
-import { _electron as electron, type ElectronApplication } from 'playwright'
+import {
+  test as base,
+  expect,
+  _electron as electron,
+  type ElectronApplication,
+  type Page,
+  type Locator
+} from '@playwright/test'
 import path from 'path'
 import fs from 'fs'
 import { execSync } from 'child_process'

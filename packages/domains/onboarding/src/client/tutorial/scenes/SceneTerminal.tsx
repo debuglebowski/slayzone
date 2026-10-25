@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import { useVisibleInterval } from '@slayzone/ui'
 import { Sparkles, ChevronDown, Plus, Calendar, Archive, Trash2 } from 'lucide-react'
 import { SceneShell, TaskHeader, panelButtons } from './SceneShell'

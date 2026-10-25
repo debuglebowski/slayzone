@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { Dialog, DialogContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'

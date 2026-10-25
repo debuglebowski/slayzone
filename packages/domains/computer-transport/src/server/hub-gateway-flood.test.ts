@@ -16,7 +16,8 @@ import {
   type ComputerFloodLimits,
   createHubComputerGateway,
   DEFAULT_COMPUTER_FLOOD_LIMITS,
-  type HubComputerGateway
+  type HubComputerGateway,
+  PRE_AUTH_FRAME_MAX_BYTES
 } from './hub-gateway'
 
 class FakeSocket extends EventEmitter {
@@ -227,5 +228,62 @@ describe('/computers flood limits', () => {
       expect(connect(gateway, '203.0.113.20')).not.toBeNull()
     }
     expect(gateway.admitUpgrade({ ip: '203.0.113.20' }).ok).toBe(false)
+  })
+})
+
+/**
+ * Before enroll/hello succeeds a socket is anyone's, and ws accepts a 100 MiB frame by
+ * default. zod <= 4.6.5 allocates one issue per failing array element
+ * (GHSA-mrhx-c7xc-m3w5): `capabilities: [0, 0, …]` in a 100 MiB enroll frame is ~50M
+ * issues, many GiB, an out-of-memory hub with no credential at all. Unauthenticated
+ * frames are therefore capped far below that, before JSON.parse and zod see them.
+ */
+describe('/computers unauthenticated frame size', () => {
+  const bigEnroll = (n: number) =>
+    Buffer.from(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'enroll',
+        params: {
+          joinToken: 'jt-valid',
+          name: 'c',
+          platform: 'linux-x64',
+          version: '0.0.0',
+          capabilities: Array(n).fill(0),
+          protocolVersion: COMPUTER_PROTOCOL_VERSION
+        }
+      })
+    )
+
+  it('closes a socket whose unauthenticated frame is over the cap, unparsed', async () => {
+    const { gateway } = setup(false)
+    const errors: string[] = []
+    gateway.events.on('protocol-error', (e: { detail: string }) => errors.push(e.detail))
+    const ws = connect(gateway, '203.0.113.30')!
+    const frame = bigEnroll(PRE_AUTH_FRAME_MAX_BYTES)
+    expect(frame.byteLength).toBeGreaterThan(PRE_AUTH_FRAME_MAX_BYTES)
+    ws.emit('message', frame)
+    await flush()
+    expect(ws.closeCode).toBe(1009)
+    expect(ws.sent).toEqual([])
+    expect(errors.some((d) => d.includes('unauthenticated frame'))).toBe(true)
+  })
+
+  it('a real enroll frame is far below the cap', async () => {
+    const { gateway } = setup(false)
+    const ws = connect(gateway, '203.0.113.31')!
+    await enroll(ws)
+    expect(ws.closeCode).toBeNull()
+  })
+
+  it('an authenticated computer may send frames over the cap', async () => {
+    const { gateway } = setup(false)
+    const ws = connect(gateway, '203.0.113.32')!
+    await enroll(ws)
+    ws.request(2, 'heartbeat', { ts: 1, pad: 'x'.repeat(PRE_AUTH_FRAME_MAX_BYTES * 2) })
+    await flush()
+    expect(ws.closeCode).toBeNull()
+    expect(ws.response(2)?.result).toBeDefined()
   })
 })

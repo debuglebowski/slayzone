@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 
 export function SuccessStep({ onComplete }: { onComplete: () => void }): React.JSX.Element {
   useEffect(() => {

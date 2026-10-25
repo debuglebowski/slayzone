@@ -10,7 +10,8 @@
  *   - processes on: still boots, node-pty still not requested — it is required on the
  *     first hub-local spawn (node-pty-optional.test.ts covers that refusal).
  * ws asks for bufferutil at load and falls back when it is missing, so that one is
- * expected in the log; utf-8-validate is never asked for on node >= 18.14.
+ * expected in the log; utf-8-validate is never asked for on node >= 18.14 (no longer
+ * shipped at all — still blocked here so a regression that requires it fails).
  *
  * The published tarball itself is installed with `--omit=optional` and booted the same
  * way by scripts/smoke-hub-no-natives.sh, from scripts/publish-npm.sh.

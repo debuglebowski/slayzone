@@ -1,6 +1,6 @@
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
-import type { ElectronApplication } from 'playwright'
+import type { ElectronApplication } from '@playwright/test'
 
 /**
  * Session-history sidebar: lists every agent session (one entry per distinct

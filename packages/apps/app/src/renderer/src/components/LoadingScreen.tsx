@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { useEffect, useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'

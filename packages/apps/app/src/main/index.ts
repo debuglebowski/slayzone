@@ -27,7 +27,6 @@ import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
-import { electronApp, is } from '@electron-toolkit/utils'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
 
@@ -194,7 +193,7 @@ app.commandLine.appendSwitch('tls-use-system-ca')
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 
 // Enable remote debugging in dev (port 0 = OS-assigned, avoids conflicts with other dev instances)
-if (is.dev && !isPlaywright) {
+if (!app.isPackaged && !isPlaywright) {
   app.commandLine.appendSwitch('remote-debugging-port', '0')
 }
 
@@ -203,7 +202,7 @@ if (is.dev && !isPlaywright) {
 // (1000+ tasks, many open tabs) the structured-clone of detail OOMs the
 // renderer, which then crashes and triggers a full reload via the
 // render-process-gone handler. 8 GB buys headroom until hidden tabs unmount.
-if (is.dev) {
+if (!app.isPackaged) {
   app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
 }
 
@@ -250,7 +249,7 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Electron profile instead of only redirecting the SQLite DB path.
   mkdirSync(process.env.SLAYZONE_USER_DATA_DIR, { recursive: true })
   app.setPath('userData', process.env.SLAYZONE_USER_DATA_DIR)
-} else if (is.dev) {
+} else if (!app.isPackaged) {
   // Dev runs alongside the packaged app. Two Chromium instances sharing one
   // profile corrupts partition storage (wedged IndexedDB/quota service,
   // "Database IO error" on service worker DB), so isolate dev's Electron
@@ -301,7 +300,7 @@ if (!process.env.SLAYZONE_RELEASE_CHANNEL) {
 // renames the live one, and both are only safe when no other instance of this app is
 // writing it — v0.35.0 holds the same lock (same userData), so a launch that cannot take
 // it must not migrate (it quits below). Dev and e2e never enforce the lock.
-const shouldEnforceSingleInstanceLock = !isPlaywright && !is.dev
+const shouldEnforceSingleInstanceLock = !isPlaywright && app.isPackaged
 let lockOutcome: LockOutcome = { kind: 'acquired' }
 if (shouldEnforceSingleInstanceLock) {
   lockOutcome = acquireLockWithSelfHeal()
@@ -811,7 +810,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
   }
 
   const { startLocalComputer } = await import('./local-computer-supervisor')
-  const computerScriptPath = is.dev
+  const computerScriptPath = !app.isPackaged
     ? join(app.getAppPath(), '../computer/dist/bin.cjs')
     : join(process.resourcesPath, 'computer', 'bin.cjs')
   // The local computer gets its OWN channel-scoped root, handed over explicitly
@@ -976,7 +975,7 @@ let rendererReloading = false
 const APP_PROTOCOL_SCHEME = 'slayzone'
 // Avoid stealing the global slayzone:// handler from packaged builds during local dev.
 const SHOULD_REGISTER_PROTOCOL_CLIENT =
-  !is.dev || process.env.SLAYZONE_REGISTER_DEV_PROTOCOL === '1'
+  app.isPackaged || process.env.SLAYZONE_REGISTER_DEV_PROTOCOL === '1'
 type ProtocolClientStatusReason = 'registered' | 'dev-skipped' | 'registration-failed'
 type ProtocolClientStatus = {
   scheme: string
@@ -1038,7 +1037,7 @@ const OAUTH_CALLBACK_TIMEOUT_MS = 120_000
 const BOOT_START_MS = performance.now()
 let bootLastStepMs = BOOT_START_MS
 const bootSteps: { step: string; t: number; delta: number }[] = []
-const isBootDebug = (): boolean => is.dev && process.env.SLAYZONE_DEBUG_BOOT === '1'
+const isBootDebug = (): boolean => !app.isPackaged && process.env.SLAYZONE_DEBUG_BOOT === '1'
 
 // Optional sync file sink. stdout capture in Playwright drops data emitted
 // before its 'data' listener attaches, so writing direct to a known file
@@ -1295,7 +1294,7 @@ function emitNewTemporaryTask(): void {
 }
 
 function getCliSrc(): string {
-  return is.dev
+  return !app.isPackaged
     ? join(app.getAppPath(), '../cli/bin/slay')
     : join(process.resourcesPath, 'bin', 'slay')
 }
@@ -1439,7 +1438,7 @@ function createMainWindow(): void {
     setTimeout(() => {
       if (!mainWindow || mainWindow.isDestroyed()) return
       console.log('[renderer] reloading after crash...')
-      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
         mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
       } else {
         mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -1514,7 +1513,7 @@ function createMainWindow(): void {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -1672,7 +1671,7 @@ app
     const isLabEnabled = (key: string): boolean => {
       const raw =
         key === 'labs_tests_panel' ? clientSettings.labs?.testsPanel : clientSettings.labs?.loopMode
-      if (raw === undefined) return is.dev || isPlaywright
+      if (raw === undefined) return !app.isPackaged || isPlaywright
       return raw
     }
     logBoot('database init complete')
@@ -2428,7 +2427,7 @@ app
         logBoot('sidecar server supervisor import dispatched')
         Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
           .then(([{ startSidecarServer }, desktopBridge]) => {
-            const scriptPath = is.dev
+            const scriptPath = !app.isPackaged
               ? join(app.getAppPath(), '../hub/dist/bin.cjs')
               : join(process.resourcesPath, 'hub', 'bin.cjs')
             const supervisor = startSidecarServer({
@@ -2550,7 +2549,8 @@ app
               // changes (server-src watcher rebuilds bin.cjs). Off by default so a
               // rebuild never surprises a live debug session; staleness still shows
               // in the Diagnostics tab regardless. Never enabled in a packaged app.
-              hotRestartOnBuildChange: is.dev && process.env.SLAYZONE_SIDECAR_HOT_RESTART === '1'
+              hotRestartOnBuildChange:
+                !app.isPackaged && process.env.SLAYZONE_SIDECAR_HOT_RESTART === '1'
             })
             sidecarServerHandle = supervisor
             resolveSidecarHandle(supervisor)
@@ -2867,7 +2867,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // is safe (only local processes) and survives a respawn-on-new-port.
         return 'ws://127.0.0.1:*'
       },
-      is.dev
+      !app.isPackaged
     )
 
     // No certificate verify proc: a remote hub's wss:// front end is verified by
@@ -3127,11 +3127,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
     logBoot('extension+session config done')
 
-    // Set app user model id for windows
-    electronApp.setAppUserModelId('com.slayzone.app')
+    // Set app user model id for windows (dev: the electron binary, so
+    // notifications/taskbar group under it rather than a not-installed app id)
+    if (process.platform === 'win32') {
+      app.setAppUserModelId(app.isPackaged ? 'com.slayzone.app' : process.execPath)
+    }
 
     // Open DevTools by F12 in development
-    if (is.dev) {
+    if (!app.isPackaged) {
       app.on('browser-window-created', (_, window) => {
         window.webContents.on('before-input-event', (event, input) => {
           if (input.type === 'keyDown' && input.code === 'F12') {

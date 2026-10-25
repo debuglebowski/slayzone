@@ -16,7 +16,7 @@ import {
 } from '../fixtures/browser-view'
 import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
-type ElectronApp = import('playwright').ElectronApplication
+type ElectronApp = import('@playwright/test').ElectronApplication
 type Page = import('@playwright/test').Page
 
 test.describe('External protocol blocking', () => {

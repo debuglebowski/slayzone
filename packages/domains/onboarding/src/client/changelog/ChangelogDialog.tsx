@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import {
   Dialog,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Button } from '@slayzone/ui'
 import { useTRPC } from '@slayzone/transport/client'
 import { useQuery, useMutation } from '@tanstack/react-query'

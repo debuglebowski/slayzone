@@ -21,8 +21,7 @@
     "@slayzone/test-utils": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
-    "better-sqlite3": "^12.8.0",
-    "typescript": "^5.9.3",
+    "better-sqlite3": "^12.11.1",
     "vitest": "^4.1.11"
   }
 }

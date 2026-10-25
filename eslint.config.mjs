@@ -1,15 +1,13 @@
 import { defineConfig } from 'eslint/config'
 import tseslint from 'typescript-eslint'
-import eslintPluginReact from 'eslint-plugin-react'
 import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
-import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 // Biome owns format + ~all lint. ESLint kept ONLY for React Compiler
 // experimental rules from eslint-plugin-react-hooks v7 — biome has no
-// equivalent. Other plugins are loaded as stubs (all rules off) so the
-// ~120 legacy `// eslint-disable-next-line @typescript-eslint/...` /
-// `// eslint-disable-next-line react/...` comments scattered across the
-// codebase don't trigger "Definition for rule not found" errors.
+// equivalent. typescript-eslint is loaded as a stub (all rules off) so the
+// legacy `// eslint-disable-next-line @typescript-eslint/...` comments
+// scattered across the codebase don't trigger "Definition for rule not
+// found" errors.
 
 export default defineConfig(
   {
@@ -39,9 +37,7 @@ export default defineConfig(
     },
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      react: eslintPluginReact,
-      'react-hooks': eslintPluginReactHooks,
-      'react-refresh': eslintPluginReactRefresh
+      'react-hooks': eslintPluginReactHooks
     },
     linterOptions: {
       reportUnusedDisableDirectives: 'off'

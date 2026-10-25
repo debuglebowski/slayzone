@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@slayzone/platform": "workspace:*",
-    "better-sqlite3": "^12.8.0"
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"

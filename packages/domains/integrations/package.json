@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@slayzone/task": "workspace:*",
-    "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/platform": "workspace:*"

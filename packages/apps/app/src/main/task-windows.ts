@@ -1,7 +1,6 @@
 import { BrowserWindow, ipcMain, app, screen, webContents } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
-import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
 
 interface OwnershipKey {
@@ -128,7 +127,7 @@ function createSecondaryTaskWindow(taskId: string): BrowserWindow {
   })
   const params = new URLSearchParams({ taskWindow: taskId })
   const url =
-    is.dev && process.env['ELECTRON_RENDERER_URL']
+    !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
       ? `${process.env['ELECTRON_RENDERER_URL']}?${params.toString()}`
       : `file://${join(__dirname, '../renderer/index.html')}?${params.toString()}`
   win.loadURL(url)

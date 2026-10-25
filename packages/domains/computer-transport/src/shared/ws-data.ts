@@ -11,3 +11,13 @@ export function wsDataToText(data: unknown): string {
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8')
   return (data as Buffer).toString('utf8')
 }
+
+/** Byte length of a `ws` message payload, without decoding it. */
+export function wsDataByteLength(data: unknown): number {
+  if (typeof data === 'string') return Buffer.byteLength(data, 'utf8')
+  if (Array.isArray(data)) {
+    return (data as readonly Uint8Array[]).reduce((n, chunk) => n + chunk.byteLength, 0)
+  }
+  if (data instanceof ArrayBuffer) return data.byteLength
+  return (data as Buffer).byteLength
+}

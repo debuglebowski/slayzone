@@ -15,7 +15,6 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
-    "tsx": "^4.23.15",
-    "typescript": "^5.9.3"
+    "tsx": "^4.23.15"
   }
 }
