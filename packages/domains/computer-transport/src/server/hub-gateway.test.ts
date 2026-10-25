@@ -174,6 +174,53 @@ describe('reconnect auth (hello)', () => {
     expect((await rejoined).computer).toMatchObject({ authMode: 'hello', epoch: 'epoch-xyz' })
   })
 
+  it('a second live PROCESS claiming the same computer is refused, not allowed to take over', async () => {
+    // Two processes sharing one credential store (an orphaned app's computer and
+    // the next app's) used to supersede each other on every reconnect. Each
+    // takeover disposed every session of the loser — "Process exited with code 1"
+    // on every task, over and over. The incumbent keeps the id; the newcomer
+    // retries until it is gone.
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    const incumbent = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-A' })
+    incumbent.start()
+    await incumbent.events.once('connected')
+
+    const disconnects: string[] = []
+    hub.gateway.events.on('computer-disconnected', ({ reason }) => disconnects.push(reason))
+    const intruder = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-B' })
+    const errors: boolean[] = []
+    intruder.events.on('error', ({ fatal }) => errors.push(fatal))
+    intruder.start()
+    await intruder.events.once('reconnect-scheduled')
+
+    expect(incumbent.state).toBe('connected')
+    expect(disconnects).toEqual([])
+    expect(errors).not.toContain(true) // refusal is transient, never needs-re-enrollment
+    expect(hub.gateway.listComputers()[0]).toMatchObject({ epoch: 'epoch-A' })
+
+    // Once the incumbent is gone, the waiting process gets in on its next retry.
+    const takeover = hub.gateway.events.once('computer-connected')
+    await incumbent.stop()
+    expect((await takeover).computer).toMatchObject({ authMode: 'hello', epoch: 'epoch-B' })
+  })
+
+  it('the SAME process reconnecting over a live-looking socket still supersedes it', async () => {
+    // A half-open socket from a network blip: same epoch ⇒ same process, so the
+    // new socket is the real one.
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    const first = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-A' })
+    first.start()
+    await first.events.once('connected')
+
+    const superseded = hub.gateway.events.once('computer-disconnected')
+    const second = makeDialer(hub.url, { credentialStore: store, epoch: 'epoch-A' })
+    second.start()
+    await second.events.once('connected')
+    expect((await superseded).reason).toBe('superseded-by-reconnect')
+  })
+
   it('stale api key falls back to enroll when a join token is present', async () => {
     const hub = await startHub()
     const store = createMemoryCredentialStore({ computerId: 'computer-old', apiKey: 'key-revoked' })
