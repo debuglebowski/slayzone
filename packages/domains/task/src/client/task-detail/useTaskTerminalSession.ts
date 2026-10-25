@@ -4,27 +4,12 @@ import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/cli
 import type { Task } from '@slayzone/task/shared'
 import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task/shared'
 
-/**
- * Renderer-side conversation id read. Reads the server-computed
- * `currentConversationByMode` field which goes through the append-only
- * `task_conversations` ledger (honors manual-reset cutoff + provenance gate).
- *
- * Direct access to `provider_config.{mode}.conversationId` from the renderer
- * is rejected by the `lint:server-boundary` guard — that path bypasses the
- * provenance check and would re-introduce the clobber bug class.
- */
-function readCurrentConversationId(
-  task: Task | null | undefined,
-  mode: string | undefined
-): string | null {
-  if (!task || !mode) return null
-  return task.currentConversationByMode?.[mode] ?? null
-}
 import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
 import { takeTaskPaneEvents } from '../taskPaneEvents'
+import { readCurrentConversationId } from '../main-terminal-props'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null

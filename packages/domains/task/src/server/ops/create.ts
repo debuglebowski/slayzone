@@ -169,7 +169,10 @@ export async function createTaskOp(
   if (task) {
     ipcMain?.emit('db:tasks:create:done', null, id, data.projectId)
     taskEvents.emit('task:created', { taskId: id, projectId: data.projectId })
-    onMutation?.()
+    // Scoped: the create wrote only this task's rows (its board row, main tab,
+    // history), and the renderer places a new row via `loadBoardRows`' successor
+    // ids — no whole-board reload per create.
+    onMutation?.({ taskIds: [id] })
   }
   return colorOne(db, task)
 }

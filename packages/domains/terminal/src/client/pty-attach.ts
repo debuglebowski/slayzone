@@ -50,6 +50,15 @@ export function markSessionUnspawned(sessionId: string, at: number = Date.now())
   unspawned.set(sessionId, at)
 }
 
+/**
+ * Whether `sessionId` is marked as having no PTY yet (a live, unexpired mark).
+ * Does not consume the mark — the session's first `attachPty` still does.
+ */
+export function isSessionKnownUnspawned(sessionId: string): boolean {
+  const at = unspawned.get(sessionId)
+  return at !== undefined && Date.now() - at <= UNSPAWNED_MARK_TTL_MS
+}
+
 function consumeUnspawned(sessionId: string): boolean {
   const at = unspawned.get(sessionId)
   if (at === undefined) return false

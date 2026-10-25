@@ -18,6 +18,9 @@ export type BoardRows = {
   tasks: Task[]
   taskTags: Record<string, string[]>
   blockedTaskIds: string[]
+  /** Per returned task, the id of the row after it on the board (null = last).
+   *  Absent from hubs that predate it. */
+  nextTaskIds?: Record<string, string | null>
 }
 
 /** More changed rows than this in one event → reload the board instead. */
@@ -26,11 +29,14 @@ export const MAX_PATCH_ROWS = 200
 /**
  * Patch the rows of `ids` into a board, from their freshly loaded slice.
  *
+ * A row that is not on the board yet (a create), or whose `order`/`created_at`
+ * changed (it may move), is placed before the row the server names as its
+ * successor (`rows.nextTaskIds`) — the board's SQL ordering (`order`,
+ * `created_at`, rowid) is not replicable client-side, so the server decides.
+ *
  * Returns null when a patch cannot reproduce what a full reload would show, so
- * the caller reloads instead:
- * - a row that is not on the board yet (a create): where it sorts depends on
- *   SQL ordering (`order`, `created_at`, rowid) the client cannot replicate;
- * - a row whose `order` or `created_at` changed: same reason — it may move.
+ * the caller reloads instead: such a row arrived without a successor (older
+ * hub), or its successor is not on this board (the board is out of date).
  *
  * A requested id missing from `rows.tasks` was deleted → dropped. Every other
  * row keeps its object identity, so memoized consumers skip re-rendering.
@@ -43,7 +49,8 @@ export function patchBoardRows(
   const wanted = new Set(ids)
   const fresh = new Map(rows.tasks.map((t) => [t.id, t]))
   const onBoard = new Set<string>()
-  const tasks: Task[] = []
+  let tasks: Task[] = []
+  const toPlace: Task[] = []
   for (const t of prev.tasks) {
     if (!wanted.has(t.id)) {
       tasks.push(t)
@@ -52,10 +59,15 @@ export function patchBoardRows(
     onBoard.add(t.id)
     const next = fresh.get(t.id)
     if (!next) continue // deleted
-    if (next.order !== t.order || next.created_at !== t.created_at) return null
-    tasks.push(next)
+    if (next.order !== t.order || next.created_at !== t.created_at) toPlace.push(next)
+    else tasks.push(next)
   }
-  for (const id of fresh.keys()) if (!onBoard.has(id)) return null
+  for (const [id, row] of fresh) if (!onBoard.has(id)) toPlace.push(row)
+  if (toPlace.length > 0) {
+    const placed = placeBeforeSuccessors(tasks, toPlace, rows.nextTaskIds)
+    if (!placed) return null
+    tasks = placed
+  }
 
   const taskTags: Record<string, string[]> = { ...prev.taskTags }
   for (const id of wanted) {
@@ -68,6 +80,38 @@ export function patchBoardRows(
   for (const id of wanted) if (blocked.has(id)) blockedTaskIds.push(id)
 
   return { ...prev, tasks, taskTags, blockedTaskIds }
+}
+
+/** Insert `rows` into `tasks`, each before its successor id (null = append).
+ *  A successor may itself be one of `rows`; null when one cannot be placed. */
+function placeBeforeSuccessors(
+  tasks: Task[],
+  rows: Task[],
+  nextTaskIds: Record<string, string | null> | undefined
+): Task[] | null {
+  if (!nextTaskIds) return null
+  const out = [...tasks]
+  const pendingIds = new Set(rows.map((r) => r.id))
+  let pending = rows
+  while (pending.length > 0) {
+    const deferred: Task[] = []
+    for (const row of pending) {
+      const successor = nextTaskIds[row.id]
+      if (successor === undefined) return null
+      const at = successor === null ? out.length : out.findIndex((t) => t.id === successor)
+      if (at >= 0) {
+        out.splice(at, 0, row)
+        pendingIds.delete(row.id)
+      } else if (pendingIds.has(successor as string)) {
+        deferred.push(row)
+      } else {
+        return null
+      }
+    }
+    if (deferred.length === pending.length) return null
+    pending = deferred
+  }
+  return out
 }
 
 /** Parents of the given tasks, before and after the change — their sub-task
@@ -111,7 +155,12 @@ export function mergeRow<T extends object>(base: T | undefined, local: T, remote
   return out as T
 }
 
-/** Apply a patch (`prev` → `next` board) to the renderer's task mirror. */
+/**
+ * Apply a patch (`prev` → `next` board) to the renderer's task mirror. A row the
+ * mirror lacks (a create from elsewhere) and a row the server moved that has no
+ * local edit take their board position; a row with a local edit stays where the
+ * optimistic write put it.
+ */
 export function patchMirrorTasks(
   mirror: Task[],
   ids: readonly string[],
@@ -122,14 +171,36 @@ export function patchMirrorTasks(
   const base = new Map(prev.tasks.filter((t) => wanted.has(t.id)).map((t) => [t.id, t]))
   const fresh = new Map(next.tasks.filter((t) => wanted.has(t.id)).map((t) => [t.id, t]))
   const out: Task[] = []
+  const inMirror = new Set<string>()
+  const toPlace = new Set<string>()
   for (const t of mirror) {
     if (!wanted.has(t.id)) {
       out.push(t)
       continue
     }
+    inMirror.add(t.id)
     const remote = fresh.get(t.id)
     if (!remote) continue // deleted on the server
-    out.push(mergeRow(base.get(t.id), t, remote))
+    const b = base.get(t.id)
+    const moved = !!b && (remote.order !== b.order || remote.created_at !== b.created_at)
+    if (moved && t === b) toPlace.add(t.id)
+    else out.push(mergeRow(b, t, remote))
+  }
+  for (const id of fresh.keys()) if (!inMirror.has(id)) toPlace.add(id)
+  if (toPlace.size === 0) return out
+  // Last first, so a placed row's board successor is already in `out`.
+  const present = new Set(out.map((t) => t.id))
+  for (let i = next.tasks.length - 1; i >= 0; i--) {
+    const row = next.tasks[i]
+    if (!toPlace.has(row.id)) continue
+    let at = out.length
+    for (let j = i + 1; j < next.tasks.length; j++) {
+      if (!present.has(next.tasks[j].id)) continue
+      at = out.findIndex((t) => t.id === next.tasks[j].id)
+      break
+    }
+    out.splice(at, 0, row)
+    present.add(row.id)
   }
   return out
 }

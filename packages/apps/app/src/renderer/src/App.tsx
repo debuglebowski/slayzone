@@ -43,6 +43,8 @@ import {
 } from '@slayzone/tasks/hooks'
 import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
+// Same module TabPanes' task fallback comes from (eager either way).
+import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext } from '@slayzone/projects'
 import {
@@ -53,9 +55,27 @@ import {
 } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
-import { markSessionUnspawned, traceSessionOpen, usePtyStatus } from '@slayzone/terminal/client'
+import {
+  markSessionUnspawned,
+  startEarlyInputCapture,
+  traceSessionOpen,
+  usePtyStatus
+} from '@slayzone/terminal/client'
 // Shared
-import { Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  toast,
+  useGuardedHotkeys,
+  useShortcutStore,
+  shortcutDefinitions
+} from '@slayzone/ui'
+import {
+  createTriggerDedupe,
+  MENU_RELAY_DEDUPE_MS,
+  type TriggerPath
+} from './app-shell/trigger-dedupe'
 import {
   SidebarProvider,
   cn,
@@ -857,10 +877,18 @@ function App(): React.JSX.Element {
 
   // Scratch terminal
   const handleCreateScratchTerminal = useCallback(
-    async (projectIdArg?: string): Promise<void> => {
+    async (
+      projectIdArg?: string,
+      pressedAt?: number,
+      earlyInput?: { bind: (sessionId: string) => void; cancel: () => void }
+    ): Promise<void> => {
       const projectId = projectIdArg ?? selectedProjectId
-      if (!projectId) return
+      if (!projectId) {
+        earlyInput?.cancel()
+        return
+      }
       if (durationLocked) {
+        earlyInput?.cancel()
         toast(PROJECT_LOCKED_TOAST)
         return
       }
@@ -877,18 +905,26 @@ function App(): React.JSX.Element {
       // task INSERT is FK-bound to it — so create on the hub that owns it, then
       // record the new id's hub before openTask scopes its tab.
       const projectHubId = getHubIdForProject(projectId)
-      const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
-        projectId,
-        title: `Terminal ${next}`,
-        status,
-        isTemporary: true,
-        // Opened right below — lets the hub hand it the project's warm agent.
-        openAfterCreate: true
-      })
+      const task = await getClientForHub(projectHubId, trpcClient)
+        .task.create.mutate({
+          projectId,
+          title: `Terminal ${next}`,
+          status,
+          isTemporary: true,
+          // Opened right below — lets the hub hand it the project's warm agent.
+          openAfterCreate: true
+        })
+        .catch((err: unknown) => {
+          earlyInput?.cancel()
+          throw err
+        })
       if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
       recordDiagnosticsTimeline('temp_task_created', {
         taskId: task.id,
-        taskCreateMs: Math.round(performance.now() - createStart)
+        taskCreateMs: Math.round(performance.now() - createStart),
+        ...(pressedAt === undefined
+          ? {}
+          : { pressToCreatedMs: Math.round(performance.now() - pressedAt) })
       })
       track('temporary_task_created')
       setTasks((prev) => [task, ...prev])
@@ -898,7 +934,11 @@ function App(): React.JSX.Element {
       // Brand-new task: its main terminal has no PTY yet, so skip the attach probe;
       // trace the open so the mount timeline covers tab open → terminal init.
       markSessionUnspawned(`${task.id}:${task.id}`)
-      traceSessionOpen(`${task.id}:${task.id}`)
+      traceSessionOpen(`${task.id}:${task.id}`, pressedAt)
+      earlyInput?.bind(`${task.id}:${task.id}`)
+      // Show its terminal while the task page loads — the page is not on the path
+      // to typing into the agent.
+      if (project) markTerminalFirst(task, project)
       openTask(task.id, project)
     },
     [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked, trpcClient]
@@ -914,11 +954,38 @@ function App(): React.JSX.Element {
     }
   }, [openTask])
 
+  // New temporary task: the renderer handles its own keydown (no main → hub →
+  // renderer relay on the critical path); the native menu accelerator stays as the
+  // fallback for input the page does not see. One press may arrive by both paths.
+  const [newTempTaskGate] = useState(() => createTriggerDedupe(MENU_RELAY_DEDUPE_MS))
+  const triggerNewTempTask = (path: TriggerPath): void => {
+    const pressedAt = performance.now()
+    if (!newTempTaskGate.accept(path, pressedAt)) return
+    // Keys typed right after the press belong to the NEW terminal: never let them
+    // reach whatever had focus (another agent — an Enter would submit its prompt).
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    // …and hold them until that terminal exists (it takes them as it focuses).
+    const earlyInput = startEarlyInputCapture()
+    void handleCreateScratchTerminal(undefined, pressedAt, earlyInput)
+  }
+  const newTempTaskKeys = useShortcutStore(
+    (s) =>
+      s.overrides['new-temp-task'] ??
+      shortcutDefinitions.find((d) => d.id === 'new-temp-task')?.defaultKeys ??
+      ''
+  )
+  const isRecordingShortcut = useShortcutStore((s) => s.isRecording)
+  useGuardedHotkeys(
+    newTempTaskKeys,
+    (e) => {
+      e.preventDefault()
+      triggerNewTempTask('keydown')
+    },
+    { enableOnFormTags: true, enabled: !isRecordingShortcut && newTempTaskKeys !== '' }
+  )
   useSubscription(
     trpc.menu.onNewTemporaryTask.subscriptionOptions(undefined, {
-      onData: () => {
-        handleCreateScratchTerminal()
-      }
+      onData: () => triggerNewTempTask('menu')
     })
   )
 

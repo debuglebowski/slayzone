@@ -39,6 +39,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import type { Task, PanelVisibility, PanelSizes, UpdateTaskInput } from '@slayzone/task/shared'
 import type { TaskTemplate } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
+import { mainTerminalProps } from './main-terminal-props'
 import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
@@ -2168,6 +2169,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     />
   )
 
+  const mainTerminal = mainTerminalProps(task, project, modes)
+
   return (
     <div
       id="task-detail"
@@ -2783,22 +2786,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
                           cwd={effectiveRepoPath || project?.path || ''}
-                          defaultMode={task.terminal_mode}
-                          conversationId={getConversationIdForMode(task) || undefined}
-                          existingConversationId={getConversationIdForMode(task) || undefined}
-                          // Hydration gate: `currentConversationByMode` is set only by
-                          // parseAndColorTasks; `undefined` = task not yet hydrated (boot
-                          // window). Tells TerminalStarter to hold auto-spawn so the main
-                          // tab never spawns with a null hint and clobbers its conversation.
-                          conversationHydrated={task.currentConversationByMode !== undefined}
-                          supportsSessionId={
-                            modes
-                              .find((m) => m.id === task.terminal_mode)
-                              ?.initialCommand?.includes('{id}') ?? false
-                          }
+                          // Spawn props shared with the terminal-first pane (one
+                          // derivation — see mainTerminalProps). The hydration gate
+                          // (`conversationHydrated`) holds the main tab's auto-spawn
+                          // until the task's conversation id is loaded, so it never
+                          // spawns with a null hint and clobbers its conversation.
+                          defaultMode={mainTerminal.mode}
+                          conversationId={mainTerminal.conversationId}
+                          existingConversationId={mainTerminal.existingConversationId}
+                          conversationHydrated={mainTerminal.conversationHydrated}
+                          supportsSessionId={mainTerminal.supportsSessionId}
                           initialPrompt={getQuickRunPrompt(task.id)}
-                          providerFlags={getProviderFlagsForMode(task)}
-                          executionContext={project?.execution_context}
+                          providerFlags={mainTerminal.providerFlags}
+                          executionContext={mainTerminal.executionContext}
                           focusRequestId={terminalFocusRequestId}
                           onStartFresh={handleResetTerminal}
                           onReady={handleTerminalReady}

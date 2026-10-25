@@ -52,7 +52,9 @@ vi.mock('@slayzone/ui', () => {
     Popover: Passthrough,
     PopoverContent: ({ children }: MockChildren) => <div>{children}</div>,
     PopoverTrigger: ({ children }: MockChildren) => <>{children}</>,
-    Dialog: Passthrough,
+    // Honors `open` like Radix: a closed dialog's content is not mounted.
+    Dialog: ({ open, children }: MockChildren & { open?: boolean }) =>
+      open ? <>{children}</> : null,
     DialogContent: Passthrough,
     DialogHeader: Passthrough,
     DialogTitle: ({ children }: MockChildren) => <div>{children}</div>,
@@ -215,8 +217,12 @@ const doneTask = makeTask({
 const allTasksList = [blockerTask, extraBlockerTask, availableTask, doneTask]
 const blockersList = [blockerTask, extraBlockerTask]
 
+const boardReads = vi.fn()
 const queryData: Record<string, () => unknown> = {
-  'task.loadBoardData': () => ({ tasks: allTasksList }),
+  'task.loadBoardData': () => {
+    boardReads()
+    return { tasks: allTasksList }
+  },
   'task.getBlockers': () => blockersList,
   'projects.list': () => projects,
   // No computers enrolled in the sidebar tests → ComputerCard shows its minimal
@@ -335,11 +341,26 @@ function renderSidebar(taskOverrides?: Partial<Task>) {
   )
 }
 
+function openBlockerPicker(): void {
+  fireEvent.click(screen.getByRole('button', { name: 'Set blocking task' }))
+}
+
 describe('TaskMetadataSidebar', () => {
+  it('reads the whole board only once the blocker picker is opened', async () => {
+    renderSidebar()
+    await screen.findByText('Fix API')
+    expect(boardReads).not.toHaveBeenCalled()
+    openBlockerPicker()
+    await screen.findByLabelText('Search available blockers')
+    expect(boardReads).toHaveBeenCalled()
+  })
+
   it('renders status icons using project-specific status config for blocker rows and available blockers', async () => {
     renderSidebar()
 
     await screen.findByText('Fix API')
+    openBlockerPicker()
+    await screen.findByLabelText('Search available blockers')
 
     expect(screen.queryByLabelText('Search blockers')).toBeNull()
     expect(screen.getByTitle('Doing')).toBeDefined()
@@ -351,6 +372,8 @@ describe('TaskMetadataSidebar', () => {
   it('filters the add-blocker list independently and adds the selected blocker', async () => {
     renderSidebar()
 
+    await screen.findByText('Fix API')
+    openBlockerPicker()
     const addSearch = await screen.findByLabelText('Search available blockers')
     const addBlockerSection = addSearch.parentElement?.parentElement as HTMLElement
     fireEvent.change(addSearch, { target: { value: 'ship' } })
@@ -367,7 +390,9 @@ describe('TaskMetadataSidebar', () => {
       })
     })
 
-    expect(screen.getByText('No tasks available')).toBeDefined()
+    // Picking closes the picker; reopened, the added blocker is no longer offered.
+    openBlockerPicker()
+    expect(await screen.findByText('No tasks available')).toBeDefined()
   })
 
   it('removes a blocker from the filtered list', async () => {

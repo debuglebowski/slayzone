@@ -13,7 +13,10 @@ import { HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { useTabStore, type Tab } from '@slayzone/settings'
-import { TaskShell } from '@slayzone/task/client/TaskShell'
+import {
+  TaskPaneFallback,
+  useTerminalFirstHolding
+} from '@slayzone/task/client/TerminalFirstShell'
 import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { mruRank } from '@slayzone/terminal/client/terminal-mru'
@@ -267,6 +270,8 @@ const TaskPane = memo(function TaskPane({
     task?.panel_visibility?.browser === true,
     explodeMode || isViewActive
   )
+  // A task opened terminal-first keeps showing its terminal until the agent is up.
+  const holdForTerminal = useTerminalFirstHolding(taskId)
   return (
     <PaneFrame
       isViewActive={isViewActive}
@@ -276,8 +281,8 @@ const TaskPane = memo(function TaskPane({
       hubId={hubId}
     >
       <ErrorBoundary onReset={() => taskDetailCache.invalidate('taskDetail', taskId, hubId)}>
-        <Suspense fallback={<TaskShell />}>
-          {hydrated ? (
+        <Suspense fallback={<TaskPaneFallback taskId={taskId} />}>
+          {hydrated && !holdForTerminal ? (
             <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
               <TaskDetailDataLoader
                 taskId={taskId}
@@ -302,7 +307,7 @@ const TaskPane = memo(function TaskPane({
               {isViewActive && !explodeMode ? <ActiveDetailMark /> : null}
             </div>
           ) : (
-            <TaskShell />
+            <TaskPaneFallback taskId={taskId} />
           )}
         </Suspense>
       </ErrorBoundary>

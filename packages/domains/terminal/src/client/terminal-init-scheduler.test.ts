@@ -8,6 +8,7 @@ import {
   __resetPtyAttachForTest,
   attachPty,
   markSessionUnspawned,
+  isSessionKnownUnspawned,
   UNSPAWNED_MARK_TTL_MS,
   type PtyAttachClient
 } from './pty-attach'
@@ -246,6 +247,24 @@ async function run(): Promise<void> {
     markSessionUnspawned('a')
     await attachPty(client, 'b', -1)
     ok(calls.join() === 'attach,attach', `other sessions unaffected (calls ${calls})`)
+  })
+
+  await test('isSessionKnownUnspawned peeks without consuming the mark', async () => {
+    __resetPtyAttachForTest()
+    const { client, calls } = fakeClient(async () => ({
+      exists: true,
+      state: 'running',
+      buffer: { chunks: [], currentSeq: 3 }
+    }))
+    ok(!isSessionKnownUnspawned('p'), 'unmarked → unknown')
+    markSessionUnspawned('p')
+    ok(isSessionKnownUnspawned('p'), 'marked → known')
+    ok(isSessionKnownUnspawned('p'), 'peek again → still known')
+    await attachPty(client, 'p', -1)
+    ok(calls.length === 0, 'attach still consumes the mark without a round trip')
+    ok(!isSessionKnownUnspawned('p'), 'consumed by attach')
+    markSessionUnspawned('q', Date.now() - UNSPAWNED_MARK_TTL_MS - 1)
+    ok(!isSessionKnownUnspawned('q'), 'expired → unknown')
   })
 
   await test('unspawned mark expires: a stale mark never hides a live session', async () => {

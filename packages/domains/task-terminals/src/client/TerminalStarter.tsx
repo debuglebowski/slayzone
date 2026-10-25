@@ -7,7 +7,7 @@ import {
   type TerminalHandle,
   type TerminalProps
 } from '@slayzone/terminal/client/LazyTerminal'
-import { markSkipCache } from '@slayzone/terminal/client'
+import { isSessionKnownUnspawned, markSkipCache } from '@slayzone/terminal/client'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
@@ -102,8 +102,12 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     // Snapshot at mount: the decision is made once per mount ("when you open a
     // task"), so later prop changes must not re-run it.
     const [openState] = useState(() => ({ agentState, isTemporary: !!isTemporary }))
-    const [started, setStarted] = useState(false)
-    const [existsChecked, setExistsChecked] = useState(false)
+    // A pending explicit start (`requestAgentStart` / `markForceStart` — e.g. the
+    // terminal-first pane handing over its running agent) mounts the terminal on
+    // the FIRST render, so a live xterm is reattached without a blank frame. The
+    // decision effect below still consumes the mark.
+    const [started, setStarted] = useState(() => forceStartSet.has(sessionId))
+    const [existsChecked, setExistsChecked] = useState(() => forceStartSet.has(sessionId))
     // Set when the decision is "start" but the spawn waits for hydration.
     const [startPending, setStartPending] = useState(false)
     const [dontShowAgain, setDontShowAgain] = useState(false)
@@ -148,6 +152,14 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         setReason('initial')
         setStarted(true)
         setExistsChecked(true)
+        return () => {
+          cancelled = true
+        }
+      }
+      // A temporary task always starts (`agentStartsOnOpen`), and a session this
+      // renderer just created has no PTY to reattach to — nothing to ask the hub.
+      if (openState.isTemporary && isSessionKnownUnspawned(sessionId)) {
+        setStartPending(true)
         return () => {
           cancelled = true
         }

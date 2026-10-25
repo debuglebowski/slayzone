@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { ListChecks, MessageSquare, SearchIcon, X } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
@@ -17,11 +17,12 @@ interface BlockedBySectionProps {
   onUpdate: (task: Task) => void
   blockers: Task[]
   setBlockers: React.Dispatch<React.SetStateAction<Task[]>>
-  allTasks: Task[]
   columnsByProject: Map<string, Project['columns_config']>
   addBlockerSearch: string
   setAddBlockerSearch: React.Dispatch<React.SetStateAction<string>>
 }
+
+const selectTasks = (board: { tasks: Task[] }): Task[] => board.tasks
 
 function matchesTaskSearch(task: Task, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase()
@@ -34,7 +35,6 @@ export function BlockedBySection({
   onUpdate,
   blockers,
   setBlockers,
-  allTasks,
   columnsByProject,
   addBlockerSearch,
   setAddBlockerSearch
@@ -47,12 +47,9 @@ export function BlockedBySection({
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
 
-  const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await addBlocker.mutateAsync({ taskId: task.id, blockerTaskId })
-    const blockerTask = allTasks.find((t) => t.id === blockerTaskId)
-    if (blockerTask) {
-      setBlockers([...blockers, blockerTask])
-    }
+  const handleAddBlocker = async (blockerTask: Task): Promise<void> => {
+    await addBlocker.mutateAsync({ taskId: task.id, blockerTaskId: blockerTask.id })
+    setBlockers([...blockers, blockerTask])
     setAddBlockerSearch('')
   }
 
@@ -88,15 +85,6 @@ export function BlockedBySection({
     setCommentDialogOpen(false)
     setBlockedComment('')
   }
-
-  const availableBlockers = allTasks.filter(
-    (t) =>
-      !blockers.some((b) => b.id === t.id) &&
-      !isTerminalStatus(t.status, columnsByProject.get(t.project_id))
-  )
-  const filteredAvailableBlockers = availableBlockers.filter((blocker) =>
-    matchesTaskSearch(blocker, addBlockerSearch)
-  )
 
   return (
     <div>
@@ -184,41 +172,17 @@ export function BlockedBySection({
           <DialogHeader>
             <DialogTitle>Add blocking task</DialogTitle>
           </DialogHeader>
-          {availableBlockers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tasks available</p>
-          ) : (
-            <div className="space-y-2">
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={addBlockerSearch}
-                  onChange={(e) => setAddBlockerSearch(e.target.value)}
-                  aria-label="Search available blockers"
-                  placeholder="Search tasks..."
-                  className="h-8 pl-8 text-sm"
-                />
-              </div>
-              {filteredAvailableBlockers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No tasks match your search</p>
-              ) : (
-                <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                  {filteredAvailableBlockers.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        handleAddBlocker(t.id)
-                        setBlockerDialogOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                    >
-                      <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
-                      <span className="line-clamp-1 flex-1">{t.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <BlockerPicker
+            task={task}
+            blockers={blockers}
+            columnsByProject={columnsByProject}
+            search={addBlockerSearch}
+            setSearch={setAddBlockerSearch}
+            onPick={(t) => {
+              void handleAddBlocker(t)
+              setBlockerDialogOpen(false)
+            }}
+          />
         </DialogContent>
       </Dialog>
 
@@ -250,6 +214,79 @@ export function BlockedBySection({
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+interface BlockerPickerProps {
+  task: Task
+  blockers: Task[]
+  columnsByProject: Map<string, Project['columns_config']>
+  search: string
+  setSearch: React.Dispatch<React.SetStateAction<string>>
+  onPick: (task: Task) => void
+}
+
+/**
+ * The add-blocker list. Mounted only while its dialog is open, so the whole-board
+ * query it reads (every task) is subscribed — and structurally compared on each
+ * board change — only then, not by every open task tab's sidebar.
+ */
+function BlockerPicker({
+  task,
+  blockers,
+  columnsByProject,
+  search,
+  setSearch,
+  onPick
+}: BlockerPickerProps): React.JSX.Element {
+  const trpc = useTRPC()
+  // Read from the board query the app already holds (`task.loadBoardData` — the
+  // same rows `task.getAll` returns) rather than a second multi-MB cache entry.
+  const allTasksQuery = useQuery(
+    trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000, select: selectTasks })
+  )
+  const availableBlockers = (allTasksQuery.data ?? []).filter(
+    (t) =>
+      t.id !== task.id &&
+      !blockers.some((b) => b.id === t.id) &&
+      !isTerminalStatus(t.status, columnsByProject.get(t.project_id))
+  )
+  const filteredAvailableBlockers = availableBlockers.filter((blocker) =>
+    matchesTaskSearch(blocker, search)
+  )
+
+  if (availableBlockers.length === 0) {
+    return <p className="text-sm text-muted-foreground">No tasks available</p>
+  }
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search available blockers"
+          placeholder="Search tasks..."
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
+      {filteredAvailableBlockers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No tasks match your search</p>
+      ) : (
+        <div className="max-h-[200px] space-y-1 overflow-y-auto">
+          {filteredAvailableBlockers.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onPick(t)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
+            >
+              <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
+              <span className="line-clamp-1 flex-1">{t.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

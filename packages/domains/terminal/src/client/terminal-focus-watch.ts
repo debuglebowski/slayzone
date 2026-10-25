@@ -11,6 +11,7 @@ import {
   getFocusTrail,
   getLastInput
 } from './focus-loss-diag'
+import { isEarlyInputCapturing } from './early-input'
 
 interface FocusLossWatchOptions {
   container: HTMLElement
@@ -81,6 +82,9 @@ export function watchTerminalFocusLoss({
         const wentNowhere =
           active == null || active === document.body || active === document.documentElement
         if (!wentNowhere) return // focus moved to a real control — leave it
+        // Blurred on purpose for a terminal being created (Cmd+Shift+N): focus
+        // belongs to that one, not back here.
+        if (isEarlyInputCapturing()) return
         if (!textarea.isConnected) return // torn down — let the reporter classify it
         const landedBefore = describeEl(active)
         terminalRef.current?.focus()

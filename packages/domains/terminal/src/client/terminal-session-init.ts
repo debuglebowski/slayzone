@@ -40,6 +40,8 @@ import { acquireInitSlot } from './terminal-init-scheduler'
 import { touchTerminalMru } from './terminal-mru'
 import { isMainThreadSettled, overlapsLongTask } from './main-thread-jank'
 import { attachPty } from './pty-attach'
+import { createInputGate } from './input-gate'
+import { takeEarlyInput } from './early-input'
 import type { TerminalProps } from './Terminal.types'
 
 // Reopen respawns the CLI with --resume; it re-streams the transcript over the
@@ -659,6 +661,45 @@ export async function initTerminalSession(
     // DOM work done — let the next queued terminal go.
     releaseSlot()
 
+    // Input from here on: the xterm is focusable now, but a new session's PTY is a
+    // round trip away. Keys typed meanwhile are held and delivered once it is up
+    // (`inputGate.open()` below) instead of reaching no handler and being lost.
+    //
+    // OSC replies (\x1b]...\x07 or \x1b]...\x1b\\) are dropped here: they are
+    // ANSWERS to color queries, never user input, and the server is the sole
+    // authority for answering (synchronously, see `computeSyncQueryResponse`)
+    // — a renderer-side answer is stale by construction and injects escape
+    // bytes into the process's stdin. These broke interactive prompts (gh CLI).
+    //
+    // CSI device-status (CPR / DECXCPR / DSR) is NOT filtered here. It is
+    // suppressed at the source instead, via `suppressDeviceStatusReplies` on
+    // the parser, because filtering it after the fact is impossible: xterm
+    // encodes modified F3 as `ESC[1;<mod>R`, byte-identical to a row-1 cursor
+    // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
+    // Stopping the reply from being generated leaves keystrokes untouched.
+    const inputGate = createInputGate((data) => {
+      void trpcClient.pty.write.mutate({ sessionId, data })
+    })
+    // An init abandoned mid-way (unmount) may leave this xterm cached and later
+    // reattached: never leave it holding input.
+    signal.addEventListener('abort', () => inputGate.open(), { once: true })
+    // Keys typed after the user asked for this terminal but before its xterm
+    // existed (early-input.ts). Taken here — synchronously with the focus above
+    // and the input wiring below — so none is dropped or doubled.
+    const early = takeEarlyInput(sessionId)
+    if (early) inputGate.input(early)
+    terminal.onData((data) => {
+      // Mark user activity so the next batcher flush paints at 60fps
+      // (echo round-trip has zero added latency from the throttle).
+      lastActivityTimeRef.current = performance.now()
+      if (!hasCalledFirstInputRef.current) {
+        hasCalledFirstInputRef.current = true
+        onFirstInputRef.current?.()
+      }
+      const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      if (filtered) inputGate.input(filtered)
+    })
+
     // Check if PTY already exists (e.g., from idle hibernation), and if so its
     // state + full ring buffer — one round trip (pty.attach).
     const attached = await attachPty(trpcClient, sessionId, -1)
@@ -741,6 +782,7 @@ export async function initTerminalSession(
         terminal.writeln(`\x1b[31mError: ${message}\x1b[0m`)
         setInitError(message)
         setPtyState('error')
+        inputGate.drop()
         return
       }
 
@@ -759,31 +801,8 @@ export async function initTerminalSession(
       }
     }
 
-    // Handle terminal input - pass through to PTY.
-    //
-    // OSC replies (\x1b]...\x07 or \x1b]...\x1b\\) are dropped here: they are
-    // ANSWERS to color queries, never user input, and the server is the sole
-    // authority for answering (synchronously, see `computeSyncQueryResponse`)
-    // — a renderer-side answer is stale by construction and injects escape
-    // bytes into the process's stdin. These broke interactive prompts (gh CLI).
-    //
-    // CSI device-status (CPR / DECXCPR / DSR) is NOT filtered here. It is
-    // suppressed at the source instead, via `suppressDeviceStatusReplies` on
-    // the parser, because filtering it after the fact is impossible: xterm
-    // encodes modified F3 as `ESC[1;<mod>R`, byte-identical to a row-1 cursor
-    // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
-    // Stopping the reply from being generated leaves keystrokes untouched.
-    terminal.onData((data) => {
-      // Mark user activity so the next batcher flush paints at 60fps
-      // (echo round-trip has zero added latency from the throttle).
-      lastActivityTimeRef.current = performance.now()
-      if (!hasCalledFirstInputRef.current) {
-        hasCalledFirstInputRef.current = true
-        onFirstInputRef.current?.()
-      }
-      const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-      if (filtered) void trpcClient.pty.write.mutate({ sessionId, data: filtered })
-    })
+    // The session is up: deliver input typed while it was being created.
+    inputGate.open()
 
     // Optimistically clear the 'running' dot when the user interrupts the
     // agent. Mirrors Superset's `useTerminalInterruptClear`: Ctrl+C / Esc

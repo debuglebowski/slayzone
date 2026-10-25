@@ -22,8 +22,6 @@ interface TaskMetadataSidebarProps {
   onTagCreated?: (tag: Tag) => void
 }
 
-const selectTasks = (board: { tasks: Task[] }): Task[] => board.tasks
-
 export function TaskMetadataSidebar({
   task,
   tags,
@@ -36,18 +34,11 @@ export function TaskMetadataSidebar({
   const [blockers, setBlockers] = useState<Task[]>([])
   const [addBlockerSearch, setAddBlockerSearch] = useState('')
 
-  // Every task (the blocker picker), current blockers, and projects. The task list
-  // is read from the board query the app already holds (`task.loadBoardData` — the
-  // same rows `task.getAll` returns) rather than a second multi-MB `getAll` cache
-  // entry refetched on every mount and focus. Same staleTime as the app's board
-  // observer; the board is kept fresh by the app's tasks-changed handling.
-  const allTasksQuery = useQuery(
-    trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000, select: selectTasks })
-  )
+  // Current blockers and projects. The blocker picker's list of every task is read
+  // inside the picker (BlockedBySection), only while it is open.
   const blockersQuery = useQuery(trpc.task.getBlockers.queryOptions({ taskId: task.id }))
   const projectsQuery = useQuery(trpc.projects.list.queryOptions())
 
-  const allTasks = (allTasksQuery.data ?? []).filter((t) => t.id !== task.id)
   const projects = projectsQuery.data ?? []
 
   // Mirror fetched blockers into local state so BlockedBySection can optimistically
@@ -94,7 +85,6 @@ export function TaskMetadataSidebar({
         onUpdate={onUpdate}
         blockers={blockers}
         setBlockers={setBlockers}
-        allTasks={allTasks}
         columnsByProject={columnsByProject}
         addBlockerSearch={addBlockerSearch}
         setAddBlockerSearch={setAddBlockerSearch}

@@ -68,14 +68,14 @@ describe('patchBoardRows', () => {
     expect([...next!.blockedTaskIds].sort()).toEqual(['a', 'b'])
   })
 
-  it('refuses (null → full reload) when a row is new: its position is SQL-ordered', () => {
+  it('refuses (null → full reload) when a row is new and the server gave no position', () => {
     const prev = board([t('a')])
     expect(
       patchBoardRows(prev, ['n'], { tasks: [t('n')], taskTags: {}, blockedTaskIds: [] })
     ).toBeNull()
   })
 
-  it('refuses when a row would move (order or created_at changed)', () => {
+  it('refuses when a row would move and the server gave no position', () => {
     const prev = board([t('a'), t('b', { order: 1 })])
     expect(
       patchBoardRows(prev, ['b'], {
@@ -92,6 +92,68 @@ describe('patchBoardRows', () => {
       })
     ).toBeNull()
   })
+
+  it('inserts a new row before its server-given successor, others keep identity', () => {
+    const a = t('a')
+    const b = t('b', { order: 1 })
+    const prev = board([a, b])
+    const n = t('n', { order: 1 })
+    const next = patchBoardRows(prev, ['n'], {
+      tasks: [n],
+      taskTags: { n: ['x'] },
+      blockedTaskIds: [],
+      nextTaskIds: { n: 'b' }
+    })
+    expect(next!.tasks.map((x) => x.id)).toEqual(['a', 'n', 'b'])
+    expect(next!.tasks[0]).toBe(a)
+    expect(next!.tasks[2]).toBe(b)
+    expect(next!.taskTags).toEqual({ n: ['x'] })
+  })
+
+  it('appends a new row whose successor is null (last on the board)', () => {
+    const prev = board([t('a')])
+    const next = patchBoardRows(prev, ['n'], {
+      tasks: [t('n', { order: 9 })],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { n: null }
+    })
+    expect(next!.tasks.map((x) => x.id)).toEqual(['a', 'n'])
+  })
+
+  it('moves a row to its server-given successor', () => {
+    const prev = board([t('a'), t('b', { order: 1 }), t('c', { order: 2 })])
+    const next = patchBoardRows(prev, ['a'], {
+      tasks: [t('a', { order: 3 })],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { a: null }
+    })
+    expect(next!.tasks.map((x) => x.id)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('chains several placed rows whose successor is another placed row', () => {
+    const prev = board([t('a'), t('z', { order: 9 })])
+    const next = patchBoardRows(prev, ['m', 'n'], {
+      tasks: [t('m', { order: 1 }), t('n', { order: 2 })],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { m: 'n', n: 'z' }
+    })
+    expect(next!.tasks.map((x) => x.id)).toEqual(['a', 'm', 'n', 'z'])
+  })
+
+  it('refuses when the successor is not on this board (board out of date)', () => {
+    const prev = board([t('a')])
+    expect(
+      patchBoardRows(prev, ['n'], {
+        tasks: [t('n')],
+        taskTags: {},
+        blockedTaskIds: [],
+        nextTaskIds: { n: 'unknown' }
+      })
+    ).toBeNull()
+  })
 })
 
 describe('parentIdsOf', () => {
@@ -103,6 +165,51 @@ describe('parentIdsOf', () => {
 })
 
 describe('patchMirrorTasks (three-way: keep pending optimistic edits)', () => {
+  it('adds a row the mirror does not hold yet, at its board position', () => {
+    const a = t('a')
+    const b = t('b', { order: 1 })
+    const prev = board([a, b])
+    const n = t('n', { order: 1 })
+    const next = patchBoardRows(prev, ['n'], {
+      tasks: [n],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { n: 'b' }
+    })!
+    const out = patchMirrorTasks([a, b], ['n'], prev, next)
+    expect(out.map((x) => x.id)).toEqual(['a', 'n', 'b'])
+    expect(out[1]).toBe(n)
+  })
+
+  it('an optimistically added row is merged in place, not duplicated', () => {
+    const a = t('a')
+    const prev = board([a])
+    const n = t('n', { order: 1 })
+    const next = patchBoardRows(prev, ['n'], {
+      tasks: [n],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { n: null }
+    })!
+    const optimistic = { ...n } as Task
+    const out = patchMirrorTasks([optimistic, a], ['n'], prev, next)
+    expect(out.map((x) => x.id)).toEqual(['n', 'a'])
+    expect(out[0]).toBe(n)
+  })
+
+  it('a remote move of a row without local edits follows the board', () => {
+    const a = t('a')
+    const b = t('b', { order: 1 })
+    const prev = board([a, b])
+    const next = patchBoardRows(prev, ['a'], {
+      tasks: [t('a', { order: 2 })],
+      taskTags: {},
+      blockedTaskIds: [],
+      nextTaskIds: { a: null }
+    })!
+    expect(patchMirrorTasks([a, b], ['a'], prev, next).map((x) => x.id)).toEqual(['b', 'a'])
+  })
+
   it('a drag across columns: the status patch lands without undoing the optimistic order', () => {
     // Board (server) before: b in todo at order 1. The drag optimistically moved b to
     // in_progress at order 0 and wrote status + order as two mutations. The status

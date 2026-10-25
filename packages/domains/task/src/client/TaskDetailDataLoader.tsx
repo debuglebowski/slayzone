@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useHubId } from '@slayzone/transport/client'
 import { TaskDetailPage, type TaskDetailPageProps } from './TaskDetailPage'
 import { taskDetailCache } from './taskDetailCache'
+import { clearTerminalFirst } from './terminal-first'
 
 export type TaskDetailDataLoaderProps = Omit<TaskDetailPageProps, 'initialData'>
 
@@ -19,5 +20,7 @@ export const TaskDetailDataLoader = React.memo(function TaskDetailDataLoader(
 ): React.JSX.Element {
   const hubId = useHubId() ?? undefined
   const data = taskDetailCache.useData('taskDetail', props.taskId, hubId)
+  // The page (and its own terminal) is up: the terminal-first pane is done.
+  useEffect(() => clearTerminalFirst(props.taskId), [props.taskId])
   return <TaskDetailPage {...props} initialData={data} />
 })
