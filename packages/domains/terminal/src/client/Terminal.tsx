@@ -64,6 +64,9 @@ import { track } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
 
+/** Host style for a terminal nobody can see — see the host `<div>` below. */
+const HIDDEN_HOST_STYLE = { contentVisibility: 'hidden' } as const
+
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
     sessionId,
@@ -1169,7 +1172,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         style={{ padding: '8px', backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a' }}
         onClick={() => terminalRef.current?.focus()}
       >
-        <div ref={containerRef} className="h-full w-full overflow-hidden" />
+        {/* Hidden terminal: keep parsing output, stop painting it. A hidden tab is
+            `visibility: hidden`, which still intersects the viewport, so xterm's
+            IntersectionObserver never paused its renderer and every hidden terminal
+            painted every output chunk — main-thread work that lands on a tab switch.
+            `content-visibility: hidden` skips the subtree, so the observer reports
+            it off-screen and xterm pauses (buffer, modes and scroll position stay
+            live); on reveal xterm repaints the whole viewport. The host box keeps
+            its size, so the ResizeObserver above never sees a resize. */}
+        <div
+          ref={containerRef}
+          className="h-full w-full overflow-hidden"
+          style={isActive ? undefined : HIDDEN_HOST_STYLE}
+        />
         {isLoading && (
           <div
             className="absolute inset-0 z-10"

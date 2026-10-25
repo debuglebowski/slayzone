@@ -26,11 +26,12 @@
  * Two environment facts make the spec meaningful, both asserted rather than
  * assumed:
  *
- *   - Inactive task tabs hide with `visibility: hidden`, not `display: none`.
- *     `IntersectionObserver` ignores `visibility`, so those panes stay UNPAUSED
- *     (`RenderService._isPaused === false`) and can still paint. A `display:
- *     none` pane would be paused, `refresh()` would be a no-op, and this spec
- *     would prove nothing.
+ *   - The sibling contracts need several panes that PAINT at once. A hidden task
+ *     tab's terminal is paused (`content-visibility: hidden` on its host, so
+ *     xterm's IntersectionObserver sets `RenderService._isPaused`) — `refresh()`
+ *     is a no-op there and would prove nothing. So the sibling test runs in
+ *     explode mode, where every task's pane is on screen and unpaused, and the
+ *     hidden-pane test checks the reveal handoff instead.
  *   - The oracle compares vertex texture coordinates against the atlas cache
  *     EXACTLY (numeric), keyed by the same `(code, bg, fg, ext)` the renderer
  *     used. It does not reverse-map `tile → char`: after a repack a stale coord
@@ -41,6 +42,7 @@
  * against a version downgrade; this spec asserts the behaviour.
  */
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import {
   getMainSessionId,
   openTaskTerminal,
@@ -314,6 +316,13 @@ async function frames(page: import('@playwright/test').Page, count = 4): Promise
   )
 }
 
+/** Toggle explode mode (all task panes in one grid) and wait for the grid to match. */
+async function setExplodeMode(page: import('@playwright/test').Page, on: boolean): Promise<void> {
+  const cells = page.locator('[data-explode-task-id]')
+  if (((await cells.count()) > 0) !== on) await pressShortcut(page, 'explode-mode')
+  await expect(cells).toHaveCount(on ? TAB_COUNT : 0, { timeout: 10_000 })
+}
+
 const fmt = (rs: PaneReading[]): string =>
   rs
     .map(
@@ -367,12 +376,14 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
       await runCommand(mainWindow, sid, `echo ${marker}`)
       await waitForBufferContains(mainWindow, sid, marker)
     }
+    // Every pane on screen at once (explode mode), so every renderer paints.
+    await setExplodeMode(mainWindow, true)
     // Startup corrections run at +0/250/750ms after each load; let the last
     // pane's window close so the atlas is settled, not mid-correction.
     await mainWindow.waitForTimeout(1_500)
     await frames(mainWindow)
 
-    // The last-opened tab is the active one; the rest are hidden but unpaused.
+    // The last-opened tab is the focused cell; the others are siblings on screen.
     const activeSid = getMainSessionId(taskIds[TAB_COUNT - 1])
 
     const state: AtlasState = await mainWindow.evaluate(ORACLE_SOURCE)
@@ -396,15 +407,15 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
     // The invalidation signal must exist on the shipped bundle.
     expect(state.versionSupported, 'atlas exposes pageLayoutVersion (post-fix build)').toBe(true)
 
-    // Hidden tabs must still be paintable, or nothing below means anything.
+    // Every pane must be paintable, or nothing below means anything.
     const paused = (await mainWindow.evaluate('(() => window.__atlasOracle.paused())()')) as Array<{
       sid: string
       isPaused: boolean
     }>
     expect(
       paused.filter((p) => !p.isPaused).length,
-      'at least 2 WebGL panes unpaused (hidden tabs use visibility:hidden, so they keep painting)'
-    ).toBeGreaterThanOrEqual(2)
+      'every WebGL pane unpaused (explode mode puts them all on screen)'
+    ).toBe(state.webglPanes)
 
     // Opening tabs sequentially already exercises the bug: each new pane's
     // startup correction repacks the SHARED atlas, so earlier panes are behind by
@@ -574,6 +585,8 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
   }) => {
     test.setTimeout(240_000)
 
+    // Back to tabs: one pane visible, the others hidden (and paused).
+    await setExplodeMode(mainWindow, false)
     const state: AtlasState = await mainWindow.evaluate(ORACLE_SOURCE)
     test.skip(!state.webglAvailable, 'no WebGL context available in this environment')
     expect(state.webglPanes, 'panes from the previous test still mounted').toBeGreaterThanOrEqual(2)
@@ -676,7 +689,9 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
       )) as PaneReading[]
       const now = rs.find((r) => r.sessionId === stalest.sessionId)
       latest = now ? now.agreement : 1
-      if (latest > MIN_AGREEMENT) {
+      // A paused hidden pane can hold no vertex data at all (0 cells compared,
+      // agreement 1 by default) — repaired means it painted real cells correctly.
+      if (latest > MIN_AGREEMENT && (now?.compared ?? 0) > 20) {
         repairedAfterMs = Date.now() - switchedAt
         break
       }
