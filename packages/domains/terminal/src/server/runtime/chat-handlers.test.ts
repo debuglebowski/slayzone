@@ -1,10 +1,12 @@
 /**
  * Integration test for chat:reset IPC handler.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   packages/domains/terminal/src/main/chat-handlers.test.ts
+ *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
  *
  * Uses Electron's bundled Node so better-sqlite3's native module matches. Wires
- * registerChatHandlers against a mock ipcMain + in-memory sqlite + faked transport
+ * registerChatHandlers against a mock ipcMain + createTestHarness's migrated
+ * in-memory sqlite + faked transport
  * spawn, then drives the `chat:reset` channel end-to-end. Asserts the three
  * properties that make reset correct:
  *   - new spawn does NOT use --resume (ignores stored chatConversationId)
@@ -14,11 +16,14 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
-import Database from 'better-sqlite3'
+import type Database from 'better-sqlite3'
 import { registerChatHandlers } from './chat-handlers'
 import * as mgr from './chat-transport-manager'
 import { persistChatEvent } from '../chat-events-store'
-import { createSlayzoneDbAdapter } from '../../../../../shared/test-utils/ipc-harness.js'
+import {
+  createSlayzoneDbAdapter,
+  createTestHarness
+} from '../../../../../shared/test-utils/ipc-harness.js'
 
 let passed = 0
 let failed = 0
@@ -84,27 +89,29 @@ function createMockIpcMain(): MockIpcMain {
   }
 }
 
-function setupDb(): Database.Database {
-  const db = new Database(':memory:')
-  db.exec(`
-    CREATE TABLE tasks (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      provider_config TEXT
-    );
-    CREATE TABLE terminal_modes (
-      id TEXT PRIMARY KEY,
-      default_flags TEXT
-    );
-    CREATE TABLE chat_events (
-      tab_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      event TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (tab_id, seq)
-    );
-  `)
-  return db
+/** Real migrated schema (FK pragmas on) — the handlers read projects/tasks/
+ * terminal_tabs/chat_events/chat_queue, so fixtures go through the full chain. */
+async function setupDb(): Promise<Database.Database> {
+  return (await createTestHarness()).db
+}
+
+function seedTask(
+  db: Database.Database,
+  taskId: string,
+  providerConfig: string | null,
+  tabId?: string
+): void {
+  db.prepare(
+    "INSERT OR IGNORE INTO projects (id, name, color) VALUES ('proj-1', 'P', '#000')"
+  ).run()
+  db.prepare(
+    "INSERT INTO tasks (id, project_id, title, provider_config) VALUES (?, 'proj-1', 'T', ?)"
+  ).run(taskId, providerConfig ?? '{}')
+  if (tabId) {
+    db.prepare(
+      "INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, 'claude-chat', 0)"
+    ).run(tabId, taskId)
+  }
 }
 
 console.log('\nchat:reset IPC handler tests\n')
@@ -113,15 +120,12 @@ await test('chat:reset spawns fresh (no --resume) even when DB has stored chatCo
   mgr.__resetForTests()
   mgr.resetTransportDeps()
 
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-reset-1'
   const tabId = 'tab-reset-1'
-  const mode = 'claude-code'
+  const mode = 'claude-chat'
 
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatConversationId: 'old-stored-sid' } })
-  )
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatConversationId: 'old-stored-sid' } }), tabId)
 
   const spawnArgsLog: string[][] = []
   mgr.setTransportDepsForTests({
@@ -222,15 +226,12 @@ await test('chat:reset still wipes events + clears conv id when no live session 
   mgr.__resetForTests()
   mgr.resetTransportDeps()
 
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-reset-2'
   const tabId = 'tab-reset-2'
-  const mode = 'claude-code'
+  const mode = 'claude-chat'
 
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatConversationId: 'stale-sid' } })
-  )
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatConversationId: 'stale-sid' } }), tabId)
   await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
     kind: 'turn-init',
     sessionId: 'stale-sid',
@@ -284,10 +285,10 @@ console.log('\nchat:setModel / chat:getModel IPC handler tests\n')
 await test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=opus) when nothing stored', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-1'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null)
 
   const ipc = createMockIpcMain()
   registerChatHandlers(
@@ -305,13 +306,10 @@ await test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=o
 await test('chat:getModel returns stored value', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-2'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatModel: 'opus' } })
-  )
+  const mode = 'claude-chat'
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatModel: 'opus' } }))
 
   const ipc = createMockIpcMain()
   registerChatHandlers(
@@ -326,15 +324,12 @@ await test('chat:getModel returns stored value', async () => {
 await test('chat:getModel falls back to account default for unknown / legacy stored value', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-3'
-  const mode = 'claude-code'
+  const mode = 'claude-chat'
   // Includes legacy `'default'` from before the option was removed — must
   // coerce to a concrete model rather than echo back.
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatModel: 'default' } })
-  )
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatModel: 'default' } }))
 
   const ipc = createMockIpcMain()
   registerChatHandlers(
@@ -349,11 +344,11 @@ await test('chat:getModel falls back to account default for unknown / legacy sto
 await test('chat:setModel persists to provider_config + respawns with --model flag', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-4'
   const tabId = 'tab-model-4'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   const spawnArgsLog: string[][] = []
   mgr.setTransportDepsForTests({
@@ -375,14 +370,26 @@ await test('chat:setModel persists to provider_config + respawns with --model fl
 
   // Initial eager start — no model stored. We always emit --model now, picking
   // the account default from `~/.claude/settings.json` (or DEFAULT_CHAT_MODEL).
-  await ipc.invoke('chat:start', { tabId, taskId, mode, cwd: '/tmp', providerFlagsOverride: null })
+  await ipc.invoke('chat:start', {
+    tabId,
+    taskId,
+    mode,
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
   expect(spawnArgsLog.length).toBe(1)
   const firstIdx = spawnArgsLog[0].indexOf('--model')
   expect(firstIdx >= 0).toBe(true)
   expect(['opus', 'sonnet', 'haiku'].includes(spawnArgsLog[0][firstIdx + 1])).toBe(true)
 
   // setModel → kill+respawn with --model sonnet.
-  await ipc.invoke('chat:setModel', { tabId, taskId, mode, cwd: '/tmp', chatModel: 'sonnet' })
+  await ipc.invoke('chat:setModel', {
+    tabId,
+    taskId,
+    mode,
+    cwd: '/tmp',
+    chatModel: 'sonnet'
+  })
   expect(spawnArgsLog.length).toBe(2)
   const second = spawnArgsLog[1]
   const idx = second.indexOf('--model')
@@ -400,11 +407,11 @@ await test('chat:setModel persists to provider_config + respawns with --model fl
 await test('chat:setModel rejects invalid model id', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-5'
   const tabId = 'tab-model-5'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
@@ -422,7 +429,13 @@ await test('chat:setModel rejects invalid model id', async () => {
 
   let threw = false
   try {
-    await ipc.invoke('chat:setModel', { tabId, taskId, mode, cwd: '/tmp', chatModel: 'gpt-5' })
+    await ipc.invoke('chat:setModel', {
+      tabId,
+      taskId,
+      mode,
+      cwd: '/tmp',
+      chatModel: 'gpt-5'
+    })
   } catch {
     threw = true
   }
@@ -432,14 +445,11 @@ await test('chat:setModel rejects invalid model id', async () => {
 await test('chat:start reads stored chatModel and adds --model on cold spawn', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-6'
   const tabId = 'tab-model-6'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatModel: 'haiku' } })
-  )
+  const mode = 'claude-chat'
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatModel: 'haiku' } }), tabId)
 
   const spawnArgsLog: string[][] = []
   mgr.setTransportDepsForTests({
@@ -459,7 +469,13 @@ await test('chat:start reads stored chatModel and adds --model on cold spawn', a
     createSlayzoneDbAdapter(db)
   )
 
-  await ipc.invoke('chat:start', { tabId, taskId, mode, cwd: '/tmp', providerFlagsOverride: null })
+  await ipc.invoke('chat:start', {
+    tabId,
+    taskId,
+    mode,
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
   expect(spawnArgsLog.length).toBe(1)
   const args = spawnArgsLog[0]
   const idx = args.indexOf('--model')
@@ -470,15 +486,12 @@ await test('chat:start reads stored chatModel and adds --model on cold spawn', a
 await test('explicit providerFlagsOverride suppresses --model injection', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-model-7'
   const tabId = 'tab-model-7'
-  const mode = 'claude-code'
+  const mode = 'claude-chat'
   // Stored chatModel = sonnet; override should still win.
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatModel: 'sonnet' } })
-  )
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatModel: 'sonnet' } }), tabId)
 
   const spawnArgsLog: string[][] = []
   mgr.setTransportDepsForTests({
@@ -514,11 +527,11 @@ console.log('\nlazy-spawn IPC handler tests\n')
 await test('chat:hydrate does NOT spawn a subprocess', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-lazy-1'
   const tabId = 'tab-lazy-1'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   const spawnCount = { n: 0 }
   mgr.setTransportDepsForTests({
@@ -554,11 +567,11 @@ await test('chat:hydrate does NOT spawn a subprocess', async () => {
 await test('chat:send triggers lazy spawn on a hydrated session', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-lazy-2'
   const tabId = 'tab-lazy-2'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   const spawnCount = { n: 0 }
   let lastChild: ChildProcess | null = null
@@ -600,11 +613,11 @@ await test('chat:send triggers lazy spawn on a hydrated session', async () => {
 await test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-lazy-3'
   const tabId = 'tab-lazy-3'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   const spawnCount = { n: 0 }
   mgr.setTransportDepsForTests({
@@ -644,14 +657,11 @@ await test('chat:hydrate twice is idempotent — only one skeleton, zero spawns'
 await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-lazy-4'
   const tabId = 'tab-lazy-4'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(
-    taskId,
-    JSON.stringify({ [mode]: { chatConversationId: 'old-sid' } })
-  )
+  const mode = 'claude-chat'
+  seedTask(db, taskId, JSON.stringify({ [mode]: { chatConversationId: 'old-sid' } }), tabId)
   await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
     kind: 'turn-init',
     sessionId: 'old-sid',
@@ -678,7 +688,13 @@ await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', asy
     createSlayzoneDbAdapter(db)
   )
 
-  await ipc.invoke('chat:reset', { tabId, taskId, mode, cwd: '/tmp', providerFlagsOverride: null })
+  await ipc.invoke('chat:reset', {
+    tabId,
+    taskId,
+    mode,
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
 
   // No spawn on reset.
   expect(spawnCount.n).toBe(0)
@@ -701,11 +717,11 @@ await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', asy
 await test('chat:setMode pre-spawn persists DB without spawning', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
-  const db = setupDb()
+  const db = await setupDb()
   const taskId = 'task-lazy-5'
   const tabId = 'tab-lazy-5'
-  const mode = 'claude-code'
-  db.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run(taskId, null)
+  const mode = 'claude-chat'
+  seedTask(db, taskId, null, tabId)
 
   const spawnCount = { n: 0 }
   mgr.setTransportDepsForTests({
@@ -736,7 +752,13 @@ await test('chat:setMode pre-spawn persists DB without spawning', async () => {
   expect(spawnCount.n).toBe(0)
 
   // setMode on a not-spawned skeleton: DB write only, no respawn.
-  await ipc.invoke('chat:setMode', { tabId, taskId, mode, cwd: '/tmp', chatMode: 'plan' })
+  await ipc.invoke('chat:setMode', {
+    tabId,
+    taskId,
+    mode,
+    cwd: '/tmp',
+    chatMode: 'plan'
+  })
   expect(spawnCount.n).toBe(0)
 
   const cfgRow = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as {

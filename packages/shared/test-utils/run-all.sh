@@ -60,6 +60,7 @@ run_test_electron_strict_loader packages/domains/agent-turns/src/server/prompt-c
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task-terminals.test.ts
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
+run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_test_electron_strict_loader packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
@@ -681,8 +682,6 @@ run_test packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 
 # Known-red suites, skipped visibly with the reason instead of failing every run. Each
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
-skip_suite packages/domains/terminal/src/server/runtime/chat-handlers.test.ts \
-  "10 of 14 cases fail: its hand-written mini-schema predates the projects table the handlers now query (already ported to the async SlayzoneDb adapter). Fix: build on createTestHarness's migrated DB"
 skip_suite packages/domains/diagnostics/src/electron/batching.test.ts \
   "1 assertion fails (Expected 1, got 0). Fix the flush expectation"
 skip_suite packages/domains/file-editor/src/client/useFileEditor.test.ts \
