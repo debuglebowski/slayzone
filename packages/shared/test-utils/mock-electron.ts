@@ -122,15 +122,14 @@ export const net = {
 // In-memory credential store for tests (replaces OS keychain)
 const _credentialStore = new Map<string, Buffer>()
 export const safeStorage = {
-  isEncryptionAvailable: () => true,
-  encryptString: (text: string) => {
-    const buf = Buffer.from(`encrypted:${text}`)
-    return buf
-  },
-  decryptString: (buf: Buffer) => {
+  isAsyncEncryptionAvailable: async () => true,
+  encryptStringAsync: async (text: string) => Buffer.from(`encrypted:${text}`),
+  decryptStringAsync: async (buf: Buffer) => {
     const str = buf.toString()
-    if (str.startsWith('encrypted:')) return str.slice('encrypted:'.length)
-    return str
+    return {
+      result: str.startsWith('encrypted:') ? str.slice('encrypted:'.length) : str,
+      shouldReEncrypt: false
+    }
   }
 }
 

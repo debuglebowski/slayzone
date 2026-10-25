@@ -568,11 +568,12 @@ export type AppDeps = {
   // Credential cipher — Electron `safeStorage`-backed, so host-only. The side-car
   // runs as ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
   // forwards encrypt/decrypt here over the bridge. Base64 strings on the wire
-  // (superjson does not round-trip Buffer).
+  // (superjson does not round-trip Buffer). Async — Electron's async safeStorage
+  // API; `shouldReEncrypt` = OS key rotated, the side-car re-encrypts + persists.
   credentialCipher: {
-    isEncryptionAvailable: () => boolean
-    encryptStringToB64: (secret: string) => string
-    decryptStringFromB64: (b64: string) => string
+    isEncryptionAvailable: () => Promise<boolean>
+    encryptStringToB64: (secret: string) => Promise<string>
+    decryptStringFromB64: (b64: string) => Promise<{ result: string; shouldReEncrypt: boolean }>
   }
 
   // auth

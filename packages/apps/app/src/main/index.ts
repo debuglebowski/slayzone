@@ -2355,13 +2355,13 @@ app
               // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
               // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
               credentialCipher: {
-                isEncryptionAvailable: () =>
-                  getSafeStorageCipher()?.isEncryptionAvailable() ?? false,
-                encryptStringToB64: (secret) => {
+                isEncryptionAvailable: async () =>
+                  (await getSafeStorageCipher()?.isEncryptionAvailable()) ?? false,
+                encryptStringToB64: async (secret) => {
                   const c = getSafeStorageCipher()
                   if (!c)
                     throw new Error('OS secure credential storage is unavailable on this machine')
-                  return c.encryptString(secret).toString('base64')
+                  return (await c.encryptString(secret)).toString('base64')
                 },
                 decryptStringFromB64: (b64) => {
                   const c = getSafeStorageCipher()
@@ -3430,10 +3430,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.handle('app:get-hub-tokens', () =>
       getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
     )
-    ipcMain.handle('app:set-hub-token', (_event, payload: { hubId: string; token: string }) => {
-      setHubToken(getClientStateRoot(), payload.hubId, payload.token, getLegacyClientStateRoot())
-      return { ok: true as const }
-    })
+    ipcMain.handle(
+      'app:set-hub-token',
+      async (_event, payload: { hubId: string; token: string }) => {
+        await setHubToken(
+          getClientStateRoot(),
+          payload.hubId,
+          payload.token,
+          getLegacyClientStateRoot()
+        )
+        return { ok: true as const }
+      }
+    )
     // Sign in to a remote hub (email+password → bearer). Runs main-side (CSP +
     // cert-pin), then persists the token for that hub. Returns ok/error to the UI.
     ipcMain.handle(
@@ -3442,7 +3450,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         const result = await hubLogin(payload.url, payload.email, payload.password)
         if (result.ok) {
           try {
-            setHubToken(
+            await setHubToken(
               getClientStateRoot(),
               payload.hubId,
               result.token,
@@ -3501,7 +3509,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           signal: flow.abort.signal
         })
         if (!result.ok) return result
-        setHubToken(getClientStateRoot(), flow.hubId, result.token, getLegacyClientStateRoot())
+        await setHubToken(
+          getClientStateRoot(),
+          flow.hubId,
+          result.token,
+          getLegacyClientStateRoot()
+        )
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }

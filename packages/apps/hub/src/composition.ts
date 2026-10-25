@@ -996,10 +996,10 @@ export function composeServer(opts: {
       themeGetSource: () => 'system',
       themeSet: async (pref) => (pref === 'light' ? 'light' : 'dark'),
       // No Electron safeStorage on a headless host — report unavailable so the
-      // credential store uses its plaintext fallback (gated by env). The encrypt/
+      // credential store uses its plaintext fallback (gated on availability). The encrypt/
       // decrypt stubs are never reached because the cipher stays unset standalone.
       credentialCipher: {
-        isEncryptionAvailable: () => false,
+        isEncryptionAvailable: async () => false,
         encryptStringToB64: stub('credentialCipher.encryptStringToB64'),
         decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
       },

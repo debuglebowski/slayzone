@@ -4,32 +4,24 @@ import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refu
 /**
  * OS secure-credential cipher seam — electron-free so this store lives in server/.
  * The Electron host injects a safeStorage-backed cipher at boot via
- * `setCredentialCipher` (../electron/credentials-cipher); the standalone server
- * pkg can inject its own (slice 6). Until injected, `cipher` is null → the
- * plaintext fallback applies (test/dev only, gated by allowPlaintextFallback).
- * The interface mirrors Electron's `safeStorage` so the host injects it directly.
- */
-/**
- * Mirrors Electron's `safeStorage` so the host can inject it directly. Methods
- * are async-tolerant: the host injects a synchronous safeStorage cipher, while
- * the supervised side-car injects a cipher that forwards to the host over the
- * capability bridge (inherently async). Consumers `await` either shape.
+ * `setCredentialCipher` (../electron/credentials-cipher); the supervised side-car
+ * injects one that forwards to the host over the capability bridge. Until
+ * injected, `cipher` is null → the plaintext fallback applies (see
+ * allowPlaintextFallback).
+ *
+ * Mirrors Electron's ASYNC safeStorage API (`isAsyncEncryptionAvailable` /
+ * `encryptStringAsync` / `decryptStringAsync`; the sync trio is deprecated in
+ * Electron 45, removed in 46). Ciphertext written by the old sync
+ * `encryptString` stays decryptable by `decryptStringAsync`.
  */
 export interface CredentialCipher {
-  isEncryptionAvailable: () => boolean | Promise<boolean>
-  encryptString: (secret: string) => Buffer | Promise<Buffer>
-  decryptString: (encrypted: Buffer) => string | Promise<string>
-}
-
-/**
- * Synchronous cipher shape — exactly Electron's `safeStorage`. The host injects
- * one of these directly; it is assignable to the async-tolerant CredentialCipher
- * above (a sync return satisfies `T | Promise<T>`), so the store can `await` it.
- */
-export interface SafeStorageCipher {
-  isEncryptionAvailable: () => boolean
-  encryptString: (secret: string) => Buffer
-  decryptString: (encrypted: Buffer) => string
+  isEncryptionAvailable: () => Promise<boolean>
+  encryptString: (secret: string) => Promise<Buffer>
+  /**
+   * `shouldReEncrypt` — the OS key rotated (or a stronger one is available):
+   * the caller re-encrypts `result` and persists the new ciphertext.
+   */
+  decryptString: (encrypted: Buffer) => Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
 let cipher: CredentialCipher | null = null
@@ -107,8 +99,26 @@ export async function readCredential(db: SlayzoneDb, ref: string): Promise<strin
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
 
-  const encrypted = Buffer.from(row.value, 'base64')
-  return await cipher!.decryptString(encrypted)
+  const { result, shouldReEncrypt } = await cipher!.decryptString(Buffer.from(row.value, 'base64'))
+  if (shouldReEncrypt) await reEncrypt(db, ref, row.value, result)
+  return result
+}
+
+/**
+ * Key rotated → persist fresh ciphertext. Compare-and-swap on the old value so a
+ * concurrent `storeCredential` is never overwritten with the stale secret.
+ * Best-effort: the decrypt already succeeded, so a failed write-back must not
+ * fail the read (the next read retries).
+ */
+async function reEncrypt(db: SlayzoneDb, ref: string, prev: string, secret: string): Promise<void> {
+  try {
+    const encrypted = await cipher!.encryptString(secret)
+    await db
+      .prepare('UPDATE settings SET value = ? WHERE key = ? AND value = ?')
+      .run(encrypted.toString('base64'), toSettingKey(ref), prev)
+  } catch {
+    /* retried on the next read */
+  }
 }
 
 export async function deleteCredential(db: SlayzoneDb, ref: string): Promise<void> {

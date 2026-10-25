@@ -7,7 +7,12 @@
  * Run with: npx tsx packages/domains/integrations/src/server/credentials.test.ts
  */
 import assert from 'node:assert/strict'
-import { readCredential, storeCredential, setCredentialCipher } from './credentials.js'
+import {
+  type CredentialCipher,
+  readCredential,
+  setCredentialCipher,
+  storeCredential
+} from './credentials.js'
 
 class FakeDb {
   private store = new Map<string, string>()
@@ -35,6 +40,17 @@ class FakeDb {
       }
     }
 
+    if (sql.startsWith('UPDATE settings SET value')) {
+      return {
+        run: (value, key, expected) => {
+          if (this.store.get(String(key)) === String(expected)) {
+            this.store.set(String(key), String(value))
+          }
+        },
+        get: () => undefined
+      }
+    }
+
     if (sql.startsWith('DELETE FROM settings')) {
       return {
         run: (key) => {
@@ -46,21 +62,26 @@ class FakeDb {
 
     throw new Error(`Unhandled SQL in fake DB: ${sql}`)
   }
+
+  raw(key: string): string | undefined {
+    return this.store.get(key)
+  }
 }
 
 const db = new FakeDb()
 
-// A fake OS keychain cipher (base64 "encryption" — enough to prove the encrypt
-// path is taken and round-trips). `available` toggles isEncryptionAvailable.
-function fakeCipher(available: boolean): {
-  isEncryptionAvailable: () => boolean
-  encryptString: (s: string) => Buffer
-  decryptString: (b: Buffer) => string
-} {
+// A fake OS keychain cipher (tagged "encryption" — enough to prove the encrypt
+// path is taken and round-trips). `available` toggles isEncryptionAvailable;
+// `key` is the current key version — ciphertext under an older key decrypts
+// with `shouldReEncrypt: true`, like safeStorage after a key rotation.
+function fakeCipher(available: boolean, key = 'k1'): CredentialCipher {
   return {
-    isEncryptionAvailable: () => available,
-    encryptString: (s) => Buffer.from(`enc:${s}`, 'utf8'),
-    decryptString: (b) => b.toString('utf8').replace(/^enc:/, '')
+    isEncryptionAvailable: async () => available,
+    encryptString: async (s) => Buffer.from(`enc:${key}:${s}`, 'utf8'),
+    decryptString: async (b) => {
+      const [, k, ...rest] = b.toString('utf8').split(':')
+      return { result: rest.join(':'), shouldReEncrypt: k !== key }
+    }
   }
 }
 
@@ -113,6 +134,17 @@ async function main(): Promise<void> {
     // A working cipher now exists → the stored plaintext is no longer trusted.
     setCredentialCipher(fakeCipher(true))
     await assert.rejects(() => readCredential(db as never, ref))
+  })
+
+  await runTest('re-encrypts + persists when the keychain key rotated', async () => {
+    setCredentialCipher(fakeCipher(true, 'k1'))
+    const ref = `cred-${crypto.randomUUID()}`
+    await storeCredential(db as never, ref, 'secret:rot')
+    setCredentialCipher(fakeCipher(true, 'k2'))
+    assert.equal(await readCredential(db as never, ref), 'secret:rot')
+    const stored = Buffer.from(db.raw(`integration:credential:${ref}`)!, 'base64').toString()
+    assert.equal(stored, 'enc:k2:secret:rot')
+    assert.equal(await readCredential(db as never, ref), 'secret:rot')
   })
 
   setCredentialCipher(null)
