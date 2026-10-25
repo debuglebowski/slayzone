@@ -1052,6 +1052,10 @@ export function createIntegrationOps(db: SlayzoneDb, _options?: { enableTestChan
       )
       .get(task.project_id)) as IntegrationProjectMapping | undefined
     if (!mapping?.status_setup_complete) return
+    // Push-on-edit writes to GitHub only on a two-way mapping — one-way is GitHub →
+    // SlayZone, same as every other automatic push (create, archive, Linear sync).
+    // The bulk "Push ↑" is an explicit request and does not come through here.
+    if (mapping.sync_mode !== 'two_way') return
 
     const connection = await getConnection(db, link.connection_id)
     assertConnectionProvider(connection, 'github')

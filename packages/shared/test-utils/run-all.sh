@@ -381,6 +381,7 @@ run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/users.
 run_test_no_loader packages/shared/transport/src/server/http/rest-api/hub/web-login.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/integrations.test.ts
 run_test_electron_strict_loader packages/domains/integrations/src/server/integrations-switch.test.ts
+run_test_electron_strict_loader packages/domains/integrations/src/server/push-on-edit.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/worktrees.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
 # return adapted to {snapshotSha,headSha}). All run_test* helpers are strict (pipefail),
