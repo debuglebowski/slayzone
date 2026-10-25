@@ -145,28 +145,6 @@ testWindow.__slayzone_tabStore ??= useTabStore
 testWindow.__slayzone_dialogStore ??= useDialogStore
 testWindow.__slayzone_filterStore ??= useFilterStore
 
-/**
- * Idle-prefetch heavy chunks the user will likely hit soon. `import()` is cached,
- * so real usage then lands on a warm chunk.
- */
-function prefetchLikelyChunks(): void {
-  // Task-detail page chunk — shared by every task tab, lazy (see TaskDetailDataLoader
-  // import above). The very first task open cold-downloads it; warming here makes even
-  // the first open instant. This is the dominant first-task-open latency.
-  void import('@slayzone/task/client/TaskDetailDataLoader')
-  // xterm chunk (~440KB) — first terminal panel mount lands warm.
-  void import('@slayzone/terminal/client/Terminal')
-  // material-file-icons (~500KB) — first FileIcon render lands warm.
-  void import('@slayzone/icons').then((m) => m.loadFileIcons())
-  // Optional task panels — each its own lazy chunk (see TaskDetailPage lazy imports).
-  // Specifiers must match those lazy imports exactly so Vite dedupes to the same chunk.
-  // Warm so revealing a panel the first time lands without a skeleton flash.
-  void import('@slayzone/task-browser')
-  void import('@slayzone/file-editor/client')
-  void import('@slayzone/worktrees')
-  void import('@slayzone/task-artifacts/client')
-}
-
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
   const trpc = useTRPC()
@@ -452,27 +430,6 @@ function App(): React.JSX.Element {
   }, [])
   useEffect(() => {
     return initShortcuts()
-  }, [])
-
-  // Idle-prefetch heavy chunks user will likely hit soon. Runs after first
-  // paint settles. requestIdleCallback yields to main-thread work so this
-  // never blocks user input.
-  useEffect(() => {
-    const idle = (cb: () => void): number => {
-      const ric = (
-        window as unknown as {
-          requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-        }
-      ).requestIdleCallback
-      return ric ? ric(cb, { timeout: 3000 }) : (setTimeout(cb, 1500) as unknown as number)
-    }
-    const handle = idle(prefetchLikelyChunks)
-    return () => {
-      const cic = (window as unknown as { cancelIdleCallback?: (h: number) => void })
-        .cancelIdleCallback
-      if (cic) cic(handle)
-      else clearTimeout(handle)
-    }
   }, [])
 
   useEffect(() => {

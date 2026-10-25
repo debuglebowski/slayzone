@@ -1,46 +1,71 @@
 import { useEffect } from 'react'
+import { preloadOnIdle } from '@slayzone/ui'
+import { preloadTerminal } from '@slayzone/terminal/client/LazyTerminal'
+import {
+  ArtifactsPanel,
+  BrowserPanel,
+  DescriptionDialog,
+  FileEditorView as TaskFileEditorView,
+  UnifiedGitPanel as TaskGitPanel
+} from '@slayzone/task/client/lazyPanels'
+import {
+  ChangelogDialog,
+  CliInstallDialog,
+  ContextManagerPage,
+  CreateProjectDialog,
+  CreateTaskDialog,
+  DeleteProjectDialog,
+  DeleteTaskDialog,
+  EditTaskDialog,
+  GroupSettingsDialog,
+  OnboardingDialog,
+  ProjectSettingsDialog,
+  SearchDialog,
+  TaskDetailDataLoader,
+  TemplatesSettingsTab,
+  TerminalStatusDialog,
+  TutorialAnimationModal,
+  UserSettingsDialog
+} from './lazy'
 
-// Warm latency-sensitive lazy chunks on idle so the FIRST keystroke that opens
-// them doesn't pay the chunk-fetch cost (Suspense fallback is null → blank gap).
-// Focused on keystroke-triggered surfaces; the dynamic-import specifier must match
-// the one in lazy.ts so both share one chunk in the module cache.
+// Warm lazy chunks while the renderer is idle, so the first open of a modal, page
+// or panel doesn't pay the chunk-fetch cost (Suspense fallback is null → blank gap).
+// One chunk per idle period, most latency-sensitive first. Every entry is the
+// lazy component's own `.preload`, so it always warms the chunk that renders.
 const PRELOADS: Array<() => Promise<unknown>> = [
-  // Cmd+K command palette (+ its cmdk/fzf deps). See lazy.ts `SearchDialog`.
-  () => import('@slayzone/search'),
-  // Dialogs/pages kept off the startup graph by their packages' lean barrels
-  // (settings, onboarding, ai-config). Before that split they loaded at boot, so
-  // warming them here keeps their first open (Cmd+, settings, an auto-opened
-  // onboarding/changelog dialog, the AI-config page) exactly as instant.
-  () => import('@slayzone/settings/client/UserSettingsDialog'),
-  () => import('@slayzone/settings/client/CliInstallDialog'),
-  () => import('@slayzone/onboarding/client/OnboardingDialog'),
-  () => import('@slayzone/onboarding/client/ChangelogDialog'),
-  () => import('@slayzone/onboarding/client/TutorialAnimationModal'),
-  () => import('@slayzone/ai-config/client')
+  // Cmd+K command palette (+ its cmdk/fzf deps).
+  SearchDialog.preload,
+  // Task-detail page — shared by every task tab; the dominant first-task-open latency.
+  TaskDetailDataLoader.preload,
+  // xterm (~440KB) — first terminal panel mount lands warm.
+  preloadTerminal,
+  // Task dialogs (one shared @slayzone/task chunk) and settings (Cmd+,).
+  CreateTaskDialog.preload,
+  EditTaskDialog.preload,
+  DeleteTaskDialog.preload,
+  UserSettingsDialog.preload,
+  TemplatesSettingsTab.preload,
+  // material-file-icons (~500KB) — first FileIcon render lands warm.
+  () => import('@slayzone/icons').then((m) => m.loadFileIcons()),
+  // Optional task panels — revealing one the first time lands without a skeleton flash.
+  BrowserPanel.preload,
+  TaskFileEditorView.preload,
+  TaskGitPanel.preload,
+  ArtifactsPanel.preload,
+  DescriptionDialog.preload,
+  // Remaining modals.
+  CreateProjectDialog.preload,
+  ProjectSettingsDialog.preload,
+  DeleteProjectDialog.preload,
+  GroupSettingsDialog.preload,
+  TerminalStatusDialog.preload,
+  CliInstallDialog.preload,
+  OnboardingDialog.preload,
+  ChangelogDialog.preload,
+  TutorialAnimationModal.preload,
+  ContextManagerPage.preload
 ]
 
 export function useIdlePreload(): void {
-  useEffect(() => {
-    const ric: typeof requestIdleCallback =
-      typeof requestIdleCallback === 'function'
-        ? requestIdleCallback
-        : (cb) =>
-            window.setTimeout(
-              () => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline),
-              200
-            )
-    const cic: typeof cancelIdleCallback =
-      typeof cancelIdleCallback === 'function'
-        ? cancelIdleCallback
-        : (id) => window.clearTimeout(id)
-
-    const handle = ric(() => {
-      for (const load of PRELOADS)
-        load().catch(() => {
-          // Warming is an optimization: a failed prefetch just means the real
-          // lazy import pays the fetch cost (and reports its own error).
-        })
-    })
-    return () => cic(handle)
-  }, [])
+  useEffect(() => preloadOnIdle(PRELOADS), [])
 }
