@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Weekly dependency updates, only to versions published at least 30 days ago (same rule as minimumReleaseAge in pnpm-workspace.yaml), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
+  "description": "Weekly dependency updates, only to versions published at least 30 days ago (pnpm-workspace.yaml installs from 25 days, so a hand bump has 5 days of slack), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "timezone": "Europe/Stockholm",
   "schedule": ["before 6am on monday"],
@@ -47,7 +47,7 @@
       "groupSlug": null
     },
     {
-      "description": "TypeScript and React are exempt from the 30-day minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
+      "description": "TypeScript and React are exempt from the minimum release age (pnpm-workspace.yaml minimumReleaseAgeExclude): always the latest version.",
       "matchPackageNames": [
         "typescript",
         "@typescript/typescript-*",

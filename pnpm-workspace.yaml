@@ -4,8 +4,10 @@ packages:
   - 'packages/domains/*'
   - 'packages/shared/*'
 
-# Install only package versions published at least 30 days ago (minutes).
-minimumReleaseAge: 43200
+# Install only package versions published at least 25 days ago (minutes). Renovate
+# proposes updates only after 30 days; the 5-day slack lets a hand bump install a version
+# Renovate would not propose yet.
+minimumReleaseAge: 36000
 # Exempt: TypeScript and React are always used at their latest versions.
 minimumReleaseAgeExclude:
   - typescript
