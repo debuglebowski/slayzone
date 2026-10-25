@@ -99,7 +99,11 @@ test.describe('boot renderer economy', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
-    const p = await s.createProject({ name: 'Boot Econ', color: '#0ea5e9', path: TEST_PROJECT_PATH })
+    const p = await s.createProject({
+      name: 'Boot Econ',
+      color: '#0ea5e9',
+      path: TEST_PROJECT_PATH
+    })
     for (let i = 0; i < TERMINALS; i++) {
       const t = await s.createTask({
         projectId: p.id,
@@ -180,7 +184,9 @@ test.describe('boot renderer economy', () => {
         window.getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: 'echo PARKED-OK\r' }),
       hidden
     )
-    await expect.poll(() => bufferHas(mainWindow, hidden, 'PARKED-OK'), { timeout: 10_000 }).toBe(true)
+    await expect
+      .poll(() => bufferHas(mainWindow, hidden, 'PARKED-OK'), { timeout: 10_000 })
+      .toBe(true)
 
     // Reveal: WebGL attached and painted by the next frame.
     await mainWindow.evaluate((id) => {

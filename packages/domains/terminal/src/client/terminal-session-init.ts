@@ -227,13 +227,7 @@ export async function initTerminalSession(
       const liveTerm = terminalRef.current
       if (liveAddon && liveTerm && shouldReportDowngrade(sessionId, reason)) {
         try {
-          const snapshot = captureDowngradeSnapshot(
-            liveAddon,
-            liveTerm,
-            reason,
-            sessionId,
-            mode
-          )
+          const snapshot = captureDowngradeSnapshot(liveAddon, liveTerm, reason, sessionId, mode)
           reportDowngradeSnapshot(snapshot)
         } catch {
           // Snapshot capture must never block the downgrade itself.
@@ -463,8 +457,7 @@ export async function initTerminalSession(
         containerRef.current.appendChild(cached.element)
         onAttachedRef.current?.({ sessionId, focus: () => cached.terminal.focus() })
         cached.terminal.options.theme = resolvedTerminalTheme
-        cached.terminal.options.minimumContrastRatio =
-          resolvedTerminalVariant === 'light' ? 4.5 : 1
+        cached.terminal.options.minimumContrastRatio = resolvedTerminalVariant === 'light' ? 4.5 : 1
         terminalRef.current = cached.terminal
         fitAddonRef.current = cached.fitAddon
         serializeAddonRef.current = cached.serializeAddon
@@ -801,8 +794,7 @@ export async function initTerminalSession(
     // actually continues. Use onKey (semantic key) not onData, so kitty /
     // CSI-u input encoding doesn't hide the Esc keypress.
     terminal.onKey(({ domEvent }) => {
-      const isInterrupt =
-        domEvent.key === 'Escape' || (domEvent.key === 'c' && domEvent.ctrlKey)
+      const isInterrupt = domEvent.key === 'Escape' || (domEvent.key === 'c' && domEvent.ctrlKey)
       if (isInterrupt) void trpcClient.pty.interrupt.mutate({ sessionId })
     })
 

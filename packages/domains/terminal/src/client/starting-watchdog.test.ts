@@ -54,7 +54,11 @@ test('backend moved on (a lost state event): adopt its state', () => {
 })
 
 test('backend no longer has it: dead', () => {
-  eq(startingWatchdogVerdict({ exists: false, actual: null, waitedMs: 20_000 }), { kind: 'dead' }, 'gone')
+  eq(
+    startingWatchdogVerdict({ exists: false, actual: null, waitedMs: 20_000 }),
+    { kind: 'dead' },
+    'gone'
+  )
   eq(
     startingWatchdogVerdict({ exists: false, actual: 'starting', waitedMs: 20_000 }),
     { kind: 'dead' },
@@ -75,7 +79,11 @@ test('starting for implausibly long: dead (last-resort bound)', () => {
 })
 
 test('backend already reports dead: leave it to the exit event', () => {
-  eq(startingWatchdogVerdict({ exists: true, actual: 'dead', waitedMs: 20_000 }), { kind: 'none' }, 'verdict')
+  eq(
+    startingWatchdogVerdict({ exists: true, actual: 'dead', waitedMs: 20_000 }),
+    { kind: 'none' },
+    'verdict'
+  )
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

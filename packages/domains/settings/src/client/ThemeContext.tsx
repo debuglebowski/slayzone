@@ -80,9 +80,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() =>
     cached ? resolveThemeCache(cached).theme : 'dark'
   )
-  const [preference, setPreferenceState] = useState<ThemePreference>(
-    cached?.preference ?? 'dark'
-  )
+  const [preference, setPreferenceState] = useState<ThemePreference>(cached?.preference ?? 'dark')
 
   // Single theme (when split off)
   const [singleThemeId, setSingleThemeId] = useState(cached?.singleThemeId ?? DEFAULT_THEME_ID)

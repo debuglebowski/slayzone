@@ -55,7 +55,11 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
   }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
-    const p = await s.createProject({ name: 'Row Patch', color: '#22c55e', path: TEST_PROJECT_PATH })
+    const p = await s.createProject({
+      name: 'Row Patch',
+      color: '#22c55e',
+      path: TEST_PROJECT_PATH
+    })
     const a = await s.createTask({ projectId: p.id, title: 'RP task', status: 'todo' })
     await s.refreshData()
     await openTaskById(mainWindow, a.id)
@@ -79,7 +83,11 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
   }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
-    const p = await s.createProject({ name: 'Hidden Subs', color: '#3b82f6', path: TEST_PROJECT_PATH })
+    const p = await s.createProject({
+      name: 'Hidden Subs',
+      color: '#3b82f6',
+      path: TEST_PROJECT_PATH
+    })
     const parent = await s.createTask({ projectId: p.id, title: 'HS parent', status: 'todo' })
     const sub = await s.createTask({
       projectId: p.id,

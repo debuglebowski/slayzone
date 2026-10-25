@@ -37,11 +37,7 @@ export function useTaskTagIds(
   // holds until the query answers again — the next answer is server truth.
   const [local, setLocal] = useState<{ ids: string[]; over: Tag[] | undefined } | null>(null)
   const tagIds =
-    local && local.over === data
-      ? local.ids
-      : data
-        ? data.map((t) => t.id)
-        : (initialTagIds ?? [])
+    local && local.over === data ? local.ids : data ? data.map((t) => t.id) : (initialTagIds ?? [])
 
   const setTagIds = (ids: string[]): void => setLocal({ ids, over: data })
 

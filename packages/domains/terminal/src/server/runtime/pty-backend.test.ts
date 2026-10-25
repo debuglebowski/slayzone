@@ -591,14 +591,16 @@ await test('an exit the owner attributes to its startup deadline goes through th
   setPtyBackend(null)
 })
 
-await test('remote backend: an AGENT\'s initial spawn asks for admission (visible tab first); a plain shell never does', async () => {
+await test("remote backend: an AGENT's initial spawn asks for admission (visible tab first); a plain shell never does", async () => {
   // Restoring a workspace starts every tab's agent; the computer admits them a few
   // at a time. Only the agent's own start queues — shells start at once.
   const captured: Array<{ sid: string; admission: PtySpawnSpec['admission'] }> = []
   setPtyBackend({
     spawn(spec) {
       captured.push({ sid: spec.sessionId, admission: spec.admission })
-      return makeFakeHandle({ whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true }) })
+      return makeFakeHandle({
+        whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+      })
     }
   })
   const cases: Array<{ sid: string; mode: string; foreground?: boolean }> = [
@@ -618,9 +620,18 @@ await test('remote backend: an AGENT\'s initial spawn asks for admission (visibl
     })
   }
   const byId = Object.fromEntries(captured.map((c) => [c.sid, c.admission ?? null]))
-  expect(byId['admShell:admShell'] === null, `plain shell must start at once, got ${String(byId['admShell:admShell'])}`)
-  expect(byId['admBg:admBg'] === 'background', `hidden agent → background, got ${String(byId['admBg:admBg'])}`)
-  expect(byId['admFg:admFg'] === 'foreground', `visible agent → foreground, got ${String(byId['admFg:admFg'])}`)
+  expect(
+    byId['admShell:admShell'] === null,
+    `plain shell must start at once, got ${String(byId['admShell:admShell'])}`
+  )
+  expect(
+    byId['admBg:admBg'] === 'background',
+    `hidden agent → background, got ${String(byId['admBg:admBg'])}`
+  )
+  expect(
+    byId['admFg:admFg'] === 'foreground',
+    `visible agent → foreground, got ${String(byId['admFg:admFg'])}`
+  )
   for (const c of cases) killPty(c.sid)
   setPtyBackend(null)
 })
@@ -628,12 +639,18 @@ await test('remote backend: an AGENT\'s initial spawn asks for admission (visibl
 await test('prioritizePty forwards to the backend for a live session only', async () => {
   const asked: string[] = []
   setPtyBackend({
-    spawn: () =>
-      makeFakeHandle({ whenSpawned: new Promise<never>(() => {}) as never }),
+    spawn: () => makeFakeHandle({ whenSpawned: new Promise<never>(() => {}) as never }),
     prioritize: (sessionId) => asked.push(sessionId)
   })
   const sid = 'prio:prio'
-  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'claude-code' as never, type: 'claude-code', computerId: 'computer-1' })
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code' as never,
+    type: 'claude-code',
+    computerId: 'computer-1'
+  })
   prioritizePty(sid)
   prioritizePty('unknown:unknown')
   expect(JSON.stringify(asked) === JSON.stringify([sid]), `asked=${JSON.stringify(asked)}`)

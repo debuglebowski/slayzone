@@ -2178,7 +2178,8 @@ export async function createPty(
                 // Split of `firstOutputMs` for a round-trip spawn: time until the
                 // owner started it (incl. waiting for an agent-start slot), then
                 // time from start to first output.
-                spawnConfirmedMs: spawnConfirmedTs !== null ? spawnConfirmedTs - createStartedAt : null,
+                spawnConfirmedMs:
+                  spawnConfirmedTs !== null ? spawnConfirmedTs - createStartedAt : null,
                 firstOutputAfterSpawnMs:
                   spawnConfirmedTs !== null ? firstOutputTs - spawnConfirmedTs : null,
                 usedFallback,
@@ -2837,7 +2838,8 @@ export async function createPty(
       }, 5000)
     }
     if (resuming) {
-      if (spawnConfirmation) void spawnConfirmation.then(openSessionErrorWindow, openSessionErrorWindow)
+      if (spawnConfirmation)
+        void spawnConfirmation.then(openSessionErrorWindow, openSessionErrorWindow)
       else openSessionErrorWindow()
     }
 

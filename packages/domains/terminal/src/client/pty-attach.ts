@@ -33,7 +33,9 @@ let attachUnsupported = false
 function isMissingProcedure(e: unknown): boolean {
   const err = e as { data?: { code?: string }; message?: string } | null
   if (err?.data?.code === 'NOT_FOUND') return true
-  return typeof err?.message === 'string' && /No ["']?query["']?-procedure|not found/i.test(err.message)
+  return (
+    typeof err?.message === 'string' && /No ["']?query["']?-procedure|not found/i.test(err.message)
+  )
 }
 
 /**

@@ -698,7 +698,8 @@ describe('computer-owned session lifecycle', () => {
 describe('agent-start admission', () => {
   const cwd = process.cwd()
   /** One slot, held until first output (no cap in test time), quick warm quiet. */
-  const oneSlot = () => createSpawnAdmission({ concurrency: 1, startCapMs: 60_000, warmQuietMs: 50 })
+  const oneSlot = () =>
+    createSpawnAdmission({ concurrency: 1, startCapMs: 60_000, warmQuietMs: 50 })
   const outputOf = (notifies: Notify[], sessionId: string): string =>
     notifies
       .filter((n) => n.method === 'pty.data' && n.params.sessionId === sessionId)
@@ -727,7 +728,12 @@ describe('agent-start admission', () => {
 
     const first = settled(pty.handlers['pty.spawn'](holder('first')) as Promise<unknown>)
     const second = settled(
-      pty.handlers['pty.spawn']({ sessionId: 'second', admission: 'foreground', command: 'cat', cwd }) as Promise<unknown>
+      pty.handlers['pty.spawn']({
+        sessionId: 'second',
+        admission: 'foreground',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
     )
     await waitFor(() => first.done)
     expect((first.value as SpawnResult).pid).toBeGreaterThan(0)
@@ -869,7 +875,12 @@ describe('agent-start admission', () => {
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
     void pty.handlers['pty.spawn'](holder('holder', 0.2))
     const lost = settled(
-      pty.handlers['pty.spawn']({ sessionId: 'lost', admission: 'background', command: 'cat', cwd }) as Promise<unknown>
+      pty.handlers['pty.spawn']({
+        sessionId: 'lost',
+        admission: 'background',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
     )
     pty.dropQueued('hub disconnected')
     await waitFor(() => lost.done)
@@ -907,7 +918,7 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
-  it('warm agents boot one at a time: a warm start keeps its slot past its shell\'s first output', async () => {
+  it("warm agents boot one at a time: a warm start keeps its slot past its shell's first output", async () => {
     // The shell prints first; the agent it execs boots after that. Releasing on
     // that first output would let the whole pool boot at once.
     const { ctx } = makeCtx()

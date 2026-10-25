@@ -41,7 +41,10 @@ interface RenderServiceLike {
   setRenderer: (r: unknown) => void
   handleResize: (cols: number, rows: number) => void
   _isPaused?: boolean
-  _handleIntersectionChange?: (entry: { isIntersecting: boolean; intersectionRatio: number }) => void
+  _handleIntersectionChange?: (entry: {
+    isIntersecting: boolean
+    intersectionRatio: number
+  }) => void
 }
 
 interface CoreLike {

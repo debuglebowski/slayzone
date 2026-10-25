@@ -628,7 +628,8 @@ export function createPtyHandlers(
         signal: params.signal ?? 'SIGHUP',
         reason: 'killed-before-start'
       })
-      if (!delivered) ctx.log('kill of a queued start not delivered', { sessionId: params.sessionId })
+      if (!delivered)
+        ctx.log('kill of a queued start not delivered', { sessionId: params.sessionId })
       cancelQueued(params.sessionId, 'killed')
       // An older process still filed under this id was due to be replaced by the
       // queued start; end it silently, as that replacement would have.

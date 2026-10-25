@@ -720,7 +720,9 @@ describe('createRoutingPtyBackend', () => {
       resolveComputerId: (s) => s.computerId ?? null
     })
 
-    const handle = backend.spawn(ptySpec({ startupTimeoutMs: 10_000, admission: 'background' })) as PtyHandle
+    const handle = backend.spawn(
+      ptySpec({ startupTimeoutMs: 10_000, admission: 'background' })
+    ) as PtyHandle
     expect(requireCall(gateway, 'pty.spawn').params).toMatchObject({ admission: 'background' })
 
     // Still waiting for its slot on the computer: the reveal is forwarded.

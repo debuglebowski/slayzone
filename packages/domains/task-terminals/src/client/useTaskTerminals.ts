@@ -63,9 +63,7 @@ export function useTaskTerminals(
   // Tab CRUD mutations. The hook keeps its own optimistic `tabs` state (created
   // tab pushed, deleted tab filtered) so these are imperative `mutateAsync`
   // calls — list refetch is driven by the server `onChanged` broadcast below.
-  const { mutateAsync: createTerminal } = useMutation(
-    trpc.taskTerminals.create.mutationOptions()
-  )
+  const { mutateAsync: createTerminal } = useMutation(trpc.taskTerminals.create.mutationOptions())
   const { mutateAsync: splitTerminal } = useMutation(trpc.taskTerminals.split.mutationOptions())
   const { mutateAsync: deleteTerminal } = useMutation(trpc.taskTerminals.delete.mutationOptions())
   const { mutateAsync: moveTerminalToGroup } = useMutation(

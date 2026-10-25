@@ -319,7 +319,7 @@ async function frames(page: import('@playwright/test').Page, count = 4): Promise
 /** Toggle explode mode (all task panes in one grid) and wait for the grid to match. */
 async function setExplodeMode(page: import('@playwright/test').Page, on: boolean): Promise<void> {
   const cells = page.locator('[data-explode-task-id]')
-  if (((await cells.count()) > 0) !== on) await pressShortcut(page, 'explode-mode')
+  if ((await cells.count()) > 0 !== on) await pressShortcut(page, 'explode-mode')
   await expect(cells).toHaveCount(on ? TAB_COUNT : 0, { timeout: 10_000 })
 }
 

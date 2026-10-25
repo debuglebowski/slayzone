@@ -1,37 +1,15 @@
 {
-  "packages/apps/app/src/renderer/src/components/RemoteConfigScreen.tsx": [
-    "RemoteConfigScreen"
-  ],
-  "packages/domains/agent-panels/src/agent-status/useIdleTasks.ts": [
-    "useIdleTasks"
-  ],
-  "packages/domains/agent-turns/src/client/useAgentTurns.ts": [
-    "useAgentTurns"
-  ],
-  "packages/domains/ai-config/src/client/AddItemPicker.tsx": [
-    "AddItemPicker"
-  ],
-  "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": [
-    "AddRegistryDialog"
-  ],
-  "packages/domains/ai-config/src/client/ComputerContextFiles.tsx": [
-    "ComputerContextFiles"
-  ],
-  "packages/domains/ai-config/src/client/ComputerFilesView.tsx": [
-    "ComputerFilesView"
-  ],
-  "packages/domains/ai-config/src/client/ComputerMcpView.tsx": [
-    "ComputerMcpView"
-  ],
-  "packages/domains/ai-config/src/client/ContextFilesPanel.tsx": [
-    "ContextFilesPanel"
-  ],
-  "packages/domains/ai-config/src/client/InstructionVariantsView.tsx": [
-    "InstructionVariantsView"
-  ],
-  "packages/domains/ai-config/src/client/LibraryItemPicker.tsx": [
-    "LibraryItemPicker"
-  ],
+  "packages/apps/app/src/renderer/src/components/RemoteConfigScreen.tsx": ["RemoteConfigScreen"],
+  "packages/domains/agent-panels/src/agent-status/useIdleTasks.ts": ["useIdleTasks"],
+  "packages/domains/agent-turns/src/client/useAgentTurns.ts": ["useAgentTurns"],
+  "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
+  "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
+  "packages/domains/ai-config/src/client/ComputerContextFiles.tsx": ["ComputerContextFiles"],
+  "packages/domains/ai-config/src/client/ComputerFilesView.tsx": ["ComputerFilesView"],
+  "packages/domains/ai-config/src/client/ComputerMcpView.tsx": ["ComputerMcpView"],
+  "packages/domains/ai-config/src/client/ContextFilesPanel.tsx": ["ContextFilesPanel"],
+  "packages/domains/ai-config/src/client/InstructionVariantsView.tsx": ["InstructionVariantsView"],
+  "packages/domains/ai-config/src/client/LibraryItemPicker.tsx": ["LibraryItemPicker"],
   "packages/domains/ai-config/src/client/mcp-servers-panel/dialogs/AddComputerMcpDialog.tsx": [
     "AddComputerMcpDialog"
   ],
@@ -41,150 +19,68 @@
   "packages/domains/ai-config/src/client/mcp-servers-panel/useProjectMcpServers.ts": [
     "useProjectMcpServers"
   ],
-  "packages/domains/ai-config/src/client/mcp-sync-handlers.ts": [
-    "useMcpSyncHandlers"
-  ],
-  "packages/domains/ai-config/src/client/ProjectContextFilesView.tsx": [
-    "ProjectContextFilesView"
-  ],
-  "packages/domains/ai-config/src/client/ProjectContextFlat.tsx": [
-    "ProjectContextFlat"
-  ],
-  "packages/domains/ai-config/src/client/ProjectContextTree.tsx": [
-    "ProjectContextTree"
-  ],
-  "packages/domains/ai-config/src/client/ProjectInstructions.tsx": [
-    "ProjectInstructionsBody"
-  ],
-  "packages/domains/ai-config/src/client/ProjectSkills.tsx": [
-    "ProjectSkills"
-  ],
-  "packages/domains/ai-config/src/client/SkillsSection.tsx": [
-    "SkillsSection"
-  ],
+  "packages/domains/ai-config/src/client/mcp-sync-handlers.ts": ["useMcpSyncHandlers"],
+  "packages/domains/ai-config/src/client/ProjectContextFilesView.tsx": ["ProjectContextFilesView"],
+  "packages/domains/ai-config/src/client/ProjectContextFlat.tsx": ["ProjectContextFlat"],
+  "packages/domains/ai-config/src/client/ProjectContextTree.tsx": ["ProjectContextTree"],
+  "packages/domains/ai-config/src/client/ProjectInstructions.tsx": ["ProjectInstructionsBody"],
+  "packages/domains/ai-config/src/client/ProjectSkills.tsx": ["ProjectSkills"],
+  "packages/domains/ai-config/src/client/SkillsSection.tsx": ["SkillsSection"],
   "packages/domains/ai-config/src/client/useContextItemEditorState.ts": [
     "useContextItemEditorState"
   ],
-  "packages/domains/ai-config/src/client/useLegacyContextState.ts": [
-    "useLegacyContextState"
-  ],
-  "packages/domains/ai-config/src/client/useMcpFlatState.ts": [
-    "useMcpFlatState"
-  ],
-  "packages/domains/ai-config/src/client/useProjectContextTree.ts": [
-    "useProjectContextTree"
-  ],
-  "packages/domains/ai-config/src/client/useSkillItem.ts": [
-    "useSkillItem"
-  ],
-  "packages/domains/ai-config/src/client/useSkillMarketplace.ts": [
-    "useSkillMarketplace"
-  ],
-  "packages/domains/automations/src/client/AutomationCard.tsx": [
-    "AutomationCard"
-  ],
-  "packages/domains/feedback/src/client/FeedbackDialog.tsx": [
-    "FeedbackDialog"
-  ],
-  "packages/domains/home/src/client/HomeContainer.tsx": [
-    "HomeContainerImpl"
-  ],
-  "packages/domains/leaderboard/src/convexAuth.tsx": [
-    "ConvexAuthBridge"
-  ],
-  "packages/domains/leaderboard/src/useLeaderboardController.ts": [
-    "useLeaderboardController"
-  ],
-  "packages/domains/onboarding/src/client/CliInstallStep.tsx": [
-    "CliInstallStep"
-  ],
-  "packages/domains/onboarding/src/client/OnboardingDialog.tsx": [
-    "OnboardingDialog"
-  ],
-  "packages/domains/onboarding/src/client/tutorial/scenes/SceneProcesses.tsx": [
-    "ProcessesPanel"
-  ],
-  "packages/domains/projects/src/client/ColumnsTab.tsx": [
-    "ColumnsTab"
-  ],
-  "packages/domains/projects/src/client/CreateProjectDialog.tsx": [
-    "CreateProjectDialog"
-  ],
-  "packages/domains/projects/src/client/EnvironmentTab.tsx": [
-    "EnvironmentTab"
-  ],
-  "packages/domains/projects/src/client/GeneralTab.tsx": [
-    "GeneralTab"
-  ],
+  "packages/domains/ai-config/src/client/useLegacyContextState.ts": ["useLegacyContextState"],
+  "packages/domains/ai-config/src/client/useMcpFlatState.ts": ["useMcpFlatState"],
+  "packages/domains/ai-config/src/client/useProjectContextTree.ts": ["useProjectContextTree"],
+  "packages/domains/ai-config/src/client/useSkillItem.ts": ["useSkillItem"],
+  "packages/domains/ai-config/src/client/useSkillMarketplace.ts": ["useSkillMarketplace"],
+  "packages/domains/automations/src/client/AutomationCard.tsx": ["AutomationCard"],
+  "packages/domains/feedback/src/client/FeedbackDialog.tsx": ["FeedbackDialog"],
+  "packages/domains/home/src/client/HomeContainer.tsx": ["HomeContainerImpl"],
+  "packages/domains/leaderboard/src/convexAuth.tsx": ["ConvexAuthBridge"],
+  "packages/domains/leaderboard/src/useLeaderboardController.ts": ["useLeaderboardController"],
+  "packages/domains/onboarding/src/client/CliInstallStep.tsx": ["CliInstallStep"],
+  "packages/domains/onboarding/src/client/OnboardingDialog.tsx": ["OnboardingDialog"],
+  "packages/domains/onboarding/src/client/tutorial/scenes/SceneProcesses.tsx": ["ProcessesPanel"],
+  "packages/domains/projects/src/client/ColumnsTab.tsx": ["ColumnsTab"],
+  "packages/domains/projects/src/client/CreateProjectDialog.tsx": ["CreateProjectDialog"],
+  "packages/domains/projects/src/client/EnvironmentTab.tsx": ["EnvironmentTab"],
+  "packages/domains/projects/src/client/GeneralTab.tsx": ["GeneralTab"],
   "packages/domains/projects/src/client/ProjectIntegrationConnectionModal.tsx": [
     "ProjectIntegrationConnectionModal"
   ],
-  "packages/domains/projects/src/client/ProjectSettingsDialog.tsx": [
-    "ProjectSettingsDialog"
-  ],
-  "packages/domains/projects/src/client/TasksGeneralTab.tsx": [
-    "TasksGeneralTab"
-  ],
-  "packages/domains/projects/src/client/useIntegrationsTab.ts": [
-    "useIntegrationsTab"
-  ],
+  "packages/domains/projects/src/client/ProjectSettingsDialog.tsx": ["ProjectSettingsDialog"],
+  "packages/domains/projects/src/client/TasksGeneralTab.tsx": ["TasksGeneralTab"],
+  "packages/domains/projects/src/client/useIntegrationsTab.ts": ["useIntegrationsTab"],
   "packages/domains/projects/src/client/useProjectIntegrationSetupWizard.ts": [
     "useProjectIntegrationSetupWizard"
   ],
-  "packages/domains/projects/src/client/useProviderData.ts": [
-    "useProviderData"
-  ],
-  "packages/domains/projects/src/client/WorktreesTab.tsx": [
-    "WorktreesTab"
-  ],
-  "packages/domains/settings/src/client/AppearanceContext.tsx": [
-    "AppearanceProvider"
-  ],
-  "packages/domains/settings/src/client/CliInstallDialog.tsx": [
-    "CliInstallDialog"
-  ],
-  "packages/domains/settings/src/client/tabs/AboutSettingsTab.tsx": [
-    "AboutSettingsTab"
-  ],
+  "packages/domains/projects/src/client/useProviderData.ts": ["useProviderData"],
+  "packages/domains/projects/src/client/WorktreesTab.tsx": ["WorktreesTab"],
+  "packages/domains/settings/src/client/AppearanceContext.tsx": ["AppearanceProvider"],
+  "packages/domains/settings/src/client/CliInstallDialog.tsx": ["CliInstallDialog"],
+  "packages/domains/settings/src/client/tabs/AboutSettingsTab.tsx": ["AboutSettingsTab"],
   "packages/domains/settings/src/client/tabs/ai-providers/UsageConfigSection.tsx": [
     "UsageConfigSection"
   ],
   "packages/domains/settings/src/client/tabs/ai-providers/useAiProviderForm.ts": [
     "useAiProviderForm"
   ],
-  "packages/domains/settings/src/client/tabs/BackupSettingsTab.tsx": [
-    "BackupSettingsTab"
-  ],
-  "packages/domains/settings/src/client/tabs/ComputerActions.tsx": [
-    "ComputerActionsProvider"
-  ],
-  "packages/domains/settings/src/client/tabs/ComputerRootsDialog.tsx": [
-    "ComputerRootsDialog"
-  ],
+  "packages/domains/settings/src/client/tabs/BackupSettingsTab.tsx": ["BackupSettingsTab"],
+  "packages/domains/settings/src/client/tabs/ComputerActions.tsx": ["ComputerActionsProvider"],
+  "packages/domains/settings/src/client/tabs/ComputerRootsDialog.tsx": ["ComputerRootsDialog"],
   "packages/domains/settings/src/client/tabs/DiagnosticsSettingsTab.tsx": [
     "DiagnosticsSettingsTab"
   ],
-  "packages/domains/settings/src/client/tabs/HubCard.tsx": [
-    "HubCard"
-  ],
-  "packages/domains/settings/src/client/tabs/HubsSettingsTab.tsx": [
-    "HubsSettingsTab"
-  ],
+  "packages/domains/settings/src/client/tabs/HubCard.tsx": ["HubCard"],
+  "packages/domains/settings/src/client/tabs/HubsSettingsTab.tsx": ["HubsSettingsTab"],
   "packages/domains/settings/src/client/tabs/panels-settings/usePanelSettings.ts": [
     "usePanelSettings"
   ],
-  "packages/domains/settings/src/client/tabs/WorktreesSettingsTab.tsx": [
-    "WorktreesSettingsTab"
-  ],
-  "packages/domains/settings/src/client/ThemeContext.tsx": [
-    "ThemeProvider"
-  ],
-  "packages/domains/settings/src/client/UserSettingsDialog.tsx": [
-    "UserSettingsDialog"
-  ],
-  "packages/domains/sidebar/src/AppSidebar.tsx": [
-    "AppSidebar"
-  ],
+  "packages/domains/settings/src/client/tabs/WorktreesSettingsTab.tsx": ["WorktreesSettingsTab"],
+  "packages/domains/settings/src/client/ThemeContext.tsx": ["ThemeProvider"],
+  "packages/domains/settings/src/client/UserSettingsDialog.tsx": ["UserSettingsDialog"],
+  "packages/domains/sidebar/src/AppSidebar.tsx": ["AppSidebar"],
   "packages/domains/task-terminals/src/client/agent-prompts/AgentPromptsSidebar.tsx": [
     "usePromptsSidebarOpen"
   ],
@@ -192,151 +88,57 @@
     "useSessionsSidebarOpen",
     "SessionsSidebar"
   ],
-  "packages/domains/task/src/client/CreateTaskDialog.tsx": [
-    "CreateTaskDialog"
-  ],
-  "packages/domains/task/src/client/ExternalSyncCard.tsx": [
-    "ExternalSyncCard"
-  ],
-  "packages/domains/task/src/client/ProcessDialog.tsx": [
-    "ProcessDialog"
-  ],
-  "packages/domains/task/src/client/ProcessesPanel.tsx": [
-    "ProcessesPanel"
-  ],
-  "packages/domains/task/src/client/task-detail/useTaskDoctor.ts": [
-    "useTaskDoctor"
-  ],
-  "packages/domains/task/src/client/TaskHistoryPanel.tsx": [
-    "TaskHistoryPanel"
-  ],
-  "packages/domains/task/src/client/TemplatesSettingsTab.tsx": [
-    "TemplateFormDialog"
-  ],
-  "packages/domains/task/src/client/useSharedCardHeights.ts": [
-    "useSharedCardHeights"
-  ],
-  "packages/domains/task/src/client/WebPanelView.tsx": [
-    "WebPanelView"
-  ],
-  "packages/domains/tasks/src/client/KanbanListView.tsx": [
-    "KanbanListView"
-  ],
-  "packages/domains/telemetry/src/client/TelemetryProvider.tsx": [
-    "TelemetryProvider"
-  ],
-  "packages/domains/terminal/src/client/PtyContext.tsx": [
-    "PtyEventStreams",
-    "PtyProvider"
-  ],
+  "packages/domains/task/src/client/CreateTaskDialog.tsx": ["CreateTaskDialog"],
+  "packages/domains/task/src/client/ExternalSyncCard.tsx": ["ExternalSyncCard"],
+  "packages/domains/task/src/client/ProcessDialog.tsx": ["ProcessDialog"],
+  "packages/domains/task/src/client/ProcessesPanel.tsx": ["ProcessesPanel"],
+  "packages/domains/task/src/client/task-detail/useTaskDoctor.ts": ["useTaskDoctor"],
+  "packages/domains/task/src/client/TaskHistoryPanel.tsx": ["TaskHistoryPanel"],
+  "packages/domains/task/src/client/TemplatesSettingsTab.tsx": ["TemplateFormDialog"],
+  "packages/domains/task/src/client/useSharedCardHeights.ts": ["useSharedCardHeights"],
+  "packages/domains/task/src/client/WebPanelView.tsx": ["WebPanelView"],
+  "packages/domains/tasks/src/client/KanbanListView.tsx": ["KanbanListView"],
+  "packages/domains/telemetry/src/client/TelemetryProvider.tsx": ["TelemetryProvider"],
+  "packages/domains/terminal/src/client/PtyContext.tsx": ["PtyEventStreams", "PtyProvider"],
   "packages/domains/terminal/src/client/TerminalStatusPopover.tsx": [
     "TerminalStatusButton",
     "TerminalStatusDialog"
   ],
-  "packages/domains/terminal/src/client/useTerminalModes.ts": [
-    "useTerminalModes"
-  ],
-  "packages/domains/usage-analytics/src/client/useUsageAnalytics.ts": [
-    "useUsageAnalytics"
-  ],
-  "packages/domains/worktrees/src/client/CommitGraph.tsx": [
-    "CommitGraphImpl"
-  ],
-  "packages/domains/worktrees/src/client/ConflictFileView.tsx": [
-    "ConflictFileView"
-  ],
-  "packages/domains/worktrees/src/client/ConflictPhaseContent.tsx": [
-    "ConflictPhaseContent"
-  ],
-  "packages/domains/worktrees/src/client/CopyFilesDialog.tsx": [
-    "CopyFilesDialog"
-  ],
-  "packages/domains/worktrees/src/client/CreateWorktreeDialog.tsx": [
-    "CreateWorktreeDialog"
-  ],
-  "packages/domains/worktrees/src/client/DiffView.scroll.ts": [
-    "useSbsSync"
-  ],
-  "packages/domains/worktrees/src/client/DiffView.tsx": [
-    "DiffView"
-  ],
-  "packages/domains/worktrees/src/client/DiffView.virtual.tsx": [
-    "VirtualRowList"
-  ],
-  "packages/domains/worktrees/src/client/GeneralTabContent.tsx": [
-    "GeneralTabContent"
-  ],
-  "packages/domains/worktrees/src/client/git-diff-store.ts": [
-    "useGitDiffSnapshot"
-  ],
-  "packages/domains/worktrees/src/client/git-panel-toolbar.tsx": [
-    "GitPanelToolbar"
-  ],
-  "packages/domains/worktrees/src/client/GitDiffPanel.tsx": [
-    "GitDiffPanel"
-  ],
-  "packages/domains/worktrees/src/client/pr-dialogs.tsx": [
-    "CreatePrDialog"
-  ],
-  "packages/domains/worktrees/src/client/ProjectGeneralTab.tsx": [
-    "ProjectGeneralTab"
-  ],
-  "packages/domains/worktrees/src/client/ProjectPrTab.tsx": [
-    "usePrFilterState"
-  ],
-  "packages/domains/worktrees/src/client/RemoteSection.tsx": [
-    "RemoteSection"
-  ],
-  "packages/domains/worktrees/src/client/StashTab.tsx": [
-    "StashTab"
-  ],
-  "packages/domains/worktrees/src/client/useBranchGraph.ts": [
-    "useBranchGraph"
-  ],
+  "packages/domains/terminal/src/client/useTerminalModes.ts": ["useTerminalModes"],
+  "packages/domains/usage-analytics/src/client/useUsageAnalytics.ts": ["useUsageAnalytics"],
+  "packages/domains/worktrees/src/client/CommitGraph.tsx": ["CommitGraphImpl"],
+  "packages/domains/worktrees/src/client/ConflictFileView.tsx": ["ConflictFileView"],
+  "packages/domains/worktrees/src/client/ConflictPhaseContent.tsx": ["ConflictPhaseContent"],
+  "packages/domains/worktrees/src/client/CopyFilesDialog.tsx": ["CopyFilesDialog"],
+  "packages/domains/worktrees/src/client/CreateWorktreeDialog.tsx": ["CreateWorktreeDialog"],
+  "packages/domains/worktrees/src/client/DiffView.scroll.ts": ["useSbsSync"],
+  "packages/domains/worktrees/src/client/DiffView.tsx": ["DiffView"],
+  "packages/domains/worktrees/src/client/DiffView.virtual.tsx": ["VirtualRowList"],
+  "packages/domains/worktrees/src/client/GeneralTabContent.tsx": ["GeneralTabContent"],
+  "packages/domains/worktrees/src/client/git-diff-store.ts": ["useGitDiffSnapshot"],
+  "packages/domains/worktrees/src/client/git-panel-toolbar.tsx": ["GitPanelToolbar"],
+  "packages/domains/worktrees/src/client/GitDiffPanel.tsx": ["GitDiffPanel"],
+  "packages/domains/worktrees/src/client/pr-dialogs.tsx": ["CreatePrDialog"],
+  "packages/domains/worktrees/src/client/ProjectGeneralTab.tsx": ["ProjectGeneralTab"],
+  "packages/domains/worktrees/src/client/ProjectPrTab.tsx": ["usePrFilterState"],
+  "packages/domains/worktrees/src/client/RemoteSection.tsx": ["RemoteSection"],
+  "packages/domains/worktrees/src/client/StashTab.tsx": ["StashTab"],
+  "packages/domains/worktrees/src/client/useBranchGraph.ts": ["useBranchGraph"],
   "packages/domains/worktrees/src/client/useConsolidatedGeneralData.ts": [
     "useConsolidatedGeneralData"
   ],
-  "packages/domains/worktrees/src/client/useGitDiffActions.ts": [
-    "useGitDiffActions"
-  ],
-  "packages/domains/worktrees/src/client/useGitDiffCommit.ts": [
-    "useGitDiffCommit"
-  ],
-  "packages/domains/worktrees/src/client/useGitDiffData.ts": [
-    "useGitDiffData"
-  ],
-  "packages/domains/worktrees/src/client/useGitDiffFlow.ts": [
-    "useGitDiffFlow"
-  ],
-  "packages/domains/worktrees/src/client/useGitMergeActions.ts": [
-    "useGitMergeActions"
-  ],
-  "packages/domains/worktrees/src/client/useLinkedPrView.ts": [
-    "useLinkedPrView"
-  ],
-  "packages/domains/worktrees/src/client/WorktreesTab.tsx": [
-    "WorktreesTab"
-  ],
-  "packages/shared/editor/src/rich-text-editor.tsx": [
-    "RichTextEditor"
-  ],
-  "packages/shared/editor/src/use-click-to-focus.ts": [
-    "useClickToFocus"
-  ],
-  "packages/shared/editor/src/use-image-paste-drop.ts": [
-    "useImagePasteDrop"
-  ],
-  "packages/shared/markdown/src/client/MediaView.tsx": [
-    "useFitFullMode",
-    "SvgVectorView"
-  ],
-  "packages/shared/markdown/src/client/MermaidBlock.tsx": [
-    "MermaidBlock"
-  ],
-  "packages/shared/ui/src/calendar.tsx": [
-    "Calendar"
-  ],
-  "packages/shared/ui/src/use-undo.ts": [
-    "UndoProvider"
-  ]
+  "packages/domains/worktrees/src/client/useGitDiffActions.ts": ["useGitDiffActions"],
+  "packages/domains/worktrees/src/client/useGitDiffCommit.ts": ["useGitDiffCommit"],
+  "packages/domains/worktrees/src/client/useGitDiffData.ts": ["useGitDiffData"],
+  "packages/domains/worktrees/src/client/useGitDiffFlow.ts": ["useGitDiffFlow"],
+  "packages/domains/worktrees/src/client/useGitMergeActions.ts": ["useGitMergeActions"],
+  "packages/domains/worktrees/src/client/useLinkedPrView.ts": ["useLinkedPrView"],
+  "packages/domains/worktrees/src/client/WorktreesTab.tsx": ["WorktreesTab"],
+  "packages/shared/editor/src/rich-text-editor.tsx": ["RichTextEditor"],
+  "packages/shared/editor/src/use-click-to-focus.ts": ["useClickToFocus"],
+  "packages/shared/editor/src/use-image-paste-drop.ts": ["useImagePasteDrop"],
+  "packages/shared/markdown/src/client/MediaView.tsx": ["useFitFullMode", "SvgVectorView"],
+  "packages/shared/markdown/src/client/MermaidBlock.tsx": ["MermaidBlock"],
+  "packages/shared/ui/src/calendar.tsx": ["Calendar"],
+  "packages/shared/ui/src/use-undo.ts": ["UndoProvider"]
 }

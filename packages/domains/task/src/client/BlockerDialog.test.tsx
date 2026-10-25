@@ -60,7 +60,12 @@ describe('BlockerDialog', () => {
     const { client } = renderDialog(null)
     expect(getAllOptions).not.toHaveBeenCalled()
     expect(getBlockersOptions).not.toHaveBeenCalled()
-    expect(client.getQueryCache().find({ queryKey: ['task.getAll'] })?.getObserversCount()).toBe(0)
+    expect(
+      client
+        .getQueryCache()
+        .find({ queryKey: ['task.getAll'] })
+        ?.getObserversCount()
+    ).toBe(0)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
@@ -71,7 +76,12 @@ describe('BlockerDialog', () => {
     expect(screen.queryByText('Finished')).toBeNull()
     expect(await screen.findByRole('button', { name: /Candidate A/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Already blocking/ })).toBeNull()
-    expect(client.getQueryCache().find({ queryKey: ['task.getAll'] })?.getObserversCount()).toBe(1)
+    expect(
+      client
+        .getQueryCache()
+        .find({ queryKey: ['task.getAll'] })
+        ?.getObserversCount()
+    ).toBe(1)
   })
 
   it('close releases the subscriptions', async () => {
@@ -80,7 +90,10 @@ describe('BlockerDialog', () => {
     rerender(null)
     await vi.waitFor(() =>
       expect(
-        client.getQueryCache().find({ queryKey: ['task.getAll'] })?.getObserversCount()
+        client
+          .getQueryCache()
+          .find({ queryKey: ['task.getAll'] })
+          ?.getObserversCount()
       ).toBe(0)
     )
   })

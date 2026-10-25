@@ -469,7 +469,9 @@ export function useTasksData(): UseTasksDataReturn {
     w.__slayzone_refreshData = () => {
       void queryClient.invalidateQueries()
       return Promise.all([
-        queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()).then(afterFullBoardReload),
+        queryClient
+          .refetchQueries(trpc.task.loadBoardData.queryFilter())
+          .then(afterFullBoardReload),
         loadGroups()
       ])
     }

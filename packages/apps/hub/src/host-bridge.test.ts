@@ -72,7 +72,11 @@ const hostEmit = (viewId: string, type: string, patch: Partial<Snap>): void => {
 // --- Desktop side of the bridge -----------------------------------------------
 const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 })
 await new Promise<void>((r) => wss.once('listening', () => r()))
-const wssHandler = applyWSSHandler({ wss, router: capabilityBridgeRouter, createContext: () => ({}) })
+const wssHandler = applyWSSHandler({
+  wss,
+  router: capabilityBridgeRouter,
+  createContext: () => ({})
+})
 const port = (wss.address() as AddressInfo).port
 
 const until = async (cond: () => boolean, what: string): Promise<void> => {
@@ -168,7 +172,11 @@ await describe('desktop bridge: browser replay cache', () => {
     }
     hubBrowser.events.on('event', onEvent)
     // Navigates while the socket is down: the desktop's state moves, its event is lost.
-    views.set('bv-1', { ...(views.get('bv-1') as Snap), isLoading: true, url: 'https://c.example/' })
+    views.set('bv-1', {
+      ...(views.get('bv-1') as Snap),
+      isLoading: true,
+      url: 'https://c.example/'
+    })
     for (const c of wss.clients) c.terminate()
     await until(() => cached('bv-1')?.url === 'https://c.example/', 'the re-prime')
     await until(() => healed.some((s) => s.url === 'https://c.example/'), 'the heal')

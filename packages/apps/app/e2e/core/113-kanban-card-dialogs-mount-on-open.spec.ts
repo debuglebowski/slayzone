@@ -1,5 +1,12 @@
 import type { Page } from '@playwright/test'
-import { test, expect, seed, resetApp, showProjectBoard, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  showProjectBoard,
+  TEST_PROJECT_PATH
+} from '../fixtures/electron'
 
 // Every kanban card wraps a TaskContextMenu that owns six dialogs (archive, delete,
 // custom snooze, new tag, blocking task, blocked-with-comment). They used to mount
@@ -19,54 +26,57 @@ const DIALOG_COMPONENTS = [
 
 /** Fibers + hooks inside the TaskContextMenus of the board, by component name. */
 async function contextMenuSubtrees(page: Page) {
-  return page.evaluate((names) => {
-    type Fiber = {
-      tag: number
-      type?: { name?: string; displayName?: string } | string | null
-      child: Fiber | null
-      sibling: Fiber | null
-      memoizedState: { next: unknown } | null
-    }
-    const nameOf = (f: Fiber) =>
-      typeof f.type === 'object' || typeof f.type === 'function'
-        ? (f.type as { displayName?: string; name?: string })?.displayName ||
-          (f.type as { name?: string })?.name
-        : undefined
-    const cards = [...document.querySelectorAll<HTMLElement>('[data-task-id]')].filter(
-      (el) => el.offsetParent !== null && el.closest('[data-sidebar-tree-item]') === null
-    )
-    const key = Object.keys(cards[0]).find((k) => k.startsWith('__reactFiber'))!
-    const menus = new Set<Fiber>()
-    for (const el of cards) {
-      let f = (el as unknown as Record<string, Fiber & { return: Fiber | null }>)[key] as
-        | (Fiber & { return: Fiber | null })
-        | null
-      while (f && nameOf(f) !== 'TaskContextMenu') f = f.return as typeof f
-      if (f) menus.add(f)
-    }
-    let fibers = 0
-    let hooks = 0
-    const byName: Record<string, number> = Object.fromEntries(names.map((n) => [n, 0]))
-    for (const menu of menus) {
-      const stack: (Fiber | null)[] = [menu.child]
-      while (stack.length) {
-        const f = stack.pop()
-        if (!f) continue
-        fibers++
-        if (f.tag === 0 || f.tag === 11 || f.tag === 15) {
-          let h = f.memoizedState as { next: unknown } | null
-          while (h) {
-            hooks++
-            h = h.next as typeof h
-          }
-        }
-        const n = nameOf(f)
-        if (n && n in byName) byName[n]++
-        stack.push(f.sibling, f.child)
+  return page.evaluate(
+    (names) => {
+      type Fiber = {
+        tag: number
+        type?: { name?: string; displayName?: string } | string | null
+        child: Fiber | null
+        sibling: Fiber | null
+        memoizedState: { next: unknown } | null
       }
-    }
-    return { menus: menus.size, fibers, hooks, byName }
-  }, DIALOG_COMPONENTS as unknown as string[])
+      const nameOf = (f: Fiber) =>
+        typeof f.type === 'object' || typeof f.type === 'function'
+          ? (f.type as { displayName?: string; name?: string })?.displayName ||
+            (f.type as { name?: string })?.name
+          : undefined
+      const cards = [...document.querySelectorAll<HTMLElement>('[data-task-id]')].filter(
+        (el) => el.offsetParent !== null && el.closest('[data-sidebar-tree-item]') === null
+      )
+      const key = Object.keys(cards[0]).find((k) => k.startsWith('__reactFiber'))!
+      const menus = new Set<Fiber>()
+      for (const el of cards) {
+        let f = (el as unknown as Record<string, Fiber & { return: Fiber | null }>)[key] as
+          | (Fiber & { return: Fiber | null })
+          | null
+        while (f && nameOf(f) !== 'TaskContextMenu') f = f.return as typeof f
+        if (f) menus.add(f)
+      }
+      let fibers = 0
+      let hooks = 0
+      const byName: Record<string, number> = Object.fromEntries(names.map((n) => [n, 0]))
+      for (const menu of menus) {
+        const stack: (Fiber | null)[] = [menu.child]
+        while (stack.length) {
+          const f = stack.pop()
+          if (!f) continue
+          fibers++
+          if (f.tag === 0 || f.tag === 11 || f.tag === 15) {
+            let h = f.memoizedState as { next: unknown } | null
+            while (h) {
+              hooks++
+              h = h.next as typeof h
+            }
+          }
+          const n = nameOf(f)
+          if (n && n in byName) byName[n]++
+          stack.push(f.sibling, f.child)
+        }
+      }
+      return { menus: menus.size, fibers, hooks, byName }
+    },
+    DIALOG_COMPONENTS as unknown as string[]
+  )
 }
 
 test.describe('Kanban card dialogs mount on open', () => {

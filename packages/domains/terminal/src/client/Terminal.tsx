@@ -58,10 +58,7 @@ import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal/shared'
-import {
-  startingWatchdogVerdict,
-  STARTING_WATCHDOG_INTERVAL_MS
-} from './starting-watchdog'
+import { startingWatchdogVerdict, STARTING_WATCHDOG_INTERVAL_MS } from './starting-watchdog'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import {
   stripUnderlineCodes,

@@ -118,7 +118,8 @@ test.describe('hidden task terminals parse output but do not paint it', () => {
           mainWindow.evaluate(
             (ids) =>
               ids.every(
-                (id) => !!(window as unknown as ProbeWindow).__slayzone_terminalLinks?.[id]?._terminal
+                (id) =>
+                  !!(window as unknown as ProbeWindow).__slayzone_terminalLinks?.[id]?._terminal
               ),
             hiddenSids
           ),

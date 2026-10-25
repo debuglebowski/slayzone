@@ -343,10 +343,7 @@ function bufferHash(terminal: ScrambleProbeTerminal): number {
  * reachable, else from the one class-less render canvas (webgl-budget.ts) — never
  * by calling `getContext()` on every canvas in the pane.
  */
-function defaultCreateSampler(
-  terminal: ScrambleProbeTerminal,
-  addon?: WebglAddon
-): PixelSampler {
+function defaultCreateSampler(terminal: ScrambleProbeTerminal, addon?: WebglAddon): PixelSampler {
   const SAMPLE_W = 64
   const SAMPLE_H = 16
 

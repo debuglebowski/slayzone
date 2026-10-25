@@ -78,12 +78,8 @@ describe('createNotifyCoalescer', () => {
 
   it('keeps each acting user in its own bucket (owner-gate attribution)', () => {
     const { c, delivered } = setup()
-    runWithSecurityContext({ ip: null, route: null, actor: 'u1' }, () =>
-      c.push({ taskIds: ['a'] })
-    )
-    runWithSecurityContext({ ip: null, route: null, actor: 'u2' }, () =>
-      c.push({ taskIds: ['b'] })
-    )
+    runWithSecurityContext({ ip: null, route: null, actor: 'u1' }, () => c.push({ taskIds: ['a'] }))
+    runWithSecurityContext({ ip: null, route: null, actor: 'u2' }, () => c.push({ taskIds: ['b'] }))
     // Both leading: different actors never merge.
     expect(delivered).toEqual([['a'], ['b']])
   })

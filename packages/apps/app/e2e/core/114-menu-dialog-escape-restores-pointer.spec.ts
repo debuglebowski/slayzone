@@ -1,4 +1,11 @@
-import { test, expect, seed, resetApp, showProjectBoard, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  showProjectBoard,
+  TEST_PROJECT_PATH
+} from '../fixtures/electron'
 
 // Dialogs opened from a kanban card's context menu (custom snooze, archive,
 // blocker, new tag, ...) and then dismissed with Escape must hand pointer
@@ -26,8 +33,7 @@ test.describe('Menu-opened dialogs closed with Escape', () => {
 
     const dialog = (role: 'dialog' | 'alertdialog' = 'dialog') =>
       mainWindow.getByRole(role).filter({ visible: true })
-    const bodyPointerEvents = () =>
-      mainWindow.evaluate(() => document.body.style.pointerEvents)
+    const bodyPointerEvents = () => mainWindow.evaluate(() => document.body.style.pointerEvents)
     const openMenu = async (i: number) => {
       await card(i).click({ button: 'right' })
       const menu = mainWindow.locator('[role="menu"]').filter({ visible: true })

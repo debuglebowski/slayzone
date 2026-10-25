@@ -33,11 +33,7 @@ function assert(cond: unknown, msg: string): asserts cond {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Collect onChange calls for `ms` after running `act`. */
-async function changesDuring(
-  w: { fired: string[] },
-  act: () => void,
-  ms = 600
-): Promise<string[]> {
+async function changesDuring(w: { fired: string[] }, act: () => void, ms = 600): Promise<string[]> {
   w.fired.length = 0
   act()
   await sleep(ms)
@@ -59,9 +55,7 @@ async function main(): Promise<void> {
 
   const cwd = join(root, 'apps/hub')
   const metafile = {
-    inputs: Object.fromEntries(
-      [bin, inlined, dep].map((f) => [relative(cwd, f), {}])
-    )
+    inputs: Object.fromEntries([bin, inlined, dep].map((f) => [relative(cwd, f), {}]))
   }
   const state = { fired: [] as string[] }
   const watcher = watchBundleInputs({
