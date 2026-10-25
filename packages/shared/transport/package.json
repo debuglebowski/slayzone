@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./server": "./src/server/index.ts",
     "./client": "./src/client/index.ts",
+    "./testing": "./src/testing/index.tsx",
     "./txns": "./src/txns/index.ts",
     "./db-bootstrap": "./src/db-bootstrap/index.ts"
   },

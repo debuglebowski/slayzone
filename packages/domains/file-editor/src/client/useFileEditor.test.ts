@@ -1,53 +1,53 @@
 // @vitest-environment jsdom
+import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, cleanup } from '@testing-library/react'
+import { createTrpcTest } from '@slayzone/transport/testing'
 import { useFileEditor, isImageFile, isPdfFile, isBinaryFile } from './useFileEditor'
 
-type FileCallback = (rootPath: string, relPath: string) => void
+type FileWatchEvent = { type: 'changed' | 'deleted'; root: string; relPath: string }
 
 interface FsStub {
   readFile: ReturnType<typeof vi.fn>
   writeFile: ReturnType<typeof vi.fn>
-  watch: ReturnType<typeof vi.fn>
-  unwatch: ReturnType<typeof vi.fn>
-  onFileChanged: ReturnType<typeof vi.fn>
-  onFileDeleted: ReturnType<typeof vi.fn>
   emitChanged: (root: string, rel: string) => void
   emitDeleted: (root: string, rel: string) => void
+  wrapper: (props: { children: ReactNode }) => ReactNode
 }
 
+// In-memory fileEditor backend behind the real tRPC client + provider: the
+// three procedures the hook uses, served from `diskContent`.
 function installFsStub(diskContent: Record<string, string> = {}): FsStub {
-  const changedListeners = new Set<FileCallback>()
-  const deletedListeners = new Set<FileCallback>()
-  const stub: FsStub = {
-    readFile: vi.fn(async (_root: string, rel: string) => {
-      if (!(rel in diskContent)) throw new Error('ENOENT')
-      return { content: diskContent[rel] }
-    }),
-    writeFile: vi.fn(async (_root: string, rel: string, content: string) => {
-      diskContent[rel] = content
-    }),
-    watch: vi.fn(async () => undefined),
-    unwatch: vi.fn(async () => undefined),
-    onFileChanged: vi.fn((cb: FileCallback) => {
-      changedListeners.add(cb)
-      return () => changedListeners.delete(cb)
-    }),
-    onFileDeleted: vi.fn((cb: FileCallback) => {
-      deletedListeners.add(cb)
-      return () => deletedListeners.delete(cb)
-    }),
-    emitChanged: (root, rel) => {
-      for (const cb of changedListeners) cb(root, rel)
+  const watchers = new Set<(event: FileWatchEvent) => void>()
+  const readFile = vi.fn(async (_root: string, rel: string) => {
+    if (!(rel in diskContent)) throw new Error('ENOENT')
+    return { content: diskContent[rel] }
+  })
+  const writeFile = vi.fn(async (_root: string, rel: string, content: string) => {
+    diskContent[rel] = content
+  })
+  const emit = (event: FileWatchEvent) => {
+    for (const push of watchers) push(event)
+  }
+  const { wrapper } = createTrpcTest({
+    procedures: {
+      'fileEditor.readFile': (i) => readFile(i.rootPath, i.filePath),
+      'fileEditor.writeFile': (i) => writeFile(i.rootPath, i.filePath, i.content)
     },
-    emitDeleted: (root, rel) => {
-      for (const cb of deletedListeners) cb(root, rel)
+    subscriptions: {
+      'fileEditor.watch': (_input, push) => {
+        watchers.add(push)
+        return () => watchers.delete(push)
+      }
     }
+  })
+  return {
+    readFile,
+    writeFile,
+    emitChanged: (root, rel) => emit({ type: 'changed', root, relPath: rel }),
+    emitDeleted: (root, rel) => emit({ type: 'deleted', root, relPath: rel }),
+    wrapper
   }
-  ;(globalThis as unknown as { window: { api: { fs: unknown } } }).window = {
-    api: { fs: stub }
-  }
-  return stub
 }
 
 const ROOT = '/tmp/proj'
@@ -77,7 +77,7 @@ async function flush() {
 
 describe('useFileEditor — delete handling', () => {
   it('closes tab when its file is deleted on disk', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -99,7 +99,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('active becomes null when last tab deleted', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -117,7 +117,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('closes descendants when folder deleted', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -140,7 +140,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('ignores delete event for non-open file', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -156,7 +156,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('ignores delete from different project root', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -172,7 +172,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('dirty tab stays open with deleted flag when file deleted on disk', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -195,7 +195,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('folder delete: clean children close, dirty child stays', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -219,7 +219,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('saving deleted dirty file clears deleted flag (recreate)', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -244,7 +244,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('external recreate clears deleted flag (via change event)', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -272,7 +272,7 @@ describe('useFileEditor — delete handling', () => {
   })
 
   it('does not close tab for path that is only a prefix match (no slash)', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {
@@ -313,7 +313,7 @@ describe('file-type classifiers', () => {
 
 describe('useFileEditor — binary files', () => {
   it('opens a pdf as binary without reading content', async () => {
-    const { result } = renderHook(() => useFileEditor(ROOT))
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
     await flush()
 
     await act(async () => {

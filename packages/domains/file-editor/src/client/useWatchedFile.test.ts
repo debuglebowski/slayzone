@@ -1,26 +1,28 @@
 // @vitest-environment jsdom
+import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, cleanup } from '@testing-library/react'
+import { createTrpcTest } from '@slayzone/transport/testing'
+import { useWatchedFile } from './useWatchedFile'
 
 type FileWatchEvent = { type: 'changed' | 'deleted'; root: string; relPath: string }
-type WatchOnData = (event: FileWatchEvent) => void
 
-// Captures every active fileEditor.watch subscription so the test can drive the
-// file-watcher path (formerly window.api.fs.onFileChanged) through tRPC.
+// Every live fileEditor.watch subscription, served through the real tRPC
+// client + provider so the test drives the hook's file-watcher path.
 interface WatchController {
-  /** onData callbacks for currently-enabled subscriptions */
-  active: Set<WatchOnData>
-  /** true once at least one subscription was registered with enabled !== false */
+  /** push callbacks for currently-open subscriptions */
+  active: Set<(event: FileWatchEvent) => void>
+  /** true once at least one subscription was opened (i.e. enabled) */
   everEnabled: boolean
   emit: (root: string, rel: string, type?: FileWatchEvent['type']) => void
   reset: () => void
 }
 
 const watchController: WatchController = {
-  active: new Set<WatchOnData>(),
+  active: new Set(),
   everEnabled: false,
   emit: (root, rel, type = 'changed') => {
-    for (const cb of watchController.active) cb({ type, root, relPath: rel })
+    for (const push of watchController.active) push({ type, root, relPath: rel })
   },
   reset: () => {
     watchController.active.clear()
@@ -28,39 +30,22 @@ const watchController: WatchController = {
   }
 }
 
-vi.mock('@slayzone/transport/client', () => {
-  // trpc.fileEditor.watch.subscriptionOptions(input, opts) → opaque payload that
-  // the mocked useSubscription consumes.
-  const useTRPC = () => ({
-    fileEditor: {
-      watch: {
-        subscriptionOptions: (
-          input: { rootPath: string },
-          opts: { enabled?: boolean; onData: WatchOnData }
-        ) => ({ input, opts })
-      }
-    }
-  })
-  const useSubscription = (sub: { opts: { enabled?: boolean; onData: WatchOnData } }): void => {
-    const enabled = sub.opts.enabled !== false
-    if (!enabled) return
-    watchController.everEnabled = true
-    // Register the onData callback for the life of this render's subscription.
-    // React Testing Library re-runs on each render; we keep the latest callback
-    // registered and drop it on cleanup via a side-effect-free Set membership.
-    watchController.active.add(sub.opts.onData)
-  }
-  return { useTRPC, useSubscription }
-})
-
-// Imported AFTER vi.mock so the hook picks up the mocked transport.
-const { useWatchedFile } = await import('./useWatchedFile')
+let wrapper: (props: { children: ReactNode }) => ReactNode
 
 const ROOT = '/tmp/proj'
 const REL = 'CLAUDE.md'
 
 beforeEach(() => {
   watchController.reset()
+  wrapper = createTrpcTest({
+    subscriptions: {
+      'fileEditor.watch': (_input, push) => {
+        watchController.everEnabled = true
+        watchController.active.add(push)
+        return () => watchController.active.delete(push)
+      }
+    }
+  }).wrapper
   vi.useFakeTimers()
 })
 
@@ -83,8 +68,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => 'hello')
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -99,8 +85,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => 'old')
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 100 })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 100 }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -123,8 +110,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => 'old')
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 500 })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 500 }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -144,8 +132,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => diskContent)
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save }),
+      { wrapper }
     )
     await flushPromises()
     expect(result.current.content).toBe('v1')
@@ -165,8 +154,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => diskContent)
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -189,8 +179,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => diskContent)
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -216,8 +207,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => 'initial')
     const save = vi.fn(async () => undefined)
 
-    const { result, unmount } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 })
+    const { result, unmount } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -240,8 +232,9 @@ describe('useWatchedFile', () => {
         })
     )
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 50 })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 50 }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -292,7 +285,7 @@ describe('useWatchedFile', () => {
           debounceMs: 5000
         })
       },
-      { initialProps: { rel: 'A.md' } }
+      { initialProps: { rel: 'A.md' }, wrapper }
     )
     await flushPromises()
     expect(result.current.content).toBe('A-disk')
@@ -325,8 +318,9 @@ describe('useWatchedFile', () => {
         })
     )
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 50 })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 50 }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -368,8 +362,9 @@ describe('useWatchedFile', () => {
     const read = vi.fn(async () => null)
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save }),
+      { wrapper }
     )
     await flushPromises()
 
@@ -391,7 +386,7 @@ describe('useWatchedFile', () => {
     const { result, rerender } = renderHook(
       ({ rel }: { rel: string | null }) =>
         useWatchedFile({ projectPath: null, relPath: rel, read, save, debounceMs: 50 }),
-      { initialProps: { rel: null as string | null } }
+      { initialProps: { rel: null as string | null }, wrapper }
     )
     await flushPromises()
 
@@ -421,8 +416,9 @@ describe('useWatchedFile', () => {
     // save does nothing — but the external watcher will fire as an "echo"
     const save = vi.fn(async () => undefined)
 
-    const { result } = renderHook(() =>
-      useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 10 })
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 10 }),
+      { wrapper }
     )
     await flushPromises()
 

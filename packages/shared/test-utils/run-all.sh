@@ -684,8 +684,6 @@ run_test packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
 skip_suite packages/domains/diagnostics/src/electron/batching.test.ts \
   "1 assertion fails (Expected 1, got 0). Fix the flush expectation"
-skip_suite packages/domains/file-editor/src/client/useFileEditor.test.ts \
-  "11 cases stub window.api.fs, the renderer IPC removed in June; the hook now uses tRPC (useTRPC needs a provider). Port the stubs to a tRPC test client"
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 
@@ -761,6 +759,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/apps/app/src/renderer/src/components/ErrorBoundary.test.tsx \
   packages/apps/app/src/renderer/src/components/dialogs/CliInstallDialog.test.tsx \
   packages/domains/automations/src/client/AutomationCard.test.tsx \
+  packages/domains/file-editor/src/client/useFileEditor.test.ts \
   packages/domains/file-editor/src/client/useWatchedFile.test.ts \
   packages/domains/projects/src/client/TasksGeneralTab.test.tsx \
   packages/domains/task-terminals/src/client/focus-handoff.test.ts \
