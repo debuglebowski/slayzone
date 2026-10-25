@@ -28,3 +28,14 @@
     marker.dataset.error = err.message
   }
 })()
+
+// Test hook: the page dispatches `slz-ext-request` (DOM events cross into this
+// isolated world); the background's reply lands on the marker as JSON.
+document.addEventListener('slz-ext-request', function (event) {
+  var marker = document.getElementById('slayzone-test-ext')
+  chrome.runtime.sendMessage(JSON.parse(event.detail), function (response) {
+    marker.dataset.reply = chrome.runtime.lastError
+      ? JSON.stringify({ ok: false, error: chrome.runtime.lastError.message })
+      : JSON.stringify(response)
+  })
+})

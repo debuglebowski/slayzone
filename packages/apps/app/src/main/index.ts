@@ -149,6 +149,14 @@ function awaitTrpcPort(timeoutMs = 5000): Promise<number> {
 // External app protocols registered here so Chromium routes them through our session handler
 // instead of passing them to the OS (which would launch desktop apps like Figma, Slack, etc.)
 protocol.registerSchemesAsPrivileged([
+  // Browser-panel MV3 extensions: Chrome registers chrome-extension:// as a standard,
+  // secure scheme; Electron does not, so Blink refuses the origin private file
+  // system (navigator.storage.getDirectory → SecurityError) in extension pages and
+  // service workers. 1Password keeps its database there ("db-unknown" without it).
+  {
+    scheme: 'chrome-extension',
+    privileges: { standard: true, secure: true }
+  },
   {
     scheme: 'slz-file',
     privileges: {
@@ -560,6 +568,8 @@ import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
 import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
 import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
+import { discoverBrowserExtensions } from './browser-extension-discovery'
+import { extensionIdFromManifestKey } from './extension-id'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -3000,7 +3010,49 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // Initialize Chrome extension API support for the browser panel session.
     const chromeExtensions = new ElectronChromeExtensions({
       license: 'GPL-3.0',
-      session: browserSession
+      session: browserSession,
+      // How extensions open, focus and close tabs (chrome.tabs.*): browser-panel tabs.
+      // Without these, 1Password could not open its own sign-in page at all.
+      createTab: (details) => browserViewManager.createTabForExtension(details),
+      selectTab: (tab) => browserViewManager.selectTabForExtension(tab),
+      removeTab: (tab) => browserViewManager.removeTabForExtension(tab),
+      // chrome.windows.create (unlock / sign-in popups): a real window on the
+      // browser-panel session, registered as a tab so the extension can drive it.
+      createWindow: async (details) => {
+        const url = Array.isArray(details.url) ? details.url[0] : details.url
+        const win = new BrowserWindow({
+          width: details.width ?? 420,
+          height: details.height ?? 640,
+          ...(details.left !== undefined && details.top !== undefined
+            ? { x: details.left, y: details.top }
+            : {}),
+          parent: details.type === 'popup' && mainWindow ? mainWindow : undefined,
+          autoHideMenuBar: true,
+          webPreferences: { session: browserSession, sandbox: true, contextIsolation: true }
+        })
+        chromeExtensions.addTab(win.webContents, win)
+        if (url) await win.loadURL(url)
+        return win
+      },
+      removeWindow: (win) => {
+        if (!win.isDestroyed()) win.close()
+      },
+      // chrome.permissions.request: ask, as Chrome does.
+      requestPermissions: async (extension, permissions) => {
+        const asked = [...(permissions.permissions ?? []), ...(permissions.origins ?? [])]
+        const options: Electron.MessageBoxOptions = {
+          type: 'question',
+          buttons: ['Allow', 'Deny'],
+          defaultId: 0,
+          cancelId: 1,
+          message: `"${extension.name}" wants additional permissions`,
+          detail: asked.join('\n') || 'No details given.'
+        }
+        const { response } = mainWindow
+          ? await dialog.showMessageBox(mainWindow, options)
+          : await dialog.showMessageBox(options)
+        return response === 0
+      }
     })
     ElectronChromeExtensions.handleCRXProtocol(browserSession)
     browserViewManager.setChromeExtensions(chromeExtensions)
@@ -3019,25 +3071,60 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // (installChromeWebStore handles its own extensions, but we also support
     // importing from other browsers via loadExtension)
     const extensionsJsonPath = join(app.getPath('userData'), 'browser-extensions.json')
+    // Web Store installs live under `extensionsPath` and are reloaded (and updated)
+    // by installChromeWebStore; this file only lists extensions imported from other
+    // browsers or loaded unpacked. One copy per extension ID, Web Store wins: a
+    // second copy loaded later replaces the first, so an older import of the same
+    // extension would sit on data a newer Web Store build already migrated
+    // (1Password: "Failed to initialize database").
+    const isWebStoreInstall = (extPath: string) =>
+      extPath.startsWith(extensionsPath + sep) || extPath === extensionsPath
     const saveExtensionPaths = () => {
       try {
-        const exts = browserSession.getAllExtensions().map((e) => e.path)
+        const exts = browserSession
+          .getAllExtensions()
+          .map((e) => e.path)
+          .filter((extPath) => !isWebStoreInstall(extPath))
         fsp.writeFile(extensionsJsonPath, JSON.stringify(exts))
       } catch {
         /* best effort */
+      }
+    }
+    const manifestExtensionId = async (extPath: string): Promise<string | null> => {
+      try {
+        const manifest = JSON.parse(await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8'))
+        return typeof manifest.key === 'string' ? extensionIdFromManifestKey(manifest.key) : null
+      } catch {
+        return null
       }
     }
     const loadSavedExtensions = async () => {
       try {
         const data = await fsp.readFile(extensionsJsonPath, 'utf-8')
         const paths: string[] = JSON.parse(data)
+        const webStoreIds = new Set(
+          browserSession
+            .getAllExtensions()
+            .filter((e) => isWebStoreInstall(e.path))
+            .map((e) => e.id)
+        )
         for (const extPath of paths) {
+          if (isWebStoreInstall(extPath)) continue
+          const id = await manifestExtensionId(extPath)
+          if (id && webStoreIds.has(id)) {
+            console.log(
+              '[extensions] skipping import already installed from the Web Store:',
+              extPath
+            )
+            continue
+          }
           try {
             await browserSession.loadExtension(extPath)
           } catch (err) {
             console.warn('[extensions] Failed to reload extension:', extPath, err)
           }
         }
+        saveExtensionPaths()
       } catch {
         /* no saved extensions or file doesn't exist */
       }
@@ -3080,94 +3167,17 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         browserSession.removeExtension(extensionId)
         saveExtensionPaths()
       },
-      discoverBrowserExtensions: async () => {
-        const appSupport = join(homedir(), 'Library', 'Application Support')
-        const knownBrowsers = [
-          { name: 'Chrome', dir: 'Google/Chrome/Default/Extensions' },
-          { name: 'Arc', dir: 'Arc/User Data/Default/Extensions' },
-          { name: 'Brave', dir: 'BraveSoftware/Brave-Browser/Default/Extensions' },
-          { name: 'Edge', dir: 'Microsoft Edge/Default/Extensions' },
-          { name: 'Chromium', dir: 'Chromium/Default/Extensions' },
-          { name: 'Vivaldi', dir: 'Vivaldi/Default/Extensions' }
-        ]
-        const alreadyLoaded = new Set(browserSession.getAllExtensions().map((e) => e.id))
-        const results: {
-          name: string
-          extensions: {
-            id: string
-            name: string
-            version: string
-            path: string
-            alreadyImported: boolean
-            manifestVersion?: number
-          }[]
-        }[] = []
-
-        for (const browser of knownBrowsers) {
-          const extDir = join(appSupport, browser.dir)
-          let entries: string[]
-          try {
-            entries = await fsp.readdir(extDir)
-          } catch {
-            continue
-          }
-
-          const extensions: (typeof results)[0]['extensions'] = []
-          for (const id of entries) {
-            if (id === 'Temp' || id.startsWith('.')) continue
-            const idDir = join(extDir, id)
-            let versions: string[]
-            try {
-              versions = await fsp.readdir(idDir)
-            } catch {
-              continue
-            }
-            const ver = versions.sort().pop()
-            if (!ver) continue
-            const extPath = join(idDir, ver)
-            try {
-              const manifest = JSON.parse(
-                await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8')
-              )
-              let name: string = manifest.name || id
-              if (name.startsWith('__MSG_')) {
-                const key = name.slice(6, -2)
-                for (const lang of ['en', 'en_US', 'en_GB']) {
-                  try {
-                    const msgs = JSON.parse(
-                      await fsp.readFile(join(extPath, '_locales', lang, 'messages.json'), 'utf-8')
-                    )
-                    if (msgs[key]?.message) {
-                      name = msgs[key].message
-                      break
-                    }
-                  } catch {
-                    /* try next lang */
-                  }
-                }
-              }
-              extensions.push({
-                id,
-                name,
-                version: manifest.version || '?',
-                path: extPath,
-                alreadyImported: alreadyLoaded.has(id),
-                manifestVersion:
-                  typeof manifest.manifest_version === 'number'
-                    ? manifest.manifest_version
-                    : undefined
-              })
-            } catch {
-              /* skip unreadable extensions */
-            }
-          }
-          if (extensions.length > 0) {
-            results.push({ name: browser.name, extensions })
-          }
-        }
-        return results
-      },
+      discoverBrowserExtensions: () =>
+        discoverBrowserExtensions({
+          appSupportDir: join(homedir(), 'Library', 'Application Support'),
+          loadedIds: new Set(browserSession.getAllExtensions().map((e) => e.id))
+        }),
       importExtension: async (extPath: string) => {
+        const id = await manifestExtensionId(extPath)
+        const installed = id ? browserSession.getExtension(id) : null
+        if (installed && isWebStoreInstall(installed.path)) {
+          return { error: `${installed.name} is already installed from the Chrome Web Store` }
+        }
         try {
           const ext = await browserSession.loadExtension(extPath)
           saveExtensionPaths()

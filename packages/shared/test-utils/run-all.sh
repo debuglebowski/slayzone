@@ -340,6 +340,10 @@ run_test packages/apps/app/src/main/present-window.test.ts
 run_test packages/apps/app/src/main/clipboard-file-paths.test.ts
 # Remembered dialog folder: Electron 43 opens a dialog without defaultPath in Downloads.
 run_test packages/apps/app/src/main/dialog-last-dir.test.ts
+# Browser-panel extension import list: every Chromium profile, not just Default.
+run_test packages/apps/app/src/main/browser-extension-discovery.test.ts
+# Chrome extension ID from manifest key (one copy per extension; Web Store wins).
+run_test packages/apps/app/src/main/extension-id.test.ts
 # Dev launcher (dev.mjs) ↔ main: relaunch exit code, shutdown grace > quit watchdog.
 run_test packages/apps/app/src/main/dev-launcher-contract.test.ts
 # macOS update manifest: OS-minimum stamp (Electron 44 = macOS 13+) survives the arch merge.

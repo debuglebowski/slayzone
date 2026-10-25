@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   clipboard,
   Menu,
@@ -169,6 +170,8 @@ export class BrowserViewManager {
   private onHandoffPolicyChange:
     | ((wcId: number, policy: DesktopHandoffPolicy | null) => void)
     | null = null
+  /** tabId → resolver for a tab main asked the panel to open (extension chrome.tabs.create). */
+  private pendingTabOpens = new Map<string, (entry: ViewEntry) => void>()
 
   setMainWindow(win: BrowserWindow) {
     this.mainWindow = win
@@ -242,6 +245,7 @@ export class BrowserViewManager {
     }
 
     this.views.set(viewId, entry)
+    this.pendingTabOpens.get(opts.tabId)?.(entry)
 
     // Always add to window first so the view is properly initialized
     this.addToWindow(entry)
@@ -1083,6 +1087,97 @@ export class BrowserViewManager {
       })
     }
     wc.on('did-navigate', (_event, url) => inject(url))
+  }
+
+  // ── Chrome-extension tab hooks (electron-chrome-extensions ChromeExtensionImpl) ──
+  // Extensions (1Password's sign-in page, settings, unlock) open, focus and close
+  // tabs through chrome.tabs.*. Browser-panel tabs are owned by the renderer, so
+  // main asks the panel to do it (the same `onEvent` channel Cmd+Click uses) and,
+  // for a new tab, waits for the tab's view to be created.
+
+  private entryForWebContents(wc: Electron.WebContents): [string, ViewEntry] | null {
+    for (const [viewId, entry] of this.views) {
+      if (entry.kind === 'browser-tab' && entry.view.webContents === wc) return [viewId, entry]
+    }
+    return null
+  }
+
+  /** The browser tab an extension acts from: its opener tab, else the last one used. */
+  private extensionSourceTab(openerTabId: number | undefined): [string, ViewEntry] | null {
+    let latest: [string, ViewEntry] | null = null
+    for (const [viewId, entry] of this.views) {
+      if (entry.kind !== 'browser-tab' || entry.view.webContents.isDestroyed()) continue
+      if (openerTabId !== undefined && entry.view.webContents.id === openerTabId) {
+        return [viewId, entry]
+      }
+      if (!latest || entry.lastUsed > latest[1].lastUsed) latest = [viewId, entry]
+    }
+    return latest
+  }
+
+  /**
+   * Opens a browser-panel tab for an extension, in the task of the tab it acts
+   * from, and resolves once that tab's page exists. Always a foreground tab: a
+   * background panel tab has no page until it is first shown, and the extension
+   * needs the page back.
+   */
+  async createTabForExtension(details: {
+    url?: string
+    openerTabId?: number
+  }): Promise<[Electron.WebContents, BrowserWindow]> {
+    const source = this.extensionSourceTab(details.openerTabId)
+    if (!source) throw new Error('No browser panel tab is open to open the extension tab next to')
+    const [sourceViewId, sourceEntry] = source
+    const tabId = `tab-ext-${randomUUID().slice(0, 8)}`
+    const created = new Promise<ViewEntry>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingTabOpens.delete(tabId)
+        reject(new Error('Timed out waiting for the browser panel to open the extension tab'))
+      }, 15_000)
+      this.pendingTabOpens.set(tabId, (entry) => {
+        clearTimeout(timer)
+        this.pendingTabOpens.delete(tabId)
+        resolve(entry)
+      })
+    })
+    browserViewEvents.emit('event', {
+      viewId: sourceViewId,
+      type: 'new-tab-request',
+      url: details.url || 'about:blank',
+      background: false,
+      taskId: sourceEntry.taskId,
+      tabId
+    }) // tRPC app.browser.onEvent
+    const entry = await created
+    const win = this.windowFor(entry)
+    if (!win) throw new Error('The browser panel window is gone')
+    return [entry.view.webContents, win]
+  }
+
+  /** chrome.tabs.update({ active: true }): switch the panel to that tab. */
+  selectTabForExtension(wc: Electron.WebContents): void {
+    const found = this.entryForWebContents(wc)
+    if (!found) return
+    const [viewId, entry] = found
+    browserViewEvents.emit('event', {
+      viewId,
+      type: 'select-tab-request',
+      taskId: entry.taskId,
+      tabId: entry.tabId
+    }) // tRPC app.browser.onEvent
+  }
+
+  /** chrome.tabs.remove: close that panel tab. */
+  removeTabForExtension(wc: Electron.WebContents): void {
+    const found = this.entryForWebContents(wc)
+    if (!found) return
+    const [viewId, entry] = found
+    browserViewEvents.emit('event', {
+      viewId,
+      type: 'close-tab-request',
+      taskId: entry.taskId,
+      tabId: entry.tabId
+    }) // tRPC app.browser.onEvent
   }
 
   private getWebContents(viewId: string): Electron.WebContents | null {

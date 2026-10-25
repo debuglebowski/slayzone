@@ -328,22 +328,34 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     })
   }, [activeViewState.favicon])
 
-  // Handle new-tab-request events from main process (Cmd+Click / middle-click on links)
+  // Tab requests from main: new-tab-request (Cmd+Click / middle-click on links, and
+  // Chrome extensions' chrome.tabs.create — those carry the tabId main waits on),
+  // select-tab-request / close-tab-request (chrome.tabs.update / chrome.tabs.remove).
   const handleNewTabRequest = useStableCallback((raw: unknown) => {
     const event = raw as {
       type: string
       taskId?: string
       url?: string
       background?: boolean
+      tabId?: string
     }
-    if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
+    if (event.taskId !== taskId) return
+    if (event.type === 'select-tab-request' && event.tabId) {
+      switchToTab(event.tabId)
+      return
+    }
+    if (event.type === 'close-tab-request' && event.tabId) {
+      closeTab(event.tabId)
+      return
+    }
+    if (event.type !== 'new-tab-request') return
     const tabUrl = event.url as string
     if (event.background) {
       const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
       const t = tabsRef.current
       commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
     } else {
-      createNewTab(tabUrl)
+      createNewTab(tabUrl, event.tabId)
     }
   })
   useSubscription(

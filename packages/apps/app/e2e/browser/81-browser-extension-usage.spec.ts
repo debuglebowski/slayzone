@@ -6,7 +6,8 @@ import {
   testInvoke,
   ensureBrowserPanelVisible,
   openTaskViaSearch,
-  getActiveViewId
+  getActiveViewId,
+  getViewsForTask
 } from '../fixtures/browser-view'
 import { getTestUrl } from '../fixtures/test-server'
 
@@ -266,6 +267,74 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
         `Running workers: ${JSON.stringify(swInfo.runningWorkers)}`
       ].join('\n')
     ).toBe('connected')
+  })
+
+  // Runs after the MV3 messaging test above, which loaded the MV3 fixture into this
+  // worker's app and left the active tab on a page where its content script runs.
+  async function askMv3Background(
+    mainWindow: import('@playwright/test').Page,
+    viewId: string,
+    message: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    await testInvoke(
+      mainWindow,
+      'browser:execute-js',
+      viewId,
+      `(() => { const m = document.getElementById('slayzone-test-ext'); delete m.dataset.reply;
+        document.dispatchEvent(new CustomEvent('slz-ext-request', { detail: ${JSON.stringify(
+          JSON.stringify(message)
+        )} })) })()`
+    )
+    let reply = ''
+    await expect
+      .poll(
+        async () => {
+          reply = (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'document.getElementById("slayzone-test-ext")?.dataset.reply || ""'
+          )) as string
+          return reply
+        },
+        { timeout: 20000 }
+      )
+      .not.toBe('')
+    return JSON.parse(reply)
+  }
+
+  test('MV3: `browser` namespace is the shimmed chrome', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+    const reply = await askMv3Background(mainWindow, viewId, { type: 'namespaces' })
+    expect(reply).toEqual({ browserIsChrome: true, browserWindows: 'object' })
+  })
+
+  test('MV3: service worker can use the origin private file system', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+    expect(await askMv3Background(mainWindow, viewId, { type: 'opfs' })).toEqual({ opfs: 'ok' })
+  })
+
+  test('MV3: chrome.tabs.create opens a browser-panel tab', async ({ mainWindow }) => {
+    test.setTimeout(45000)
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+    const viewsBefore = await getViewsForTask(mainWindow, taskId)
+    const target = await getTestUrl('/title-ext-opened')
+
+    const reply = await askMv3Background(mainWindow, viewId, { type: 'open-tab', url: target })
+    expect(reply, JSON.stringify(reply)).toMatchObject({ ok: true })
+    expect(typeof reply.tabId).toBe('number')
+
+    const viewsAfter = await getViewsForTask(mainWindow, taskId)
+    expect(viewsAfter.length).toBe(viewsBefore.length + 1)
+    const opened = viewsAfter.find((v) => !viewsBefore.includes(v))!
+    await expect
+      .poll(async () => (await testInvoke(mainWindow, 'browser:get-url', opened)) as string, {
+        timeout: 15000
+      })
+      .toContain('/title-ext-opened')
   })
 
   test('real extension: 1Password imports and page stays usable', async ({ mainWindow }) => {

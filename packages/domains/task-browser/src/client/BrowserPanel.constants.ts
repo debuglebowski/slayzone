@@ -11,4 +11,6 @@ export const SLOT_BUTTONS: { slot: DeviceSlot; icon: typeof Monitor; label: stri
 // Shared with task-artifacts' HTML preview theme override, so the two toggles
 // cannot drift apart.
 export const THEME_CYCLE = HTML_THEME_CYCLE as readonly BrowserTabTheme[]
+// Extensions manager UI: off until MV3 password managers work end to end (1Password
+// still renders an empty page in Electron). Web Store installs work without it.
 export const EXTENSIONS_MANAGER_ENABLED = false

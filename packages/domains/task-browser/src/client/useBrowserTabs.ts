@@ -20,10 +20,11 @@ export function useBrowserTabs({
   // Tab callbacks
   const newTabUrl = browserDefaultUrl || 'about:blank'
   const createNewTab = useCallback(
-    (url?: string) => {
+    (url?: string, id?: string) => {
       const tabUrl = url ?? newTabUrl
       const newTab: BrowserTab = {
-        id: generateTabId(),
+        // `id` is given when main opens the tab and must find its view (extension tabs).
+        id: id ?? generateTabId(),
         url: tabUrl,
         title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
       }
