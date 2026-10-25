@@ -21,7 +21,6 @@
     "patchedDependencies": {
       "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
       "posix@4.2.0": "patches/posix@4.2.0.patch",
-      "app-builder-lib@26.15.2": "patches/app-builder-lib@26.15.2.patch",
       "@radix-ui/react-menu@2.1.24": "patches/@radix-ui__react-menu@2.1.24.patch"
     }
   },
