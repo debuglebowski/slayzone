@@ -19,9 +19,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-pr-dry-run-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   dry-run:
