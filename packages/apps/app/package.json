@@ -117,7 +117,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "electron": "41.10.7",
-    "electron-builder": "~26.15.2",
+    "electron-builder": "~26.17.0",
     "electron-vite": "^5.0.0",
     "jsdom": "^26.1.0",
     "rollup-plugin-visualizer": "^7.1.1",
