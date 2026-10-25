@@ -571,6 +571,7 @@ import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handler
 import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
+import { attachPdfViewerLinkBridge } from './pdf-viewer-link-bridge'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -597,7 +598,6 @@ import { powerResumeEvents } from './power-resume-events'
 import { startDesktopBridgeServer } from './desktop-bridge-server'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
-import { attachPdfViewerLinkBridge } from './pdf-viewer-link-bridge'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
 const DEFAULT_WINDOW_WIDTH = 1760

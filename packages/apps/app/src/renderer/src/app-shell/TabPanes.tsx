@@ -13,10 +13,7 @@ import { HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { useTabStore, type Tab } from '@slayzone/settings'
-import {
-  TaskPaneFallback,
-  useTerminalFirstHolding
-} from '@slayzone/task/client/TerminalFirstShell'
+import { TaskPaneFallback, useTerminalFirstHolding } from '@slayzone/task/client/TerminalFirstShell'
 import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { mruRank } from '@slayzone/terminal/client/terminal-mru'
