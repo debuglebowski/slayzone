@@ -2,6 +2,7 @@ import { Fzf } from 'fzf'
 import type { SearchFileContext } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
+import { flattenPaletteCommands, type PaletteCommand } from '@slayzone/ui'
 import type { FilterKind, SearchItem } from './SearchDialog.types'
 import { BASENAME_BOOST, KIND_WEIGHT, MAX_RESULTS, ACTION_DEFS } from './SearchDialog.constants'
 import { selectorForItem } from './SearchDialog.utils'
@@ -15,6 +16,7 @@ export interface RankedResult {
 }
 
 export interface GroupedResults {
+  taskCommands: RankedResult[]
   actions: RankedResult[]
   files: RankedResult[]
   tasks: RankedResult[]
@@ -27,6 +29,8 @@ interface BuildSearchItemsParams {
   allFiles: string[]
   tasks: Task[]
   projects: Project[]
+  /** Commands of the current task (empty outside a task). */
+  taskCommands: PaletteCommand[]
 }
 
 export function buildSearchItems({
@@ -34,14 +38,29 @@ export function buildSearchItems({
   fileContext,
   allFiles,
   tasks,
-  projects
+  projects,
+  taskCommands
 }: BuildSearchItemsParams): SearchItem[] {
   const list: SearchItem[] = []
+  const showTaskCommands = filter === 'all' || filter === 'task'
   const showActions = filter === 'all' || filter === 'actions'
   const showFiles = filter === 'all' || filter === 'files'
   const showTasks = filter === 'all' || filter === 'tasks'
   const showProjects = filter === 'all' || filter === 'projects'
 
+  if (showTaskCommands) {
+    for (const { command, trail } of flattenPaletteCommands(taskCommands)) {
+      list.push({
+        kind: 'task-command',
+        // Prefixed: rankResults dedupes by id across kinds.
+        id: `cmd:${command.id}`,
+        label: [...trail, command.label].join(' → '),
+        sublabel: '',
+        keywords: command.keywords ?? '',
+        command
+      })
+    }
+  }
   if (showActions) {
     for (const a of ACTION_DEFS) {
       list.push({
@@ -148,9 +167,10 @@ export function rankResults(
 }
 
 export function groupResults(results: RankedResult[]): GroupedResults {
+  const taskCommands = results.filter((r) => r.item.kind === 'task-command')
   const actions = results.filter((r) => r.item.kind === 'action')
   const files = results.filter((r) => r.item.kind === 'file')
   const taskHits = results.filter((r) => r.item.kind === 'task')
   const projectHits = results.filter((r) => r.item.kind === 'project')
-  return { actions, files, tasks: taskHits, projects: projectHits }
+  return { taskCommands, actions, files, tasks: taskHits, projects: projectHits }
 }

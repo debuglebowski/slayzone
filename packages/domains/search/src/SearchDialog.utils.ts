@@ -2,6 +2,7 @@ import type { SearchItem } from './SearchDialog.types'
 
 export function selectorForItem(item: SearchItem): string {
   if (item.kind === 'file') return item.filePath
+  if (item.kind === 'task-command' && item.keywords) return `${item.label} ${item.keywords}`
   return item.label
 }
 

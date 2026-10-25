@@ -150,7 +150,8 @@ vi.mock('@slayzone/task/shared', () => ({
   setProviderFlags: vi.fn(),
   clearAllConversationIds: vi.fn(),
   normalizeDescription: (d: string | null | undefined) => d ?? '',
-  stripMarkdown: (s: string) => s
+  stripMarkdown: (s: string) => s,
+  priorityOptions: [{ value: 3, label: 'Medium' }]
 }))
 
 vi.mock('@slayzone/terminal/shared', () => ({

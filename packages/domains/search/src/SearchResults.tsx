@@ -4,7 +4,8 @@ import {
   CommandItem,
   cn,
   PriorityIcon,
-  getTaskStatusStyle
+  getTaskStatusStyle,
+  type PaletteCommand
 } from '@slayzone/ui'
 import { CheckSquare, Folder } from 'lucide-react'
 import { FileIcon } from '@slayzone/icons'
@@ -15,6 +16,7 @@ import { ACTION_DEFS, ACTION_ICONS } from './SearchDialog.constants'
 import { formatRelative, offsetPositions } from './SearchDialog.utils'
 import { ActionShortcut } from './ActionShortcut'
 import { Highlight } from './Highlight'
+import { TaskCommandGroup } from './PaletteCommandResults'
 
 interface RecentItem {
   tab: TaskTab
@@ -26,6 +28,11 @@ interface SearchResultsProps {
   isSearching: boolean
   groups: GroupedResults
   recentItems: RecentItem[]
+  /** Heading of the current task's section; null outside a task. */
+  taskHeading: string | null
+  /** The current task's featured commands (shown before typing). */
+  featuredTaskCommands: PaletteCommand[]
+  onRunTaskCommand: (command: PaletteCommand) => void
   onRunAction: (id: ActionId) => void
   onSelectFile: (filePath: string) => void
   onSelectTask: (taskId: string) => void
@@ -36,6 +43,9 @@ export function SearchResults({
   isSearching,
   groups,
   recentItems,
+  taskHeading,
+  featuredTaskCommands,
+  onRunTaskCommand,
   onRunAction,
   onSelectFile,
   onSelectTask,
@@ -45,6 +55,13 @@ export function SearchResults({
     <>
       {!isSearching && (
         <>
+          {taskHeading && (
+            <TaskCommandGroup
+              heading={taskHeading}
+              commands={featuredTaskCommands}
+              onSelect={onRunTaskCommand}
+            />
+          )}
           <CommandGroup heading="Actions">
             {ACTION_DEFS.filter((a) => a.featured).map((a) => {
               const Icon = ACTION_ICONS[a.id]
@@ -101,10 +118,19 @@ export function SearchResults({
       )}
 
       {isSearching &&
+        groups.taskCommands.length === 0 &&
         groups.actions.length === 0 &&
         groups.files.length === 0 &&
         groups.tasks.length === 0 &&
         groups.projects.length === 0 && <CommandEmpty>No results found.</CommandEmpty>}
+
+      {isSearching && taskHeading && (
+        <TaskCommandGroup
+          heading={taskHeading}
+          results={groups.taskCommands}
+          onSelect={onRunTaskCommand}
+        />
+      )}
 
       {isSearching && groups.actions.length > 0 && (
         <CommandGroup heading="Actions">

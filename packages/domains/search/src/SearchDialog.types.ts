@@ -1,8 +1,9 @@
 import type { Tab } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
+import type { PaletteCommand } from '@slayzone/ui'
 
-export type FilterKind = 'all' | 'actions' | 'files' | 'tasks' | 'projects'
+export type FilterKind = 'all' | 'task' | 'actions' | 'files' | 'tasks' | 'projects'
 
 export type TaskTab = Extract<Tab, { type: 'task' }>
 
@@ -21,6 +22,15 @@ export type SearchItem =
   | { kind: 'file'; id: string; label: string; sublabel: string; filePath: string }
   | { kind: 'task'; id: string; label: string; sublabel: string; status: string; priority: number }
   | { kind: 'project'; id: string; label: string; sublabel: string }
+  /** A command the current task published (sub-page items flattened: "Status → Done"). */
+  | {
+      kind: 'task-command'
+      id: string
+      label: string
+      sublabel: string
+      keywords: string
+      command: PaletteCommand
+    }
 
 export interface SearchDialogProps {
   open: boolean

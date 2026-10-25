@@ -16,6 +16,7 @@ export const MAX_RECENT = 4
 
 export const FILTERS: { id: FilterKind; label: string }[] = [
   { id: 'all', label: 'All' },
+  { id: 'task', label: 'Task' },
   { id: 'actions', label: 'Actions' },
   { id: 'files', label: 'Files' },
   { id: 'tasks', label: 'Tasks' },
@@ -23,6 +24,8 @@ export const FILTERS: { id: FilterKind; label: string }[] = [
 ]
 
 export const KIND_WEIGHT: Record<SearchItem['kind'], number> = {
+  // Commands of the task you are in rank above global ones.
+  'task-command': 1.1,
   action: 1.05,
   file: 1.0,
   task: 0.95,

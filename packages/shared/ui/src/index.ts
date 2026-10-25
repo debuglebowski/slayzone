@@ -49,6 +49,17 @@ export { UndoProvider, useUndo, type UndoableAction } from './use-undo'
 export { focusOwnsUndoKey } from './undo-key-target'
 export { useStableCallback } from './use-stable-callback'
 export {
+  usePaletteCommandStore,
+  usePublishPaletteCommands,
+  flattenPaletteCommands,
+  type PaletteCommand,
+  type PaletteIcon,
+  type PalettePage,
+  type PaletteListPage,
+  type PalettePromptPage,
+  type PaletteScope
+} from './palette-commands'
+export {
   useStablePoll,
   type UseStablePollOptions,
   type UseStablePollResult

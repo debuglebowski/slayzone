@@ -171,6 +171,7 @@ import { usePanelOwnership } from './usePanelOwnership'
 import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
+import { useTaskPaletteCommands, type PalettePanel } from './useTaskPaletteCommands'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
 import { WebPanelView } from './WebPanelView'
@@ -1305,6 +1306,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [effectiveRepoPath, handleQuickOpenFile])
 
+  // Git panel shortcuts (Cmd+G general, Cmd+Shift+G changes): open on `tab`, switch
+  // to it, or close when already showing it. Shared by the shortcuts and Cmd+K.
+  const toggleGitTab = useStableCallback((tab: GitTabId) => {
+    if (!panelVisibility.diff) {
+      setGitDefaultTab(tab)
+      handlePanelToggle('diff', true)
+    } else if (gitPanelRef.current?.getActiveTab() === tab) {
+      handlePanelToggle('diff', false)
+    } else {
+      gitPanelRef.current?.switchToTab(tab)
+    }
+  })
+
   // Cmd+T/B/G/S/E/P + web panel shortcuts for panel toggles
   useEffect(() => {
     // Hidden tabs register nothing: every open tab used to run this on every keystroke.
@@ -1345,14 +1359,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       if (matchesShortcut(e, keys('panel-git-diff')) && isBuiltinEnabled('diff', 'task')) {
         e.preventDefault()
-        if (!panelVisibility.diff) {
-          setGitDefaultTab('changes')
-          handlePanelToggle('diff', true)
-        } else if (gitPanelRef.current?.getActiveTab() === 'changes') {
-          handlePanelToggle('diff', false)
-        } else {
-          gitPanelRef.current?.switchToTab('changes')
-        }
+        toggleGitTab('changes')
         return
       }
 
@@ -1373,14 +1380,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Safe panel toggles — work even inside CodeMirror / contenteditable
       if (matchesShortcut(e, keys('panel-git')) && isBuiltinEnabled('diff', 'task')) {
         e.preventDefault()
-        if (!panelVisibility.diff) {
-          setGitDefaultTab('general')
-          handlePanelToggle('diff', true)
-        } else if (gitPanelRef.current?.getActiveTab() === 'general') {
-          handlePanelToggle('diff', false)
-        } else {
-          gitPanelRef.current?.switchToTab('general')
-        }
+        toggleGitTab('general')
         return
       }
       // Cmd+T: new browser tab when browser panel is open
@@ -1452,7 +1452,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     handlePanelToggle,
     isBuiltinEnabled,
     enabledWebPanels,
-    buildTaskFileContext
+    buildTaskFileContext,
+    toggleGitTab
   ])
 
   const handleDescriptionSave = async (): Promise<void> => {
@@ -1713,6 +1714,74 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleDeleteConfirm = (): void => {
     setDeleteDialogOpen(false)
   }
+
+  // Cmd+K "Current task" section — the same handlers the page's own controls run.
+  const palettePanels: PalettePanel[] = []
+  const addPalettePanel = (id: string, label: string, shortcutId?: string, open?: boolean) => {
+    palettePanels.push({ id, label, shortcutId, open: open ?? !!panelVisibility[id] })
+  }
+  if (isBuiltinEnabled('terminal', 'task'))
+    addPalettePanel('terminal', 'Terminal', 'panel-terminal')
+  if (isBuiltinEnabled('browser', 'task')) addPalettePanel('browser', 'Browser', 'panel-browser')
+  if (isBuiltinEnabled('editor', 'task')) addPalettePanel('editor', 'Editor', 'panel-editor')
+  if (isBuiltinEnabled('diff', 'task')) {
+    addPalettePanel('git', 'Git', 'panel-git', !!panelVisibility.diff)
+    addPalettePanel('git-diff', 'Git diff', 'panel-git-diff', !!panelVisibility.diff)
+  }
+  if (isBuiltinEnabled('processes', 'task'))
+    addPalettePanel('processes', 'Processes', 'panel-processes')
+  if (isBuiltinEnabled('tests', 'task')) addPalettePanel('tests', 'Tests', 'panel-tests')
+  if (isBuiltinEnabled('artifacts', 'task'))
+    addPalettePanel('artifacts', 'Artifacts', 'panel-artifacts')
+  if (isBuiltinEnabled('settings', 'task'))
+    addPalettePanel('settings', 'Settings', 'panel-settings')
+  for (const wp of enabledWebPanels) addPalettePanel(wp.id, wp.name)
+
+  useTaskPaletteCommands({
+    enabled: !!shortcutActive,
+    task,
+    columnsConfig: project?.columns_config,
+    statusOptions,
+    tags,
+    taskTagIds,
+    panels: palettePanels,
+    modes,
+    hasConversationId: !!task && !!getConversationIdForMode(task),
+    hasDescription: !!descriptionValue,
+    canRenameInline: !compact && !zenMode,
+    onTaskUpdated: handleTaskUpdate,
+    onTagsChange: handleTagsChange,
+    onRenameInline: () => {
+      setEditingTitle(true)
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+    },
+    onRename: async (title) => {
+      if (!task || title === task.title) return
+      handleTaskUpdate(await updateTaskAsync({ id: task.id, title }))
+    },
+    onArchive: () => setArchiveDialogOpen(true),
+    onUnarchive: handleUnarchive,
+    onDelete: () => setDeleteDialogOpen(true),
+    onCreateSubTask: async (title) => {
+      if (!task) return
+      await createSubTask({
+        projectId: task.project_id,
+        title,
+        status: getDefaultStatus(project?.columns_config)
+      })
+    },
+    onModeChange: (mode) => handleModeChange(mode as TerminalMode),
+    onRestartAgent: handleRestartTerminal,
+    onInjectTitle: handleInjectTitle,
+    onInjectDescription: handleInjectDescription,
+    onCopyConversationId: handleCopyConversationId,
+    onTogglePanel: (panelId) => {
+      if (panelId === 'git') toggleGitTab('general')
+      else if (panelId === 'git-diff') toggleGitTab('changes')
+      else handlePanelToggle(panelId, !panelVisibility[panelId])
+    }
+  })
 
   if (!task) {
     return (
