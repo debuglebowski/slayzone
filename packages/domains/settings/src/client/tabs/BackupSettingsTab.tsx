@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
@@ -84,9 +84,13 @@ export function BackupSettingsTab() {
   const setSettingsMutation = useMutation(trpc.app.backup.setSettings.mutationOptions())
   const revealInFinderMutation = useMutation(trpc.app.backup.revealInFinder.mutationOptions())
 
-  useEffect(() => {
+  // Each new settings result re-seeds the form (which local edits override in
+  // between) — adjusted while rendering.
+  const [seenSettings, setSeenSettings] = useState<typeof backupSettingsQuery.data>()
+  if (backupSettingsQuery.data !== seenSettings) {
+    setSeenSettings(backupSettingsQuery.data)
     if (backupSettingsQuery.data) setSettings(backupSettingsQuery.data)
-  }, [backupSettingsQuery.data])
+  }
 
   const reloadBackups = useCallback(() => {
     void queryClient.invalidateQueries(trpc.app.backup.list.queryFilter())

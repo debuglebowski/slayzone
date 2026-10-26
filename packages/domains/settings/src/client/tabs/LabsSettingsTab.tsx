@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Label, Switch } from '@slayzone/ui'
@@ -28,17 +28,23 @@ export function LabsSettingsTab() {
   // `settings.set`, which would write a hub row nothing reads.
   const setLabFlagMutation = useMutation(trpc.app.meta.setLabFlag.mutationOptions())
 
-  useEffect(() => {
+  // Each new flag result re-seeds its switch (which a local toggle overrides in
+  // between) — adjusted while rendering.
+  const [seenTestsPanel, setSeenTestsPanel] = useState<typeof testsPanelQuery.data>()
+  if (testsPanelQuery.data !== seenTestsPanel) {
+    setSeenTestsPanel(testsPanelQuery.data)
     if (testsPanelQuery.data !== undefined) {
       setState((prev) => ({ ...prev, labs_tests_panel: !!testsPanelQuery.data }))
     }
-  }, [testsPanelQuery.data])
+  }
 
-  useEffect(() => {
+  const [seenLoopMode, setSeenLoopMode] = useState<typeof loopModeQuery.data>()
+  if (loopModeQuery.data !== seenLoopMode) {
+    setSeenLoopMode(loopModeQuery.data)
     if (loopModeQuery.data !== undefined) {
       setState((prev) => ({ ...prev, labs_loop_mode: !!loopModeQuery.data }))
     }
-  }, [loopModeQuery.data])
+  }
 
   return (
     <div className="space-y-6">

@@ -16,6 +16,7 @@ import { useContextManagerStore } from './useContextManagerStore'
 import { PROVIDER_ROW_ORDER } from './ContextItemEditor.constants'
 import { getJsonValidation } from './ContextItemEditor.utils'
 import type { ContextItemEditorProps } from './ContextItemEditor.types'
+import { useDepsChanged } from './useDepsChanged'
 
 export function useContextItemEditorState({
   item,
@@ -61,11 +62,11 @@ export function useContextItemEditorState({
 
   const isStale = aggregatedHealth === 'stale' && staleProviders.length > 0
 
-  useEffect(() => {
-    if (activeDiffProvider && !staleProviders.includes(activeDiffProvider)) {
-      setActiveDiffProvider(staleProviders[0] ?? null)
-    }
-  }, [activeDiffProvider, staleProviders])
+  // A selected provider that is no longer stale falls back to the first stale one.
+  // Adjusted while rendering; the re-render it triggers no longer matches.
+  if (activeDiffProvider && !staleProviders.includes(activeDiffProvider)) {
+    setActiveDiffProvider(staleProviders[0] ?? null)
+  }
 
   const autoSelectedItemRef = useRef<string | null>(null)
   useEffect(() => {
@@ -132,10 +133,13 @@ export function useContextItemEditorState({
       content
     })
 
-  useEffect(() => {
+  // A new slug/content from the item resets the local draft (adjusted while
+  // rendering; on mount the state already starts from the item).
+  const itemTextChanged = useDepsChanged([item.slug, item.content])
+  if (itemTextChanged) {
     setSlug(item.slug)
     setContent(item.content)
-  }, [item.slug, item.content])
+  }
 
   const save = async (patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
     setSaving(true)

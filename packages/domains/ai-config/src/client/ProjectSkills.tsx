@@ -16,6 +16,7 @@ import { LibraryItemPicker } from './LibraryItemPicker'
 import { ContextItemEditor } from './ContextItemEditor'
 import { toSyncBadgeLabel } from './sync-view-model'
 import { getSkillValidation } from './skill-validation'
+import { useDepsChanged } from './useDepsChanged'
 
 interface ProjectSkillsProps {
   projectId: string
@@ -66,46 +67,65 @@ export function ProjectSkills({
 
   const skills = type ? allItems.filter((s) => s.item.type === type) : allItems
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [linked, local] = await Promise.all([
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchSkills = useCallback(
+    async () =>
+      Promise.all([
         trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
         trpcClient.aiConfig.listItems.query({ scope: 'project', projectId, type })
-      ])
-      setAllItems(linked)
-      setLocalItems(local)
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, projectId, projectPath, type])
+      ]).then(
+        ([linked, local]) => {
+          setAllItems(linked)
+          setLocalItems(local)
+          setLoading(false)
+        },
+        (err: unknown) => {
+          setLoading(false)
+          throw err
+        }
+      ),
+    [trpcClient, projectId, projectPath, type]
+  )
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    return fetchSkills()
+  }, [fetchSkills])
 
   const handleCreate = async () => {
     const slug = 'new-skill'
-    const created = await trpcClient.aiConfig.createItem.mutate({
-      type: 'skill',
-      scope: 'project',
-      projectId,
-      slug,
-      content: buildDefaultSkillContent(slug)
-    })
-    setLocalItems((prev) => [created, ...prev])
-    setEditingId(created.id)
-    onChanged?.()
+    return trpcClient.aiConfig.createItem
+      .mutate({
+        type: 'skill',
+        scope: 'project',
+        projectId,
+        slug,
+        content: buildDefaultSkillContent(slug)
+      })
+      .then((created) => {
+        setLocalItems((prev) => [created, ...prev])
+        setEditingId(created.id)
+        onChanged?.()
+      })
   }
 
-  useEffect(() => {
-    if (openPickerTrigger && openPickerTrigger > 0) setShowPicker(true)
-  }, [openPickerTrigger])
+  // Every new picker trigger (and a positive one at mount) opens the picker.
+  const pickerTriggered = useDepsChanged([openPickerTrigger], true)
+  if (pickerTriggered && openPickerTrigger && openPickerTrigger > 0) setShowPicker(true)
 
   useEffect(() => {
     if (!openCreateTrigger || openCreateTrigger <= 0) return
     void handleCreate()
   }, [openCreateTrigger])
 
+  // The effect below reloads on mount (initial state is already loading) and when
+  // the client, project or type changes — raise loading for the latter while rendering.
+  const sourceChanged = useDepsChanged([trpcClient, projectId, projectPath, type])
+  if (sourceChanged) setLoading(true)
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchSkills()
+  }, [fetchSkills])
 
   const handleRemove = async (itemId: string) => {
     await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId })

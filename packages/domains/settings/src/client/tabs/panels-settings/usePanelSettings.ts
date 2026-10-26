@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { safeRandomUUID } from '@slayzone/ui'
@@ -119,104 +119,110 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   const [editPanelProtocolError, setEditPanelProtocolError] = useState('')
   const [editShortcutError, setEditShortcutError] = useState('')
 
-  useEffect(() => {
-    const all = allSettingsQuery.data
-    if (!all) return
-    const pc = all['panel_config']
-    const tff = all['terminal_font_family']
-    const ts = all['terminal_scrollback']
-    const eww = all['editor_word_wrap']
-    const erw = all['editor_render_whitespace']
-    const ets = all['editor_tab_size']
-    const eit = all['editor_indent_tabs']
-    const dcl = all['diff_context_lines']
-    const diw = all['diff_ignore_whitespace']
-    const dcf = all['diff_continuous_flow']
-    const dtc = all['diff_tree_collapsed']
-    const dsbs = all['diff_side_by_side']
-    const dwr = all['diff_wrap']
-    const dste = all['dev_server_toast_enabled']
-    const dsaob = all['dev_server_auto_open_browser']
-    const bdu = all['browser_default_url']
-    const bdz = all['browser_default_zoom']
-    const bdd = all['browser_default_devices']
-    const cgc = all['commit_graph_config']
-    const emvm = all['editor_markdown_view_mode']
-    const gto = all['git_tab_order']
-    const gtv = all['git_tab_visibility']
-    const tasm = all[AGENT_STARTUP_SETTING]
-    const tfcr = all['terminal_force_compatibility_renderer']
-    const taci = all['terminal_auto_close_idle']
-    const ticv = all['terminal_idle_close_value']
-    const ticu = all['terminal_idle_close_unit']
+  // Each new settings snapshot re-seeds every field (which local edits override in
+  // between) — adjusted while rendering.
+  const [seenSettings, setSeenSettings] = useState<typeof allSettingsQuery.data>()
+  const all = allSettingsQuery.data
+  if (all !== seenSettings) {
+    setSeenSettings(all)
+    if (all) {
+      const pc = all['panel_config']
+      const tff = all['terminal_font_family']
+      const ts = all['terminal_scrollback']
+      const eww = all['editor_word_wrap']
+      const erw = all['editor_render_whitespace']
+      const ets = all['editor_tab_size']
+      const eit = all['editor_indent_tabs']
+      const dcl = all['diff_context_lines']
+      const diw = all['diff_ignore_whitespace']
+      const dcf = all['diff_continuous_flow']
+      const dtc = all['diff_tree_collapsed']
+      const dsbs = all['diff_side_by_side']
+      const dwr = all['diff_wrap']
+      const dste = all['dev_server_toast_enabled']
+      const dsaob = all['dev_server_auto_open_browser']
+      const bdu = all['browser_default_url']
+      const bdz = all['browser_default_zoom']
+      const bdd = all['browser_default_devices']
+      const cgc = all['commit_graph_config']
+      const emvm = all['editor_markdown_view_mode']
+      const gto = all['git_tab_order']
+      const gtv = all['git_tab_visibility']
+      const tasm = all[AGENT_STARTUP_SETTING]
+      const tfcr = all['terminal_force_compatibility_renderer']
+      const taci = all['terminal_auto_close_idle']
+      const ticv = all['terminal_idle_close_value']
+      const ticu = all['terminal_idle_close_unit']
 
-    if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
-    if (tff) setTerminalFontFamily(tff)
-    if (ts) setTerminalScrollback(ts)
-    setAgentStartupMode(parseAgentStartupMode(tasm))
-    if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
-    if (taci === '1') setTerminalAutoCloseIdle(true)
-    if (ticv) setTerminalIdleCloseValue(ticv)
-    if (ticu) setTerminalIdleCloseUnit(ticu)
-    if (eww === 'on') setEditorWordWrap('on')
-    if (erw === 'all') setEditorRenderWhitespace('all')
-    if (ets === '4') setEditorTabSize('4')
-    if (eit === '1') setEditorIndentTabs(true)
-    if (dcl === '0' || dcl === '3' || dcl === '5' || dcl === 'all') setDiffContextLines(dcl)
-    if (diw === '1') setDiffIgnoreWhitespace(true)
-    if (dcf === '1') setDiffContinuousFlow(true)
-    if (dtc === '1') setDiffTreeCollapsed(true)
-    if (dsbs === '1') setDiffSideBySide(true)
-    if (dwr === '1') setDiffWrap(true)
-    if (dste === '0') setDevServerToastEnabled(false)
-    if (dsaob === '1') setDevServerAutoOpenBrowser(true)
-    if (bdu) setBrowserDefaultUrl(bdu)
-    if (bdz) setBrowserDefaultZoom(bdz)
-    if (bdd) {
-      try {
-        const d = JSON.parse(bdd)
-        setBrowserDevices({
-          desktop: d.desktop
-            ? {
-                enabled: d.desktop.enabled !== false,
-                width: String(d.desktop.width),
-                height: String(d.desktop.height)
-              }
-            : { enabled: true, width: '1920', height: '1080' },
-          tablet: d.tablet
-            ? {
-                enabled: d.tablet.enabled !== false,
-                width: String(d.tablet.width),
-                height: String(d.tablet.height)
-              }
-            : { enabled: true, width: '744', height: '1133' },
-          mobile: d.mobile
-            ? {
-                enabled: d.mobile.enabled !== false,
-                width: String(d.mobile.width),
-                height: String(d.mobile.height)
-              }
-            : { enabled: true, width: '393', height: '852' }
-        })
-      } catch {
-        /* ignore */
+      if (pc)
+        setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
+      if (tff) setTerminalFontFamily(tff)
+      if (ts) setTerminalScrollback(ts)
+      setAgentStartupMode(parseAgentStartupMode(tasm))
+      if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
+      if (taci === '1') setTerminalAutoCloseIdle(true)
+      if (ticv) setTerminalIdleCloseValue(ticv)
+      if (ticu) setTerminalIdleCloseUnit(ticu)
+      if (eww === 'on') setEditorWordWrap('on')
+      if (erw === 'all') setEditorRenderWhitespace('all')
+      if (ets === '4') setEditorTabSize('4')
+      if (eit === '1') setEditorIndentTabs(true)
+      if (dcl === '0' || dcl === '3' || dcl === '5' || dcl === 'all') setDiffContextLines(dcl)
+      if (diw === '1') setDiffIgnoreWhitespace(true)
+      if (dcf === '1') setDiffContinuousFlow(true)
+      if (dtc === '1') setDiffTreeCollapsed(true)
+      if (dsbs === '1') setDiffSideBySide(true)
+      if (dwr === '1') setDiffWrap(true)
+      if (dste === '0') setDevServerToastEnabled(false)
+      if (dsaob === '1') setDevServerAutoOpenBrowser(true)
+      if (bdu) setBrowserDefaultUrl(bdu)
+      if (bdz) setBrowserDefaultZoom(bdz)
+      if (bdd) {
+        try {
+          const d = JSON.parse(bdd)
+          setBrowserDevices({
+            desktop: d.desktop
+              ? {
+                  enabled: d.desktop.enabled !== false,
+                  width: String(d.desktop.width),
+                  height: String(d.desktop.height)
+                }
+              : { enabled: true, width: '1920', height: '1080' },
+            tablet: d.tablet
+              ? {
+                  enabled: d.tablet.enabled !== false,
+                  width: String(d.tablet.width),
+                  height: String(d.tablet.height)
+                }
+              : { enabled: true, width: '744', height: '1133' },
+            mobile: d.mobile
+              ? {
+                  enabled: d.mobile.enabled !== false,
+                  width: String(d.mobile.width),
+                  height: String(d.mobile.height)
+                }
+              : { enabled: true, width: '393', height: '852' }
+          })
+        } catch {
+          /* ignore */
+        }
       }
-    }
-    if (cgc) {
-      try {
-        const g = JSON.parse(cgc)
-        if (g.collapsed !== undefined) setGraphCollapsed(g.collapsed)
-        if (g.showBranches !== undefined) setGraphShowBranches(g.showBranches)
-        if (g.breakOnTags !== undefined) setGraphBreakOnTags(g.breakOnTags)
-        if (g.breakOnMerges !== undefined) setGraphBreakOnMerges(g.breakOnMerges)
-      } catch {
-        /* ignore */
+      if (cgc) {
+        try {
+          const g = JSON.parse(cgc)
+          if (g.collapsed !== undefined) setGraphCollapsed(g.collapsed)
+          if (g.showBranches !== undefined) setGraphShowBranches(g.showBranches)
+          if (g.breakOnTags !== undefined) setGraphBreakOnTags(g.breakOnTags)
+          if (g.breakOnMerges !== undefined) setGraphBreakOnMerges(g.breakOnMerges)
+        } catch {
+          /* ignore */
+        }
       }
+      if (emvm === 'split' || emvm === 'code') setEditorMarkdownViewMode(emvm)
+      setGitTabOrder(normalizeGitTabOrder(gto))
+      setGitTabVisibility(normalizeGitTabVisibility(gtv))
     }
-    if (emvm === 'split' || emvm === 'code') setEditorMarkdownViewMode(emvm)
-    setGitTabOrder(normalizeGitTabOrder(gto))
-    setGitTabVisibility(normalizeGitTabVisibility(gtv))
-  }, [allSettingsQuery.data])
+  }
 
   // Replaces the app:settings-changed IPC listener: re-read panel_config when a
   // settings change is broadcast (CLI / other window). An unscoped ping (CLI/REST,
@@ -245,10 +251,22 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     })
   )
 
-  useEffect(() => {
-    if (!activeTab.startsWith('panels/web:')) return
-    const wpId = activeTab.slice(7)
-    const wp = panelConfig.webPanels.find((p) => p.id === wpId)
+  // Opening a web panel's tab, or a new panel config, seeds that panel's edit form
+  // (which typing overrides in between) — adjusted while rendering, on an
+  // [activeTab, panelConfig] effect's triggers.
+  const [seenEditSource, setSeenEditSource] = useState<{
+    activeTab: string
+    panelConfig: PanelConfig
+  }>()
+  if (
+    !seenEditSource ||
+    seenEditSource.activeTab !== activeTab ||
+    seenEditSource.panelConfig !== panelConfig
+  ) {
+    setSeenEditSource({ activeTab, panelConfig })
+    const wp = activeTab.startsWith('panels/web:')
+      ? panelConfig.webPanels.find((p) => p.id === activeTab.slice(7))
+      : undefined
     if (wp) {
       setEditPanelName(wp.name)
       setEditPanelUrl(wp.baseUrl)
@@ -258,7 +276,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
       setEditPanelProtocolError('')
       setEditShortcutError('')
     }
-  }, [activeTab, panelConfig])
+  }
 
   // Shared write-through used by the panel sub-views (terminal/editor/diff/
   // browser/git) so every panel-settings write goes through one tRPC mutation.

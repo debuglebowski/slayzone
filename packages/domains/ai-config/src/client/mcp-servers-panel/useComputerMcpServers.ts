@@ -12,9 +12,13 @@ export function useComputerMcpServers() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
 
-  const loadCustom = useCallback(async () => {
-    setCustomServers(await loadCustomServers(trpcClient))
-  }, [trpcClient])
+  const loadCustom = useCallback(
+    async () =>
+      loadCustomServers(trpcClient).then((servers) => {
+        setCustomServers(servers)
+      }),
+    [trpcClient]
+  )
 
   useEffect(() => {
     void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {

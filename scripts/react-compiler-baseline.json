@@ -4,9 +4,7 @@
   "packages/domains/agent-turns/src/client/useAgentTurns.ts": ["useAgentTurns"],
   "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
   "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
-  "packages/domains/ai-config/src/client/ComputerContextFiles.tsx": ["ComputerContextFiles"],
   "packages/domains/ai-config/src/client/ComputerFilesView.tsx": ["ComputerFilesView"],
-  "packages/domains/ai-config/src/client/ComputerMcpView.tsx": ["ComputerMcpView"],
   "packages/domains/ai-config/src/client/ContextFilesPanel.tsx": ["ContextFilesPanel"],
   "packages/domains/ai-config/src/client/InstructionVariantsView.tsx": ["InstructionVariantsView"],
   "packages/domains/ai-config/src/client/LibraryItemPicker.tsx": ["LibraryItemPicker"],
@@ -16,21 +14,15 @@
   "packages/domains/ai-config/src/client/mcp-servers-panel/dialogs/AddProjectMcpDialog.tsx": [
     "AddProjectMcpDialog"
   ],
-  "packages/domains/ai-config/src/client/mcp-servers-panel/useProjectMcpServers.ts": [
-    "useProjectMcpServers"
-  ],
   "packages/domains/ai-config/src/client/mcp-sync-handlers.ts": ["useMcpSyncHandlers"],
   "packages/domains/ai-config/src/client/ProjectContextFilesView.tsx": ["ProjectContextFilesView"],
   "packages/domains/ai-config/src/client/ProjectContextFlat.tsx": ["ProjectContextFlat"],
   "packages/domains/ai-config/src/client/ProjectContextTree.tsx": ["ProjectContextTree"],
   "packages/domains/ai-config/src/client/ProjectInstructions.tsx": ["ProjectInstructionsBody"],
-  "packages/domains/ai-config/src/client/ProjectSkills.tsx": ["ProjectSkills"],
   "packages/domains/ai-config/src/client/SkillsSection.tsx": ["SkillsSection"],
   "packages/domains/ai-config/src/client/useContextItemEditorState.ts": [
     "useContextItemEditorState"
   ],
-  "packages/domains/ai-config/src/client/useLegacyContextState.ts": ["useLegacyContextState"],
-  "packages/domains/ai-config/src/client/useMcpFlatState.ts": ["useMcpFlatState"],
   "packages/domains/ai-config/src/client/useProjectContextTree.ts": ["useProjectContextTree"],
   "packages/domains/ai-config/src/client/useSkillItem.ts": ["useSkillItem"],
   "packages/domains/ai-config/src/client/useSkillMarketplace.ts": ["useSkillMarketplace"],

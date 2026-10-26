@@ -14,14 +14,17 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
   const [providers, setProviders] = useState<CliProviderInfo[]>([])
   const [projectProviders, setProjectProviders] = useState<CliProvider[]>([])
 
-  const fetchProviders = useCallback(async () => {
-    const list = await trpcClient.aiConfig.listProviders.query()
-    setProviders(list)
-    if (projectId) {
-      const pp = await trpcClient.aiConfig.getProjectProviders.query({ projectId })
-      setProjectProviders(pp)
-    }
-  }, [trpcClient, projectId])
+  const fetchProviders = useCallback(
+    async () =>
+      trpcClient.aiConfig.listProviders.query().then(async (list) => {
+        setProviders(list)
+        if (projectId) {
+          const pp = await trpcClient.aiConfig.getProjectProviders.query({ projectId })
+          setProjectProviders(pp)
+        }
+      }),
+    [trpcClient, projectId]
+  )
 
   useEffect(() => {
     let stale = false

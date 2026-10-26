@@ -12,6 +12,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input, Textarea, cn } from '@slayzone/ui'
 import type { CliProvider, ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
+import { useDepsChanged } from './useDepsChanged'
 
 interface ComputerContextFilesProps {
   filter?: 'instructions' | 'skill'
@@ -30,18 +31,35 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
   const [newFileName, setNewFileName] = useState('')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchFiles = useCallback(
+    async () =>
+      trpcClient.aiConfig.getComputerFiles.query().then(
+        (files) => {
+          setEntries(files)
+          setLoading(false)
+        },
+        (err: unknown) => {
+          setLoading(false)
+          throw err
+        }
+      ),
+    [trpcClient]
+  )
+
   const loadFiles = useCallback(async () => {
     setLoading(true)
-    try {
-      setEntries(await trpcClient.aiConfig.getComputerFiles.query())
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient])
+    return fetchFiles()
+  }, [fetchFiles])
+
+  // The effect below reloads on mount (initial state is already loading) and on a
+  // client change — raise loading for the latter while rendering.
+  const clientChanged = useDepsChanged([trpcClient])
+  if (clientChanged) setLoading(true)
 
   useEffect(() => {
-    void loadFiles()
-  }, [loadFiles])
+    void fetchFiles()
+  }, [fetchFiles])
 
   const openFile = async (entry: ComputerFileEntry) => {
     // Create file if it doesn't exist

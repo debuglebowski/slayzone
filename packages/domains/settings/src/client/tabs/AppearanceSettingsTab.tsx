@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Info } from 'lucide-react'
@@ -94,23 +94,28 @@ export function AppearanceSettingsTab() {
   const [notesSpellcheck, setNotesSpellcheck] = useState(true)
   const [chatWidth, setChatWidth] = useState<'narrow' | 'wide'>('narrow')
 
-  useEffect(() => {
-    const all = allSettingsQuery.data
-    if (!all) return
-    setProjectColorTints(all['project_color_tints_enabled'] !== '0')
-    setShowContextManager(all['show_context_manager'] !== '0')
-    setTerminalFontSize(all['terminal_font_size'] ?? '13')
-    setEditorFontSize(all['editor_font_size'] ?? '13')
-    setReduceMotion(all['reduce_motion'] === '1')
-    setNotesFontFamily(all['notes_font_family'] === 'mono' ? 'mono' : 'sans')
-    const readabilityValue = all['notes_readability'] || all['notes_line_spacing']
-    setNotesReadability(readabilityValue === 'compact' ? 'compact' : 'normal')
-    setNotesWidth(all['notes_width'] === 'wide' ? 'wide' : 'narrow')
-    setNotesCheckedHighlight(all['notes_checked_highlight'] === '1')
-    setNotesShowToolbar(all['notes_show_toolbar'] === '1')
-    setNotesSpellcheck(all['notes_spellcheck'] !== '0')
-    setChatWidth(all['chat_width'] === 'wide' ? 'wide' : 'narrow')
-  }, [allSettingsQuery.data])
+  // Each new settings snapshot re-seeds the controls (which local edits override in
+  // between) — adjusted while rendering.
+  const [seenSettings, setSeenSettings] = useState<typeof allSettingsQuery.data>()
+  const all = allSettingsQuery.data
+  if (all !== seenSettings) {
+    setSeenSettings(all)
+    if (all) {
+      setProjectColorTints(all['project_color_tints_enabled'] !== '0')
+      setShowContextManager(all['show_context_manager'] !== '0')
+      setTerminalFontSize(all['terminal_font_size'] ?? '13')
+      setEditorFontSize(all['editor_font_size'] ?? '13')
+      setReduceMotion(all['reduce_motion'] === '1')
+      setNotesFontFamily(all['notes_font_family'] === 'mono' ? 'mono' : 'sans')
+      const readabilityValue = all['notes_readability'] || all['notes_line_spacing']
+      setNotesReadability(readabilityValue === 'compact' ? 'compact' : 'normal')
+      setNotesWidth(all['notes_width'] === 'wide' ? 'wide' : 'narrow')
+      setNotesCheckedHighlight(all['notes_checked_highlight'] === '1')
+      setNotesShowToolbar(all['notes_show_toolbar'] === '1')
+      setNotesSpellcheck(all['notes_spellcheck'] !== '0')
+      setChatWidth(all['chat_width'] === 'wide' ? 'wide' : 'narrow')
+    }
+  }
 
   return (
     <>

@@ -3,6 +3,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import type { SkillRegistry, SkillRegistryEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
+import { useDepsChanged } from './useDepsChanged'
 
 export type View = 'browse' | 'manage'
 export type BrowseMode = 'registries' | 'all'
@@ -25,31 +26,52 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [previewEntry, setPreviewEntry] = useState<SkillRegistryEntry | null>(null)
 
-  const loadRegistries = useCallback(async () => {
-    const regs = await trpcClient.aiConfig.marketplace.listRegistries.query()
-    setRegistries(regs)
-  }, [trpcClient, refreshKey])
+  const loadRegistries = useCallback(
+    async () =>
+      trpcClient.aiConfig.marketplace.listRegistries.query().then((regs) => {
+        setRegistries(regs)
+      }),
+    [trpcClient, refreshKey]
+  )
 
   const effectiveRegistryId = browseMode === 'registries' ? activeRegistryId : selectedRegistry
 
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchEntries = useCallback(
+    async () =>
+      trpcClient.aiConfig.marketplace.listEntries
+        .query({
+          registryId: effectiveRegistryId ?? undefined,
+          search: search || undefined,
+          projectId: projectId ?? undefined
+        })
+        .then(
+          (rows) => {
+            setEntries(rows)
+            setLoading(false)
+          },
+          (err: unknown) => {
+            setLoading(false)
+            throw err
+          }
+        ),
+    [trpcClient, effectiveRegistryId, search, refreshKey]
+  )
+
   const loadEntries = useCallback(async () => {
     setLoading(true)
-    try {
-      const rows = await trpcClient.aiConfig.marketplace.listEntries.query({
-        registryId: effectiveRegistryId ?? undefined,
-        search: search || undefined,
-        projectId: projectId ?? undefined
-      })
-      setEntries(rows)
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, effectiveRegistryId, search, refreshKey])
+    return fetchEntries()
+  }, [fetchEntries])
+
+  // The effect below reloads on mount (initial state is already loading) and
+  // whenever its inputs change — raise loading for the latter while rendering.
+  const entriesSourceChanged = useDepsChanged([trpcClient, effectiveRegistryId, search, refreshKey])
+  if (entriesSourceChanged) setLoading(true)
 
   useEffect(() => {
     loadRegistries()
-    loadEntries()
-  }, [loadRegistries, loadEntries])
+    fetchEntries()
+  }, [loadRegistries, fetchEntries])
 
   useEffect(() => {
     trpcClient.aiConfig.marketplace.ensureFresh

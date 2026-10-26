@@ -18,12 +18,15 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  const discover = useCallback(async () => {
-    const discovered = await trpcClient.aiConfig.discoverContextFiles.query({
-      projectPath: projectPath ?? ''
-    })
-    setFiles(discovered)
-  }, [trpcClient, projectPath])
+  const discover = useCallback(
+    async () =>
+      trpcClient.aiConfig.discoverContextFiles
+        .query({ projectPath: projectPath ?? '' })
+        .then((discovered) => {
+          setFiles(discovered)
+        }),
+    [trpcClient, projectPath]
+  )
 
   useEffect(() => {
     void discover()

@@ -77,10 +77,22 @@ export function UserSettingsDialog({
   )
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  useEffect(() => {
+  // Opening, or a new stored value while open, re-seeds the mode (which a local pick
+  // overrides in between) — adjusted while rendering, on an [open, data] effect's
+  // triggers.
+  const [seenModeSource, setSeenModeSource] = useState<{
+    open: boolean
+    data: typeof defaultModeQuery.data
+  }>()
+  if (
+    !seenModeSource ||
+    seenModeSource.open !== open ||
+    seenModeSource.data !== defaultModeQuery.data
+  ) {
+    setSeenModeSource({ open, data: defaultModeQuery.data })
     const m = defaultModeQuery.data
     if (open && m) setDefaultTerminalMode(m as TerminalMode)
-  }, [open, defaultModeQuery.data])
+  }
 
   useEffect(() => {
     if (!open) return

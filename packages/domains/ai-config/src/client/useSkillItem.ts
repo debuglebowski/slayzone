@@ -7,6 +7,7 @@ import { PROVIDER_PATHS } from '../shared/provider-registry'
 import { getSkillValidation } from './skill-validation'
 import type { ProviderRow } from './ItemSection.types'
 import { providerSupportsType } from './ItemSection.utils'
+import { useDepsChanged } from './useDepsChanged'
 
 export function useSkillItem({
   item,
@@ -45,11 +46,14 @@ export function useSkillItem({
   const [pullingProvider, setPullingProvider] = useState<CliProvider | null>(null)
   const [syncingAll, setSyncingAll] = useState(false)
 
-  useEffect(() => {
+  // A new content/slug from the item resets the local draft (adjusted while
+  // rendering; on mount the state already starts from the item).
+  const itemTextChanged = useDepsChanged([item.content, item.slug])
+  if (itemTextChanged) {
     setContent(item.content)
     setSlugRaw(item.slug)
     setSlugDirty(false)
-  }, [item.content, item.slug])
+  }
 
   const providerRows: ProviderRow[] = enabledProviders
     .filter((p) => {

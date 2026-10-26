@@ -3,6 +3,7 @@ import { AlertCircle, Check, Circle, File, FilePlus, Link, RefreshCw } from 'luc
 import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, FileTree, Textarea, cn, fileTreeIndent } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
+import { useDepsChanged } from './useDepsChanged'
 
 interface ProjectContextFilesViewProps {
   projectId: string
@@ -63,38 +64,53 @@ const getRelativePath = (entry: ContextTreeEntry) => entry.relativePath
 export function ProjectContextFilesView({ projectPath, projectId }: ProjectContextFilesViewProps) {
   const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ContextTreeEntry[]>([])
-  const [loadingTree, setLoadingTree] = useState(false)
+  // Starts true: the mount effect below begins the first load right away.
+  const [loadingTree, setLoadingTree] = useState(true)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedContent, setSelectedContent] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [message, setMessage] = useState('')
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
+  // Fetch + settle `loadingTree`; whoever starts a load raises it first.
+  const fetchTree = useCallback(
+    async () =>
+      trpcClient.aiConfig.getContextTree
+        .query({ projectPath, projectId })
+        .then((tree) => {
+          setEntries(tree)
+          const folders = new Set<string>()
+          for (const entry of tree) {
+            const parts = entry.relativePath.split('/')
+            let path = ''
+            for (let i = 0; i < parts.length - 1; i++) {
+              path = path ? `${path}/${parts[i]}` : parts[i]
+              folders.add(path)
+            }
+          }
+          setExpandedFolders((prev) => (prev.size === 0 ? folders : prev))
+          setLoadingTree(false)
+        })
+        .catch(() => {
+          setMessage('Could not load context files')
+          setLoadingTree(false)
+        }),
+    [trpcClient, projectId, projectPath]
+  )
+
   const loadTree = useCallback(async () => {
     setLoadingTree(true)
-    try {
-      const tree = await trpcClient.aiConfig.getContextTree.query({ projectPath, projectId })
-      setEntries(tree)
-      const folders = new Set<string>()
-      for (const entry of tree) {
-        const parts = entry.relativePath.split('/')
-        let path = ''
-        for (let i = 0; i < parts.length - 1; i++) {
-          path = path ? `${path}/${parts[i]}` : parts[i]
-          folders.add(path)
-        }
-      }
-      setExpandedFolders((prev) => (prev.size === 0 ? folders : prev))
-    } catch {
-      setMessage('Could not load context files')
-    } finally {
-      setLoadingTree(false)
-    }
-  }, [trpcClient, projectId, projectPath])
+    return fetchTree()
+  }, [fetchTree])
+
+  // The effect below reloads on mount (initial state is already loading) and when
+  // the client or project changes — raise loading for the latter while rendering.
+  const sourceChanged = useDepsChanged([trpcClient, projectId, projectPath])
+  if (sourceChanged) setLoadingTree(true)
 
   useEffect(() => {
-    void loadTree()
-  }, [loadTree])
+    void fetchTree()
+  }, [fetchTree])
 
   const toggleFolder = useCallback((folderPath: string) => {
     setExpandedFolders((prev) => {

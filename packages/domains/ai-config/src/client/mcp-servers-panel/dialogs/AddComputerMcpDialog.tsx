@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,
@@ -10,6 +10,7 @@ import {
 } from '@slayzone/ui'
 import { buildConfig, loadCustomServers, saveCustomServers } from '../mcp-helpers'
 import type { CustomMcpServer, EditTarget } from '../types'
+import { useDepsChanged } from '../../useDepsChanged'
 import { McpServerFormFields } from './McpServerFormFields'
 
 interface AddComputerMcpDialogProps {
@@ -41,8 +42,10 @@ export function AddComputerMcpDialog({
     setEnvVars([])
   }
 
-  useEffect(() => {
-    if (!open) return
+  // (Re)fill the form when the dialog opens or its edit target changes — adjusted
+  // while rendering, on the triggers an [open, editTarget] effect would have.
+  const formSourceChanged = useDepsChanged([open, editTarget], true)
+  if (formSourceChanged && open) {
     if (editTarget) {
       setServerKey(editTarget.server.id)
       setDescription(editTarget.server.description ?? '')
@@ -54,7 +57,7 @@ export function AddComputerMcpDialog({
     } else {
       reset()
     }
-  }, [open, editTarget])
+  }
 
   const handleSave = async () => {
     if (!serverKey.trim() || !command.trim()) return

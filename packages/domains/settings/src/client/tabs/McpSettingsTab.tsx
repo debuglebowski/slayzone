@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Input, Label } from '@slayzone/ui'
@@ -7,19 +7,21 @@ import { SettingsTabIntro } from './SettingsTabIntro'
 export function McpSettingsTab() {
   const trpc = useTRPC()
   const [preferredPort, setPreferredPort] = useState('')
-  const [actualPort, setActualPort] = useState('')
 
   const preferredPortQuery = useQuery(trpc.settings.get.queryOptions({ key: 'mcp_preferred_port' }))
   const actualPortQuery = useQuery(trpc.settings.get.queryOptions({ key: 'server_port' }))
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  useEffect(() => {
+  // Each new stored value re-seeds the input (which typing overrides in between) —
+  // adjusted while rendering.
+  const [seenPreferredPort, setSeenPreferredPort] = useState<typeof preferredPortQuery.data>()
+  if (preferredPortQuery.data !== seenPreferredPort) {
+    setSeenPreferredPort(preferredPortQuery.data)
     if (preferredPortQuery.data !== undefined) setPreferredPort(preferredPortQuery.data ?? '')
-  }, [preferredPortQuery.data])
+  }
 
-  useEffect(() => {
-    if (actualPortQuery.data !== undefined) setActualPort(actualPortQuery.data ?? '')
-  }, [actualPortQuery.data])
+  // Read-only: '' until loaded (a loaded query never reverts to undefined).
+  const actualPort = actualPortQuery.data ?? ''
 
   return (
     <>

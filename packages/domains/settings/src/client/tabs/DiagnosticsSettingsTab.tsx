@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
@@ -30,13 +30,17 @@ export function DiagnosticsSettingsTab() {
   const diagnosticsConfigQuery = useQuery(trpc.diagnostics.getConfig.queryOptions())
   const setDiagnosticsConfigMutation = useMutation(trpc.diagnostics.setConfig.mutationOptions())
 
-  useEffect(() => {
+  // Each new config result re-seeds the form (which local edits override in
+  // between) — adjusted while rendering.
+  const [seenConfig, setSeenConfig] = useState<typeof diagnosticsConfigQuery.data>()
+  if (diagnosticsConfigQuery.data !== seenConfig) {
+    setSeenConfig(diagnosticsConfigQuery.data)
     const config = diagnosticsConfigQuery.data
     if (config) {
       setDiagnosticsConfig(config)
       setRetentionDaysInput(String(config.retentionDays))
     }
-  }, [diagnosticsConfigQuery.data])
+  }
 
   // Poll the dark-launch side-car status while this tab is mounted. 5s feels
   // live; the interval pauses while the window is unfocused (react-query

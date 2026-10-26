@@ -15,6 +15,7 @@ import {
   parseComputerCustomServerIds,
   type MergedServer
 } from './mcp-flat-helpers'
+import { useDepsChanged } from './useDepsChanged'
 
 interface UseMcpFlatStateArgs {
   projectPath: string
@@ -50,23 +51,38 @@ export function useMcpFlatState({ projectPath, enabledProviders }: UseMcpFlatSta
   const [customProviders, setCustomProviders] = useState<Partial<Record<McpTarget, boolean>>>({})
   const [addingCustom, setAddingCustom] = useState(false)
 
-  const loadConfigs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [results, customServersRaw] = await Promise.all([
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchConfigs = useCallback(
+    async () =>
+      Promise.all([
         trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
         trpcClient.settings.get.query({ key: 'mcp_custom_servers' })
       ])
-      setConfigs(results)
-      setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, projectPath])
+        .then(([results, customServersRaw]) => {
+          setConfigs(results)
+          setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))
+          setLoading(false)
+        })
+        .catch((err: unknown) => {
+          setLoading(false)
+          throw err
+        }),
+    [trpcClient, projectPath]
+  )
+
+  const loadConfigs = useCallback(async () => {
+    setLoading(true)
+    return fetchConfigs()
+  }, [fetchConfigs])
+
+  // The effect below reloads on mount (initial state is already loading) and when
+  // the client or project changes — raise loading for the latter while rendering.
+  const sourceChanged = useDepsChanged([trpcClient, projectPath])
+  if (sourceChanged) setLoading(true)
 
   useEffect(() => {
-    void loadConfigs()
-  }, [loadConfigs])
+    void fetchConfigs()
+  }, [fetchConfigs])
 
   // Track which providers support writes
   const writableProviders = new Set(configs.filter((c) => c.writable).map((c) => c.provider))

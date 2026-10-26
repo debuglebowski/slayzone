@@ -4,6 +4,7 @@ import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget } fro
 import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { ALL_PROVIDERS, loadCustomServers, matchesSearch } from './mcp-helpers'
 import type { CustomMcpServer, EditTarget, MergedServer } from './types'
+import { useDepsChanged } from '../useDepsChanged'
 
 export function useProjectMcpServers(projectPath: string, projectId: string) {
   const trpcClient = useTRPCClient()
@@ -17,25 +18,41 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [editProviders, setEditProviders] = useState<McpTarget[]>([])
 
-  const loadConfigs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [results, custom, providers] = await Promise.all([
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchConfigs = useCallback(
+    async () =>
+      Promise.all([
         trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
         loadCustomServers(trpcClient),
         trpcClient.aiConfig.getProjectProviders.query({ projectId })
-      ])
-      setConfigs(results)
-      setCustomServers(custom)
-      setEnabledProviders(providers)
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, projectPath, projectId])
+      ]).then(
+        ([results, custom, providers]) => {
+          setConfigs(results)
+          setCustomServers(custom)
+          setEnabledProviders(providers)
+          setLoading(false)
+        },
+        (err: unknown) => {
+          setLoading(false)
+          throw err
+        }
+      ),
+    [trpcClient, projectPath, projectId]
+  )
+
+  const loadConfigs = useCallback(async () => {
+    setLoading(true)
+    return fetchConfigs()
+  }, [fetchConfigs])
+
+  // The effect below reloads on mount (initial state is already loading) and when
+  // the client or project changes — raise loading for the latter while rendering.
+  const sourceChanged = useDepsChanged([trpcClient, projectPath, projectId])
+  if (sourceChanged) setLoading(true)
 
   useEffect(() => {
-    void loadConfigs()
-  }, [loadConfigs])
+    void fetchConfigs()
+  }, [fetchConfigs])
 
   const enabledMcpTargets = useMemo(
     () => ALL_PROVIDERS.filter((p) => enabledProviders.includes(p)),

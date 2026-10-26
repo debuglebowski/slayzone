@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Button, Label } from '@slayzone/ui'
@@ -21,10 +21,13 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
   >(null)
 
   // Mirror the query into local state so optimistic mutations (delete/reorder/
-  // create/update) can keep editing the list as the original code did.
-  useEffect(() => {
+  // create/update) can keep editing the list as the original code did. Each new
+  // result re-seeds it — adjusted while rendering.
+  const [seenTags, setSeenTags] = useState<typeof tagsQuery.data>()
+  if (tagsQuery.data !== seenTags) {
+    setSeenTags(tagsQuery.data)
     if (tagsQuery.data) setAllTags(tagsQuery.data)
-  }, [tagsQuery.data])
+  }
 
   const deleteTagMutation = useMutation(
     trpc.tags.delete.mutationOptions({

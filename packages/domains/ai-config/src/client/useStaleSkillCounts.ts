@@ -17,11 +17,9 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
     [projects]
   )
 
-  const refresh = useCallback(() => {
-    if (pairs.length === 0) {
-      setCounts(new Map())
-      return
-    }
+  // Query + apply the counts; no-op without any project path.
+  const fetchCounts = useCallback(() => {
+    if (pairs.length === 0) return
     const reqId = ++reqIdRef.current
     trpcClient.aiConfig.getProjectsStaleSkillCounts
       .query(pairs)
@@ -34,9 +32,36 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
       })
   }, [trpcClient, pairs])
 
+  const refresh = useCallback(() => {
+    if (pairs.length === 0) {
+      setCounts(new Map())
+      return
+    }
+    fetchCounts()
+  }, [pairs, fetchCounts])
+
+  // With no project path, each change of inputs clears the counts (otherwise the
+  // effect below fetches) — adjusted while rendering. `clearedFor` holds the inputs
+  // last cleared for and is reset once there are paths again, so a changing
+  // project list costs no extra render pass. Mounting without paths needs nothing:
+  // counts start empty.
+  const noPaths = pairs.length === 0
+  const inputs = [trpcClient, pairs]
+  const [clearedFor, setClearedFor] = useState<readonly unknown[] | null>(() =>
+    noPaths ? inputs : null
+  )
+  if (noPaths) {
+    if (!clearedFor || inputs.some((v, i) => !Object.is(v, clearedFor[i]))) {
+      setClearedFor(inputs)
+      setCounts(new Map())
+    }
+  } else if (clearedFor) {
+    setClearedFor(null)
+  }
+
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    fetchCounts()
+  }, [fetchCounts])
 
   useEffect(() => {
     const onFocus = () => refresh()

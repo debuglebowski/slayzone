@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Button, Label } from '@slayzone/ui'
@@ -6,7 +6,6 @@ import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function AboutSettingsTab() {
   const trpc = useTRPC()
-  const [dbPath, setDbPath] = useState<string>('')
   const [cliInstalled, setCliInstalled] = useState(false)
   const [cliPath, setCliPath] = useState<string>('')
   const [cliInstalling, setCliInstalling] = useState(false)
@@ -16,19 +15,21 @@ export function AboutSettingsTab() {
   const cliStatusQuery = useQuery(trpc.app.meta.checkCliInstalled.queryOptions())
   const installCliMutation = useMutation(trpc.app.meta.installCli.mutationOptions())
 
-  useEffect(() => {
-    if (dbPathQuery.data !== undefined) {
-      setDbPath(dbPathQuery.data ?? 'Default location (userData)')
-    }
-  }, [dbPathQuery.data])
+  // Empty until the setting has loaded (a loaded query never reverts to undefined).
+  const dbPath =
+    dbPathQuery.data !== undefined ? (dbPathQuery.data ?? 'Default location (userData)') : ''
 
-  useEffect(() => {
+  // Each new CLI status result re-seeds the local install state (which an install
+  // overrides in between) — adjusted while rendering.
+  const [seenCliStatus, setSeenCliStatus] = useState<typeof cliStatusQuery.data>()
+  if (cliStatusQuery.data !== seenCliStatus) {
+    setSeenCliStatus(cliStatusQuery.data)
     const status = cliStatusQuery.data
     if (status) {
       setCliInstalled(status.installed)
       if (status.path) setCliPath(status.path)
     }
-  }, [cliStatusQuery.data])
+  }
 
   const handleInstallCli = async () => {
     setCliInstalling(true)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Plus, Trash2 } from 'lucide-react'
@@ -30,6 +30,16 @@ const FALLBACK_PRESETS: CopyPreset[] = [
   { id: 'docs-and-env', name: 'Docs + env', pathGlobs: ['docs/**', '*.md', '.env*', '*.local'] }
 ]
 
+/** The stored presets, or the built-in ones when unset, empty or unparseable. */
+function presetsFromSetting(value: string | null): CopyPreset[] {
+  try {
+    const parsed = value ? (JSON.parse(value) as CopyPreset[]) : null
+    return parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS
+  } catch {
+    return FALLBACK_PRESETS
+  }
+}
+
 export function WorktreesSettingsTab() {
   const trpc = useTRPC()
   const [worktreeBasePath, setWorktreeBasePath] = useState('')
@@ -51,42 +61,51 @@ export function WorktreesSettingsTab() {
   const presetsQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }))
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  useEffect(() => {
+  // Each new stored value re-seeds its control (which local edits override in
+  // between) — adjusted while rendering, one block per setting.
+  const [seenBasePath, setSeenBasePath] = useState<typeof basePathQuery.data>()
+  if (basePathQuery.data !== seenBasePath) {
+    setSeenBasePath(basePathQuery.data)
     if (basePathQuery.data !== undefined) setWorktreeBasePath(basePathQuery.data ?? '')
-  }, [basePathQuery.data])
+  }
 
-  useEffect(() => {
+  const [seenAutoCreate, setSeenAutoCreate] = useState<typeof autoCreateQuery.data>()
+  if (autoCreateQuery.data !== seenAutoCreate) {
+    setSeenAutoCreate(autoCreateQuery.data)
     if (autoCreateQuery.data !== undefined) {
       setAutoCreateWorktreeOnTaskCreate(autoCreateQuery.data === '1')
     }
-  }, [autoCreateQuery.data])
+  }
 
-  useEffect(() => {
+  const [seenCopyBehavior, setSeenCopyBehavior] = useState<typeof copyBehaviorQuery.data>()
+  if (copyBehaviorQuery.data !== seenCopyBehavior) {
+    setSeenCopyBehavior(copyBehaviorQuery.data)
     if (copyBehaviorQuery.data !== undefined) {
       setCopyBehavior((copyBehaviorQuery.data as WorktreeCopyBehavior) ?? 'ask')
     }
-  }, [copyBehaviorQuery.data])
+  }
 
-  useEffect(() => {
+  const [seenSubmoduleInit, setSeenSubmoduleInit] = useState<typeof submoduleInitQuery.data>()
+  if (submoduleInitQuery.data !== seenSubmoduleInit) {
+    setSeenSubmoduleInit(submoduleInitQuery.data)
     if (submoduleInitQuery.data !== undefined) {
       setSubmoduleInit((submoduleInitQuery.data as WorktreeSubmoduleInit) ?? 'auto')
     }
-  }, [submoduleInitQuery.data])
+  }
 
-  useEffect(() => {
-    if (presetsQuery.isError) {
-      setPresets(FALLBACK_PRESETS)
-      return
-    }
-    if (presetsQuery.data !== undefined) {
-      try {
-        const parsed = presetsQuery.data ? (JSON.parse(presetsQuery.data) as CopyPreset[]) : null
-        setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
-      } catch {
-        setPresets(FALLBACK_PRESETS)
-      }
-    }
-  }, [presetsQuery.data, presetsQuery.isError])
+  const [seenPresets, setSeenPresets] = useState<{
+    data: typeof presetsQuery.data
+    isError: boolean
+  }>()
+  if (
+    !seenPresets ||
+    seenPresets.data !== presetsQuery.data ||
+    seenPresets.isError !== presetsQuery.isError
+  ) {
+    setSeenPresets({ data: presetsQuery.data, isError: presetsQuery.isError })
+    if (presetsQuery.isError) setPresets(FALLBACK_PRESETS)
+    else if (presetsQuery.data !== undefined) setPresets(presetsFromSetting(presetsQuery.data))
+  }
 
   const savePresets = useCallback((updated: CopyPreset[]) => {
     setPresets(updated)

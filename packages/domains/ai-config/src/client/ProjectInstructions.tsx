@@ -143,12 +143,11 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     return { hashColorMap: colorMap, hashMembers: members }
   }, [files])
 
-  // Auto-select first file (only in custom mode)
-  useEffect(() => {
-    if (!linkedVariant && files.length > 0 && !selectedPath) {
-      setSelectedPath(files[0].path)
-    }
-  }, [files, selectedPath, linkedVariant])
+  // Auto-select first file (only in custom mode). Adjusted while rendering; the
+  // re-render it triggers no longer matches (selectedPath is then set).
+  if (!linkedVariant && files.length > 0 && !selectedPath) {
+    setSelectedPath(files[0].path)
+  }
 
   const load = useCallback(async () => {
     if (!isProject) return

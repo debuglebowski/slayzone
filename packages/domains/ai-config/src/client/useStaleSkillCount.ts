@@ -13,11 +13,9 @@ export function useStaleSkillCount(
   const [count, setCount] = useState(0)
   const reqIdRef = useRef(0)
 
-  const refresh = useCallback(() => {
-    if (!projectId || !projectPath) {
-      setCount(0)
-      return
-    }
+  // Query + apply the count; no-op without a project.
+  const fetchCount = useCallback(() => {
+    if (!projectId || !projectPath) return
     const reqId = ++reqIdRef.current
     trpcClient.aiConfig.getProjectStaleSkillCount
       .query({ projectId, projectPath })
@@ -29,9 +27,36 @@ export function useStaleSkillCount(
       })
   }, [trpcClient, projectId, projectPath])
 
+  const refresh = useCallback(() => {
+    if (!projectId || !projectPath) {
+      setCount(0)
+      return
+    }
+    fetchCount()
+  }, [projectId, projectPath, fetchCount])
+
+  // Without a project, each change of inputs zeroes the count (with one, the effect
+  // below fetches) — adjusted while rendering. `zeroedFor` holds the inputs last
+  // zeroed for and is cleared once a project is set, so switching between projects
+  // costs no extra render pass. Mounting without a project needs nothing: count
+  // starts at 0.
+  const noProject = !projectId || !projectPath
+  const inputs = [trpcClient, projectId, projectPath]
+  const [zeroedFor, setZeroedFor] = useState<readonly unknown[] | null>(() =>
+    noProject ? inputs : null
+  )
+  if (noProject) {
+    if (!zeroedFor || inputs.some((v, i) => !Object.is(v, zeroedFor[i]))) {
+      setZeroedFor(inputs)
+      setCount(0)
+    }
+  } else if (zeroedFor) {
+    setZeroedFor(null)
+  }
+
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    fetchCount()
+  }, [fetchCount])
 
   useEffect(() => {
     const onFocus = () => refresh()

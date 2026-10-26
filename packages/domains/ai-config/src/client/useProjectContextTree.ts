@@ -3,6 +3,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import type { ContextTreeEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
 import { collectExpandedFolders } from './ProjectContextTree.utils'
+import { useDepsChanged } from './useDepsChanged'
 
 interface UseProjectContextTreeArgs {
   projectPath: string
@@ -16,7 +17,8 @@ interface UseProjectContextTreeArgs {
 export function useProjectContextTree({ projectPath, projectId }: UseProjectContextTreeArgs) {
   const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ContextTreeEntry[]>([])
-  const [loading, setLoading] = useState(false)
+  // Starts true: the mount effect below begins the first load right away.
+  const [loading, setLoading] = useState(true)
   const selectedPath = useContextManagerStore((s) => s.projectSelectedPath)
   const setSelectedPath = useContextManagerStore((s) => s.setProjectSelectedPath)
   const [content, setContent] = useState('')
@@ -44,22 +46,38 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
   const [renameValue, setRenameValue] = useState('')
   const [syncing, setSyncing] = useState(false)
 
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchTree = useCallback(
+    async () =>
+      trpcClient.aiConfig.getContextTree
+        .query({ projectPath, projectId })
+        .then((tree) => {
+          setEntries(tree)
+          // Auto-expand all folders on first load
+          const folders = collectExpandedFolders(tree)
+          setExpandedFolders((prev) => (prev.size === 0 ? folders : prev))
+          setLoading(false)
+        })
+        .catch((err: unknown) => {
+          setLoading(false)
+          throw err
+        }),
+    [trpcClient, projectPath, projectId]
+  )
+
   const loadTree = useCallback(async () => {
     setLoading(true)
-    try {
-      const tree = await trpcClient.aiConfig.getContextTree.query({ projectPath, projectId })
-      setEntries(tree)
-      // Auto-expand all folders on first load
-      const folders = collectExpandedFolders(tree)
-      setExpandedFolders((prev) => (prev.size === 0 ? folders : prev))
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, projectPath, projectId])
+    return fetchTree()
+  }, [fetchTree])
+
+  // The effect below reloads on mount (initial state is already loading) and when
+  // the client or project changes — raise loading for the latter while rendering.
+  const sourceChanged = useDepsChanged([trpcClient, projectPath, projectId])
+  if (sourceChanged) setLoading(true)
 
   useEffect(() => {
-    void loadTree()
-  }, [loadTree])
+    void fetchTree()
+  }, [fetchTree])
 
   const toggleFolder = useCallback((folderPath: string) => {
     setExpandedFolders((prev) => {

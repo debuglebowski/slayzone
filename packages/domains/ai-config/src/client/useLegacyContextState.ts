@@ -1,43 +1,50 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, UpdateAiConfigItemInput } from '../shared'
 import type { ContextManagerSection, Section } from './ContextManagerSettings.types'
 import { nextAvailableSlug } from './ContextManagerSettings.utils'
+import { useDepsChanged } from './useDepsChanged'
 
 export function useLegacyContextState(initialSection: ContextManagerSection | null) {
   const trpcClient = useTRPCClient()
   const [section, setSection] = useState<Section | null>(initialSection)
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  // Starts true when mounting on the item section: the load effect below begins
+  // loading right away.
+  const [loading, setLoading] = useState(() => initialSection === 'skill')
   const [providerVersion] = useState(0)
   const [syncCheckVersion] = useState(0)
 
+  // A new initialSection prop re-selects the section (adjusted while rendering;
+  // on mount the state already starts from it).
+  const initialSectionChanged = useDepsChanged([initialSection])
+  if (initialSectionChanged) setSection(initialSection)
+
   const isItemSection = section === 'skill'
 
-  const loadItems = useCallback(async () => {
-    if (!isItemSection) return
-    setLoading(true)
-    try {
-      const rows = await trpcClient.aiConfig.listItems.query({
-        scope: 'library',
-        type: 'skill'
-      })
-      setItems(rows)
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient, section, isItemSection])
-
-  useEffect(() => {
-    void loadItems()
+  // Switching section (or client) drops the open editor and, on the item section,
+  // restarts the load below — adjusted while rendering.
+  const sectionChanged = useDepsChanged([trpcClient, section])
+  if (sectionChanged) {
     setEditingId(null)
-  }, [loadItems])
+    if (isItemSection) setLoading(true)
+  }
 
   useEffect(() => {
-    setSection(initialSection)
-  }, [initialSection])
+    if (!isItemSection) return
+    void trpcClient.aiConfig.listItems.query({ scope: 'library', type: 'skill' }).then(
+      (rows) => {
+        setItems(rows)
+        setLoading(false)
+      },
+      (err: unknown) => {
+        setLoading(false)
+        throw err
+      }
+    )
+  }, [trpcClient, section, isItemSection])
 
   const handleCreate = async () => {
     if (!isItemSection) return

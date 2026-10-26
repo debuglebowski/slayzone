@@ -12,6 +12,7 @@ import { FileText, Plus, Save, Trash2 } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input, Label, Textarea, cn } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
+import { useDepsChanged } from './useDepsChanged'
 
 export function InstructionVariantsView() {
   const trpcClient = useTRPCClient()
@@ -31,19 +32,23 @@ export function InstructionVariantsView() {
   const selected = variants.find((v) => v.id === selectedId) ?? null
   const dirty = selected ? editContent !== originalContent || editName !== originalName : false
 
-  const loadVariants = useCallback(async () => {
-    setLoading(true)
-    try {
-      const items = await trpcClient.aiConfig.listInstructionVariants.query()
-      setVariants(items)
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient])
+  // The only load: on mount (initial state is already loading) and on a client
+  // change — raise loading for the latter while rendering.
+  const clientChanged = useDepsChanged([trpcClient])
+  if (clientChanged) setLoading(true)
 
   useEffect(() => {
-    void loadVariants()
-  }, [loadVariants])
+    void trpcClient.aiConfig.listInstructionVariants.query().then(
+      (items) => {
+        setVariants(items)
+        setLoading(false)
+      },
+      (err: unknown) => {
+        setLoading(false)
+        throw err
+      }
+    )
+  }, [trpcClient])
 
   const selectVariant = (variant: AiConfigItem) => {
     setSelectedId(variant.id)

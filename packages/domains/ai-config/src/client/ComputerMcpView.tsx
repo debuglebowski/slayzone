@@ -4,6 +4,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { CliProvider, McpConfigFileResult } from '../shared'
+import { useDepsChanged } from './useDepsChanged'
 
 export function ComputerMcpView() {
   const trpcClient = useTRPCClient()
@@ -14,18 +15,35 @@ export function ComputerMcpView() {
   const [newServerCommand, setNewServerCommand] = useState('')
   const [newServerArgs, setNewServerArgs] = useState('')
 
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchConfigs = useCallback(
+    async () =>
+      trpcClient.aiConfig.discoverComputerMcpConfigs.query().then(
+        (result) => {
+          setConfigs(result)
+          setLoading(false)
+        },
+        (err: unknown) => {
+          setLoading(false)
+          throw err
+        }
+      ),
+    [trpcClient]
+  )
+
   const loadConfigs = useCallback(async () => {
     setLoading(true)
-    try {
-      setConfigs(await trpcClient.aiConfig.discoverComputerMcpConfigs.query())
-    } finally {
-      setLoading(false)
-    }
-  }, [trpcClient])
+    return fetchConfigs()
+  }, [fetchConfigs])
+
+  // The effect below reloads on mount (initial state is already loading) and on a
+  // client change — raise loading for the latter while rendering.
+  const clientChanged = useDepsChanged([trpcClient])
+  if (clientChanged) setLoading(true)
 
   useEffect(() => {
-    void loadConfigs()
-  }, [loadConfigs])
+    void fetchConfigs()
+  }, [fetchConfigs])
 
   const handleAddServer = useCallback(
     async (provider: CliProvider) => {

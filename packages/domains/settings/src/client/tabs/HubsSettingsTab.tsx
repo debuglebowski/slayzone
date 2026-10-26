@@ -180,37 +180,42 @@ export function HubsSettingsTab() {
     runLocalHub: true
   })
 
-  const reload = useCallback(async () => {
-    const [registry, tokens] = await Promise.all([
-      electronBootstrap.getHubRegistry(),
-      electronBootstrap.getHubTokens()
-    ])
-    const nextRunLocalHub = registry.hubs.some((h) => h.kind === 'local')
-    const nextRemotes = registry.hubs.filter((h) => h.kind === 'remote')
-    setRunLocalHub(nextRunLocalHub)
-    setRemotes(nextRemotes)
-    setDefaultHubId(registry.defaultHubId)
-    setAuthedHubIds(new Set(Object.keys(tokens)))
-    setDirty(false)
-    originalRef.current = {
-      remotes: nextRemotes,
-      defaultHubId: registry.defaultHubId,
-      runLocalHub: nextRunLocalHub
-    }
-    // Ask every remote whether it gates, so the row can decide whether a Sign in
-    // button is even meaningful. Deliberately NOT awaited: the list must render
-    // immediately, and each answer lands independently (one slow/unreachable hub
-    // can't hold up the others). `/health` answers before the auth gate, so this
-    // works while signed out — which is the only state where it matters.
-    for (const hub of nextRemotes) {
-      if (!hub.url) continue
-      void electronBootstrap.probeServerHealth(hub.url).then((result) => {
-        setAuthNeeds((prev) => ({ ...prev, [hub.id]: authNeedFromProbe(result.authRequired) }))
-        const methods = result.signIn
-        if (methods) setSignInMethods((prev) => ({ ...prev, [hub.id]: methods }))
-      })
-    }
-  }, [])
+  const reload = useCallback(
+    async () =>
+      Promise.all([electronBootstrap.getHubRegistry(), electronBootstrap.getHubTokens()]).then(
+        ([registry, tokens]) => {
+          const nextRunLocalHub = registry.hubs.some((h) => h.kind === 'local')
+          const nextRemotes = registry.hubs.filter((h) => h.kind === 'remote')
+          setRunLocalHub(nextRunLocalHub)
+          setRemotes(nextRemotes)
+          setDefaultHubId(registry.defaultHubId)
+          setAuthedHubIds(new Set(Object.keys(tokens)))
+          setDirty(false)
+          originalRef.current = {
+            remotes: nextRemotes,
+            defaultHubId: registry.defaultHubId,
+            runLocalHub: nextRunLocalHub
+          }
+          // Ask every remote whether it gates, so the row can decide whether a Sign in
+          // button is even meaningful. Deliberately NOT awaited: the list must render
+          // immediately, and each answer lands independently (one slow/unreachable hub
+          // can't hold up the others). `/health` answers before the auth gate, so this
+          // works while signed out — which is the only state where it matters.
+          for (const hub of nextRemotes) {
+            if (!hub.url) continue
+            void electronBootstrap.probeServerHealth(hub.url).then((result) => {
+              setAuthNeeds((prev) => ({
+                ...prev,
+                [hub.id]: authNeedFromProbe(result.authRequired)
+              }))
+              const methods = result.signIn
+              if (methods) setSignInMethods((prev) => ({ ...prev, [hub.id]: methods }))
+            })
+          }
+        }
+      ),
+    []
+  )
 
   const openSignIn = (hubId: string): void => {
     setSignInHubId(hubId)
