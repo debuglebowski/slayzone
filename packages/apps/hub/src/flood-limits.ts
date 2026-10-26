@@ -25,6 +25,11 @@
  *   - `POST /api/auth/web-session`, `POST /api/auth/web-logout` — the web shell's
  *     session status and sign-out (T-13, web-session-routes.ts): open like better-auth's
  *     `get-session` / `sign-out`, so its default for those, 300 a minute each.
+ *   - `GET /device` — the device sign-in page (T-14, hub-auth `device-page.ts`). Without
+ *     a fresh Entra session it starts Entra in process (`signInSocial`, as web-sso), so
+ *     web-sso's budget: 20 a minute. Covers every leg, query or not (open, return, retry).
+ *   - `POST /device/approve`, `POST /device/deny` — its cookie-authenticated forms. They
+ *     never start Entra; one shared budget like the session posts, 300 a minute (T-110).
  *
  * Deliberately NOT limited here (see the PR for T-26):
  *   - `/health`: answered from memory, and the front end's health probe polls it — a
@@ -50,7 +55,7 @@ import {
   createRateLimitAudit,
   type RateRule
 } from '@slayzone/platform/rate-limit'
-import { WEB_SIGN_IN_PATH } from '@slayzone/hub-auth/server'
+import { DEVICE_PAGE_PATH, WEB_SIGN_IN_PATH } from '@slayzone/hub-auth/server'
 import { BREAK_GLASS_PATH } from './break-glass'
 import { WEB_LOGOUT_PATH, WEB_SESSION_STATUS_PATH } from './web-sessions'
 
@@ -62,7 +67,10 @@ export const HUB_FLOOD_RULES = {
   // T-13: the web shell's sign-in and session routes.
   webSso: { max: 20, windowMs: 60_000 },
   webSession: { max: 300, windowMs: 60_000 },
-  webLogout: { max: 300, windowMs: 60_000 }
+  webLogout: { max: 300, windowMs: 60_000 },
+  // T-110: the device sign-in page (start leg) and its approve/deny forms.
+  deviceStart: { max: 20, windowMs: 60_000 },
+  deviceDecide: { max: 300, windowMs: 60_000 }
 } as const satisfies Record<string, RateRule>
 
 /** Open `/trpc` sockets one client address may hold. */
@@ -80,7 +88,17 @@ const HTTP_RULES = new Map<string, { limit: string; rule: RateRule }>([
     `POST ${WEB_SESSION_STATUS_PATH}`,
     { limit: 'http.web_session', rule: HUB_FLOOD_RULES.webSession }
   ],
-  [`POST ${WEB_LOGOUT_PATH}`, { limit: 'http.web_logout', rule: HUB_FLOOD_RULES.webLogout }]
+  [`POST ${WEB_LOGOUT_PATH}`, { limit: 'http.web_logout', rule: HUB_FLOOD_RULES.webLogout }],
+  [`GET ${DEVICE_PAGE_PATH}`, { limit: 'http.device_start', rule: HUB_FLOOD_RULES.deviceStart }],
+  // One limit name, so approve and deny share a bucket.
+  [
+    `POST ${DEVICE_PAGE_PATH}/approve`,
+    { limit: 'http.device_decide', rule: HUB_FLOOD_RULES.deviceDecide }
+  ],
+  [
+    `POST ${DEVICE_PAGE_PATH}/deny`,
+    { limit: 'http.device_decide', rule: HUB_FLOOD_RULES.deviceDecide }
+  ]
 ])
 
 export type TrpcUpgradeAdmission =

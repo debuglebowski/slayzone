@@ -240,6 +240,57 @@ test('the web shell sign-in and session routes (T-13): limited per address', () 
   setSecurityLogSink(silent)
 })
 
+test('the device sign-in page (T-110): start leg 20/min, approve+deny share 300/min', () => {
+  const lines = captureAudit()
+  const clock = withClock()
+  const guard = createHubFloodGuard({ enabled: true, now: clock.now })
+  const start = HUB_FLOOD_RULES.deviceStart.max
+  assert(start === HUB_FLOOD_RULES.webSso.max, 'same budget as web-sso')
+  for (let i = 0; i < start; i++) {
+    // Opening with a code, the return leg from Entra, a retry: all the same path.
+    const url =
+      i % 2 === 0 ? '/device' : `/device?user_code=ABCDEFGH${i % 4 ? '&signin=failed' : ''}`
+    assert(
+      !guard.refuseRequest(request('GET', url, '203.0.113.90'), response().res),
+      `start ${i + 1} passes`
+    )
+  }
+  const over = response()
+  assert(
+    guard.refuseRequest(request('GET', '/device?user_code=ABCDEFGH', '203.0.113.90'), over.res),
+    'start N+1 refused'
+  )
+  assert(over.out.status === 429, '429')
+  assert(Number(over.out.headers['retry-after']) > 0, 'retry-after')
+  assert(
+    !guard.refuseRequest(request('GET', '/device', '203.0.113.91'), response().res),
+    'another address passes'
+  )
+  // The forms count separately from the start leg, and approve + deny share one bucket.
+  const decide = HUB_FLOOD_RULES.deviceDecide.max
+  for (let i = 0; i < decide; i++) {
+    const path = i % 2 === 0 ? '/device/approve' : '/device/deny'
+    assert(
+      !guard.refuseRequest(request('POST', path, '203.0.113.90'), response().res),
+      `decide ${i + 1} passes`
+    )
+  }
+  const r = response()
+  assert(guard.refuseRequest(request('POST', '/device/deny', '203.0.113.90'), r.res), 'over')
+  assert(r.out.status === 429, 'decide 429')
+  const limits = rateLines(lines).map((l) => (l.detail as { limit?: string }).limit)
+  assert(
+    limits.join(',') === 'http.device_start,http.device_decide',
+    `one line per flood, got ${limits.join(',')}`
+  )
+  clock.advance(60_000)
+  assert(
+    !guard.refuseRequest(request('GET', '/device', '203.0.113.90'), response().res),
+    'next window'
+  )
+  setSecurityLogSink(silent)
+})
+
 test('off (the desktop app’s hub): nothing refused, nothing counted, nothing audited', () => {
   const lines = captureAudit()
   const guard = createHubFloodGuard({ enabled: false })
@@ -249,6 +300,13 @@ test('off (the desktop app’s hub): nothing refused, nothing counted, nothing a
       !guard.refuseRequest(request('POST', '/api/auth/web-login', '127.0.0.1'), response().res),
       'web-login'
     )
+    for (const [method, path] of [
+      ['GET', '/device?user_code=ABCDEFGH'],
+      ['POST', '/device/approve'],
+      ['GET', '/api/auth/web-sso']
+    ]) {
+      assert(!guard.refuseRequest(request(method!, path!, '127.0.0.1'), response().res), path!)
+    }
     const admission = guard.admitTrpcUpgrade(request('GET', '/trpc', '127.0.0.1'))
     assert(admission.ok, 'trpc')
     admission.track(new FakeWs())
