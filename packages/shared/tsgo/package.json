@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/tsgo",
-  "version": "0.36.0-beta.20",
+  "version": "0.36.0-beta.21",
   "private": true,
   "description": "The `tsgo` command every package's typecheck script runs: TypeScript 7's native compiler. Its own `typescript` dependency is 7.x; the workspace's `typescript` stays 5.x for tools that need the JS compiler API (typescript-eslint).",
   "type": "module",
