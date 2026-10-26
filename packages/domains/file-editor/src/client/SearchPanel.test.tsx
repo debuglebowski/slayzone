@@ -122,3 +122,51 @@ describe('SearchPanel', () => {
     expect(status()).toBe('0 results in 0 files')
   })
 })
+
+describe('SearchPanel — out-of-date searches', () => {
+  // Each search waits until the test answers it, by query.
+  let answers: Map<string, (v: unknown) => void>
+  beforeEach(() => {
+    answers = new Map()
+    search.mockImplementation(
+      (input: SearchInput) => new Promise((resolve) => answers.set(input.query, resolve))
+    )
+  })
+  const hit = (path: string) => ({
+    results: [{ path, matches: [{ line: 1, col: 1, lineText: 'x' }] }]
+  })
+  const type = (value: string) =>
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value } })
+
+  it("an older search finishing keeps the newer search's spinner and drops its results", async () => {
+    renderPanel()
+    type('foo')
+    await settle(300)
+    type('bar')
+    await settle(300)
+    expect(search.mock.calls.map((c) => c[0].query)).toEqual(['foo', 'bar'])
+
+    await act(async () => answers.get('foo')?.(hit('src/foo.ts')))
+    await settle()
+    expect(status()).toBe(' Searching...')
+    expect(screen.queryByText('foo.ts')).toBeNull()
+
+    await act(async () => answers.get('bar')?.(hit('src/bar.ts')))
+    await settle()
+    expect(status()).toBe('1 result in 1 file')
+    expect(screen.getByText('bar.ts')).toBeTruthy()
+  })
+
+  it('a search still in flight when the query is cleared shows no results', async () => {
+    renderPanel()
+    type('foo')
+    await settle(300)
+    type('')
+    expect(status()).toBeNull()
+
+    await act(async () => answers.get('foo')?.(hit('src/foo.ts')))
+    await settle()
+    expect(status()).toBeNull()
+    expect(screen.queryByText('foo.ts')).toBeNull()
+  })
+})

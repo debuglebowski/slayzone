@@ -13,10 +13,12 @@ export function useStaleSkillCount(
   const [count, setCount] = useState(0)
   const reqIdRef = useRef(0)
 
-  // Query + apply the count; no-op without a project.
+  // Query + apply the count; no query without a project. Every call supersedes the
+  // request in flight — the no-project one too, so a late result for the previous
+  // project can't overwrite the zero.
   const fetchCount = useCallback(() => {
-    if (!projectId || !projectPath) return
     const reqId = ++reqIdRef.current
+    if (!projectId || !projectPath) return
     trpcClient.aiConfig.getProjectStaleSkillCount
       .query({ projectId, projectPath })
       .then((n) => {
@@ -28,10 +30,7 @@ export function useStaleSkillCount(
   }, [trpcClient, projectId, projectPath])
 
   const refresh = useCallback(() => {
-    if (!projectId || !projectPath) {
-      setCount(0)
-      return
-    }
+    if (!projectId || !projectPath) setCount(0)
     fetchCount()
   }, [projectId, projectPath, fetchCount])
 

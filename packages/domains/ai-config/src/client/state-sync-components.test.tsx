@@ -63,6 +63,7 @@ vi.mock('@slayzone/ui', async () => {
     DialogTitle: Div,
     DialogFooter: Div,
     Tooltip: Pass,
+    TooltipProvider: Pass,
     TooltipTrigger: Pass,
     TooltipContent: () => null,
     FileTree: ({ items }: { items: Array<{ relativePath: string }> }) => (
@@ -76,6 +77,22 @@ vi.mock('@slayzone/ui', async () => {
     toast: { success: vi.fn(), error: vi.fn() }
   }
 })
+
+// ProjectInstructions' file editor + its workspace routing: out of scope here.
+vi.mock('@slayzone/file-editor/client/useWatchedFile', () => ({
+  useWatchedFile: () => ({
+    content: '',
+    setContent: () => {},
+    dirty: false,
+    diskChanged: false,
+    reloadFromDisk: async () => {},
+    flushNow: async () => {},
+    onBlur: () => {}
+  })
+}))
+vi.mock('@slayzone/file-editor/client/workspace-target', () => ({
+  WorkspaceTargetProvider: ({ children }: Kids) => <>{children}</>
+}))
 
 vi.mock('./LibraryItemPicker', () => ({
   LibraryItemPicker: () => <div data-testid="library-picker" />
@@ -93,6 +110,7 @@ const { ComputerMcpView } = await import('./ComputerMcpView')
 const { ContextFilesPanel } = await import('./ContextFilesPanel')
 const { ProviderSyncSection } = await import('./ProviderSyncSection')
 const { ProjectContextFilesView } = await import('./ProjectContextFilesView')
+const { ProjectInstructions } = await import('./ProjectInstructions')
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void }
 function deferred<T>(): Deferred<T> {
@@ -350,5 +368,31 @@ describe('ProjectContextFilesView', () => {
     await act(async () => tree[1].resolve([]))
     await flush()
     expect(screen.getByText('No context files found.')).toBeTruthy()
+  })
+})
+
+describe('ProjectInstructions', () => {
+  it('shows Loading until the first load lands', async () => {
+    const root = deferredHandler('aiConfig.getRootInstructions')
+    handlers['aiConfig.getProjectInstructionVariant'] = async () => null
+    render(<ProjectInstructions projectId="p1" projectPath="/a" />)
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    await flush()
+    expect(callsTo('aiConfig.getRootInstructions').map((c) => c.input)).toEqual([
+      { projectId: 'p1', projectPath: '/a' }
+    ])
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    await act(async () => root[0].resolve({ providerHealth: {} }))
+    await flush()
+    expect(screen.queryByText('Loading...')).toBeNull()
+    expect(screen.getByText('No provider files found')).toBeTruthy()
+  })
+
+  it('without a project, loads nothing and never shows Loading', async () => {
+    render(<ProjectInstructions />)
+    await flush()
+    expect(callsTo('aiConfig.getRootInstructions')).toHaveLength(0)
+    expect(screen.queryByText('Loading...')).toBeNull()
+    expect(screen.getByText('No provider files found')).toBeTruthy()
   })
 })

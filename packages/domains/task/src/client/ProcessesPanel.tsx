@@ -45,8 +45,11 @@ export function ProcessesPanel({
   const logEndRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
+    // A response for a previous task/project must not replace the newer list.
+    let cancelled = false
     setLoading(true)
     trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
+      if (cancelled) return
       const entries = (list as ProcessEntry[]).map((p) => {
         if (p.serverUrl || p.status !== 'running') return p
         for (let i = p.logBuffer.length - 1; i >= 0; i--) {
@@ -58,6 +61,9 @@ export function ProcessesPanel({
       setProcesses(entries)
       setLoading(false)
     })
+    return () => {
+      cancelled = true
+    }
   }, [taskId, projectId, trpcClient])
 
   useSubscription(

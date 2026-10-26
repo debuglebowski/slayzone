@@ -54,7 +54,7 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
             throw err
           }
         ),
-    [trpcClient, effectiveRegistryId, search, refreshKey]
+    [trpcClient, effectiveRegistryId, search, projectId, refreshKey]
   )
 
   const loadEntries = useCallback(async () => {
@@ -64,7 +64,13 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
 
   // The effect below reloads on mount (initial state is already loading) and
   // whenever its inputs change — raise loading for the latter while rendering.
-  const entriesSourceChanged = useDepsChanged([trpcClient, effectiveRegistryId, search, refreshKey])
+  const entriesSourceChanged = useDepsChanged([
+    trpcClient,
+    effectiveRegistryId,
+    search,
+    projectId,
+    refreshKey
+  ])
   if (entriesSourceChanged) setLoading(true)
 
   useEffect(() => {

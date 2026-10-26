@@ -279,7 +279,8 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     </div>
   )
 
-  if (loading && files.length === 0) {
+  // Without a project nothing loads, so `loading` (true from mount) never settles.
+  if (isProject && loading && files.length === 0) {
     return <p className="text-xs text-muted-foreground">Loading...</p>
   }
 

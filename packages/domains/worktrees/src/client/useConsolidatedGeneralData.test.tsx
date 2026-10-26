@@ -137,3 +137,129 @@ describe('useConsolidatedGeneralData — action handlers', () => {
     )
   })
 })
+
+// The reactive fetches (worktree branch, PR, metadata, detected worktrees): a
+// response for previous inputs that lands after the inputs changed is dropped, so it
+// can never replace the current inputs' data.
+describe('useConsolidatedGeneralData — out-of-date responses', () => {
+  type Pending = { key: string; input: unknown; resolve: (v: unknown) => void }
+  let pending: Pending[] = []
+
+  // Every fetch for a `deferred` procedure waits until the test resolves it; the
+  // rest answer from queryResults right away.
+  async function setupWithProps(deferred: string[], initial: { task: Task; projectPath: string }) {
+    pending = []
+    const client = new QueryClient()
+    vi.spyOn(client, 'fetchQuery').mockImplementation(((o: { queryKey: unknown[] }) => {
+      const [key, input] = o.queryKey as [string, unknown]
+      if (!deferred.includes(key)) return Promise.resolve(queryResults[key] ?? null)
+      return new Promise((resolve) => pending.push({ key, input, resolve }))
+    }) as never)
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const hook = renderHook(
+      (p: { task: Task; projectPath: string }) =>
+        useConsolidatedGeneralData(p.task, p.projectPath, true, 5000, async () => p.task),
+      { wrapper, initialProps: initial }
+    )
+    // Let the immediate fetches land (e.g. the worktree branch the PR fetch keys on).
+    await act(async () => {})
+    return hook
+  }
+  // Answers every pending fetch of `key` for `input`.
+  const take = (key: string, input: unknown) => {
+    const matching = pending.filter(
+      (x) => x.key === key && JSON.stringify(x.input) === JSON.stringify(input)
+    )
+    if (matching.length === 0) throw new Error(`no pending ${key} ${JSON.stringify(input)}`)
+    return { resolve: (v: unknown) => matching.forEach((x) => x.resolve(v)) }
+  }
+  // No branch comparison: keeps fetchBranchData's own getCurrentBranch calls out.
+  const wtTask = (over: Partial<Task>) =>
+    ({ ...task, worktree_parent_branch: null, ...over }) as unknown as Task
+
+  it('worktree branch: a late response for the previous worktree path is dropped', async () => {
+    const { result, rerender } = await setupWithProps(['getCurrentBranch'], {
+      task: wtTask({ worktree_path: '/wt1' }),
+      projectPath: '/repo'
+    })
+    rerender({ task: wtTask({ worktree_path: '/wt2' }), projectPath: '/repo' })
+    await act(async () => take('getCurrentBranch', { path: '/wt2' }).resolve('b2'))
+    expect(result.current.worktreeBranch).toBe('b2')
+    await act(async () => take('getCurrentBranch', { path: '/wt1' }).resolve('b1'))
+    expect(result.current.worktreeBranch).toBe('b2')
+  })
+
+  it('worktree branch: a late response is dropped once the worktree is unlinked', async () => {
+    const { result, rerender } = await setupWithProps(['getCurrentBranch'], {
+      task: wtTask({ worktree_path: '/wt1' }),
+      projectPath: '/repo'
+    })
+    rerender({ task: wtTask({ worktree_path: null }), projectPath: '/repo' })
+    await act(async () => take('getCurrentBranch', { path: '/wt1' }).resolve('b1'))
+    expect(result.current.worktreeBranch).toBe(null)
+  })
+
+  it('metadata: a late response for the previous worktree path is dropped', async () => {
+    const { result, rerender } = await setupWithProps(['getWorktreeMetadata'], {
+      task: wtTask({ worktree_path: '/wt1' }),
+      projectPath: '/repo'
+    })
+    rerender({ task: wtTask({ worktree_path: '/wt2' }), projectPath: '/repo' })
+    const m2 = { createdAt: 'two' }
+    await act(async () => take('getWorktreeMetadata', { path: '/wt2' }).resolve(m2))
+    expect(result.current.metadata).toBe(m2)
+    await act(async () =>
+      take('getWorktreeMetadata', { path: '/wt1' }).resolve({ createdAt: 'one' })
+    )
+    expect(result.current.metadata).toBe(m2)
+  })
+
+  it('PR: a late response for the previous PR url is dropped', async () => {
+    const { result, rerender } = await setupWithProps(['getPrByUrl'], {
+      task: wtTask({ worktree_path: '/wt1', pr_url: 'https://x/pr/1' }),
+      projectPath: '/repo'
+    })
+    rerender({
+      task: wtTask({ worktree_path: '/wt1', pr_url: 'https://x/pr/2' }),
+      projectPath: '/repo'
+    })
+    const pr2 = { number: 2 }
+    await act(async () =>
+      take('getPrByUrl', { repoPath: '/repo', url: 'https://x/pr/2' }).resolve(pr2)
+    )
+    expect(result.current.pr).toBe(pr2)
+    await act(async () =>
+      take('getPrByUrl', { repoPath: '/repo', url: 'https://x/pr/1' }).resolve({ number: 1 })
+    )
+    expect(result.current.pr).toBe(pr2)
+  })
+
+  it('detected worktrees: a late response for the previous repo is dropped', async () => {
+    const { result, rerender } = await setupWithProps(['detectWorktrees'], {
+      task: wtTask({ worktree_path: null }),
+      projectPath: '/repo1'
+    })
+    rerender({ task: wtTask({ worktree_path: null }), projectPath: '/repo2' })
+    const wt = (path: string) => ({ path, branch: 'b', isMain: false })
+    await act(async () => take('detectWorktrees', { repoPath: '/repo2' }).resolve([wt('/two')]))
+    expect(result.current.detectedWorktrees).toEqual([wt('/two')])
+    await act(async () => take('detectWorktrees', { repoPath: '/repo1' }).resolve([wt('/one')]))
+    expect(result.current.detectedWorktrees).toEqual([wt('/two')])
+  })
+
+  it('detected worktrees: a late response is dropped once a worktree is linked', async () => {
+    const { result, rerender } = await setupWithProps(['detectWorktrees'], {
+      task: wtTask({ worktree_path: null }),
+      projectPath: '/repo'
+    })
+    rerender({ task: wtTask({ worktree_path: '/wt' }), projectPath: '/repo' })
+    await act(async () =>
+      take('detectWorktrees', { repoPath: '/repo' }).resolve([
+        { path: '/one', branch: 'b', isMain: false }
+      ])
+    )
+    expect(result.current.detectedWorktrees).toEqual([])
+  })
+})

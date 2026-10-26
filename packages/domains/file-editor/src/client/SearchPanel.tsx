@@ -13,25 +13,30 @@ interface SearchPanelProps {
 }
 
 // Plain module function: React Compiler can't lower try/finally inside the
-// component. Body moved verbatim from the debounced search timer.
+// component. Body moved from the debounced search timer. `isCurrent` turns false
+// once the search inputs change: an outdated search then touches no state, so it
+// can neither show its results nor hide the newer search's spinner.
 async function runSearch(
   search: () => Promise<{ results: FileSearchResult[] }>,
   setters: {
     setResults: (results: FileSearchResult[]) => void
     setCollapsed: (collapsed: Set<string>) => void
     setSearching: (searching: boolean) => void
-  }
+  },
+  isCurrent: () => boolean
 ): Promise<void> {
   const { setResults, setCollapsed, setSearching } = setters
   try {
     const res = await search()
-    setResults(res.results)
-    setCollapsed(new Set())
+    if (isCurrent()) {
+      setResults(res.results)
+      setCollapsed(new Set())
+    }
     track('file_search_used', { had_results: res.results.length > 0 })
   } catch {
-    setResults([])
+    if (isCurrent()) setResults([])
   } finally {
-    setSearching(false)
+    if (isCurrent()) setSearching(false)
   }
 }
 
@@ -87,6 +92,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!query.trim()) return
+    let cancelled = false
     debounceRef.current = setTimeout(() => {
       void runSearch(
         () =>
@@ -98,10 +104,12 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
               options: { matchCase, regex: useRegex }
             })
           ),
-        { setResults, setCollapsed, setSearching }
+        { setResults, setCollapsed, setSearching },
+        () => !cancelled
       )
     }, 300)
     return () => {
+      cancelled = true
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [query, matchCase, useRegex, projectPath, queryClient, trpc])

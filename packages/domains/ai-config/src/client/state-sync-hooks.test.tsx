@@ -256,6 +256,46 @@ describe('useSkillMarketplace', () => {
     expect(result.current.loading).toBe(false)
     expect(result.current.entries).toEqual([{ id: 'e2' }])
   })
+
+  it('reloads entries for the new project, and later reloads use it too', async () => {
+    handlers['aiConfig.marketplace.listRegistries'] = async () => []
+    handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})
+    handlers['aiConfig.deleteItem'] = async () => undefined
+    const entries = deferredHandler('aiConfig.marketplace.listEntries')
+    const listed = () => callsTo('aiConfig.marketplace.listEntries').map((c) => c.input)
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useSkillMarketplace(id, '/a'),
+      {
+        initialProps: { id: 'p1' }
+      }
+    )
+    await flush()
+    await act(async () => entries[0].resolve([{ id: 'e1' }]))
+    await flush()
+    expect(result.current.loading).toBe(false)
+
+    rerender({ id: 'p2' })
+    expect(result.current.loading).toBe(true)
+    await flush()
+    expect(listed()).toEqual([
+      { registryId: undefined, search: undefined, projectId: 'p1' },
+      { registryId: undefined, search: undefined, projectId: 'p2' }
+    ])
+    await act(async () => entries[1].resolve([{ id: 'e2' }]))
+    await flush()
+    expect(result.current.loading).toBe(false)
+    expect(result.current.entries).toEqual([{ id: 'e2' }])
+
+    // A handler-driven reload (loadEntries) asks for the current project.
+    act(() => {
+      void result.current.handleUninstall('i1')
+    })
+    await flush()
+    expect(listed().at(-1)).toEqual({ registryId: undefined, search: undefined, projectId: 'p2' })
+    await act(async () => entries[2].resolve([]))
+    await flush()
+  })
 })
 
 describe('useLegacyContextState', () => {
@@ -445,6 +485,43 @@ describe('useStaleSkillCount without a project at mount', () => {
     await flush()
     expect(result.current.count).toBe(4)
     expect(callsTo('aiConfig.getProjectStaleSkillCount')).toHaveLength(2)
+  })
+})
+
+describe('useStaleSkillCount: a late result after the project is cleared', () => {
+  it("keeps the zero: the previous project's result is dropped", async () => {
+    const counts = deferredHandler('aiConfig.getProjectStaleSkillCount')
+    const { result, rerender } = renderHook(
+      ({ id, path }: { id: string | null; path: string | null }) => useStaleSkillCount(id, path),
+      { initialProps: { id: 'p1' as string | null, path: '/a' as string | null } }
+    )
+    await flush()
+    expect(counts).toHaveLength(1)
+
+    rerender({ id: null, path: null })
+    expect(result.current.count).toBe(0)
+    await act(async () => counts[0].resolve(3))
+    await flush()
+    expect(result.current.count).toBe(0)
+  })
+})
+
+describe('useStaleSkillCounts: a late result after the paths are cleared', () => {
+  it("keeps the counts empty: the previous projects' result is dropped", async () => {
+    const counts = deferredHandler('aiConfig.getProjectsStaleSkillCounts')
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Array<{ id: string; path: string | null }> }) =>
+        useStaleSkillCounts(projects),
+      { initialProps: { projects: [{ id: 'p1', path: '/a' as string | null }] } }
+    )
+    await flush()
+    expect(counts).toHaveLength(1)
+
+    rerender({ projects: [{ id: 'p1', path: null }] })
+    expect(result.current.counts.size).toBe(0)
+    await act(async () => counts[0].resolve({ p1: 2 }))
+    await flush()
+    expect(result.current.counts.size).toBe(0)
   })
 })
 

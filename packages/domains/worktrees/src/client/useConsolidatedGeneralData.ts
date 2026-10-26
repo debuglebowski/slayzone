@@ -281,16 +281,25 @@ export function useConsolidatedGeneralData(
     }
   }, [targetPath, projectPath, parentBranch, queryClient, trpc])
 
-  // Worktree branch
+  // Worktree branch. Each reactive fetch below drops its response once its inputs
+  // have changed, so a late answer for previous inputs can't replace current data.
   useEffect(() => {
     if (!task.worktree_path) {
       setWorktreeBranch(null)
       return
     }
+    let cancelled = false
     queryClient
       .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path }))
-      .then(setWorktreeBranch)
-      .catch(() => setWorktreeBranch(null))
+      .then((branch) => {
+        if (!cancelled) setWorktreeBranch(branch)
+      })
+      .catch(() => {
+        if (!cancelled) setWorktreeBranch(null)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [task.worktree_path, queryClient, trpc])
 
   useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: pollIntervalMs })
@@ -310,26 +319,41 @@ export function useConsolidatedGeneralData(
   useEffect(() => {
     const repoPath = projectPath || targetPath
     if (!repoPath) return
+    let cancelled = false
+    const apply = (next: GhPullRequest | null) => {
+      if (!cancelled) setPr(next)
+    }
     if (task.pr_url) {
       queryClient
         .fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath, url: task.pr_url }))
-        .then(setPr)
-        .catch(() => setPr(null))
+        .then(apply)
+        .catch(() => apply(null))
     } else if (activeBranch) {
       queryClient
         .fetchQuery(trpc.worktrees.listOpenPrs.queryOptions({ repoPath }))
-        .then((prs) => setPr(prs.find((p) => p.headRefName === activeBranch) ?? null))
-        .catch(() => setPr(null))
+        .then((prs) => apply(prs.find((p) => p.headRefName === activeBranch) ?? null))
+        .catch(() => apply(null))
+    }
+    return () => {
+      cancelled = true
     }
   }, [task.pr_url, activeBranch, projectPath, targetPath, queryClient, trpc])
 
   // Metadata — one-time per worktree path
   useEffect(() => {
     if (!task.worktree_path) return
+    let cancelled = false
     queryClient
       .fetchQuery(trpc.worktrees.getWorktreeMetadata.queryOptions({ path: task.worktree_path }))
-      .then(setMetadata)
-      .catch(() => setMetadata(null))
+      .then((meta) => {
+        if (!cancelled) setMetadata(meta)
+      })
+      .catch(() => {
+        if (!cancelled) setMetadata(null)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [task.worktree_path, queryClient, trpc])
 
   // Reset on path change
@@ -589,10 +613,18 @@ export function useConsolidatedGeneralData(
       setDetectedWorktrees([])
       return
     }
+    let cancelled = false
     queryClient
       .fetchQuery(trpc.worktrees.detectWorktrees.queryOptions({ repoPath: projectPath }))
-      .then((wts) => setDetectedWorktrees(wts.filter((w) => !w.isMain)))
-      .catch(() => setDetectedWorktrees([]))
+      .then((wts) => {
+        if (!cancelled) setDetectedWorktrees(wts.filter((w) => !w.isMain))
+      })
+      .catch(() => {
+        if (!cancelled) setDetectedWorktrees([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [hasWorktree, projectPath, queryClient, trpc])
 
   const handleAction = useCallback(

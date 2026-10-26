@@ -17,10 +17,12 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
     [projects]
   )
 
-  // Query + apply the counts; no-op without any project path.
+  // Query + apply the counts; no query without any project path. Every call
+  // supersedes the request in flight — the no-path one too, so a late result for
+  // the previous projects can't overwrite the cleared counts.
   const fetchCounts = useCallback(() => {
-    if (pairs.length === 0) return
     const reqId = ++reqIdRef.current
+    if (pairs.length === 0) return
     trpcClient.aiConfig.getProjectsStaleSkillCounts
       .query(pairs)
       .then((rec) => {
@@ -33,10 +35,7 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
   }, [trpcClient, pairs])
 
   const refresh = useCallback(() => {
-    if (pairs.length === 0) {
-      setCounts(new Map())
-      return
-    }
+    if (pairs.length === 0) setCounts(new Map())
     fetchCounts()
   }, [pairs, fetchCounts])
 

@@ -768,6 +768,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \
+  packages/domains/task/src/client/ProcessesPanel.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTitleEditing.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTerminalSession.test.tsx \
   packages/domains/task/src/client/TaskProgressPopover.test.tsx \
