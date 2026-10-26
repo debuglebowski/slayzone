@@ -448,11 +448,11 @@ function App(): React.JSX.Element {
     })
   }, [startTour, trpcClient])
 
+  // Opening onboarding mounts it for good (latched while rendering, not in an effect).
+  if (onboardingOpen && !shouldMountOnboarding) setShouldMountOnboarding(true)
+
   useEffect(() => {
-    if (onboardingOpen) {
-      setShouldMountOnboarding(true)
-      return
-    }
+    if (onboardingOpen) return
 
     let cancelled = false
 
@@ -649,12 +649,22 @@ function App(): React.JSX.Element {
       useTabStore.getState().setActiveView('tabs')
   }, [showContextManager])
 
-  useEffect(() => {
+  // Re-sync the editable project name whenever the selection or the project list
+  // changes (incl. first render) — adjusted while rendering, not in an effect.
+  const [projectNameSyncedFor, setProjectNameSyncedFor] = useState<{
+    selectedProjectId: typeof selectedProjectId
+    projects: Project[]
+  } | null>(null)
+  if (
+    projectNameSyncedFor?.selectedProjectId !== selectedProjectId ||
+    projectNameSyncedFor.projects !== projects
+  ) {
+    setProjectNameSyncedFor({ selectedProjectId, projects })
     if (selectedProjectId) {
       const project = projects.find((p) => p.id === selectedProjectId)
       if (project) setProjectNameValue(project.name)
     }
-  }, [selectedProjectId, projects])
+  }
 
   // Computed values
   const projectTasks = selectedProjectId
@@ -771,14 +781,20 @@ function App(): React.JSX.Element {
     mode: 'auto' | 'manual' | null
   }>({ kind: 'attached', mode: null })
   const floatingStateQuery = useQuery(trpc.app.floatingAgent.getState.queryOptions())
-  useEffect(() => {
-    if (floatingStateQuery.data) {
+  const floatingStateData = floatingStateQuery.data
+  // Apply each new query result, incl. one already cached at mount (adjusted while
+  // rendering, not in an effect).
+  const [appliedFloatingStateData, setAppliedFloatingStateData] =
+    useState<typeof floatingStateData>(undefined)
+  if (floatingStateData !== appliedFloatingStateData) {
+    setAppliedFloatingStateData(floatingStateData)
+    if (floatingStateData) {
       setFloatingGlobalAgentPanelState({
-        kind: floatingStateQuery.data.kind as FloatingStateKind,
-        mode: floatingStateQuery.data.mode
+        kind: floatingStateData.kind as FloatingStateKind,
+        mode: floatingStateData.mode
       })
     }
-  }, [floatingStateQuery.data])
+  }
   useSubscription(
     trpc.app.floatingAgent.onState.subscriptionOptions(undefined, {
       onData: (s) =>
