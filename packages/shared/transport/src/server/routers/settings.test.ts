@@ -65,8 +65,16 @@ test('settings router: forDatabase returns one shared instance per db (no cache 
 // per-user key and shares the hub's keys; a request without one (above, and the
 // desktop app's hub) keeps the global table. The client sends nothing new.
 const principal = (userId: string) => ({ userId, role: 'user' as const, scopes: ['full' as const] })
-const callerA = settingsRouter.createCaller({ db: h.slayDb, dataRoot: '', principal: principal('user-a') })
-const callerB = settingsRouter.createCaller({ db: h.slayDb, dataRoot: '', principal: principal('user-b') })
+const callerA = settingsRouter.createCaller({
+  db: h.slayDb,
+  dataRoot: '',
+  principal: principal('user-a')
+})
+const callerB = settingsRouter.createCaller({
+  db: h.slayDb,
+  dataRoot: '',
+  principal: principal('user-b')
+})
 
 test('settings router: viewState is per user, and never falls back to the global row', async () => {
   await caller.set({ key: 'viewState', value: 'global-tabs' })

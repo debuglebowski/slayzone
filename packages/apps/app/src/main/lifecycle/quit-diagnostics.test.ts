@@ -62,4 +62,3 @@ test('a hung close cannot block the quit past the deadline', async () => {
   })
   expect(result).toBe('timed-out')
 })
-

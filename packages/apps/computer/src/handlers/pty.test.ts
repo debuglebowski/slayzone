@@ -159,7 +159,9 @@ describe('createPtyHandlers', () => {
     // Output produced BEFORE adoption must not be streamed: the hub has no
     // session to route it to, and adopt hands the whole buffer over instead.
     await pty.handlers['pty.write']({ sessionId: 'warm-1', data: 'preboot\n' })
-    await waitFor(() => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 1)
+    await waitFor(
+      () => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 1
+    )
     await new Promise((r) => setTimeout(r, 150))
     expect(dataParams(notifies)).toEqual([])
 
@@ -216,7 +218,9 @@ describe('createPtyHandlers', () => {
     })
     // The hub holds no session for a warm id, so a pre-adopt death must not
     // surface as pty.exit — it would tear down a session that never existed.
-    await waitFor(() => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 0)
+    await waitFor(
+      () => (pty.handlers['pty.warmList']({}) as { warms: unknown[] }).warms.length === 0
+    )
     expect(notifies.some((n) => n.method === 'pty.exit')).toBe(false)
 
     expect(() => pty.handlers['pty.warmAdopt']({ warmId: 'warm-dies', sessionId: 's' })).toThrow(

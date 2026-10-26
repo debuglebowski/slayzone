@@ -29,9 +29,11 @@ base.describe('quit flushes diagnostics', () => {
 
       const proc = launched.app.process()
       const exitCode = new Promise<number | null>((resolve) => proc.once('exit', resolve))
-      await launched.app.evaluate(({ app }) => app.quit()).catch(() => {
-        // The evaluate can lose its channel as the process goes down.
-      })
+      await launched.app
+        .evaluate(({ app }) => app.quit())
+        .catch(() => {
+          // The evaluate can lose its channel as the process goes down.
+        })
       const code = await Promise.race([
         exitCode,
         new Promise<'hung'>((r) => setTimeout(() => r('hung'), 30_000))
@@ -49,7 +51,9 @@ base.describe('quit flushes diagnostics', () => {
       const db = new DatabaseSync(dbPath, { readOnly: true })
       try {
         const rows = db
-          .prepare(`SELECT COUNT(*) AS c FROM diagnostics_events WHERE event = 'app.will-quit.complete'`)
+          .prepare(
+            `SELECT COUNT(*) AS c FROM diagnostics_events WHERE event = 'app.will-quit.complete'`
+          )
           .get() as unknown as { c: number }
         expect(rows.c).toBe(1)
       } finally {

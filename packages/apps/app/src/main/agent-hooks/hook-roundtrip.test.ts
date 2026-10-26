@@ -29,8 +29,9 @@ import { NOTIFY_SCRIPT_SOURCE } from './sources'
 // The agent tree is the REAL one (pure, no DB): it decides the state each hook
 // transitions to, which is exactly what this round-trip asserts.
 vi.mock('@slayzone/terminal/server', async () => {
-  const agentTree =
-    await vi.importActual<typeof import('@slayzone/terminal/server')>('@slayzone/terminal/server')
+  const agentTree = await vi.importActual<typeof import('@slayzone/terminal/server')>(
+    '@slayzone/terminal/server'
+  )
   return {
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,

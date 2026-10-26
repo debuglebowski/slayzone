@@ -83,7 +83,10 @@ async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer |
       notify: (method: string, params?: unknown) => {
         if (method === ComputerNotificationMethods.fsChange) {
           // Validate like the real gateway's demux does before re-emitting.
-          events.emit('fs.change', { computerId: COMPUTER_ID, ...fsChangeParamsSchema.parse(params) })
+          events.emit('fs.change', {
+            computerId: COMPUTER_ID,
+            ...fsChangeParamsSchema.parse(params)
+          })
         }
         return true
       }

@@ -61,9 +61,15 @@ async function loadComputer(): Promise<{
       notify: (method: string, params?: unknown) => {
         // Validate like the real gateway's demux does before re-emitting.
         if (method === ComputerNotificationMethods.procData) {
-          events.emit('proc.data', { computerId: COMPUTER_ID, ...procDataParamsSchema.parse(params) })
+          events.emit('proc.data', {
+            computerId: COMPUTER_ID,
+            ...procDataParamsSchema.parse(params)
+          })
         } else if (method === ComputerNotificationMethods.procExit) {
-          events.emit('proc.exit', { computerId: COMPUTER_ID, ...procExitParamsSchema.parse(params) })
+          events.emit('proc.exit', {
+            computerId: COMPUTER_ID,
+            ...procExitParamsSchema.parse(params)
+          })
         }
         return true
       }

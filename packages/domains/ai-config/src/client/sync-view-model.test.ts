@@ -168,7 +168,14 @@ test('groupProvidersByPath preserves registry order across groups', () => {
 
 test('groupProvidersByPath filters out unlinked not_synced entries', () => {
   const groups = groupProvidersByPath(
-    { claude: claudeStale, codex: { syncHealth: 'not_synced', syncReason: 'not_linked', path: '.agents/skills/foo/SKILL.md' } },
+    {
+      claude: claudeStale,
+      codex: {
+        syncHealth: 'not_synced',
+        syncReason: 'not_linked',
+        path: '.agents/skills/foo/SKILL.md'
+      }
+    },
     ROW_ORDER
   )
   expect(groups.length).toBe(1)

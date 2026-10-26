@@ -44,7 +44,12 @@ if (childDbPath) {
     diagnosticsDb: createSlayzoneDbAdapter(raw),
     blobDir: path.join(path.dirname(childDbPath), 'blobs')
   })
-  recordDiagnosticEvent({ level: 'info', source: 'diagnostics', event: 'test.exit', message: 'queued' })
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'diagnostics',
+    event: 'test.exit',
+    message: 'queued'
+  })
   // Nothing else: the process must now exit on its own, flushing first.
 } else {
   console.log('\nwrite-queue flush on exit')
@@ -76,7 +81,9 @@ if (childDbPath) {
     if (elapsed >= startupMs + 1500) {
       throw new Error(`child took ${elapsed}ms vs ~${startupMs}ms startup: the flush timer held it`)
     }
-    console.log(`  ✓ queued event does not hold the process open (${elapsed}ms, startup ~${startupMs}ms)`)
+    console.log(
+      `  ✓ queued event does not hold the process open (${elapsed}ms, startup ~${startupMs}ms)`
+    )
 
     const check = new Database(dbPath, { readonly: true })
     const rows = check.prepare(`SELECT message FROM diagnostics_events`).all() as {

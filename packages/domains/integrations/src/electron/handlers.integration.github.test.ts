@@ -127,8 +127,7 @@ try {
 console.log('\nGitHub: Connection management')
 if (handlerConnectionId) {
   try {
-    const connections = await ops.listConnections('github'
-    )
+    const connections = await ops.listConnections('github')
     expect(connections.length).toBeGreaterThan(0)
     const found = connections.find((c) => c.id === handlerConnectionId)
     expect(found).toBeTruthy()
@@ -138,8 +137,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    const usage = await ops.getConnectionUsage(handlerConnectionId
-    )
+    const usage = await ops.getConnectionUsage(handlerConnectionId)
     expect(typeof usage.mapped_project_count).toBe('number')
     ok('get-connection-usage returns usage')
   } catch (e) {
@@ -220,8 +218,7 @@ try {
 
 if (handlerConnectionId) {
   try {
-    const repos = await ops.listGithubRepositories(handlerConnectionId
-    )
+    const repos = await ops.listGithubRepositories(handlerConnectionId)
     expect(repos.length).toBeGreaterThan(0)
     ok('list-github-repositories handler returns repos')
   } catch (e) {
@@ -229,8 +226,7 @@ if (handlerConnectionId) {
   }
 
   try {
-    const projects = await ops.listGithubProjects(handlerConnectionId
-    )
+    const projects = await ops.listGithubProjects(handlerConnectionId)
     expect(Array.isArray(projects)).toBe(true)
     ok('list-github-projects handler returns array')
   } catch (e) {
@@ -344,12 +340,11 @@ if (createdIssueNumber) {
 
   try {
     const result = await ops.importGithubRepositoryIssues({
-        projectId,
-        connectionId,
-        repositoryFullName: GITHUB_TEST_REPO,
-        selectedIssueIds: [createdIssueId]
-      }
-    )
+      projectId,
+      connectionId,
+      repositoryFullName: GITHUB_TEST_REPO,
+      selectedIssueIds: [createdIssueId]
+    })
     expect(result.imported).toBeGreaterThan(0)
 
     const tasks = h.db.prepare('SELECT * FROM tasks WHERE project_id = ?').all(projectId)

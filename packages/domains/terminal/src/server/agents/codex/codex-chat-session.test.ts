@@ -66,7 +66,8 @@ function makeHarness(ctxOverrides: Partial<ChatDriverContext> = {}): Harness {
     ...ctxOverrides
   }
   const driver = codexChatBackend.createDriver()
-  if (!hasControlSeams(driver)) throw new Error('codex driver must implement applyControl + respondPermission')
+  if (!hasControlSeams(driver))
+    throw new Error('codex driver must implement applyControl + respondPermission')
   void driver.start(ctx)
   return { driver, sent, emitted }
 }
@@ -433,7 +434,10 @@ async function run(): Promise<void> {
   await test('applyControl set_model takes effect on the next turn', async () => {
     const h = makeHarness()
     await handshake(h)
-    const ack = await h.driver.applyControl({ subtype: 'set_model', model: 'gpt-6-codex' }, CONTROL_TIMEOUT_MS)
+    const ack = await h.driver.applyControl(
+      { subtype: 'set_model', model: 'gpt-6-codex' },
+      CONTROL_TIMEOUT_MS
+    )
     eq(ack, { ok: true }, 'set_model acks ok')
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
@@ -456,7 +460,10 @@ async function run(): Promise<void> {
   await test('applyControl set_permission_mode changes the next turn sandbox', async () => {
     const h = makeHarness({ chatMode: 'full-access' })
     await handshake(h)
-    await h.driver.applyControl({ subtype: 'set_permission_mode', mode: 'approval-required' }, CONTROL_TIMEOUT_MS)
+    await h.driver.applyControl(
+      { subtype: 'set_permission_mode', mode: 'approval-required' },
+      CONTROL_TIMEOUT_MS
+    )
     h.driver.sendUserMessage('go')
     const turn = h.sent.find((m) => m.method === 'turn/start')!
     const sp = (turn.params as Record<string, unknown>).sandboxPolicy as Record<string, unknown>
