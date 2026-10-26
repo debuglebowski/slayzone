@@ -3,10 +3,7 @@ import {
   useContext,
   useRef,
   useCallback,
-  useState,
   useMemo,
-  type Dispatch,
-  type SetStateAction,
   type MutableRefObject,
   type ReactNode
 } from 'react'
@@ -59,8 +56,6 @@ interface PtyContextValue {
   clearPendingPrompt: (sessionId: string) => void
   resetTaskState: (sessionId: string) => void
   cleanupTask: (sessionId: string) => void // Free all memory for a task
-  // Global prompt tracking for badge
-  getPendingPromptTaskIds: () => string[]
   // Quick run prompt
   setQuickRunPrompt: (sessionId: string, prompt: string) => void
   getQuickRunPrompt: (sessionId: string) => string | undefined
@@ -80,7 +75,6 @@ interface PtyStreamSinks {
   sessionDetectedSubsRef: MutableRefObject<Map<string, Set<SessionDetectedCallback>>>
   devServerSubsRef: MutableRefObject<Map<string, Set<DevServerCallback>>>
   titleSubsRef: MutableRefObject<Map<string, Set<TitleChangeCallback>>>
-  setPendingPromptTaskIds: Dispatch<SetStateAction<Set<string>>>
 }
 
 /**
@@ -102,8 +96,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
     promptSubsRef,
     sessionDetectedSubsRef,
     devServerSubsRef,
-    titleSubsRef,
-    setPendingPromptTaskIds
+    titleSubsRef
   } = sinks
 
   // Reactive terminal-state store wiring (state-change / exit / hibernated subs +
@@ -207,12 +200,6 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
       ) {
         const state = statesRef.current.get(sessionId)
         if (state) state.pendingPrompt = undefined
-        setPendingPromptTaskIds((prev) => {
-          if (!prev.has(sessionId)) return prev
-          const next = new Set(prev)
-          next.delete(sessionId)
-          return next
-        })
       }
     }
   )
@@ -226,9 +213,6 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
       if (!state) return // Ignore prompts for unknown tasks
 
       state.pendingPrompt = prompt as PromptInfo
-
-      // Update global tracking
-      setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
 
       const subs = promptSubsRef.current.get(sessionId)
       if (subs) {
@@ -289,9 +273,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
   const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
 
-  // Track task IDs with pending prompts for global badge
-  const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
-
   // Multi-hub: the PTY event streams must run per connected hub (a remote task's
   // pty lives on its hub, so onData/onExit only arrive from that hub's socket).
   // Mount one PtyEventStreams per hub inside its HubScope, all writing the SHARED
@@ -305,8 +286,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     promptSubsRef,
     sessionDetectedSubsRef,
     devServerSubsRef,
-    titleSubsRef,
-    setPendingPromptTaskIds
+    titleSubsRef
   }
   const hubStreams = fed ? (
     fed.hubs.map((h) => (
@@ -447,31 +427,14 @@ export function PtyProvider({ children }: { children: ReactNode }) {
 
   const clearPendingPrompt = useCallback((sessionId: string): void => {
     const state = statesRef.current.get(sessionId)
-    if (state) {
-      state.pendingPrompt = undefined
-      setPendingPromptTaskIds((prev) => {
-        const next = new Set(prev)
-        next.delete(sessionId)
-        return next
-      })
-    }
+    if (state) state.pendingPrompt = undefined
   }, [])
-
-  // Stable identity (keeps the context value stable); reads the latest committed set.
-  const getPendingPromptTaskIds = useStableCallback((): string[] => {
-    return Array.from(pendingPromptTaskIds)
-  })
 
   // Full reset for mode switches - removes all state so fresh state is created
   // Sequence numbers handle ordering - no need for ignore mechanism
   const resetTaskState = useCallback((sessionId: string): void => {
     statesRef.current.delete(sessionId)
     useTerminalStateStore.getState().clearSession(sessionId)
-    setPendingPromptTaskIds((prev) => {
-      const next = new Set(prev)
-      next.delete(sessionId)
-      return next
-    })
   }, [])
 
   // Clean up all memory for a task (call when PTY exits or task is deleted)
@@ -484,11 +447,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     sessionDetectedSubsRef.current.delete(sessionId)
     devServerSubsRef.current.delete(sessionId)
     titleSubsRef.current.delete(sessionId)
-    setPendingPromptTaskIds((prev) => {
-      const next = new Set(prev)
-      next.delete(sessionId)
-      return next
-    })
   }, [])
 
   // Quick run prompt - for auto-sending prompt when task opens
@@ -528,7 +486,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       clearPendingPrompt,
       resetTaskState,
       cleanupTask,
-      getPendingPromptTaskIds,
       setQuickRunPrompt,
       getQuickRunPrompt,
       clearQuickRunPrompt
@@ -549,7 +506,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       clearPendingPrompt,
       resetTaskState,
       cleanupTask,
-      getPendingPromptTaskIds,
       setQuickRunPrompt,
       getQuickRunPrompt,
       clearQuickRunPrompt
@@ -570,13 +526,4 @@ export function usePty(): PtyContextValue {
     throw new Error('usePty must be used within PtyProvider')
   }
   return ctx
-}
-
-/**
- * Hook for tracking pending prompts globally.
- * Returns array of task IDs with pending prompts.
- */
-export function usePendingPrompts(): string[] {
-  const ctx = usePty()
-  return ctx.getPendingPromptTaskIds()
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Pins PtyProvider's event-stream fan-out: each pty.* subscription routes its
 // payload to the per-session subscribers, keeps the per-session metadata, and
-// tracks pending prompts for getPendingPromptTaskIds.
+// tracks each session's pending prompt for getPendingPrompt.
 import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
@@ -115,17 +115,16 @@ describe('PtyProvider event streams', () => {
     await emit('onPrompt', { sessionId: 's1', prompt })
     expect(promptCb).toHaveBeenCalledWith(prompt)
     expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
-    expect(ctx().getPendingPromptTaskIds()).toEqual(['s1'])
 
     await emit('onPrompt', { sessionId: 'nobody', prompt })
-    expect(ctx().getPendingPromptTaskIds()).toEqual(['s1'])
+    expect(ctx().getPendingPrompt('nobody')).toBeUndefined()
+    expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
 
     await emit('onStateChange', { sessionId: 's1', newState: 'idle', oldState: 'running' })
-    expect(ctx().getPendingPromptTaskIds()).toEqual(['s1'])
+    expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
 
     await emit('onStateChange', { sessionId: 's1', newState: 'dead', oldState: 'running' })
     expect(ctx().getPendingPrompt('s1')).toBeUndefined()
-    expect(ctx().getPendingPromptTaskIds()).toEqual([])
   })
 
   it('fires exit subscribers, captures crash output, then frees the session', async () => {

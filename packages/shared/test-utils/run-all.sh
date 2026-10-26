@@ -760,7 +760,6 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/client/ProjectSettingsDialog.test.tsx \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
   packages/domains/projects/src/client/useIntegrationsTab.test.tsx \
-  packages/domains/projects/src/client/useProviderData.test.tsx \
   packages/domains/task-artifacts/src/client/useArtifacts.test.tsx \
   packages/domains/task-browser/src/client/useBrowserPickElement.test.tsx \
   packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.test.tsx \

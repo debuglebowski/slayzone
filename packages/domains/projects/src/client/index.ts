@@ -5,7 +5,6 @@ export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'
 export { useDetectedRepos } from './useDetectedRepos'
-export { useProviderData } from './useProviderData'
 export { PROVIDER_CONFIG, type ProviderUiConfig } from './project-settings-shared'
 export {
   isRateLimited,
