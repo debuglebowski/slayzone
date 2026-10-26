@@ -48,11 +48,11 @@ export default defineConfig(
     rules: {
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/refs': 'warn',
-      // Cleared to zero → error, so it can't regrow under the shared warning cap.
+      // Cleared to zero → error, so they can't regrow under the shared warning cap.
       'react-hooks/immutability': 'error',
       'react-hooks/purity': 'error',
-      'react-hooks/preserve-manual-memoization': 'warn',
-      'react-hooks/static-components': 'warn'
+      'react-hooks/preserve-manual-memoization': 'error',
+      'react-hooks/static-components': 'error'
     }
   },
   // Ban raw setInterval in renderer/client code — these timers fire while the

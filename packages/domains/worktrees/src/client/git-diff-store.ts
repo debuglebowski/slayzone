@@ -25,7 +25,7 @@
  *   unsubscribe state inside a single React primitive — no effect-ordering
  *   races with getSnapshot returning stale EMPTY_STATE.
  */
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { GitDiffSnapshot } from '../shared/types'
@@ -550,38 +550,41 @@ export function useGitDiffSnapshot(
 
   // Subscribe + getSnapshot must be stable across renders at the same key so
   // useSyncExternalStore does not tear down / recreate every render. We
-  // memoize on `key` + every param that feeds into subscribeEntry.
-  const subscribe = useMemo(() => {
-    if (!active || !targetPath)
-      return (_listener: () => void) => () => {
-        // Nothing was subscribed (panel hidden or no target), so there is
-        // nothing for useSyncExternalStore to tear down.
+  // memoize on `key` + every param that feeds into subscribeEntry. One closure
+  // each, condition inside: a memo returning a different function per branch
+  // is one the React Compiler cannot preserve.
+  const subscribe = useCallback(
+    (listener: () => void): (() => void) => {
+      if (!active || !targetPath)
+        return () => {
+          // Nothing was subscribed (panel hidden or no target), so there is
+          // nothing for useSyncExternalStore to tear down.
+        }
+      const args: SubscribeArgs = {
+        targetPath,
+        ignoreWhitespace: params.ignoreWhitespace,
+        fromSha: params.fromSha,
+        toSha: params.toSha,
+        contextLines,
+        pollIntervalMs: params.pollIntervalMs
       }
-    const args: SubscribeArgs = {
+      return subscribeEntry(args, listener)
+    },
+    [
+      active,
       targetPath,
-      ignoreWhitespace: params.ignoreWhitespace,
-      fromSha: params.fromSha,
-      toSha: params.toSha,
+      params.ignoreWhitespace,
+      params.fromSha,
+      params.toSha,
       contextLines,
-      pollIntervalMs: params.pollIntervalMs
-    }
-    return (listener: () => void) => subscribeEntry(args, listener)
-  }, [
-    active,
-    targetPath,
-    params.ignoreWhitespace,
-    params.fromSha,
-    params.toSha,
-    contextLines,
-    params.pollIntervalMs
-  ])
+      params.pollIntervalMs
+    ]
+  )
 
-  const getSnapshot = useMemo(() => {
-    if (!key) return () => EMPTY_STATE
-    return () => {
-      const e = entries.get(key)
-      return e ? e.state : EMPTY_STATE
-    }
+  const getSnapshot = useCallback((): GitDiffState => {
+    if (!key) return EMPTY_STATE
+    const e = entries.get(key)
+    return e ? e.state : EMPTY_STATE
   }, [key])
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

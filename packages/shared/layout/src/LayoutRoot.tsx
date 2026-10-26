@@ -11,7 +11,6 @@ import { findNode } from './tree-ops'
 import { getLayoutStore, useLayoutStore, useLayoutTree } from './store'
 import type { NativeSurfaceHost } from './NativeSurfaceHost'
 import type { PanelRegistry } from './registry'
-import { resolvePanel } from './registry'
 import { SplitDivider } from './SplitDivider'
 import { OverlayLayer } from './OverlayLayer'
 import { NativeAnchor } from './NativeAnchor'
@@ -213,7 +212,9 @@ function TileBody(props: {
   active: boolean
 }) {
   const { tile, registry, host, active } = props
-  const Comp = resolvePanel(registry, tile.type)
+  // Read straight off the registry prop (not via resolvePanel()) so the React
+  // Compiler can see Comp is a stable component, not one created during render.
+  const Comp = registry[tile.type] ?? null
   if (tile.renderKind === 'native') {
     const anchor = (
       <NativeAnchor
