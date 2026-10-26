@@ -28,7 +28,8 @@ import {
   ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubTrigger,
-  ContextMenuSubContent
+  ContextMenuSubContent,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import {
@@ -272,7 +273,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         <ContextMenuSeparator />
                         <ContextMenuItem onSelect={() => void handleArtifactPaste(folder.id)}>
                           <ClipboardPaste className="size-3 mr-2" /> Paste
-                          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+                          <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
                         </ContextMenuItem>
                       </>
                     )}
@@ -374,20 +375,20 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         onSelect={() => handleArtifactCut(getEffectiveArtifactIds(artifact.id))}
                       >
                         <Scissors className="size-3 mr-2" /> Cut
-                        <ContextMenuShortcut>⌘X</ContextMenuShortcut>
+                        <ContextMenuShortcut>{formatKeysForDisplay('mod+x')}</ContextMenuShortcut>
                       </ContextMenuItem>
                       <ContextMenuItem
                         onSelect={() => handleArtifactCopy(getEffectiveArtifactIds(artifact.id))}
                       >
                         <Copy className="size-3 mr-2" /> Copy
-                        <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+                        <ContextMenuShortcut>{formatKeysForDisplay('mod+c')}</ContextMenuShortcut>
                       </ContextMenuItem>
                       {(clipboard || osHasFiles) && (
                         <ContextMenuItem
                           onSelect={() => void handleArtifactPaste(artifact.folder_id)}
                         >
                           <ClipboardPaste className="size-3 mr-2" /> Paste
-                          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+                          <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem
@@ -396,7 +397,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         }
                       >
                         <CopyPlus className="size-3 mr-2" /> Duplicate
-                        <ContextMenuShortcut>⌘D</ContextMenuShortcut>
+                        <ContextMenuShortcut>{formatKeysForDisplay('mod+d')}</ContextMenuShortcut>
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
@@ -543,7 +544,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void handleArtifactPaste(null)}>
               <ClipboardPaste className="size-3 mr-2" /> Paste
-              <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+              <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
             </ContextMenuItem>
           </>
         )}

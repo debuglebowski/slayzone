@@ -66,7 +66,8 @@ import {
   DevServerToast,
   Collapsible,
   CollapsibleTrigger,
-  CollapsibleContent
+  CollapsibleContent,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import {
   DropdownMenu,
@@ -2615,7 +2616,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       id: wp.id,
                       icon: Globe,
                       label: wp.name,
-                      shortcut: wp.shortcut ? `⌘${wp.shortcut.toUpperCase()}` : undefined
+                      shortcut: wp.shortcut
+                        ? (formatKeysForDisplay(`mod+${wp.shortcut}`) ?? undefined)
+                        : undefined
                     }
                   }
                   const ordered = orderedTaskIds

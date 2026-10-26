@@ -1,4 +1,4 @@
-export { detectPlatform, type Platform } from './platform'
+export { detectPlatform, isPrimaryModifier, type Platform } from './platform'
 export { type ShortcutScope, SCOPE_PRIORITY } from './scope'
 export {
   shortcutDefinitions,

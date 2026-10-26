@@ -811,6 +811,7 @@ run_vitest_files "vitest (jsdom client suites)" \
 # Swept in 2026-10-22: vitest suites (jsdom / vi.mock) that no runner ran.
 run_vitest_files "vitest (swept-in suites)" \
   packages/apps/app/src/main/browser-link-context-menu.test.ts \
+  packages/apps/app/src/main/browser-view-keys.test.ts \
   packages/apps/app/src/main/floating-global-agent-panel/state-machine.test.ts \
   packages/apps/app/src/preload/browser-link-task-capture.test.ts \
   packages/apps/app/src/renderer/src/components/ErrorBoundary.test.tsx \

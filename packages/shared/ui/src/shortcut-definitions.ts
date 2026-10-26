@@ -8,6 +8,7 @@ export {
   formatKeysVerbose,
   withShortcut,
   detectPlatform,
+  isPrimaryModifier,
   SCOPE_PRIORITY,
   registry,
   scopeTracker,

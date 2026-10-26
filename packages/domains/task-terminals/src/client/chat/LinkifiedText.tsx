@@ -1,7 +1,10 @@
 import React from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { findLinksInString } from '@slayzone/terminal/shared'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+import { formatKeysForDisplay, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+
+const modKey = formatKeysForDisplay('mod')
+const modShiftKey = formatKeysForDisplay('mod+shift')
 
 interface LinkifiedTextProps {
   text: string
@@ -68,7 +71,9 @@ export function LinkifiedText({ text, onOpenUrl, onOpenFile }: LinkifiedTextProp
           </a>
         </TooltipTrigger>
         <TooltipContent side="top" className="font-mono text-[11px]">
-          {isUrl ? '⌘+Click open · ⌘⇧+Click external' : `⌘+Click open: ${label}`}
+          {isUrl
+            ? `${modKey}+Click open · ${modShiftKey}+Click external`
+            : `${modKey}+Click open: ${label}`}
         </TooltipContent>
       </Tooltip>
     )

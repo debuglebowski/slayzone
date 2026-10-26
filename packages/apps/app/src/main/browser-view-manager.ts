@@ -45,22 +45,12 @@ import {
   normalizeBrowserLinkContextMenuInput,
   type BrowserLinkContextMenuAction
 } from './browser-link-context-menu'
+import { classifyBrowserViewKey } from './browser-view-keys'
 import {
   BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
   BROWSER_CREATE_TASK_FROM_LINK_INSTALLED_KEY,
   buildBrowserCreateTaskFromLinkCaptureScript
 } from '../shared/browser-link-task-capture-script'
-
-/** Cmd+key combos that always pass through to the webpage (clipboard, undo, scroll). */
-const BROWSER_DEFAULT_PASSTHROUGH = new Set([
-  'c',
-  'v',
-  'x',
-  'a',
-  'z', // clipboard + undo
-  'arrowup',
-  'arrowdown' // scroll to top/bottom
-])
 
 // Ensure the modified-link capture listener exists on every document swap.
 const MODIFIED_LINK_CAPTURE_SCRIPT = buildBrowserCreateTaskFromLinkCaptureScript(
@@ -1390,43 +1380,23 @@ export class BrowserViewManager {
         return
       }
 
-      if (!(input.control || input.meta)) return
-
-      const key = input.key.toLowerCase()
-
-      // Let native edit shortcuts (copy, paste, cut, select-all, undo, redo)
-      // pass through to the webpage so clipboard/edit operations work.
-      if (BROWSER_DEFAULT_PASSTHROUGH.has(key) && input.meta && !input.alt) return
+      // Native edit shortcuts (copy, paste, cut, select-all, undo, redo) pass
+      // through to the webpage so clipboard/edit operations work.
+      const action = classifyBrowserViewKey(input)
+      if (action.kind === 'ignore' || action.kind === 'passthrough') return
 
       const win = this.mainWindow
       if (!win || win.isDestroyed()) return
 
       e.preventDefault()
 
-      // Cmd+R: reload THIS browser view directly
-      if (key === 'r' && input.meta && !input.shift && !input.alt) {
+      // Mod+R reloads THIS browser view; Mod+Shift+R the app (renderer).
+      if (action.kind === 'reload-view') {
         wc.reload()
         return
       }
-      // Cmd+Shift+R: reload the app (renderer)
-      if (key === 'r' && input.meta && input.shift && !input.alt) {
-        menuEvents.emit('reload-app')
-        return
-      }
-      if (key === ',' && input.meta && input.shift) {
-        menuEvents.emit('open-project-settings')
-        return
-      }
-      if (key === ',' && input.meta) {
-        menuEvents.emit('open-settings')
-        return
-      }
-      if (key === 's' && input.meta && input.shift) {
-        menuEvents.emit('screenshot-trigger')
-        return
-      }
-      if (input.key === '§' && input.meta) {
-        menuEvents.emit('go-home')
+      if (action.kind === 'menu') {
+        menuEvents.emit(action.event)
         return
       }
 

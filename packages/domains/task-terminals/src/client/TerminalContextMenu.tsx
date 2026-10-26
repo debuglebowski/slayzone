@@ -12,7 +12,9 @@ import {
   useAppearance,
   appearanceDefaults,
   safeClipboardWriteText,
-  safeClipboardReadText
+  safeClipboardReadText,
+  detectPlatform,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import {
   Copy,
@@ -32,6 +34,13 @@ import {
   Power
 } from 'lucide-react'
 import type { TerminalHandle } from '@slayzone/terminal/client/Terminal'
+
+// Copy/Paste aren't registry shortcuts: macOS uses Cmd+C/V natively via xterm, while
+// Windows/Linux use Ctrl+Shift+C/V (Terminal's capture-phase keydown listener) since
+// plain Ctrl+C is SIGINT in a terminal.
+const isMac = detectPlatform() === 'mac'
+const copyShortcut = formatKeysForDisplay(isMac ? 'mod+c' : 'ctrl+shift+c')
+const pasteShortcut = formatKeysForDisplay(isMac ? 'mod+v' : 'ctrl+shift+v')
 
 interface TerminalContextMenuProps {
   children: React.ReactNode
@@ -133,12 +142,12 @@ export function TerminalContextMenu({
         <ContextMenuItem disabled={!hasSelection} onSelect={handleCopy}>
           <Copy className="size-4" />
           Copy
-          <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+          <ContextMenuShortcut>{copyShortcut}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onSelect={handlePaste}>
           <ClipboardPaste className="size-4" />
           Paste
-          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+          <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>
         </ContextMenuItem>
 
         <ContextMenuSeparator />

@@ -4,6 +4,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { getTrpcClient } from '@slayzone/transport/client'
+import { formatKeysForDisplay, isPrimaryModifier } from '@slayzone/ui'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { ensureOptionKeyTracking } from './option-as-meta'
 
@@ -91,8 +92,9 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     if (tooltipEl) tooltipEl.style.display = 'none'
   }
 
-  const urlHint = '— ⌘+Click open · ⌘⇧+Click external'
-  const fileHint = '— ⌘+Click open'
+  const modKey = formatKeysForDisplay('mod')
+  const urlHint = `— ${modKey}+Click open · ${formatKeysForDisplay('mod+shift')}+Click external`
+  const fileHint = `— ${modKey}+Click open`
 
   // xterm measures the character cell from whatever font is loaded when
   // open() runs. If the terminal webfont has not loaded yet (cold start)
@@ -128,11 +130,11 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     linkHandler: {
       activate: (event: MouseEvent, uri: string) => {
         const onOpenUrl = getOnOpenUrl()
-        if (event.metaKey && event.shiftKey) {
+        if (isPrimaryModifier(event) && event.shiftKey) {
           void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
-        } else if (event.metaKey && onOpenUrl) {
+        } else if (isPrimaryModifier(event) && onOpenUrl) {
           onOpenUrl(uri)
-        } else if (event.metaKey) {
+        } else if (isPrimaryModifier(event)) {
           void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
         }
       },
@@ -161,11 +163,11 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     terminal,
     (event, uri) => {
       const onOpenUrl = getOnOpenUrl()
-      if (event.metaKey && event.shiftKey) {
+      if (isPrimaryModifier(event) && event.shiftKey) {
         void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
-      } else if (event.metaKey && onOpenUrl) {
+      } else if (isPrimaryModifier(event) && onOpenUrl) {
         onOpenUrl(uri)
-      } else if (event.metaKey) {
+      } else if (isPrimaryModifier(event)) {
         void getTrpcClient().app.shell.openExternal.mutate({ url: uri })
       }
     },
@@ -180,7 +182,7 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     new FileLinkProvider(
       terminal,
       (event, filePath, line, col) => {
-        if (!event.metaKey) return
+        if (!isPrimaryModifier(event)) return
         // Resolve relative paths against terminal cwd
         const resolved = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
         const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd

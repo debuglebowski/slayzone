@@ -11,7 +11,13 @@ import {
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
-import { cn, useShortcutAction, useShortcutDisplay, useStableCallback } from '@slayzone/ui'
+import {
+  cn,
+  isPrimaryModifier,
+  useShortcutAction,
+  useShortcutDisplay,
+  useStableCallback
+} from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import { type BrowserTabPlaceholderHandle, type BrowserTabView } from './BrowserTabPlaceholder'
 import type { BrowserViewState } from './useBrowserView'
@@ -407,11 +413,11 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isFocused || !captureShortcuts) return
-      if (e.metaKey && e.key === 't') {
+      if (isPrimaryModifier(e) && e.key === 't') {
         e.preventDefault()
         createNewTab()
       }
-      if (e.metaKey && e.key === 'w') {
+      if (isPrimaryModifier(e) && e.key === 'w') {
         e.preventDefault()
         if (tabs.activeTabId) closeTab(tabs.activeTabId)
       }

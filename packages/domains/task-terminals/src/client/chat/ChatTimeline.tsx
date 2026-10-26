@@ -14,7 +14,9 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
-  type AppearanceSettings
+  type AppearanceSettings,
+  formatKeysForDisplay,
+  withShortcut
 } from '@slayzone/ui'
 import {
   BackgroundJobsBanner,
@@ -201,7 +203,9 @@ export function ChatTimeline({
             <ContextMenuItem onSelect={copySessionId}>Copy session id</ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={search.requestOpen}>Find in chat… (⌘F)</ContextMenuItem>
+          <ContextMenuItem onSelect={search.requestOpen}>
+            {withShortcut('Find in chat…', formatKeysForDisplay('mod+f'))}
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => setCollapseSignal((n) => n + 1)}>
             Collapse all expanded blocks
           </ContextMenuItem>

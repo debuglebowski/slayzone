@@ -35,7 +35,8 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuShortcut,
-  withShortcut
+  withShortcut,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import type { BrowserTab } from '../shared'
 import type { TaskUrlEntry } from './BrowserPanel.types'
@@ -316,7 +317,7 @@ export function BrowserToolbar({
                 }}
               >
                 Reload
-                <ContextMenuShortcut>⌘R</ContextMenuShortcut>
+                <ContextMenuShortcut>{formatKeysForDisplay('mod+r')}</ContextMenuShortcut>
               </ContextMenuItem>
               <ContextMenuItem
                 onClick={() => {
@@ -325,7 +326,7 @@ export function BrowserToolbar({
                 }}
               >
                 Hard Reload
-                <ContextMenuShortcut>⇧⌘R</ContextMenuShortcut>
+                <ContextMenuShortcut>{formatKeysForDisplay('shift+mod+r')}</ContextMenuShortcut>
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>

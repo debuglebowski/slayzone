@@ -15,7 +15,8 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
-  ContextMenuTrigger
+  ContextMenuTrigger,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { compactChildren } from './EditorFileTree.utils'
@@ -336,7 +337,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
               <ContextMenuSeparator />
               <ContextMenuItem onSelect={() => handlePaste('')}>
                 <ClipboardPaste className="size-3 mr-2" /> Paste
-                <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+                <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
               </ContextMenuItem>
             </>
           )}

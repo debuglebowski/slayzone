@@ -9,6 +9,7 @@ import {
   shortcutDefinitions,
   MENU_SHORTCUT_DEFAULTS,
   detectPlatform,
+  isPrimaryModifier,
   getBlockedWebPanelKeys,
   type ElectronInput
 } from './index'
@@ -185,6 +186,11 @@ describe('formatKeysForDisplay', () => {
     expect(formatKeysForDisplay('mod+n', 'other')).toBe('CtrlN')
   })
 
+  it('shows enter as ↩ on macOS, spelled out elsewhere', () => {
+    expect(formatKeysForDisplay('shift+mod+enter', 'mac')).toBe('⇧⌘↩')
+    expect(formatKeysForDisplay('mod+enter', 'other')).toBe('CtrlEnter')
+  })
+
   it('shows arrow and page keys as symbols', () => {
     expect(formatKeysForDisplay('mod+alt+arrowright', 'mac')).toBe('⌘⌥→')
     expect(formatKeysForDisplay('mod+alt+arrowleft', 'mac')).toBe('⌘⌥←')
@@ -290,6 +296,33 @@ describe('detectPlatform', () => {
   it('returns mac or other', () => {
     const result = detectPlatform()
     expect(['mac', 'other']).toContain(result)
+  })
+})
+
+describe('isPrimaryModifier', () => {
+  const none = { metaKey: false, ctrlKey: false }
+  const meta = { metaKey: true, ctrlKey: false }
+  const ctrl = { metaKey: false, ctrlKey: true }
+  const both = { metaKey: true, ctrlKey: true }
+
+  it('is Cmd on macOS — Ctrl alone is not primary', () => {
+    expect(isPrimaryModifier(meta, 'mac')).toBe(true)
+    expect(isPrimaryModifier(ctrl, 'mac')).toBe(false)
+    expect(isPrimaryModifier(none, 'mac')).toBe(false)
+  })
+
+  it('is Ctrl off macOS — Win/Super (metaKey) alone is not primary', () => {
+    expect(isPrimaryModifier(ctrl, 'other')).toBe(true)
+    expect(isPrimaryModifier(meta, 'other')).toBe(false)
+    expect(isPrimaryModifier(none, 'other')).toBe(false)
+  })
+
+  it('off macOS, rejects Ctrl while Win/Super is also held (as matchesShortcut does)', () => {
+    expect(isPrimaryModifier(both, 'other')).toBe(false)
+  })
+
+  it('defaults to the detected platform', () => {
+    expect(isPrimaryModifier(meta)).toBe(isPrimaryModifier(meta, detectPlatform()))
   })
 })
 

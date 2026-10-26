@@ -22,7 +22,8 @@ import {
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuTrigger,
-  Input
+  Input,
+  formatKeysForDisplay
 } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { FileIcon } from './FileIcon'
@@ -164,16 +165,16 @@ export function renderContextMenuItems(ctx: FileTreeRenderCtx, entry: DirEntry, 
       )}
       <ContextMenuItem onSelect={() => handleCut(effectivePaths)}>
         <Scissors className="size-3 mr-2" /> Cut
-        <ContextMenuShortcut>⌘X</ContextMenuShortcut>
+        <ContextMenuShortcut>{formatKeysForDisplay('mod+x')}</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={() => handleCopy(effectivePaths)}>
         <Copy className="size-3 mr-2" /> Copy
-        <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+        <ContextMenuShortcut>{formatKeysForDisplay('mod+c')}</ContextMenuShortcut>
       </ContextMenuItem>
       {(clipboard || osHasFiles) && (
         <ContextMenuItem onSelect={() => handlePaste(isFolder ? entry.path : parentDir)}>
           <ClipboardPaste className="size-3 mr-2" /> Paste
-          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+          <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
         </ContextMenuItem>
       )}
       <ContextMenuItem
