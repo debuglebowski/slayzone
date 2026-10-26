@@ -145,25 +145,41 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
   const loading = open && treeQuery.isFetching
   const treeLoaded = open && (treeQuery.isSuccess || treeQuery.isError)
 
-  // Reset transient selection/expansion + apply preset list on open.
-  useEffect(() => {
-    if (!open) return
-    setExpanded(new Set())
-  }, [open])
+  // Reset transient selection/expansion + apply preset list on open. Both run while
+  // rendering whenever their inputs change (null = not yet synced, so the first
+  // render syncs too), so no commit shows the previous open's state.
+  const [expandedResetForOpen, setExpandedResetForOpen] = useState<boolean | null>(null)
+  if (expandedResetForOpen !== open) {
+    setExpandedResetForOpen(open)
+    if (open) setExpanded(new Set())
+  }
 
-  useEffect(() => {
-    if (!open || !presetsQuery.isFetched) return
-    let list: WorktreeCopyPreset[]
-    try {
-      const raw = presetsQuery.data
-      const parsed = raw ? (JSON.parse(raw) as WorktreeCopyPreset[]) : null
-      list = parsed && parsed.length > 0 ? parsed : DEFAULT_COPY_PRESETS
-    } catch {
-      list = DEFAULT_COPY_PRESETS
+  const presetsInput = {
+    open,
+    isFetched: presetsQuery.isFetched,
+    data: presetsQuery.data
+  }
+  const [presetsSyncedFor, setPresetsSyncedFor] = useState<typeof presetsInput | null>(null)
+  if (
+    presetsSyncedFor === null ||
+    presetsSyncedFor.open !== presetsInput.open ||
+    presetsSyncedFor.isFetched !== presetsInput.isFetched ||
+    presetsSyncedFor.data !== presetsInput.data
+  ) {
+    setPresetsSyncedFor(presetsInput)
+    if (open && presetsQuery.isFetched) {
+      let list: WorktreeCopyPreset[]
+      try {
+        const raw = presetsQuery.data
+        const parsed = raw ? (JSON.parse(raw) as WorktreeCopyPreset[]) : null
+        list = parsed && parsed.length > 0 ? parsed : DEFAULT_COPY_PRESETS
+      } catch {
+        list = DEFAULT_COPY_PRESETS
+      }
+      setPresets(list)
+      setSelectedPresetId(list[0].id)
     }
-    setPresets(list)
-    setSelectedPresetId(list[0].id)
-  }, [open, presetsQuery.isFetched, presetsQuery.data])
+  }
 
   useEffect(() => {
     if (!treeLoaded || presets.length === 0) return

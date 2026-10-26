@@ -87,11 +87,7 @@
   "packages/domains/task/src/client/WebPanelView.tsx": ["WebPanelView"],
   "packages/domains/tasks/src/client/KanbanListView.tsx": ["KanbanListView"],
   "packages/domains/telemetry/src/client/TelemetryProvider.tsx": ["TelemetryProvider"],
-  "packages/domains/terminal/src/client/PtyContext.tsx": ["PtyEventStreams", "PtyProvider"],
-  "packages/domains/terminal/src/client/TerminalStatusPopover.tsx": [
-    "TerminalStatusButton",
-    "TerminalStatusDialog"
-  ],
+  "packages/domains/terminal/src/client/PtyContext.tsx": ["PtyEventStreams"],
   "packages/domains/terminal/src/client/useTerminalModes.ts": ["useTerminalModes"],
   "packages/domains/usage-analytics/src/client/useUsageAnalytics.ts": ["useUsageAnalytics"],
   "packages/domains/worktrees/src/client/CommitGraph.tsx": ["CommitGraphImpl"],
@@ -102,7 +98,6 @@
   "packages/domains/worktrees/src/client/DiffView.tsx": ["DiffView"],
   "packages/domains/worktrees/src/client/DiffView.virtual.tsx": ["VirtualRowList"],
   "packages/domains/worktrees/src/client/GeneralTabContent.tsx": ["GeneralTabContent"],
-  "packages/domains/worktrees/src/client/git-diff-store.ts": ["useGitDiffSnapshot"],
   "packages/domains/worktrees/src/client/git-panel-toolbar.tsx": ["GitPanelToolbar"],
   "packages/domains/worktrees/src/client/GitDiffPanel.tsx": ["GitDiffPanel"],
   "packages/domains/worktrees/src/client/pr-dialogs.tsx": ["CreatePrDialog"],
@@ -116,7 +111,6 @@
   ],
   "packages/domains/worktrees/src/client/useGitDiffActions.ts": ["useGitDiffActions"],
   "packages/domains/worktrees/src/client/useGitDiffCommit.ts": ["useGitDiffCommit"],
-  "packages/domains/worktrees/src/client/useGitDiffData.ts": ["useGitDiffData"],
   "packages/domains/worktrees/src/client/useGitDiffFlow.ts": ["useGitDiffFlow"],
   "packages/domains/worktrees/src/client/useGitMergeActions.ts": ["useGitMergeActions"],
   "packages/domains/worktrees/src/client/useLinkedPrView.ts": ["useLinkedPrView"],

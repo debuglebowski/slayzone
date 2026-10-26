@@ -40,19 +40,19 @@ export function useGitDiffSelection({
   // pane needs SOMETHING to render. Auto-pick the first entry on mount, after a
   // selection vanishes (file committed/discarded), and any time the list grows
   // from empty. Continuous-flow doesn't depend on selection so it stays opt-in.
-  useEffect(() => {
-    if (diffContinuousFlow) return
+  // Checked while rendering, so no commit shows a missing/vanished selection.
+  if (!diffContinuousFlow) {
     if (flatEntries.length === 0) {
       if (selectedFile) setSelectedFile(null)
-      return
+    } else {
+      const stillValid =
+        selectedFile &&
+        flatEntries.some((f) => f.path === selectedFile.path && f.source === selectedFile.source)
+      if (!stillValid) {
+        setSelectedFile({ path: flatEntries[0].path, source: flatEntries[0].source })
+      }
     }
-    const stillValid =
-      selectedFile &&
-      flatEntries.some((f) => f.path === selectedFile.path && f.source === selectedFile.source)
-    if (!stillValid) {
-      setSelectedFile({ path: flatEntries[0].path, source: flatEntries[0].source })
-    }
-  }, [flatEntries, selectedFile, diffContinuousFlow])
+  }
 
   // Scroll selected item into view
   useEffect(() => {

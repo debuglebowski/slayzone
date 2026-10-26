@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
 import {
@@ -7,7 +7,8 @@ import {
   TooltipTrigger,
   TooltipContent,
   useAppearance,
-  safeClipboardWriteText
+  safeClipboardWriteText,
+  useStableCallback
 } from '@slayzone/ui'
 import { useBrowserView } from '@slayzone/task-browser'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -114,7 +115,11 @@ export function WebPanelView({
     visible: true,
     offScreen: isActive === false
   })
-  actionsRef.current = actions
+  // Publish this commit's actions to `onPopupRoute`. An insertion effect (same timing
+  // as useStableCallback) — it runs before any popup event of this commit can arrive.
+  useInsertionEffect(() => {
+    actionsRef.current = actions
+  })
 
   // Apply browser baseline zoom to match browser panel rendering
   useEffect(() => {
@@ -122,8 +127,7 @@ export function WebPanelView({
   }, [viewId, browserDefaultZoom, actions])
 
   // Sync URL changes to parent — skip OAuth/SSO intermediate pages
-  const onUrlChangeRef = useRef(onUrlChange)
-  onUrlChangeRef.current = onUrlChange
+  const handleUrlChange = useStableCallback(onUrlChange)
   const prevUrlRef = useRef(state.url)
   useEffect(() => {
     if (!state.url || state.url === prevUrlRef.current) return
@@ -143,18 +147,19 @@ export function WebPanelView({
     } catch {
       /* invalid URL — skip persist */ return
     }
-    onUrlChangeRef.current(panelId, state.url)
-  }, [state.url, panelId])
+    handleUrlChange(panelId, state.url)
+  }, [state.url, panelId, handleUrlChange])
 
   // Sync favicon changes to parent
-  const onFaviconChangeRef = useRef(onFaviconChange)
-  onFaviconChangeRef.current = onFaviconChange
+  const handleFaviconChange = useStableCallback((id: string, favicon: string) =>
+    onFaviconChange?.(id, favicon)
+  )
   const prevFaviconRef = useRef(state.favicon)
   useEffect(() => {
     if (!state.favicon || state.favicon === prevFaviconRef.current) return
     prevFaviconRef.current = state.favicon
-    onFaviconChangeRef.current?.(panelId, state.favicon)
-  }, [state.favicon, panelId])
+    handleFaviconChange(panelId, state.favicon)
+  }, [state.favicon, panelId, handleFaviconChange])
 
   return (
     <div className="flex flex-col h-full">

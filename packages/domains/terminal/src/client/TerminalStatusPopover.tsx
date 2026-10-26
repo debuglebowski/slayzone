@@ -6,6 +6,7 @@ import {
   IconButton,
   getTerminalStateStyle,
   useStablePoll,
+  useStableCallback,
   useNow,
   Dialog,
   DialogContent,
@@ -54,9 +55,10 @@ export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonPro
 
   // Refresh the running-PTY count on any state transition. Server fan-out is
   // global (no per-session filter); we don't read the payload here.
+  const handlePtyStateChange = useStableCallback(() => void refreshPtys())
   useSubscription(
     trpc.pty.onStateChange.subscriptionOptions(undefined, {
-      onData: () => void refreshPtys()
+      onData: handlePtyStateChange
     })
   )
 
@@ -197,9 +199,10 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
   useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
 
   // Refresh on any PTY state transition (server fan-out is global).
+  const handlePtyStateChange = useStableCallback(() => void refreshPtys())
   useSubscription(
     trpc.pty.onStateChange.subscriptionOptions(undefined, {
-      onData: () => void refreshPtys()
+      onData: handlePtyStateChange
     })
   )
 

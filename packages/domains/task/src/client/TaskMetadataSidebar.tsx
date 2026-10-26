@@ -42,10 +42,13 @@ export function TaskMetadataSidebar({
   const projects = projectsQuery.data ?? []
 
   // Mirror fetched blockers into local state so BlockedBySection can optimistically
-  // add/remove via setBlockers. Reset the search box on task change.
-  useEffect(() => {
+  // add/remove via setBlockers. Reset the search box on task change (while rendering,
+  // so no commit shows the previous task's search).
+  const [searchTaskId, setSearchTaskId] = useState(task.id)
+  if (searchTaskId !== task.id) {
+    setSearchTaskId(task.id)
     setAddBlockerSearch('')
-  }, [task.id])
+  }
   useEffect(() => {
     if (blockersQuery.data) setBlockers(blockersQuery.data)
   }, [blockersQuery.data])

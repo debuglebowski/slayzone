@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useAgentTurns, type AgentTurnRange } from '@slayzone/agent-turns/client'
 
 /**
@@ -20,12 +20,11 @@ export function useGitDiffTurns(targetPath: string | null) {
   // If the selected turn was filtered out (its files are no longer in working
   // tree changes), fall back to "All turns" — otherwise the chip row would show
   // no active button and the diff would silently switch to all-turns mode
-  // without the user realizing.
-  useEffect(() => {
-    if (selectedTurnId !== 'all' && !turns.some((t) => t.id === selectedTurnId)) {
-      setSelectedTurnId('all')
-    }
-  }, [selectedTurnId, turns])
+  // without the user realizing. Checked while rendering, so no commit shows a
+  // vanished turn as selected.
+  if (selectedTurnId !== 'all' && !turns.some((t) => t.id === selectedTurnId)) {
+    setSelectedTurnId('all')
+  }
 
   // Resolve effective sha range for the current turn selection. For the first
   // turn (no prior snapshot), use the snapshot's parent commit (= HEAD at the

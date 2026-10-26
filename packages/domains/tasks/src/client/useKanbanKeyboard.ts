@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { Column } from './kanban'
@@ -60,17 +60,18 @@ export function useKanbanKeyboard({
     return map
   }, [columns])
 
-  // Clear focus if focused task disappears (filtered/deleted)
-  useEffect(() => {
-    if (focusedTaskId && !gridLookup.has(focusedTaskId)) {
-      setFocusedTaskId(null)
-    }
-  }, [focusedTaskId, gridLookup])
+  // Clear focus if focused task disappears (filtered/deleted). Checked while
+  // rendering, so no commit shows focus on a card that is gone.
+  if (focusedTaskId && !gridLookup.has(focusedTaskId)) {
+    setFocusedTaskId(null)
+  }
 
-  // Close picker when focus changes
-  useEffect(() => {
+  // Close picker when focus changes (while rendering, same reason)
+  const [pickerFocusId, setPickerFocusId] = useState(focusedTaskId)
+  if (pickerFocusId !== focusedTaskId) {
+    setPickerFocusId(focusedTaskId)
     setPickerState(null)
-  }, [focusedTaskId])
+  }
 
   const findTask = useCallback(
     (id: string) => {

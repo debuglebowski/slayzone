@@ -595,14 +595,14 @@ export function useGitDiffSnapshot(
   useEffect(() => {
     keyRef.current = key
   })
-  const refreshRef = useRef<() => void>(() => {
+  const refresh = useCallback((): void => {
     const k = keyRef.current
     if (!k) return
     const e = entries.get(k)
     if (e) void runFetch(e)
-  })
+  }, [])
 
-  return { ...state, refresh: refreshRef.current }
+  return { ...state, refresh }
 }
 
 // ── Diagnostic / test hooks (not re-exported from package index) ────────

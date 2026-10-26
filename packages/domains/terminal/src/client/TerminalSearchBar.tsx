@@ -44,6 +44,25 @@ export function TerminalSearchBar({ searchAddon, onClose, focusToken }: Terminal
     return () => disposable?.dispose()
   }, [searchAddon])
 
+  // Empty query → no results. Reset while rendering whenever the search inputs
+  // change (the same trigger as the effect below), so no commit shows stale counts.
+  const [searchedQuery, setSearchedQuery] = useState(query)
+  const [searchedCaseSensitive, setSearchedCaseSensitive] = useState(caseSensitive)
+  const [searchedAddon, setSearchedAddon] = useState(searchAddon)
+  if (
+    searchedQuery !== query ||
+    searchedCaseSensitive !== caseSensitive ||
+    searchedAddon !== searchAddon
+  ) {
+    setSearchedQuery(query)
+    setSearchedCaseSensitive(caseSensitive)
+    setSearchedAddon(searchAddon)
+    if (!query) {
+      setResultIndex(-1)
+      setResultCount(0)
+    }
+  }
+
   // Incremental search on query/caseSensitive change
   useEffect(() => {
     try {
@@ -51,8 +70,6 @@ export function TerminalSearchBar({ searchAddon, onClose, focusToken }: Terminal
         searchAddon.findNext(query, { caseSensitive, incremental: true, decorations })
       } else {
         searchAddon.clearDecorations()
-        setResultIndex(-1)
-        setResultCount(0)
       }
     } catch {
       // Addon may be disposed

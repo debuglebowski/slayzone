@@ -26,6 +26,16 @@ interface AddFormState {
 
 const EMPTY_FORM: AddFormState = { label: '', command: '', autoRestart: false, scope: 'project' }
 
+function formFromProcess(process: ProcessEntry | null): AddFormState {
+  if (!process) return EMPTY_FORM
+  return {
+    label: process.label,
+    command: process.command,
+    autoRestart: process.autoRestart,
+    scope: process.taskId === null ? 'project' : 'task'
+  }
+}
+
 interface ProcessDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -52,25 +62,20 @@ export function ProcessDialog({
   const createProcess = useMutation(trpc.processes.create.mutationOptions())
   const spawnProcess = useMutation(trpc.processes.spawn.mutationOptions())
   const restartProcess = useMutation(trpc.processes.restart.mutationOptions())
-  const [form, setForm] = useState<AddFormState>(EMPTY_FORM)
+  const [form, setForm] = useState<AddFormState>(() => formFromProcess(process))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const labelRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (process) {
-      setForm({
-        label: process.label,
-        command: process.command,
-        autoRestart: process.autoRestart,
-        scope: process.taskId === null ? 'project' : 'task'
-      })
-    } else {
-      setForm(EMPTY_FORM)
-    }
+  // Reset the form whenever the edited process or the open state changes. Done while
+  // rendering (not in an effect) so no commit shows the previous process's form.
+  const [resetFor, setResetFor] = useState({ process, open })
+  if (resetFor.process !== process || resetFor.open !== open) {
+    setResetFor({ process, open })
+    setForm(formFromProcess(process))
     setSaveError(null)
     setSaving(false)
-  }, [process, open])
+  }
 
   useEffect(() => {
     if (open) setTimeout(() => labelRef.current?.focus(), 50)

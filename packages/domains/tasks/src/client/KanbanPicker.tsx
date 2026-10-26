@@ -27,14 +27,16 @@ export function KanbanPicker({
   onUpdateTask,
   tasks,
   columns,
-  cardRefs
+  // Ref-suffixed local name: lets the React Compiler see this is a ref, so the
+  // DOM measurement below (rect -> anchor state) is recognised as ref-derived.
+  cardRefs: cardElementsRef
 }: KanbanPickerProps): React.JSX.Element | null {
   const [anchorStyle, setAnchorStyle] = useState<React.CSSProperties>({})
   const statusOptions = buildStatusOptions(columns)
 
   useEffect(() => {
     if (!pickerState) return
-    const el = cardRefs.current.get(pickerState.taskId)
+    const el = cardElementsRef.current.get(pickerState.taskId)
     if (!el) return
     const rect = el.getBoundingClientRect()
     setAnchorStyle({
@@ -45,7 +47,7 @@ export function KanbanPicker({
       height: rect.height,
       pointerEvents: 'none' as const
     })
-  }, [pickerState, cardRefs])
+  }, [pickerState, cardElementsRef])
 
   if (!pickerState) return null
 

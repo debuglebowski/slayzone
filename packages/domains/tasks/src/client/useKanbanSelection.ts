@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { Column } from './kanban'
 
 export interface KanbanSelectionAPI {
@@ -27,29 +27,37 @@ export function useKanbanSelection({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [anchorId, setAnchorId] = useState<string | null>(null)
 
-  // Reset on key change (project switch, etc.)
-  useEffect(() => {
+  // Reset on key change (project switch, etc.). Both syncs below run while
+  // rendering, so no commit shows a selection that no longer applies.
+  const [selectionResetKey, setSelectionResetKey] = useState(resetKey)
+  if (selectionResetKey !== resetKey) {
+    setSelectionResetKey(resetKey)
     setSelectedIds(new Set())
     setAnchorId(null)
-  }, [resetKey])
+  }
 
-  // Prune ids no longer present (filter changes, archive, etc.)
-  const visibleIdsRef = useRef<Set<string>>(new Set())
-  useEffect(() => {
+  // Prune ids no longer present (filter changes, archive, etc.). A content check,
+  // not an identity check: callers rebuild `columns` every render, and every
+  // selection write comes from a visible card, so "selection ⊆ visible" is exactly
+  // what the prune maintains. Once pruned the check is false, so it settles.
+  if (selectedIds.size > 0 || anchorId !== null) {
     const visible = new Set<string>()
     for (const c of columns) for (const t of c.tasks) visible.add(t.id)
-    visibleIdsRef.current = visible
-    setSelectedIds((prev) => {
-      let changed = false
-      const next = new Set<string>()
-      for (const id of prev) {
-        if (visible.has(id)) next.add(id)
-        else changed = true
-      }
-      return changed ? next : prev
-    })
-    setAnchorId((prev) => (prev && visible.has(prev) ? prev : prev === null ? null : null))
-  }, [columns])
+    let stale = anchorId !== null && !visible.has(anchorId)
+    for (const id of selectedIds) if (!visible.has(id)) stale = true
+    if (stale) {
+      setSelectedIds((prev) => {
+        let changed = false
+        const next = new Set<string>()
+        for (const id of prev) {
+          if (visible.has(id)) next.add(id)
+          else changed = true
+        }
+        return changed ? next : prev
+      })
+      setAnchorId((prev) => (prev && visible.has(prev) ? prev : prev === null ? null : null))
+    }
+  }
 
   const isSelected = useCallback((id: string) => selectedIds.has(id), [selectedIds])
 

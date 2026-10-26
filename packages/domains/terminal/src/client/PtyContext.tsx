@@ -18,6 +18,7 @@ import {
   HubScope
 } from '@slayzone/transport/client'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
+import { useStableCallback } from '@slayzone/ui'
 import { disposeTerminal } from './terminal-cache'
 import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalStateStore'
 
@@ -118,140 +119,159 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   // Note: only update EXISTING state, don't create state for unknown tasks —
   // state is created when the Terminal component subscribes (the
   // ensure-state-before-onData guard).
-  useSubscription(
-    trpc.pty.onData.subscriptionOptions(undefined, {
-      onData: ({ sessionId, data, seq }) => {
-        const state = statesRef.current.get(sessionId)
-        if (!state) return
+  const handleData = useStableCallback(
+    ({ sessionId, data, seq }: { sessionId: string; data: string; seq: number }) => {
+      const state = statesRef.current.get(sessionId)
+      if (!state) return
 
-        // Drop out-of-order data (seq should be monotonically increasing)
-        if (seq <= state.lastSeq) return
-        state.lastSeq = seq
+      // Drop out-of-order data (seq should be monotonically increasing)
+      if (seq <= state.lastSeq) return
+      state.lastSeq = seq
 
-        // Notify subscribers
-        const subs = dataSubsRef.current.get(sessionId)
-        if (subs) {
-          subs.forEach((cb) => cb(data, seq))
-        }
+      // Notify subscribers
+      const subs = dataSubsRef.current.get(sessionId)
+      if (subs) {
+        subs.forEach((cb) => cb(data, seq))
       }
-    })
+    }
   )
+  useSubscription(trpc.pty.onData.subscriptionOptions(undefined, { onData: handleData }))
 
-  useSubscription(
-    trpc.pty.onExit.subscriptionOptions(undefined, {
-      onData: async ({ sessionId, exitCode, errorCode, exitReason }) => {
-        const state = statesRef.current.get(sessionId)
+  const handleExit = useStableCallback(
+    async ({
+      sessionId,
+      exitCode,
+      errorCode,
+      exitReason
+    }: {
+      sessionId: string
+      exitCode: number | null
+      errorCode: string | null
+      exitReason: string | null
+    }) => {
+      const state = statesRef.current.get(sessionId)
 
-        if (state) {
-          state.exitCode = exitCode ?? undefined
+      if (state) {
+        state.exitCode = exitCode ?? undefined
 
-          // Capture crash output before the 100ms backend cleanup window closes
-          // Only capture if process exited non-zero (likely a crash)
-          if (exitCode !== 0) {
-            try {
-              const raw = await trpcClient.pty.getBuffer.query({ sessionId })
-              if (raw && statesRef.current.get(sessionId)) {
-                statesRef.current.get(sessionId)!.crashOutput = raw
-              }
-            } catch {
-              // Best-effort; ignore errors
+        // Capture crash output before the 100ms backend cleanup window closes
+        // Only capture if process exited non-zero (likely a crash)
+        if (exitCode !== 0) {
+          try {
+            const raw = await trpcClient.pty.getBuffer.query({ sessionId })
+            if (raw && statesRef.current.get(sessionId)) {
+              statesRef.current.get(sessionId)!.crashOutput = raw
             }
+          } catch {
+            // Best-effort; ignore errors
           }
         }
-
-        // Fire explicit exit subscribers (the exit event stream). Terminal STATE
-        // (→ 'dead', or preserved 'hibernated') is owned by the reactive store,
-        // which applies its own pty:exit handler + reconcile. `errorCode` is the
-        // structured exit reason (the old positional `reason` arg).
-        const subs = exitSubsRef.current.get(sessionId)
-        if (subs) subs.forEach((cb) => cb(exitCode ?? 0, errorCode ?? null, exitReason ?? null))
-
-        // Free xterm.js instance + this session's event-stream bookkeeping.
-        disposeTerminal(sessionId)
-        statesRef.current.delete(sessionId)
-        dataSubsRef.current.delete(sessionId)
-        exitSubsRef.current.delete(sessionId)
-        promptSubsRef.current.delete(sessionId)
-        sessionDetectedSubsRef.current.delete(sessionId)
-        devServerSubsRef.current.delete(sessionId)
-        titleSubsRef.current.delete(sessionId)
       }
-    })
+
+      // Fire explicit exit subscribers (the exit event stream). Terminal STATE
+      // (→ 'dead', or preserved 'hibernated') is owned by the reactive store,
+      // which applies its own pty:exit handler + reconcile. `errorCode` is the
+      // structured exit reason (the old positional `reason` arg).
+      const subs = exitSubsRef.current.get(sessionId)
+      if (subs) subs.forEach((cb) => cb(exitCode ?? 0, errorCode ?? null, exitReason ?? null))
+
+      // Free xterm.js instance + this session's event-stream bookkeeping.
+      disposeTerminal(sessionId)
+      statesRef.current.delete(sessionId)
+      dataSubsRef.current.delete(sessionId)
+      exitSubsRef.current.delete(sessionId)
+      promptSubsRef.current.delete(sessionId)
+      sessionDetectedSubsRef.current.delete(sessionId)
+      devServerSubsRef.current.delete(sessionId)
+      titleSubsRef.current.delete(sessionId)
+    }
   )
+  useSubscription(trpc.pty.onExit.subscriptionOptions(undefined, { onData: handleExit }))
 
   // Terminal STATE lives in the reactive store (which has its own
   // onStateChange handler). PtyContext keeps only the pending-prompt side
   // effect: clear it when the agent leaves the alive set (dead/error).
-  useSubscription(
-    trpc.pty.onStateChange.subscriptionOptions(undefined, {
-      onData: ({ sessionId, newState, oldState }) => {
-        if (
-          ALIVE_STATES.has(oldState as TerminalState) &&
-          !ALIVE_STATES.has(newState as TerminalState)
-        ) {
-          const state = statesRef.current.get(sessionId)
-          if (state) state.pendingPrompt = undefined
-          setPendingPromptTaskIds((prev) => {
-            if (!prev.has(sessionId)) return prev
-            const next = new Set(prev)
-            next.delete(sessionId)
-            return next
-          })
-        }
-      }
-    })
-  )
-
-  useSubscription(
-    trpc.pty.onPrompt.subscriptionOptions(undefined, {
-      onData: ({ sessionId, prompt }) => {
+  const handleStateChange = useStableCallback(
+    ({
+      sessionId,
+      newState,
+      oldState
+    }: {
+      sessionId: string
+      newState: string
+      oldState: string
+    }) => {
+      if (
+        ALIVE_STATES.has(oldState as TerminalState) &&
+        !ALIVE_STATES.has(newState as TerminalState)
+      ) {
         const state = statesRef.current.get(sessionId)
-        if (!state) return // Ignore prompts for unknown tasks
-
-        state.pendingPrompt = prompt as PromptInfo
-
-        // Update global tracking
-        setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
-
-        const subs = promptSubsRef.current.get(sessionId)
-        if (subs) {
-          subs.forEach((cb) => cb(prompt as PromptInfo))
-        }
+        if (state) state.pendingPrompt = undefined
+        setPendingPromptTaskIds((prev) => {
+          if (!prev.has(sessionId)) return prev
+          const next = new Set(prev)
+          next.delete(sessionId)
+          return next
+        })
       }
-    })
+    }
+  )
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, { onData: handleStateChange })
   )
 
-  useSubscription(
-    trpc.pty.onSessionDetected.subscriptionOptions(undefined, {
-      onData: ({ sessionId, conversationId }) => {
-        const subs = sessionDetectedSubsRef.current.get(sessionId)
-        if (subs) {
-          subs.forEach((cb) => cb(conversationId))
-        }
+  const handlePrompt = useStableCallback(
+    ({ sessionId, prompt }: { sessionId: string; prompt: unknown }) => {
+      const state = statesRef.current.get(sessionId)
+      if (!state) return // Ignore prompts for unknown tasks
+
+      state.pendingPrompt = prompt as PromptInfo
+
+      // Update global tracking
+      setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
+
+      const subs = promptSubsRef.current.get(sessionId)
+      if (subs) {
+        subs.forEach((cb) => cb(prompt as PromptInfo))
       }
-    })
+    }
+  )
+  useSubscription(trpc.pty.onPrompt.subscriptionOptions(undefined, { onData: handlePrompt }))
+
+  const handleSessionDetected = useStableCallback(
+    ({ sessionId, conversationId }: { sessionId: string; conversationId: string }) => {
+      const subs = sessionDetectedSubsRef.current.get(sessionId)
+      if (subs) {
+        subs.forEach((cb) => cb(conversationId))
+      }
+    }
+  )
+  useSubscription(
+    trpc.pty.onSessionDetected.subscriptionOptions(undefined, { onData: handleSessionDetected })
   )
 
-  useSubscription(
-    trpc.pty.onDevServerDetected.subscriptionOptions(undefined, {
-      onData: ({ sessionId, url }) => {
-        const subs = devServerSubsRef.current.get(sessionId)
-        if (subs) {
-          subs.forEach((cb) => cb(url))
-        }
+  const handleDevServerDetected = useStableCallback(
+    ({ sessionId, url }: { sessionId: string; url: string }) => {
+      const subs = devServerSubsRef.current.get(sessionId)
+      if (subs) {
+        subs.forEach((cb) => cb(url))
       }
-    })
+    }
+  )
+  useSubscription(
+    trpc.pty.onDevServerDetected.subscriptionOptions(undefined, { onData: handleDevServerDetected })
   )
 
-  useSubscription(
-    trpc.pty.onTitleChange.subscriptionOptions(undefined, {
-      onData: ({ sessionId, title }) => {
-        const subs = titleSubsRef.current.get(sessionId)
-        if (subs) {
-          subs.forEach((cb) => cb(title))
-        }
+  const handleTitleChange = useStableCallback(
+    ({ sessionId, title }: { sessionId: string; title: string }) => {
+      const subs = titleSubsRef.current.get(sessionId)
+      if (subs) {
+        subs.forEach((cb) => cb(title))
       }
-    })
+    }
+  )
+  useSubscription(
+    trpc.pty.onTitleChange.subscriptionOptions(undefined, { onData: handleTitleChange })
   )
 
   return null
@@ -271,9 +291,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
 
   // Track task IDs with pending prompts for global badge
   const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
-  // Ref for stable getPendingPromptTaskIds callback
-  const pendingPromptTaskIdsRef = useRef(pendingPromptTaskIds)
-  pendingPromptTaskIdsRef.current = pendingPromptTaskIds
 
   // Multi-hub: the PTY event streams must run per connected hub (a remote task's
   // pty lives on its hub, so onData/onExit only arrive from that hub's socket).
@@ -440,9 +457,10 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const getPendingPromptTaskIds = useCallback((): string[] => {
-    return Array.from(pendingPromptTaskIdsRef.current)
-  }, [])
+  // Stable identity (keeps the context value stable); reads the latest committed set.
+  const getPendingPromptTaskIds = useStableCallback((): string[] => {
+    return Array.from(pendingPromptTaskIds)
+  })
 
   // Full reset for mode switches - removes all state so fresh state is created
   // Sequence numbers handle ordering - no need for ignore mechanism

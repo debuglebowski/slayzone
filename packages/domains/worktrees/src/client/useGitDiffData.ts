@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { buildFileTree } from '@slayzone/ui'
@@ -67,8 +67,13 @@ export function useGitDiffData(
     onSnapshotChange()
   }, [snapshot, onSnapshotChange])
 
+  // `refresh` is identity-stable (useGitDiffSnapshot), so the initial value already
+  // covers every read. Insertion effect (same timing as useStableCallback) keeps the
+  // ref current should that ever change, before any layout effect reads it.
   const refreshRef = useRef(refresh)
-  refreshRef.current = refresh
+  useInsertionEffect(() => {
+    refreshRef.current = refresh
+  })
 
   // parseUnifiedDiff is backed by a global LRU keyed by the raw patch string, so
   // identical patches across panels + re-renders return the same array

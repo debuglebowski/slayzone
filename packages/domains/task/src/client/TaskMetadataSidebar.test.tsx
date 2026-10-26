@@ -456,6 +456,32 @@ describe('TaskMetadataSidebar', () => {
     expect(screen.getByText('waiting on API')).toBeDefined()
   })
 
+  it('resets the add-blocker search when the task changes, not on a re-render', async () => {
+    const view = renderSidebar()
+    await screen.findByText('Fix API')
+    openBlockerPicker()
+    const search = (): HTMLInputElement =>
+      screen.getByLabelText('Search available blockers') as HTMLInputElement
+    await screen.findByLabelText('Search available blockers')
+    fireEvent.change(search(), { target: { value: 'ship' } })
+
+    const rerender = (task: Task): void =>
+      view.rerender(
+        <TaskMetadataSidebar
+          task={task}
+          tags={[]}
+          taskTagIds={[]}
+          onUpdate={vi.fn()}
+          onTagsChange={vi.fn()}
+        />
+      )
+    rerender(makeTask({ title: 'Renamed' }))
+    expect(search().value).toBe('ship')
+
+    rerender(makeTask({ id: 'task-2' }))
+    expect(search().value).toBe('')
+  })
+
   it('clearing blocked_comment calls updateTask', async () => {
     renderSidebar({ is_blocked: true, blocked_comment: 'waiting on API' })
     const commentText = await screen.findByText('waiting on API')

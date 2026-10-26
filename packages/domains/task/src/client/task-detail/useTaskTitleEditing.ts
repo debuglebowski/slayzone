@@ -24,10 +24,16 @@ export function useTaskTitleEditing(
   const [titleValue, setTitleValue] = useState(task?.title ?? '')
   const titleInputRef = useRef<HTMLInputElement>(null)
 
-  // Sync title from global state when changed externally (not while editing)
-  useEffect(() => {
+  // Sync title from global state when changed externally (not while editing). Runs
+  // while rendering, whenever the title or the editing flag changes, so no commit
+  // shows a stale title.
+  const [syncedTitle, setSyncedTitle] = useState(task?.title)
+  const [syncedEditing, setSyncedEditing] = useState(editingTitle)
+  if (syncedTitle !== task?.title || syncedEditing !== editingTitle) {
+    setSyncedTitle(task?.title)
+    setSyncedEditing(editingTitle)
     if (task && !editingTitle) setTitleValue(task.title)
-  }, [task?.title, editingTitle])
+  }
 
   // Focus and select title input when editing
   useEffect(() => {

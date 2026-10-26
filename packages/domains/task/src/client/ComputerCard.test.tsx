@@ -142,6 +142,38 @@ describe('ComputerCard', () => {
     })
   })
 
+  it('re-syncs the local binding only when the task or its persisted binding changes', async () => {
+    computersData = [
+      { id: 'computer-a', name: 'mac-studio' },
+      { id: 'computer-b', name: 'linux-box' }
+    ]
+    const select = (): HTMLSelectElement =>
+      screen.getByTestId('computer-select') as HTMLSelectElement
+    const { rerender } = render(
+      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />
+    )
+    expect(select().value).toBe('__inherit__')
+
+    // Local choice sticks across re-renders with unchanged props.
+    fireEvent.change(select(), { target: { value: 'computer-a' } })
+    await waitFor(() => expect(setTaskComputerSpy).toHaveBeenCalled())
+    rerender(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
+    expect(select().value).toBe('computer-a')
+
+    // Persisted binding changes → mirror it.
+    rerender(
+      <ComputerCard taskId="task-1" taskComputerId="computer-b" projectDefaultComputerId={null} />
+    )
+    expect(select().value).toBe('computer-b')
+
+    // Another task with the same binding value still re-syncs (taskId is a trigger).
+    fireEvent.change(select(), { target: { value: 'computer-a' } })
+    rerender(
+      <ComputerCard taskId="task-2" taskComputerId="computer-b" projectDefaultComputerId={null} />
+    )
+    expect(select().value).toBe('computer-b')
+  })
+
   it('shows the effective resolved computer', () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
     resolvedComputerId = 'computer-a'

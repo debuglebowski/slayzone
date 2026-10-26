@@ -308,4 +308,36 @@ describe('git-diff-store refcount + sharing', () => {
 
     h.unmount()
   })
+
+  it('refresh keeps one identity across re-renders and key changes, and targets the current key', async () => {
+    gitStub.getWorkingDiff.mockResolvedValue(makeSnapshot('v'))
+    const h = renderHook(
+      ({ path }: { path: string }) =>
+        useGitDiffSnapshot(path, {
+          ignoreWhitespace: false,
+          pollIntervalMs: 60_000,
+          visible: true
+        }),
+      { initialProps: { path: '/tmp/repo-a' } }
+    )
+    await flushMicrotasks()
+    const first = h.result.current.refresh
+
+    h.rerender({ path: '/tmp/repo-a' })
+    expect(h.result.current.refresh).toBe(first)
+
+    h.rerender({ path: '/tmp/repo-b' })
+    await flushMicrotasks()
+    expect(h.result.current.refresh).toBe(first)
+
+    gitStub.getWorkingDiff.mockClear()
+    await act(async () => {
+      first()
+    })
+    await flushMicrotasks()
+    expect(gitStub.getWorkingDiff).toHaveBeenCalledTimes(1)
+    expect((gitStub.getWorkingDiff.mock.calls[0] as unknown[])[0]).toBe('/tmp/repo-b')
+
+    h.unmount()
+  })
 })

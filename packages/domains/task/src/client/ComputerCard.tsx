@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
@@ -46,10 +46,13 @@ export function ComputerCard({
 
   // Local mirror of the task's binding so the select reflects the choice
   // immediately; re-sync when the task (or its persisted binding) changes.
+  // Re-synced while rendering (not in an effect) so no commit shows a stale binding.
   const [binding, setBinding] = useState<string | null>(taskComputerId)
-  useEffect(() => {
+  const [syncedFrom, setSyncedFrom] = useState({ taskId, taskComputerId })
+  if (syncedFrom.taskId !== taskId || syncedFrom.taskComputerId !== taskComputerId) {
+    setSyncedFrom({ taskId, taskComputerId })
     setBinding(taskComputerId)
-  }, [taskId, taskComputerId])
+  }
 
   const nameFor = (id: string | null): string => {
     if (id == null) return 'Local'

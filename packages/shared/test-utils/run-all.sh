@@ -761,6 +761,19 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
+  packages/domains/task/src/client/ProcessDialog.test.tsx \
+  packages/domains/task/src/client/task-detail/useTaskTitleEditing.test.tsx \
+  packages/domains/task/src/client/TaskProgressPopover.test.tsx \
+  packages/domains/task/src/client/WebPanelView.test.tsx \
+  packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \
+  packages/domains/terminal/src/client/PtyContext.test.tsx \
+  packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
+  packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
+  packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
+  packages/domains/worktrees/src/client/CreatePrDialog.test.tsx \
+  packages/domains/worktrees/src/client/ProjectPrTab.test.tsx \
+  packages/domains/worktrees/src/client/useGitDiffData.test.tsx \
+  packages/domains/worktrees/src/client/useGitDiffSelectionTurns.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \

@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { GitPullRequest, Loader2 } from 'lucide-react'
@@ -48,17 +48,33 @@ export function CreatePrDialog({
       { enabled: open && !task.worktree_parent_branch }
     )
   )
-  useEffect(() => {
-    if (!open || task.worktree_parent_branch) return
-    if (defaultBranchQuery.isSuccess) setBaseBranch(defaultBranchQuery.data ?? 'main')
-    else if (defaultBranchQuery.isError) setBaseBranch('main')
-  }, [
+  // Apply the resolved default branch. Runs while rendering whenever its inputs change
+  // (null = not yet synced, so the first render syncs too), so no commit shows the
+  // unresolved base branch.
+  const baseBranchInput = {
     open,
-    task.worktree_parent_branch,
-    defaultBranchQuery.isSuccess,
-    defaultBranchQuery.isError,
-    defaultBranchQuery.data
-  ])
+    parentBranch: task.worktree_parent_branch,
+    isSuccess: defaultBranchQuery.isSuccess,
+    isError: defaultBranchQuery.isError,
+    data: defaultBranchQuery.data
+  }
+  const [baseBranchSyncedFor, setBaseBranchSyncedFor] = useState<typeof baseBranchInput | null>(
+    null
+  )
+  if (
+    baseBranchSyncedFor === null ||
+    baseBranchSyncedFor.open !== baseBranchInput.open ||
+    baseBranchSyncedFor.parentBranch !== baseBranchInput.parentBranch ||
+    baseBranchSyncedFor.isSuccess !== baseBranchInput.isSuccess ||
+    baseBranchSyncedFor.isError !== baseBranchInput.isError ||
+    baseBranchSyncedFor.data !== baseBranchInput.data
+  ) {
+    setBaseBranchSyncedFor(baseBranchInput)
+    if (open && !task.worktree_parent_branch) {
+      if (defaultBranchQuery.isSuccess) setBaseBranch(defaultBranchQuery.data ?? 'main')
+      else if (defaultBranchQuery.isError) setBaseBranch('main')
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

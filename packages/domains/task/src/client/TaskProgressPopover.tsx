@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Gauge } from 'lucide-react'
 import {
   Popover,
@@ -46,9 +46,15 @@ export function TaskProgressPopover({
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState(value)
 
-  useEffect(() => {
+  // While closed, re-sync the draft to `value` whenever `value` or `open` changes.
+  // Done while rendering (not in an effect) so no commit shows a stale draft.
+  const [syncedValue, setSyncedValue] = useState(value)
+  const [syncedOpen, setSyncedOpen] = useState(open)
+  if (!Object.is(syncedValue, value) || syncedOpen !== open) {
+    setSyncedValue(value)
+    setSyncedOpen(open)
     if (!open) setLocal(value)
-  }, [value, open])
+  }
 
   const display = open ? local : value
 

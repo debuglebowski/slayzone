@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'lucide-react'
@@ -35,18 +35,29 @@ function usePrFilterState(projectId: string | null) {
   const filterQuery = useQuery(
     trpc.settings.get.queryOptions({ key: key ?? '' }, { enabled: !!key })
   )
-  // Seed the editable filter state from the persisted value once it loads.
-  useEffect(() => {
-    if (!key || !filterQuery.isSuccess) return
-    const value = filterQuery.data
-    if (value) {
-      try {
-        setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
-      } catch {
-        /* ignore */
+  // Seed the editable filter state from the persisted value once it loads. Runs while
+  // rendering whenever its inputs change (null = not yet synced, so the first render
+  // syncs too), so no commit shows the unseeded filter.
+  const seedInput = { key, isSuccess: filterQuery.isSuccess, data: filterQuery.data }
+  const [seededFor, setSeededFor] = useState<typeof seedInput | null>(null)
+  if (
+    seededFor === null ||
+    seededFor.key !== seedInput.key ||
+    seededFor.isSuccess !== seedInput.isSuccess ||
+    seededFor.data !== seedInput.data
+  ) {
+    setSeededFor(seedInput)
+    if (key && filterQuery.isSuccess) {
+      const value = filterQuery.data
+      if (value) {
+        try {
+          setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
+        } catch {
+          /* ignore */
+        }
       }
     }
-  }, [key, filterQuery.isSuccess, filterQuery.data])
+  }
 
   const updateFilter = useCallback(
     (next: Partial<PrFilterState>) => {
