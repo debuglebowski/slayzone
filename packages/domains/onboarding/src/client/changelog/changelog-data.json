@@ -116,11 +116,6 @@
       },
       {
         "category": "fix",
-        "title": "Browser extensions work",
-        "description": "Extensions in the browser panel get tab access and storage, and load only once."
-      },
-      {
-        "category": "fix",
         "title": "Worktree fixes",
         "description": "Removing a worktree keeps its branch unless you ask, and relative symlinks survive copying ignored files."
       }
