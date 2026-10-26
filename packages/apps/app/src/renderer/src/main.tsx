@@ -202,10 +202,9 @@ if (isFloatingGlobalAgentPanel) {
     )
     const decorateUrl = (url: string): string => withWindowId(url, windowId)
     // Seed the live hub registry once with the exact data that used to flow
-    // directly into FederationProvider's props. HubsSettingsTab's add-only
-    // save path pushes further updates into this store post-boot (no
-    // relaunch needed) — FederatedRoot below is the seam that turns a store
-    // update into an actual re-render.
+    // directly into FederationProvider's props. A sign-in pushes fresh tokens
+    // into this store post-boot (no relaunch needed) — FederatedRoot below is
+    // the seam that turns a store update into an actual re-render.
     useHubRegistryStore.getState().seed(hubs, registry.defaultHubId, hubTokens)
 
     performance.mark('sz:reactMount')

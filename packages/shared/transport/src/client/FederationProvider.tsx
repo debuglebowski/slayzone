@@ -109,9 +109,9 @@ export type FederatedRootProps = {
 /**
  * Boot wires `hubs`/`defaultHubId`/`tokens` into `useHubRegistryStore` once
  * (see `main.tsx`); this component is the seam that turns a later live store
- * update (a hub added via `HubsSettingsTab`'s add-only path) into an actual
- * re-render of `FederationProvider` — the single `createRoot().render()` call
- * at boot has no other way to receive post-boot updates.
+ * update (fresh tokens after a hub sign-in) into an actual re-render of
+ * `FederationProvider` — the single `createRoot().render()` call at boot has
+ * no other way to receive post-boot updates.
  */
 export function FederatedRoot({ decorateUrl, children }: FederatedRootProps): ReactNode {
   const hubs = useHubRegistryStore((s) => s.hubs)

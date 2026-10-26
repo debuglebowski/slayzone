@@ -21,5 +21,6 @@ export {
   type TaskHeaderAlign
 } from './useTabStore'
 export { AppearanceProvider } from './AppearanceContext'
+export { requestSettingsReopen, consumeSettingsReopen } from './settings-reopen'
 export { useAppearance, type AppearanceSettings } from '@slayzone/ui'
 export type { CreateTaskDraft } from '@slayzone/task/shared'

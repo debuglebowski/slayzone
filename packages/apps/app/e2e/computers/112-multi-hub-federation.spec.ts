@@ -1231,7 +1231,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   )
 
-  base('adding a hub via Settings goes live without a reload', async () => {
+  base('adding a hub via Settings goes live after one window reload', async () => {
     base.setTimeout(180_000)
 
     // Boots SINGLE-hub (no remotes in boot-config, mirroring a user who has
@@ -1245,6 +1245,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       hub = await spawnSecondHub(secondStore)
       await waitForHubHealth(hub.port)
       const remoteHubUrl = hub.url
+      // #161: dial the hub as `localhost`, NOT `127.0.0.1` — the local hub's
+      // `ws://127.0.0.1:*` CSP entry would otherwise mask a remote hub's origin
+      // missing from connect-src (a real remote hub never shares that origin).
+      const addedHubUrl = remoteHubUrl.replace('ws://127.0.0.1:', 'ws://localhost:')
       hubComputer = await attachDefaultComputer(hub, secondStore)
 
       // Seed a project on the hub-to-be-added BEFORE it's added — proves the
@@ -1282,25 +1286,29 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
 
       await page.locator('[data-testid="hub-add-open"]').click()
-      await page.locator('[data-testid="hub-add-url"]').fill(remoteHubUrl)
+      await page.locator('[data-testid="hub-add-url"]').fill(addedHubUrl)
       await page.locator('[data-testid="hub-probe"]').click()
       await expect(page.locator('[data-testid="hub-probe-result"]')).toContainText('reachable', {
         timeout: 10_000
       })
       await page.locator('[data-testid="hub-add"]').click()
-      await page.locator('[data-testid="hubs-save-relaunch"]').click()
 
-      // The save button clears once the (live) save resolves — confirms the
-      // add-only path completed without waiting on a relaunch/reload.
-      await expect(page.locator('[data-testid="hubs-save-relaunch"]')).toBeHidden({
-        timeout: 10_000
+      // A pure add reloads the window (no app relaunch): the renderer CSP is
+      // fixed per document load, so only a fresh load can admit the new hub's
+      // origin. The app then reopens Settings → Connections to sign in.
+      await Promise.all([
+        page.waitForEvent('framenavigated', { timeout: 15_000 }),
+        page.locator('[data-testid="hubs-save-relaunch"]').click()
+      ])
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await expect(page.locator('[role="dialog"][aria-label="Settings"]').first()).toBeVisible({
+        timeout: 15_000
       })
 
       // The hub is standalone, so it gates every request on a signed-in account.
       // Signing in HERE — through the product's own dialog, not a seeded token —
-      // is what makes the live path complete: `signIn()` pushes the fresh token
-      // into the hub registry, and this hub's WS client has not been created yet,
-      // so it opens authed on the first federated fetch. Still no reload.
+      // pushes the fresh token into the hub registry, and this hub's WS client
+      // has not been created yet, so it opens authed on the first federated fetch.
       await page.locator('[data-testid="hub-signin-open"]').first().click()
       await expect(page.locator('[data-testid="hub-signin-dialog"]')).toBeVisible({
         timeout: 10_000
@@ -1314,8 +1322,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await page.keyboard.press('Escape')
       await page.keyboard.press('Escape')
 
-      // The live path in question: the remote hub's project appears in the
-      // rail with NO page.reload() anywhere in this test.
+      // The remote hub's project appears in the rail — its origin is in the
+      // reloaded document's connect-src (blocked before #161's fix).
       await expect(projectBlob(page, 'LI')).toBeVisible({ timeout: 20_000 })
     } finally {
       if (launched) await launched.close()

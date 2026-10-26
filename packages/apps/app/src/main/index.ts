@@ -77,7 +77,7 @@ import {
   type CreateViewOpts,
   type ViewBounds
 } from './browser-view-manager'
-import { attachRendererCsp } from './renderer-csp'
+import { attachRendererCsp, hubConnectSources } from './renderer-csp'
 import {
   probeRemoteHealth,
   hubLogin,
@@ -2945,19 +2945,24 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // name the dynamic in-process tRPC WS port exactly (a static meta tag
     // can't). Registered before any window loads — createWindow() runs at the
     // end of whenReady — so every app document is covered.
-    // The connect-src origin is mode-aware: local = the in-process WS port,
-    // remote = the exact configured ws(s) origin (never the scheme-wide floor).
+    // connect-src names every hub the renderer dials (#161): the local sidecar
+    // (loopback port-wildcard — its port can change across respawns) when this
+    // process runs one, plus the exact origin of every registered remote hub.
+    // The registry is re-read from disk per document load (same source as
+    // `app:get-hub-registry`), so a hub saved since boot is allowed on the next
+    // load. Never the scheme-wide floor.
     attachRendererCsp(
       session.defaultSession,
       async () => {
-        if (isRemoteMode) {
-          const url = bootConfig.remote_server_url
-          return url ? new URL(url).origin : ''
+        const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+        const remoteHubUrls = resolveHubRegistry(cfg).flatMap((h) =>
+          h.kind === 'remote' && h.url ? [h.url] : []
+        )
+        // Legacy remote mode dials the boot-time url even if the file changed since.
+        if (isRemoteMode && bootConfig.remote_server_url) {
+          remoteHubUrls.push(bootConfig.remote_server_url)
         }
-        // Local cutover (slice 9): the renderer connects to the side-car on a
-        // loopback port that can change across respawns. A loopback port-wildcard
-        // is safe (only local processes) and survives a respawn-on-new-port.
-        return 'ws://127.0.0.1:*'
+        return hubConnectSources({ localHub: !isRemoteMode, remoteHubUrls })
       },
       !app.isPackaged
     )

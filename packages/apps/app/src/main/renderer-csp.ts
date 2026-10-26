@@ -1,10 +1,10 @@
 /**
  * Content-Security-Policy for the app renderer.
  *
- * The renderer's only dynamic connection target is the tRPC WebSocket server
- * — local mode binds an OS-assigned loopback port (see ws-server.ts), remote
- * mode (slice 7) targets a user-configured ws(s) host. A static policy cannot
- * name either, so the CSP is layered:
+ * The renderer's only dynamic connection targets are hub tRPC WebSockets —
+ * the local sidecar on an OS-assigned loopback port, plus every user-registered
+ * remote ws(s) hub (multi-hub federation). A static policy cannot name these,
+ * so the CSP is layered:
  *
  *   1. A scheme-wide floor (`buildCspFloor`) is injected into the HTML
  *      as a `<meta>` tag at build time (see electron.vite.config.ts). This
@@ -13,7 +13,7 @@
  *   2. An exact-origin header (`buildRendererCsp`) is emitted at runtime via
  *      `session.webRequest.onHeadersReceived`. When both are present the
  *      browser enforces their intersection — so the effective `connect-src`
- *      is the exact tRPC origin, and the floor only governs if the header is
+ *      is the exact hub origins, and the floor only governs if the header is
  *      absent.
  *
  * This module is the single source of truth for both layers, and is kept free
@@ -64,30 +64,63 @@ function assembleCsp(trpcConnectSrc: string, dev: boolean): string {
  * WS. The floor can't name the exact origin — the local OS-assigned port and a
  * remote host are both unknowable at build time — but it is deliberately NOT
  * `ws: wss:` (which would permit arbitrary plaintext-ws exfil to any host in
- * the rare case the runtime header is absent). Instead:
- *   - `ws://127.0.0.1:*` — local mode: loopback, any port (as tight as before).
- *   - `wss:` — remote mode: any host, but TLS-only.
- * A plaintext-`ws://` remote (e.g. a LAN box without TLS) is therefore allowed
- * only via the exact runtime header below, not the floor fallback. Injected as
- * a `<meta>` tag so the document is never left without a CSP.
+ * the rare case the runtime header is absent). Instead it mirrors the hub
+ * scheme rule (`hubUrlFromAddr`: loopback → ws, any other host → wss):
+ *   - `ws://127.0.0.1:*`, `ws://localhost:*` — loopback hubs, any port.
+ *     (`::1` is omitted: CSP host-sources can't name an IPv6 literal.)
+ *   - `wss:` — remote hubs: any host, but TLS-only.
+ * The floor and the runtime header are INTERSECTED, so a plaintext `ws://`
+ * hub on a non-loopback host (e.g. a LAN box without TLS) is blocked even when
+ * the header names it — consistent with the scheme rule. Injected as a
+ * `<meta>` tag so the document is never left without a CSP.
  *
  * `dev` must match the build mode — the meta floor and the runtime header are
  * enforced as an intersection, so both layers need the dev `script-src`
  * relaxation or the stricter one still blocks Vite's inline preamble.
  */
 export function buildCspFloor(dev: boolean): string {
-  return assembleCsp('ws://127.0.0.1:* wss:', dev)
+  return assembleCsp('ws://127.0.0.1:* ws://localhost:* wss:', dev)
 }
 
 /**
- * Builds the runtime CSP string with the tRPC WS origin named exactly —
- * `ws://127.0.0.1:<port>` in local mode, the configured ws(s) origin in
- * remote mode. When the origin is unknown (server not bound yet) it is
- * omitted — the policy still applies, tRPC just stays blocked until an origin
- * is known (the renderer defers its WS connect on the same signal).
+ * The `connect-src` entries for every hub the renderer may dial (#161). With
+ * multi-hub federation the renderer opens one tRPC WS per registered hub, so a
+ * single boot-time origin is not enough:
+ *   - the co-located local hub → `ws://127.0.0.1:*` (its sidecar port can change
+ *     across respawns; loopback-only, so the port wildcard is safe);
+ *   - each registered remote hub → its exact ws(s) origin, plus the matching
+ *     http(s) origin of the same host (already trusted by the user; keeps a
+ *     future renderer-side HTTP call to the hub from silently breaking).
+ * Malformed or non-ws(s) urls are dropped, so a bad registry row can never
+ * widen the policy. Exact origins only — never a scheme or host wildcard.
  */
-export function buildRendererCsp(trpcOrigin: string, dev: boolean): string {
-  return assembleCsp(trpcOrigin, dev)
+export function hubConnectSources(hubs: {
+  localHub: boolean
+  remoteHubUrls: readonly string[]
+}): string {
+  const sources = new Set<string>()
+  if (hubs.localHub) sources.add('ws://127.0.0.1:*')
+  for (const raw of hubs.remoteHubUrls) {
+    let url: URL
+    try {
+      url = new URL(raw)
+    } catch {
+      continue
+    }
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') continue
+    sources.add(url.origin)
+    sources.add(`${url.protocol === 'wss:' ? 'https' : 'http'}://${url.host}`)
+  }
+  return [...sources].join(' ')
+}
+
+/**
+ * Builds the runtime CSP string with the tRPC connect sources named exactly
+ * (see `hubConnectSources`). When none are known they are omitted — the policy
+ * still applies, tRPC just stays blocked.
+ */
+export function buildRendererCsp(trpcConnectSrc: string, dev: boolean): string {
+  return assembleCsp(trpcConnectSrc, dev)
 }
 
 /**
@@ -96,10 +129,8 @@ export function buildRendererCsp(trpcOrigin: string, dev: boolean): string {
  * header with the current tRPC origin; sub-resources pass through untouched
  * (CSP is enforced from the document response only).
  *
- * `getTrpcOrigin` resolves the exact origin — local: once the in-process
- * server is listening (awaited per document load so the very first window,
- * which may load before the server binds, still gets the exact origin);
- * remote: the configured host. Resolving '' omits the origin.
+ * `getTrpcOrigin` resolves the connect sources per document load (see
+ * `hubConnectSources`). Resolving '' omits them.
  */
 export function attachRendererCsp(
   sess: Electron.Session,

@@ -54,7 +54,12 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
+import {
+  useTabStore,
+  useDialogStore,
+  AppearanceProvider,
+  consumeSettingsReopen
+} from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
 import {
   markSessionUnspawned,
@@ -1185,6 +1190,16 @@ function App(): React.JSX.Element {
     setSettingsInitialAiConfigSection(null)
     setSettingsOpen(true)
   }
+
+  // A settings save that had to reload the window (e.g. adding a hub, #161)
+  // asks to land back on its tab.
+  useEffect(() => {
+    const tab = consumeSettingsReopen()
+    if (!tab) return
+    setSettingsInitialTab(tab)
+    setSettingsInitialAiConfigSection(null)
+    setSettingsOpen(true)
+  }, [])
 
   // Custom event listeners for settings
   useEffect(() => {

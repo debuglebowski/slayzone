@@ -68,7 +68,7 @@ vi.mock('@slayzone/transport/client', () => ({
     setBootSettings: () => Promise.resolve({ ok: true as const }),
     relaunch: () => Promise.resolve()
   },
-  useHubRegistryStore: { getState: () => ({ addHubs: vi.fn(), setTokens: vi.fn() }) },
+  useHubRegistryStore: { getState: () => ({ setTokens: vi.fn() }) },
   useFederationOrNull: () => federation,
   HubScope: ({ hubId, children }: any) => {
     renderingHubId = hubId

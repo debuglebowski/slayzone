@@ -786,6 +786,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/client/useGitDiffSelectionTurns.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
+  packages/domains/settings/src/client/settings-reopen.test.ts \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \

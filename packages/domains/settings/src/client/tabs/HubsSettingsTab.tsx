@@ -26,6 +26,7 @@ import {
   DialogFooter
 } from '@slayzone/ui'
 import { Trash2, RotateCw, Plus, X, Pencil, PlugZap, Star, MoreHorizontal } from 'lucide-react'
+import { requestSettingsReopen } from '../settings-reopen'
 import { ComputerActionsProvider } from './ComputerActions'
 import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
 
@@ -70,12 +71,11 @@ import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
  * client dials at boot, so those still require a relaunch — the "Save &
  * relaunch" button is the consent, mirroring the Server tab. A save that is a
  * PURE ADDITION (nothing else changed since the last reload/save) skips the
- * relaunch and pushes the new hub(s) into `useHubRegistryStore` instead — see
- * `save()`'s `isAddOnly` check. That live path exists because every consumer
- * below `FederatedRoot`/`FederationProvider` already resolves hubs reactively;
- * it's deliberately NOT extended to removal, since `FederationProvider`'s
- * per-hub `QueryClient` cache and the WS-client registry in `trpc.ts` have no
- * teardown path yet.
+ * app relaunch and only reloads the window — see `save()`'s `isAddOnly` check.
+ * A reload (not an in-place store push) is required because the renderer CSP
+ * is fixed per document load: only a fresh load admits the new hub's origin to
+ * `connect-src` (#161). The reload reopens Settings here so the user can sign
+ * in to the new hub straight away.
  */
 
 type ProbeState =
@@ -283,9 +283,10 @@ export function HubsSettingsTab() {
     })
     if (result.ok) {
       setPassword('')
-      // Pushes the freshly-stored token into the live registry too — if this
-      // hub was already live-added this session (see save()'s isAddOnly
-      // path), FederationProvider needs the token without a relaunch.
+      // Pushes the freshly-stored token into the live registry too — a hub
+      // added this session (see save()'s isAddOnly path) is already dialed
+      // after the window reload, and FederationProvider needs the token
+      // without a relaunch.
       await signedIn(hub.id)
     } else {
       setSignInState({ kind: 'fail', error: result.error })
@@ -464,9 +465,9 @@ export function HubsSettingsTab() {
 
       // A pure addition — every previously-saved remote is still present,
       // unchanged (id/url/label), only new ones appended, and nothing else
-      // (default hub, local toggle) changed — can go live without a
-      // relaunch. Anything else (remove/reorder/relabel-of-existing/toggle/
-      // default-change) still needs one, unchanged from before.
+      // (default hub, local toggle) changed — goes live with a window reload,
+      // no app relaunch. Anything else (remove/reorder/relabel-of-existing/
+      // toggle/default-change) still needs a relaunch, unchanged from before.
       const original = originalRef.current
       const isAddOnly =
         remotes.length > original.remotes.length &&
@@ -485,9 +486,10 @@ export function HubsSettingsTab() {
       })
 
       if (isAddOnly) {
-        useHubRegistryStore.getState().addHubs(remotes.slice(original.remotes.length))
-        originalRef.current = { remotes, defaultHubId, runLocalHub: effectiveRunLocal }
-        setDirty(false)
+        // The fresh document re-seeds the hub registry from the saved file and
+        // gets a CSP naming the new hub's origin (#161).
+        requestSettingsReopen('connections')
+        window.location.reload()
       } else {
         await electronBootstrap.relaunch()
         // Under Playwright relaunch is a no-op — reflect the saved state.
