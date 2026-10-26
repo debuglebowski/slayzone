@@ -51,6 +51,7 @@ import {
   isRateLimited,
   recordTaskOpen,
   isProjectLocked,
+  useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
@@ -544,7 +545,8 @@ function App(): React.JSX.Element {
   // Project lock guard — single chokepoint for task-open paths. Resolves the task's
   // project from `tasks` state, or accepts a `projectOverride` for freshly-created
   // tasks not yet in state (closure lag from setTasks).
-  const durationLocked = isProjectLocked(selectedProject)
+  // Reactive: re-renders when the lock expires or is overridden (unlock early / re-lock).
+  const { locked: durationLocked } = useProjectLockState(selectedProject)
   // Stable: it (and openTask below) reach every open task tab, and the task list it
   // reads changes constantly — a `tasks` dep would re-render all of them each time.
   const guardTaskOpen = useStableCallback(

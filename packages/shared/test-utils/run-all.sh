@@ -735,6 +735,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
+  packages/domains/projects/src/client/useProjectLockState.test.tsx \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \

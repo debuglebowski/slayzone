@@ -25,8 +25,8 @@ import { resolveRepoPath } from '@slayzone/projects/shared'
 import {
   ProjectLockPopover,
   ProjectLockScreen,
-  hasActiveLockOverride,
-  clearLockOverrides
+  clearLockOverrides,
+  useProjectLockState
 } from '@slayzone/projects'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import {
@@ -198,6 +198,7 @@ export function HomeDetail({
     setHomeGitDefaultTab,
     setHomePanelVisibility
   } = homePanel
+  const { overrideActive: lockOverrideActive } = useProjectLockState(selectedProject)
   return (
     <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
       {durationLocked && selectedProject?.lock_config ? (
@@ -239,7 +240,7 @@ export function HomeDetail({
               </div>
               {projects.length > 0 && !(projectPathMissing && selectedProjectId) && (
                 <div className="ml-auto flex items-center gap-1">
-                  {selectedProject && hasActiveLockOverride(selectedProject) && (
+                  {selectedProject && lockOverrideActive && (
                     <Button
                       variant="ghost"
                       size="sm"

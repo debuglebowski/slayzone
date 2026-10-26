@@ -17,7 +17,9 @@ export {
   overrideDurationLock,
   overrideScheduleLock,
   clearLockOverrides,
-  hasActiveLockOverride
+  hasActiveLockOverride,
+  useProjectLockState,
+  type ProjectLockState
 } from './useProjectLockGuard'
 export { ProjectLockPopover } from './ProjectLockPopover'
 export { ProjectLockScreen } from './ProjectLockScreen'
