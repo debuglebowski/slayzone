@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
@@ -20,6 +20,15 @@ const DEFAULT_STATE: AgentStatusState = {
 
 const SETTINGS_KEY = 'agentStatusPanelState'
 
+/** Stored JSON merged over the defaults; null when it does not parse (kept as-is then). */
+function parseStoredState(stored: string): AgentStatusState | null {
+  try {
+    return { ...DEFAULT_STATE, ...JSON.parse(stored) }
+  } catch {
+    return null
+  }
+}
+
 export function useAgentStatusState(): [
   AgentStatusState,
   (updates: Partial<AgentStatusState>) => void
@@ -31,15 +40,14 @@ export function useAgentStatusState(): [
   const storedQuery = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
   const stored = storedQuery.data
 
-  useEffect(() => {
-    if (stored) {
-      try {
-        setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }, [stored])
+  // Hydrate from the persisted value whenever it changes — adjusted during render.
+  // Starts as "not loaded" (undefined) so a value already cached at mount hydrates too.
+  const [hydratedFrom, setHydratedFrom] = useState<typeof stored>(undefined)
+  if (stored !== hydratedFrom) {
+    setHydratedFrom(stored)
+    const parsed = stored ? parseStoredState(stored) : null
+    if (parsed) setState(parsed)
+  }
 
   const updateState = useCallback(
     (updates: Partial<AgentStatusState>) => {

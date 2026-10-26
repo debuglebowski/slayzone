@@ -57,20 +57,26 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
     })
   )
 
-  const loadTask = useCallback(async () => {
-    try {
-      const detail = await fetchTaskDetail(taskId)
-      if (!detail) {
-        setError(`Task not found: ${taskId}`)
-        return
-      }
-      setError(null)
-      setData(detail)
-      document.title = `${detail.task.title} — SlayZone`
-    } catch (e) {
-      setError(String(e))
-    }
-  }, [taskId])
+  // Promise chain (not async/await) so every setState visibly runs after the
+  // fetch settles; `then(onFulfilled, onRejected)` keeps the single-tick timing.
+  const loadTask = useCallback(
+    (): Promise<void> =>
+      fetchTaskDetail(taskId).then(
+        (detail) => {
+          if (!detail) {
+            setError(`Task not found: ${taskId}`)
+            return
+          }
+          setError(null)
+          setData(detail)
+          document.title = `${detail.task.title} — SlayZone`
+        },
+        (e: unknown) => {
+          setError(String(e))
+        }
+      ),
+    [taskId]
+  )
 
   useEffect(() => {
     loadTask()

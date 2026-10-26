@@ -142,12 +142,29 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     setDiskChanged(false)
   }, [])
 
-  // Load on mount / relPath change. Cleanup flushes the OUTGOING relPath.
-  useEffect(() => {
+  // No target: clear the draft state on mount / target change — adjusted during
+  // render. The refs are still cleared in the load effect below (commit time, after
+  // the outgoing file's cleanup flush has read them).
+  const [targetSyncedFor, setTargetSyncedFor] = useState<{
+    projectPath: string | null
+    relPath: string | null
+  } | null>(null)
+  if (
+    targetSyncedFor === null ||
+    targetSyncedFor.projectPath !== projectPath ||
+    targetSyncedFor.relPath !== relPath
+  ) {
+    setTargetSyncedFor({ projectPath, relPath })
     if (!projectPath || !relPath) {
       setContentState('')
       setOriginalContent('')
       setDiskChanged(false)
+    }
+  }
+
+  // Load on mount / relPath change. Cleanup flushes the OUTGOING relPath.
+  useEffect(() => {
+    if (!projectPath || !relPath) {
       contentRef.current = ''
       originalContentRef.current = ''
       return

@@ -74,11 +74,12 @@ export function FeedbackDialog(): React.JSX.Element {
     setThreads(rows)
   }, [trpcClient])
 
+  // Promise chain (not async/await) so the setState visibly runs after the fetch.
   const loadMessages = useCallback(
-    async (threadId: string) => {
-      const rows = await trpcClient.feedback.getMessages.query({ threadId })
-      setMessages(rows)
-    },
+    (threadId: string): Promise<void> =>
+      trpcClient.feedback.getMessages.query({ threadId }).then((rows) => {
+        setMessages(rows)
+      }),
     [trpcClient]
   )
 
@@ -92,11 +93,19 @@ export function FeedbackDialog(): React.JSX.Element {
     }
   }, [open, loadThreads])
 
+  // Selecting a thread leaves compose-new mode — adjusted during render on the
+  // same trigger as the load effect below.
+  const [composeSyncedFor, setComposeSyncedFor] = useState({ selectedId, loadMessages })
+  if (
+    composeSyncedFor.selectedId !== selectedId ||
+    composeSyncedFor.loadMessages !== loadMessages
+  ) {
+    setComposeSyncedFor({ selectedId, loadMessages })
+    if (selectedId) setComposingNew(false)
+  }
+
   useEffect(() => {
-    if (selectedId) {
-      loadMessages(selectedId)
-      setComposingNew(false)
-    }
+    if (selectedId) loadMessages(selectedId)
   }, [selectedId, loadMessages])
 
   // Auto-scroll to bottom when messages change

@@ -20,9 +20,12 @@ export function ArtifactPicker({ items, query, coords, onSelect, onClose }: Arti
 
   const filtered = items.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()))
 
-  useEffect(() => {
+  // Reset the highlight when the query changes — adjusted during render.
+  const [prevQuery, setPrevQuery] = useState(query)
+  if (query !== prevQuery) {
+    setPrevQuery(query)
     setSelectedIndex(0)
-  }, [query])
+  }
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

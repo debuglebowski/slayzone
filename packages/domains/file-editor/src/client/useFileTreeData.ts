@@ -83,12 +83,16 @@ export function useFileTreeData({
   }, [refreshKey, refetchGitStatus])
 
   // Sync query result into the gitStatus Map, gated on isGitRepo (preserves the
-  // old effect's "only set when a repo" + swallow-error semantics).
-  useEffect(() => {
+  // old effect's "only set when a repo" + swallow-error semantics). Adjusted
+  // during render whenever the result changes; starts as "no result yet" so a
+  // result already cached at mount syncs too.
+  const [gitStatusSyncedFrom, setGitStatusSyncedFrom] =
+    useState<typeof gitStatusQuery.data>(undefined)
+  if (gitStatusQuery.data !== gitStatusSyncedFrom) {
     const result = gitStatusQuery.data
-    if (!result || !result.isGitRepo) return
-    setGitStatus(new Map(Object.entries(result.files)))
-  }, [gitStatusQuery.data])
+    setGitStatusSyncedFrom(result)
+    if (result && result.isGitRepo) setGitStatus(new Map(Object.entries(result.files)))
+  }
 
   const dirGitStatus = useMemo(() => {
     const dirs = new Map<string, GitFileStatus>()

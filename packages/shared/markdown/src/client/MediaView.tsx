@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
 import { Frame, Expand } from 'lucide-react'
 import { IconButton, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { usePanZoom, type PanZoomControls, type PanZoomTransform } from './usePanZoom'
@@ -32,7 +32,10 @@ function useFitFullMode(
 ): FitFullMode {
   const [mode, setMode] = useState<'fit' | 'full'>('fit')
   const modeRef = useRef(mode)
-  modeRef.current = mode
+  // Synced at commit (before layout/passive effects); read only by effects + callbacks.
+  useInsertionEffect(() => {
+    modeRef.current = mode
+  })
 
   const computeFit = useCallback((): PanZoomTransform | null => {
     const host = hostRef.current
@@ -176,7 +179,10 @@ function SvgVectorView({
 }) {
   const processed = useMemo(() => preprocessSvg(svg), [svg])
   const intrinsicRef = useRef<{ w: number; h: number } | null>(processed)
-  intrinsicRef.current = processed
+  // Synced at commit (before layout/passive effects); read only by effects + callbacks.
+  useInsertionEffect(() => {
+    intrinsicRef.current = processed
+  })
   const svgWrapperRef = useRef<HTMLDivElement | null>(null)
 
   const applyToSvg = useCallback((t: PanZoomTransform) => {

@@ -1,6 +1,5 @@
 {
   "packages/apps/app/src/renderer/src/components/RemoteConfigScreen.tsx": ["RemoteConfigScreen"],
-  "packages/domains/agent-panels/src/agent-status/useIdleTasks.ts": ["useIdleTasks"],
   "packages/domains/agent-turns/src/client/useAgentTurns.ts": ["useAgentTurns"],
   "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
   "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
@@ -127,8 +126,6 @@
   "packages/shared/editor/src/rich-text-editor.tsx": ["RichTextEditor"],
   "packages/shared/editor/src/use-click-to-focus.ts": ["useClickToFocus"],
   "packages/shared/editor/src/use-image-paste-drop.ts": ["useImagePasteDrop"],
-  "packages/shared/markdown/src/client/MediaView.tsx": ["useFitFullMode", "SvgVectorView"],
   "packages/shared/markdown/src/client/MermaidBlock.tsx": ["MermaidBlock"],
-  "packages/shared/ui/src/calendar.tsx": ["Calendar"],
-  "packages/shared/ui/src/use-undo.ts": ["UndoProvider"]
+  "packages/shared/ui/src/calendar.tsx": ["Calendar"]
 }

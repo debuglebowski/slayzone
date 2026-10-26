@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useStableCallback } from '@slayzone/ui'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
 import { isAliveTerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
@@ -105,32 +106,33 @@ export function useIdleTasks(
   })
   const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([
-      trpcClient.pty.list.query(),
-      trpcClient.pty.chatList.query()
-    ])
-    setSnapshot({ rows: [...ptys.map(ptyToRow), ...chats.map(chatToRow)], at: Date.now() })
-  }, [trpcClient])
+  // Promise chain (not async/await): the setState visibly runs after the fetch.
+  const refresh = useCallback(
+    (): Promise<void> =>
+      Promise.all([trpcClient.pty.list.query(), trpcClient.pty.chatList.query()]).then(
+        ([ptys, chats]) => {
+          setSnapshot({ rows: [...ptys.map(ptyToRow), ...chats.map(chatToRow)], at: Date.now() })
+        }
+      ),
+    [trpcClient]
+  )
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
   // pty:state-change carries both PTY and chat transitions (chat-transport-manager
-  // broadcasts on the same channel via session-registry).
-  useSubscription(
-    trpc.pty.onStateChange.subscriptionOptions(undefined, {
-      onData: ({ newState }) => {
-        refresh()
-        // Threshold means a freshly-idle session won't appear yet — recheck once threshold passes.
-        if (newState === 'idle') {
-          if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
-          recheckTimerRef.current = setTimeout(refresh, IDLE_AGE_RECHECK_DELAY_MS)
-        }
-      }
-    })
-  )
+  // broadcasts on the same channel via session-registry). Stable callback: reads
+  // the recheck timer ref outside render (useSubscription calls the latest onData).
+  const onStateChange = useStableCallback(({ newState }: { newState: string }) => {
+    refresh()
+    // Threshold means a freshly-idle session won't appear yet — recheck once threshold passes.
+    if (newState === 'idle') {
+      if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
+      recheckTimerRef.current = setTimeout(refresh, IDLE_AGE_RECHECK_DELAY_MS)
+    }
+  })
+  useSubscription(trpc.pty.onStateChange.subscriptionOptions(undefined, { onData: onStateChange }))
 
   useEffect(() => {
     return () => {
@@ -175,13 +177,15 @@ export function useActiveSessionTaskIds(): Set<string> {
   const trpcClient = useTRPCClient()
   const [taskIds, setTaskIds] = useState<Set<string>>(new Set())
 
-  const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([
-      trpcClient.pty.list.query(),
-      trpcClient.pty.chatList.query()
-    ])
-    setTaskIds(buildActiveSessionTaskIds(ptys, chats))
-  }, [trpcClient])
+  const refresh = useCallback(
+    (): Promise<void> =>
+      Promise.all([trpcClient.pty.list.query(), trpcClient.pty.chatList.query()]).then(
+        ([ptys, chats]) => {
+          setTaskIds(buildActiveSessionTaskIds(ptys, chats))
+        }
+      ),
+    [trpcClient]
+  )
 
   useEffect(() => {
     refresh()

@@ -561,8 +561,8 @@ export function HomeView(): React.JSX.Element {
     ? `__global-agent-panel:${selectedProjectId}:${globalAgentPanelState.sessionIndex}`
     : null
   // Keep the panel mounted once opened so the terminal session survives toggling.
-  const globalAgentMountedRef = useRef(false)
-  if (globalAgentPanelState.isOpen) globalAgentMountedRef.current = true
+  const [globalAgentMounted, setGlobalAgentMounted] = useState(globalAgentPanelState.isOpen)
+  if (globalAgentPanelState.isOpen && !globalAgentMounted) setGlobalAgentMounted(true)
 
   const handleAgentNewSession = useCallback(async () => {
     if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
@@ -621,11 +621,11 @@ export function HomeView(): React.JSX.Element {
   // A dead tRPC WebSocket leaves the board query PENDING forever (wsLink retries,
   // it never errors). Escalate a long pending state to a connection warning.
   const [stalled, setStalled] = useState(false)
+  // Leaving `pending` clears the flag — adjusted during render (it is only read
+  // while pending, so this never changes what renders).
+  if (boardStatus !== 'pending' && stalled) setStalled(false)
   useEffect(() => {
-    if (boardStatus !== 'pending') {
-      setStalled(false)
-      return
-    }
+    if (boardStatus !== 'pending') return
     const t = setTimeout(() => setStalled(true), 5000)
     return () => clearTimeout(t)
   }, [boardStatus])
@@ -651,7 +651,7 @@ export function HomeView(): React.JSX.Element {
   const currentProjectName = projects.find((p) => p.id === selectedProjectId)?.name
   const currentProjectPath = projects.find((p) => p.id === selectedProjectId)?.path ?? ''
   const globalAgentVisible =
-    agentSessionId !== null && globalAgentMountedRef.current && globalAgentPanelState.isOpen
+    agentSessionId !== null && globalAgentMounted && globalAgentPanelState.isOpen
 
   // Header action bar — fork-only TerminalStatusButton + the shared
   // AppHeaderActions (project-tabs / zen / explode / scratch terminal / agent
@@ -842,7 +842,7 @@ export function HomeView(): React.JSX.Element {
           the terminal session persists across toggles. Floating-window controls
           are omitted (no floating-window infra in the fork) → the panel renders
           without the detach dropdown. */}
-      {agentSessionId !== null && globalAgentMountedRef.current && (
+      {agentSessionId !== null && globalAgentMounted && (
         <>
           {globalAgentVisible && (
             <ResizeHandle

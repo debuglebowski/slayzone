@@ -14,13 +14,12 @@ export function usePresence(
   exitMs = 200
 ): { mounted: boolean; state: 'open' | 'closed' } {
   const [mounted, setMounted] = useState(active)
+  // Mount as soon as `active` turns on — adjusted during render, so the content
+  // appears in the same commit instead of one effect pass later.
+  if (active && !mounted) setMounted(true)
 
   useEffect(() => {
-    if (active) {
-      setMounted(true)
-      return
-    }
-    if (!mounted) return
+    if (active || !mounted) return
     const t = setTimeout(() => setMounted(false), exitMs)
     return () => clearTimeout(t)
   }, [active, mounted])

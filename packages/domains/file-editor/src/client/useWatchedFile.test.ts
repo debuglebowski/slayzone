@@ -411,6 +411,55 @@ describe('useWatchedFile', () => {
     expect(watchController.everEnabled).toBe(false)
   })
 
+  it('target cleared while dirty → outgoing file flushed, state reset to empty + clean', async () => {
+    const read = vi.fn(async () => 'A-disk')
+    const save = vi.fn(async (_content: string) => undefined)
+
+    const { result, rerender } = renderHook(
+      ({ rel }: { rel: string | null }) =>
+        useWatchedFile({ projectPath: ROOT, relPath: rel, read, save, debounceMs: 5000 }),
+      { initialProps: { rel: 'A.md' as string | null }, wrapper }
+    )
+    await flushPromises()
+    expect(result.current.content).toBe('A-disk')
+
+    act(() => {
+      result.current.setContent('A-edited')
+    })
+    // Dirty + a disk change while dirty → diskChanged banner state is set too.
+    act(() => {
+      watchController.emit(ROOT, 'A.md')
+    })
+    expect(result.current.dirty).toBe(true)
+    expect(result.current.diskChanged).toBe(true)
+
+    rerender({ rel: null })
+    await flushPromises()
+
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledWith('A-edited')
+    expect(result.current.content).toBe('')
+    expect(result.current.dirty).toBe(false)
+    expect(result.current.diskChanged).toBe(false)
+
+    // No stray debounce save, and flushNow without a target stays a no-op.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+    })
+    await flushPromises()
+    await act(async () => {
+      await result.current.flushNow()
+    })
+    expect(save).toHaveBeenCalledTimes(1)
+
+    // Re-targeting loads the file fresh and clean.
+    rerender({ rel: 'A.md' })
+    await flushPromises()
+    expect(result.current.content).toBe('A-disk')
+    expect(result.current.dirty).toBe(false)
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
   it('own save does not trigger diskChanged banner', async () => {
     const read = vi.fn(async () => 'v1')
     // save does nothing — but the external watcher will fire as an "echo"

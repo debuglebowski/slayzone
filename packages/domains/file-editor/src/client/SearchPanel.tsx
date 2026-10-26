@@ -56,15 +56,37 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
     inputRef.current?.focus()
   }, [])
 
-  // Debounced search
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
+  // Search inputs changed: clear (empty query) or show the spinner until the
+  // debounced search lands — adjusted during render, on the effect's own deps.
+  const [searchSyncedFor, setSearchSyncedFor] = useState({
+    query,
+    matchCase,
+    useRegex,
+    projectPath,
+    queryClient,
+    trpc
+  })
+  if (
+    searchSyncedFor.query !== query ||
+    searchSyncedFor.matchCase !== matchCase ||
+    searchSyncedFor.useRegex !== useRegex ||
+    searchSyncedFor.projectPath !== projectPath ||
+    searchSyncedFor.queryClient !== queryClient ||
+    searchSyncedFor.trpc !== trpc
+  ) {
+    setSearchSyncedFor({ query, matchCase, useRegex, projectPath, queryClient, trpc })
     if (!query.trim()) {
       setResults([])
       setSearching(false)
-      return
+    } else {
+      setSearching(true)
     }
-    setSearching(true)
+  }
+
+  // Debounced search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!query.trim()) return
     debounceRef.current = setTimeout(() => {
       void runSearch(
         () =>

@@ -209,3 +209,108 @@ describe('MediaView raster Fit/Full', () => {
     vi.doUnmock('@slayzone/ui')
   })
 })
+
+describe('MediaView SVG Fit/Full', () => {
+  it('refits on content change + resize only while in fit mode, with the new dims', async () => {
+    const calls: { x: number; y: number; scale: number }[] = []
+    const roCallbacks: Array<() => void> = []
+    const realRO = globalThis.ResizeObserver
+    ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      cb: () => void
+      constructor(cb: () => void) {
+        this.cb = cb
+      }
+      observe() {
+        roCallbacks.push(this.cb)
+      }
+      disconnect() {
+        const i = roCallbacks.indexOf(this.cb)
+        if (i >= 0) roCallbacks.splice(i, 1)
+      }
+    }
+    vi.resetModules()
+    vi.doMock('./usePanZoom', async () => {
+      const React = await import('react')
+      return {
+        usePanZoom: () => {
+          const hostRef = React.useRef<HTMLDivElement | null>(null)
+          const contentRef = React.useRef<HTMLDivElement | null>(null)
+          const controls = React.useMemo(
+            () => ({
+              setTransform: (t: { x: number; y: number; scale: number }) => {
+                calls.push(t)
+              },
+              getTransform: () => ({ x: 0, y: 0, scale: 1 }),
+              zoomIn: () => {},
+              zoomOut: () => {},
+              reset: () => {},
+              fit: () => {}
+            }),
+            []
+          )
+          return { hostRef, contentRef, controls }
+        }
+      }
+    })
+    vi.doMock('@slayzone/ui', () => ({
+      IconButton: (props: {
+        onClick?: () => void
+        'aria-label': string
+        children?: React.ReactNode
+      }) => (
+        <button aria-label={props['aria-label']} onClick={props.onClick}>
+          {props.children}
+        </button>
+      ),
+      Tooltip: (props: { children?: React.ReactNode }) => <>{props.children}</>,
+      TooltipTrigger: (props: { children?: React.ReactNode }) => <>{props.children}</>,
+      TooltipContent: () => null
+    }))
+    const { MediaView: Mocked } = await import('./MediaView')
+    const svg = (w: number, h: number) => ({
+      kind: 'svg' as const,
+      svg: `<svg viewBox="0 0 ${w} ${h}"/>`
+    })
+    const resize = () =>
+      act(() => {
+        for (const cb of [...roCallbacks]) cb()
+      })
+
+    // Host = 800×600 (stubBCR).
+    const { container, rerender } = render(<Mocked source={svg(100, 50)} />)
+    // Mount refit: scale = min(8, 12) = 8 → 800×400 centered.
+    expect(calls.at(-1)).toEqual({ x: 0, y: 100, scale: 8 })
+
+    // Content change while fitting refits against the NEW intrinsic dims.
+    rerender(<Mocked source={svg(200, 100)} />)
+    expect(calls.at(-1)).toEqual({ x: 0, y: 100, scale: 4 })
+    const n1 = calls.length
+    resize()
+    expect(calls.length).toBe(n1 + 1)
+    expect(calls.at(-1)).toEqual({ x: 0, y: 100, scale: 4 })
+
+    // Full mode: neither resize nor a content change refits.
+    act(() => {
+      ;(container.querySelector('[aria-label="Full size"]') as HTMLButtonElement).click()
+    })
+    expect(calls.at(-1)).toEqual({ x: 300, y: 250, scale: 1 })
+    const n2 = calls.length
+    resize()
+    rerender(<Mocked source={svg(400, 300)} />)
+    resize()
+    expect(calls.length).toBe(n2)
+
+    // Back to fit: uses the latest content's dims; resize refits again.
+    act(() => {
+      ;(container.querySelector('[aria-label="Fit to view"]') as HTMLButtonElement).click()
+    })
+    expect(calls.at(-1)).toEqual({ x: 0, y: 0, scale: 2 })
+    const n3 = calls.length
+    resize()
+    expect(calls.length).toBe(n3 + 1)
+
+    vi.doUnmock('./usePanZoom')
+    vi.doUnmock('@slayzone/ui')
+    ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = realRO
+  })
+})

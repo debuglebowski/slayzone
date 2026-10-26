@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import {
@@ -59,7 +59,18 @@ export function AutomationDialog({
   }, [modesQuery.data, modesQuery.isError])
   const providersLoaded = open && (modesQuery.isSuccess || modesQuery.isError)
 
-  useEffect(() => {
+  // Load the form from `automation` (or reset it) on mount and whenever
+  // `automation` / `open` change — adjusted during render, not in an effect.
+  const [formSyncedFor, setFormSyncedFor] = useState<{
+    automation: typeof automation
+    open: boolean
+  } | null>(null)
+  if (
+    formSyncedFor === null ||
+    formSyncedFor.automation !== automation ||
+    formSyncedFor.open !== open
+  ) {
+    setFormSyncedFor({ automation, open })
     if (automation) {
       setName(automation.name)
       setDescription(automation.description ?? '')
@@ -75,7 +86,7 @@ export function AutomationDialog({
       setActions([{ ...EMPTY_RUN_COMMAND }])
       setCatchupOnStart(true)
     }
-  }, [automation, open])
+  }
 
   const handleSave = () => {
     if (!name.trim()) return

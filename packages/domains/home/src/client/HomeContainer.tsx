@@ -1,12 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-  type Ref
-} from 'react'
+import React, { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { useUndo } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
@@ -262,9 +254,18 @@ function HomeContainerImpl({
   // Inline project-name editing (rename via projects.update).
   const projectNameInputRef = useRef<HTMLTextAreaElement>(null)
   const [projectNameValue, setProjectNameValue] = useState(selectedProject?.name ?? '')
-  useEffect(() => {
+  // Re-seed the draft when the project (or its saved name) changes — adjusted during render.
+  const [projectNameSyncedFor, setProjectNameSyncedFor] = useState({
+    id: selectedProject?.id,
+    name: selectedProject?.name
+  })
+  if (
+    projectNameSyncedFor.id !== selectedProject?.id ||
+    projectNameSyncedFor.name !== selectedProject?.name
+  ) {
+    setProjectNameSyncedFor({ id: selectedProject?.id, name: selectedProject?.name })
     setProjectNameValue(selectedProject?.name ?? '')
-  }, [selectedProject?.id, selectedProject?.name])
+  }
   const handleProjectNameSave = useCallback(async () => {
     const name = projectNameValue.trim()
     if (!selectedProject || !name || name === selectedProject.name) return

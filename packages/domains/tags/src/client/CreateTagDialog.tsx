@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { Tag } from '@slayzone/tags/shared'
@@ -51,7 +51,13 @@ export function CreateTagDialog({
   const [name, setName] = useState('')
   const [selected, setSelected] = useState(DEFAULT_PRESET)
 
-  useEffect(() => {
+  // Seed the form whenever the dialog opens or its tag changes (and on mount) —
+  // adjusted during render, not in an effect.
+  const [formSyncedFor, setFormSyncedFor] = useState<{ open: boolean; tag: typeof tag } | null>(
+    null
+  )
+  if (formSyncedFor === null || formSyncedFor.open !== open || formSyncedFor.tag !== tag) {
+    setFormSyncedFor({ open, tag })
     if (open) {
       setName(tag?.name ?? '')
       if (tag) {
@@ -61,7 +67,7 @@ export function CreateTagDialog({
         setSelected(DEFAULT_PRESET)
       }
     }
-  }, [open, tag])
+  }
 
   const handleSubmit = async () => {
     if (!name.trim()) return

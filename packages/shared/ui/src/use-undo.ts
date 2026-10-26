@@ -3,7 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
-  useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode
 } from 'react'
@@ -110,11 +110,9 @@ function createUndoStack(): UndoStackAPI {
 const UndoContext = createContext<UndoStackAPI | null>(null)
 
 export function UndoProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const stackRef = useRef<UndoStackAPI | null>(null)
-  if (!stackRef.current) {
-    stackRef.current = createUndoStack()
-  }
-  return createElement(UndoContext.Provider, { value: stackRef.current }, children)
+  // One stack per provider instance (lazy initializer runs on mount only).
+  const [stack] = useState(createUndoStack)
+  return createElement(UndoContext.Provider, { value: stack }, children)
 }
 
 /**

@@ -307,11 +307,10 @@ export function AppDialogs({
   // explicitly reopened from the checklist. Once mounted it stays mounted so
   // close/reopen animations work (mirrors canonical App.tsx).
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(false)
+  // Latch on as soon as the store opens it — adjusted during render.
+  if (onboardingOpen && !shouldMountOnboarding) setShouldMountOnboarding(true)
   useEffect(() => {
-    if (onboardingOpen) {
-      setShouldMountOnboarding(true)
-      return
-    }
+    if (onboardingOpen) return
     let cancelled = false
     void trpcClient.settings.get.query({ key: 'onboarding_completed' }).then((v) => {
       if (!cancelled && v !== 'true') setShouldMountOnboarding(true)

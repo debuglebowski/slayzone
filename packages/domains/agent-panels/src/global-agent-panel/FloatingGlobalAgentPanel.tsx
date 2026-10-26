@@ -43,15 +43,21 @@ export function FloatingGlobalAgentPanel() {
   // Terminal state from the reactive store (hydrates this renderer on wire).
   const terminalState = useSessionState(session?.sessionId ?? '')
 
-  const loadSessionAndConfig = useCallback(async () => {
-    const data =
-      (await trpcClient.app.floatingAgent.getSession.query()) as FloatingSessionPayload | null
-    if (data)
-      setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-    const config =
-      (await trpcClient.app.floatingAgent.getConfig.query()) as FloatingConfigPayload | null
-    if (config) setStyle(config.style as 'widget' | 'icon')
-  }, [trpcClient])
+  // Promise chain (not async/await) so every setState visibly runs after its
+  // fetch. getConfig is chained directly (not returned) to keep the same tick.
+  const loadSessionAndConfig = useCallback(
+    (): Promise<void> =>
+      trpcClient.app.floatingAgent.getSession.query().then((rawSession) => {
+        const data = rawSession as FloatingSessionPayload | null
+        if (data)
+          setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
+        return trpcClient.app.floatingAgent.getConfig.query().then((rawConfig) => {
+          const config = rawConfig as FloatingConfigPayload | null
+          if (config) setStyle(config.style as 'widget' | 'icon')
+        })
+      }),
+    [trpcClient]
+  )
 
   useEffect(() => {
     void loadSessionAndConfig()

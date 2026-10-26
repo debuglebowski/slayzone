@@ -47,6 +47,14 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     trpc.app.meta.getVersion.queryOptions(undefined, { enabled: initDone })
   )
 
+  // Adopt the persisted tier once, the first time it resolves — adjusted during
+  // render (same once-only trigger as the init sequence below).
+  const [tierHydrated, setTierHydrated] = useState(false)
+  if (!tierHydrated && tierSetting.isSuccess) {
+    setTierHydrated(true)
+    setTier(tierSetting.data === 'opted_in' ? 'opted_in' : 'anonymous')
+  }
+
   // Init sequence — runs exactly once, after the persisted tier resolves.
   useEffect(() => {
     if (initializedRef.current) return
@@ -56,7 +64,6 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     performance.mark('sz:telemetry:start')
     const stored = tierSetting.data
     const t: TelemetryTier = stored === 'opted_in' ? 'opted_in' : 'anonymous'
-    setTier(t)
     void (async () => {
       await initTelemetry(t)
       performance.mark('sz:telemetry:end')

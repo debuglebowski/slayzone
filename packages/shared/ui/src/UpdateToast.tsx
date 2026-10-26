@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Download, X } from 'lucide-react'
 import { usePresence } from './use-presence'
 
@@ -16,9 +16,7 @@ export function UpdateToast({
   const { mounted, state } = usePresence(!!version)
   // Hold the last non-null version so text stays put during the exit animation.
   const [lastVersion, setLastVersion] = useState(version)
-  useEffect(() => {
-    if (version) setLastVersion(version)
-  }, [version])
+  if (version && version !== lastVersion) setLastVersion(version)
 
   if (!mounted) return null
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Globe, X } from 'lucide-react'
 import { usePresence } from './use-presence'
 
@@ -16,9 +16,7 @@ export function DevServerToast({
   const { mounted, state } = usePresence(!!url)
   // Hold the last non-null url so text stays put during the exit animation.
   const [lastUrl, setLastUrl] = useState(url)
-  useEffect(() => {
-    if (url) setLastUrl(url)
-  }, [url])
+  if (url && url !== lastUrl) setLastUrl(url)
 
   if (!mounted) return null
 

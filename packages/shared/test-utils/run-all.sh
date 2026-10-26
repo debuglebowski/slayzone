@@ -741,6 +741,16 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/ai-config/src/client/state-sync-components.test.tsx \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
   packages/domains/settings/src/client/UserSettingsDialog.test.tsx \
+  packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
+  packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
+  packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
+  packages/domains/automations/src/client/automation-dialog/AutomationDialog.test.tsx \
+  packages/domains/file-editor/src/client/SearchPanel.test.tsx \
+  packages/domains/file-editor/src/client/useFileTreeData.test.tsx \
+  packages/domains/onboarding/src/client/CliInstallStep.test.tsx \
+  packages/domains/tags/src/client/CreateTagDialog.test.tsx \
+  packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
+  packages/shared/editor/src/ArtifactPicker.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion } from 'motion/react'
 import { Button } from '@slayzone/ui'
 import { useTRPC } from '@slayzone/transport/client'
@@ -15,9 +15,13 @@ export function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.El
   const installMutation = useMutation(trpc.app.meta.installCli.mutationOptions())
   const installing = installMutation.isPending
 
-  useEffect(() => {
+  // Mirror each new status result into `installed` (handleInstall also sets it) —
+  // adjusted during render. Starts as "no result yet" so a cached result syncs at mount.
+  const [statusSyncedFrom, setStatusSyncedFrom] = useState<typeof statusQuery.data>(undefined)
+  if (statusQuery.data !== statusSyncedFrom) {
+    setStatusSyncedFrom(statusQuery.data)
     if (statusQuery.data) setInstalled(statusQuery.data.installed)
-  }, [statusQuery.data])
+  }
 
   const handleInstall = async () => {
     setMessage('')

@@ -57,12 +57,16 @@ export function useLeaderboardController(auth: LeaderboardAuthState) {
     })
   }, [auth.isAuthenticated, syncViewerProfile])
 
-  useEffect(() => {
-    if (auth.isAuthenticated && viewer) return
+  // No signed-in viewer → drop the GitHub fallback identity. Adjusted during render
+  // (only resolveGithubProfile below sets these, and only while there is a viewer).
+  if (
+    !(auth.isAuthenticated && viewer) &&
+    (resolvedGithubLogin !== null || resolvedGithubAvatar !== null || resolvedGithubUrl !== null)
+  ) {
     setResolvedGithubLogin(null)
     setResolvedGithubAvatar(null)
     setResolvedGithubUrl(null)
-  }, [auth.isAuthenticated, viewer])
+  }
 
   useEffect(() => {
     let cancelled = false
