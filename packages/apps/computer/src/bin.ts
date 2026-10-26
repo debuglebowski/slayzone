@@ -31,6 +31,15 @@ import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { ENV_VARS, ignoredCertPinNotices, loadComputerConfig } from './config'
 import { startComputer } from './main'
+import { watchParent } from './parent-watch'
+
+/**
+ * How long a SUPERVISED computer may take, from the start of its stop, to exit
+ * before it forces the exit itself. Above the supervisor's SIGTERM grace (3s): with
+ * the app alive its SIGKILL comes first; this is what still ends the computer once
+ * the app is gone.
+ */
+const SUPERVISED_STOP_DEADLINE_MS = 5_000
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -127,12 +136,16 @@ async function maybeInteractiveSetup(): Promise<{
 }
 
 async function main(): Promise<void> {
+  // Started by the desktop app (local-computer-supervisor.ts), which owns this
+  // computer's env, root and lifetime.
+  const supervised = process.env.SLAYZONE_SUPERVISED === '1'
+
   // ROOT anchoring (standalone only): a bare `slayzone-computer` anchors its
   // computer.config.json + credential store to the launch dir. Seed BEFORE loadComputerConfig
   // (which reads <ROOT>/computer.config.json via getSlayzoneHomeDir). Skipped when
   // supervised — the Electron host supplies the computer's env in full. Operator
   // env still wins (explicit SLAYZONE_ROOT respected).
-  if (process.env.SLAYZONE_SUPERVISED !== '1' && !process.env.SLAYZONE_ROOT) {
+  if (!supervised && !process.env.SLAYZONE_ROOT) {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
 
@@ -191,7 +204,7 @@ async function main(): Promise<void> {
   // Skipped when SUPERVISED: the Electron host installs the very same files from
   // the very same shared installers during its own boot, so doing it again here
   // would be two writers racing for no gain.
-  if (process.env.SLAYZONE_SUPERVISED !== '1') {
+  if (!supervised) {
     const { installAgentHooks } = await import('./agent-hooks')
     await installAgentHooks(log)
   }
@@ -219,16 +232,37 @@ async function main(): Promise<void> {
   })
 
   let stopping = false
-  const gracefulStop = (signal: string): void => {
+  const gracefulStop = (why: string): void => {
     if (stopping) return
     stopping = true
-    log(`received ${signal}, stopping`)
+    log(why)
+    // Supervised: bounded. A stop ends by the event loop draining, so a stop that
+    // hangs — or completes but leaves a live handle behind (d468275b5: an fs
+    // watch) — keeps the process alive. While the app lives, its supervisor
+    // SIGKILLs after a grace period; once the app is gone nothing would, and the
+    // computer would be orphaned with every agent pty still under it. Unref'd: a
+    // clean stop still exits the moment the loop drains.
+    if (supervised) {
+      setTimeout(() => {
+        log(`still running ${SUPERVISED_STOP_DEADLINE_MS}ms after stop began — forcing exit`)
+        process.exit(1)
+      }, SUPERVISED_STOP_DEADLINE_MS).unref()
+    }
     void handle.stop().then(() => {
       process.exitCode ??= 0
     })
   }
-  process.on('SIGINT', () => gracefulStop('SIGINT'))
-  process.on('SIGTERM', () => gracefulStop('SIGTERM'))
+  process.on('SIGINT', () => gracefulStop('received SIGINT, stopping'))
+  process.on('SIGTERM', () => gracefulStop('received SIGTERM, stopping'))
+
+  // A supervised computer must never outlive the app that spawned it. See
+  // parent-watch.ts for the signals and why each is needed. Standalone computers
+  // have no such parent and are untouched.
+  if (supervised) {
+    watchParent({
+      onParentDeath: (reason) => gracefulStop(`parent app is gone (${reason}), stopping`)
+    })
+  }
 }
 
 void main()

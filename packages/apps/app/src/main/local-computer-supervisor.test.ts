@@ -14,18 +14,30 @@
  * needs-re-enrollment latch), so the tests assert it clears both rather than
  * merely cycling a healthy child.
  *
+ * The third group pins `stop()` as the app's quit relies on it: it resolves only
+ * once the computer is GONE — every caller, and including a computer a restart
+ * was replacing — so an awaited quit cannot exit under a live computer.
+ *
  * Driven against a controllable fake computer script so exit codes, output tails
  * and backoff exhaustion are deterministic and fast. Timing constants are
  * shrunk through the additive `opts.timing` override (defaults unchanged in
  * production).
  *
+ * The last group is parent death, against the REAL built computer (rebuilt on
+ * demand): a supervised computer must never outlive its app — not when the app is
+ * SIGKILLed, not when it quits without waiting, not when a leaked handle keeps the
+ * computer's loop alive — while a standalone computer ignores its parent entirely.
+ *
  * Run with:
  *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
  *     packages/apps/app/src/main/local-computer-supervisor.test.ts
  */
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
+import * as net from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   startLocalComputer,
   type LocalComputerExitInfo,
@@ -74,8 +86,12 @@ process.stdout.write('fake-computer bye\\n')
 if (process.env.FAKE_STAY_ALIVE === '1') {
   // A long-lived computer, like the real one: only a signal ends it. SIGTERM is
   // handled explicitly so the supervisor's graceful-stop path is exercised
-  // rather than its SIGKILL fallback.
-  process.on('SIGTERM', function () { process.exit(0) })
+  // rather than its SIGKILL fallback — unless FAKE_IGNORE_SIGTERM asks for a
+  // computer whose stop never finishes (the orphan class: a handle that keeps a
+  // stopping computer's loop alive), which only SIGKILL ends.
+  process.on('SIGTERM', function () {
+    if (process.env.FAKE_IGNORE_SIGTERM !== '1') process.exit(0)
+  })
   setInterval(function () {}, 1000)
 } else {
   // Exit on a turn of the loop so the pipes flush first.
@@ -325,6 +341,486 @@ test('suspendRestarts: a computer that dies during app quit stays down', async (
     assertEq(ctx.permanentFailure, null, 'a quit-time death is not a permanent failure')
   } finally {
     await handle.stop()
+  }
+})
+
+// --- quit: stop() resolves only once the computer is gone --------------------
+
+/**
+ * True once `pid` no longer runs. A zombie counts as gone: an orphan that exited
+ * but has not been reaped by its new parent yet is not a running computer.
+ */
+function pidGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ESRCH'
+  }
+  try {
+    const stat = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
+    return stat.trim().startsWith('Z')
+  } catch {
+    return true // ps exits non-zero for a pid it cannot find
+  }
+}
+
+test('stop: resolves only once the computer is gone, SIGKILLing one that ignores SIGTERM', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 300 }
+  )
+  try {
+    await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+    const pid = handle.getPid()!
+    const started = Date.now()
+    await handle.stop()
+    assert(pidGone(pid), 'the computer is gone when stop() resolves')
+    assert(Date.now() - started >= 250, 'SIGTERM got its grace period before the SIGKILL')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('stop: a second caller waits for the same reap instead of returning early', async () => {
+  // will-quit and the quit watchdog can both reach stop(). Whichever comes second
+  // must not read "already stopping" as "gone" and let the app exit under a live
+  // computer.
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 300 }
+  )
+  await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+  const pid = handle.getPid()!
+  const first = handle.stop()
+  await handle.stop()
+  assert(pidGone(pid), 'the second stop() resolved only after the computer was gone')
+  await first
+})
+
+test('stop: during a restart, reaps the computer the restart was replacing', async () => {
+  // restart() detaches the outgoing computer before killing it, so `stop()` used to
+  // find no child and return at once — while the outgoing one was still inside its
+  // SIGTERM grace, and the app was free to exit before the SIGKILL landed.
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 300 },
+    true
+  )
+  await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+  const outgoing = handle.getPid()!
+  const restarting = handle.restart()
+  await handle.stop()
+  assert(pidGone(outgoing), 'the outgoing computer is gone when stop() resolves')
+  await restarting
+  await delay(100)
+  assertEq(handle.getPid(), null, 'the restart spawned no replacement after the stop')
+  assertEq(tokensSeenByChildren(ctx).length, 1, 'no second computer was ever spawned')
+})
+
+// --- parent death: the REAL built computer -----------------------------------
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const COMPUTER_DIR = path.resolve(HERE, '../../..', 'computer')
+const COMPUTER_BIN = path.join(COMPUTER_DIR, 'dist', 'bin.cjs')
+const SUPERVISOR_MODULE = path.join(HERE, 'local-computer-supervisor.ts')
+/** Must cover the computer's own SUPERVISED_STOP_DEADLINE_MS (5s) plus boot + reap. */
+const REAL_EXIT_BUDGET_MS = 12_000
+/**
+ * The real computer is fully up: logged from an async boot step, so the synchronous
+ * part of its main() — signal handlers and parent watch included — has run. (An
+ * earlier line can precede the SIGTERM handler, and a SIGTERM there just kills it.)
+ */
+const COMPUTER_BOOTED = 'agent-hook loopback relay listening'
+
+function newestMtime(dir: string): number {
+  let newest = 0
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    newest = Math.max(newest, entry.isDirectory() ? newestMtime(full) : fs.statSync(full).mtimeMs)
+  }
+  return newest
+}
+
+/** The supervisor runs dist/bin.cjs, so that is what is tested: (re)built when older than src. */
+let computerBuildChecked = false
+function ensureComputerBuilt(): void {
+  if (computerBuildChecked) return
+  const stale =
+    !fs.existsSync(COMPUTER_BIN) ||
+    newestMtime(path.join(COMPUTER_DIR, 'src')) > fs.statSync(COMPUTER_BIN).mtimeMs
+  if (stale) {
+    console.log('  … building the computer bundle (missing or older than its src)')
+    execFileSync('node', ['build.mjs'], { cwd: COMPUTER_DIR, stdio: 'inherit' })
+  }
+  computerBuildChecked = true
+}
+
+/**
+ * Preloaded into the real computer (NODE_OPTIONS=--require). Once its app is dead
+ * nothing reads the computer's stdout, so it is mirrored to a file; and the exit
+ * code is recorded: 0 = a clean stop, anything else = a crash or a forced exit.
+ */
+const COMPUTER_PROBE = `'use strict'
+const fs = require('node:fs')
+const write = process.stdout.write.bind(process.stdout)
+process.stdout.write = function (chunk, ...rest) {
+  try { fs.appendFileSync(process.env.PROBE_LOG_FILE, chunk) } catch (e) {}
+  return write(chunk, ...rest)
+}
+process.on('exit', function (code) {
+  try { fs.writeFileSync(process.env.PROBE_EXIT_FILE, String(code)) } catch (e) {}
+})
+// The d468275b5 class: a handle that keeps a stopping computer's loop alive forever.
+if (process.env.PROBE_LEAK === '1') setInterval(function () {}, 60000)
+`
+
+/**
+ * The desktop app, reduced to its supervisor: the REAL `startLocalComputer`, so the
+ * computer is spawned exactly as the app spawns it. On SIGTERM it "quits" the way
+ * the app used to: fire-and-forget `stop()`, then exit before the supervisor's
+ * SIGTERM→SIGKILL escalation can land.
+ */
+const FAKE_APP = `import { startLocalComputer } from '${pathToFileURL(SUPERVISOR_MODULE).href}'
+const handle = startLocalComputer({
+  execPath: process.execPath,
+  scriptPath: process.env.FAKE_APP_COMPUTER_BIN as string,
+  env: JSON.parse(process.env.FAKE_APP_COMPUTER_ENV as string),
+  logger: (line: string) => process.stdout.write(line + '\\n')
+})
+process.on('SIGTERM', () => {
+  handle.suspendRestarts()
+  void handle.stop()
+  setTimeout(() => process.exit(0), 500)
+})
+setInterval(() => {}, 1 << 30)
+`
+
+/**
+ * A bare parent that spawns the computer with a chosen stdio shape — for the cases
+ * the real supervisor never produces: a standalone computer logging to a file, and
+ * a stdin whose other end someone else holds (FAKE_PARENT_STDIN_PORT: a socket to
+ * a server in the test process), which the parent's death does not close — only
+ * the ppid poll can tell.
+ */
+const FAKE_PARENT = `'use strict'
+const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const net = require('node:net')
+const out = fs.openSync(process.env.FAKE_PARENT_OUT, 'a')
+function start(stdin) {
+  const c = spawn(process.execPath, [process.env.FAKE_APP_COMPUTER_BIN], {
+    env: Object.assign(JSON.parse(process.env.FAKE_APP_COMPUTER_ENV), { ELECTRON_RUN_AS_NODE: '1' }),
+    stdio: [stdin, out, out]
+  })
+  process.stdout.write('[fake-parent] spawned pid=' + c.pid + '\\n')
+}
+const port = Number(process.env.FAKE_PARENT_STDIN_PORT || '0')
+if (port) {
+  const sock = net.connect(port, '127.0.0.1', function () { start(sock) })
+} else {
+  start('pipe')
+}
+setInterval(function () {}, 1 << 30)
+`
+
+/**
+ * A server that accepts connections, holds them open and never answers.
+ *
+ * As the computer's hub: the computer sits in its handshake, QUIET — like a
+ * computer idling on a healthy hub, and unlike one in a reconnect loop, whose next
+ * log line would hit the dead app's stdout pipe and crash it (EPIPE), hiding an
+ * orphan behind an accidental exit.
+ *
+ * As the far end of the computer's stdin: an end this test process holds, so the
+ * parent's death cannot close it.
+ */
+async function startSilentServer(): Promise<{ port: number; close: () => void }> {
+  const sockets: net.Socket[] = []
+  const server = net.createServer((s) => {
+    s.on('error', () => {})
+    sockets.push(s)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  return {
+    port,
+    close: () => {
+      for (const s of sockets) s.destroy()
+      server.close()
+    }
+  }
+}
+
+/** Every SLAYZONE_ and ELECTRON_ var stripped: a supervised test runner leaks the real root. */
+function scrubbedEnv(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v == null || /^(SLAYZONE_|ELECTRON_)/.test(k) || k === 'NODE_OPTIONS') continue
+    out[k] = v
+  }
+  return out
+}
+
+type RealComputerRun = {
+  /** The process the computer believes is its app. */
+  parent: ChildProcess
+  computerPid: number
+  /** The computer's own stdout so far (mirrored by the probe). */
+  log: () => string
+  /** The computer's exit code, once it has exited on its own (null otherwise). */
+  exitCode: () => string | null
+  cleanup: () => void
+}
+
+async function startRealComputer(opts: {
+  parent: 'supervisor' | 'stdin-held-elsewhere' | 'standalone'
+  supervised: boolean
+  leak?: boolean
+}): Promise<RealComputerRun> {
+  ensureComputerBuilt()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-parent-death-'))
+  tmpDirs.push(dir)
+  fs.mkdirSync(path.join(dir, 'home'))
+  fs.mkdirSync(path.join(dir, 'root'))
+  const probe = path.join(dir, 'probe.cjs')
+  fs.writeFileSync(probe, COMPUTER_PROBE)
+  const logFile = path.join(dir, 'computer.log')
+  const exitFile = path.join(dir, 'computer.exit')
+  const hub = await startSilentServer()
+  const stdinHolder = opts.parent === 'stdin-held-elsewhere' ? await startSilentServer() : null
+  const computerEnv: Record<string, string> = {
+    ...scrubbedEnv(),
+    // Isolated: the computer's state, credentials and path-jail all live in `dir`.
+    HOME: path.join(dir, 'home'),
+    SLAYZONE_ROOT: path.join(dir, 'root'),
+    SLAYZONE_HUB_ADDRESS: `127.0.0.1:${hub.port}`,
+    SLAYZONE_HUB_JOIN_TOKEN: 'parent-death-test',
+    SLAYZONE_NONINTERACTIVE: '1',
+    ...(opts.supervised ? { SLAYZONE_SUPERVISED: '1' } : {}),
+    NODE_OPTIONS: `--require ${probe}`,
+    PROBE_LOG_FILE: logFile,
+    PROBE_EXIT_FILE: exitFile,
+    ...(opts.leak ? { PROBE_LEAK: '1' } : {})
+  }
+  const parentEnv: Record<string, string> = {
+    ...scrubbedEnv(),
+    ELECTRON_RUN_AS_NODE: '1',
+    FAKE_APP_COMPUTER_BIN: COMPUTER_BIN,
+    FAKE_APP_COMPUTER_ENV: JSON.stringify(computerEnv)
+  }
+  let parent: ChildProcess
+  if (opts.parent === 'supervisor') {
+    const script = path.join(dir, 'fake-app.mts')
+    fs.writeFileSync(script, FAKE_APP)
+    parent = spawn(process.execPath, ['--import', import.meta.resolve('tsx/esm'), script], {
+      env: parentEnv,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+  } else {
+    const script = path.join(dir, 'fake-parent.cjs')
+    fs.writeFileSync(script, FAKE_PARENT)
+    parent = spawn(process.execPath, [script], {
+      env: {
+        ...parentEnv,
+        FAKE_PARENT_OUT: path.join(dir, 'computer.out'),
+        ...(stdinHolder ? { FAKE_PARENT_STDIN_PORT: String(stdinHolder.port) } : {})
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+  }
+  let parentOut = ''
+  parent.stdout?.on('data', (c: Buffer) => (parentOut += c.toString()))
+  parent.stderr?.on('data', (c: Buffer) => (parentOut += c.toString()))
+
+  const read = (file: string): string => {
+    try {
+      return fs.readFileSync(file, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  let computerPid = 0
+  const cleanup = (): void => {
+    for (const pid of [computerPid, parent.pid]) {
+      if (pid && !pidGone(pid)) {
+        try {
+          process.kill(pid, 'SIGKILL')
+        } catch {
+          /* gone */
+        }
+      }
+    }
+    parent.stdin?.destroy()
+    hub.close()
+    stdinHolder?.close()
+  }
+  try {
+    await waitFor(
+      () => /spawned pid=\d+/.test(parentOut),
+      20_000,
+      `parent never spawned the computer — output: ${parentOut}`
+    )
+    computerPid = Number(/spawned pid=(\d+)/.exec(parentOut)![1])
+    await waitFor(
+      () => read(logFile).includes(COMPUTER_BOOTED),
+      20_000,
+      `computer never booted — log: ${read(logFile)} ${read(path.join(dir, 'computer.out'))} parent: ${parentOut}`
+    )
+  } catch (err) {
+    cleanup()
+    throw err
+  }
+  return {
+    parent,
+    computerPid,
+    log: () => read(logFile),
+    exitCode: () => (fs.existsSync(exitFile) ? read(exitFile) : null),
+    cleanup
+  }
+}
+
+/** {@link waitFor}, but a timeout carries the computer's log as it is THEN. */
+async function waitForRun(
+  run: RealComputerRun,
+  cond: () => boolean,
+  timeoutMs: number,
+  msg: string
+): Promise<void> {
+  await waitFor(cond, timeoutMs, msg).catch((err: unknown) => {
+    throw new Error(`${err instanceof Error ? err.message : String(err)} — log:\n${run.log()}`)
+  })
+}
+
+test('parent-death: a SIGKILLed app takes its supervised computer with it, cleanly', async () => {
+  const run = await startRealComputer({ parent: 'supervisor', supervised: true })
+  try {
+    // No false positive while the app lives: longer than one parent poll.
+    await delay(1_500)
+    assert(!pidGone(run.computerPid), 'the computer runs while its app is alive')
+    run.parent.kill('SIGKILL')
+    await waitForRun(
+      run,
+      () => pidGone(run.computerPid),
+      REAL_EXIT_BUDGET_MS,
+      'computer outlived its SIGKILLed app'
+    )
+    // 0, not 1: a clean stop that disposed its ptys, not a crash on the first
+    // write to the dead app's stdout pipe.
+    assertEq(run.exitCode(), '0', `the computer stopped cleanly — log:\n${run.log()}`)
+    assert(
+      /parent app is gone \(parent-(pipe-closed|output-closed|reparented|exited)\)/.test(run.log()),
+      `the computer said why it stopped — log:\n${run.log()}`
+    )
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: an app that quits without waiting cannot orphan a computer whose stop hangs', async () => {
+  // The reported orphan, end to end: the app SIGTERMs its computer and exits
+  // before the 3s SIGKILL escalation; the computer's stop never lets its loop
+  // drain (a leaked handle). Nothing is left to SIGKILL it — it must end itself.
+  const run = await startRealComputer({ parent: 'supervisor', supervised: true, leak: true })
+  try {
+    run.parent.kill('SIGTERM')
+    await waitForRun(
+      run,
+      () => run.log().includes('received SIGTERM'),
+      10_000,
+      "the computer never got the app's SIGTERM"
+    )
+    await waitForRun(
+      run,
+      () => pidGone(run.computerPid),
+      REAL_EXIT_BUDGET_MS,
+      'a stuck computer outlived the app that quit on it'
+    )
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: a SIGKILLed app is noticed even when stdin is held open elsewhere', async () => {
+  // Only the ppid/liveness poll can see this one: the stdin pipe outlives the app.
+  const run = await startRealComputer({ parent: 'stdin-held-elsewhere', supervised: true })
+  try {
+    run.parent.kill('SIGKILL')
+    await waitForRun(
+      run,
+      () => pidGone(run.computerPid),
+      REAL_EXIT_BUDGET_MS,
+      'computer outlived its app with stdin still open'
+    )
+    assert(
+      /parent app is gone \(parent-(reparented|exited)\)/.test(run.log()),
+      `the parent poll noticed — log:\n${run.log()}`
+    )
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: a standalone computer ignores its parent dying', async () => {
+  // `slay computer`, a launchd/systemd unit, a shell: no app owns it, and a closed
+  // stdin or a reparent means nothing. It must keep serving.
+  const run = await startRealComputer({ parent: 'standalone', supervised: false })
+  try {
+    run.parent.kill('SIGKILL')
+    await delay(4_000) // several parent polls (1s each)
+    assert(!pidGone(run.computerPid), `a standalone computer stopped — log:\n${run.log()}`)
+    assert(!run.log().includes('parent app is gone'), 'it never watched its parent')
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('stop: the real supervised computer still exits on its own when its app stops it', async () => {
+  // The parent watch must never hold the computer's loop: a SIGTERMed computer
+  // exits by itself (code 0), not by the supervisor's SIGKILL.
+  ensureComputerBuilt()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-real-stop-'))
+  tmpDirs.push(dir)
+  fs.mkdirSync(path.join(dir, 'home'))
+  fs.mkdirSync(path.join(dir, 'root'))
+  const probe = path.join(dir, 'probe.cjs')
+  fs.writeFileSync(probe, COMPUTER_PROBE)
+  const logFile = path.join(dir, 'computer.log')
+  const exitFile = path.join(dir, 'computer.exit')
+  const hub = await startSilentServer()
+  const handle = startLocalComputer({
+    execPath: process.execPath,
+    scriptPath: COMPUTER_BIN,
+    env: {
+      ...scrubbedEnv(),
+      HOME: path.join(dir, 'home'),
+      SLAYZONE_ROOT: path.join(dir, 'root'),
+      SLAYZONE_HUB_ADDRESS: `127.0.0.1:${hub.port}`,
+      SLAYZONE_HUB_JOIN_TOKEN: 'parent-death-test',
+      SLAYZONE_SUPERVISED: '1',
+      NODE_OPTIONS: `--require ${probe}`,
+      PROBE_LOG_FILE: logFile,
+      PROBE_EXIT_FILE: exitFile
+    },
+    logger: () => {},
+    timing: { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 3_000 }
+  })
+  try {
+    await waitFor(
+      () => fs.existsSync(logFile) && fs.readFileSync(logFile, 'utf8').includes(COMPUTER_BOOTED),
+      20_000,
+      'real computer booted'
+    )
+    const started = Date.now()
+    await handle.stop()
+    assertEq(
+      fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8') : null,
+      '0',
+      `the computer exited by itself, cleanly — not SIGKILLed after the grace — log:\n${fs.readFileSync(logFile, 'utf8')}`
+    )
+    assert(Date.now() - started < 3_000, 'well inside the SIGTERM grace')
+  } finally {
+    await handle.stop()
+    hub.close()
   }
 })
 

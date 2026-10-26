@@ -550,6 +550,7 @@ import {
   scanCrashDumps
 } from './lifecycle/sentinel'
 import { drainDiagnosticsForQuit } from './lifecycle/quit-diagnostics'
+import { stopLocalComputerForQuit } from './lifecycle/quit-local-computer'
 import {
   acquireLockWithSelfHeal,
   lockOutcomeIsAcquired,
@@ -728,10 +729,8 @@ let bridgeCleanup: (() => void) | null = null
 let sidecarCleanup: (() => void) | null = null
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
 // Local-computer supervisor — spawns the co-located computer in local mode. Null
-// in remote mode (no local hub to dial) or before the async spawn runs.
-let localComputerCleanup: (() => void) | null = null
-// The same supervisor's handle. Kept separately from the cleanup thunk because
-// `app:restart-local-computer` needs to CYCLE it, not just stop it at quit.
+// in remote mode (no local hub to dial) or before the async spawn runs. Cycled by
+// `app:restart-local-computer`; reaped by the quit (see reapLocalComputerForQuit).
 let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
@@ -866,16 +865,17 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     return
   }
 
+  const { startLocalComputer } = await import('./local-computer-supervisor')
   // The mint window (waitForReady + retries) can straddle an app quit: before-quit
   // already suspended restarts on a handle that did not exist yet, and will-quit
-  // may have run localComputerCleanup while it was still null — spawning now
-  // would orphan a child no quit hook governs. Skip once quit has been requested.
+  // may have reaped while it was still null — spawning now would orphan a child no
+  // quit hook governs. Skip once quit has been requested. Checked AFTER the import
+  // above, so no await separates the check from the spawn below.
   if (quitRequested) {
     logBoot('[local-computer] app quitting — skipping computer spawn')
     return
   }
 
-  const { startLocalComputer } = await import('./local-computer-supervisor')
   const computerScriptPath = !app.isPackaged
     ? join(app.getAppPath(), '../computer/dist/bin.cjs')
     : join(process.resourcesPath, 'computer', 'bin.cjs')
@@ -1007,7 +1007,6 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     }
   })
   localComputerHandle = handleComputer
-  localComputerCleanup = () => void handleComputer.stop()
   logBoot('local-computer supervisor started (auto-enrolled)')
 }
 
@@ -1051,6 +1050,48 @@ const QUIT_DIAGNOSTICS_DRAIN_MS = 2_000
 let willQuitTailStarted = false
 /** Set on the first `before-quit`; never cleared (a started quit always ends the process). */
 let quitRequested = false
+/**
+ * Deadline for reaping the local computer on quit (see stopLocalComputerForQuit).
+ * Covers the supervisor's 3s SIGTERM grace plus the SIGKILL reap, with headroom.
+ */
+const QUIT_LOCAL_COMPUTER_STOP_MS = 5_000
+
+/**
+ * Stop the local computer and WAIT for it, bounded — before main exits.
+ *
+ * Every agent pty is a child of the computer, so a computer that outlives the app
+ * keeps them all running, and holds the computer id the next app's computer needs
+ * (each takeover kills every agent). Fired and forgotten, the stop lost the race
+ * with the process exit, and a computer that did not exit on SIGTERM was orphaned.
+ * A deadline miss is recorded: it is the one quit that can still leave a computer
+ * behind (until its own parent watch notices the app is gone).
+ */
+async function reapLocalComputerForQuit(): Promise<void> {
+  const handle = localComputerHandle
+  // Read before the stop, which detaches the child.
+  const pid = handle?.getPid() ?? null
+  const result = await stopLocalComputerForQuit({
+    stop: handle ? () => handle.stop() : null,
+    timeoutMs: QUIT_LOCAL_COMPUTER_STOP_MS
+  })
+  if (result !== 'timed-out' && result !== 'failed') return
+  console.error(`[main] local computer not reaped on quit: ${result}`)
+  try {
+    recordDiagnosticEvent({
+      level: 'warn',
+      source: 'main',
+      event: 'local_computer.quit_reap_failed',
+      message:
+        result === 'timed-out'
+          ? `Local computer still running ${QUIT_LOCAL_COMPUTER_STOP_MS}ms into the quit; the app exited without it.`
+          : 'Stopping the local computer failed during quit; the app exited without it.',
+      payload: { result, pid }
+    })
+  } catch {
+    /* diagnostics unavailable — the console error above still records it */
+  }
+}
+
 type OAuthCallbackPayload = { code?: string; error?: string }
 const oauthCallbackQueue: OAuthCallbackPayload[] = []
 const oauthCallbackWaiters = new Set<(payload: OAuthCallbackPayload) => void>()
@@ -4592,16 +4633,19 @@ app.on('before-quit', (event) => {
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
-      // app.exit skips will-quit, so reap the children here: both stops SIGTERM
-      // synchronously, which is all a force-exit can wait for.
+      // app.exit skips will-quit, so reap the children here. The side-car's stop
+      // SIGTERMs synchronously (it also exits on its own once this process is
+      // gone); the computer's reap is awaited, bounded, alongside the flush.
       sidecarCleanup?.()
-      localComputerCleanup?.()
       // Bounded flush first, so the watchdog event above survives the force-exit.
-      void drainDiagnosticsForQuit({
-        stop: stopDiagnostics,
-        closeDb: closeDiagnosticsDatabase,
-        timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
-      }).finally(() => app.exit(1))
+      void Promise.all([
+        reapLocalComputerForQuit(),
+        drainDiagnosticsForQuit({
+          stop: stopDiagnostics,
+          closeDb: closeDiagnosticsDatabase,
+          timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
+        })
+      ]).finally(() => app.exit(1))
     }, QUIT_WATCHDOG_MS)
   }
   if (quitDrainComplete) return
@@ -4634,7 +4678,6 @@ app.on('will-quit', (event) => {
   }
   bridgeCleanup?.()
   sidecarCleanup?.()
-  localComputerCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
   // event of the session and proves the chain ran.
   recordDiagnosticEvent({
@@ -4646,18 +4689,24 @@ app.on('will-quit', (event) => {
   stopIdleChecker()
   closeArtifactWatcher()
   closeGitWatcher()
-  // Flush, THEN close: unawaited, the close overtook the flush and lost the
-  // queue's tail, the canary above included.
-  void drainDiagnosticsForQuit({
-    stop: stopDiagnostics,
-    closeDb: closeDiagnosticsDatabase,
-    timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
-  }).finally(() => {
-    // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
-    // Pure fs (no DB needed), so survives any prior close failure.
-    writeCleanShutdownSentinel()
-    app.quit()
-  })
+  // Reap the computer, THEN flush, THEN close: the process must not exit under a
+  // live computer, and a reap that misses its deadline records an event the flush
+  // has to carry. Unawaited, the close overtook the flush and lost the queue's
+  // tail, the canary above included.
+  void reapLocalComputerForQuit()
+    .then(() =>
+      drainDiagnosticsForQuit({
+        stop: stopDiagnostics,
+        closeDb: closeDiagnosticsDatabase,
+        timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
+      })
+    )
+    .finally(() => {
+      // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
+      // Pure fs (no DB needed), so survives any prior close failure.
+      writeCleanShutdownSentinel()
+      app.quit()
+    })
 })
 
 // In this file you can include the rest of your app's specific main process

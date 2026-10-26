@@ -325,6 +325,8 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_test packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
+# Quit WAITS for the local computer's reap (fire-and-forget orphaned it), bounded.
+run_test packages/apps/app/src/main/lifecycle/quit-local-computer.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -536,7 +538,9 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cre
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
 # Local-computer supervisor exit reporting — the computer owns every agent pty, so
-# its exits must stay observable (they killed whole fleets silently before).
+# its exits must stay observable (they killed whole fleets silently before). Also
+# stop() as quit awaits it, and parent death against the REAL computer bundle
+# (rebuilt on demand): a supervised computer never outlives its app.
 run_test_electron_strict packages/apps/app/src/main/local-computer-supervisor.test.ts
 
 # e2e stale-process reaper: must never match the dev app's live computer (doing so
