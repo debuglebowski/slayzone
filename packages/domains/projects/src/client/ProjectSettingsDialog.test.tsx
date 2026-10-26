@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type React from 'react'
+import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import type { Project } from '@slayzone/projects/shared'
@@ -8,6 +9,14 @@ import type { Project } from '@slayzone/projects/shared'
 let mappings: Record<string, { status_setup_complete?: boolean } | null> = {}
 let fetchFails = false
 let isPlaywright = false
+// Tabs that committed (ran their mount effects), in order.
+let mountedTabs: string[] = []
+function useMountLog(name: string): void {
+  useEffect(() => {
+    mountedTabs.push(name)
+  }, [name])
+}
+
 const fetchQuery = vi.fn((opts: { input: { projectId: string; provider: string } }) =>
   fetchFails
     ? Promise.reject(new Error('offline'))
@@ -35,7 +44,8 @@ vi.mock('@tanstack/react-query', () => {
 })
 
 type Kids = { children?: React.ReactNode }
-vi.mock('@slayzone/ui', () => ({
+vi.mock('@slayzone/ui', async () => ({
+  ...(await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')),
   Dialog: ({ open, children }: Kids & { open: boolean }) => (open ? <>{children}</> : null),
   DialogContent: ({ children }: Kids) => <>{children}</>,
   DialogHeader: ({ children }: Kids) => <>{children}</>,
@@ -46,13 +56,29 @@ vi.mock('@slayzone/ui', () => ({
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('./useDetectedRepos', () => ({ useDetectedRepos: () => [] }))
 vi.mock('./ColumnsTab', () => ({
-  ColumnsTab: ({ lockedByProvider }: { lockedByProvider: string | null }) => (
-    <div data-testid="columns-lock">{lockedByProvider ?? 'unlocked'}</div>
-  )
+  ColumnsTab: ({ lockedByProvider }: { lockedByProvider: string | null }) => {
+    useMountLog('tasks/statuses')
+    return <div data-testid="columns-lock">{lockedByProvider ?? 'unlocked'}</div>
+  }
 }))
-vi.mock('./GeneralTab', () => ({ GeneralTab: () => null }))
-vi.mock('./EnvironmentTab', () => ({ EnvironmentTab: () => null }))
-vi.mock('./IntegrationsTab', () => ({ IntegrationsTab: () => null }))
+vi.mock('./GeneralTab', () => ({
+  GeneralTab: () => {
+    useMountLog('general')
+    return null
+  }
+}))
+vi.mock('./EnvironmentTab', () => ({
+  EnvironmentTab: () => {
+    useMountLog('environment')
+    return null
+  }
+}))
+vi.mock('./IntegrationsTab', () => ({
+  IntegrationsTab: () => {
+    useMountLog('integrations')
+    return null
+  }
+}))
 vi.mock('./WorktreesTab', () => ({ WorktreesTab: () => null }))
 vi.mock('./ReposTab', () => ({ ReposTab: () => null }))
 vi.mock('./TasksGeneralTab', () => ({ TasksGeneralTab: () => null }))
@@ -74,6 +100,7 @@ const ui = (p: Project | null, open = true) => (
 const lockText = () => screen.getByTestId('columns-lock').textContent
 
 beforeEach(() => {
+  mountedTabs = []
   mappings = {}
   fetchFails = false
   isPlaywright = false
@@ -126,5 +153,50 @@ describe('ProjectSettingsDialog status lock', () => {
     render(ui(project('p1')))
     await waitFor(() => expect(lockText()).toBe('unlocked'))
     expect(fetchQuery).not.toHaveBeenCalled()
+  })
+})
+
+describe('ProjectSettingsDialog active tab', () => {
+  type Tab = React.ComponentProps<typeof ProjectSettingsDialog>['initialTab']
+  const dialog = (
+    open: boolean,
+    initialTab: Tab,
+    integrationOnboardingProvider: 'linear' | null = null
+  ) => (
+    <ProjectSettingsDialog
+      project={project('p1')}
+      open={open}
+      onOpenChange={vi.fn()}
+      initialTab={initialTab}
+      integrationOnboardingProvider={integrationOnboardingProvider}
+      onUpdated={vi.fn()}
+    />
+  )
+
+  it('first open mounts only the initial tab', () => {
+    render(dialog(true, 'environment'))
+    expect(mountedTabs).toEqual(['environment'])
+  })
+
+  it('reopening mounts only the new initial tab, not the previously active one', () => {
+    const { rerender } = render(dialog(true, 'tasks/statuses'))
+    rerender(dialog(false, 'tasks/statuses'))
+    mountedTabs = []
+
+    rerender(dialog(true, 'environment'))
+    expect(mountedTabs).toEqual(['environment'])
+  })
+
+  it('an onboarding provider opens straight on Integrations', () => {
+    render(dialog(true, 'environment', 'linear'))
+    expect(mountedTabs).toEqual(['integrations'])
+  })
+
+  it('initialTab changing while open switches to it, even with an onboarding provider set', () => {
+    const { rerender } = render(dialog(true, 'environment', 'linear'))
+    mountedTabs = []
+
+    rerender(dialog(true, 'tasks/statuses', 'linear'))
+    expect(mountedTabs).toEqual(['tasks/statuses'])
   })
 })

@@ -748,6 +748,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
   packages/domains/settings/src/client/UserSettingsDialog.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
+  packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
   packages/domains/automations/src/client/automation-dialog/AutomationDialog.test.tsx \
@@ -757,6 +758,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tags/src/client/CreateTagDialog.test.tsx \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \
+  packages/shared/editor/src/rich-text-editor.mention.test.tsx \
   packages/domains/projects/src/client/ProjectSettingsDialog.test.tsx \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
   packages/domains/projects/src/client/useIntegrationsTab.test.tsx \
@@ -765,6 +767,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \
   packages/domains/task/src/client/ProcessesPanel.test.tsx \

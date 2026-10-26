@@ -25,6 +25,7 @@ import type {
   Tile,
   TileType
 } from '@slayzone/layout'
+import { useDepsChanged } from '@slayzone/ui'
 import {
   closeExtensionsModal,
   createEmbeddedTabHost,
@@ -488,13 +489,22 @@ function ExtIcon({
   )
 }
 
-function ExtensionsModal({ profileKey, onClose }: { profileKey: string; onClose: () => void }) {
+export function ExtensionsModal({
+  profileKey,
+  onClose
+}: {
+  profileKey: string
+  onClose: () => void
+}) {
   const [selected, setSelected] = useState<ExtSelected>({ kind: 'store' })
   const [exts, setExts] = useState<ExtensionInfo[]>([])
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
-  // Switching identity resets the active tab to the Web Store.
-  useEffect(() => setSelected({ kind: 'store' }), [profileKey])
+  // Switching identity resets the active tab to the Web Store — adjusted during
+  // render, so the inlay effect below never navigates the new identity to the
+  // old selection first, and mount (already 'store') navigates only once.
+  const profileChanged = useDepsChanged([profileKey])
+  if (profileChanged) setSelected({ kind: 'store' })
 
   // List the identity's installed extensions for the toolbar.
   useEffect(() => {

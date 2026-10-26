@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, useDepsChanged } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
@@ -131,17 +131,17 @@ export function ProjectSettingsDialog({
     void fetchIntegrationLock(queryClient, trpc, project.id).then(setLockedByProvider)
   }, [open, project, queryClient, trpc])
 
-  useEffect(() => {
-    if (open) {
-      setActiveTab(initialTab)
-    }
-  }, [open, project?.id, initialTab])
-
-  useEffect(() => {
-    if (!open) return
-    if (!integrationOnboardingProvider) return
+  // Pick the tab while rendering (same triggers as an effect on these deps, incl.
+  // mount), so opening never commits the previously active tab first — that
+  // tab would mount and run its effects/fetches for one frame. An onboarding
+  // provider wins when both trigger at once (Integrations is where it lands).
+  const tabTriggerChanged = useDepsChanged([open, project?.id, initialTab], true)
+  const onboardingTriggerChanged = useDepsChanged([open, integrationOnboardingProvider], true)
+  if (open && onboardingTriggerChanged && integrationOnboardingProvider) {
     setActiveTab('integrations')
-  }, [open, integrationOnboardingProvider])
+  } else if (open && tabTriggerChanged) {
+    setActiveTab(initialTab)
+  }
 
   const navItems = [
     { key: 'general', label: 'General' },

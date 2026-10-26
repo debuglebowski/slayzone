@@ -54,8 +54,7 @@ export function RichTextEditor({
     formatState,
     mentionState,
     setMentionState,
-    insertArtifactLinkRef,
-    artifactsRef
+    insertArtifactLinkRef
   } = useEditorSetup({
     value,
     placeholder,
@@ -70,7 +69,6 @@ export function RichTextEditor({
     htmlOnLinkClick,
     onOpenLink,
     onArtifactClick,
-    artifacts,
     onSearchMatchCountChange,
     onUploadImages
   })
@@ -116,24 +114,21 @@ export function RichTextEditor({
         <EditorToolbar formatState={formatState} onCommand={handleCommand} />
       )}
       <div ref={containerRef} className="mk-doc-scroll" />
-      {mentionState?.active &&
-        mentionState.coords &&
-        artifactsRef.current &&
-        artifactsRef.current.length > 0 && (
-          <ArtifactPicker
-            items={artifactsRef.current}
-            query={mentionState.query}
-            coords={mentionState.coords}
-            onSelect={(item) => {
-              const editor = editorInstanceRef.current
-              if (editor) {
-                const view = editor.ctx.get(editorViewCtx)
-                insertArtifactLinkRef.current?.(view, item.id, item.title)
-              }
-            }}
-            onClose={() => setMentionState(null)}
-          />
-        )}
+      {mentionState?.active && mentionState.coords && artifacts && artifacts.length > 0 && (
+        <ArtifactPicker
+          items={artifacts}
+          query={mentionState.query}
+          coords={mentionState.coords}
+          onSelect={(item) => {
+            const editor = editorInstanceRef.current
+            if (editor) {
+              const view = editor.ctx.get(editorViewCtx)
+              insertArtifactLinkRef.current?.(view, item.id, item.title)
+            }
+          }}
+          onClose={() => setMentionState(null)}
+        />
+      )}
     </div>
   )
 }

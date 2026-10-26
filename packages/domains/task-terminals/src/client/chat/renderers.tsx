@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useChatView } from './ChatViewContext'
 import {
   ChevronDown,
@@ -22,7 +22,7 @@ import {
   User,
   Bot
 } from 'lucide-react'
-import { cn, safeClipboardWriteText } from '@slayzone/ui'
+import { cn, safeClipboardWriteText, useDepsChanged } from '@slayzone/ui'
 import { DiffView, GhMarkdown } from '@slayzone/worktrees/client'
 import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
@@ -319,11 +319,12 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
   )
   const hasChildren = childIndices.length > 0 || launcherTool != null
   // Mirror ToolShell convention: errored items default open so the user sees what failed;
-  // everything else stays collapsed. collapseSignal forces all back to closed.
+  // everything else stays collapsed. A collapseSignal bump ("collapse all") forces
+  // all back to closed — adjusted during render on a CHANGE only, so mounting
+  // (incl. under an already-bumped signal) keeps the default.
   const [open, setOpen] = useState(errored)
-  useEffect(() => {
-    setOpen(false)
-  }, [collapseSignal])
+  const collapseBumped = useDepsChanged([collapseSignal])
+  if (collapseBumped) setOpen(false)
 
   return (
     <>
@@ -476,9 +477,10 @@ function ToolShell({
   const status = invocation.status
   const [open, setOpen] = useState(defaultOpen ?? status === 'error')
   const { collapseSignal } = useChatView()
-  useEffect(() => {
-    setOpen(false)
-  }, [collapseSignal])
+  // "Collapse all": closes on a collapseSignal CHANGE only (adjusted during
+  // render), so the default above holds on mount.
+  const collapseBumped = useDepsChanged([collapseSignal])
+  if (collapseBumped) setOpen(false)
   // Body fallback chain: per-tool rich children > rawContent text > pending placeholder.
   // Keeps any tool card non-blank when structured data is missing or absent.
   const rawText = useMemo(() => extractRawText(invocation.result?.rawContent), [invocation.result])

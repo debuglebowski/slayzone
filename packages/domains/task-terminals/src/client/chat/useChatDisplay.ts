@@ -24,9 +24,9 @@ const PAGE_SIZE = 100
  *     intermediate noise); `showLastMessageTools` preserves tools after the last
  *     user message. Always drops non-renderable items + sub-agent children
  *     (`parentToolUseId` set) so the virtualizer count matches visible DOM.
- *   - search: delegates to `useChatSearch(displayedTimeline)`, plus the two
- *     effects that keep the active match on-screen (auto-expand the pagination
- *     window above it; scroll it into view).
+ *   - search: delegates to `useChatSearch(displayedTimeline)`, plus keeping the
+ *     active match on-screen (auto-expand the pagination window above it while
+ *     rendering; scroll it into view in an effect).
  *   - pagination: `visibleCount` window + derived slice.
  *   - `itemKey`: stable per-item keys so streaming text re-renders the same node.
  *   - copy helpers for the context menu.
@@ -106,13 +106,13 @@ export function useChatDisplay({
   const visibleStart = displayedTimeline.length - Math.min(visibleCount, displayedTimeline.length)
   const visibleItems = displayedTimeline.slice(visibleStart)
 
-  // Auto-expand window if a search match lands above it.
-  useEffect(() => {
-    if (search.activeItemIdx < 0) return
-    if (search.activeItemIdx < visibleStart) {
-      setVisibleCount(displayedTimeline.length - search.activeItemIdx)
-    }
-  }, [search.activeItemIdx, visibleStart, displayedTimeline.length])
+  // Auto-expand window if a search match lands above it — adjusted during
+  // render, so the match's row is already in the DOM on the commit the scroll
+  // effect below runs. (As an effect it landed one commit late: the scroll
+  // queried the old DOM, found nothing, and never re-ran for that match.)
+  if (search.activeItemIdx >= 0 && search.activeItemIdx < visibleStart) {
+    setVisibleCount(displayedTimeline.length - search.activeItemIdx)
+  }
 
   // Stable per-item keys so streaming text updates re-render the same DOM node.
   const itemKey = useCallback((item: TimelineItem, index: number): Key => {

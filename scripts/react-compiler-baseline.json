@@ -113,7 +113,6 @@
   "packages/domains/worktrees/src/client/useGitMergeActions.ts": ["useGitMergeActions"],
   "packages/domains/worktrees/src/client/useLinkedPrView.ts": ["useLinkedPrView"],
   "packages/domains/worktrees/src/client/WorktreesTab.tsx": ["WorktreesTab"],
-  "packages/shared/editor/src/rich-text-editor.tsx": ["RichTextEditor"],
   "packages/shared/editor/src/use-click-to-focus.ts": ["useClickToFocus"],
   "packages/shared/editor/src/use-image-paste-drop.ts": ["useImagePasteDrop"],
   "packages/shared/markdown/src/client/MermaidBlock.tsx": ["MermaidBlock"],

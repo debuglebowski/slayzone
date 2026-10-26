@@ -22,7 +22,6 @@ import {
 } from './milkdown-artifact-link'
 import { extractImageFilesFromDataTransfer } from './use-image-paste-drop'
 import { createSearchHighlightPlugin } from './milkdown-search-highlight'
-import type { ArtifactPickerItem } from './ArtifactPicker'
 import type { FormatState } from './rich-text-editor.types'
 import { emptyFormatState } from './rich-text-editor.constants'
 import { readFormatState } from './rich-text-editor.utils'
@@ -48,7 +47,6 @@ interface UseEditorSetupArgs {
   htmlOnLinkClick?: (resolvedHref: string) => void
   onOpenLink?: (href: string, target: LinkOpenTarget) => void
   onArtifactClick?: (artifactId: string) => void
-  artifacts?: ArtifactPickerItem[]
   onSearchMatchCountChange?: (count: number) => void
   onUploadImages?: (files: File[]) => Promise<Array<{ id: string; title: string }>>
 }
@@ -61,7 +59,6 @@ interface UseEditorSetupResult {
   mentionState: ArtifactMentionState | null
   setMentionState: (state: ArtifactMentionState | null) => void
   insertArtifactLinkRef: MutableRefObject<InsertArtifactLink | null>
-  artifactsRef: MutableRefObject<ArtifactPickerItem[] | undefined>
 }
 
 /**
@@ -84,7 +81,6 @@ export function useEditorSetup({
   htmlOnLinkClick,
   onOpenLink,
   onArtifactClick,
-  artifacts,
   onSearchMatchCountChange,
   onUploadImages
 }: UseEditorSetupArgs): UseEditorSetupResult {
@@ -101,10 +97,6 @@ export function useEditorSetup({
   const onArtifactClickRef = useRef(onArtifactClick)
   useEffect(() => {
     onArtifactClickRef.current = onArtifactClick
-  })
-  const artifactsRef = useRef(artifacts)
-  useEffect(() => {
-    artifactsRef.current = artifacts
   })
   const onSearchMatchCountChangeRef = useRef(onSearchMatchCountChange)
   useEffect(() => {
@@ -349,7 +341,6 @@ export function useEditorSetup({
     formatState,
     mentionState,
     setMentionState,
-    insertArtifactLinkRef,
-    artifactsRef
+    insertArtifactLinkRef
   }
 }

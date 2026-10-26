@@ -11,22 +11,32 @@ vi.mock('@slayzone/worktrees/client', () => ({
   GhMarkdown: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 
-import { ChatViewContext } from './ChatViewContext'
-import { ResultFooter, ThinkingBlock, ToolCallAskUserQuestion } from './renderers'
+import { ChatViewContext, type ChatViewState } from './ChatViewContext'
+import {
+  ResultFooter,
+  SubAgentRow,
+  ThinkingBlock,
+  ToolCallAskUserQuestion,
+  ToolCallBash,
+  ToolCallEdit,
+  ToolCallGeneric
+} from './renderers'
 
 /** Context with a controllable collapse signal + timeline; everything else default. */
 function View({
   signal,
   timeline = [],
+  overrides,
   children
 }: {
   signal: number
   timeline?: TimelineItem[]
+  overrides?: Partial<ChatViewState>
   children: React.ReactNode
 }) {
   const base = useContext(ChatViewContext)
   return (
-    <ChatViewContext.Provider value={{ ...base, collapseSignal: signal, timeline }}>
+    <ChatViewContext.Provider value={{ ...base, collapseSignal: signal, timeline, ...overrides }}>
       {children}
     </ChatViewContext.Provider>
   )
@@ -173,5 +183,125 @@ describe('AskUserQuestion collapse', () => {
 
     rerender(ui(1, [toolItem(first), toolItem(second)]))
     expect(isExpanded()).toBe(false)
+  })
+})
+
+describe('ToolShell default-open', () => {
+  const tool = (
+    name: string,
+    status: ToolInvocation['status'],
+    input: Record<string, unknown>,
+    rawContent?: string
+  ): ToolInvocation =>
+    ({
+      id: `${name}-1`,
+      name,
+      status,
+      input,
+      result: rawContent === undefined ? undefined : { rawContent, structured: null }
+    }) as unknown as ToolInvocation
+  const bash = tool('Bash', 'done', { command: 'ls -la', description: 'List files' })
+  const bashUi = (signal: number) => (
+    <View signal={signal}>
+      <ToolCallBash invocation={bash} />
+    </View>
+  )
+  const isBashOpen = () => screen.queryByText('ls -la') !== null
+
+  it('a defaultOpen card (Bash) stays open after mount; "collapse all" still closes it', () => {
+    const { rerender } = render(bashUi(0))
+    expect(isBashOpen()).toBe(true)
+
+    rerender(bashUi(0))
+    expect(isBashOpen()).toBe(true)
+
+    rerender(bashUi(1))
+    expect(isBashOpen()).toBe(false)
+
+    // Manual toggle still works after a collapse.
+    fireEvent.click(screen.getByText('List files'))
+    expect(isBashOpen()).toBe(true)
+  })
+
+  it('mounting under an already-bumped signal does not collapse the default', () => {
+    const { rerender } = render(bashUi(4))
+    expect(isBashOpen()).toBe(true)
+    rerender(bashUi(4))
+    expect(isBashOpen()).toBe(true)
+  })
+
+  it('file edits follow fileEditsOpenByDefault', () => {
+    const edit = tool('Edit', 'done', {
+      file_path: '/a/b.ts',
+      old_string: 'old line',
+      new_string: 'new line'
+    })
+    const editUi = (openByDefault: boolean) => (
+      <View signal={0} overrides={{ fileEditsOpenByDefault: openByDefault }}>
+        <ToolCallEdit invocation={edit} />
+      </View>
+    )
+    render(editUi(true))
+    expect(screen.queryByText('+ new line')).not.toBeNull()
+    cleanup()
+
+    render(editUi(false))
+    expect(screen.queryByText('+ new line')).toBeNull()
+  })
+
+  it('an errored tool starts open; a successful one without defaultOpen starts closed', () => {
+    const failed = tool('Lookup', 'error', { q: 1 }, 'lookup exploded')
+    render(
+      <View signal={0}>
+        <ToolCallGeneric invocation={failed} />
+      </View>
+    )
+    expect(screen.queryByText('lookup exploded')).not.toBeNull()
+    cleanup()
+
+    const ok = tool('Lookup', 'done', { q: 1 }, 'lookup result')
+    render(
+      <View signal={0}>
+        <ToolCallGeneric invocation={ok} />
+      </View>
+    )
+    expect(screen.queryByText('lookup result')).toBeNull()
+  })
+})
+
+describe('SubAgentRow default-open', () => {
+  const launcher = {
+    kind: 'tool',
+    invocation: { id: 'sa1', name: 'Agent', status: 'error', input: { prompt: 'p' } }
+  } as unknown as TimelineItem
+  const row = (phase: 'completed' | 'failed') =>
+    ({
+      kind: 'sub-agent',
+      toolUseId: 'sa1',
+      phase,
+      description: 'investigate',
+      timestamp: 0
+    }) as unknown as Extract<TimelineItem, { kind: 'sub-agent' }>
+  const ui = (signal: number, phase: 'completed' | 'failed') => (
+    <View signal={signal} timeline={[launcher]}>
+      <SubAgentRow item={row(phase)} />
+    </View>
+  )
+  const isOpen = () => screen.queryByTestId('sub-agent-children') !== null
+
+  it('an errored sub-agent stays open after mount; "collapse all" closes it', () => {
+    const { rerender } = render(ui(0, 'failed'))
+    expect(isOpen()).toBe(true)
+
+    rerender(ui(0, 'failed'))
+    expect(isOpen()).toBe(true)
+
+    rerender(ui(1, 'failed'))
+    expect(isOpen()).toBe(false)
+  })
+
+  it('a successful sub-agent starts closed', () => {
+    render(ui(0, 'completed'))
+    expect(isOpen()).toBe(false)
   })
 })

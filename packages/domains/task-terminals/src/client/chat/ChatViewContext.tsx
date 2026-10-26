@@ -5,7 +5,8 @@ import type { TimelineItem } from '@slayzone/terminal/client'
 export interface ChatViewState {
   /**
    * Monotonic counter. When it increments, all expandable items should reset to collapsed.
-   * Items subscribe via useEffect([collapseSignal]) → setOpen(false).
+   * Items close when it CHANGES (state adjusted during render), never on mount —
+   * so an item's own default (e.g. errored / `defaultOpen` tool cards) holds.
    */
   collapseSignal: number
   /** When true, timeline filters down to user messages + final assistant reply per turn. */
