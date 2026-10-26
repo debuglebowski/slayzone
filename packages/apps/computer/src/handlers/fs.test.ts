@@ -44,7 +44,7 @@ afterEach(() => {
 
 describe('createFsHandlers — fs.pathExists', () => {
   it('is false for a missing path and true once the file exists', () => {
-    const handlers = createFsHandlers(ctxWithRoots(roots))
+    const { handlers } = createFsHandlers(ctxWithRoots(roots))
     const file = join(dir, 'probe.txt')
     expect(handlers[M.fsPathExists]({ path: file })).toEqual({ exists: false })
     writeFileSync(file, 'x')
@@ -52,19 +52,19 @@ describe('createFsHandlers — fs.pathExists', () => {
   })
 
   it('reports an existing directory as present', () => {
-    const handlers = createFsHandlers(ctxWithRoots(roots))
+    const { handlers } = createFsHandlers(ctxWithRoots(roots))
     expect(handlers[M.fsPathExists]({ path: dir })).toEqual({ exists: true })
   })
 
   it('rejects an empty path via schema validation (before any fs access)', () => {
-    const handlers = createFsHandlers(ctxWithRoots(roots))
+    const { handlers } = createFsHandlers(ctxWithRoots(roots))
     expect(() => handlers[M.fsPathExists]({ path: '' })).toThrow()
   })
 })
 
 describe('createFsHandlers — fs.removeDir', () => {
   it('recursively removes a populated directory tree', async () => {
-    const handlers = createFsHandlers(ctxWithRoots(roots))
+    const { handlers } = createFsHandlers(ctxWithRoots(roots))
     const target = join(dir, 'nested')
     mkdirSync(join(target, 'deep'), { recursive: true })
     writeFileSync(join(target, 'deep', 'file.txt'), 'data')
@@ -76,7 +76,7 @@ describe('createFsHandlers — fs.removeDir', () => {
   })
 
   it('is idempotent — removing a nonexistent dir resolves ok (force:true)', async () => {
-    const handlers = createFsHandlers(ctxWithRoots(roots))
+    const { handlers } = createFsHandlers(ctxWithRoots(roots))
     const gone = join(dir, 'never-existed')
     const res = await handlers[M.fsRemoveDir]({ path: gone })
     expect(res).toEqual({ ok: true })
@@ -85,13 +85,13 @@ describe('createFsHandlers — fs.removeDir', () => {
 
 describe('createFsHandlers — allowedRoots guard', () => {
   it('rejects pathExists outside every allowed root', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     // `/` is guaranteed to sit outside a tmpdir subroot.
     expect(() => handlers[M.fsPathExists]({ path: '/' })).toThrow(/allowedRoots/)
   })
 
   it('rejects a ../ traversal on pathExists', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     expect(() => handlers[M.fsPathExists]({ path: join(dir, '..', 'escape') })).toThrow(
       /allowedRoots/
     )
@@ -105,7 +105,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
     mkdirSync(sibling, { recursive: true })
     writeFileSync(join(sibling, 'keep.txt'), 'must survive')
 
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(child)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
     await expect(handlers[M.fsRemoveDir]({ path: sibling })).rejects.toThrow(/allowedRoots/)
     // The guard fired before rm — the sibling is untouched.
     expect(existsSync(join(sibling, 'keep.txt'))).toBe(true)
@@ -115,7 +115,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
   // everything rather than fall open — including the browse ops the picker calls
   // first, which is exactly where an accidental fail-open would be least visible.
   it('refuses every op when allowedRoots is empty', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([]))
+    const { handlers } = createFsHandlers(ctxWithRoots([]))
     expect(() => handlers[M.fsPathExists]({ path: dir })).toThrow(/no allowedRoots/)
     await expect(handlers[M.fsListDir]({ path: dir })).rejects.toThrow(/no allowedRoots/)
     await expect(handlers[M.fsMkdir]({ path: join(dir, 'x') })).rejects.toThrow(/no allowedRoots/)
@@ -130,7 +130,7 @@ describe('createFsHandlers — allowedRoots guard', () => {
 
 describe('createFsHandlers — fs.listRoots', () => {
   it('returns the realpath-resolved jail plus the computer platform idiom', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = handlers[M.fsListRoots]({}) as {
       roots: string[]
       platform: string
@@ -143,7 +143,7 @@ describe('createFsHandlers — fs.listRoots', () => {
 
   it('drops a configured root that does not exist rather than offering a dead end', () => {
     const absent = join(dir, 'not-created')
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir), absent]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir), absent]))
     const res = handlers[M.fsListRoots]({}) as { roots: string[] }
     expect(res.roots).toEqual([realpathSync(dir)])
   })
@@ -159,7 +159,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('lists directories before files, both alphabetical', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = (await handlers[M.fsListDir]({ path: dir })) as {
       entries: { name: string; type: string }[]
     }
@@ -168,7 +168,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('flags a directory containing .git so the picker can mark repos', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = (await handlers[M.fsListDir]({ path: dir })) as {
       entries: { name: string; isGitRepo?: boolean }[]
     }
@@ -177,7 +177,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('hides dotfiles by default and reveals them with includeHidden', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const plain = (await handlers[M.fsListDir]({ path: dir })) as { entries: { name: string }[] }
     expect(plain.entries.map((e) => e.name)).not.toContain('.hidden')
 
@@ -188,7 +188,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('never lists node_modules or .git, even with includeHidden', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = (await handlers[M.fsListDir]({ path: dir, includeHidden: true })) as {
       entries: { name: string }[]
     }
@@ -198,7 +198,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('omits files under dirsOnly', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = (await handlers[M.fsListDir]({ path: dir, dirsOnly: true })) as {
       entries: { name: string }[]
     }
@@ -209,7 +209,7 @@ describe('createFsHandlers — fs.listDir', () => {
   // parent would render an affordance the jail then refuses — a dead control
   // reads as a bug, so the boundary has to be explicit in the payload.
   it('reports parent null at an allowed root and a real parent below it', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const atRoot = (await handlers[M.fsListDir]({ path: dir })) as { parent: string | null }
     expect(atRoot.parent).toBeNull()
 
@@ -220,7 +220,7 @@ describe('createFsHandlers — fs.listDir', () => {
   })
 
   it('returns absolute paths on every entry', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = (await handlers[M.fsListDir]({ path: dir })) as {
       entries: { name: string; path: string }[]
     }
@@ -230,7 +230,7 @@ describe('createFsHandlers — fs.listDir', () => {
 
 describe('createFsHandlers — fs.mkdir', () => {
   it('creates nested directories and returns the canonical path', async () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const target = join(dir, 'a', 'b', 'c')
     const res = (await handlers[M.fsMkdir]({ path: target })) as { path: string }
     expect(existsSync(target)).toBe(true)
@@ -240,7 +240,7 @@ describe('createFsHandlers — fs.mkdir', () => {
   it('refuses to create outside the jail', async () => {
     const child = join(dir, 'child')
     mkdirSync(child, { recursive: true })
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(child)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
     await expect(handlers[M.fsMkdir]({ path: join(dir, 'escape') })).rejects.toThrow(/allowedRoots/)
     expect(existsSync(join(dir, 'escape'))).toBe(false)
   })
@@ -255,7 +255,7 @@ describe('createFsHandlers — file-editor ops', () => {
   })
 
   it('readDir returns root-relative paths and honours .gitignore', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = handlers[M.fsReadDir]({ rootPath: dir, dirPath: '' }) as {
       entries: { name: string; path: string; ignored?: boolean }[]
     }
@@ -265,7 +265,7 @@ describe('createFsHandlers — file-editor ops', () => {
   })
 
   it('round-trips writeFile → readFile', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     handlers[M.fsWriteFile]({ rootPath: dir, filePath: 'src/new.ts', content: 'hi' })
     expect(handlers[M.fsReadFile]({ rootPath: dir, filePath: 'src/new.ts' })).toEqual({
       content: 'hi'
@@ -275,7 +275,7 @@ describe('createFsHandlers — file-editor ops', () => {
   it('rejects a rootPath outside the jail before file-editor sees it', () => {
     const child = join(dir, 'child')
     mkdirSync(child, { recursive: true })
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(child)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
     expect(() => handlers[M.fsReadDir]({ rootPath: dir, dirPath: '' })).toThrow(/allowedRoots/)
   })
 
@@ -285,14 +285,14 @@ describe('createFsHandlers — file-editor ops', () => {
   it('rejects a relative escape from the root even when it stays inside the jail', () => {
     const child = join(dir, 'child')
     mkdirSync(child, { recursive: true })
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     expect(() => handlers[M.fsReadFile]({ rootPath: child, filePath: '../.gitignore' })).toThrow(
       /traversal/i
     )
   })
 
   it('listAllFiles reports truncated:false below the wire cap', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = handlers[M.fsListAllFiles]({ rootPath: dir }) as {
       files: string[]
       truncated: boolean
@@ -303,7 +303,7 @@ describe('createFsHandlers — file-editor ops', () => {
   })
 
   it('searchFiles clamps maxResults to the wire cap instead of erroring', () => {
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
     const res = handlers[M.fsSearchFiles]({
       rootPath: dir,
       query: 'export',
@@ -317,7 +317,7 @@ describe('createFsHandlers — file-editor ops', () => {
 describe('createFsHandlers — watch lifecycle', () => {
   it('streams fs.change tagged with the hub-minted watchId, and stops on watchStop', async () => {
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
     expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
     writeFileSync(join(dir, 'touched.txt'), 'x')
@@ -339,7 +339,7 @@ describe('createFsHandlers — watch lifecycle', () => {
   // client — the panel would see every change twice and refetch twice.
   it('is idempotent on watchId — a repeated start does not double-deliver', async () => {
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
@@ -355,10 +355,29 @@ describe('createFsHandlers — watch lifecycle', () => {
     handlers[M.fsWatchStop]({ watchId: 'w1' })
   }, 20_000)
 
+  // Shutdown path: the hub never sends watchStop for a computer that is stopping, and
+  // an open watch is a handle that keeps the stopped process alive.
+  it('disposeAll closes every live watch', async () => {
+    const other = join(dir, 'other')
+    mkdirSync(other, { recursive: true })
+    const liveWatches = (): number =>
+      process.getActiveResourcesInfo().filter((r) => r === 'FSEventWrap').length
+    const before = liveWatches()
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+
+    handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+    handlers[M.fsWatchStart]({ watchId: 'w2', rootPath: other })
+    expect(liveWatches()).toBeGreaterThan(before)
+
+    disposeAll()
+    // `<=`, not `===`: a watch an earlier test stopped may still be closing at `before`.
+    await vi.waitFor(() => expect(liveWatches()).toBeLessThanOrEqual(before), { timeout: 2_000 })
+  })
+
   it('refuses to watch a root outside the jail', () => {
     const child = join(dir, 'child')
     mkdirSync(child, { recursive: true })
-    const handlers = createFsHandlers(ctxWithRoots([realpathSync(child)]))
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
     expect(() => handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toThrow(/allowedRoots/)
   })
 })

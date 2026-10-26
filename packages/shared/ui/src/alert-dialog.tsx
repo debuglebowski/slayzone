@@ -42,15 +42,22 @@ function AlertDialogContent({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        data-slot="alert-dialog-content"
-        className={cn(
-          'bg-modal data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-[var(--modal-border)] p-6 shadow-lg duration-200',
-          className
-        )}
-        {...props}
-      />
+      {/* Content INSIDE the overlay, not beside it (Radix's nested-overlay layout).
+          The Portal mounts each child separately, so as siblings the overlay's shorter
+          exit (150ms vs the content's 200ms) unmounted it first; a reopen inside that
+          gap re-mounted only the overlay, appended AFTER the still-mounted content, and
+          the equal-z-index overlay then covered the dialog and swallowed every click on
+          its buttons. Nested, the content cannot end up beneath its own overlay. */}
+      <AlertDialogOverlay>
+        <AlertDialogPrimitive.Content
+          data-slot="alert-dialog-content"
+          className={cn(
+            'bg-modal data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-[var(--modal-border)] p-6 shadow-lg duration-200',
+            className
+          )}
+          {...props}
+        />
+      </AlertDialogOverlay>
     </AlertDialogPortal>
   )
 }

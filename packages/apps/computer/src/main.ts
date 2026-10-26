@@ -120,7 +120,7 @@ export interface HubRequestDispatch {
    * `actor` member; a request without a valid one is refused (pre-v3 hub).
    */
   handle(method: string, params: unknown, actor: unknown): Promise<unknown>
-  /** Tear down live sessions/processes (computer shutdown). */
+  /** Tear down live sessions/processes/fs watches (computer shutdown). */
   dispose(): void
   /** Late-bind the computer loopback agent-hook URL once its listener has bound
    *  (the port is ephemeral, resolved async after the dispatch is built). The
@@ -154,6 +154,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     deps.admission ? { admission: deps.admission } : {}
   )
   const proc = createProcHandlers(ctx, deps.getProjectPaths)
+  const fs = createFsHandlers(ctx)
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
@@ -168,7 +169,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
-    ...createFsHandlers(ctx),
+    ...fs.handlers,
     ...createComputerConfigHandlers(ctx),
     ...createGhHandlers(ctx),
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
@@ -235,6 +236,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const dispose = (): void => {
     pty.disposeAll()
     proc.disposeAll()
+    fs.disposeAll()
   }
 
   const setAgentHookUrl = (url: string): void => {
@@ -433,7 +435,8 @@ export function startComputer(
     return {
       dialer,
       dispose: async () => {
-        // Kill live ptys/processes before the socket drops so nothing is orphaned.
+        // Kill live ptys/processes and close fs watches before the socket drops, so
+        // nothing is orphaned and no handle keeps the stopped process alive.
         dispatch.dispose()
         if (agentHookServer) await agentHookServer.close()
         await dialer.stop()

@@ -78,7 +78,7 @@ async function loadComputerFsHandlers(roots: string[]): Promise<LoadedComputer |
     return null
   }
   const events = new TypedEventEmitter<ComputerGatewayEvents>()
-  const handlers = mod.createFsHandlers({
+  const { handlers } = mod.createFsHandlers({
     dialer: {
       notify: (method: string, params?: unknown) => {
         if (method === ComputerNotificationMethods.fsChange) {

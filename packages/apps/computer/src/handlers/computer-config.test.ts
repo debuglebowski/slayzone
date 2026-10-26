@@ -72,7 +72,7 @@ describe('computer.setAllowedRoots', () => {
     mkdirSync(outside, { recursive: true })
 
     const ctx = ctxWith([inside])
-    const fs = createFsHandlers(ctx)
+    const { handlers: fs } = createFsHandlers(ctx)
     const cfg = createComputerConfigHandlers(ctx)
 
     expect(() => fs[HubToComputerMethods.fsPathExists]({ path: outside })).toThrow(/allowedRoots/)

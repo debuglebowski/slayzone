@@ -104,7 +104,17 @@ void _typePins
 /** Directories never worth showing in a picker, even with `includeHidden`. */
 const BROWSE_ALWAYS_HIDDEN = new Set(['.git', '.DS_Store', 'node_modules'])
 
-export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
+export interface FsHandlers {
+  handlers: HubMethodTable
+  /**
+   * Close every live watch (called on computer shutdown). A watch is an event-loop
+   * handle: one left open keeps a stopped computer's process alive, because its
+   * SIGTERM path relies on the loop draining to exit.
+   */
+  disposeAll(): void
+}
+
+export function createFsHandlers(ctx: HandlerContext): FsHandlers {
   // Read the jail through `ctx` on EVERY call rather than capturing the array at
   // construction: `computer.setAllowedRoots` edits it live (same shared-ctx trick
   // as `setAgentHookUrl`), and a captured reference would keep enforcing the
@@ -358,7 +368,15 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
     return { ok: true }
   }
 
-  return {
+  function disposeAll(): void {
+    for (const [watchId, dispose] of watches) {
+      dispose()
+      ctx.log('fs watch disposed on shutdown', { watchId })
+    }
+    watches.clear()
+  }
+
+  const handlers: HubMethodTable = {
     [HubToComputerMethods.fsPathExists]: pathExists,
     [HubToComputerMethods.fsRemoveDir]: removeDir,
 
@@ -382,4 +400,6 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
     [HubToComputerMethods.fsWatchStart]: watchStart,
     [HubToComputerMethods.fsWatchStop]: watchStop
   }
+
+  return { handlers, disposeAll }
 }

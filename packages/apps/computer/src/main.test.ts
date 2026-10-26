@@ -1,8 +1,12 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ComputerCredentialStore } from '@slayzone/computer-transport/client'
-import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
+import {
+  ComputerTransportErrorCodes,
+  HubToComputerMethods,
+  RpcError
+} from '@slayzone/computer-transport/shared'
 import { describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from './config'
 import type { ComputerDialer } from './handlers/types'
@@ -89,6 +93,31 @@ describe('createHubRequestHandler dispatch table', () => {
   it('dispose() is callable with no live sessions', () => {
     const { dispose } = makeDispatch()
     expect(() => dispose()).not.toThrow()
+  })
+
+  // A live `fs.watch` is an event-loop handle. The computer's SIGTERM path stops its
+  // connections and then relies on the loop draining to exit, so a watch left open by
+  // the file editor kept a stopped computer alive indefinitely — orphaned once the
+  // desktop app quit (measured: the e2e 45-file-tree-rename shutdown wedge).
+  it('dispose() closes live fs watches, so a stopped computer can exit', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'computer-dispose-')))
+    const liveWatches = (): number =>
+      process.getActiveResourcesInfo().filter((r) => r === 'FSEventWrap').length
+    const before = liveWatches()
+    const { handle, dispose } = createHubRequestHandler({
+      shutdown: () => {},
+      dialer: fakeDialer,
+      config: { ...testConfig, allowedRoots: [root] }
+    })
+
+    await handle(HubToComputerMethods.fsWatchStart, { watchId: 'w1', rootPath: root }, ACTOR)
+    expect(liveWatches()).toBeGreaterThan(before)
+
+    dispose()
+    // Handle close completes on a later loop turn; a leaked watch never gets there.
+    // `<=`, not `===`: a watch another test stopped may still be closing at `before`.
+    await vi.waitFor(() => expect(liveWatches()).toBeLessThanOrEqual(before), { timeout: 2_000 })
+    rmSync(root, { recursive: true, force: true })
   })
 })
 
