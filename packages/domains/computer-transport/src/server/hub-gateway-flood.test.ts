@@ -158,12 +158,12 @@ describe('/computers flood limits', () => {
     const { gateway } = setup()
     const ws = connect(gateway, '203.0.113.6')!
     for (let id = 1; id <= LIMITS.attemptsPerSocket; id++) {
-      ws.request(id, 'hello', { apiKey: `wrong-${id}` })
+      ws.request(id, 'hello', { apiKey: `wrong-${id}`, protocolVersion: COMPUTER_PROTOCOL_VERSION })
       await flush()
       expect(ws.response(id)?.error).toMatchObject({ message: 'unknown api key' })
     }
     expect(ws.closeCode).toBeNull()
-    ws.request(99, 'hello', { apiKey: 'wrong-99' })
+    ws.request(99, 'hello', { apiKey: 'wrong-99', protocolVersion: COMPUTER_PROTOCOL_VERSION })
     expect(ws.response(99)?.error).toMatchObject({
       code: ComputerTransportErrorCodes.unauthorized,
       message: 'too many authentication attempts on one connection'
@@ -216,7 +216,8 @@ describe('/computers flood limits', () => {
     const { gateway } = setup(false)
     for (let i = 0; i < 50; i++) expect(connect(gateway, '127.0.0.1')).not.toBeNull()
     const ws = connect(gateway, '127.0.0.1')!
-    for (let id = 1; id <= 10; id++) ws.request(id, 'hello', { apiKey: 'wrong' })
+    for (let id = 1; id <= 10; id++)
+      ws.request(id, 'hello', { apiKey: 'wrong', protocolVersion: COMPUTER_PROTOCOL_VERSION })
     await flush()
     expect(ws.closeCode).toBeNull()
     expect(rateLines()).toHaveLength(0)

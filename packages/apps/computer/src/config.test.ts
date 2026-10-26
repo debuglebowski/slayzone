@@ -41,7 +41,9 @@ describe('loadComputerConfig', () => {
       joinToken: 'jt-1',
       name: hostname(),
       allowedRoots: [],
-      capabilities: ['pty', 'git', 'fs', 'proc']
+      capabilities: ['pty', 'git', 'fs', 'proc'],
+      // Standalone: a hub may never edit its folder limits (T-27).
+      hubMayEditRoots: false
     })
   })
 

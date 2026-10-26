@@ -32,6 +32,7 @@ import {
   createRateLimitAudit
 } from '@slayzone/platform/rate-limit'
 import {
+  currentSecurityContext,
   runWithSecurityContext,
   securityEvent,
   type SecurityOutcome
@@ -52,7 +53,8 @@ import {
   type ComputerEventParams,
   ComputerNotificationMethods,
   computerNotificationSchemas,
-  ComputerToHubMethods
+  ComputerToHubMethods,
+  type RequestActor
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
 import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
@@ -623,7 +625,11 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       lastSeenAt: Date.now()
     }
     register(conn, descriptor)
-    conn.rpc.respond(id, { computerId: minted.computerId, apiKey: minted.apiKey })
+    conn.rpc.respond(id, {
+      computerId: minted.computerId,
+      apiKey: minted.apiKey,
+      protocolVersion: COMPUTER_PROTOCOL_VERSION
+    })
     events.emit('computer-enrolled', { computer: { ...descriptor } })
     events.emit('computer-connected', { computer: { ...descriptor } })
     auditAuth(conn, 'computer.enroll', 'success', minted.computerId, {
@@ -644,6 +650,25 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       conn.rpc.respondError(id, ComputerTransportErrorCodes.unauthorized, 'malformed hello request')
       auditAuth(conn, 'computer.hello', 'failure', null, { reason: 'malformed' })
       conn.ws.close(1008, 'malformed hello')
+      return
+    }
+    // v3 (T-27): a reconnect proves its protocol too. Before, only enroll did, so a
+    // computer enrolled long ago kept reconnecting across breaking changes — and a
+    // pre-v3 computer keeps no local request log, which is the point of v3.
+    if (parsed.data.protocolVersion !== COMPUTER_PROTOCOL_VERSION) {
+      const sent = parsed.data.protocolVersion ?? '<3 (none sent)'
+      conn.rpc.respondError(
+        id,
+        ComputerTransportErrorCodes.protocolMismatch,
+        `hub speaks computer protocol v${COMPUTER_PROTOCOL_VERSION}, computer sent v${sent} — upgrade this computer to the hub's release`
+      )
+      auditAuth(conn, 'computer.hello', 'failure', null, {
+        reason: 'protocol_mismatch',
+        protocolVersion: parsed.data.protocolVersion ?? null
+      })
+      // Valid shape, wrong version: not a flood strike (see computer_in_use below).
+      releasePending(conn)
+      conn.ws.close(1008, 'protocol mismatch')
       return
     }
     let identity: Awaited<ReturnType<HubComputerGatewayOptions['verifyApiKey']>>
@@ -723,7 +748,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       lastSeenAt: Date.now()
     }
     register(conn, descriptor)
-    conn.rpc.respond(id, { computerId: identity.computerId })
+    conn.rpc.respond(id, {
+      computerId: identity.computerId,
+      protocolVersion: COMPUTER_PROTOCOL_VERSION
+    })
     events.emit('computer-connected', { computer: { ...descriptor } })
     log('computer computer reconnected', { computerId: identity.computerId })
   }
@@ -924,7 +952,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         if (!audited) return
         securityEvent({
           event: audited.event,
-          outcome,
+          // The computer's own policy said no (T-27): a refusal, not a malfunction.
+          outcome:
+            outcome === 'failure' &&
+            err instanceof RpcError &&
+            err.code === ComputerTransportErrorCodes.refusedByComputer
+              ? 'denied'
+              : outcome,
           targetKind: 'computer',
           targetId: computerId,
           detail: err === undefined ? audited.detail : { ...audited.detail, code: errorCode(err) }
@@ -939,8 +973,33 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         audit('failure', err)
         return Promise.reject(err)
       }
-      const sent = conn.rpc.request<T>(method, params, timeoutMs)
-      if (!audited) return sent
+      // Who asked, for the computer's local request log (T-27). Same context the
+      // audit line above reads; none = the hub acting on its own behalf.
+      const ctx = currentSecurityContext()
+      const actor: RequestActor = {
+        userId: ctx?.actor ? ctx.actor.slice(0, 200) : null,
+        route: ctx?.route ? ctx.route.slice(0, 200) : null
+      }
+      const sent = conn.rpc.request<T>(method, params, timeoutMs, actor)
+      if (!audited) {
+        // An unaudited method (a read, a probe) still leaves a line when the computer
+        // REFUSES it by its own policy (T-27) — a jail refusal is worth seeing.
+        return sent.catch((err: unknown) => {
+          if (
+            err instanceof RpcError &&
+            err.code === ComputerTransportErrorCodes.refusedByComputer
+          ) {
+            securityEvent({
+              event: 'computer.refused',
+              outcome: 'denied',
+              targetKind: 'computer',
+              targetId: computerId,
+              detail: { method, code: err.code }
+            })
+          }
+          throw err
+        })
+      }
       return sent.then(
         (result) => {
           audit('success')

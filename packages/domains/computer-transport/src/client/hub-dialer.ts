@@ -20,6 +20,7 @@ import WebSocket from 'ws'
 import { TypedEventEmitter } from '../shared/events'
 import {
   enrollResultSchema,
+  type EnrollResult,
   COMPUTER_PROTOCOL_VERSION,
   ComputerTransportErrorCodes,
   helloResultSchema,
@@ -97,8 +98,11 @@ export interface HubDialerOptions {
    * Handle a hub→computer request; resolve with the result or throw an
    * `RpcError` to control the error code. When omitted, every request is
    * answered with `-32001 unimplemented`.
+   *
+   * `actor` is the request envelope's raw `actor` member (`undefined` from a pre-v3
+   * hub) — see `requestActorSchema`. Validating it is the handler's job.
    */
-  onHubRequest?: (method: string, params: unknown) => Promise<unknown> | unknown
+  onHubRequest?: (method: string, params: unknown, actor: unknown) => Promise<unknown> | unknown
   /** Default 15s; `0` disables the loop. */
   heartbeatIntervalMs?: number
   /** Reply window for one heartbeat before the socket is torn down. Default 10s. */
@@ -265,7 +269,8 @@ export class HubDialer {
       write: (line) => {
         ws.send(line)
       },
-      onPeerRequest: (method, params, id) => this.handleHubRequest(conn, method, params, id),
+      onPeerRequest: (method, params, id, actor) =>
+        this.handleHubRequest(conn, method, params, id, actor),
       onNotification: (method, params) => this.events.emit('notification', { method, params }),
       onParseError: (line, err) => {
         this.log('computer dialer received malformed frame', { error: String(err), line })
@@ -295,10 +300,7 @@ export class HubDialer {
   }
 
   /** One `enroll` round-trip with the given token. Throws on any failure. */
-  private async enroll(
-    conn: Connection,
-    joinToken: string
-  ): Promise<{ computerId: string; apiKey: string }> {
+  private async enroll(conn: Connection, joinToken: string): Promise<EnrollResult> {
     const raw = await conn.rpc.request(ComputerToHubMethods.enroll, {
       joinToken,
       name: this.opts.identity.name,
@@ -312,6 +314,25 @@ export class HubDialer {
     return enrollResultSchema.parse(raw)
   }
 
+  /**
+   * v3 (T-27): refuse a hub that does not echo our protocol version. Only a hub
+   * older than v3 omits it, and such a hub sends no actor with its requests, so
+   * nothing it asked for could be logged against a user. Fatal, like an enroll
+   * mismatch: retrying the same hub cannot fix it; upgrading it does.
+   */
+  private hubSpeaksOurProtocol(conn: Connection, hubVersion: number | undefined): boolean {
+    if (hubVersion === COMPUTER_PROTOCOL_VERSION) return true
+    this.fatal(
+      new Error(
+        `hub speaks computer protocol ${hubVersion === undefined ? 'older than v3' : `v${hubVersion}`}, ` +
+          `this computer speaks v${COMPUTER_PROTOCOL_VERSION} — upgrade the hub and this computer ` +
+          `to the same SlayZone release`
+      ),
+      conn
+    )
+    return false
+  }
+
   private async authenticate(conn: Connection): Promise<void> {
     this.setState('authenticating')
     try {
@@ -321,17 +342,26 @@ export class HubDialer {
           const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
             epoch: this.epoch,
+            protocolVersion: COMPUTER_PROTOCOL_VERSION,
             // Reconnect is the ONLY moment the hub can learn that this computer
             // adopted a peer's host id while it was offline.
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {})
           })
           const result = helloResultSchema.parse(raw)
+          if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return
           this.onAuthenticated(conn, result.computerId, 'hello')
           return
         } catch (err) {
           // Only an explicit credential rejection means the stored key is
           // dead. Transient hub-side RpcErrors and socket failures both go to
           // the reconnect path (rethrow → outer catch → backoff).
+          if (
+            err instanceof RpcError &&
+            err.code === ComputerTransportErrorCodes.protocolMismatch
+          ) {
+            this.fatal(new Error(`hub refused reconnect: ${err.message}`), conn)
+            return
+          }
           if (!(err instanceof RpcError) || err.code !== ComputerTransportErrorCodes.unauthorized)
             throw err
           if (!this.opts.joinToken) {
@@ -432,6 +462,7 @@ export class HubDialer {
           throw retryErr
         }
       }
+      if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return
       try {
         await this.opts.credentialStore.save({
           computerId: result.computerId,
@@ -498,7 +529,8 @@ export class HubDialer {
     conn: Connection,
     method: string,
     params: unknown,
-    id: string | number
+    id: string | number,
+    actor: unknown
   ): void {
     if (method === HubToComputerMethods.ping) {
       conn.rpc.respond(id, { ts: Date.now() })
@@ -515,7 +547,7 @@ export class HubDialer {
     }
     void (async () => {
       try {
-        const result = await handler(method, params)
+        const result = await handler(method, params, actor)
         conn.rpc.respond(id, result ?? null)
       } catch (err) {
         if (err instanceof RpcError) {

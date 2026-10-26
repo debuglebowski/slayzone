@@ -16,7 +16,7 @@ complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell com
 complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
 complete -c slay -n '__fish_seen_subcommand_from hub' -a 'ls create start stop rm restart logs registered use login current forget users owner-password'
-complete -c slay -n '__fish_seen_subcommand_from computer' -a 'ls mint create start stop rm restart logs'
+complete -c slay -n '__fish_seen_subcommand_from computer' -a 'ls mint create start stop rm restart logs roots'
 complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
 complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
 complete -c slay -n '__fish_seen_subcommand_from templates' -a 'list view create update delete'
@@ -115,6 +115,7 @@ _slay() {
     'rm:Stop a computer and remove its registration'
     'restart:Restart a computer'
     'logs:Show a computer log'
+    'roots:Show or change the folders a computer may work in'
   )
   case $words[2] in
     tasks)
@@ -188,7 +189,7 @@ _slay_completions() {
         COMPREPLY=( $(compgen -W "ls create start stop rm restart logs registered use login current forget users owner-password" -- "$cur") )
         ;;
       computer)
-        COMPREPLY=( $(compgen -W "ls mint create start stop rm restart logs" -- "$cur") )
+        COMPREPLY=( $(compgen -W "ls mint create start stop rm restart logs roots" -- "$cur") )
         ;;
       update)
         COMPREPLY=( $(compgen -W "--check" -- "$cur") )

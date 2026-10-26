@@ -83,7 +83,7 @@ import {
   type FsReadFileResult,
   type FsSearchFilesResult
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { assertPathAllowed, isProtectedPath } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /**
@@ -110,7 +110,19 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
   // as `setAgentHookUrl`), and a captured reference would keep enforcing the
   // boot-time set — the user widens the roots in Settings, the UI reports
   // success, and the computer silently keeps refusing.
-  const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
+  const allow = (candidate: string, subtree = false): string =>
+    assertPathAllowed(candidate, ctx.config.allowedRoots, { subtree })
+  /**
+   * Jail a ROOT-SCOPED op: the root, and also the root-relative target (T-27) —
+   * the root alone would let `fs.writeFile` reach the computer's own
+   * `computer.config.json` whenever an allowed root contains it. `assertWithinRoot`
+   * in file-editor still contains the relative part. Returns the jailed root.
+   */
+  const allowIn = (rootPath: string, rel: string, subtree = false): string => {
+    const root = allow(rootPath)
+    allow(join(root, rel), subtree)
+    return root
+  }
 
   /** Live watches, keyed by the hub-minted watchId. */
   const watches = new Map<string, () => void>()
@@ -125,7 +137,7 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
 
   async function removeDir(rawParams: unknown): Promise<{ ok: true }> {
     const { path } = fsRemoveDirParamsSchema.parse(rawParams)
-    const resolved = allow(path)
+    const resolved = allow(path, true)
     await rm(resolved, { recursive: true, force: true })
     ctx.log('fs removeDir', { path: resolved })
     return { ok: true }
@@ -232,36 +244,37 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
 
   function readFileHandler(rawParams: unknown): FsReadFileResult {
     const { rootPath, filePath, force } = fsReadFileParamsSchema.parse(rawParams)
-    return feReadFile(allow(rootPath), filePath, force)
+    return feReadFile(allowIn(rootPath, filePath), filePath, force)
   }
 
   function writeFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath, content } = fsWriteFileParamsSchema.parse(rawParams)
-    feWriteFile(allow(rootPath), filePath, content)
+    feWriteFile(allowIn(rootPath, filePath), filePath, content)
     return { ok: true }
   }
 
   function createFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath } = fsCreateFileParamsSchema.parse(rawParams)
-    feCreateFile(allow(rootPath), filePath)
+    feCreateFile(allowIn(rootPath, filePath), filePath)
     return { ok: true }
   }
 
   function createDirHandler(rawParams: unknown): { ok: true } {
     const { rootPath, dirPath } = fsCreateDirParamsSchema.parse(rawParams)
-    feCreateDir(allow(rootPath), dirPath)
+    feCreateDir(allowIn(rootPath, dirPath), dirPath)
     return { ok: true }
   }
 
   function renameHandler(rawParams: unknown): { ok: true } {
     const { rootPath, oldPath, newPath } = fsRenameParamsSchema.parse(rawParams)
-    feRenamePath(allow(rootPath), oldPath, newPath)
+    allowIn(rootPath, newPath, true)
+    feRenamePath(allowIn(rootPath, oldPath, true), oldPath, newPath)
     return { ok: true }
   }
 
   function deleteHandler(rawParams: unknown): { ok: true } {
     const { rootPath, targetPath } = fsDeleteParamsSchema.parse(rawParams)
-    feDeletePath(allow(rootPath), targetPath)
+    feDeletePath(allowIn(rootPath, targetPath, true), targetPath)
     return { ok: true }
   }
 
@@ -270,12 +283,13 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
     // `absoluteSrc` is a second absolute path on this machine, outside the root —
     // so it needs the jail in its own right, not just `assertWithinRoot`.
     const src = allow(absoluteSrc)
-    return { path: feCopyIn(allow(rootPath), src, targetDir) }
+    return { path: feCopyIn(allowIn(rootPath, targetDir ?? ''), src, targetDir) }
   }
 
   function copyHandler(rawParams: unknown): { ok: true } {
     const { rootPath, srcPath, destPath } = fsCopyParamsSchema.parse(rawParams)
-    feCopy(allow(rootPath), srcPath, destPath)
+    allowIn(rootPath, srcPath)
+    feCopy(allowIn(rootPath, destPath, true), srcPath, destPath)
     return { ok: true }
   }
 
@@ -289,10 +303,13 @@ export function createFsHandlers(ctx: HandlerContext): HubMethodTable {
     // Clamp rather than reject: a caller asking for more than the wire allows
     // should get the wire's maximum plus an honest `truncated`, not an error.
     const maxResults = Math.min(options?.maxResults ?? FS_MAX_SEARCH_RESULTS, FS_MAX_SEARCH_RESULTS)
-    const results = feSearchFiles(allow(rootPath), query, {
+    const root = allow(rootPath)
+    // Content search reads every file below the root; a root above the computer's
+    // own state must not hand back lines of its credentials or request log (T-27).
+    const results = feSearchFiles(root, query, {
       ...options,
       maxResults
-    })
+    }).filter((r) => !isProtectedPath(join(root, r.path)))
     const total = results.reduce((n, r) => n + r.matches.length, 0)
     return { results, truncated: total >= maxResults }
   }

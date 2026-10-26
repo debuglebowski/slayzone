@@ -33,7 +33,9 @@ function ctxWith(roots: string[]) {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
     allowedRoots: roots,
-    capabilities: ['fs']
+    capabilities: ['fs'],
+    // The desktop's own computer (T-27): the only kind that accepts a hub-pushed jail.
+    hubMayEditRoots: true
   }
   return { dialer, config, log: () => {} }
 }

@@ -150,6 +150,21 @@ export function runCreateRollback(): void {
  * "does not exist" is no source knowing the name at all (see
  * {@link computerIdentity.isUnknown}).
  */
+/**
+ * Apply `slay computer roots` edits to a computer's allowed folders: removals
+ * first, then additions not already present. `missing` lists added folders that
+ * do not exist (the computer would drop them anyway; refusing says why).
+ */
+export function editAllowedRoots(
+  current: readonly string[],
+  edit: { add: readonly string[]; remove: readonly string[]; exists: (dir: string) => boolean }
+): { roots: string[]; missing: string[] } {
+  const missing = edit.add.filter((d) => !edit.exists(d))
+  const roots = current.filter((d) => !edit.remove.includes(d))
+  for (const d of edit.add) if (!roots.includes(d)) roots.push(d)
+  return { roots, missing }
+}
+
 async function requireKnown(name: string, backend: ServiceBackend): Promise<ComputerFacts> {
   const facts = await resolveComputer(name, backend)
   if (!isUnknown(facts)) return facts
@@ -836,6 +851,57 @@ export function computerCommand(): Command {
       console.log(
         `Computer "${name}" restarted${status.pid ? ` (pid ${status.pid})` : ''} and reconnected.`
       )
+    })
+
+  // slay computer roots <name> [--add <dir>] [--remove <dir>]
+  //
+  // T-27: a computer's folder limits are set HERE, on the device — a hub can no
+  // longer push them (the computer refuses `computer.setAllowedRoots`). This edits
+  // the computer's own computer.config.json; a running computer polls that file and
+  // applies the change within seconds, no restart. (The desktop app's own computer
+  // is the exception: its local hub widens its roots as projects are added.)
+  cmd
+    .command('roots <name>')
+    .description('Show or change the folders a computer may work in (set on this machine only)')
+    .option(
+      '--add <dir>',
+      'Allow this folder (repeatable; must exist)',
+      (value: string, previous: string[] = []) => [...previous, value]
+    )
+    .option(
+      '--remove <dir>',
+      'Stop allowing this folder (repeatable)',
+      (value: string, previous: string[] = []) => [...previous, value]
+    )
+    .action(async (name: string, opts: { add?: string[]; remove?: string[] }) => {
+      const backend = resolveBackend()
+      const facts = await requireKnown(name, backend)
+      const root = requireRoot(facts, 'change folder limits for')
+      const configPath = configPathFor(root)
+      const current = loadComputerConfigFile(configPath).allowedRoots ?? [root]
+      if (!opts.add?.length && !opts.remove?.length) {
+        console.log(current.map((d) => shortenPath(d)).join('\n'))
+        return
+      }
+      const edit = editAllowedRoots(current, {
+        add: (opts.add ?? []).map((d) => resolvePath(d)),
+        remove: (opts.remove ?? []).map((d) => resolvePath(d)),
+        exists: existsSync
+      })
+      if (edit.missing.length > 0) {
+        fail(
+          `No such folder on this machine: ${edit.missing.map((d) => shortenPath(d)).join(', ')}`
+        )
+      }
+      if (edit.roots.length === 0) {
+        fail(
+          `A computer needs at least one allowed folder. To stop it entirely, ` +
+            `\`slay computer stop ${name}\` (or revoke it on the hub).`
+        )
+      }
+      updateComputerConfigFile({ allowedRoots: edit.roots }, configPath)
+      console.log(`Allow: ${edit.roots.map((d) => shortenPath(d)).join(', ')}`)
+      if (facts.running) console.log('The running computer picks this up within a few seconds.')
     })
 
   // slay computer logs <name>
