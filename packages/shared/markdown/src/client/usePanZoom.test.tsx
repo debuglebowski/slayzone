@@ -7,8 +7,8 @@ interface HarnessProps {
   svg: string
   hostSize?: { w: number; h: number }
   controlsRef: React.MutableRefObject<PanZoomControls | null>
-  hostRefOut: React.MutableRefObject<HTMLDivElement | null>
-  contentRefOut: React.MutableRefObject<HTMLDivElement | null>
+  hostOutRef: React.MutableRefObject<HTMLDivElement | null>
+  contentOutRef: React.MutableRefObject<HTMLDivElement | null>
   fitOnMount?: boolean
 }
 
@@ -16,16 +16,16 @@ function Harness({
   svg,
   hostSize,
   controlsRef,
-  hostRefOut,
-  contentRefOut,
+  hostOutRef,
+  contentOutRef,
   fitOnMount = false
 }: HarnessProps) {
   const { hostRef, contentRef, controls } = usePanZoom({ fitOnMount })
   const initRef = useRef(false)
   useEffect(() => {
     controlsRef.current = controls
-    hostRefOut.current = hostRef.current
-    contentRefOut.current = contentRef.current
+    hostOutRef.current = hostRef.current
+    contentOutRef.current = contentRef.current
     if (initRef.current) return
     initRef.current = true
     if (hostSize && hostRef.current) {
@@ -87,8 +87,8 @@ describe('usePanZoom', () => {
         svg='<svg viewBox="0 0 100 50"></svg>'
         hostSize={{ w: 200, h: 200 }}
         controlsRef={controls}
-        hostRefOut={host}
-        contentRefOut={content}
+        hostOutRef={host}
+        contentOutRef={content}
       />
     )
     await act(async () => {
@@ -107,8 +107,8 @@ describe('usePanZoom', () => {
         svg='<svg viewBox="0 0 100 100"></svg>'
         hostSize={{ w: 200, h: 200 }}
         controlsRef={controls}
-        hostRefOut={host}
-        contentRefOut={content}
+        hostOutRef={host}
+        contentOutRef={content}
       />
     )
     await act(async () => {
@@ -129,8 +129,8 @@ describe('usePanZoom', () => {
         svg='<svg viewBox="0 0 100 100"></svg>'
         hostSize={{ w: 200, h: 200 }}
         controlsRef={controls}
-        hostRefOut={host}
-        contentRefOut={content}
+        hostOutRef={host}
+        contentOutRef={content}
       />
     )
     await act(async () => {
@@ -155,8 +155,8 @@ describe('usePanZoom', () => {
         svg='<svg viewBox="0 0 100 100"></svg>'
         hostSize={{ w: 200, h: 200 }}
         controlsRef={controls}
-        hostRefOut={host}
-        contentRefOut={content}
+        hostOutRef={host}
+        contentOutRef={content}
       />
     )
     await act(async () => {

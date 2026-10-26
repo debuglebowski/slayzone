@@ -32,6 +32,20 @@ export interface SbsSyncApi {
   scrollLeftRef: React.MutableRefObject<number>
 }
 
+// Module-level on purpose: `register` stores its own params in the set, so the
+// React Compiler types the set's members as immutable callback params and
+// rejects writing their scrollLeft inline in onScroll. These are DOM nodes
+// mutated from a scroll handler — legitimate, just opaque to that analysis.
+function broadcastScrollLeft(
+  els: Iterable<HTMLDivElement>,
+  src: HTMLDivElement,
+  scrollLeft: number
+): void {
+  for (const el of els) {
+    if (el !== src && el.scrollLeft !== scrollLeft) el.scrollLeft = scrollLeft
+  }
+}
+
 export function useSbsSync(): SbsSyncApi {
   const elsRef = useRef<Set<HTMLDivElement>>(new Set())
   const scrollLeftRef = useRef(0)
@@ -55,9 +69,7 @@ export function useSbsSync(): SbsSyncApi {
     const src = e.currentTarget
     const sl = src.scrollLeft
     scrollLeftRef.current = sl
-    for (const el of elsRef.current) {
-      if (el !== src && el.scrollLeft !== sl) el.scrollLeft = sl
-    }
+    broadcastScrollLeft(elsRef.current, src, sl)
     syncingRef.current = false
   }, [])
 

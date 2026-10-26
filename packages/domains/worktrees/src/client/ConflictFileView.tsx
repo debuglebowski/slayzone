@@ -125,29 +125,6 @@ export function ConflictFileView({
     return viewRef.current?.state.doc.toString() ?? ''
   }, [])
 
-  const handleAcceptOurs = useCallback(async () => {
-    if (!content?.ours) return
-    setEditorContent(content.ours)
-    await resolveWithContent(content.ours)
-  }, [content, setEditorContent])
-
-  const handleAcceptTheirs = useCallback(async () => {
-    if (!content?.theirs) return
-    setEditorContent(content.theirs)
-    await resolveWithContent(content.theirs)
-  }, [content, setEditorContent])
-
-  const handleApplySuggestion = useCallback(async () => {
-    if (!analysis?.suggestion) return
-    setEditorContent(analysis.suggestion)
-    await resolveWithContent(analysis.suggestion)
-  }, [analysis, setEditorContent])
-
-  const handleMarkResolved = useCallback(async () => {
-    const text = getEditorContent()
-    await resolveWithContent(text)
-  }, [getEditorContent])
-
   const resolveWithContent = useCallback(
     async (text: string) => {
       setError(null)
@@ -160,8 +137,37 @@ export function ConflictFileView({
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [repoPath, filePath, onResolved]
+    [
+      repoPath,
+      filePath,
+      onResolved,
+      writeResolvedFileMutation.mutateAsync,
+      stageFileMutation.mutateAsync
+    ]
   )
+
+  const handleAcceptOurs = useCallback(async () => {
+    if (!content?.ours) return
+    setEditorContent(content.ours)
+    await resolveWithContent(content.ours)
+  }, [content, setEditorContent, resolveWithContent])
+
+  const handleAcceptTheirs = useCallback(async () => {
+    if (!content?.theirs) return
+    setEditorContent(content.theirs)
+    await resolveWithContent(content.theirs)
+  }, [content, setEditorContent, resolveWithContent])
+
+  const handleApplySuggestion = useCallback(async () => {
+    if (!analysis?.suggestion) return
+    setEditorContent(analysis.suggestion)
+    await resolveWithContent(analysis.suggestion)
+  }, [analysis, setEditorContent, resolveWithContent])
+
+  const handleMarkResolved = useCallback(async () => {
+    const text = getEditorContent()
+    await resolveWithContent(text)
+  }, [getEditorContent, resolveWithContent])
 
   const handleAnalyze = useCallback(async () => {
     if (!content) return

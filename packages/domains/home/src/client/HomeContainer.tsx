@@ -167,20 +167,23 @@ function HomeContainerImpl({
   // Surface an `openFile` handle to the parent (fork command palette). Mirrors
   // the canonical app's `buildHomeFileContext`: reveal the editor panel, then
   // open via the editor ref (queuing through pendingHomeEditorFileRef if the
-  // editor hasn't mounted yet).
+  // editor hasn't mounted yet). Refs destructured so the compiler sees them as
+  // refs, not as fields of an (immutable) hook return value.
+  const { homeEditorRef, pendingHomeEditorFileRef, homePanelVisibility, setHomePanelVisibility } =
+    homePanel
   const openHomeFile = useCallback(
     (filePath: string) => {
-      if (homePanel.homeEditorRef.current) {
-        if (!homePanel.homePanelVisibility.editor) {
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
+      if (homeEditorRef.current) {
+        if (!homePanelVisibility.editor) {
+          setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
         }
-        homePanel.homeEditorRef.current.openFile(filePath)
+        homeEditorRef.current.openFile(filePath)
       } else {
-        homePanel.pendingHomeEditorFileRef.current = filePath
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
+        pendingHomeEditorFileRef.current = filePath
+        setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
       }
     },
-    [homePanel]
+    [homeEditorRef, pendingHomeEditorFileRef, homePanelVisibility.editor, setHomePanelVisibility]
   )
   useImperativeHandle(editorHandleRef, () => ({ openFile: openHomeFile }), [openHomeFile])
 

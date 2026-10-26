@@ -101,6 +101,12 @@ const NOOP = (): void => {
   // Deliberately inert — see above.
 }
 
+// Expose the tab + dialog stores for e2e / CDP introspection — same module-scope
+// escape hatch as the Electron App.tsx (render must not write globals).
+const testWindow = window as unknown as Record<string, unknown>
+testWindow.__slayzone_tabStore ??= useTabStore
+testWindow.__slayzone_dialogStore ??= useDialogStore
+
 export function HomeView(): React.JSX.Element {
   const rawData = useTasksData()
   const trpcClient = useTRPCClient()
@@ -183,14 +189,6 @@ export function HomeView(): React.JSX.Element {
   const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
     useExplodeMode(openTaskIds)
   const visibleTaskCount = openTaskIds.length
-
-  // Expose the tab + dialog stores for e2e / CDP introspection (mirrors the
-  // Electron App.tsx exposure). Idempotent guards → safe to run each render.
-  if (typeof window !== 'undefined') {
-    const w = window as unknown as Record<string, unknown>
-    if (!w.__slayzone_tabStore) w.__slayzone_tabStore = useTabStore
-    if (!w.__slayzone_dialogStore) w.__slayzone_dialogStore = useDialogStore
-  }
 
   // Keep the store's task/project lookup fresh — openTask reads it to build a
   // tab's title and worktree-grouped insert position.

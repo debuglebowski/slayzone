@@ -80,6 +80,20 @@ export function ProjectSkills({
     }
   }, [trpcClient, projectId, projectPath, type])
 
+  const handleCreate = async () => {
+    const slug = 'new-skill'
+    const created = await trpcClient.aiConfig.createItem.mutate({
+      type: 'skill',
+      scope: 'project',
+      projectId,
+      slug,
+      content: buildDefaultSkillContent(slug)
+    })
+    setLocalItems((prev) => [created, ...prev])
+    setEditingId(created.id)
+    onChanged?.()
+  }
+
   useEffect(() => {
     if (openPickerTrigger && openPickerTrigger > 0) setShowPicker(true)
   }, [openPickerTrigger])
@@ -102,20 +116,6 @@ export function ProjectSkills({
   const handleItemLoaded = async () => {
     setShowPicker(false)
     await load()
-    onChanged?.()
-  }
-
-  const handleCreate = async () => {
-    const slug = 'new-skill'
-    const created = await trpcClient.aiConfig.createItem.mutate({
-      type: 'skill',
-      scope: 'project',
-      projectId,
-      slug,
-      content: buildDefaultSkillContent(slug)
-    })
-    setLocalItems((prev) => [created, ...prev])
-    setEditingId(created.id)
     onChanged?.()
   }
 
