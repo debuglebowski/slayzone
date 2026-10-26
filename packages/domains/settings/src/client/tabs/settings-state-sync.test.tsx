@@ -114,6 +114,7 @@ vi.mock('@slayzone/ui', () => {
       terminal: { background: '', red: '', green: '', yellow: '', blue: '', magenta: '', cyan: '' }
     }),
     safeRandomUUID: () => 'uuid',
+    parseTerminalOptionAsMeta: () => 'auto',
     toast: { success: vi.fn(), error: vi.fn() }
   }
 })

@@ -6,6 +6,20 @@ export interface BrowserDeviceDefaults {
   mobile: { enabled: boolean; width: number; height: number }
 }
 
+/**
+ * macOS: which Option key(s) send Meta (ESC prefix) to the terminal instead of
+ * composing a character. Ghostty's `macos-option-as-alt` model plus its
+ * zero-config default: 'auto' = Meta on US-shaped layouts, compose wherever the
+ * layout puts its own character on Option (Option+2 = @ on Swedish).
+ */
+export type TerminalOptionAsMeta = 'auto' | 'both' | 'left' | 'right' | 'none'
+
+export function parseTerminalOptionAsMeta(value: string | undefined): TerminalOptionAsMeta {
+  return value === 'both' || value === 'left' || value === 'right' || value === 'none'
+    ? value
+    : 'auto'
+}
+
 export interface AppearanceSettings {
   terminalFontSize: number
   editorFontSize: number
@@ -28,6 +42,7 @@ export interface AppearanceSettings {
    * picked on every fresh terminal in this session and every future one.
    */
   terminalForceCompatibilityRenderer: boolean
+  terminalOptionAsMeta: TerminalOptionAsMeta
   // Diff
   diffContextLines: '0' | '3' | '5' | 'all'
   diffIgnoreWhitespace: boolean
@@ -70,6 +85,7 @@ export const appearanceDefaults: AppearanceSettings = {
   terminalFontFamily: 'Menlo, Monaco, "Courier New", monospace',
   terminalScrollback: 2000,
   terminalForceCompatibilityRenderer: false,
+  terminalOptionAsMeta: 'auto',
   diffContextLines: '3',
   diffIgnoreWhitespace: false,
   diffContinuousFlow: false,

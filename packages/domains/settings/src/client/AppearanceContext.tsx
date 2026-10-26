@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import { AppearanceContext, appearanceDefaults } from '@slayzone/ui'
+import { AppearanceContext, appearanceDefaults, parseTerminalOptionAsMeta } from '@slayzone/ui'
 import type { AppearanceSettings, BrowserDeviceDefaults } from '@slayzone/ui'
 
 function tryParseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -60,6 +60,7 @@ export function AppearanceProvider({
     const termFamily = get('terminal_font_family')
     const termScrollback = get('terminal_scrollback')
     const termForceCompat = get('terminal_force_compatibility_renderer')
+    const termOptionAsMeta = get('terminal_option_as_meta')
     const diffContext = get('diff_context_lines')
     const diffWs = get('diff_ignore_whitespace')
     const diffContinuous = get('diff_continuous_flow')
@@ -106,6 +107,7 @@ export function AppearanceProvider({
       terminalFontFamily: termFamily || d.terminalFontFamily,
       terminalScrollback: termScrollback ? parseInt(termScrollback, 10) : d.terminalScrollback,
       terminalForceCompatibilityRenderer: termForceCompat === '1',
+      terminalOptionAsMeta: parseTerminalOptionAsMeta(termOptionAsMeta),
       diffContextLines:
         diffContext === '0' || diffContext === '5' || diffContext === 'all' ? diffContext : '3',
       diffIgnoreWhitespace: diffWs === '1',

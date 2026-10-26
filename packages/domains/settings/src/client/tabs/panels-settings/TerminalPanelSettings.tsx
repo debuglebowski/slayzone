@@ -7,7 +7,9 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-  Switch
+  Switch,
+  parseTerminalOptionAsMeta,
+  type TerminalOptionAsMeta
 } from '@slayzone/ui'
 import {
   AGENT_STARTUP_SETTING,
@@ -45,6 +47,42 @@ const AGENT_STARTUP_OPTIONS: Array<{
   }
 ]
 
+// Option is only a modifier question on macOS (elsewhere Alt is always Meta).
+const IS_MAC = navigator.platform.startsWith('Mac')
+
+const OPTION_AS_META_OPTIONS: Array<{
+  value: TerminalOptionAsMeta
+  label: string
+  description: string
+}> = [
+  {
+    value: 'auto',
+    label: 'Auto',
+    description:
+      'Meta on US layouts. Where your layout types a character with Option (Option+2 = @ on Swedish), Option types it.'
+  },
+  {
+    value: 'both',
+    label: 'Both',
+    description: 'Both Option keys send Meta. Characters that need Option cannot be typed.'
+  },
+  {
+    value: 'left',
+    label: 'Left',
+    description: 'Left Option sends Meta; right Option types characters.'
+  },
+  {
+    value: 'right',
+    label: 'Right',
+    description: 'Right Option sends Meta; left Option types characters.'
+  },
+  {
+    value: 'none',
+    label: 'Off',
+    description: 'Option always types characters, like macOS Terminal. Option+←/→ still jump words.'
+  }
+]
+
 export function TerminalPanelSettings({
   state,
   modes,
@@ -73,7 +111,9 @@ export function TerminalPanelSettings({
     terminalScrollback,
     setTerminalScrollback,
     terminalForceCompatibilityRenderer,
-    setTerminalForceCompatibilityRenderer
+    setTerminalForceCompatibilityRenderer,
+    terminalOptionAsMeta,
+    setTerminalOptionAsMeta
   } = state
   return (
     <>
@@ -215,6 +255,35 @@ export function TerminalPanelSettings({
             }}
           />
         </div>
+        {IS_MAC && (
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Option as Meta</span>
+            <div className="flex items-center gap-2">
+              <Select
+                value={terminalOptionAsMeta}
+                onValueChange={(v) => {
+                  const next = parseTerminalOptionAsMeta(v)
+                  setTerminalOptionAsMeta(next)
+                  setSetting('terminal_option_as_meta', next)
+                }}
+              >
+                <SelectTrigger className="w-32 shrink-0" data-testid="terminal-option-as-meta">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" align="start">
+                  {OPTION_AS_META_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                {OPTION_AS_META_OPTIONS.find((o) => o.value === terminalOptionAsMeta)?.description}
+              </span>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
           <span className="text-sm text-muted-foreground">Compatibility renderer</span>
           <div className="flex items-center gap-2">

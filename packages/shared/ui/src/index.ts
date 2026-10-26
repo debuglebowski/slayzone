@@ -31,7 +31,9 @@ export {
   useAppearance,
   AppearanceContext,
   appearanceDefaults,
+  parseTerminalOptionAsMeta,
   type AppearanceSettings,
+  type TerminalOptionAsMeta,
   type BrowserDeviceDefaults
 } from './AppearanceContext'
 export { getTerminalStateStyle, type TerminalStateStyle } from './terminal-state'

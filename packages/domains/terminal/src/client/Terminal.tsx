@@ -40,6 +40,7 @@ import type { ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
 import { diag } from './terminal-webgl-diag'
 import { trimSelectionTrailingSpaces } from './Terminal.utils'
+import { syncMacOptionIsMeta } from './option-as-meta'
 import { noteTerminalOutput } from './focus-loss-diag'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
 import '@xterm/xterm/css/xterm.css'
@@ -196,11 +197,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     terminalFontSize,
     terminalFontFamily,
     terminalScrollback,
-    terminalForceCompatibilityRenderer
+    terminalForceCompatibilityRenderer,
+    terminalOptionAsMeta
   } = useAppearance()
   // Ref so the inline-defined `triggerWebglLoad` + cache-reattach path see
   // the current setting value without closure staleness.
   const forceCompatRef = useRef(terminalForceCompatibilityRenderer)
+  // Read per keystroke by the key handler — a settings change reaches live,
+  // cached and reattached terminals without re-init.
+  const optionAsMetaRef = useRef(terminalOptionAsMeta)
 
   const resolvedTerminalTheme = getThemeTerminalColors(terminalThemeId, contentVariant)
   const resolvedTerminalVariant = contentVariant
@@ -234,6 +239,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     providerFlagsRef.current = providerFlags
     executionContextRef.current = executionContext
     forceCompatRef.current = terminalForceCompatibilityRenderer
+    optionAsMetaRef.current = terminalOptionAsMeta
     initOptionsRef.current = {
       fontSize: terminalFontSize,
       fontFamily: terminalFontFamily,
@@ -334,6 +340,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const handleTerminalKeyEvent = useCallback(
     (e: KeyboardEvent): boolean => {
+      // macOS Option: Meta or a composed character (@ on Swedish Option+2) —
+      // resolved per keystroke, before xterm reads `macOptionIsMeta`.
+      syncMacOptionIsMeta(terminalRef.current, e, optionAsMetaRef.current)
       if (e.ctrlKey && e.key === 'Tab') return false
       // Task-tab switching (⌘⌥←/→, Ctrl+PgUp/PgDn off macOS) belongs to the app even
       // from a focused terminal — xterm would send the keys to the shell instead.
@@ -375,9 +384,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       ) {
         return false
       }
-      // macOS: Option+Arrow word navigation.
-      // xterm.js sends \x1b[1;3D (CSI modifier form) but macOS shells
-      // bind \x1bb/\x1bf (Meta-b/f) for word nav. Match iTerm2 behavior.
+      // macOS: Option+Arrow word navigation, whatever the Option-as-Meta setting
+      // (arrows compose nothing). xterm.js sends \x1b[1;3D (CSI modifier form)
+      // but macOS shells bind \x1bb/\x1bf (Meta-b/f) for word nav. Match iTerm2.
       if (
         navigator.platform.startsWith('Mac') &&
         e.altKey &&

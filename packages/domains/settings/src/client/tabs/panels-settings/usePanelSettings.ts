@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
-import { safeRandomUUID } from '@slayzone/ui'
+import { parseTerminalOptionAsMeta, safeRandomUUID, type TerminalOptionAsMeta } from '@slayzone/ui'
 import {
   AGENT_STARTUP_SETTING,
   DEFAULT_AGENT_STARTUP_MODE,
@@ -62,6 +62,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
   const [terminalIdleCloseUnit, setTerminalIdleCloseUnit] = useState('minutes')
   const [terminalForceCompatibilityRenderer, setTerminalForceCompatibilityRenderer] =
     useState(false)
+  const [terminalOptionAsMeta, setTerminalOptionAsMeta] = useState<TerminalOptionAsMeta>('auto')
 
   // Editor
   const [editorWordWrap, setEditorWordWrap] = useState<'on' | 'off'>('off')
@@ -150,6 +151,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
       const gtv = all['git_tab_visibility']
       const tasm = all[AGENT_STARTUP_SETTING]
       const tfcr = all['terminal_force_compatibility_renderer']
+      const toam = all['terminal_option_as_meta']
       const taci = all['terminal_auto_close_idle']
       const ticv = all['terminal_idle_close_value']
       const ticu = all['terminal_idle_close_unit']
@@ -160,6 +162,7 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
       if (ts) setTerminalScrollback(ts)
       setAgentStartupMode(parseAgentStartupMode(tasm))
       if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
+      setTerminalOptionAsMeta(parseTerminalOptionAsMeta(toam))
       if (taci === '1') setTerminalAutoCloseIdle(true)
       if (ticv) setTerminalIdleCloseValue(ticv)
       if (ticu) setTerminalIdleCloseUnit(ticu)
@@ -450,6 +453,8 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     setTerminalIdleCloseUnit,
     terminalForceCompatibilityRenderer,
     setTerminalForceCompatibilityRenderer,
+    terminalOptionAsMeta,
+    setTerminalOptionAsMeta,
     editorWordWrap,
     setEditorWordWrap,
     editorRenderWhitespace,

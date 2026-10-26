@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { getTrpcClient } from '@slayzone/transport/client'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
+import { ensureOptionKeyTracking } from './option-as-meta'
 
 // Override xterm underline styles - Claude Code outputs these and they persist incorrectly
 // This is a definitive fix that works regardless of ANSI code filtering
@@ -107,10 +108,13 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
   ])
   if (signal.aborted) return null
 
+  // `macOptionIsMeta` is not set here: the custom key handler resolves it per
+  // keystroke from the Option-as-Meta setting (see option-as-meta.ts).
+  ensureOptionKeyTracking()
+
   // Create new terminal
   const terminal = new XTerm({
     allowProposedApi: true,
-    macOptionIsMeta: true,
     cursorBlink: false,
     fontSize,
     fontFamily,
