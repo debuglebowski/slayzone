@@ -202,8 +202,29 @@ const board: OutputFilter = async (data, scope) => {
     projects: await rows('id', 'project')(data.projects, scope),
     tags: await rows('project_id', 'project')(data.tags, scope),
     taskTags: await keyed('task')(data.taskTags, scope),
-    blockedTaskIds: await ids('task')(data.blockedTaskIds, scope)
+    blockedTaskIds: await ids('task')(data.blockedTaskIds, scope),
+    ...('nextTaskIds' in data ? { nextTaskIds: await successors(data.nextTaskIds, scope) } : {})
   }
+}
+
+/** `loadBoardRows`' `nextTaskIds`: a row's successor is the next row of the WHOLE
+ *  board, which may be another owner's task. An entry stays only when both its
+ *  row and its successor are the caller's; a dropped entry makes the client
+ *  refuse the patch and reload its (filtered) board instead. */
+const successors: OutputFilter = async (data, scope) => {
+  if (!isRecord(data)) return data
+  const out: Record<string, string | null> = {}
+  for (const [k, v] of Object.entries(data)) {
+    const row = res('task', k)
+    if (!row || !(await scope.allows(row))) continue
+    if (v === null) {
+      out[k] = null
+      continue
+    }
+    const next = res('task', v)
+    if (next && (await scope.allows(next))) out[k] = v as string
+  }
+  return out
 }
 
 /** Project folders: a group shows when it is empty or holds one of the caller's

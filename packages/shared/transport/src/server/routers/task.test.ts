@@ -1358,7 +1358,8 @@ test('task router: loadBoardRows is exactly those rows of loadBoardData', async 
   expect(await caller.loadBoardRows({ ids: [] })).toEqual({
     tasks: [],
     taskTags: {},
-    blockedTaskIds: []
+    blockedTaskIds: [],
+    nextTaskIds: {}
   })
 })
 
