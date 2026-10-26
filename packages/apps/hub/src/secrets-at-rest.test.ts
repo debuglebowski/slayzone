@@ -274,9 +274,22 @@ async function enroll(port: number, joinToken: string): Promise<string> {
   return apiKey
 }
 
-async function hello(port: number, apiKey: string): Promise<boolean> {
-  const r = await computerRpc(port, 'hello', { apiKey })
-  return typeof r.result?.computerId === 'string'
+/**
+ * Fails with the hub's reply unless a reconnect with `apiKey` gets the computer in.
+ * Sent the way the computer's dialer sends it: since v3 (T-27) `hello` carries the
+ * protocol version (a hub refuses one without), and the computer stays only if the
+ * hub echoes its own.
+ */
+async function assertHello(port: number, apiKey: string, label: string): Promise<void> {
+  const r = await computerRpc(port, 'hello', {
+    apiKey,
+    protocolVersion: COMPUTER_PROTOCOL_VERSION
+  })
+  assert(
+    typeof r.result?.computerId === 'string' &&
+      r.result.protocolVersion === COMPUTER_PROTOCOL_VERSION,
+    `${label}: ${JSON.stringify(r)}`
+  )
 }
 
 // --- what may never show up -----------------------------------------------------
@@ -408,7 +421,7 @@ async function main(): Promise<void> {
         assert(wrong.status === 401, `a wrong password is refused, got ${wrong.status}`)
         joinToken = await mintJoinToken(port, bearer)
         apiKey = await enroll(port, joinToken)
-        assert(await hello(port, apiKey), 'the enrolled computer says hello')
+        await assertHello(port, apiKey, 'the enrolled computer says hello')
         const add = await postJson(
           `http://127.0.0.1:${port}/api/hub/users`,
           { email: 'someone@example.com' },
@@ -583,9 +596,9 @@ async function main(): Promise<void> {
           headers: { authorization: `Bearer ${ownerToken}` }
         })
         assert(tasks.status === 200, `a session from before still works, got ${tasks.status}`)
-        assert(await hello(port, apiKeyBefore), 'a computer enrolled before still connects')
+        await assertHello(port, apiKeyBefore, 'a computer enrolled before still connects')
         const apiKeyAfter = await enroll(port, await mintJoinToken(port, ownerToken))
-        assert(await hello(port, apiKeyAfter), 'a computer enrolled after connects')
+        await assertHello(port, apiKeyAfter, 'a computer enrolled after connects')
         const out = after.logs.join('\n')
         assert(out.includes(statePath) && out.includes(ownerPath), `names both files:\n${out}`)
       } finally {
