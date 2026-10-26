@@ -6,11 +6,11 @@ import {
   DialogContent,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
+  useDepsChanged
 } from '@slayzone/ui'
 import { buildConfig, loadCustomServers, saveCustomServers } from '../mcp-helpers'
 import type { CustomMcpServer, EditTarget } from '../types'
-import { useDepsChanged } from '../../useDepsChanged'
 import { McpServerFormFields } from './McpServerFormFields'
 
 interface AddComputerMcpDialogProps {

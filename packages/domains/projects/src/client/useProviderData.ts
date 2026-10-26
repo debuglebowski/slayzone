@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { ExternalGroup, ExternalScope } from '@slayzone/integrations/shared'
-import { depsChanged } from './deps-changed'
+import { depsChanged } from '@slayzone/ui'
 
 export interface UseProviderDataResult {
   groups: ExternalGroup[]

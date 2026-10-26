@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, AlertCircle, Circle, Trash2, Sparkles } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { cn } from '@slayzone/ui'
+import { cn, useDepsChanged } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type {
   AiConfigItem,
@@ -16,7 +16,6 @@ import { LibraryItemPicker } from './LibraryItemPicker'
 import { ContextItemEditor } from './ContextItemEditor'
 import { toSyncBadgeLabel } from './sync-view-model'
 import { getSkillValidation } from './skill-validation'
-import { useDepsChanged } from './useDepsChanged'
 
 interface ProjectSkillsProps {
   projectId: string

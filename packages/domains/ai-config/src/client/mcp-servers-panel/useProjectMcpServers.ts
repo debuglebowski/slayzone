@@ -4,7 +4,7 @@ import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget } fro
 import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { ALL_PROVIDERS, loadCustomServers, matchesSearch } from './mcp-helpers'
 import type { CustomMcpServer, EditTarget, MergedServer } from './types'
-import { useDepsChanged } from '../useDepsChanged'
+import { useDepsChanged } from '@slayzone/ui'
 
 export function useProjectMcpServers(projectPath: string, projectId: string) {
   const trpcClient = useTRPCClient()

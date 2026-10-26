@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2, Lock, Server } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { Button, Input } from '@slayzone/ui'
+import { Button, Input, useDepsChanged } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { CliProvider, McpConfigFileResult } from '../shared'
-import { useDepsChanged } from './useDepsChanged'
 
 export function ComputerMcpView() {
   const trpcClient = useTRPCClient()

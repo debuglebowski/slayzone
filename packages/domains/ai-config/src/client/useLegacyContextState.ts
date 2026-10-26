@@ -4,7 +4,7 @@ import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, UpdateAiConfigItemInput } from '../shared'
 import type { ContextManagerSection, Section } from './ContextManagerSettings.types'
 import { nextAvailableSlug } from './ContextManagerSettings.utils'
-import { useDepsChanged } from './useDepsChanged'
+import { useDepsChanged } from '@slayzone/ui'
 
 export function useLegacyContextState(initialSection: ContextManagerSection | null) {
   const trpcClient = useTRPCClient()

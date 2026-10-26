@@ -10,9 +10,8 @@ import {
 import { createPortal } from 'react-dom'
 import { FileText, Plus, Save, Trash2 } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { Button, Input, Label, Textarea, cn } from '@slayzone/ui'
+import { Button, Input, Label, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
-import { useDepsChanged } from './useDepsChanged'
 
 export function InstructionVariantsView() {
   const trpcClient = useTRPCClient()

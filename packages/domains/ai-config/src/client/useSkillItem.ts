@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { toast } from '@slayzone/ui'
+import { toast, useDepsChanged } from '@slayzone/ui'
 import { repairSkillFrontmatter } from '../shared'
 import type { AiConfigItem, CliProvider, ProjectSkillStatus } from '../shared'
 import { PROVIDER_PATHS } from '../shared/provider-registry'
 import { getSkillValidation } from './skill-validation'
 import type { ProviderRow } from './ItemSection.types'
 import { providerSupportsType } from './ItemSection.utils'
-import { useDepsChanged } from './useDepsChanged'
 
 export function useSkillItem({
   item,

@@ -42,7 +42,8 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client
 }))
 
-vi.mock('@slayzone/ui', () => ({
+vi.mock('@slayzone/ui', async () => ({
+  ...(await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')),
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 

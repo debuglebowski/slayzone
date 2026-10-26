@@ -26,12 +26,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
   cn,
-  fileTreeIndent
+  fileTreeIndent,
+  useDepsChanged
 } from '@slayzone/ui'
 import type { ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
-import { useDepsChanged } from './useDepsChanged'
 
 export function ComputerFilesView() {
   const trpcClient = useTRPCClient()

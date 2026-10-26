@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Check, Circle, File, FilePlus, Link, RefreshCw } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { Button, FileTree, Textarea, cn, fileTreeIndent } from '@slayzone/ui'
+import { Button, FileTree, Textarea, cn, fileTreeIndent, useDepsChanged } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
-import { useDepsChanged } from './useDepsChanged'
 
 interface ProjectContextFilesViewProps {
   projectId: string

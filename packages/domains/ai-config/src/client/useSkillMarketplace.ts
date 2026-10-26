@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { toast } from '@slayzone/ui'
+import { toast, useDepsChanged } from '@slayzone/ui'
 import type { SkillRegistry, SkillRegistryEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
-import { useDepsChanged } from './useDepsChanged'
 
 export type View = 'browse' | 'manage'
 export type BrowseMode = 'registries' | 'all'

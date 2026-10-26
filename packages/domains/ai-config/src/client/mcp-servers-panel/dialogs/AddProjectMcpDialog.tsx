@@ -7,12 +7,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Label
+  Label,
+  useDepsChanged
 } from '@slayzone/ui'
 import type { McpTarget } from '../../../shared'
 import { buildConfig, loadCustomServers, PROVIDER_LABELS, saveCustomServers } from '../mcp-helpers'
 import type { CustomMcpServer, EditTarget } from '../types'
-import { useDepsChanged } from '../../useDepsChanged'
 import { McpServerFormFields } from './McpServerFormFields'
 
 interface AddProjectMcpDialogProps {

@@ -71,6 +71,7 @@ export {
   type UseVisibleIntervalOptions
 } from './use-document-visibility'
 export { useNow, type UseNowOptions } from './use-now'
+export { depsChanged, useDepsChanged } from './use-deps-changed'
 
 // Components
 export * from './alert-dialog'

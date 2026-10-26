@@ -9,10 +9,9 @@ import {
 } from 'react'
 import { File, FilePlus, Trash2 } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { Button, Input, Textarea, cn } from '@slayzone/ui'
+import { Button, Input, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { CliProvider, ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
-import { useDepsChanged } from './useDepsChanged'
 
 interface ComputerContextFilesProps {
   filter?: 'instructions' | 'skill'

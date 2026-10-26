@@ -41,10 +41,12 @@ vi.mock('@slayzone/transport/client', () => ({
 }))
 
 type Kids = { children?: React.ReactNode }
-vi.mock('@slayzone/ui', () => {
+vi.mock('@slayzone/ui', async () => {
+  const depsHelpers = await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')
   const Pass = ({ children }: Kids) => <>{children}</>
   const Div = ({ children }: Kids) => <div>{children}</div>
   return {
+    ...depsHelpers,
     cn: (...xs: unknown[]) => xs.filter(Boolean).join(' '),
     Button: ({ children, variant: _v, size: _s, ...props }: Record<string, unknown> & Kids) => (
       <button {...(props as React.ComponentProps<'button'>)}>{children}</button>

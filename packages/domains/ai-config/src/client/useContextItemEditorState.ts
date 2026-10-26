@@ -16,7 +16,7 @@ import { useContextManagerStore } from './useContextManagerStore'
 import { PROVIDER_ROW_ORDER } from './ContextItemEditor.constants'
 import { getJsonValidation } from './ContextItemEditor.utils'
 import type { ContextItemEditorProps } from './ContextItemEditor.types'
-import { useDepsChanged } from './useDepsChanged'
+import { useDepsChanged } from '@slayzone/ui'
 
 export function useContextItemEditorState({
   item,

@@ -50,7 +50,10 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client
 }))
 
-vi.mock('@slayzone/ui', () => ({ toast: vi.fn() }))
+vi.mock('@slayzone/ui', async () => ({
+  ...(await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')),
+  toast: vi.fn()
+}))
 
 import { useIntegrationsTab } from './useIntegrationsTab'
 

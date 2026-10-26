@@ -15,7 +15,7 @@ import {
   parseComputerCustomServerIds,
   type MergedServer
 } from './mcp-flat-helpers'
-import { useDepsChanged } from './useDepsChanged'
+import { useDepsChanged } from '@slayzone/ui'
 
 interface UseMcpFlatStateArgs {
   projectPath: string

@@ -3,7 +3,7 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import type { ContextTreeEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
 import { collectExpandedFolders } from './ProjectContextTree.utils'
-import { useDepsChanged } from './useDepsChanged'
+import { useDepsChanged } from '@slayzone/ui'
 
 interface UseProjectContextTreeArgs {
   projectPath: string

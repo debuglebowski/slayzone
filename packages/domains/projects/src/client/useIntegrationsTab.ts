@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { toast } from '@slayzone/ui'
+import { toast, depsChanged } from '@slayzone/ui'
 import type {
   GithubIssueSummary,
   GithubProjectSummary,
@@ -22,7 +22,6 @@ import type {
   TaskSyncRow
 } from './IntegrationsTab.types'
 import { formatGithubImportMessage, sortByMode, summarizeSyncRows } from './IntegrationsTab.utils'
-import { depsChanged } from './deps-changed'
 
 /**
  * Nudge the board to re-read after an integration write.
