@@ -116,6 +116,20 @@ if (have('computer/bin.cjs')) {
   r.status === 0 && r.out.includes('loaded')
     ? pass('computer: node-pty loads')
     : fail(`computer: node-pty cannot load — ${r.out.split('\n')[0]}`)
+  // Loading is not spawning: on posix node-pty execs a separate `spawn-helper` binary
+  // whose path it derives itself (rewriting `app.asar` → `app.asar.unpacked`), and a
+  // wrong or non-executable helper fails only at `spawn` ("posix_spawnp failed.") —
+  // every terminal dead while the load check above stays green.
+  if (process.platform !== 'win32') {
+    const s = run(
+      `const pty=require('module').createRequire(${JSON.stringify(computer)})('node-pty');` +
+        `const p=pty.spawn('/bin/sh',['-c','echo pty-ok'],{env:process.env});let o='';` +
+        `p.onData((d)=>{o+=d});p.onExit(()=>{console.log(o.trim());process.exit(0)})`
+    )
+    s.status === 0 && s.out.includes('pty-ok')
+      ? pass('computer: node-pty spawns a process')
+      : fail(`computer: node-pty cannot spawn — ${s.out.split('\n')[0]}`)
+  }
 }
 
 // ws's native frame masking: bufferutil falls back to plain JS, silently, when its

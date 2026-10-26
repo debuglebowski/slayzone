@@ -22,7 +22,8 @@
       "@convex-dev/auth@0.0.95": "patches/@convex-dev__auth@0.0.95.patch",
       "posix@4.2.0": "patches/posix@4.2.0.patch",
       "@radix-ui/react-menu@2.1.24": "patches/@radix-ui__react-menu@2.1.24.patch",
-      "electron-chrome-extensions@4.9.0": "patches/electron-chrome-extensions@4.9.0.patch"
+      "electron-chrome-extensions@4.9.0": "patches/electron-chrome-extensions@4.9.0.patch",
+      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
     }
   },
   "scripts": {

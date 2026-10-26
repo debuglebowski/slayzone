@@ -1,0 +1,34 @@
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+index 1ec12f796a822c78fba9ad7f6448c3987e325c23..9cd843ca50777e1e22df49df6def9d50b4a66da9 100644
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -28,8 +28,10 @@ var native = utils_1.loadNativeModule('pty');
+ var pty = native.module;
+ var helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// Only a path still INSIDE an archive is rewritten: one loaded from the unpacked dir
++// (SlayZone's packaged computer, via NODE_PATH) would become `app.asar.unpacked.unpacked`.
++helperPath = helperPath.replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
++helperPath = helperPath.replace(/node_modules\.asar(?!\.unpacked)/, 'node_modules.asar.unpacked');
+ var DEFAULT_FILE = 'sh';
+ var DEFAULT_NAME = 'xterm';
+ var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
+index 98733dc0cd752b554bd94e45904ca341ad141bba..54d94119af63ca29ce6527b83dafb3e5ebced0f1 100644
+--- a/src/unixTerminal.ts
++++ b/src/unixTerminal.ts
+@@ -16,8 +16,10 @@ const native = loadNativeModule('pty');
+ const pty: IUnixNative = native.module;
+ let helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// Only a path still INSIDE an archive is rewritten: one loaded from the unpacked dir
++// (SlayZone's packaged computer, via NODE_PATH) would become `app.asar.unpacked.unpacked`.
++helperPath = helperPath.replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
++helperPath = helperPath.replace(/node_modules\.asar(?!\.unpacked)/, 'node_modules.asar.unpacked');
+ 
+ const DEFAULT_FILE = 'sh';
+ const DEFAULT_NAME = 'xterm';
