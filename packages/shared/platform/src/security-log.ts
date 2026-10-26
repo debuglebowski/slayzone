@@ -143,7 +143,12 @@ export const SECURITY_EVENTS = [
   /** A request, upgrade or socket refused by a flood limit (`denied`). At most one line
    *  per limit and client address per minute, however many were refused; `detail.limit`
    *  names the limit, `detail.max`/`windowSec` its size. */
-  'hub.rate_limit'
+  'hub.rate_limit',
+  // T-27 (added): computer-side hardening.
+  /** A computer refused a hub → computer call by its own policy (`denied`): a path or
+   *  spawn cwd outside its `allowedRoots`, or a hub-pushed folder-limit change, on a
+   *  method with no audit event of its own. `detail.method`, `detail.code`. */
+  'computer.refused'
 ] as const
 
 export type SecurityEventName = (typeof SECURITY_EVENTS)[number]

@@ -3,10 +3,10 @@
  * and its computers over the duplex JSON-RPC channel.
  *
  * Versioning: the contract is versioned via `protocolVersion` carried in the
- * `enroll` request. A hub rejects enrollment from a computer speaking a
- * different major protocol version with `ComputerTransportErrorCodes.protocolMismatch`.
- * Reconnects (`hello`) reuse credentials minted at enroll time, so the
- * version negotiated at enrollment governs the session.
+ * `enroll` and (v3+) `hello` requests. A hub rejects either from a computer
+ * speaking a different protocol version with
+ * `ComputerTransportErrorCodes.protocolMismatch`, and (v3+) echoes its own
+ * version in the result so the computer can refuse an older hub just as clearly.
  *
  * Direction map (v1):
  *  computer → hub requests:      enroll, hello, heartbeat
@@ -49,8 +49,18 @@ import { z } from 'zod'
  */
 export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
-/** Bump on any breaking change to the frames below. */
-export const COMPUTER_PROTOCOL_VERSION = 2
+/**
+ * Bump on any breaking change to the frames below.
+ *
+ * v3 (T-27): every hub → computer request carries the requesting user
+ * ({@link requestActorSchema}, an envelope member), `hello` carries
+ * `protocolVersion`, and `enroll`/`hello` results echo the hub's version.
+ * Refused in BOTH directions, never degraded: a v3 computer will not do work for
+ * a hub that cannot say who asked (its local request log would have no actor),
+ * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
+ * and CLI ship in the same release.
+ */
+export const COMPUTER_PROTOCOL_VERSION = 3
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {
@@ -68,8 +78,37 @@ export const ComputerTransportErrorCodes = {
    * computer retries, and gets in once the incumbent's connection is gone.
    * Older computers treat any unlisted code as transient too.
    */
-  computerInUse: -32005
+  computerInUse: -32005,
+  /**
+   * The computer refused the request by its own local policy (T-27): a hub-pushed
+   * `allowedRoots` change, or a path / spawn cwd outside its `allowedRoots`. Not
+   * transient — retrying the same request is refused again. The hub audits it as
+   * `denied` and the message says what to do on the device.
+   */
+  refusedByComputer: -32006
 } as const
+
+/**
+ * Who asked for a hub → computer request (T-27). Carried as the top-level `actor`
+ * member of the JSON-RPC request envelope (next to `params`), so it applies to
+ * EVERY hub → computer method without touching each params schema, and a params
+ * object is never mistaken for it.
+ *
+ * The hub fills it from the request's security context (the principal the tRPC /
+ * REST entry point resolved). `userId: null` = the hub acting on its own behalf
+ * (reconnect reconciliation, the desktop's root widening) or a hub without login.
+ * The computer writes it to its local request log; it never authorizes anything
+ * on the computer.
+ *
+ * REQUIRED from a v3 hub: a request without it comes from an older hub and is
+ * refused with `protocolMismatch` (see {@link COMPUTER_PROTOCOL_VERSION}).
+ */
+export const requestActorSchema = z.object({
+  userId: z.string().min(1).max(200).nullable(),
+  /** `trpc <path>` / `METHOD /path` the request entered the hub through. */
+  route: z.string().max(200).nullable()
+})
+export type RequestActor = z.infer<typeof requestActorSchema>
 
 // ---------------------------------------------------------------------------
 // computer → hub requests
@@ -127,7 +166,9 @@ export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
 export const enrollResultSchema = z.object({
   computerId: z.string().min(1),
-  apiKey: z.string().min(1)
+  apiKey: z.string().min(1),
+  /** The hub's protocol version (v3+). Absent = an older hub; the computer refuses it. */
+  protocolVersion: z.number().int().positive().optional()
 })
 export type EnrollResult = z.infer<typeof enrollResultSchema>
 
@@ -135,12 +176,20 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 export const helloParamsSchema = z.object({
   apiKey: z.string().min(1),
   epoch: epochField,
-  hostId: hostIdField
+  hostId: hostIdField,
+  /**
+   * v3+. Before v3 only `enroll` carried a version, so a computer enrolled long ago
+   * reconnected on any protocol. Absent = a pre-v3 computer; a v3 hub refuses it
+   * with `protocolMismatch`.
+   */
+  protocolVersion: z.number().int().positive().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
 export const helloResultSchema = z.object({
-  computerId: z.string().min(1)
+  computerId: z.string().min(1),
+  /** The hub's protocol version (v3+). Absent = an older hub; the computer refuses it. */
+  protocolVersion: z.number().int().positive().optional()
 })
 export type HelloResult = z.infer<typeof helloResultSchema>
 
@@ -622,11 +671,16 @@ export type PingResult = z.infer<typeof pingResultSchema>
  * Replace the computer's `allowedRoots` path-jail, persisting to its
  * `computer.config.json` and applying without a restart.
  *
+ * T-27: REFUSED (`refusedByComputer`) by every computer except the desktop app's
+ * own supervised one dialing its loopback hub. Folder limits are a decision of
+ * the device's user, made on the device (`slay computer roots`, or
+ * `computer.config.json`), never pushed by a hub. The desktop's local computer
+ * keeps accepting it because there the hub IS the local app (login off,
+ * loopback, same user).
+ *
  * Not a privilege grant: a hub that can `pty.spawn` already runs arbitrary
  * commands on the computer, so the jail is a safety rail against a mistaken path,
- * not a security boundary against the hub. It exists so a stale project path
- * cannot make the hub delete the wrong tree — which is exactly why the operator
- * needs to be able to widen it when their projects legitimately live elsewhere.
+ * not a security boundary against the hub.
  */
 export const computerSetAllowedRootsParamsSchema = z.object({
   /** Absolute paths. Replaces the current set wholesale. */

@@ -74,8 +74,11 @@ export interface DuplexRpcOptions {
    * Peer→local request (method + id). The handler must eventually call
    * `respond(id, ...)` or `respondError(id, ...)`. When omitted, requests are
    * auto-answered with -32601 so the peer never hangs.
+   *
+   * `actor` is the envelope's top-level `actor` member, raw (`undefined` when
+   * absent) — see `requestActorSchema` in frames.ts. Validation is the caller's.
    */
-  onPeerRequest?: (method: string, params: unknown, id: JsonRpcId) => void
+  onPeerRequest?: (method: string, params: unknown, id: JsonRpcId, actor: unknown) => void
   /** Peer→local notification (method, no id). */
   onNotification?: (method: string, params: unknown) => void
   /** Diagnostic hook for unparseable / malformed inbound frames. */
@@ -122,17 +125,29 @@ export class DuplexRpc {
    * Issue a JSON-RPC request. Resolves with the `result` payload, rejects with
    * `RpcError` on a JSON-RPC error reply, `RpcTimeoutError` on timeout, or
    * `RpcDisposedError` on disposal. `timeoutMs <= 0` disables the timeout.
+   *
+   * `actor`, when given, rides as the envelope's top-level `actor` member (who
+   * asked — hub → computer requests only; see `requestActorSchema`).
    */
-  request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
+  request<T = unknown>(
+    method: string,
+    params?: unknown,
+    timeoutMs?: number,
+    actor?: unknown
+  ): Promise<T> {
     if (this.disposed) {
       return Promise.reject(new RpcDisposedError(this.label))
     }
     const effectiveTimeout =
       timeoutMs ?? this.opts.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     const id = this.nextId++
-    const envelope = JSON.stringify(
-      params === undefined ? { jsonrpc: '2.0', id, method } : { jsonrpc: '2.0', id, method, params }
-    )
+    const envelope = JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method,
+      ...(params === undefined ? {} : { params }),
+      ...(actor === undefined ? {} : { actor })
+    })
     return new Promise<T>((resolve, reject) => {
       const timer =
         effectiveTimeout > 0
@@ -220,7 +235,7 @@ export class DuplexRpc {
     if (typeof msg.method === 'string') {
       if (hasId) {
         if (this.opts.onPeerRequest) {
-          this.opts.onPeerRequest(msg.method, msg.params, rawId as JsonRpcId)
+          this.opts.onPeerRequest(msg.method, msg.params, rawId as JsonRpcId, msg.actor)
         } else {
           this.respondError(
             rawId as JsonRpcId,

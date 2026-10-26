@@ -13,6 +13,7 @@ import {
   type TestLeaf
 } from '@slayzone/test-utils/test-ca'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { COMPUTER_PROTOCOL_VERSION, ComputerTransportErrorCodes } from '../shared/frames'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 import { createMemoryCredentialStore } from './credential-store'
 import { HubDialer, type HubDialerOptions } from './hub-dialer'
@@ -152,8 +153,12 @@ describe('heartbeat-loss detection (computer side)', () => {
               id: frame.id,
               result:
                 frame.method === 'enroll'
-                  ? { computerId: 'computer-1', apiKey: 'key-1' }
-                  : { computerId: 'computer-1' }
+                  ? {
+                      computerId: 'computer-1',
+                      apiKey: 'key-1',
+                      protocolVersion: COMPUTER_PROTOCOL_VERSION
+                    }
+                  : { computerId: 'computer-1', protocolVersion: COMPUTER_PROTOCOL_VERSION }
             })
           )
         }
@@ -175,6 +180,95 @@ describe('heartbeat-loss detection (computer side)', () => {
     await vi.advanceTimersByTimeAsync(500) // heartbeat times out → terminate
     await disconnected
     expect((await retryScheduled).attempt).toBe(1)
+  })
+})
+
+describe('computer protocol v3 (T-27)', () => {
+  /** Raw hub: answers enroll/hello with `authResult`, then runs `afterAuth`. */
+  async function rawHub(
+    authResult: (frame: Record<string, unknown>) => Record<string, unknown>,
+    afterAuth?: (ws: import('ws').WebSocket) => void
+  ): Promise<number> {
+    const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    await new Promise<void>((resolve) => wss.once('listening', resolve))
+    cleanups.push(() => new Promise<void>((resolve) => wss.close(() => resolve())))
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Record<string, unknown>
+        if (frame.method === 'enroll' || frame.method === 'hello') {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...authResult(frame) }))
+          afterAuth?.(ws)
+        }
+      })
+    })
+    return (wss.address() as AddressInfo).port
+  }
+
+  it('refuses, fatally and clearly, a hub that does not echo protocol v3 (an older hub)', async () => {
+    const port = await rawHub(() => ({ result: { computerId: 'c-1', apiKey: 'k-1' } }))
+    const dialer = makeDialer(`ws://127.0.0.1:${port}`)
+    const connected = vi.fn()
+    dialer.events.on('connected', connected)
+    dialer.start()
+    const { error, fatal } = await dialer.events.once('error')
+    expect(fatal).toBe(true)
+    expect(error.message).toMatch(/older than v3.*upgrade the hub/)
+    expect(connected).not.toHaveBeenCalled()
+  })
+
+  it('a hub refusing the reconnect over the protocol is fatal, not retried forever', async () => {
+    const port = await rawHub(() => ({
+      error: { code: ComputerTransportErrorCodes.protocolMismatch, message: 'hub speaks v4' }
+    }))
+    const store = createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' })
+    const dialer = makeDialer(`ws://127.0.0.1:${port}`, { credentialStore: store })
+    dialer.start()
+    const { error, fatal } = await dialer.events.once('error')
+    expect(fatal).toBe(true)
+    expect(error.message).toMatch(/hub refused reconnect: hub speaks v4/)
+  })
+
+  it('sends protocolVersion on hello, and hands the request envelope actor to onHubRequest', async () => {
+    const seenHello: Record<string, unknown>[] = []
+    const reply = new Promise<Record<string, unknown>>((resolve) => {
+      void rawHub(
+        (hello) => {
+          seenHello.push(hello)
+          return { result: { computerId: 'c-1', protocolVersion: COMPUTER_PROTOCOL_VERSION } }
+        },
+        (ws) => {
+          ws.on('message', (data) => {
+            const frame = JSON.parse(data.toString()) as Record<string, unknown>
+            if (frame.id === 'h-1') resolve(frame)
+          })
+          ws.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 'h-1',
+              method: 'git.isGitRepo',
+              params: { path: '/x' },
+              actor: { userId: 'u-1', route: 'trpc t' }
+            })
+          )
+        }
+      ).then((port) => {
+        const store = createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' })
+        const dialer = makeDialer(`ws://127.0.0.1:${port}`, {
+          credentialStore: store,
+          onHubRequest: (method, params, actor) => ({ method, params, actor })
+        })
+        dialer.start()
+      })
+    })
+    const frame = await reply
+    expect(frame.result).toEqual({
+      method: 'git.isGitRepo',
+      params: { path: '/x' },
+      actor: { userId: 'u-1', route: 'trpc t' }
+    })
+    expect((seenHello[0].params as Record<string, unknown>).protocolVersion).toBe(
+      COMPUTER_PROTOCOL_VERSION
+    )
   })
 })
 
