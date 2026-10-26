@@ -5,7 +5,18 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent
 } from 'react'
-import { BookOpen, ChevronDown, FolderPlus, Home, Plus, Search, Settings, Star } from 'lucide-react'
+import {
+  BookOpen,
+  ChevronDown,
+  FolderPlus,
+  Home,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings,
+  Star,
+  TerminalSquare
+} from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import {
   DndContext,
@@ -21,7 +32,18 @@ import {
   type DragStartEvent
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { cn, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
+import {
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  useShortcutDisplay
+} from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
 import { groupTreeRows, orderTreeRows, PINNED_GROUP_KEY, type TreeGroup } from './treeGrouping'
@@ -1359,29 +1381,33 @@ export function TreeView({
                   type="button"
                   className="flex flex-1 items-center gap-2 rounded-md py-1.5 text-sm font-semibold min-w-0"
                 >
-                  <span className="truncate flex-1 text-left">{project.name}</span>
+                  <span className="truncate text-left">{project.name}</span>
+                  {project.starred && (
+                    <Star
+                      aria-label="Starred"
+                      className="size-3 shrink-0 fill-current text-muted-foreground/70"
+                    />
+                  )}
+                  <span className="flex-1" />
                 </button>
               </Collapsible.Trigger>
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => onSetProjectStarred?.(project.id, !project.starred)}
-                    aria-label={project.starred ? `Unstar ${project.name}` : `Star ${project.name}`}
-                    className={cn(
-                      'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
-                      project.starred
-                        ? 'text-foreground'
-                        : 'text-muted-foreground/70 hover:text-foreground'
-                    )}
-                  >
-                    <Star className={cn('size-3.5', project.starred && 'fill-current')} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  {project.starred ? 'Unstar project' : 'Star project'}
-                </TooltipContent>
-              </Tooltip>
+              {onCreateTemporaryTask && (
+                <Tooltip delayDuration={500}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onCreateTemporaryTask(project.id)}
+                      aria-label={`New temporary task in ${project.name}`}
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-colors"
+                    >
+                      <TerminalSquare className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    New temporary task
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip delayDuration={500}>
                 <TooltipTrigger asChild>
                   <button
@@ -1402,47 +1428,55 @@ export function TreeView({
                   Project home
                 </TooltipContent>
               </Tooltip>
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => {
-                      useTabStore.getState().setSelectedProjectId(project.id)
-                      useTabStore.getState().setActiveView('context')
-                    }}
-                    aria-label={`Context Manager for ${project.name}`}
+                    aria-label={`More actions for ${project.name}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     className={cn(
-                      'relative inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',
+                      'relative inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color] mr-0.5',
                       isContextActive
                         ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
                         : 'text-muted-foreground/70 hover:text-foreground'
                     )}
                   >
-                    <BookOpen className="size-3.5" />
+                    <MoreHorizontal className="size-3.5" />
                     <ContextStaleDot count={staleSkillCount} />
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  {staleSkillCount > 0
-                    ? `Context Manager (${staleSkillCount} stale skill${staleSkillCount === 1 ? '' : 's'})`
-                    : 'Context Manager'}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => onProjectSettings(project)}
-                    aria-label={`Settings for ${project.name}`}
-                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-colors mr-0.5"
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48">
+                  <DropdownMenuItem
+                    onSelect={() => onSetProjectStarred?.(project.id, !project.starred)}
                   >
-                    <Settings className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  Project settings
-                </TooltipContent>
-              </Tooltip>
+                    <Star className={cn('size-4', project.starred && 'fill-current')} />
+                    {project.starred ? 'Unstar project' : 'Star project'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      useTabStore.getState().setSelectedProjectId(project.id)
+                      useTabStore.getState().setActiveView('context')
+                    }}
+                  >
+                    <BookOpen className="size-4" />
+                    <span className="flex-1">Context Manager</span>
+                    {staleSkillCount > 0 && (
+                      <span
+                        aria-label={`${staleSkillCount} stale skill${staleSkillCount === 1 ? '' : 's'}`}
+                        className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-background text-[10px] font-medium tabular-nums"
+                      >
+                        {staleSkillCount}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => onProjectSettings(project)}>
+                    <Settings className="size-4" />
+                    Project settings
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
               <div className="flex flex-col pr-2 pt-2 pb-3">
