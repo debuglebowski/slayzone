@@ -8,6 +8,7 @@ import {
   DialogTitle,
   DialogDescription,
   shortcutDefinitions,
+  resolveShortcutKeys,
   useShortcutStore,
   type ShortcutDefinition
 } from '@slayzone/ui'
@@ -49,7 +50,7 @@ export function ShortcutsDialog({
   const effectiveKeysMap = useMemo(() => {
     const map: Record<string, string | null> = {}
     for (const def of shortcutDefinitions) {
-      map[def.id] = def.id in overrides ? overrides[def.id] : def.defaultKeys
+      map[def.id] = resolveShortcutKeys(overrides, def.id)
     }
     return map
   }, [overrides])
@@ -160,7 +161,7 @@ export function ShortcutsDialog({
                         setRecording(true)
                       }}
                       onCancelRecording={handleCancelRecording}
-                      onClear={() => setOverride(def.id, '')}
+                      onClear={() => setOverride(def.id, null)}
                       conflictAction={recordingId === def.id ? pendingConflict : null}
                       shadowAction={shadowWarning?.defId === def.id ? shadowWarning.shadow : null}
                       onConfirmReassign={handleConfirmReassign}

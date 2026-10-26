@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { redirectSessionWindow, getBufferSince, ptyEvents } from '@slayzone/terminal/electron'
-import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
+import { toElectronAccelerator, resolveShortcutKeys } from '@slayzone/shortcuts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
 import {
@@ -375,10 +375,7 @@ async function readConfig(): Promise<void> {
 // --- Shortcut ---
 
 function getGlobalAgentPanelAccelerator(): string | null {
-  const overrides = getShortcutOverrides()
-  const keys =
-    overrides['global-agent-panel'] ??
-    shortcutDefinitions.find((d) => d.id === 'global-agent-panel')?.defaultKeys
+  const keys = resolveShortcutKeys(getShortcutOverrides(), 'global-agent-panel')
   if (!keys) return null
   return toElectronAccelerator(keys)
 }

@@ -70,7 +70,7 @@ import {
   toast,
   useGuardedHotkeys,
   useShortcutStore,
-  shortcutDefinitions
+  resolveShortcutKeys
 } from '@slayzone/ui'
 import {
   createTriggerDedupe,
@@ -944,10 +944,7 @@ function App(): React.JSX.Element {
     void handleCreateScratchTerminal(undefined, pressedAt, earlyInput)
   }
   const newTempTaskKeys = useShortcutStore(
-    (s) =>
-      s.overrides['new-temp-task'] ??
-      shortcutDefinitions.find((d) => d.id === 'new-temp-task')?.defaultKeys ??
-      ''
+    (s) => resolveShortcutKeys(s.overrides, 'new-temp-task') ?? ''
   )
   const isRecordingShortcut = useShortcutStore((s) => s.isRecording)
   useGuardedHotkeys(

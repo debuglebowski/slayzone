@@ -24,7 +24,7 @@ import {
   useGuardedHotkeys,
   useShortcutStore,
   useShortcutDisplay,
-  shortcutDefinitions,
+  resolveShortcutKeys,
   KeyRecorder,
   useUndo,
   focusOwnsUndoKey,
@@ -289,10 +289,7 @@ export function HomeView(): React.JSX.Element {
   useEffect(() => {
     void useShortcutStore.getState().load()
   }, [])
-  const searchKeys =
-    shortcutOverrides['search'] ||
-    shortcutDefinitions.find((d) => d.id === 'search')?.defaultKeys ||
-    'mod+k'
+  const searchKeys = resolveShortcutKeys(shortcutOverrides, 'search') ?? ''
 
   // The palette's file results open in the Home editor: switch to the Home tab so
   // the file is visible, then drive the editor through HomeContainer's handle.
@@ -321,8 +318,7 @@ export function HomeView(): React.JSX.Element {
   // Resolve a shortcut id → key string (user override else default). Used for the
   // zen / explode / exit bindings below (mirrors the Electron useAppShortcuts getKeys).
   const getKeys = useCallback(
-    (id: string): string =>
-      shortcutOverrides[id] || shortcutDefinitions.find((d) => d.id === id)?.defaultKeys || '',
+    (id: string): string => resolveShortcutKeys(shortcutOverrides, id) ?? '',
     [shortcutOverrides]
   )
 

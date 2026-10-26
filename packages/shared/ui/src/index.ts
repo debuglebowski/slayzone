@@ -6,6 +6,7 @@ export { withModalGuard } from './with-modal-guard'
 export { useGuardedHotkeys } from './useGuardedHotkeys'
 export {
   shortcutDefinitions,
+  resolveShortcutKeys,
   formatKeysForDisplay,
   withShortcut,
   toElectronAccelerator,
@@ -20,7 +21,6 @@ export {
 export {
   useShortcutStore,
   setShortcutBackend,
-  resolveShortcutKeys,
   type ShortcutBackend
 } from './useShortcutStore'
 export { useShortcutDisplay } from './useShortcutDisplay'

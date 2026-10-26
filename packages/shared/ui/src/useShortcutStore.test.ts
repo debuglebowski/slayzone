@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { resolveShortcutKeys, setShortcutBackend, useShortcutStore } from './useShortcutStore'
+import { setShortcutBackend, useShortcutStore } from './useShortcutStore'
 
 // Mock the injected persistence backend (was window.api.settings / .shortcuts).
 const mockSettings = {
@@ -105,6 +105,21 @@ describe('load', () => {
       expect(useShortcutStore.getState().overrides).toEqual({ 'global-agent-panel': 'mod+alt+a' })
     })
   })
+
+  it("rewrites a legacy '' clear to null (unbound) and persists it", async () => {
+    mockSettings.get.mockResolvedValue(JSON.stringify({ 'new-task': '', search: 'mod+shift+p' }))
+    await useShortcutStore.getState().load()
+    expect(useShortcutStore.getState().overrides).toEqual({
+      'new-task': null,
+      search: 'mod+shift+p'
+    })
+    expect(mockSettings.set).toHaveBeenCalledOnce()
+    expect(mockSettings.set).toHaveBeenCalledWith(
+      'custom_shortcuts',
+      JSON.stringify({ 'new-task': null, search: 'mod+shift+p' })
+    )
+    expect(mockShortcuts.changed).toHaveBeenCalledOnce()
+  })
 })
 
 describe('getKeys', () => {
@@ -126,19 +141,9 @@ describe('getKeys', () => {
     expect(useShortcutStore.getState().getKeys('search')).toBeNull()
   })
 
-  it("returns '' (not the default) when cleared from the shortcuts dialog", () => {
+  it("returns '' (not the default) for a legacy '' clear", () => {
     useShortcutStore.setState({ overrides: { search: '' } })
     expect(useShortcutStore.getState().getKeys('search')).toBe('')
-  })
-})
-
-describe('resolveShortcutKeys', () => {
-  it('resolves default, override and both cleared forms', () => {
-    expect(resolveShortcutKeys({}, 'search')).toBe('mod+k')
-    expect(resolveShortcutKeys({ search: 'mod+shift+p' }, 'search')).toBe('mod+shift+p')
-    expect(resolveShortcutKeys({ search: null }, 'search')).toBeNull()
-    expect(resolveShortcutKeys({ search: '' }, 'search')).toBe('')
-    expect(resolveShortcutKeys({}, 'nonexistent')).toBeNull()
   })
 })
 

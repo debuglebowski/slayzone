@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { shortcutDefinitions, registry, type ShortcutScope } from '@slayzone/shortcuts'
+import {
+  shortcutDefinitions,
+  registry,
+  resolveShortcutKeys,
+  type ShortcutScope
+} from '@slayzone/shortcuts'
 import { useShortcutStore } from './useShortcutStore'
 
 interface DynamicOpts {
@@ -36,14 +41,15 @@ export function useShortcutAction(
   // For static mode, resolve keys reactively from the store
   const isStatic = typeof idOrOpts === 'string'
   const id = isStatic ? idOrOpts : idOrOpts.id
-  const storeOverride = useShortcutStore((s) => (isStatic ? s.overrides[id] : undefined))
+  const staticKeys = useShortcutStore((s) =>
+    isStatic ? resolveShortcutKeys(s.overrides, id) : null
+  )
 
   let keys: string
   let scope: ShortcutScope
   if (isStatic) {
-    const def = shortcutDefinitions.find((d) => d.id === id)
-    keys = storeOverride ?? def?.defaultKeys ?? ''
-    scope = def?.scope ?? 'global'
+    keys = staticKeys ?? ''
+    scope = shortcutDefinitions.find((d) => d.id === id)?.scope ?? 'global'
   } else {
     keys = idOrOpts.keys
     scope = idOrOpts.scope

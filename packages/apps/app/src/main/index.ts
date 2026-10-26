@@ -106,7 +106,7 @@ import {
 import {
   toElectronAccelerator,
   matchesElectronInput,
-  shortcutDefinitions,
+  resolveShortcutKeys,
   MENU_SHORTCUT_DEFAULTS,
   type ElectronInput
 } from '@slayzone/shortcuts'
@@ -114,13 +114,6 @@ import {
 // Mutable shortcut overrides — updated from DB when shortcuts change.
 // Module-scope so both createMainWindow (before-input-event) and app.whenReady (menu) can access.
 let currentOverrides: Record<string, string | null> = {}
-
-/** Resolve effective keys for a shortcut ID, checking overrides then defaults. */
-function getEffectiveKeys(id: string, overrides: Record<string, string | null>): string | null {
-  if (id in overrides) return overrides[id]
-  const def = shortcutDefinitions.find((d) => d.id === id)
-  return def?.defaultKeys ?? null
-}
 
 /**
  * Resolves the in-process tRPC WS port once the server is listening, or 0
@@ -1569,46 +1562,46 @@ function createMainWindow(): void {
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const ei = input as unknown as ElectronInput
 
-    if (matchesElectronInput(ei, getEffectiveKeys('go-home', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'go-home'))) {
       event.preventDefault()
       menuEvents.emit('go-home')
       return
     }
 
     // Check project-settings before global-settings (shift variant first)
-    if (matchesElectronInput(ei, getEffectiveKeys('project-settings', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'project-settings'))) {
       event.preventDefault()
       emitOpenProjectSettings()
       return
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('global-settings', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'global-settings'))) {
       event.preventDefault()
       emitOpenSettings()
       return
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('terminal-screenshot', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'terminal-screenshot'))) {
       event.preventDefault()
       menuEvents.emit('screenshot-trigger')
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('reload-browser', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'reload-browser'))) {
       event.preventDefault()
       menuEvents.emit('reload-browser')
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('reload-app', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'reload-app'))) {
       event.preventDefault()
       menuEvents.emit('reload-app')
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('global-agent-panel', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'global-agent-panel'))) {
       event.preventDefault()
       menuEvents.emit('toggle-global-agent-panel')
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('agent-status-panel', currentOverrides))) {
+    if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'agent-status-panel'))) {
       event.preventDefault()
       menuEvents.emit('toggle-agent-status-panel')
     }

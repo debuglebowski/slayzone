@@ -7,6 +7,7 @@ export {
   SHORTCUT_ID_RENAMES,
   type ShortcutDefinition
 } from './definitions'
+export { resolveShortcutKeys } from './resolve'
 export {
   toElectronAccelerator,
   matchesShortcut,

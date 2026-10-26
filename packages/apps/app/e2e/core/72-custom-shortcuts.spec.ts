@@ -170,8 +170,9 @@ test.describe
 
     test('cleared shortcut no longer fires', async ({ mainWindow }) => {
       await openShortcutsDialog(mainWindow)
-      await revealShortcutRow(mainWindow, 'New Task')
+      const labelSpan = await revealShortcutRow(mainWindow, 'New Task')
       await mainWindow.getByRole('button', { name: 'Clear shortcut for New Task' }).click()
+      await expect(labelSpan.locator('..').getByText('Unbound')).toBeVisible({ timeout: 2_000 })
       await closeDialog(mainWindow)
 
       await pressShortcut(mainWindow, 'new-task')

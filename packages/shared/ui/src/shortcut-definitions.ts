@@ -1,6 +1,7 @@
 // Re-export from @slayzone/shortcuts for backwards compatibility
 export {
   shortcutDefinitions,
+  resolveShortcutKeys,
   toElectronAccelerator,
   matchesShortcut,
   formatKeysForDisplay,

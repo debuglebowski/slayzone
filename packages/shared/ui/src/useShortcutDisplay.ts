@@ -1,6 +1,6 @@
 import { useShortcutStore } from './useShortcutStore'
 import {
-  shortcutDefinitions,
+  resolveShortcutKeys,
   formatKeysForDisplay,
   formatKeysVerbose
 } from './shortcut-definitions'
@@ -12,8 +12,6 @@ export function useShortcutDisplay(
   id: string,
   format: 'glyph' | 'verbose' = 'glyph'
 ): string | null {
-  const overrides = useShortcutStore((s) => s.overrides)
-  const def = shortcutDefinitions.find((d) => d.id === id)
-  const keys = id in overrides ? overrides[id] : (def?.defaultKeys ?? null)
+  const keys = useShortcutStore((s) => resolveShortcutKeys(s.overrides, id))
   return format === 'verbose' ? formatKeysVerbose(keys) : formatKeysForDisplay(keys)
 }

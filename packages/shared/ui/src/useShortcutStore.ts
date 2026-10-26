@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   shortcutDefinitions,
+  resolveShortcutKeys,
   SHORTCUT_DEFAULT_MIGRATIONS,
   SHORTCUT_ID_RENAMES,
   type ShortcutDefinition,
@@ -29,17 +30,6 @@ export function setShortcutBackend(b: ShortcutBackend): void {
 }
 
 const SETTINGS_KEY = 'custom_shortcuts'
-
-/** Effective key combo for a shortcut: any override — including a cleared one
- *  (`null`, or `''` from the shortcuts dialog) — beats the default. `null` = unbound. */
-export function resolveShortcutKeys(
-  overrides: Record<string, string | null>,
-  id: string
-): string | null {
-  if (id in overrides) return overrides[id]
-  const def = shortcutDefinitions.find((d) => d.id === id)
-  return def?.defaultKeys ?? null
-}
 
 interface ShortcutState {
   /** User overrides. `null` value means explicitly cleared (unbound). */
@@ -84,6 +74,13 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
             changed = true
           }
         }
+        // Clears used to be stored as '' — unbound is null.
+        for (const id of Object.keys(parsed)) {
+          if (parsed[id] === '') {
+            parsed[id] = null
+            changed = true
+          }
+        }
         if (changed) {
           await backend?.set(SETTINGS_KEY, JSON.stringify(parsed))
           backend?.notifyChanged()
@@ -103,7 +100,7 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
     const { overrides } = get()
     return shortcutDefinitions.find((d) => {
       if (d.scope !== scope) return false
-      const effective = d.id in overrides ? overrides[d.id] : d.defaultKeys
+      const effective = resolveShortcutKeys(overrides, d.id)
       return effective !== null && effective === keys
     })
   },
@@ -119,7 +116,7 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
       // Component scopes at same priority don't shadow each other
       if (componentScopes.includes(scope) && componentScopes.includes(d.scope)) return false
       // Only warn when one scope can shadow the other (different priority levels)
-      const effective = d.id in overrides ? overrides[d.id] : d.defaultKeys
+      const effective = resolveShortcutKeys(overrides, d.id)
       return effective !== null && effective === keys
     })
   },
