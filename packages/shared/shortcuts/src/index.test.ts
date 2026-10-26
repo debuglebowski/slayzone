@@ -4,6 +4,7 @@ import {
   matchesShortcut,
   matchesElectronInput,
   formatKeysForDisplay,
+  formatKeysVerbose,
   withShortcut,
   shortcutDefinitions,
   MENU_SHORTCUT_DEFAULTS,
@@ -182,6 +183,17 @@ describe('formatKeysForDisplay', () => {
   it('accepts explicit platform override', () => {
     expect(formatKeysForDisplay('mod+n', 'mac')).toBe('⌘N')
     expect(formatKeysForDisplay('mod+n', 'other')).toBe('CtrlN')
+  })
+
+  it('shows arrow and page keys as symbols', () => {
+    expect(formatKeysForDisplay('mod+alt+arrowright', 'mac')).toBe('⌘⌥→')
+    expect(formatKeysForDisplay('mod+alt+arrowleft', 'mac')).toBe('⌘⌥←')
+    expect(formatKeysForDisplay('mod+arrowup', 'mac')).toBe('⌘↑')
+    expect(formatKeysForDisplay('mod+arrowdown', 'mac')).toBe('⌘↓')
+    expect(formatKeysForDisplay('mod+pagedown', 'other')).toBe('CtrlPgDn')
+    expect(formatKeysForDisplay('mod+pageup', 'other')).toBe('CtrlPgUp')
+    expect(formatKeysVerbose('mod+alt+arrowright', 'mac')).toBe('Cmd+Opt+→')
+    expect(formatKeysVerbose('mod+pagedown', 'other')).toBe('Ctrl+PgDn')
   })
 })
 

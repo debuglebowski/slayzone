@@ -1,16 +1,29 @@
 import { detectPlatform, type Platform } from './platform'
 
+/** Named non-modifier keys shown as their keycap label rather than the capitalized name. */
+const KEYCAP_LABELS: Record<string, string> = {
+  arrowleft: '←',
+  arrowright: '→',
+  arrowup: '↑',
+  arrowdown: '↓',
+  pageup: 'PgUp',
+  pagedown: 'PgDn'
+}
+
 const DISPLAY_MAP_MAC: Record<string, string> = {
+  ...KEYCAP_LABELS,
   mod: '⌘',
   shift: '⇧',
   alt: '⌥',
   ctrl: '⌃',
+  enter: '↩',
   period: '.',
   comma: ',',
   slash: '/',
   backslash: '\\'
 }
 const DISPLAY_MAP_OTHER: Record<string, string> = {
+  ...KEYCAP_LABELS,
   mod: 'Ctrl',
   shift: 'Shift',
   alt: 'Alt',
@@ -65,6 +78,7 @@ export function withShortcut(label: string, keys: string | null): string {
 }
 
 const VERBOSE_MAP_MAC: Record<string, string> = {
+  ...KEYCAP_LABELS,
   mod: 'Cmd',
   shift: 'Shift',
   alt: 'Opt',
@@ -75,6 +89,7 @@ const VERBOSE_MAP_MAC: Record<string, string> = {
   backslash: '\\'
 }
 const VERBOSE_MAP_OTHER: Record<string, string> = {
+  ...KEYCAP_LABELS,
   mod: 'Ctrl',
   shift: 'Shift',
   alt: 'Alt',

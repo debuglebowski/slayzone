@@ -335,6 +335,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handleTerminalKeyEvent = useCallback(
     (e: KeyboardEvent): boolean => {
       if (e.ctrlKey && e.key === 'Tab') return false
+      // Task-tab switching (⌘⌥←/→, Ctrl+PgUp/PgDn off macOS) belongs to the app even
+      // from a focused terminal — xterm would send the keys to the shell instead.
+      const { getKeys } = useShortcutStore.getState()
+      if (
+        matchesShortcut(e, getKeys('next-task-tab')) ||
+        matchesShortcut(e, getKeys('prev-task-tab'))
+      )
+        return false
       // Shift+Enter in AI modes: send kitty protocol sequence so CLI apps
       // can insert a newline instead of submitting.
       if (mode === 'claude-code' && e.shiftKey && e.key === 'Enter') {

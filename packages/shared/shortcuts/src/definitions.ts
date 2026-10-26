@@ -1,4 +1,5 @@
 import type { ShortcutScope } from './scope'
+import { detectPlatform } from './platform'
 
 export type ShortcutDefinition = {
   id: string
@@ -12,6 +13,11 @@ export type ShortcutDefinition = {
 }
 
 export type { ShortcutScope }
+
+/** A default that follows each platform's own convention, picked once at load. */
+function perPlatform(keys: { mac: string; other: string }): string {
+  return keys[detectPlatform()]
+}
 
 export const shortcutDefinitions: ShortcutDefinition[] = [
   // General (global scope)
@@ -152,18 +158,20 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     defaultKeys: 'ctrl+shift+tab',
     scope: 'global'
   },
+  // Task tab left/right of the active one. macOS: ⌘⌥←/→ (Chrome, Safari, VS Code).
+  // Windows/Linux: Ctrl+PgUp/PgDn — Ctrl+Alt+←/→ is the desktop's workspace switch.
   {
     id: 'next-task-tab',
     label: 'Next Task Tab',
     group: 'Tabs',
-    defaultKeys: 'mod+alt+arrowright',
+    defaultKeys: perPlatform({ mac: 'mod+alt+arrowright', other: 'mod+pagedown' }),
     scope: 'global'
   },
   {
     id: 'prev-task-tab',
     label: 'Previous Task Tab',
     group: 'Tabs',
-    defaultKeys: 'mod+alt+arrowleft',
+    defaultKeys: perPlatform({ mac: 'mod+alt+arrowleft', other: 'mod+pageup' }),
     scope: 'global'
   },
   {

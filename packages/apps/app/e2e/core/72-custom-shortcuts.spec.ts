@@ -1,10 +1,27 @@
-import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  goHome,
+  clickProject,
+  resetApp,
+  openTaskById
+} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut, shortcutKey } from '../fixtures/shortcuts'
+import { waitForPtySession } from '../fixtures/terminal'
+
+type TabStoreWindow = {
+  __slayzone_tabStore: {
+    getState: () => { tabs: { type: string; title?: string }[]; activeTabIndex: number }
+  }
+}
 
 test.describe
   .serial('Custom keyboard shortcuts', () => {
     let projectAbbrev: string
+    let projectId: string
+    let shortcutTaskId: string
 
     const openShortcutsDialog = async (mainWindow: import('@playwright/test').Page) => {
       await mainWindow.locator('button[aria-label="Keyboard Shortcuts"]').click()
@@ -84,7 +101,13 @@ test.describe
         path: TEST_PROJECT_PATH
       })
       projectAbbrev = p.name.slice(0, 2).toUpperCase()
-      await s.createTask({ projectId: p.id, title: 'Shortcut task', status: 'in_progress' })
+      projectId = p.id
+      const task = await s.createTask({
+        projectId: p.id,
+        title: 'Shortcut task',
+        status: 'in_progress'
+      })
+      shortcutTaskId = task.id
       await s.refreshData()
       await goToHome(mainWindow)
     })
@@ -325,6 +348,55 @@ test.describe
         mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
       ).toBeVisible({ timeout: 3_000 })
       await mainWindow.keyboard.press('Escape')
+
+      await goToHome(mainWindow)
+      await resetShortcuts(mainWindow)
+    })
+
+    // ─── Task-tab shortcuts reach the app from a focused terminal ───
+
+    test('rebound Next Task Tab (Ctrl+PageDown) works inside a terminal', async ({
+      mainWindow
+    }) => {
+      // Ctrl+PgDn is the Windows/Linux default. xterm would send it to the shell
+      // unless the terminal hands the app's task-tab shortcuts back to the app.
+      const s = seed(mainWindow)
+      const scratch = await s.createTask({
+        projectId,
+        title: 'Shortcut scratch',
+        status: 'in_progress',
+        isTemporary: true,
+        terminalMode: 'terminal'
+      })
+      await s.refreshData()
+      await rebindShortcut(mainWindow, 'Next Task Tab', 'Control+PageDown')
+
+      await openTaskById(mainWindow, shortcutTaskId)
+      await openTaskById(mainWindow, scratch.id)
+      await waitForPtySession(mainWindow, `${scratch.id}:${scratch.id}`)
+      const { order, from } = await mainWindow.evaluate(() => {
+        const st = (window as unknown as TabStoreWindow).__slayzone_tabStore.getState()
+        const tasks = st.tabs.filter((t) => t.type === 'task')
+        return {
+          order: tasks.map((t) => t.title ?? ''),
+          from: tasks.indexOf(st.tabs[st.activeTabIndex])
+        }
+      })
+      expect(from).toBeGreaterThanOrEqual(0)
+      const target = order[(from + 1) % order.length]
+      expect(target).not.toBe(order[from])
+
+      await mainWindow.locator('.xterm:visible').first().click()
+      await expect
+        .poll(() => mainWindow.evaluate(() => !!document.activeElement?.closest('.xterm')))
+        .toBe(true)
+      await mainWindow.keyboard.press('Control+PageDown')
+      const activeTitle = () =>
+        mainWindow.evaluate(() => {
+          const st = (window as unknown as TabStoreWindow).__slayzone_tabStore.getState()
+          return st.tabs[st.activeTabIndex]?.title ?? null
+        })
+      await expect.poll(activeTitle, { timeout: 3_000 }).toBe(target)
 
       await goToHome(mainWindow)
       await resetShortcuts(mainWindow)
