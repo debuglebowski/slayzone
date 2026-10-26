@@ -30,7 +30,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINE = join(root, 'scripts/react-compiler-baseline.json')
 
-/** Sources the renderer builds (electron app + web shell) run through the compiler. */
+/** Sources the renderer builds (electron app, fork/web-shell renderer-app, web shell) run through the compiler. */
 function sourceFiles() {
   const tracked = execFileSync(
     'git',
@@ -43,6 +43,7 @@ function sourceFiles() {
       'packages/domains/*/src/**',
       'packages/shared/*/src/**',
       'packages/apps/app/src/renderer/**',
+      'packages/apps/renderer-app/src/**',
       'packages/apps/web-shell/src/**'
     ],
     { cwd: root, encoding: 'utf8' }

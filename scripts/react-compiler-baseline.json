@@ -1,5 +1,6 @@
 {
   "packages/apps/app/src/renderer/src/components/RemoteConfigScreen.tsx": ["RemoteConfigScreen"],
+  "packages/apps/renderer-app/src/TaskDetailsView.tsx": ["ExtensionsModal"],
   "packages/domains/agent-turns/src/client/useAgentTurns.ts": ["useAgentTurns"],
   "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
   "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
