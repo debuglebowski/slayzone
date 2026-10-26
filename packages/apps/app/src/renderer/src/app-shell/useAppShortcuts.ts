@@ -248,6 +248,45 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
+  // The task tab physically left/right of the active one (home skipped), wrapping at
+  // the edges. Off a task tab (home, or a full-page view) → lands on the first task
+  // tab, ← on the last. Fires from text fields and terminals too: ⌘⌥←/→ isn't text
+  // navigation (⌥←/→ is), and a task's terminal holds focus almost permanently.
+  const navigateTaskTabs = useCallback(
+    (direction: 1 | -1) => {
+      const taskTabs = visibleTabs.flatMap((tab, i) => (tab.type === 'task' ? [i] : []))
+      if (taskTabs.length === 0) return
+      const { activeTabIndex, activeView } = useTabStore.getState()
+      const pos = activeView === 'tabs' ? taskTabs.indexOf(toVisibleIndex(activeTabIndex)) : -1
+      const next =
+        pos === -1
+          ? direction === 1
+            ? 0
+            : taskTabs.length - 1
+          : (pos + direction + taskTabs.length) % taskTabs.length
+      setActiveTabIndex(toFullIndex(taskTabs[next]))
+    },
+    [visibleTabs, toFullIndex, toVisibleIndex, setActiveTabIndex]
+  )
+
+  useGuardedHotkeys(
+    getKeys('next-task-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTaskTabs(1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
+  useGuardedHotkeys(
+    getKeys('prev-task-tab'),
+    (e) => {
+      e.preventDefault()
+      navigateTaskTabs(-1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording }
+  )
+
   useGuardedHotkeys(
     getKeys('reopen-closed-tab'),
     (e) => {

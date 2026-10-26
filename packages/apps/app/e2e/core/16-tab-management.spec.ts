@@ -1,5 +1,15 @@
-import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
+import type { Page } from '@playwright/test'
+import {
+  test,
+  expect,
+  seed,
+  goHome,
+  clickProject,
+  resetApp,
+  openTaskById
+} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { waitForPtySession } from '../fixtures/terminal'
 
 /**
  * The renderer exposes the zustand tab store on `window` purely for E2E driving
@@ -28,8 +38,32 @@ async function getVisibleInputValue(page: import('@playwright/test').Page): Prom
   })
 }
 
+/** Task-tab titles in tab-bar order. */
+function getTaskTabTitles(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as TabStoreWindow).__slayzone_tabStore
+      .getState()
+      .tabs.flatMap((tab) => (tab.type === 'task' ? [tab.title ?? ''] : []))
+  )
+}
+
+/** The active tab's title, or null when the active tab is home. */
+function getActiveTaskTabTitle(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const s = (window as unknown as TabStoreWindow).__slayzone_tabStore.getState()
+    const tab = s.tabs[s.activeTabIndex]
+    return tab?.type === 'task' ? (tab.title ?? '') : null
+  })
+}
+
+function expectActiveTaskTab(page: Page, title: string): Promise<void> {
+  return expect.poll(() => getActiveTaskTabTitle(page), { timeout: 3_000 }).toBe(title)
+}
+
 test.describe('Tab management & keyboard shortcuts', () => {
   let projectAbbrev: string
+  let projectId: string
+  const taskIds: string[] = []
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -40,10 +74,12 @@ test.describe('Tab management & keyboard shortcuts', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
+    projectId = p.id
 
-    await s.createTask({ projectId: p.id, title: 'Tab task A', status: 'in_progress' })
-    await s.createTask({ projectId: p.id, title: 'Tab task B', status: 'in_progress' })
-    await s.createTask({ projectId: p.id, title: 'Tab task C', status: 'in_progress' })
+    for (const title of ['Tab task A', 'Tab task B', 'Tab task C']) {
+      const task = await s.createTask({ projectId: p.id, title, status: 'in_progress' })
+      taskIds.push(task.id)
+    }
     await s.refreshData()
 
     await goHome(mainWindow)
@@ -185,5 +221,96 @@ test.describe('Tab management & keyboard shortcuts', () => {
 
     const value = await getVisibleInputValue(mainWindow)
     expect(value).toBe('Tab task A')
+  })
+
+  // ⌘⌥← / ⌘⌥→ (#98): the task tab physically left/right in the tab bar, wrapping at
+  // the edges, skipping the home tab.
+  test('Cmd+Option+Right/Left switch to the adjacent task tab, wrapping at the edges', async ({
+    mainWindow
+  }) => {
+    for (const id of taskIds) await openTaskById(mainWindow, id)
+    const order = await getTaskTabTitles(mainWindow)
+    expect(order).toHaveLength(3)
+
+    await mainWindow.keyboard.press('Meta+1')
+    await expectActiveTaskTab(mainWindow, order[0])
+
+    for (const title of [order[1], order[2], order[0]]) {
+      await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+      await expectActiveTaskTab(mainWindow, title)
+    }
+    for (const title of [order[2], order[1], order[0]]) {
+      await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+      await expectActiveTaskTab(mainWindow, title)
+    }
+  })
+
+  test('from the home tab, Cmd+Option+Right opens the first task tab, Left the last', async ({
+    mainWindow
+  }) => {
+    for (const id of taskIds) await openTaskById(mainWindow, id)
+    const order = await getTaskTabTitles(mainWindow)
+
+    await goHome(mainWindow)
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    await expectActiveTaskTab(mainWindow, order[0])
+
+    await goHome(mainWindow)
+    await mainWindow.keyboard.press('Meta+Alt+ArrowLeft')
+    await expectActiveTaskTab(mainWindow, order[order.length - 1])
+  })
+
+  // ⌘⌥←/→ is not text navigation (⌥←/→ is), and a task's terminal holds focus almost
+  // permanently — so the shortcut must work from a focused text field and terminal.
+  test('Cmd+Option+Right works with focus in a text field', async ({ mainWindow }) => {
+    for (const id of taskIds) await openTaskById(mainWindow, id)
+    const order = await getTaskTabTitles(mainWindow)
+    await mainWindow.keyboard.press('Meta+1')
+    await expectActiveTaskTab(mainWindow, order[0])
+
+    // The active task's title field. Polled: the pane is revealed a frame after the
+    // tab switch (deferred active index), and a hidden input has no offsetParent.
+    await expect
+      .poll(() =>
+        mainWindow.evaluate((title) => {
+          const input = [...document.querySelectorAll('input')].find(
+            (el) => el.offsetParent !== null && el.value === title
+          )
+          input?.focus()
+          return !!input && document.activeElement === input
+        }, order[0])
+      )
+      .toBe(true)
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    await expectActiveTaskTab(mainWindow, order[1])
+  })
+
+  test('Cmd+Option+Right works with focus in a terminal', async ({ mainWindow }) => {
+    const scratch = await seed(mainWindow).createTask({
+      projectId,
+      title: 'Tab scratch',
+      status: 'in_progress',
+      isTemporary: true,
+      terminalMode: 'terminal'
+    })
+    await seed(mainWindow).refreshData()
+    for (const id of taskIds) await openTaskById(mainWindow, id)
+    await openTaskById(mainWindow, scratch.id)
+    await waitForPtySession(mainWindow, `${scratch.id}:${scratch.id}`)
+
+    const order = await getTaskTabTitles(mainWindow)
+    const from = order.indexOf((await getActiveTaskTabTitle(mainWindow)) ?? '')
+    expect(from).toBeGreaterThanOrEqual(0)
+    const target = order[(from + 1) % order.length]
+    expect(target).not.toBe(order[from])
+
+    await mainWindow.locator('.xterm:visible').first().click()
+    await expect
+      .poll(() => mainWindow.evaluate(() => !!document.activeElement?.closest('.xterm')))
+      .toBe(true)
+
+    await mainWindow.keyboard.press('Meta+Alt+ArrowRight')
+    await expectActiveTaskTab(mainWindow, target)
   })
 })
