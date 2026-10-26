@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { AlertTriangle } from 'lucide-react'
@@ -38,7 +38,12 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
   const [submoduleOverride, setSubmoduleOverride] = useState<SubmoduleOverride>('inherit')
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
+  // Re-seed the form from each new `project` object, first render included.
+  // Adjusted during render (same trigger as a `[project]` effect) so no frame
+  // shows the defaults or a previous project's values.
+  const [formSource, setFormSource] = useState<Project | null>(null)
+  if (!Object.is(formSource, project)) {
+    setFormSource(project)
     setAutoCreateOverride(
       project.auto_create_worktree_on_task_create === 1
         ? 'on'
@@ -50,7 +55,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
     setCopyOverride((project.worktree_copy_behavior as CopyOverride) ?? 'inherit')
     setCustomPaths(project.worktree_copy_paths || '')
     setSubmoduleOverride((project.worktree_submodule_init as SubmoduleOverride) ?? 'inherit')
-  }, [project])
+  }
 
   const openComputerSettings = () => {
     onClose()

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import {
@@ -31,11 +31,15 @@ export function TasksGeneralTab({ project, onUpdated }: TasksGeneralTabProps) {
   )
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
+  // Re-seed from each new `project` object. Adjusted during render — same
+  // trigger as a `[project]` effect — so no frame shows the previous values.
+  const [formSource, setFormSource] = useState(project)
+  if (!Object.is(formSource, project)) {
+    setFormSource(project)
     const cfg = project.task_automation_config
     setOnActive(cfg?.on_terminal_active ?? 'none')
     setOnIdle(cfg?.on_terminal_idle ?? 'none')
-  }, [project])
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

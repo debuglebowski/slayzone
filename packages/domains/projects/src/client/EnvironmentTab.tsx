@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
@@ -28,7 +28,12 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
+  // Re-seed the form from each new `project` object, first render included.
+  // Adjusted during render (same trigger as a `[project]` effect) so no frame
+  // shows the defaults or a previous project's values.
+  const [formSource, setFormSource] = useState<Project | null>(null)
+  if (!Object.is(formSource, project)) {
+    setFormSource(project)
     const ctx = project.execution_context
     if (ctx?.type === 'docker') {
       setExecType('docker')
@@ -50,7 +55,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
       setExecShell('')
     }
     setTestResult(null)
-  }, [project])
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
@@ -44,6 +44,29 @@ interface ProjectSettingsDialogProps {
   renderTemplatesTab?: (projectId: string) => React.ReactNode
 }
 
+/** Which provider's status sync locks the project's statuses (null = none, or unknown). */
+async function fetchIntegrationLock(
+  queryClient: QueryClient,
+  trpc: ReturnType<typeof useTRPC>,
+  projectId: string
+): Promise<string | null> {
+  try {
+    const [linear, github] = await Promise.all([
+      queryClient.fetchQuery(
+        trpc.integrations.getProjectMapping.queryOptions({ projectId, provider: 'linear' })
+      ),
+      queryClient.fetchQuery(
+        trpc.integrations.getProjectMapping.queryOptions({ projectId, provider: 'github' })
+      )
+    ])
+    if (linear?.status_setup_complete) return 'Linear'
+    if (github?.status_setup_complete) return 'GitHub'
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function ProjectSettingsDialog({
   project,
   open,
@@ -81,32 +104,32 @@ export function ProjectSettingsDialog({
       setLockedByProvider(null)
       return
     }
-    try {
-      const [linear, github] = await Promise.all([
-        queryClient.fetchQuery(
-          trpc.integrations.getProjectMapping.queryOptions({
-            projectId: project.id,
-            provider: 'linear'
-          })
-        ),
-        queryClient.fetchQuery(
-          trpc.integrations.getProjectMapping.queryOptions({
-            projectId: project.id,
-            provider: 'github'
-          })
-        )
-      ])
-      if (linear?.status_setup_complete) setLockedByProvider('Linear')
-      else if (github?.status_setup_complete) setLockedByProvider('GitHub')
-      else setLockedByProvider(null)
-    } catch {
-      setLockedByProvider(null)
-    }
+    setLockedByProvider(await fetchIntegrationLock(queryClient, trpc, project.id))
   }, [project, queryClient, trpc])
 
+  // Re-check whenever the dialog opens or its project changes. The no-project /
+  // e2e branch needs no round-trip, so it is adjusted during render under the
+  // same trigger; only the lookup runs in the effect.
+  const [lockCheckSeen, setLockCheckSeen] = useState<{
+    open: boolean
+    project: Project | null
+    queryClient: typeof queryClient
+    trpc: typeof trpc
+  } | null>(null)
+  if (
+    lockCheckSeen === null ||
+    !Object.is(lockCheckSeen.open, open) ||
+    !Object.is(lockCheckSeen.project, project) ||
+    !Object.is(lockCheckSeen.queryClient, queryClient) ||
+    !Object.is(lockCheckSeen.trpc, trpc)
+  ) {
+    setLockCheckSeen({ open, project, queryClient, trpc })
+    if (open && (!project || electronBootstrap.isPlaywright())) setLockedByProvider(null)
+  }
   useEffect(() => {
-    if (open) void checkIntegrationLock()
-  }, [open, checkIntegrationLock])
+    if (!open || !project || electronBootstrap.isPlaywright()) return
+    void fetchIntegrationLock(queryClient, trpc, project.id).then(setLockedByProvider)
+  }, [open, project, queryClient, trpc])
 
   useEffect(() => {
     if (open) {

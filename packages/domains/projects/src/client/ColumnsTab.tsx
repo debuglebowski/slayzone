@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
@@ -35,9 +35,13 @@ export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabP
     resolveColumns(project.columns_config)
   )
 
-  useEffect(() => {
+  // Re-seed the draft whenever a new `project` object arrives. Adjusted during
+  // render (same trigger as a `[project]` effect) so no frame shows a stale draft.
+  const [draftSource, setDraftSource] = useState(project)
+  if (!Object.is(draftSource, project)) {
+    setDraftSource(project)
     setColumnsDraft(resolveColumns(project.columns_config))
-  }, [project])
+  }
 
   const colorOptions = ['gray', 'slate', 'blue', 'yellow', 'purple', 'green', 'red', 'orange']
 

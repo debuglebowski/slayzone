@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Lock, LockOpen, Timer, Clock, AlertTriangle } from 'lucide-react'
@@ -74,25 +74,30 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
 
   const [disableUnlockEarly, setDisableUnlockEarly] = useState(false)
 
-  // Reset local state from persisted config whenever popover opens
-  useEffect(() => {
-    if (!open) return
-    setDurationEnabled(false)
-    setDurationValue(30)
-    setDurationUnit('minutes')
-    setRateLimitEnabled(!!config?.rate_limit)
-    setMaxTasks(config?.rate_limit?.max_tasks ?? 3)
-    setPerMinutes(String(config?.rate_limit?.per_minutes ?? 60))
-    setScheduleEnabled(!!config?.schedule)
-    setScheduleFrom(config?.schedule?.from ?? '18:00')
-    setScheduleTo(config?.schedule?.to ?? '09:00')
-    setScheduleWeekdays(
-      config?.schedule?.weekdays && config.schedule.weekdays.length === 7
-        ? [...config.schedule.weekdays]
-        : Array(7).fill(true)
-    )
-    setDisableUnlockEarly(config?.disable_unlock_early ?? false)
-  }, [open, config])
+  // Reset local state from persisted config whenever popover opens (or the
+  // config changes while open). Adjusted during render — same trigger as an
+  // `[open, config]` effect — so an opening popover never paints stale values.
+  const [pendingSource, setPendingSource] = useState({ open, config })
+  if (!Object.is(pendingSource.open, open) || !Object.is(pendingSource.config, config)) {
+    setPendingSource({ open, config })
+    if (open) {
+      setDurationEnabled(false)
+      setDurationValue(30)
+      setDurationUnit('minutes')
+      setRateLimitEnabled(!!config?.rate_limit)
+      setMaxTasks(config?.rate_limit?.max_tasks ?? 3)
+      setPerMinutes(String(config?.rate_limit?.per_minutes ?? 60))
+      setScheduleEnabled(!!config?.schedule)
+      setScheduleFrom(config?.schedule?.from ?? '18:00')
+      setScheduleTo(config?.schedule?.to ?? '09:00')
+      setScheduleWeekdays(
+        config?.schedule?.weekdays && config.schedule.weekdays.length === 7
+          ? [...config.schedule.weekdays]
+          : Array(7).fill(true)
+      )
+      setDisableUnlockEarly(config?.disable_unlock_early ?? false)
+    }
+  }
 
   const isDirty = useMemo(() => {
     if (durationEnabled) return true

@@ -47,9 +47,14 @@ export function useBrowserViewBounds(
 
   // Initial app zoom factor — app.meta.getZoomFactor mirrors app:get-zoom-factor.
   const zoomQuery = useQuery(trpc.app.meta.getZoomFactor.queryOptions())
-  useEffect(() => {
+  // Adopt each new query result. Adjusted during render — same trigger as a
+  // `[zoomQuery.data]` effect; `undefined` start = an already-cached value at
+  // mount is adopted too, exactly like that effect's first run.
+  const [adoptedZoomData, setAdoptedZoomData] = useState<typeof zoomQuery.data>(undefined)
+  if (!Object.is(adoptedZoomData, zoomQuery.data)) {
+    setAdoptedZoomData(zoomQuery.data)
     if (typeof zoomQuery.data === 'number') setAppZoomFactor(zoomQuery.data)
-  }, [zoomQuery.data])
+  }
 
   // Live zoom changes — menu.onZoomFactorChanged mirrors app:zoom-factor-changed.
   const handleZoomFactorChanged = useStableCallback((factor: number) => {

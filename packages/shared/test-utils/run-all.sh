@@ -751,6 +751,16 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tags/src/client/CreateTagDialog.test.tsx \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \
+  packages/domains/projects/src/client/ProjectSettingsDialog.test.tsx \
+  packages/domains/projects/src/client/project-settings-reseed.test.tsx \
+  packages/domains/projects/src/client/useIntegrationsTab.test.tsx \
+  packages/domains/projects/src/client/useProviderData.test.tsx \
+  packages/domains/task-artifacts/src/client/useArtifacts.test.tsx \
+  packages/domains/task-browser/src/client/useBrowserPickElement.test.tsx \
+  packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.test.tsx \
+  packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
+  packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
+  packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \

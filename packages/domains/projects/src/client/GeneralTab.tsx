@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen, Upload, Trash2 } from 'lucide-react'
@@ -46,7 +46,12 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   // — read via a narrow local cast. null = Local (in-process).
   const [defaultComputerId, setDefaultComputerId] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Re-seed the form from each new `project` object, first render included.
+  // Adjusted during render (same trigger as a `[project]` effect) so no frame
+  // shows the empty defaults or a previous project's values.
+  const [formSource, setFormSource] = useState<Project | null>(null)
+  if (!Object.is(formSource, project)) {
+    setFormSource(project)
     setName(project.name)
     setColor(project.color)
     setPath(project.path || '')
@@ -56,7 +61,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setDefaultComputerId(
       (project as { default_computer_id?: string | null }).default_computer_id ?? null
     )
-  }, [project])
+  }
 
   const computers = computersQuery.data ?? []
 

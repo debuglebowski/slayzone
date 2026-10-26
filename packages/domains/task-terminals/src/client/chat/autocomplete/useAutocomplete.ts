@@ -171,14 +171,30 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
 
   const show = active !== null
 
-  useEffect(() => {
+  // Both adjusted during render — same triggers as the equivalent effects, so a
+  // new match never paints with the previous match's selection.
+  // Restart the selection when the active match changes.
+  const matchKey = {
+    leadSourceId: active?.leadSourceId,
+    tokenStart: active?.match.tokenStart,
+    query: active?.match.query
+  }
+  const [selectionMatchKey, setSelectionMatchKey] = useState(matchKey)
+  if (
+    !Object.is(selectionMatchKey.leadSourceId, matchKey.leadSourceId) ||
+    !Object.is(selectionMatchKey.tokenStart, matchKey.tokenStart) ||
+    !Object.is(selectionMatchKey.query, matchKey.query)
+  ) {
+    setSelectionMatchKey(matchKey)
     setSelectedIndex(0)
-  }, [active?.leadSourceId, active?.match.tokenStart, active?.match.query])
+  }
 
   // Clear dismissal on any draft/cursor change — Esc closes current state; next keystroke reopens.
-  useEffect(() => {
+  const [dismissalInput, setDismissalInput] = useState({ draft, cursorPos })
+  if (!Object.is(dismissalInput.draft, draft) || !Object.is(dismissalInput.cursorPos, cursorPos)) {
+    setDismissalInput({ draft, cursorPos })
     setDismissed(null)
-  }, [draft, cursorPos])
+  }
 
   const accept = useCallback(
     (index: number) => {

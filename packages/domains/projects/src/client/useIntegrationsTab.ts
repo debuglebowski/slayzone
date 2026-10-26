@@ -22,6 +22,7 @@ import type {
   TaskSyncRow
 } from './IntegrationsTab.types'
 import { formatGithubImportMessage, sortByMode, summarizeSyncRows } from './IntegrationsTab.utils'
+import { depsChanged } from './deps-changed'
 
 /**
  * Nudge the board to re-read after an integration write.
@@ -36,6 +37,33 @@ function refreshBoardData(): void {
   ;(
     window as Window & { __slayzone_refreshData?: () => Promise<void> | void }
   ).__slayzone_refreshData?.()
+}
+
+/** One round of every read `reloadIntegrationState` applies. */
+async function fetchIntegrationState(
+  trpcClient: ReturnType<typeof useTRPCClient>,
+  projectId: string
+) {
+  return await Promise.all([
+    trpcClient.integrations.listConnections.query({ provider: 'linear' }),
+    trpcClient.integrations.getProjectMapping.query({
+      projectId,
+      provider: 'linear'
+    }),
+    trpcClient.integrations.getProjectConnection.query({
+      projectId,
+      provider: 'linear'
+    }),
+    trpcClient.integrations.listConnections.query({ provider: 'github' }),
+    trpcClient.integrations.getProjectMapping.query({
+      projectId,
+      provider: 'github'
+    }),
+    trpcClient.integrations.getProjectConnection.query({
+      projectId,
+      provider: 'github'
+    })
+  ])
 }
 
 export function useIntegrationsTab({
@@ -116,111 +144,115 @@ export function useIntegrationsTab({
   const [syncStepEditing, setSyncStepEditing] = useState<1 | 2 | 3 | null>(null)
   const [loadingSyncStatuses, setLoadingSyncStatuses] = useState(false)
 
-  useEffect(() => {
+  // Synchronous state resets below are adjusted during render, each keyed on
+  // the same dependencies (and evaluated in the same order) as the effect it
+  // replaces — so no frame paints the pre-reset state. Async loads stay in
+  // effects.
+
+  // Back to the integration list on open / project switch (also on mount).
+  const entryResetDeps = [open, project.id]
+  const [entryResetSeen, setEntryResetSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(entryResetSeen, entryResetDeps)) {
+    setEntryResetSeen(entryResetDeps)
     if (open) {
       setSelectedIntegrationEntry(null)
       setSelectedIntegrationMode(null)
     }
-  }, [open, project.id])
+  }
 
+  // Onboarding request: jump to the provider's continuous-sync setup (also on mount).
+  const onboardingDeps = [open, integrationOnboardingProvider, onIntegrationOnboardingHandled]
+  const [onboardingSeen, setOnboardingSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(onboardingSeen, onboardingDeps)) {
+    setOnboardingSeen(onboardingDeps)
+    if (open && integrationOnboardingProvider) {
+      setSelectedIntegrationEntry(
+        integrationOnboardingProvider === 'github' ? 'github_projects' : 'linear'
+      )
+      setSelectedIntegrationMode('continuous')
+    }
+  }
+  // Acknowledging the request updates the host, so it stays an effect.
   useEffect(() => {
     if (!open) return
     if (!integrationOnboardingProvider) return
-    setSelectedIntegrationEntry(
-      integrationOnboardingProvider === 'github' ? 'github_projects' : 'linear'
-    )
-    setSelectedIntegrationMode('continuous')
     onIntegrationOnboardingHandled?.()
   }, [open, integrationOnboardingProvider, onIntegrationOnboardingHandled])
 
-  const reloadIntegrationState = useCallback(async () => {
-    if (!open) return
-    const [
-      loadedConnections,
-      loadedMapping,
-      loadedLinearProjectConnectionId,
-      loadedGithubConnections,
-      loadedGithubMapping,
-      loadedGithubProjectConnectionId
-    ] = await Promise.all([
-      trpcClient.integrations.listConnections.query({ provider: 'linear' }),
-      trpcClient.integrations.getProjectMapping.query({
-        projectId: project.id,
-        provider: 'linear'
-      }),
-      trpcClient.integrations.getProjectConnection.query({
-        projectId: project.id,
-        provider: 'linear'
-      }),
-      trpcClient.integrations.listConnections.query({ provider: 'github' }),
-      trpcClient.integrations.getProjectMapping.query({
-        projectId: project.id,
-        provider: 'github'
-      }),
-      trpcClient.integrations.getProjectConnection.query({
-        projectId: project.id,
-        provider: 'github'
-      })
-    ])
-    setConnections(loadedConnections)
-    setGithubConnections(loadedGithubConnections)
-    setMapping(loadedMapping)
-    setGithubMapping(loadedGithubMapping)
-    setSelectedIntegrationEntry((current) => {
-      return current
-    })
-    const resolvedGithubConnectionId =
-      loadedGithubProjectConnectionId &&
-      loadedGithubConnections.some(
-        (connection) => connection.id === loadedGithubProjectConnectionId
-      )
-        ? loadedGithubProjectConnectionId
-        : loadedGithubMapping?.connection_id &&
-            loadedGithubConnections.some(
-              (connection) => connection.id === loadedGithubMapping.connection_id
-            )
-          ? loadedGithubMapping.connection_id
-          : ''
-    const resolvedLinearConnectionId =
-      loadedLinearProjectConnectionId &&
-      loadedConnections.some((connection) => connection.id === loadedLinearProjectConnectionId)
-        ? loadedLinearProjectConnectionId
-        : loadedMapping?.connection_id &&
-            loadedConnections.some((connection) => connection.id === loadedMapping.connection_id)
-          ? loadedMapping.connection_id
-          : ''
+  const reloadIntegrationState = useCallback((): Promise<void> => {
+    if (!open) return Promise.resolve()
+    return fetchIntegrationState(trpcClient, project.id).then(
+      ([
+        loadedConnections,
+        loadedMapping,
+        loadedLinearProjectConnectionId,
+        loadedGithubConnections,
+        loadedGithubMapping,
+        loadedGithubProjectConnectionId
+      ]) => {
+        setConnections(loadedConnections)
+        setGithubConnections(loadedGithubConnections)
+        setMapping(loadedMapping)
+        setGithubMapping(loadedGithubMapping)
+        setSelectedIntegrationEntry((current) => {
+          return current
+        })
+        const resolvedGithubConnectionId =
+          loadedGithubProjectConnectionId &&
+          loadedGithubConnections.some(
+            (connection) => connection.id === loadedGithubProjectConnectionId
+          )
+            ? loadedGithubProjectConnectionId
+            : loadedGithubMapping?.connection_id &&
+                loadedGithubConnections.some(
+                  (connection) => connection.id === loadedGithubMapping.connection_id
+                )
+              ? loadedGithubMapping.connection_id
+              : ''
+        const resolvedLinearConnectionId =
+          loadedLinearProjectConnectionId &&
+          loadedConnections.some((connection) => connection.id === loadedLinearProjectConnectionId)
+            ? loadedLinearProjectConnectionId
+            : loadedMapping?.connection_id &&
+                loadedConnections.some(
+                  (connection) => connection.id === loadedMapping.connection_id
+                )
+              ? loadedMapping.connection_id
+              : ''
 
-    setGithubProjectConnectionId(resolvedGithubConnectionId)
-    setLinearProjectConnectionId(resolvedLinearConnectionId)
-    setGithubSyncProjectId(loadedGithubMapping?.external_project_id ?? '')
-    setGithubSyncRepoFullName(
-      loadedGithubMapping?.external_repo_owner && loadedGithubMapping?.external_repo_name
-        ? `${loadedGithubMapping.external_repo_owner}/${loadedGithubMapping.external_repo_name}`
-        : ''
+        setGithubProjectConnectionId(resolvedGithubConnectionId)
+        setLinearProjectConnectionId(resolvedLinearConnectionId)
+        setGithubSyncProjectId(loadedGithubMapping?.external_project_id ?? '')
+        setGithubSyncRepoFullName(
+          loadedGithubMapping?.external_repo_owner && loadedGithubMapping?.external_repo_name
+            ? `${loadedGithubMapping.external_repo_owner}/${loadedGithubMapping.external_repo_name}`
+            : ''
+        )
+        setGithubSyncMode(loadedGithubMapping?.sync_mode ?? 'one_way')
+        setLinearSyncTeamId(loadedMapping?.external_team_id ?? '')
+        setLinearSyncProjectId(loadedMapping?.external_project_id ?? '')
+        setLinearSyncMode(loadedMapping?.sync_mode ?? 'one_way')
+        setLinearSyncAssignedToMe(Boolean(loadedMapping?.assigned_to_me))
+        setSyncSettingsMessage('')
+        setLinearImportTeamId('')
+        setLinearImportProjectId('')
+        setLinearImportTeams([])
+        setLinearImportProjects([])
+        setLinearImportSourceMessage('')
+        setGithubRepositories([])
+        setGithubRepositoryFullName('')
+        setIssueOptions([])
+        setSelectedIssueIds(new Set())
+        setImportMessage('')
+        setGithubRepoIssueOptions([])
+        setSelectedGithubRepoIssueIds(new Set())
+        setGithubRepoIssueQuery('')
+        setGithubRepoImportMessage('')
+        setSyncRows([])
+        setSyncSummary(null)
+        setSyncMessage('')
+      }
     )
-    setGithubSyncMode(loadedGithubMapping?.sync_mode ?? 'one_way')
-    setLinearSyncTeamId(loadedMapping?.external_team_id ?? '')
-    setLinearSyncProjectId(loadedMapping?.external_project_id ?? '')
-    setLinearSyncMode(loadedMapping?.sync_mode ?? 'one_way')
-    setLinearSyncAssignedToMe(Boolean(loadedMapping?.assigned_to_me))
-    setSyncSettingsMessage('')
-    setLinearImportTeamId('')
-    setLinearImportProjectId('')
-    setLinearImportTeams([])
-    setLinearImportProjects([])
-    setLinearImportSourceMessage('')
-    setGithubRepositories([])
-    setGithubRepositoryFullName('')
-    setIssueOptions([])
-    setSelectedIssueIds(new Set())
-    setImportMessage('')
-    setGithubRepoIssueOptions([])
-    setSelectedGithubRepoIssueIds(new Set())
-    setGithubRepoIssueQuery('')
-    setGithubRepoImportMessage('')
-    setSyncRows([])
-    setSyncSummary(null)
-    setSyncMessage('')
   }, [open, project, trpcClient])
 
   useEffect(() => {
@@ -260,26 +292,42 @@ export function useIntegrationsTab({
     void loadGithubRepositories()
   }, [githubProjectConnectionId, githubMapping?.connection_id])
 
-  useEffect(() => {
-    setGithubRepoIssueOptions([])
-    setSelectedGithubRepoIssueIds(new Set())
-    setGithubRepoIssueQuery('')
-    setGithubRepoImportMessage('')
-  }, [
+  // The adjustments below start seeded with their first-render deps: as
+  // effects, their mount runs only re-set the initial values.
+
+  // Clear the GitHub repo-issue import whenever its source changes.
+  const repoIssueResetDeps = [
     selectedIntegrationEntry,
     githubProjectConnectionId,
     githubMapping?.connection_id,
     githubRepositoryFullName
-  ])
+  ]
+  const [repoIssueResetSeen, setRepoIssueResetSeen] =
+    useState<readonly unknown[]>(repoIssueResetDeps)
+  if (depsChanged(repoIssueResetSeen, repoIssueResetDeps)) {
+    setRepoIssueResetSeen(repoIssueResetDeps)
+    setGithubRepoIssueOptions([])
+    setSelectedGithubRepoIssueIds(new Set())
+    setGithubRepoIssueQuery('')
+    setGithubRepoImportMessage('')
+  }
 
-  useEffect(() => {
+  // GitHub sync projects: clear without a connection, else flag the load below.
+  const githubSyncProjectsDeps = [githubProjectConnectionId, githubMapping?.external_project_id]
+  const [githubSyncProjectsSeen, setGithubSyncProjectsSeen] =
+    useState<readonly unknown[]>(githubSyncProjectsDeps)
+  if (depsChanged(githubSyncProjectsSeen, githubSyncProjectsDeps)) {
+    setGithubSyncProjectsSeen(githubSyncProjectsDeps)
     if (!githubProjectConnectionId) {
       setGithubSyncProjects([])
       setGithubSyncProjectId('')
-      return
+    } else {
+      setLoadingGithubSyncProjects(true)
+      setSyncSettingsMessage('')
     }
-    setLoadingGithubSyncProjects(true)
-    setSyncSettingsMessage('')
+  }
+  useEffect(() => {
+    if (!githubProjectConnectionId) return
     void trpcClient.integrations.listGithubProjects
       .query({ connectionId: githubProjectConnectionId })
       .then((projects) => {
@@ -306,16 +354,24 @@ export function useIntegrationsTab({
       })
   }, [githubProjectConnectionId, githubMapping?.external_project_id])
 
-  useEffect(() => {
+  // Linear sync teams: clear without a connection, else flag the load below.
+  const linearSyncTeamsDeps = [linearProjectConnectionId, mapping?.external_team_id]
+  const [linearSyncTeamsSeen, setLinearSyncTeamsSeen] =
+    useState<readonly unknown[]>(linearSyncTeamsDeps)
+  if (depsChanged(linearSyncTeamsSeen, linearSyncTeamsDeps)) {
+    setLinearSyncTeamsSeen(linearSyncTeamsDeps)
     if (!linearProjectConnectionId) {
       setLinearSyncTeams([])
       setLinearSyncTeamId('')
       setLinearSyncProjects([])
       setLinearSyncProjectId('')
-      return
+    } else {
+      setLoadingLinearSyncTeams(true)
+      setSyncSettingsMessage('')
     }
-    setLoadingLinearSyncTeams(true)
-    setSyncSettingsMessage('')
+  }
+  useEffect(() => {
+    if (!linearProjectConnectionId) return
     void trpcClient.integrations.listLinearTeams
       .query({ connectionId: linearProjectConnectionId })
       .then((result) => {
@@ -343,14 +399,26 @@ export function useIntegrationsTab({
       })
   }, [linearProjectConnectionId, mapping?.external_team_id])
 
-  useEffect(() => {
+  // Linear sync projects: clear without connection + team, else flag the load below.
+  const linearSyncProjectsDeps = [
+    linearProjectConnectionId,
+    linearSyncTeamId,
+    mapping?.external_project_id
+  ]
+  const [linearSyncProjectsSeen, setLinearSyncProjectsSeen] =
+    useState<readonly unknown[]>(linearSyncProjectsDeps)
+  if (depsChanged(linearSyncProjectsSeen, linearSyncProjectsDeps)) {
+    setLinearSyncProjectsSeen(linearSyncProjectsDeps)
     if (!linearProjectConnectionId || !linearSyncTeamId) {
       setLinearSyncProjects([])
       setLinearSyncProjectId('')
-      return
+    } else {
+      setLoadingLinearSyncProjects(true)
+      setSyncSettingsMessage('')
     }
-    setLoadingLinearSyncProjects(true)
-    setSyncSettingsMessage('')
+  }
+  useEffect(() => {
+    if (!linearProjectConnectionId || !linearSyncTeamId) return
     void trpcClient.integrations.listLinearProjects
       .query({ connectionId: linearProjectConnectionId, teamId: linearSyncTeamId })
       .then((projects) => {
@@ -377,16 +445,24 @@ export function useIntegrationsTab({
       })
   }, [linearProjectConnectionId, linearSyncTeamId, mapping?.external_project_id])
 
-  useEffect(() => {
+  // Linear import teams: clear without a connection, else flag the load below.
+  const linearImportTeamsDeps = [linearProjectConnectionId]
+  const [linearImportTeamsSeen, setLinearImportTeamsSeen] =
+    useState<readonly unknown[]>(linearImportTeamsDeps)
+  if (depsChanged(linearImportTeamsSeen, linearImportTeamsDeps)) {
+    setLinearImportTeamsSeen(linearImportTeamsDeps)
     if (!linearProjectConnectionId) {
       setLinearImportTeams([])
       setLinearImportTeamId('')
       setLinearImportProjects([])
       setLinearImportProjectId('')
-      return
+    } else {
+      setLoadingLinearImportTeams(true)
+      setLinearImportSourceMessage('')
     }
-    setLoadingLinearImportTeams(true)
-    setLinearImportSourceMessage('')
+  }
+  useEffect(() => {
+    if (!linearProjectConnectionId) return
     void trpcClient.integrations.listLinearTeams
       .query({ connectionId: linearProjectConnectionId })
       .then((result) => {
@@ -407,14 +483,22 @@ export function useIntegrationsTab({
       })
   }, [linearProjectConnectionId])
 
-  useEffect(() => {
+  // Linear import projects: clear without connection + team, else flag the load below.
+  const linearImportProjectsDeps = [linearProjectConnectionId, linearImportTeamId]
+  const [linearImportProjectsSeen, setLinearImportProjectsSeen] =
+    useState<readonly unknown[]>(linearImportProjectsDeps)
+  if (depsChanged(linearImportProjectsSeen, linearImportProjectsDeps)) {
+    setLinearImportProjectsSeen(linearImportProjectsDeps)
     if (!linearProjectConnectionId || !linearImportTeamId) {
       setLinearImportProjects([])
       setLinearImportProjectId('')
-      return
+    } else {
+      setLoadingLinearImportProjects(true)
+      setLinearImportSourceMessage('')
     }
-    setLoadingLinearImportProjects(true)
-    setLinearImportSourceMessage('')
+  }
+  useEffect(() => {
+    if (!linearProjectConnectionId || !linearImportTeamId) return
     void trpcClient.integrations.listLinearProjects
       .query({ connectionId: linearProjectConnectionId, teamId: linearImportTeamId })
       .then((projects) => {

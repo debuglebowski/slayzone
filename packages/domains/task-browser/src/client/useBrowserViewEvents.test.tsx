@@ -123,3 +123,47 @@ describe('useBrowserViewEvents state-snapshot replay', () => {
     })
   })
 })
+
+describe('useBrowserViewEvents view changes', () => {
+  it('resets to the initial state when the view clears', () => {
+    const { result, rerender } = renderHook(({ id }) => useBrowserViewEvents(id), {
+      initialProps: { id: 'bv-1' as string | null }
+    })
+    feed(snapshot())
+    expect(result.current.url).toBe('https://example.com/')
+
+    rerender({ id: null })
+
+    expect(result.current.url).toBe('')
+    expect(result.current.title).toBe('')
+    expect(result.current.canGoForward).toBe(false)
+    expect(result.current.domReady).toBe(false)
+    expect(result.current.hasLoadedRealPage).toBe(false)
+  })
+
+  it('carries state across a view swap until the new view reports', () => {
+    const { result, rerender } = renderHook(({ id }) => useBrowserViewEvents(id), {
+      initialProps: { id: 'bv-1' as string | null }
+    })
+    feed(snapshot())
+
+    rerender({ id: 'bv-2' })
+    expect(result.current.url).toBe('https://example.com/')
+    expect(result.current.hasLoadedRealPage).toBe(true)
+
+    feed(snapshot({ viewId: 'bv-2', url: 'https://other.example/', title: 'Other' }))
+    expect(result.current.url).toBe('https://other.example/')
+    expect(result.current.title).toBe('Other')
+  })
+
+  it('starts empty for a view that mounts without an id, then fills once it has one', () => {
+    const { result, rerender } = renderHook(({ id }) => useBrowserViewEvents(id), {
+      initialProps: { id: null as string | null }
+    })
+    expect(result.current.url).toBe('')
+
+    rerender({ id: 'bv-1' })
+    feed(snapshot())
+    expect(result.current.url).toBe('https://example.com/')
+  })
+})

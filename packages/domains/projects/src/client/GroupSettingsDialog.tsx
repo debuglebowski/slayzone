@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -31,10 +31,13 @@ export function GroupSettingsDialog({
   onDelete
 }: GroupSettingsDialogProps) {
   const [name, setName] = useState(group.name)
-  // Reset the field whenever a different group is opened.
-  useEffect(() => {
+  // Reset the field whenever a different group is opened (or it is renamed).
+  // Adjusted during render — same trigger as a `[group.id, group.name]` effect.
+  const [nameSource, setNameSource] = useState({ id: group.id, name: group.name })
+  if (!Object.is(nameSource.id, group.id) || !Object.is(nameSource.name, group.name)) {
+    setNameSource({ id: group.id, name: group.name })
     setName(group.name)
-  }, [group.id, group.name])
+  }
 
   const save = (): void => {
     const trimmed = name.trim()

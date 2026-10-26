@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 
 /**
@@ -71,14 +71,14 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
     [itemMatches]
   )
 
-  // Clamp activeIdx when match set shrinks.
-  useEffect(() => {
-    if (matchedIndices.length === 0) {
-      if (activeIdx !== 0) setActiveIdx(0)
-      return
-    }
-    if (activeIdx >= matchedIndices.length) setActiveIdx(matchedIndices.length - 1)
-  }, [matchedIndices.length, activeIdx])
+  // Clamp activeIdx when match set shrinks. Adjusted during render (converges
+  // in one pass); the values returned below are clamped either way, so this
+  // only keeps the stored index in range for next()/prev().
+  if (matchedIndices.length === 0) {
+    if (activeIdx !== 0) setActiveIdx(0)
+  } else if (activeIdx >= matchedIndices.length) {
+    setActiveIdx(matchedIndices.length - 1)
+  }
 
   const close = useCallback(() => {
     setOpen(false)

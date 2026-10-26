@@ -60,10 +60,14 @@ function DeviceColumn({
   const [layout, setLayout] = useState<DeviceLayout | null>(null)
   const [customW, setCustomW] = useState(String(preset.width))
   const [customH, setCustomH] = useState(String(preset.height))
-  useEffect(() => {
+  // Re-seed the custom inputs when the preset size changes. Adjusted during
+  // render — same trigger as a `[preset.width, preset.height]` effect.
+  const [customSource, setCustomSource] = useState({ w: preset.width, h: preset.height })
+  if (!Object.is(customSource.w, preset.width) || !Object.is(customSource.h, preset.height)) {
+    setCustomSource({ w: preset.width, h: preset.height })
     setCustomW(String(preset.width))
     setCustomH(String(preset.height))
-  }, [preset.width, preset.height])
+  }
   const presets = presetsForSlot(slot)
 
   const applyCustom = () => {
@@ -181,9 +185,13 @@ export function MultiDeviceGrid({
 
   const [flexOverrides, setFlexOverrides] = useState<Record<string, number>>({})
   const slotsKey = enabledSlots.join(',')
-  useEffect(() => {
+  // Drop drag-resized sizes when the set of enabled slots changes. Adjusted
+  // during render — same trigger as a `[slotsKey]` effect.
+  const [flexSlotsKey, setFlexSlotsKey] = useState(slotsKey)
+  if (!Object.is(flexSlotsKey, slotsKey)) {
+    setFlexSlotsKey(slotsKey)
     setFlexOverrides({})
-  }, [slotsKey])
+  }
 
   const getFlexValue = (slot: DeviceSlot) => {
     if (layout === 'vertical') return 1

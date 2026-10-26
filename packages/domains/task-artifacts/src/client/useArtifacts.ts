@@ -130,13 +130,17 @@ export function useArtifacts(
   }, [foldersQuery.data])
 
   // Clear local state immediately when there is no task (the queries are disabled
-  // and won't emit data to drive the effects above).
-  useEffect(() => {
+  // and won't emit data to drive the effects above). Adjusted during render —
+  // same trigger as a `[taskId]` effect, whose mount run was a content no-op
+  // (both lists start empty).
+  const [stateTaskId, setStateTaskId] = useState(taskId)
+  if (!Object.is(stateTaskId, taskId)) {
+    setStateTaskId(taskId)
     if (!taskId) {
       setArtifacts([])
       setFolders([])
     }
-  }, [taskId])
+  }
 
   const isLoading = !!taskId && (artifactsQuery.isPending || foldersQuery.isPending)
 

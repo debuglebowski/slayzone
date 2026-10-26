@@ -169,7 +169,7 @@ export function useTaskTerminals(
           setActiveGroupId((prev) => {
             // Recompute from the updated tabs to see if the group still exists
             // We use functional updater on tabs to peek at current state
-            return prev // Will be corrected in the effect below if needed
+            return prev // Corrected during render below if the group is gone
           })
         }
         return success
@@ -206,14 +206,12 @@ export function useTaskTerminals(
     }
   }, [tabs, taskId, subscribeExit, closeTabInternal])
 
-  // Correct activeGroupId if the active group no longer exists
-  useEffect(() => {
-    const activeGroup = groups.find((g) => g.id === activeGroupId)
-    if (!activeGroup && groups.length > 0) {
-      const mainGroup = groups.find((g) => g.isMain)
-      setActiveGroupId(mainGroup?.id ?? groups[0].id)
-    }
-  }, [groups, activeGroupId])
+  // Correct activeGroupId if the active group no longer exists. Adjusted during
+  // render (converges in one pass) so no frame renders a missing active group.
+  if (groups.length > 0 && !groups.some((g) => g.id === activeGroupId)) {
+    const mainGroup = groups.find((g) => g.isMain)
+    setActiveGroupId(mainGroup?.id ?? groups[0].id)
+  }
 
   // Move a pane to a different group (null = new standalone group)
   const movePane = useCallback(

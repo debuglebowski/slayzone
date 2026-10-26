@@ -12,6 +12,17 @@ interface UseBrowserPickElementParams {
   onElementSnippet?: (snippet: string) => void
 }
 
+/** Run the picker-cancel script in the page, ignoring failures. */
+async function runPickerCancelScript(
+  actions: NonNullable<UseBrowserPickElementParams['activeActions']>
+): Promise<void> {
+  try {
+    await actions.executeJs(DOM_PICKER_CANCEL_SCRIPT)
+  } catch {
+    // ignore cancellation errors
+  }
+}
+
 export function useBrowserPickElement({
   activeActions,
   extensionsManagerOpen,
@@ -27,14 +38,13 @@ export function useBrowserPickElement({
     onElementSnippet?.(snippet)
   })
 
-  const cancelPickElement = useCallback(async () => {
-    if (!activeActions) return
-    try {
-      await activeActions.executeJs(DOM_PICKER_CANCEL_SCRIPT)
-    } catch {
-      // ignore cancellation errors
-    }
-    setIsPickingElement(false)
+  // State changes only after the script round-trip (a `.then`, not a statement
+  // after `await`, so callers in effects are visibly asynchronous).
+  const cancelPickElement = useCallback((): Promise<void> => {
+    if (!activeActions) return Promise.resolve()
+    return runPickerCancelScript(activeActions).then(() => {
+      setIsPickingElement(false)
+    })
   }, [activeActions])
 
   useEffect(() => {

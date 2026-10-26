@@ -39,13 +39,11 @@
   "packages/domains/projects/src/client/ProjectIntegrationConnectionModal.tsx": [
     "ProjectIntegrationConnectionModal"
   ],
-  "packages/domains/projects/src/client/ProjectSettingsDialog.tsx": ["ProjectSettingsDialog"],
   "packages/domains/projects/src/client/TasksGeneralTab.tsx": ["TasksGeneralTab"],
   "packages/domains/projects/src/client/useIntegrationsTab.ts": ["useIntegrationsTab"],
   "packages/domains/projects/src/client/useProjectIntegrationSetupWizard.ts": [
     "useProjectIntegrationSetupWizard"
   ],
-  "packages/domains/projects/src/client/useProviderData.ts": ["useProviderData"],
   "packages/domains/projects/src/client/WorktreesTab.tsx": ["WorktreesTab"],
   "packages/domains/settings/src/client/AppearanceContext.tsx": ["AppearanceProvider"],
   "packages/domains/settings/src/client/CliInstallDialog.tsx": ["CliInstallDialog"],

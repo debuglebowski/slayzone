@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useChatView } from './ChatViewContext'
 import {
   ChevronDown,
@@ -124,9 +124,13 @@ export function _UserAvatar() {
 export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 'thinking' }> }) {
   const [open, setOpen] = useState(false)
   const { collapseSignal } = useChatView()
-  useEffect(() => {
+  // "Collapse all": adjusted during render — same trigger as a
+  // `[collapseSignal]` effect (whose mount run was a no-op: starts closed).
+  const [seenCollapseSignal, setSeenCollapseSignal] = useState(collapseSignal)
+  if (!Object.is(seenCollapseSignal, collapseSignal)) {
+    setSeenCollapseSignal(collapseSignal)
     setOpen(false)
-  }, [collapseSignal])
+  }
   if (!item.text) return null
   return (
     <div className="px-4 pl-[4.25rem] py-0.5">
@@ -160,9 +164,13 @@ export function SystemInit({ item }: { item: Extract<TimelineItem, { kind: 'sess
 export function ResultFooter({ item }: { item: Extract<TimelineItem, { kind: 'result' }> }) {
   const [expanded, setExpanded] = useState(false)
   const { collapseSignal, showMessageMeta } = useChatView()
-  useEffect(() => {
+  // "Collapse all": adjusted during render — same trigger as a
+  // `[collapseSignal]` effect (whose mount run was a no-op: starts collapsed).
+  const [seenCollapseSignal, setSeenCollapseSignal] = useState(collapseSignal)
+  if (!Object.is(seenCollapseSignal, collapseSignal)) {
+    setSeenCollapseSignal(collapseSignal)
     setExpanded(false)
-  }, [collapseSignal])
+  }
   const { copied, copy } = useCopy(item.copyText ?? '')
   if (!showMessageMeta) return null
   return (
@@ -782,17 +790,19 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
     return false
   }, [timeline, invocation.id])
   const [collapsed, setCollapsed] = useState(!isLatestAsk)
-  useEffect(() => {
-    setCollapsed(!isLatestAsk)
-  }, [isLatestAsk])
-  // Skip mount: initial state already honors latest-ask. Only react to
-  // user-triggered "Collapse all" bumps after mount.
-  const initialSignalRef = useRef(collapseSignal)
-  useEffect(() => {
-    if (collapseSignal !== initialSignalRef.current) {
-      setCollapsed(true)
-    }
-  }, [collapseSignal])
+  // Skip mount: initial state already honors latest-ask. Afterwards follow
+  // latest-ask changes, then user-triggered "Collapse all" bumps (the signal
+  // only ever increments, so "changed" = "differs from its mount value").
+  // Adjusted during render, in that order — same triggers as an `[isLatestAsk]`
+  // effect followed by a `[collapseSignal]` effect.
+  const [collapseInputs, setCollapseInputs] = useState({ isLatestAsk, collapseSignal })
+  const latestAskChanged = !Object.is(collapseInputs.isLatestAsk, isLatestAsk)
+  const collapseSignalChanged = !Object.is(collapseInputs.collapseSignal, collapseSignal)
+  if (latestAskChanged || collapseSignalChanged) {
+    setCollapseInputs({ isLatestAsk, collapseSignal })
+    if (latestAskChanged) setCollapsed(!isLatestAsk)
+    if (collapseSignalChanged) setCollapsed(true)
+  }
   // Permission-prompt path: when the CLI was spawned with
   // `--permission-prompt-tool stdio`, the SDK emits a control_request that
   // we surface here. Resolving it with `behavior:'allow' + updatedInput.answers`

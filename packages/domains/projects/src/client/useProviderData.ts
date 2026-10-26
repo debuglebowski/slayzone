@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { ExternalGroup, ExternalScope } from '@slayzone/integrations/shared'
+import { depsChanged } from './deps-changed'
 
 export interface UseProviderDataResult {
   groups: ExternalGroup[]
@@ -58,50 +59,67 @@ export function useProviderData(
   const groups = (connectionId ? groupsQuery.data : undefined) ?? []
   const scopes = connectionId && selectedGroupId ? (scopesQuery.data ?? []) : []
 
+  // The four selection rules below are adjusted during render, each keyed on
+  // the dependencies (and evaluated in the order) of the effect it replaces.
+  // Each starts unseen (`null`) because those effects acted on mount too. The
+  // initial-id options are read when a rule fires, as the effects did.
+
   // Reset selections when the connection clears.
-  useEffect(() => {
+  const [connectionSeen, setConnectionSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(connectionSeen, [connectionId])) {
+    setConnectionSeen([connectionId])
     if (!connectionId) {
       setSelectedGroupId(null)
       setSelectedScopeId(null)
     }
-  }, [connectionId])
+  }
 
   // Auto-select a group once groups load (mirrors the old fetch callback).
-  useEffect(() => {
-    if (!connectionId || !groupsQuery.isSuccess) return
-    const result = groupsQuery.data ?? []
-    setSelectedGroupId((current) => {
-      if (options?.initialGroupId && result.some((g) => g.id === options.initialGroupId)) {
-        return options.initialGroupId
-      }
-      if (!current || !result.some((g) => g.id === current)) {
-        return result[0]?.id ?? null
-      }
-      return current
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, groupsQuery.isSuccess, groupsQuery.data])
+  const groupsSeenDeps = [connectionId, groupsQuery.isSuccess, groupsQuery.data]
+  const [groupsSeen, setGroupsSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(groupsSeen, groupsSeenDeps)) {
+    setGroupsSeen(groupsSeenDeps)
+    if (connectionId && groupsQuery.isSuccess) {
+      const result = groupsQuery.data ?? []
+      const initialGroupId = options?.initialGroupId
+      setSelectedGroupId((current) => {
+        if (initialGroupId && result.some((g) => g.id === initialGroupId)) {
+          return initialGroupId
+        }
+        if (!current || !result.some((g) => g.id === current)) {
+          return result[0]?.id ?? null
+        }
+        return current
+      })
+    }
+  }
 
   // Clear scope selection when group clears (mirrors old effect's early-return).
-  useEffect(() => {
+  const [groupSeen, setGroupSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(groupSeen, [connectionId, selectedGroupId])) {
+    setGroupSeen([connectionId, selectedGroupId])
     if (!connectionId || !selectedGroupId) setSelectedScopeId(null)
-  }, [connectionId, selectedGroupId])
+  }
 
   // Auto-select a scope once scopes load.
-  useEffect(() => {
-    if (!connectionId || !selectedGroupId || !scopesQuery.isSuccess) return
-    const result = scopesQuery.data ?? []
-    setSelectedScopeId((current) => {
-      if (options?.initialScopeId && result.some((s) => s.id === options.initialScopeId)) {
-        return options.initialScopeId
-      }
-      if (!current || !result.some((s) => s.id === current)) {
-        return result[0]?.id ?? null
-      }
-      return current
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, selectedGroupId, scopesQuery.isSuccess, scopesQuery.data])
+  const scopesSeenDeps = [connectionId, selectedGroupId, scopesQuery.isSuccess, scopesQuery.data]
+  const [scopesSeen, setScopesSeen] = useState<readonly unknown[] | null>(null)
+  if (depsChanged(scopesSeen, scopesSeenDeps)) {
+    setScopesSeen(scopesSeenDeps)
+    if (connectionId && selectedGroupId && scopesQuery.isSuccess) {
+      const result = scopesQuery.data ?? []
+      const initialScopeId = options?.initialScopeId
+      setSelectedScopeId((current) => {
+        if (initialScopeId && result.some((s) => s.id === initialScopeId)) {
+          return initialScopeId
+        }
+        if (!current || !result.some((s) => s.id === current)) {
+          return result[0]?.id ?? null
+        }
+        return current
+      })
+    }
+  }
 
   const reload = useCallback(() => {
     void groupsQuery.refetch()

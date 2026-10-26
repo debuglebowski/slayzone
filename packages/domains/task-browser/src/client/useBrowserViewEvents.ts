@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
 
@@ -42,9 +42,13 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
   // Reset to initial state when the view clears. Matches the old effect's
   // `if (!viewId) setState(INITIAL_STATE)` branch exactly — a non-null →
   // non-null viewId change intentionally carries state until new events arrive.
-  useEffect(() => {
+  // Adjusted during render — same trigger as a `[viewId]` effect (whose mount
+  // run was a no-op: state starts as INITIAL_STATE).
+  const [stateViewId, setStateViewId] = useState(viewId)
+  if (!Object.is(stateViewId, viewId)) {
+    setStateViewId(viewId)
     if (!viewId) setState(INITIAL_STATE)
-  }, [viewId])
+  }
 
   const handleEvent = useStableCallback((raw: unknown) => {
     const event = raw as BrowserViewEvent

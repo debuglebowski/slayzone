@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
@@ -96,13 +96,23 @@ export function ProjectIntegrationConnectionModal({
       ? `Edit ${providerLabel(provider)} Connection`
       : `Connect ${providerLabel(provider)}`
 
-  useEffect(() => {
-    if (!open) return
-    setCredential('')
-    setJiraDomain('')
-    setJiraEmail('')
-    setErrorMessage('')
-  }, [open, provider, mode])
+  // Clear the form when the modal (re)opens or its provider/mode changes while
+  // open. Adjusted during render — same trigger as an `[open, provider, mode]`
+  // effect — so a reopened modal never paints the previous credential.
+  const [formKey, setFormKey] = useState({ open, provider, mode })
+  if (
+    !Object.is(formKey.open, open) ||
+    !Object.is(formKey.provider, provider) ||
+    !Object.is(formKey.mode, mode)
+  ) {
+    setFormKey({ open, provider, mode })
+    if (open) {
+      setCredential('')
+      setJiraDomain('')
+      setJiraEmail('')
+      setErrorMessage('')
+    }
+  }
 
   const canSubmit =
     provider === 'jira'
