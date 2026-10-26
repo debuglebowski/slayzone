@@ -106,10 +106,10 @@
     line-height: 20px; font-size: 11px; font-weight: 700; color: #fff; cursor: default;
   }
   .app-electron { color: #58a6ff; } .app-chromium { color: #3fb950; }
-  .app-hub { color: #d29922; } .app-runner { color: #f778ba; } .app-agent { color: #a371f7; }
+  .app-hub { color: #d29922; } .app-computer { color: #f778ba; } .app-agent { color: #a371f7; }
   .app-cli { color: #39c5cf; }
   .pill.dot.app-electron { background: #2f6fb3; } .pill.dot.app-chromium { background: #2c7a3d; }
-  .pill.dot.app-hub { background: #9c6f18; } .pill.dot.app-runner { background: #b8497f; }
+  .pill.dot.app-hub { background: #9c6f18; } .pill.dot.app-computer { background: #b8497f; }
   .pill.dot.app-agent { background: #6f42c1; } .pill.dot.app-cli { background: #1f7c85; }
   .rs { font-weight: 700; font-size: 12px; white-space: nowrap; }
   .rs-R { color: var(--r); } .rs-S { color: var(--s); } .rs-RS { color: var(--rs); }
@@ -195,7 +195,7 @@
       <span class="ehead">Required</span>
       <div class="erow">
         <span class="eitem"><b>🔴 required</b><i>absent ⇒ it does not work (may still be injected at spawn)</i></span>
-        <span class="eitem"><b>🟡 conditional</b><i>only in a stated case — remote mode, a runner's first contact</i></span>
+        <span class="eitem"><b>🟡 conditional</b><i>only in a stated case — remote mode, a computer's first contact</i></span>
         <span class="eitem"><b>🟢 optional</b><i>a real fallback exists; set it to override</i></span>
         <span class="eitem"><b>⚙️ auto</b><i>SlayZone derives or mints it</i></span>
         <span class="eitem"><b>❓ unknown</b><i>not yet classified — a visible gap, never a guess</i></span>
@@ -206,7 +206,7 @@
       <span class="ehead">Used by</span>
       <div class="erow">
         <span class="eitem"><b><span class="pill dot app-hub">H</span> Hub</b><i>hosts the domain-server code; <b>binds</b> its own address</i></span>
-        <span class="eitem"><b><span class="pill dot app-runner">R</span> Runner</b><i><b>dials</b> that same address — one var, opposite roles</i></span>
+        <span class="eitem"><b><span class="pill dot app-computer">R</span> Computer</b><i><b>dials</b> that same address — one var, opposite roles</i></span>
         <span class="eitem"><b><span class="pill dot app-agent">A</span> Agent</b><i>the agent process + its <code>notify.sh</code> hooks; hook wiring only</i></span>
         <span class="eitem"><b><span class="pill dot app-cli">CLI</span> CLI</b><i>the <code>slay</code> binary — a <em>sibling</em> reader in the same PTY</i></span>
       </div>
@@ -256,7 +256,7 @@
       <div class="chiprow">
         <div class="chips">
           <span class="chip active" data-val="Hub" title="Hub">H</span>
-          <span class="chip active" data-val="Runner" title="Runner">R</span>
+          <span class="chip active" data-val="Computer" title="Computer">R</span>
           <span class="chip active" data-val="Agent" title="Agent">A</span>
           <span class="chip active" data-val="CLI" title="CLI">CLI</span>
         </div>
@@ -320,7 +320,7 @@
 const DATA = [
   // ---- Electron ----
   ["SLAYZONE_ROOT","Electron","R+S","State anchor for the app's own paths (→ <ROOT>/storage)","~/.slayzone",""],
-  ["SLAYZONE_HUB_ADDRESS","Electron","S","Mints the sidecar's bind authority (127.0.0.1:<free port>) + the local runner's dial authority","127.0.0.1:OS-assign",""],
+  ["SLAYZONE_HUB_ADDRESS","Electron","S","Mints the sidecar's bind authority (127.0.0.1:<free port>) + the local computer's dial authority","127.0.0.1:OS-assign",""],
   ["SLAYZONE_RELEASE_CHANNEL","Electron","R+S","Release channel (dev/beta/stable) for hook-source attribution in Diagnostics","derived from build",""],
   ["SLAYZONE_DEV","Electron","S","Tells the sidecar dev-vs-packaged (it has no app.isPackaged) → DB filename","set when unpackaged",""],
   ["SLAYZONE_DEBUG_BOOT","Electron","R","Boot-timing logs","off","dev"],
@@ -328,7 +328,7 @@ const DATA = [
   ["SLAYZONE_SIDECAR_HOT_RESTART","Electron","R","Relaunch sidecar on build change","off","dev"],
   ["SLAYZONE_USER_DATA_DIR","Electron","R","Isolate Electron profile; also the read-back mirror of SLAYZONE_ROOT (specs recover the per-worker anchor from it)","—","test"],
   ["SLAYZONE_BOOT_LOG_PATH","Electron","R","Early-boot log-file sink","—","test"],
-  ["SLAYZONE_E2E_ALLOW_COMPUTER","Electron","R","Opt-in: actually spawn local runner under Playwright","off","test"],
+  ["SLAYZONE_E2E_ALLOW_COMPUTER","Electron","R","Opt-in: actually spawn local computer under Playwright","off","test"],
   ["SLAYZONE_E2E_INSTALL_HOOKS","Electron","R","Force hook install, skip binary/version probes","off","test"],
   ["SLAYZONE_CLAUDE_SETTINGS_PATH","Electron","R","Override Claude settings.json path","~/.claude/settings.json","dev"],
   ["SLAYZONE_GEMINI_SETTINGS_PATH","Electron","R","Override Gemini settings path","~/.gemini/settings.json","dev"],
@@ -341,10 +341,10 @@ const DATA = [
   ["POSTHOG_HOST","Electron","R","Analytics ingest host","eu.i.posthog.com","build"],
   ["POSTHOG_DISABLED","Electron","R","Blank the key → disable analytics","off","build"],
   ["SLAYZONE_DESKTOP_BRIDGE_ADDRESS","Electron","S","Advertises the desktop bridge authority (one loopback listener: WS /cap + REST /api/*) to the sidecar","127.0.0.1:OS-assign",""],
-  ["SLAYZONE_SUPERVISED","Electron","S","Flags the sidecar + local runner as host-owned (skip cwd-seed/prompts)","1",""],
-  ["SLAYZONE_HUB_JOIN_TOKEN","Electron","S","Auto-enrolls the local runner (embeds hub authority + cert pin)","freshly minted",""],
+  ["SLAYZONE_SUPERVISED","Electron","S","Flags the sidecar + local computer as host-owned (skip cwd-seed/prompts)","1",""],
+  ["SLAYZONE_HUB_JOIN_TOKEN","Electron","S","Auto-enrolls the local computer (embeds hub authority + cert pin)","freshly minted",""],
   ["ELECTRON_RENDERER_URL","Electron","R","Dev renderer URL vs packaged loadFile","—",""],
-  ["ELECTRON_RUN_AS_NODE","Electron","S","Launch mechanism: run Electron bin as plain Node for the sidecar + runner","1",""],
+  ["ELECTRON_RUN_AS_NODE","Electron","S","Launch mechanism: run Electron bin as plain Node for the sidecar + computer","1",""],
   ["NODE_PATH","Electron","S","Launch mechanism: unpacked node_modules for the sidecar (packaged only)","—",""],
   ["NODE_ENV","Electron","R","test / development behavior toggles","—",""],
   ["PLAYWRIGHT","Electron","R","Master under-Playwright flag","—","test"],
@@ -379,7 +379,7 @@ const DATA = [
   ["SLAYZONE_HUB_ADDRESS","Hub","R","The address it BINDS — authority only, host[:port]. Bare host = OS-assigned port. One listener (/trpc + /computers, demuxed by path)","127.0.0.1 + OS-assign",""],
   ["SLAYZONE_MODE","Hub","R","Single transport lever: local = http/ws + loopback-only bind (fails loud on a wider bind), remote = https/wss + client auth","local",""],
   ["SLAYZONE_HUB_PUBLIC_ADDRESS","Hub","R","External authority baked into join tokens + remote agents' hub base; REQUIRED in remote mode (boot throws without it)","loopback:<bound port>",""],
-  ["SLAYZONE_HUB_AUTH_SECRET","Hub","R","HMAC signing key for ALL hub-auth (better-auth session/cookie signer + runner enroll/api-key creds); standalone generates & persists 256-bit (0600, config.json key stays `runnerTransportSecret`)","gen / dev const (supervised)",""],
+  ["SLAYZONE_HUB_AUTH_SECRET","Hub","R","HMAC signing key for ALL hub-auth (better-auth session/cookie signer + computer enroll/api-key creds); standalone generates & persists 256-bit (0600, config.json key stays `computerTransportSecret`)","gen / dev const (supervised)",""],
   ["SLAYZONE_DESKTOP_BRIDGE_ADDRESS","Hub","R","Supervised-only desktop bridge authority; ws://…/cap + http://… derive unconditionally (always loopback). Standalone → null/501","none (standalone → null)",""],
   ["SLAYZONE_NONINTERACTIVE","Hub","R","Disable first-run interactive prompt (public address)","prompt on TTY",""],
   ["NODE_ENV","Hub","R","test / development toggles (also permits the plaintext-credential fallback)","—",""],
@@ -390,7 +390,7 @@ const DATA = [
   // opaque ctx blob. notify.sh never reads the var — it only forwards the blob.
   ["SLAYZONE_RELEASE_CHANNEL","Hub","R","Stamps which release channel a hook came from into the ctx blob at spawn (attribution only, no control flow)","unknown",""],
   // The anchor's own home fallback (getSlayzoneHomeDir when SLAYZONE_ROOT is
-  // unset) — the same dependency the Runner rows below record. NOT listed:
+  // unset) — the same dependency the Computer rows below record. NOT listed:
   // USER/USERNAME, which pty-manager only READS to re-set verbatim in the child
   // PTY (pure pass-through, so not an owner per the header rule).
   ["HOME","Hub","R","Home fallback for anchor","OS home",""],
@@ -411,26 +411,26 @@ const DATA = [
   ["SHELL","Hub","R","The shell every PTY/process spawn uses (resolveUserShell: SHELL → userInfo().shell → platform default) and the one probed for the enriched PATH","/bin/zsh (macOS)",""],
   ["COMSPEC","Hub","R","Windows-only last-resort shell when SHELL and userInfo() both fail","cmd.exe",""],
 
-  // ---- Runner ----
-  ["SLAYZONE_HUB_ADDRESS","Runner","R","The address it DIALS — authority only; ws(s)://<addr>/computers is composed from it + MODE. Highest precedence over config.json/join token","from config.json / join token",""],
-  ["SLAYZONE_HUB_JOIN_TOKEN","Runner","R","Enrollment token (embeds hub url + cert pin)","none post-enroll",""],
-  ["SLAYZONE_MODE","Runner","R","remote → force wss:// (reject plaintext ws://)","local",""],
-  ["SLAYZONE_SUPERVISED","Runner","R","1 = host-spawned: skip cwd-seed, config.json prompts; name → local-runner, path-jail → [homedir()]","unset",""],
-  ["SLAYZONE_ROOT","Runner","R+S","Anchor; standalone seeds to cwd(). Creds at <ROOT>/computers, config at <ROOT>/config.json","cwd()",""],
-  ["SLAYZONE_NONINTERACTIVE","Runner","R","Disable first-run setup prompt","prompt on TTY",""],
-  ["SLAYZONE_AGENT_HOOK_URL","Runner","S","Overrides the hub's value with the runner's OWN loopback relay at every agent spawn","runner loopback",""],
-  ["HOME","Runner","R","Home fallback for anchor","OS home",""],
-  ["USERPROFILE","Runner","R","Windows home fallback for anchor","OS home",""],
-  ["WORKTREE_PATH","Runner","S","→ .slay/worktree-setup.sh child: worktree dir","—",""],
-  ["REPO_PATH","Runner","S","→ .slay/worktree-setup.sh child: repo dir","—",""],
-  ["SOURCE_BRANCH","Runner","S","→ .slay/worktree-setup.sh child: source branch","—",""],
+  // ---- Computer ----
+  ["SLAYZONE_HUB_ADDRESS","Computer","R","The address it DIALS — authority only; ws(s)://<addr>/computers is composed from it + MODE. Highest precedence over config.json/join token","from config.json / join token",""],
+  ["SLAYZONE_HUB_JOIN_TOKEN","Computer","R","Enrollment token (embeds hub url + cert pin)","none post-enroll",""],
+  ["SLAYZONE_MODE","Computer","R","remote → force wss:// (reject plaintext ws://)","local",""],
+  ["SLAYZONE_SUPERVISED","Computer","R","1 = host-spawned: skip cwd-seed, config.json prompts; name → local-computer, path-jail → [homedir()]","unset",""],
+  ["SLAYZONE_ROOT","Computer","R+S","Anchor; standalone seeds to cwd(). Creds at <ROOT>/computers, config at <ROOT>/config.json","cwd()",""],
+  ["SLAYZONE_NONINTERACTIVE","Computer","R","Disable first-run setup prompt","prompt on TTY",""],
+  ["SLAYZONE_AGENT_HOOK_URL","Computer","S","Overrides the hub's value with the computer's OWN loopback relay at every agent spawn","computer loopback",""],
+  ["HOME","Computer","R","Home fallback for anchor","OS home",""],
+  ["USERPROFILE","Computer","R","Windows home fallback for anchor","OS home",""],
+  ["WORKTREE_PATH","Computer","S","→ .slay/worktree-setup.sh child: worktree dir","—",""],
+  ["REPO_PATH","Computer","S","→ .slay/worktree-setup.sh child: repo dir","—",""],
+  ["SOURCE_BRANCH","Computer","S","→ .slay/worktree-setup.sh child: source branch","—",""],
 
   // ---- Agent = the agent process itself + the `notify.sh` hook script it runs
   //      (shared/hooks/src/notify.sh). Injected into the agent PTY by
-  //      Electron/Hub/Runner; the agent never reads them back. Everything here is
+  //      Electron/Hub/Computer; the agent never reads them back. Everything here is
   //      re-added by the per-spawn overlay AFTER sanitizeSpawnEnv strips the
   //      inherited copy, so task B never sees task A's. ----
-  ["SLAYZONE_AGENT_HOOK_URL","Agent","R","URL notify.sh POSTs lifecycle hooks to; local = app loopback, remote = runner's relay","—",""],
+  ["SLAYZONE_AGENT_HOOK_URL","Agent","R","URL notify.sh POSTs lifecycle hooks to; local = app loopback, remote = computer's relay","—",""],
   ["SLAYZONE_AGENT_ID","Agent","R","Which agent fired the hook (claude-code/codex/gemini/…); notify.sh exits 0 without it","—",""],
   ["SLAYZONE_AGENT_HOOK_CONTEXT","Agent","R","Opaque identity JSON blob (taskId/session/project/agentId/releaseChannel) notify.sh forwards verbatim as `ctx`. v4 name; the app writes ONLY this one","—",""],
   ["SLAYZONE_HOOK_CONTEXT","Agent","R","RETIRED pre-v4 name of the above, still read by notify.sh as `${NEW:-$OLD}` — one shared script serves every release channel, so an older app must keep feeding it. Unmanifested on purpose (stripped; the old-name value rides the old app's own overlay)","—",""],
@@ -448,10 +448,10 @@ const DATA = [
   ["SLAYZONE_PROJECT_ID","CLI","R","Default project for project-scoped commands","—",""],
   ["SLAYZONE_AGENT_ID","CLI","R","Tags CLI-authored writes with the agent that made them (author attribution)","—",""],
   ["SLAYZONE_HUB_ADDRESS","CLI","R","Hub authority to dial instead of the local app — authority only, http(s) from MODE; invalid = exit 1. NOT inherited (stripped at spawn), so in a task PTY the CLI reads settings.server_port instead","— (DB is the source)",""],
-  ["SLAYZONE_HUB_TOKEN","CLI","R","Bearer sent on every hub request; wins over hub.json's token (set-but-empty = deliberately no token). Now actually ENFORCED — a remote hub verifies it on /trpc + /api/* + /mcp alike. Never injected into a PTY (the runner deletes it)","hub.json token",""],
+  ["SLAYZONE_HUB_TOKEN","CLI","R","Bearer sent on every hub request; wins over hub.json's token (set-but-empty = deliberately no token). Now actually ENFORCED — a remote hub verifies it on /trpc + /api/* + /mcp alike. Never injected into a PTY (the computer deletes it)","hub.json token",""],
   ["SLAYZONE_MODE","CLI","R","Derives the hub scheme for HUB_ADDRESS (local → http, remote → https)","local",""],
   ["XDG_CONFIG_HOME","CLI","R","Linux legacy DB fallback (<config>/slayzone) when <ROOT>/storage does not exist yet","~/.config",""],
-  // Same anchor fallback the Hub/Runner rows record: the CLI's DB path runs
+  // Same anchor fallback the Hub/Computer rows record: the CLI's DB path runs
   // through getStorageDir → getSlayzoneHomeDir, which falls back to $HOME when
   // SLAYZONE_ROOT is unset. Listed for all three, since all three derive it.
   ["HOME","CLI","R","Home fallback for anchor","OS home",""],
@@ -490,27 +490,27 @@ const SCOPES = {
 //   required    — absent ⇒ the thing it wires does not work (throws, exits, or
 //                 silently no-ops). May still be injected FOR you at spawn.
 //   conditional — required only under a stated condition (remote mode, a
-//                 runner's first contact, a pre-v4 app).
+//                 computer's first contact, a pre-v4 app).
 //   optional    — real documented fallback; set it only to override.
 //   auto        — SlayZone derives/mints it; hand-setting is not the normal path.
 // A name missing here renders ❓ on purpose: a visible gap beats a wrong claim.
 const REQUIRED = {
   // --- required: absent ⇒ broken ---
   // notify.sh exits 0 (silently, no hook POSTed) when either is empty.
-  SLAYZONE_AGENT_HOOK_URL: ['required','notify.sh exits 0 without it — no lifecycle hook is ever POSTed. Injected at spawn by the hub (local) or the runner (its own loopback relay)'],
+  SLAYZONE_AGENT_HOOK_URL: ['required','notify.sh exits 0 without it — no lifecycle hook is ever POSTed. Injected at spawn by the hub (local) or the computer (its own loopback relay)'],
   SLAYZONE_AGENT_ID: ['required','Agent: notify.sh exits 0 without it. CLI: only author attribution on writes, harmless if absent'],
   SLAYZONE_AGENT_HOOK_CONTEXT: ['required','Empty ⇒ notify.sh forwards ctx `{}` ⇒ the hub resolves no task ⇒ no spinner, no unread dot. Injected per spawn'],
 
   // --- conditional: required only under a stated condition ---
   SLAYZONE_HUB_PUBLIC_ADDRESS: ['conditional','Boot THROWS when SLAYZONE_MODE=remote and it is unset (hub/src/server.ts). In local mode it defaults to the bound loopback authority'],
-  SLAYZONE_HUB_ADDRESS: ['conditional','Runner: required for FIRST contact — absent a <ROOT>/config.json or a join token, config resolution throws. Hub: optional (binds loopback + an OS-assigned port). CLI: optional (falls back to the app’s settings.server_port)'],
-  SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a runner’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/computers'],
+  SLAYZONE_HUB_ADDRESS: ['conditional','Computer: required for FIRST contact — absent a <ROOT>/config.json or a join token, config resolution throws. Hub: optional (binds loopback + an OS-assigned port). CLI: optional (falls back to the app’s settings.server_port)'],
+  SLAYZONE_HUB_JOIN_TOKEN: ['conditional','Required for a computer’s first contact only (it carries the hub authority + cert pin); unused once enrolled creds exist under <ROOT>/computers'],
   SLAYZONE_HUB_TOKEN: ['conditional','Required when dialing a hub that enforces auth (verified on /trpc + /api/* + /mcp); otherwise hub.json’s token is used. Set-but-empty = deliberately no token'],
   SLAYZONE_TASK_ID: ['conditional','Agent: the OpenCode plugin no-ops without it, so no lifecycle event reaches notify.sh at all. CLI: errors if it is unset and no id is passed'],
   SLAYZONE_HOOK_CONTEXT: ['conditional','Only needed from a PRE-v4 app: notify.sh reads it as ${NEW:-$OLD}, so an older channel’s app feeding a newer shared script still resolves a task'],
 
   // --- optional: documented fallback ---
-  SLAYZONE_ROOT: ['optional','Falls back to $HOME/.slayzone; a standalone hub/runner seeds it to cwd(). Set it to relocate ALL on-disk state'],
+  SLAYZONE_ROOT: ['optional','Falls back to $HOME/.slayzone; a standalone hub/computer seeds it to cwd(). Set it to relocate ALL on-disk state'],
   SLAYZONE_MODE: ['optional','Defaults to local (http/ws + loopback-only bind). Set remote to force https/wss + client auth'],
   SLAYZONE_HUB_AUTH_SECRET: ['optional','A standalone hub GENERATES and persists a 256-bit secret (0600) when unset; supervised uses a dev constant. Set it only to pin a known key across reinstalls'],
   SLAYZONE_NONINTERACTIVE: ['optional','Defaults to prompting on a TTY. Set it in CI/headless so first-run setup does not block'],
@@ -528,7 +528,7 @@ const REQUIRED = {
   NODE_ENV: ['optional','Test/development behavior toggles only'],
 
   // --- auto: SlayZone derives or mints it ---
-  SLAYZONE_SUPERVISED: ['auto','The Electron host sets it on the children it owns; a standalone hub/runner leaves it unset. Setting it by hand only disables standalone setup (cwd seed, prompts, secret gen)'],
+  SLAYZONE_SUPERVISED: ['auto','The Electron host sets it on the children it owns; a standalone hub/computer leaves it unset. Setting it by hand only disables standalone setup (cwd seed, prompts, secret gen)'],
   SLAYZONE_DEV: ['auto','The host hands it to the sidecar (which has no app.isPackaged); `slay --dev` is the same thing for the CLI. It only selects the DB filename'],
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: ['auto','The Electron host mints the loopback authority and advertises it; a standalone hub has no bridge (→ null / 501)'],
   SLAYZONE_RELEASE_CHANNEL: ['auto','Derived from the build. Attribution only — it is packed into the hook ctx blob and drives no control flow'],
@@ -549,10 +549,10 @@ const REQ_LABEL = {
 const reqPill = v =>
   '<span class="req" title="'+esc(REQ_LABEL[v.req]+(v.reqWhy ? ' — '+v.reqWhy : ''))+'">'+REQ_EMOJI[v.req]+'</span>';
 
-const APP_CLASS = { Electron:"app-electron", Chromium:"app-chromium", Hub:"app-hub", Runner:"app-runner", Agent:"app-agent", CLI:"app-cli" };
+const APP_CLASS = { Electron:"app-electron", Chromium:"app-chromium", Hub:"app-hub", Computer:"app-computer", Agent:"app-agent", CLI:"app-cli" };
 // Single letters where unambiguous; "CLI" spelled out because C is taken by
 // Chromium and A by Agent (.pill.dot is a capsule, so a 3-char label fits).
-const APP_LETTER = { Electron:"E", Chromium:"C", Hub:"H", Runner:"R", Agent:"A", CLI:"CLI" };
+const APP_LETTER = { Electron:"E", Chromium:"C", Hub:"H", Computer:"R", Agent:"A", CLI:"CLI" };
 const rowsEl = document.getElementById('rows');
 const headEl = document.getElementById('head');
 const countEl = document.getElementById('count');
@@ -588,11 +588,11 @@ const visibleCols = new Set(
 );
 
 // Only the processes you configure by injecting env are relevant here — the four
-// things you hand an environment to: the hub, a runner, an agent PTY, and the
+// things you hand an environment to: the hub, a computer, an agent PTY, and the
 // `slay` CLI inside it. Desktop clients (Electron/Chromium) compute defaults you
 // can override, but you don't "send them" a variable — so they alone are excluded
 // from the "Used by" column, and any var used ONLY by them is dropped entirely.
-const APP_ORDER = ['Hub','Runner','Agent','CLI'];
+const APP_ORDER = ['Hub','Computer','Agent','CLI'];
 // One entry per distinct variable name. Reducing DATA (which is per-var-per-app):
 //   users = the APP_ORDER processes that READ it as input (R/S includes 'R')
 //   purpose/def = merged across rows; tag = first non-empty.
@@ -603,7 +603,7 @@ const VARS = (() => {
     const e = byVar.get(variable);
     if(rs.includes('R') && APP_ORDER.includes(app)) e.users.add(app);
     // Keep the app with each purpose: one var legitimately means different
-    // things per app (the hub BINDS SLAYZONE_HUB_ADDRESS, the runner DIALS it),
+    // things per app (the hub BINDS SLAYZONE_HUB_ADDRESS, the computer DIALS it),
     // so a merged cell must say which app each sentence belongs to.
     if(purpose) e.purposes.push([app, purpose]);
     if(def) e.defs.push(def);

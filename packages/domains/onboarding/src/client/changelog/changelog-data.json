@@ -12,7 +12,7 @@
       {
         "category": "feature",
         "title": "Cloud computers",
-        "description": "Run agents on a remote machine: install a computer as an OS service with `slay runner`, pick it per task or set a project default."
+        "description": "Run agents on a remote machine: install a computer as an OS service with `slay computer create`, pick it per task or set a project default."
       },
       {
         "category": "feature",

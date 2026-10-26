@@ -41,7 +41,7 @@
 #
 # Required env (injected at PTY/chat spawn by buildMcpEnv):
 #   SLAYZONE_AGENT_HOOK_URL  - target URL, e.g. http://127.0.0.1:PORT/api/agent-hook
-#                              (a remote runner overlays its OWN loopback URL)
+#                              (a remote computer overlays its OWN loopback URL)
 #   SLAYZONE_AGENT_ID        - claude-code | codex | gemini | antigravity | opencode
 # Optional:
 #   SLAYZONE_AGENT_HOOK_CONTEXT - opaque identity blob (see above); sent as `ctx`
@@ -134,7 +134,7 @@ ENVELOPE="{\"ctx\":$CTX,\"raw\":$RAW_FIELD,\"arg\":$ARG_FIELD,\"agentId\":$AGENT
 # curl is the primary path — present on macOS, most Linux, and bundled with
 # Git for Windows (whose bash runs this script). wget is a fallback for minimal
 # environments; if neither exists the POST is skipped silently. NO auth header:
-# the target is always loopback (local sidecar, or the runner's own loopback),
+# the target is always loopback (local sidecar, or the computer's own loopback),
 # so no per-agent bearer is ever attached.
 if command -v curl >/dev/null 2>&1; then
   curl -s \
