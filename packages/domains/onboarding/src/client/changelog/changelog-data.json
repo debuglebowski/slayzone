@@ -1,5 +1,132 @@
 [
   {
+    "version": "0.36.0",
+    "date": "2026-10-26",
+    "tagline": "Hubs, computers, speed",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Hubs and computers",
+        "description": "Tasks and data now live on a hub, and agents run on computers connected to it — your own machine works out of the box with zero setup."
+      },
+      {
+        "category": "feature",
+        "title": "Cloud computers",
+        "description": "Run agents on a remote machine: install a computer as an OS service with `slay runner`, pick it per task or set a project default."
+      },
+      {
+        "category": "feature",
+        "title": "Multiple hubs at once",
+        "description": "Connect to several hubs side by side, add one live without restarting, and create tasks on any hub's projects."
+      },
+      {
+        "category": "feature",
+        "title": "Team hubs with sign-in",
+        "description": "Self-host a hub for a team with Entra ID single sign-on, admin and user roles, per-user ownership, join tokens and a browser-based web shell."
+      },
+      {
+        "category": "feature",
+        "title": "Warm agent pool",
+        "description": "Agents are pre-started in the background so new tasks open with an agent ready to type into almost instantly."
+      },
+      {
+        "category": "feature",
+        "title": "Session history",
+        "description": "A session-history sidebar lets you browse, switch between and delete past agent sessions for a task."
+      },
+      {
+        "category": "feature",
+        "title": "Prompt history sidebar",
+        "description": "See every message you've sent the agent in a sidebar, toggled from the terminal sidebar."
+      },
+      {
+        "category": "feature",
+        "title": "Agent startup mode",
+        "description": "Choose whether agents start manually, automatically, or instantly when a task opens."
+      },
+      {
+        "category": "feature",
+        "title": "Task commands in Cmd+K",
+        "description": "Every task action is available from the command palette, with smarter match ranking and sub-page items nested under their command."
+      },
+      {
+        "category": "feature",
+        "title": "Reopen closed terminals",
+        "description": "⌘⇧T reopens recently closed temporary terminals."
+      },
+      {
+        "category": "feature",
+        "title": "Star projects",
+        "description": "Starred projects stay visible in the sidebar instead of collapsing into the inactive group."
+      },
+      {
+        "category": "feature",
+        "title": "slay update",
+        "description": "Update a global npm, pnpm or bun install of the slay CLI with one command."
+      },
+      {
+        "category": "improvement",
+        "title": "Much faster tab switching",
+        "description": "Switching tabs costs the same no matter how many are open, hidden terminals stop painting, and typing no longer re-renders the whole app."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster startup",
+        "description": "Terminals boot staggered with an agent start queue, idle tabs hydrate lazily and dialogs preload in the background."
+      },
+      {
+        "category": "improvement",
+        "title": "Artifact viewer controls",
+        "description": "Each artifact remembers its own zoom level, and HTML previews get a light/dark theme toggle."
+      },
+      {
+        "category": "improvement",
+        "title": "Clearer terminal tabs",
+        "description": "Tabs show a starting spinner while an agent boots, and a dead tab tells you why it ended."
+      },
+      {
+        "category": "improvement",
+        "title": "Undo from the terminal",
+        "description": "⌘Z and ⌘⇧Z undo and redo task changes even while a terminal has focus."
+      },
+      {
+        "category": "improvement",
+        "title": "Sidebar polish",
+        "description": "Tree view gets a tags toggle and keeps project expansion, and project row icons have tooltips."
+      },
+      {
+        "category": "fix",
+        "title": "Agents survive restarts and sleep",
+        "description": "Restarting no longer drops agents to the Start gate, closing the laptop lid no longer kills them, and fresh sessions are never reported as expired."
+      },
+      {
+        "category": "fix",
+        "title": "Reliable terminals",
+        "description": "Fixed scrambled glyphs across panes, terminals wider than their panel, stuck spinners, and agents wedged by replayed output."
+      },
+      {
+        "category": "fix",
+        "title": "Tasks stay in their status",
+        "description": "Background tabs no longer drop tasks to Inbox, and task tabs no longer freeze on the loading skeleton."
+      },
+      {
+        "category": "fix",
+        "title": "Dev servers clean up",
+        "description": "Processes and their children are reliably reaped after crashes, so orphaned dev servers no longer hold ports."
+      },
+      {
+        "category": "fix",
+        "title": "Browser extensions work",
+        "description": "Extensions in the browser panel get tab access and storage, and load only once."
+      },
+      {
+        "category": "fix",
+        "title": "Worktree fixes",
+        "description": "Removing a worktree keeps its branch unless you ask, and relative symlinks survive copying ignored files."
+      }
+    ]
+  },
+  {
     "version": "0.35.0",
     "date": "2026-06-12",
     "tagline": "Focus, fixes, foundations",
