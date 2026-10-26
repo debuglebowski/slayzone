@@ -70,6 +70,7 @@ export {
   useVisibleInterval,
   type UseVisibleIntervalOptions
 } from './use-document-visibility'
+export { useNow, type UseNowOptions } from './use-now'
 
 // Components
 export * from './alert-dialog'

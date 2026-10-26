@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Lock } from 'lucide-react'
 import { Button, useVisibleInterval } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
@@ -29,19 +29,24 @@ export function ProjectLockScreen({
   schedule,
   onUnlocked
 }: ProjectLockScreenProps) {
-  const hasDuration = lockedUntil && new Date(lockedUntil).getTime() > Date.now()
+  // Clock is sampled at mount and by the countdown tick — never during render.
   const [remaining, setRemaining] = useState(() =>
-    hasDuration ? new Date(lockedUntil).getTime() - Date.now() : 0
+    lockedUntil ? new Date(lockedUntil).getTime() - Date.now() : 0
   )
+  const hasDuration = Boolean(lockedUntil) && remaining > 0
 
-  // Duration countdown (1s interval)
+  // Duration countdown (1s interval); unlocks on the tick the lock expires.
   useVisibleInterval(
     () => {
       const r = new Date(lockedUntil ?? 0).getTime() - Date.now()
       setRemaining(r)
+      if (r <= 0) {
+        overrideDurationLock(project.id)
+        onUnlocked(project)
+      }
     },
     1000,
-    { enabled: Boolean(hasDuration) && remaining > 0 }
+    { enabled: hasDuration }
   )
 
   // Schedule recheck (60s interval)
@@ -58,11 +63,6 @@ export function ProjectLockScreen({
     else if (schedule) overrideScheduleLock(project.id)
     onUnlocked(project)
   }, [project, hasDuration, schedule, onUnlocked])
-
-  // Auto-unlock when duration timer expires
-  useEffect(() => {
-    if (hasDuration && remaining <= 0) handleUnlockEarly()
-  }, [remaining, hasDuration, handleUnlockEarly])
 
   return (
     <div className="flex-1 flex items-center justify-center">

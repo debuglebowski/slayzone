@@ -50,7 +50,7 @@ export default defineConfig(
       'react-hooks/refs': 'warn',
       // Cleared to zero → error, so it can't regrow under the shared warning cap.
       'react-hooks/immutability': 'error',
-      'react-hooks/purity': 'warn',
+      'react-hooks/purity': 'error',
       'react-hooks/preserve-manual-memoization': 'warn',
       'react-hooks/static-components': 'warn'
     }

@@ -6,7 +6,7 @@ import {
   IconButton,
   getTerminalStateStyle,
   useStablePoll,
-  useVisibleInterval,
+  useNow,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -87,6 +87,90 @@ export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonPro
   )
 }
 
+function formatDuration(createdAt: number, now: number): string {
+  const s = Math.floor((now - createdAt) / 1000)
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+}
+
+function formatMemory(rss: number): string {
+  return rss >= 1024 ? `${(rss / 1024).toFixed(0)} MB` : `${rss} KB`
+}
+
+/**
+ * The dialog's session rows. Lives inside DialogContent, which unmounts on close,
+ * so the 1s duration clock is fresh on every open and only ticks while visible.
+ */
+function TerminalSessionList({
+  ptys,
+  stats,
+  getTaskName,
+  onSelect,
+  onTerminate
+}: {
+  ptys: PtyInfo[]
+  stats: Record<string, { cpu: number; rss: number }>
+  getTaskName: (sessionId: string) => string
+  onSelect: (sessionId: string) => void
+  onTerminate: (sessionId: string) => void
+}) {
+  const now = useNow()
+  return (
+    <>
+      {ptys.map((pty) => (
+        <div
+          key={pty.sessionId}
+          className="flex items-center justify-between p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
+          onClick={() => onSelect(pty.sessionId)}
+        >
+          <div className="flex-1 min-w-0 mr-2">
+            <p className="text-sm font-medium truncate">{getTaskName(pty.sessionId)}</p>
+            <div className="flex items-center gap-1 mt-2 flex-wrap">
+              {(() => {
+                const style = getTerminalStateStyle(pty.state)
+                return (
+                  style && (
+                    <span
+                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${style.textColor} bg-current/10 w-16 text-center`}
+                    >
+                      {style.label}
+                    </span>
+                  )
+                )
+              })()}
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-16 text-center">
+                {formatDuration(pty.createdAt, now)}
+              </span>
+              {stats[pty.sessionId] && (
+                <>
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-14 text-center">
+                    {stats[pty.sessionId].cpu.toFixed(1)}%
+                  </span>
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-14 text-center">
+                    {formatMemory(stats[pty.sessionId].rss)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          <IconButton
+            aria-label="Terminate terminal"
+            variant="ghost"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation()
+              onTerminate(pty.sessionId)
+            }}
+          >
+            <X className="size-4" />
+          </IconButton>
+        </div>
+      ))}
+    </>
+  )
+}
+
 /** Shared dialog — render once at app root. Controlled via useDialogStore.terminalsOpen. */
 export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialogProps) {
   const trpc = useTRPC()
@@ -96,7 +180,6 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
 
   const [ptys, setPtys] = useState<PtyInfo[]>([])
   const [stats, setStats] = useState<Record<string, { cpu: number; rss: number }>>({})
-  const [, tick] = useState(0)
   const lastHashRef = useRef<string>('')
 
   const killMutation = useMutation(trpc.pty.kill.mutationOptions())
@@ -112,8 +195,6 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
   }, [trpcClient])
 
   useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
-
-  useVisibleInterval(() => tick((t) => t + 1), 1000, { enabled: open })
 
   // Refresh on any PTY state transition (server fan-out is global).
   useSubscription(
@@ -146,16 +227,6 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
     return task?.title || 'Unknown Task'
   }
 
-  const formatDuration = (createdAt: number): string => {
-    const s = Math.floor((Date.now() - createdAt) / 1000)
-    if (s < 60) return `${s}s`
-    if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
-    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-  }
-
-  const formatMemory = (rss: number): string =>
-    rss >= 1024 ? `${(rss / 1024).toFixed(0)} MB` : `${rss} KB`
-
   const count = ptys.length
 
   return (
@@ -171,58 +242,16 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
           {count === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">No active terminals.</p>
           ) : (
-            ptys.map((pty) => (
-              <div
-                key={pty.sessionId}
-                className="flex items-center justify-between p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
-                onClick={() => {
-                  onTaskClick?.(getTaskIdFromSession(pty.sessionId))
-                  closeTerminals()
-                }}
-              >
-                <div className="flex-1 min-w-0 mr-2">
-                  <p className="text-sm font-medium truncate">{getTaskName(pty.sessionId)}</p>
-                  <div className="flex items-center gap-1 mt-2 flex-wrap">
-                    {(() => {
-                      const style = getTerminalStateStyle(pty.state)
-                      return (
-                        style && (
-                          <span
-                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${style.textColor} bg-current/10 w-16 text-center`}
-                          >
-                            {style.label}
-                          </span>
-                        )
-                      )
-                    })()}
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-16 text-center">
-                      {formatDuration(pty.createdAt)}
-                    </span>
-                    {stats[pty.sessionId] && (
-                      <>
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-14 text-center">
-                          {stats[pty.sessionId].cpu.toFixed(1)}%
-                        </span>
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-14 text-center">
-                          {formatMemory(stats[pty.sessionId].rss)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <IconButton
-                  aria-label="Terminate terminal"
-                  variant="ghost"
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleTerminate(pty.sessionId)
-                  }}
-                >
-                  <X className="size-4" />
-                </IconButton>
-              </div>
-            ))
+            <TerminalSessionList
+              ptys={ptys}
+              stats={stats}
+              getTaskName={getTaskName}
+              onSelect={(sessionId) => {
+                onTaskClick?.(getTaskIdFromSession(sessionId))
+                closeTerminals()
+              }}
+              onTerminate={handleTerminate}
+            />
           )}
         </div>
       </DialogContent>

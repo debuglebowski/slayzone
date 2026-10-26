@@ -98,7 +98,11 @@ export function useIdleTasks(
 ): UseIdleTasksResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const [rows, setRows] = useState<AgentSessionRow[]>([])
+  // The idle-age clock is sampled with the rows it measures — never during render.
+  const [snapshot, setSnapshot] = useState<{ rows: AgentSessionRow[]; at: number }>({
+    rows: [],
+    at: 0
+  })
   const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
@@ -106,7 +110,7 @@ export function useIdleTasks(
       trpcClient.pty.list.query(),
       trpcClient.pty.chatList.query()
     ])
-    setRows([...ptys.map(ptyToRow), ...chats.map(chatToRow)])
+    setSnapshot({ rows: [...ptys.map(ptyToRow), ...chats.map(chatToRow)], at: Date.now() })
   }, [trpcClient])
 
   useEffect(() => {
@@ -135,8 +139,8 @@ export function useIdleTasks(
   }, [])
 
   const idleTasks: IdleTask[] = useMemo(
-    () => buildIdleTasks(rows, tasks, filterProjectId, Date.now(), columnsByProjectId),
-    [rows, tasks, filterProjectId, columnsByProjectId]
+    () => buildIdleTasks(snapshot.rows, tasks, filterProjectId, snapshot.at, columnsByProjectId),
+    [snapshot, tasks, filterProjectId, columnsByProjectId]
   )
 
   return {

@@ -202,6 +202,8 @@ export function HomeDetail({
     <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
       {durationLocked && selectedProject?.lock_config ? (
         <ProjectLockScreen
+          // Fresh countdown per project + lock — remaining is sampled at mount.
+          key={`${selectedProject.id}:${selectedProject.lock_config.locked_until ?? ''}`}
           project={selectedProject}
           lockedUntil={selectedProject.lock_config?.locked_until}
           schedule={selectedProject.lock_config?.schedule}

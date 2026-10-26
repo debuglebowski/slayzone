@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNow } from '@slayzone/ui'
 import { ChevronDown, ChevronRight, Terminal as TerminalIcon } from 'lucide-react'
 import type { BgShell, BgShellStatus } from './chat-timeline'
 
@@ -59,7 +60,6 @@ export function BackgroundJobsBanner({
   floating = true
 }: BackgroundJobsBannerProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
-  const now = Date.now()
 
   const list = useMemo(() => {
     const arr: BgShell[] = []
@@ -69,6 +69,9 @@ export function BackgroundJobsBanner({
     }
     return arr
   }, [shells, order])
+
+  // Ages tick live, but only while the job rows are on screen.
+  const now = useNow(1000, { enabled: list.length > 0 && !collapsed })
 
   if (list.length === 0) return null
 
