@@ -219,7 +219,11 @@ function http(
         path,
         headers: {
           ...headers,
-          ...(payload ? { 'content-type': 'application/json' } : {})
+          // A declared length, like any real client: the hub refuses a chunked auth
+          // body (`guardAuthRequestBody`).
+          ...(payload
+            ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
+            : {})
         }
       },
       (res) => {
