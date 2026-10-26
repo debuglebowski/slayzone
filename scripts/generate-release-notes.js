@@ -13,7 +13,7 @@ if (!version) {
 
 const changelog = JSON.parse(
   fs.readFileSync(
-    'packages/apps/app/src/renderer/src/components/changelog/changelog-data.json',
+    'packages/domains/onboarding/src/client/changelog/changelog-data.json',
     'utf8'
   )
 )
@@ -21,7 +21,7 @@ const changelog = JSON.parse(
 const entry = changelog.find((e) => e.version === version)
 if (!entry) process.exit(0)
 
-const icons = { feature: '🚀', improvement: '✨', fix: '🐛' }
+const icons = { breaking: '⚠️', feature: '🚀', improvement: '✨', fix: '🐛' }
 let body = `## ${entry.tagline}\n\n`
 body += entry.items
   .map((i) => `${icons[i.category] || '•'}  **${i.title}** — ${i.description}`)

@@ -452,7 +452,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          NOTES=$(node scripts/generate-release-notes.js "$BASE_TAG" || true)
+          NOTES=$(node scripts/generate-release-notes.js "$BASE_TAG")
           if [ -z "$NOTES" ]; then
             NOTES="Release $BASE_TAG"
           fi

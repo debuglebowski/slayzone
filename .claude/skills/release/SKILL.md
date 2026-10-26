@@ -43,7 +43,7 @@ The tool will prepend a `## <old-tag>...main` section to CHANGELOG.md. After it 
 
 ### 5. Update in-app changelog
 
-Read `packages/apps/app/src/renderer/src/components/changelog/changelog-data.json`.
+Read `packages/domains/onboarding/src/client/changelog/changelog-data.json`.
 
 Add a new entry at the top of the JSON array for the new version:
 - `version`: the new version string (without `v` prefix)
@@ -63,7 +63,7 @@ Categories:
 
 ```
 git add -A -- '*package.json'
-git add CHANGELOG.md packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
+git add CHANGELOG.md packages/domains/onboarding/src/client/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 

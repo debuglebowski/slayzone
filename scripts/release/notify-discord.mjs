@@ -24,7 +24,7 @@ if (!version || !webhookUrl) {
 
 const changelog = JSON.parse(
   fs.readFileSync(
-    'packages/apps/app/src/renderer/src/components/changelog/changelog-data.json',
+    'packages/domains/onboarding/src/client/changelog/changelog-data.json',
     'utf8'
   )
 )
@@ -47,6 +47,7 @@ if (!entry) {
 }
 
 const groups = {
+  breaking: { label: '⚠️  Breaking', items: [] },
   feature: { label: '🚀  New', items: [] },
   improvement: { label: '✨  Improved', items: [] },
   fix: { label: '🐛  Fixed', items: [] }
