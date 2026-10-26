@@ -12,10 +12,7 @@ if (!version) {
 }
 
 const changelog = JSON.parse(
-  fs.readFileSync(
-    'packages/domains/onboarding/src/client/changelog/changelog-data.json',
-    'utf8'
-  )
+  fs.readFileSync('packages/domains/onboarding/src/client/changelog/changelog-data.json', 'utf8')
 )
 
 const entry = changelog.find((e) => e.version === version)
