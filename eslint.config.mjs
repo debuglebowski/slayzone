@@ -47,8 +47,8 @@ export default defineConfig(
     },
     rules: {
       'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/refs': 'warn',
       // Cleared to zero → error, so they can't regrow under the shared warning cap.
+      'react-hooks/refs': 'error',
       'react-hooks/immutability': 'error',
       'react-hooks/purity': 'error',
       'react-hooks/preserve-manual-memoization': 'error',
