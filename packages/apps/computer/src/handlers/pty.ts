@@ -46,6 +46,7 @@ import {
 import * as pty from 'node-pty'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
+import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
 import {
@@ -165,9 +166,12 @@ export function createPtyHandlers(
    * A project with no mapping fails LOUDLY. Falling back to the computer's launch
    * directory would start the agent in the wrong tree and look like it worked,
    * which is the exact failure this whole seam removes.
+   *
+   * Either way the result passes the jail (T-27, `spawnCwd`): a cwd outside
+   * `allowedRoots` is refused, never started.
    */
   function resolveCwd(opts: { cwd?: string; projectId?: string }): string {
-    if (opts.cwd) return opts.cwd
+    if (opts.cwd) return spawnCwd(opts.cwd, ctx.config.allowedRoots)
     if (!opts.projectId) throw new Error('pty.spawn needs either cwd or projectId')
     const entry = getProjectPaths?.()?.get(opts.projectId)
     if (!entry) {
@@ -175,7 +179,7 @@ export function createPtyHandlers(
         `project ${opts.projectId} is not checked out on this computer — adopt a folder or enable remote git for it`
       )
     }
-    return entry.path
+    return spawnCwd(entry.path, ctx.config.allowedRoots)
   }
 
   function buildEnv(overrides?: Record<string, string>): Record<string, string> {

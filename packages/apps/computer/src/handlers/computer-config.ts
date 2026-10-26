@@ -1,6 +1,13 @@
 /**
  * Computer self-configuration handlers — currently just the path-jail.
  *
+ * T-27: FOLDER LIMITS STAY LOCAL. `computer.setAllowedRoots` is refused
+ * (`refusedByComputer`) unless `config.hubMayEditRoots` — true only for the
+ * desktop app's own supervised computer dialing its loopback hub, where the hub
+ * is the local app. Everywhere else the device's user sets the roots on the
+ * device: `slay computer roots <name> --add <dir>` (or `computer.config.json`),
+ * which a running computer picks up live via {@link reloadLocalRoots}.
+ *
  * `allowedRoots` bounds every fs/git/proc path this computer will touch. Before
  * the filesystem ops were routed, the desktop app read and wrote the user's disk
  * directly with no jail at all, so routing them through the co-resident computer —
@@ -22,11 +29,59 @@ import { realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { updateComputerConfigFile } from '@slayzone/platform/slayzone-config'
 import {
+  ComputerTransportErrorCodes,
   HubToComputerMethods,
+  RpcError,
   computerSetAllowedRootsParamsSchema,
   type ComputerSetAllowedRootsResult
 } from '@slayzone/computer-transport/shared'
+import type { ComputerConfig } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
+
+/** Realpath each absolute, existing root; report the rest. De-duplicated. */
+function canonicalRoots(roots: readonly string[]): ComputerSetAllowedRootsResult {
+  const applied: string[] = []
+  const rejected: { path: string; reason: string }[] = []
+  for (const root of roots) {
+    if (!isAbsolute(root)) {
+      rejected.push({ path: root, reason: 'not an absolute path' })
+      continue
+    }
+    let real: string
+    try {
+      real = realpathSync.native(resolve(root))
+    } catch {
+      rejected.push({ path: root, reason: 'does not exist on this computer' })
+      continue
+    }
+    if (!applied.includes(real)) applied.push(real)
+  }
+  return { roots: applied, rejected }
+}
+
+/**
+ * Apply the roots the device's own `computer.config.json` declares (T-27) — the
+ * local channel for folder limits. Called when that file changes, so
+ * `slay computer roots --add` takes effect without a restart. An absent or
+ * all-unusable list leaves the live set alone (the boot default stays), the
+ * same "empty never applies" rule as the hub path below.
+ *
+ * Returns the applied set when it changed, else null.
+ */
+export function reloadLocalRoots(
+  config: ComputerConfig,
+  declared: readonly string[] | undefined
+): string[] | null {
+  if (!declared || declared.length === 0) return null
+  const { roots } = canonicalRoots(declared)
+  if (roots.length === 0) return null
+  const same =
+    roots.length === config.allowedRoots.length &&
+    roots.every((r, i) => r === config.allowedRoots[i])
+  if (same) return null
+  config.allowedRoots = roots
+  return roots
+}
 
 export function createComputerConfigHandlers(ctx: HandlerContext): HubMethodTable {
   /**
@@ -41,23 +96,15 @@ export function createComputerConfigHandlers(ctx: HandlerContext): HubMethodTabl
    */
   function setAllowedRoots(rawParams: unknown): ComputerSetAllowedRootsResult {
     const { roots } = computerSetAllowedRootsParamsSchema.parse(rawParams)
-
-    const applied: string[] = []
-    const rejected: { path: string; reason: string }[] = []
-    for (const root of roots) {
-      if (!isAbsolute(root)) {
-        rejected.push({ path: root, reason: 'not an absolute path' })
-        continue
-      }
-      let real: string
-      try {
-        real = realpathSync.native(resolve(root))
-      } catch {
-        rejected.push({ path: root, reason: 'does not exist on this computer' })
-        continue
-      }
-      if (!applied.includes(real)) applied.push(real)
+    if (!ctx.config.hubMayEditRoots) {
+      throw new RpcError(
+        ComputerTransportErrorCodes.refusedByComputer,
+        `this computer's folder limits are set on the computer itself, not by a hub — ` +
+          `on that machine run \`slay computer roots ${ctx.config.name} --add <dir>\` ` +
+          `(or edit allowedRoots in its computer.config.json)`
+      )
     }
+    const { roots: applied, rejected } = canonicalRoots(roots)
 
     // An empty set is refused rather than saved. `coerceComputerConfig` reads
     // `allowedRoots: []` back as "unset" and falls through to the defaults, so

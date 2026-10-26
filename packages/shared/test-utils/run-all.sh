@@ -256,6 +256,8 @@ run_test_electron_strict_loader packages/apps/cli/src/commands/computer-lifecycl
 run_test packages/apps/cli/src/commands/update.test.ts
 # `slay computer mint --for` / `--ttl` cap against a fake hub (T-20). Pure Node.
 run_test packages/apps/cli/src/commands/computer-mint.test.ts
+# `slay computer roots` edit rules (T-27: folder limits are set on the device). Pure.
+run_test packages/apps/cli/src/commands/computer-roots.test.ts
 run_test packages/apps/cli/src/local-hub.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_test packages/apps/hub/src/port-claim.test.ts

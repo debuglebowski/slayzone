@@ -25,10 +25,11 @@
  * (`spawnId`) returns the running process, and exits are remembered as tombstones
  * that `proc.list` reports — see `exit-tombstones.ts`.
  *
- * The working directory (`cwd`), when supplied, passes the
- * {@link assertPathAllowed} containment guard. The command binary itself is NOT
- * root-constrained (it typically lives in /usr/bin etc.); containment is
- * enforced on the directory the process runs in.
+ * The working directory always lies inside `allowedRoots` (T-27, {@link spawnCwd}):
+ * a supplied one passes the containment guard, an absent one becomes the first
+ * allowed root. The command binary itself is NOT root-constrained (it typically
+ * lives in /usr/bin etc.); containment is enforced on the directory the process
+ * starts in — and only there, see `spawnCwd`.
  *
  * @module computer/handlers/proc
  */
@@ -45,7 +46,7 @@ import {
   procWriteParamsSchema,
   ComputerNotificationMethods
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
 import type { HandlerContext, HubMethodTable } from './types'
@@ -127,12 +128,13 @@ export function createProcHandlers(
       }
     }
     // An explicit cwd wins (a worktree, or a task.base_dir the user set). Else
-    // resolve the project's checkout here. Neither → undefined, which is the
-    // pre-existing behaviour for a process that genuinely has no directory.
+    // resolve the project's checkout here. Neither → the first allowed root, never
+    // the computer's own launch directory (T-27: a hub-started process always
+    // starts inside the jail).
     const resolved =
       params.cwd ??
       (params.projectId ? getProjectPaths?.()?.get(params.projectId)?.path : undefined)
-    const cwd = resolved ? assertPathAllowed(resolved, ctx.config.allowedRoots) : undefined
+    const cwd = spawnCwd(resolved, ctx.config.allowedRoots)
 
     // Replace any pre-existing process with the same sessionId.
     const existing = procs.get(params.sessionId)

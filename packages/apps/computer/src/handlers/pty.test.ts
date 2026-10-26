@@ -23,7 +23,8 @@ function makeCtx({ online = true }: { online?: boolean } = {}) {
   const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
-    allowedRoots: [tmpdir()],
+    // process.cwd() is where these spawns run; a spawn cwd must be inside the jail (T-27).
+    allowedRoots: [tmpdir(), process.cwd()],
     capabilities: ['pty']
   }
   return { notifies, ctx: { dialer, config, log: () => {} } }

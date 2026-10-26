@@ -5,11 +5,20 @@
  * routes each method to its exec handler (pty.*, git.*, fs.*, proc.*), plus a
  * graceful `computer.shutdown`. Unknown methods answer `-32001 unimplemented`.
  *
+ * T-27: the dispatcher is also where every hub request is checked for its actor
+ * (refused without one — a pre-v3 hub), mapped from a jail refusal to
+ * `refusedByComputer`, and written as exactly one line to the local request log
+ * (`request-log.ts`). `ping` alone is answered inside the dialer and not logged:
+ * it is liveness, not work.
+ *
  * @module computer/main
  */
 
+import { unwatchFile, watchFile } from 'node:fs'
+import { dirname, join } from 'node:path'
 import {
   createFileCredentialStore,
+  credentialsFilePath,
   HubDialer,
   hubHostFromUrl,
   type ComputerCredentialStore,
@@ -18,10 +27,22 @@ import {
 import {
   ComputerTransportErrorCodes,
   HubToComputerMethods,
+  JSON_RPC_INTERNAL_ERROR,
   RpcError,
-  computerShutdownParamsSchema
+  computerShutdownParamsSchema,
+  requestActorSchema
 } from '@slayzone/computer-transport/shared'
-import { effectiveHubUrls, type ComputerConfig } from './config'
+import {
+  getComputerConfigFilePath,
+  loadComputerConfigFile
+} from '@slayzone/platform/slayzone-config'
+import {
+  effectiveHubUrls,
+  JailViolationError,
+  setProtectedPaths,
+  type ComputerConfig
+} from './config'
+import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { type AgentHookServer, createAgentHookServer } from './handlers/agent-hook'
 import { createFsHandlers } from './handlers/fs'
@@ -31,7 +52,7 @@ import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
 import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
-import { createComputerConfigHandlers } from './handlers/computer-config'
+import { createComputerConfigHandlers, reloadLocalRoots } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 
@@ -44,6 +65,12 @@ export interface ComputerRuntimeDeps {
   onShutdown?: (reason: string) => void
   /** Override the credential store (tests). */
   credentialStore?: ComputerCredentialStore
+  /**
+   * The computer's own state dir: its `computer.config.json`, credentials and
+   * request log. Default: where `computer.config.json` lives (`SLAYZONE_ROOT`, else
+   * `~/.slayzone`). Tests pass a temp dir.
+   */
+  stateDir?: string
 }
 
 export interface ComputerHandle {
@@ -81,11 +108,18 @@ export interface HubRequestHandlerDeps {
    * computer serves (see spawn-admission.ts). Absent: a private one (tests).
    */
   admission?: SpawnAdmission
+  /** The local request log (T-27). Absent: nothing recorded (tests). */
+  requestLog?: RequestLog
+  /** Host of the hub this dispatch serves, for the request log. */
+  hubHost?: string
 }
 
 export interface HubRequestDispatch {
-  /** Route one hub→computer request to its handler. */
-  handle(method: string, params: unknown): Promise<unknown>
+  /**
+   * Route one hub→computer request to its handler. `actor` is the envelope's raw
+   * `actor` member; a request without a valid one is refused (pre-v3 hub).
+   */
+  handle(method: string, params: unknown, actor: unknown): Promise<unknown>
   /** Tear down live sessions/processes (computer shutdown). */
   dispose(): void
   /** Late-bind the computer loopback agent-hook URL once its listener has bound
@@ -140,12 +174,62 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
 
-  const handle = async (method: string, params: unknown): Promise<unknown> => {
+  const hub = deps.hubHost ?? 'unknown'
+
+  /** Exactly one log line per request, whatever its outcome. */
+  const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
+    const parsedActor = requestActorSchema.safeParse(rawActor)
+    const actor = parsedActor.success ? parsedActor.data : null
+    const record = (result: 'ok' | 'error' | 'refused', code?: number, reason?: string): void =>
+      deps.requestLog?.record({
+        hub,
+        method,
+        actor,
+        params,
+        result,
+        ...(code !== undefined ? { code } : {}),
+        ...(reason !== undefined ? { reason } : {})
+      })
+
+    if (!actor) {
+      // A v3 hub always sends one (null userId included); none = an older hub. Refused
+      // rather than run unattributed — see COMPUTER_PROTOCOL_VERSION.
+      const err = new RpcError(
+        ComputerTransportErrorCodes.protocolMismatch,
+        "hub sent no actor with this request (a hub older than computer protocol v3) — upgrade the hub to this computer's release"
+      )
+      record('refused', err.code, err.message)
+      throw err
+    }
     const entry = table[method]
     if (!entry) {
-      throw new RpcError(ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      const err = new RpcError(
+        ComputerTransportErrorCodes.unimplemented,
+        `unimplemented: ${method}`
+      )
+      record('error', err.code)
+      throw err
     }
-    return entry(params)
+    try {
+      const result = await entry(params)
+      record('ok')
+      return result
+    } catch (err) {
+      if (err instanceof JailViolationError) {
+        log('request refused by the path jail', { method, reason: err.message })
+        const refused = new RpcError(ComputerTransportErrorCodes.refusedByComputer, err.message)
+        record('refused', refused.code, err.message)
+        throw refused
+      }
+      if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.refusedByComputer) {
+        log('request refused by local policy', { method, reason: err.message })
+        record('refused', err.code, err.message)
+        throw err
+      }
+      // Code only: a foreign error text (git/gh stderr) can carry a credential.
+      record('error', err instanceof RpcError ? err.code : JSON_RPC_INTERNAL_ERROR)
+      throw err
+    }
   }
 
   const dispose = (): void => {
@@ -202,6 +286,47 @@ export function startComputer(
 
   let handle: ComputerHandle
 
+  // The computer's own state (T-27): its config — which holds allowedRoots — its
+  // credentials and its request log are refused to every hub frame, and the log
+  // is opened before any hub can send work. An unwritable state dir throws here:
+  // better not to start than to work unlogged.
+  const stateDir = deps.stateDir ?? dirname(getComputerConfigFilePath())
+  const configFile = join(stateDir, 'computer.config.json')
+  setProtectedPaths([
+    configFile,
+    // The legacy file computer.config.json falls back to when absent.
+    join(stateDir, 'config.json'),
+    credentialsFilePath(stateDir),
+    join(stateDir, REQUEST_LOG_DIR_NAME)
+  ])
+  const requestLog = createRequestLog({
+    stateDir,
+    onError: (err) => log('request log write failed', { error: String(err) })
+  })
+  log('local request log', { file: requestLog.filePath })
+
+  // Folder limits stay local (T-27): a standalone computer applies the roots its
+  // own computer.config.json declares whenever that file changes — what
+  // `slay computer roots --add` writes. Polled, not fs.watch: an atomic rename
+  // replaces the inode a watcher holds. Not for the desktop's supervised computer,
+  // which never reads the file (its loopback hub edits its roots instead).
+  const watchLocalRoots = !config.hubMayEditRoots
+  if (watchLocalRoots) {
+    watchFile(configFile, { interval: 2000, persistent: false }, () => {
+      const declared = loadComputerConfigFile(configFile).allowedRoots
+      const applied = reloadLocalRoots(config, declared)
+      if (!applied) return
+      log('allowedRoots reloaded from local config', { applied })
+      requestLog.record({
+        hub: 'local',
+        method: 'local.allowedRoots',
+        actor: null,
+        params: { roots: applied },
+        result: 'ok'
+      })
+    })
+  }
+
   // ONE admission queue for every hub connection: agent starts contend for this
   // machine, whichever hub asked for them.
   const admission = createSpawnAdmission()
@@ -229,7 +354,7 @@ export function startComputer(
       identity,
       credentialStore,
       ...(config.joinToken && isPrimary ? { joinToken: config.joinToken } : {}),
-      onHubRequest: (method, params) => dispatch.handle(method, params),
+      onHubRequest: (method, params, actor) => dispatch.handle(method, params, actor),
       log
     })
 
@@ -256,7 +381,9 @@ export function startComputer(
       config,
       log,
       getProjectPaths: () => projectPaths,
-      admission
+      admission,
+      requestLog,
+      hubHost: hubHostFromUrl(hubUrl)
     })
 
     // Every line carries the hub, because with more than one connection "reconnect
@@ -325,6 +452,7 @@ export function startComputer(
     dialers: connections.map((c) => c.dialer),
     stop: async () => {
       hostIdStop?.()
+      if (watchLocalRoots) unwatchFile(configFile)
       await Promise.all(connections.map((c) => c.dispose()))
     }
   }

@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ComputerCredentialStore } from '@slayzone/computer-transport/client'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,6 +9,14 @@ import type { ComputerDialer } from './handlers/types'
 import { createHubRequestHandler, startComputer } from './main'
 
 const fakeDialer: ComputerDialer = { notify: () => true }
+
+/** What a v3 hub sends with every request (T-27). */
+const ACTOR = { userId: 'u-1', route: 'trpc test' }
+
+/** A temp state dir, so startComputer's request log never lands in a real one. */
+function tempState(): string {
+  return mkdtempSync(join(tmpdir(), 'computer-main-'))
+}
 
 const testConfig: ComputerConfig = {
   hubUrl: 'ws://localhost:0/computers',
@@ -37,7 +48,7 @@ describe('createHubRequestHandler dispatch table', () => {
     'answers unknown method %s with -32001 unimplemented',
     async (method) => {
       const { handle } = makeDispatch()
-      const err = await handle(method, {}).then(
+      const err = await handle(method, {}, ACTOR).then(
         () => null,
         (e: unknown) => e
       )
@@ -52,14 +63,14 @@ describe('createHubRequestHandler dispatch table', () => {
     // /tmp is inside allowedRoots but not a git repo → resolves to
     // { isGitRepo: false } (the key the SHARED result schema declares; this test
     // used to assert the computer's own divergent `isRepo`).
-    const result = await handle('git.isGitRepo', { path: '/tmp' })
+    const result = await handle('git.isGitRepo', { path: '/tmp' }, ACTOR)
     expect(result).toEqual({ isGitRepo: false })
   })
 
   it('acks computer.shutdown and then triggers the shutdown callback', async () => {
     const shutdown = vi.fn()
     const { handle } = makeDispatch(shutdown)
-    const pending = handle('computer.shutdown', { reason: 'maintenance' })
+    const pending = handle('computer.shutdown', { reason: 'maintenance' }, ACTOR)
     expect(shutdown).not.toHaveBeenCalled() // ack built before shutdown fires…
     const result = await pending
     expect(result).toEqual({ ok: true })
@@ -70,7 +81,7 @@ describe('createHubRequestHandler dispatch table', () => {
   it('defaults the shutdown reason', async () => {
     const shutdown = vi.fn()
     const { handle } = makeDispatch(shutdown)
-    await handle('computer.shutdown', undefined)
+    await handle('computer.shutdown', undefined, ACTOR)
     await new Promise<void>((resolve) => queueMicrotask(resolve))
     expect(shutdown).toHaveBeenCalledWith('hub-requested')
   })
@@ -89,7 +100,10 @@ describe('startComputer TLS', () => {
     // A wss:// hub's front end is verified against the trusted CAs by the dialer's
     // defaults; nothing about TLS is configured here any more.
     for (const hubUrl of ['wss://127.0.0.1:0/computers', 'ws://127.0.0.1:0/computers']) {
-      const handle = startComputer({ ...testConfig, hubUrl }, { credentialStore: memoryStore() })
+      const handle = startComputer(
+        { ...testConfig, hubUrl },
+        { credentialStore: memoryStore(), stateDir: tempState() }
+      )
       try {
         expect(handle.dialer).toBeDefined()
       } finally {
@@ -103,7 +117,10 @@ describe('startComputer multi-hub', () => {
   // Loopback port 0 keeps this hermetic — startComputer calls dialer.start(), so a
   // routable host would do real network I/O. See the note above.
   it('opens one dialer per configured hub, and only one by default', async () => {
-    const single = startComputer(testConfig, { credentialStore: memoryStore() })
+    const single = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState()
+    })
     try {
       expect(single.dialers.length).toBe(1)
       // The named `dialer` stays the primary, because a computer serving exactly
@@ -118,7 +135,7 @@ describe('startComputer multi-hub', () => {
         ...testConfig,
         hubUrls: ['ws://127.0.0.1:0/computers', 'ws://127.0.0.2:0/computers']
       },
-      { credentialStore: memoryStore() }
+      { credentialStore: memoryStore(), stateDir: tempState() }
     )
     try {
       expect(multi.dialers.length).toBe(2)
@@ -137,7 +154,7 @@ describe('startComputer multi-hub', () => {
         ...testConfig,
         hubUrls: ['ws://127.0.0.1:0/computers', 'ws://127.0.0.1:0/computers']
       },
-      { credentialStore: memoryStore() }
+      { credentialStore: memoryStore(), stateDir: tempState() }
     )
     try {
       expect(handle.dialers.length).toBe(1)
