@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
 import { join } from 'node:path'
+import { isLoopbackAuthority } from '@slayzone/platform'
 import type { HubEntry } from '@slayzone/types'
 
 /**
@@ -338,6 +339,18 @@ export function probeRemoteHealth(rawUrl: string, timeoutMs = 5000): Promise<Hea
     return Promise.resolve({
       ok: false,
       error: 'Invalid URL — use http(s):// or ws(s)://host[:port]'
+    })
+  }
+  // Hub scheme rule (hubUrlFromAddr): loopback → ws, any other host → wss. A
+  // plaintext non-loopback hub could never connect (the renderer CSP floor is
+  // TLS-only off-loopback), so refuse it here — the gate every add flow goes
+  // through — with the reason, instead of letting it fail silently later.
+  const parsed = new URL(normalizedUrl)
+  if (parsed.protocol === 'ws:' && !isLoopbackAuthority(parsed.host)) {
+    return Promise.resolve({
+      ok: false,
+      normalizedUrl,
+      error: `Non-local hubs need TLS — use wss://${parsed.host} (put the hub behind an HTTPS front end)`
     })
   }
   const healthUrl = toHealthUrl(normalizedUrl)

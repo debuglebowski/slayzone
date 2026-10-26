@@ -432,6 +432,26 @@ describe('probeRemoteHealth', () => {
     })
   }
 
+  it('rejects plaintext for a non-loopback host before any request (hub scheme rule)', async () => {
+    // Loopback → ws, anything else → wss (hubUrlFromAddr). A plaintext remote
+    // could never connect — the renderer CSP floor is TLS-only off-loopback —
+    // so the add flow fails here with a clear reason instead of later, silently.
+    for (const raw of ['ws://192.168.1.20:4400', 'http://hub.example.com']) {
+      const result = await probeRemoteHealth(raw)
+      expect(result.ok).toBe(false)
+      expect(result.ok ? '' : result.error).toMatch(/wss:\/\//)
+    }
+  })
+
+  it('still probes plaintext loopback hubs (127.0.0.1 and localhost)', async () => {
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+    })
+    expect((await probeRemoteHealth(`ws://127.0.0.1:${port}`)).ok).toBe(true)
+    expect((await probeRemoteHealth(`ws://localhost:${port}`)).ok).toBe(true)
+  })
+
   it('reports ok + the normalized ws URL when /health answers 200 {ok:true}', async () => {
     const port = await listen((req, res) => {
       expect(req.url).toBe('/health')
