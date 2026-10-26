@@ -16,12 +16,11 @@ test.describe
       await expect(mainWindow.getByRole('dialog')).not.toBeVisible({ timeout: 3_000 })
     }
 
-    const rebindShortcut = async (
+    /** In the open dialog, expand the group holding `label` and return its label span. */
+    const revealShortcutRow = async (
       mainWindow: import('@playwright/test').Page,
-      label: string,
-      newKeys: string
+      label: string
     ) => {
-      await openShortcutsDialog(mainWindow)
       // Only one Collapsible group is open at a time — find the group containing
       // the target label and ensure it's open. Walk groups, opening each in turn,
       // until the label becomes visible.
@@ -36,6 +35,16 @@ test.describe
         }
       }
       await expect(labelSpan).toBeVisible({ timeout: 3_000 })
+      return labelSpan
+    }
+
+    const rebindShortcut = async (
+      mainWindow: import('@playwright/test').Page,
+      label: string,
+      newKeys: string
+    ) => {
+      await openShortcutsDialog(mainWindow)
+      const labelSpan = await revealShortcutRow(mainWindow, label)
       const keyBadge = labelSpan.locator('..').locator('span.cursor-pointer').first()
       await keyBadge.click()
       await expect(mainWindow.getByText('Press keys...')).toBeVisible({ timeout: 2_000 })
@@ -155,6 +164,27 @@ test.describe
         mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
       ).toBeVisible({ timeout: 3_000 })
       await mainWindow.keyboard.press('Escape')
+    })
+
+    // ─── Clearing ───
+
+    test('cleared shortcut no longer fires', async ({ mainWindow }) => {
+      await openShortcutsDialog(mainWindow)
+      await revealShortcutRow(mainWindow, 'New Task')
+      await mainWindow.getByRole('button', { name: 'Clear shortcut for New Task' }).click()
+      await closeDialog(mainWindow)
+
+      await pressShortcut(mainWindow, 'new-task')
+      await mainWindow.waitForTimeout(500)
+      const createTaskVisible = await mainWindow
+        .getByRole('dialog')
+        .getByText('Create Task')
+        .isVisible()
+        .catch(() => false)
+      if (createTaskVisible) await closeDialog(mainWindow)
+
+      await resetShortcuts(mainWindow)
+      expect(createTaskVisible).toBe(false)
     })
 
     // ─── Persistence ───

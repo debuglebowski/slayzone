@@ -30,6 +30,17 @@ export function setShortcutBackend(b: ShortcutBackend): void {
 
 const SETTINGS_KEY = 'custom_shortcuts'
 
+/** Effective key combo for a shortcut: any override — including a cleared one
+ *  (`null`, or `''` from the shortcuts dialog) — beats the default. `null` = unbound. */
+export function resolveShortcutKeys(
+  overrides: Record<string, string | null>,
+  id: string
+): string | null {
+  if (id in overrides) return overrides[id]
+  const def = shortcutDefinitions.find((d) => d.id === id)
+  return def?.defaultKeys ?? null
+}
+
 interface ShortcutState {
   /** User overrides. `null` value means explicitly cleared (unbound). */
   overrides: Record<string, string | null>
@@ -86,12 +97,7 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
     }
   },
 
-  getKeys: (id: string) => {
-    const { overrides } = get()
-    if (id in overrides) return overrides[id]
-    const def = shortcutDefinitions.find((d) => d.id === id)
-    return def?.defaultKeys ?? null
-  },
+  getKeys: (id: string) => resolveShortcutKeys(get().overrides, id),
 
   findConflict: (keys: string, scope: ShortcutScope) => {
     const { overrides } = get()

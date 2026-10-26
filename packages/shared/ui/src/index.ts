@@ -20,6 +20,7 @@ export {
 export {
   useShortcutStore,
   setShortcutBackend,
+  resolveShortcutKeys,
   type ShortcutBackend
 } from './useShortcutStore'
 export { useShortcutDisplay } from './useShortcutDisplay'

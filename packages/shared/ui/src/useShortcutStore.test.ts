@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { setShortcutBackend, useShortcutStore } from './useShortcutStore'
+import { resolveShortcutKeys, setShortcutBackend, useShortcutStore } from './useShortcutStore'
 
 // Mock the injected persistence backend (was window.api.settings / .shortcuts).
 const mockSettings = {
@@ -124,6 +124,21 @@ describe('getKeys', () => {
   it('returns null when override explicitly cleared', () => {
     useShortcutStore.setState({ overrides: { search: null } })
     expect(useShortcutStore.getState().getKeys('search')).toBeNull()
+  })
+
+  it("returns '' (not the default) when cleared from the shortcuts dialog", () => {
+    useShortcutStore.setState({ overrides: { search: '' } })
+    expect(useShortcutStore.getState().getKeys('search')).toBe('')
+  })
+})
+
+describe('resolveShortcutKeys', () => {
+  it('resolves default, override and both cleared forms', () => {
+    expect(resolveShortcutKeys({}, 'search')).toBe('mod+k')
+    expect(resolveShortcutKeys({ search: 'mod+shift+p' }, 'search')).toBe('mod+shift+p')
+    expect(resolveShortcutKeys({ search: null }, 'search')).toBeNull()
+    expect(resolveShortcutKeys({ search: '' }, 'search')).toBe('')
+    expect(resolveShortcutKeys({}, 'nonexistent')).toBeNull()
   })
 })
 

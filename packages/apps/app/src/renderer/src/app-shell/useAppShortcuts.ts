@@ -3,7 +3,7 @@ import {
   useGuardedHotkeys,
   matchesShortcut,
   useShortcutStore,
-  shortcutDefinitions,
+  resolveShortcutKeys,
   withModalGuard,
   toast
 } from '@slayzone/ui'
@@ -87,12 +87,9 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
   const isRecording = useShortcutStore((s) => s.isRecording)
   // Resolve effective keys from overrides + defaults. Subscribing to `overrides` above
   // ensures re-render when shortcuts change, so useHotkeys picks up new key strings.
+  // Unbound (cleared) resolves to '', which binds nothing.
   const getKeys = useCallback(
-    (id: string): string => {
-      if (overrides[id]) return overrides[id]
-      const def = shortcutDefinitions.find((d) => d.id === id)
-      return def?.defaultKeys ?? ''
-    },
+    (id: string): string => resolveShortcutKeys(overrides, id) ?? '',
     [overrides]
   )
   useEffect(() => {
