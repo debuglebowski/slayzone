@@ -28,7 +28,9 @@ export function ConflictPhaseContent({
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const commitFilesMutation = useMutation(trpc.worktrees.commitFiles.mutationOptions())
+  // `mutateAsync` (stable): handleCompleteMerge depends on it, and the useMutation()
+  // result object is new on every render.
+  const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
   const continueRebaseMutation = useMutation(trpc.worktrees.continueRebase.mutationOptions())
   const skipRebaseCommitMutation = useMutation(trpc.worktrees.skipRebaseCommit.mutationOptions())
   const abortRebaseMutation = useMutation(trpc.worktrees.abortRebase.mutationOptions())
@@ -79,7 +81,7 @@ export function ConflictPhaseContent({
       const sourceBranch = await queryClient.fetchQuery(
         trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path! })
       )
-      await commitFilesMutation.mutateAsync({
+      await commitFiles({
         repoPath: projectPath,
         message: `Merge ${sourceBranch ?? 'branch'} into ${task.worktree_parent_branch}`
       })
@@ -101,7 +103,7 @@ export function ConflictPhaseContent({
     onTaskUpdated,
     queryClient,
     trpc,
-    commitFilesMutation
+    commitFiles
   ])
 
   const handleContinueRebase = useCallback(async () => {

@@ -61,6 +61,13 @@ const queries: Record<string, { data: unknown; isFetched: boolean }> = {}
 function setPresets(data: string | null): void {
   queries.presets = { data, isFetched: true }
 }
+// The ignored-file-tree query's state while open. 'error' is TanStack's shape for a
+// failed first fetch: no data, isError. `treeRenders` counts renders (one tree
+// useQuery per render); past RENDER_LOOP_LIMIT the mock throws, so a render loop fails
+// the test instead of hanging the synchronous act() flush forever.
+let treeState: 'success' | 'error' = 'success'
+let treeRenders = 0
+const RENDER_LOOP_LIMIT = 100
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     settings: {
@@ -76,9 +83,12 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (o: { k: string; enabled: boolean }) => {
     if (o.k === 'tree') {
-      return o.enabled
-        ? { data: TREE, isFetching: false, isSuccess: true, isError: false }
-        : { data: undefined, isFetching: false, isSuccess: false, isError: false }
+      if (++treeRenders > RENDER_LOOP_LIMIT) throw new Error('CopyFilesDialog render loop')
+      if (!o.enabled)
+        return { data: undefined, isFetching: false, isSuccess: false, isError: false }
+      return treeState === 'error'
+        ? { data: undefined, isFetching: false, isSuccess: false, isError: true }
+        : { data: TREE, isFetching: false, isSuccess: true, isError: false }
     }
     return queries.presets ?? { data: undefined, isFetched: false }
   }
@@ -100,6 +110,8 @@ function renderDialog(open: boolean) {
 afterEach(() => {
   cleanup()
   delete queries.presets
+  treeState = 'success'
+  treeRenders = 0
 })
 
 describe('CopyFilesDialog', () => {
@@ -161,5 +173,21 @@ describe('CopyFilesDialog', () => {
     rerender(false)
     rerender(true)
     expect(screen.queryByText('a.md')).toBeNull()
+  })
+
+  it('a failed ignored-file scan settles on the empty state (no render loop)', () => {
+    setPresets(null)
+    treeState = 'error'
+    expect(() => renderDialog(true)).not.toThrow()
+    expect(treeRenders).toBeLessThan(10)
+    expect(screen.getByText('No ignored files found.')).toBeDefined()
+    expect(preset()).toBe('all-ignored')
+    expect(copyLabel()).toBe('Copy 0 files')
+
+    // Picking another preset re-runs the selection sync once and settles again.
+    const before = treeRenders
+    fireEvent.change(screen.getByTestId('preset'), { target: { value: 'env-only' } })
+    expect(treeRenders - before).toBeLessThan(10)
+    expect(preset()).toBe('env-only')
   })
 })

@@ -357,6 +357,9 @@ run_test packages/apps/app/src/main/extension-id.test.ts
 run_test packages/apps/app/src/main/dev-launcher-contract.test.ts
 # macOS update manifest: OS-minimum stamp (Electron 44 = macOS 13+) survives the arch merge.
 run_test scripts/release/update-manifest.test.mjs
+# `pnpm lint:trpc-deps`: flags a useMutation() result object bare in a hook dep array
+# (by `*Mutation` name and by binding, multi-line arrays included); quiet on stable forms.
+run_test scripts/check-trpc-stable-deps.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
@@ -763,6 +766,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/useTaskTerminals.test.tsx \
   packages/domains/task/src/client/ProcessDialog.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTitleEditing.test.tsx \
+  packages/domains/task/src/client/task-detail/useTaskTerminalSession.test.tsx \
   packages/domains/task/src/client/TaskProgressPopover.test.tsx \
   packages/domains/task/src/client/WebPanelView.test.tsx \
   packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \
@@ -770,6 +774,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
+  packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
+  packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
+  packages/domains/worktrees/src/client/useGitMergeActions.test.tsx \
   packages/domains/worktrees/src/client/CreatePrDialog.test.tsx \
   packages/domains/worktrees/src/client/ProjectPrTab.test.tsx \
   packages/domains/worktrees/src/client/useGitDiffData.test.tsx \

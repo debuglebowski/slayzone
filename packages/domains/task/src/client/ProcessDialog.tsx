@@ -58,10 +58,12 @@ export function ProcessDialog({
   onSpawned
 }: ProcessDialogProps) {
   const trpc = useTRPC()
-  const updateProcess = useMutation(trpc.processes.update.mutationOptions())
-  const createProcess = useMutation(trpc.processes.create.mutationOptions())
-  const spawnProcess = useMutation(trpc.processes.spawn.mutationOptions())
-  const restartProcess = useMutation(trpc.processes.restart.mutationOptions())
+  // `mutateAsync` (stable): the save/spawn callbacks depend on these, and the
+  // useMutation() result object is new on every render.
+  const { mutateAsync: updateProcess } = useMutation(trpc.processes.update.mutationOptions())
+  const { mutateAsync: createProcess } = useMutation(trpc.processes.create.mutationOptions())
+  const { mutateAsync: spawnProcess } = useMutation(trpc.processes.spawn.mutationOptions())
+  const { mutateAsync: restartProcess } = useMutation(trpc.processes.restart.mutationOptions())
   const [form, setForm] = useState<AddFormState>(() => formFromProcess(process))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -95,7 +97,7 @@ export function ProcessDialog({
     try {
       const { tid, pid } = resolveScope()
       if (process) {
-        await updateProcess.mutateAsync({
+        await updateProcess({
           processId: process.id,
           updates: {
             label: form.label.trim(),
@@ -106,7 +108,7 @@ export function ProcessDialog({
           }
         })
       } else {
-        await createProcess.mutateAsync({
+        await createProcess({
           projectId: pid,
           taskId: tid,
           label: form.label.trim(),
@@ -142,7 +144,7 @@ export function ProcessDialog({
       const { tid, pid } = resolveScope()
       let id: string
       if (process) {
-        await updateProcess.mutateAsync({
+        await updateProcess({
           processId: process.id,
           updates: {
             label: form.label.trim(),
@@ -152,10 +154,10 @@ export function ProcessDialog({
             projectId: pid
           }
         })
-        await restartProcess.mutateAsync({ processId: process.id })
+        await restartProcess({ processId: process.id })
         id = process.id
       } else {
-        id = await spawnProcess.mutateAsync({
+        id = await spawnProcess({
           projectId: pid,
           taskId: tid,
           label: form.label.trim(),

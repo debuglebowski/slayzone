@@ -121,13 +121,17 @@ export function WorkspaceDirPicker({
   const listQuery = useQuery(
     trpc.workspace.listDir.queryOptions(listInput, { enabled: open && !!cwd })
   )
-  const mkdir = useMutation(trpc.workspace.mkdir.mutationOptions())
+  // `mutateAsync` (stable) for createFolder's deps, not the useMutation() result
+  // object (new every render).
+  const { mutateAsync: mkdir, isPending: mkdirPending } = useMutation(
+    trpc.workspace.mkdir.mutationOptions()
+  )
 
   const createFolder = useCallback(async (): Promise<void> => {
     const name = newName.trim()
     if (!name || !cwd) return
     try {
-      const res = await mkdir.mutateAsync({ ...scope, path: `${cwd}${sep}${name}` })
+      const res = await mkdir({ ...scope, path: `${cwd}${sep}${name}` })
       setCreating(false)
       setNewName('')
       await queryClient.invalidateQueries(trpc.workspace.listDir.queryFilter())
@@ -298,7 +302,7 @@ export function WorkspaceDirPicker({
                   <Button
                     variant="outline"
                     onClick={() => void createFolder()}
-                    disabled={!newName.trim() || mkdir.isPending}
+                    disabled={!newName.trim() || mkdirPending}
                   >
                     Create
                   </Button>

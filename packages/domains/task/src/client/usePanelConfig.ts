@@ -139,13 +139,14 @@ export function usePanelConfig(): {
   getOrderedHomeIds: () => string[]
 } {
   const trpc = useTRPC()
-  const setSetting = useMutation(trpc.settings.set.mutationOptions())
+  // `mutateAsync` (stable), not the useMutation() result object (new every render).
+  const { mutateAsync: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const config = useSyncExternalStore(panelConfigStore.subscribe, panelConfigStore.get)
 
   const updateConfig = useCallback(
     async (next: PanelConfig) => {
       panelConfigStore.set(next)
-      await setSetting.mutateAsync({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+      await setSetting({ key: SETTINGS_KEY, value: JSON.stringify(next) })
       window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
     },
     [setSetting]

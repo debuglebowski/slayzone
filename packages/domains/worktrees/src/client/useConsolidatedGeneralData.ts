@@ -102,14 +102,20 @@ export function useConsolidatedGeneralData(
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const initMutation = useMutation(trpc.worktrees.init.mutationOptions())
-  const createWorktreeMutation = useMutation(trpc.worktrees.createWorktree.mutationOptions())
+  // `mutateAsync` (stable) for the ones the action callbacks depend on — never the
+  // useMutation() result object, which is new on every render.
+  const { mutateAsync: createWorktree } = useMutation(
+    trpc.worktrees.createWorktree.mutationOptions()
+  )
   const copyIgnoredFilesMutation = useMutation(trpc.worktrees.copyIgnoredFiles.mutationOptions())
   const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
-  const rebaseOntoMutation = useMutation(trpc.worktrees.rebaseOnto.mutationOptions())
-  const mergeFromMutation = useMutation(trpc.worktrees.mergeFrom.mutationOptions())
-  const mergeIntoParentMutation = useMutation(trpc.worktrees.mergeIntoParent.mutationOptions())
-  const pushMutation = useMutation(trpc.worktrees.push.mutationOptions())
-  const pullMutation = useMutation(trpc.worktrees.pull.mutationOptions())
+  const { mutateAsync: rebaseOnto } = useMutation(trpc.worktrees.rebaseOnto.mutationOptions())
+  const { mutateAsync: mergeFrom } = useMutation(trpc.worktrees.mergeFrom.mutationOptions())
+  const { mutateAsync: mergeIntoParent } = useMutation(
+    trpc.worktrees.mergeIntoParent.mutationOptions()
+  )
+  const { mutateAsync: pushBranch } = useMutation(trpc.worktrees.push.mutationOptions())
+  const { mutateAsync: pullBranch } = useMutation(trpc.worktrees.pull.mutationOptions())
   const hasWorktree = !!task.worktree_path
   const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
   const parentBranch = task.worktree_parent_branch
@@ -372,7 +378,7 @@ export function useConsolidatedGeneralData(
     ) => {
       if (!projectPath) return
       // Omit projectId so server skips copy resolution — we handle it here
-      await createWorktreeMutation.mutateAsync({
+      await createWorktree({
         repoPath: projectPath,
         targetPath: worktreePath,
         ...(useExistingBranch ? { sourceBranch: branch } : { branch })
@@ -422,7 +428,7 @@ export function useConsolidatedGeneralData(
 
       // Non-ask: create immediately (server handles copy for all/custom/none)
       setCreating(true)
-      await createWorktreeMutation.mutateAsync({
+      await createWorktree({
         repoPath: projectPath,
         targetPath: params.worktreePath,
         branch: params.branch,
@@ -447,7 +453,7 @@ export function useConsolidatedGeneralData(
     resolveWorktreeParams,
     queryClient,
     trpc,
-    createWorktreeMutation
+    createWorktree
   ])
 
   const handleAddWorktreeFromBranch = useCallback(
@@ -480,7 +486,7 @@ export function useConsolidatedGeneralData(
         }
 
         setCreating(true)
-        await createWorktreeMutation.mutateAsync({
+        await createWorktree({
           repoPath: projectPath,
           targetPath: worktreePath,
           sourceBranch,
@@ -501,7 +507,7 @@ export function useConsolidatedGeneralData(
       onUpdateTask,
       queryClient,
       trpc,
-      createWorktreeMutation
+      createWorktree
     ]
   )
 
@@ -595,7 +601,7 @@ export function useConsolidatedGeneralData(
       setActionLoading(action)
       try {
         if (action === 'rebase') {
-          const result = await rebaseOntoMutation.mutateAsync({
+          const result = await rebaseOnto({
             path: targetPath,
             ontoBranch: parentBranch
           })
@@ -605,7 +611,7 @@ export function useConsolidatedGeneralData(
           } else if (result.conflicted) toast(result.error ?? 'Rebase has conflicts')
           else toast(result.error ?? 'Rebase failed')
         } else if (action === 'merge') {
-          const result = await mergeFromMutation.mutateAsync({
+          const result = await mergeFrom({
             path: targetPath,
             branch: parentBranch
           })
@@ -616,7 +622,7 @@ export function useConsolidatedGeneralData(
           else toast(result.error ?? 'Merge failed')
         } else if (action === 'mergeToParent') {
           if (!projectPath) return
-          const result = await mergeIntoParentMutation.mutateAsync({
+          const result = await mergeIntoParent({
             projectPath,
             parentBranch,
             sourceBranch: taskBranch
@@ -627,10 +633,10 @@ export function useConsolidatedGeneralData(
           } else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
           else toast(result.error ?? 'Merge failed')
         } else if (action === 'push') {
-          const result = await pushMutation.mutateAsync({ path: targetPath, branch: taskBranch })
+          const result = await pushBranch({ path: targetPath, branch: taskBranch })
           toast(result.success ? 'Pushed' : (result.error ?? 'Push failed'))
         } else if (action === 'pull') {
-          const result = await pullMutation.mutateAsync({ path: targetPath })
+          const result = await pullBranch({ path: targetPath })
           if (result.success) {
             toast('Pulled')
             fetchBranchData()
@@ -648,11 +654,11 @@ export function useConsolidatedGeneralData(
       taskBranch,
       projectPath,
       fetchBranchData,
-      rebaseOntoMutation,
-      mergeFromMutation,
-      mergeIntoParentMutation,
-      pushMutation,
-      pullMutation
+      rebaseOnto,
+      mergeFrom,
+      mergeIntoParent,
+      pushBranch,
+      pullBranch
     ]
   )
 

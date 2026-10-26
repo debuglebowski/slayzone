@@ -54,7 +54,9 @@ export function useTaskTerminalSession({
 }: UseTaskTerminalSessionParams): UseTaskTerminalSessionResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const updateTask = useMutation(trpc.task.update.mutationOptions())
+  // `mutateAsync` only: it is stable for the hook's lifetime, while the useMutation()
+  // result object is new on every render (see the persist effect below).
+  const { mutateAsync: updateTask } = useMutation(trpc.task.update.mutationOptions())
   // Detected session ID from /status command
   const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
 
@@ -102,7 +104,7 @@ export function useTaskTerminalSession({
   // Update DB with detected session ID
   const handleUpdateSessionId = useCallback(async () => {
     if (!task || !detectedSessionId) return
-    const updated = await updateTask.mutateAsync({
+    const updated = await updateTask({
       id: task.id,
       providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
     })
@@ -124,15 +126,19 @@ export function useTaskTerminalSession({
 
   // Persist detected conversation IDs immediately for modes that need session
   // discovery. Deduped by a ref so the write fires EXACTLY ONCE per detected id.
-  // This effect re-runs on every render (`updateTask` is a useMutation object in the
-  // deps, and `task` is a fresh object on each board refetch). Persisting issues a
-  // task.update → server broadcasts task-updated → board refetch → re-render. The old
-  // version started a NEW write on every such re-render and let the cleanup's
-  // `cancelled` flag strand the terminal setDetectedSessionId(null), so the write
-  // never cleared its own trigger → an infinite task.update loop that saturated the
-  // tRPC WS app-wide (panels/terminals in OTHER tabs starved). The ref makes re-runs
+  // This effect re-runs on every board refetch (`task` is a fresh object each time).
+  // Persisting issues a task.update → server broadcasts task-updated → board refetch →
+  // re-render. The old version started a NEW write on every such re-render and let the
+  // cleanup's `cancelled` flag strand the terminal setDetectedSessionId(null), so the
+  // write never cleared its own trigger → an infinite task.update loop that saturated
+  // the tRPC WS app-wide (panels/terminals in OTHER tabs starved). The ref makes re-runs
   // no-ops while a write for the same id is outstanding, and the clear runs without a
   // cancel gate so the loop always terminates.
+  // The deps must hold the stable `mutateAsync`, never the useMutation() result object:
+  // that object is new on every render, and the mutation's own pending→error state
+  // changes re-render this hook, so a failed write (ref reset for a retry) was re-issued
+  // by the re-render its failure caused → an endless task.update retry loop. A failed
+  // write now retries on the next real input change (e.g. the next board refetch).
   const persistedSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!task || !detectedSessionId || !sessionIdCommand) return
@@ -146,7 +152,7 @@ export function useTaskTerminalSession({
 
     void (async () => {
       try {
-        const updated = await updateTask.mutateAsync({
+        const updated = await updateTask({
           id: task.id,
           providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
         })

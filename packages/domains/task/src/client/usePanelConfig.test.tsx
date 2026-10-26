@@ -20,8 +20,11 @@ vi.mock('@slayzone/transport/client', () => ({
   }),
   useTRPC: () => ({ settings: { set: { mutationOptions: () => ({}) } } })
 }))
+// TanStack's contract: a NEW result object on every render whose `mutateAsync` is
+// stable for the component's lifetime.
+const setSettingAsync = vi.fn(async (_input: { key: string; value: string }) => undefined)
 vi.mock('@tanstack/react-query', () => ({
-  useMutation: () => ({ mutateAsync: vi.fn(async () => undefined) })
+  useMutation: () => ({ mutateAsync: setSettingAsync, isPending: false })
 }))
 
 const { usePanelConfig } = await import('./usePanelConfig')
@@ -86,6 +89,28 @@ describe('usePanelConfig (shared store)', () => {
     const after = document.querySelector('[data-testid="win2"]')?.textContent ?? ''
     expect(after).not.toBe(before)
     expect(after.startsWith('artifacts')).toBe(true)
+  })
+
+  it('updateConfig keeps one identity across re-renders and persists the config', async () => {
+    const seen = new Set<unknown>()
+    let latest: ReturnType<typeof usePanelConfig>['updateConfig'] | null = null
+    function Capture({ n }: { n: number }) {
+      const { updateConfig } = usePanelConfig()
+      seen.add(updateConfig)
+      latest = updateConfig
+      return <span>{n}</span>
+    }
+    const ui = render(<Capture n={1} />)
+    ui.rerender(<Capture n={2} />)
+    ui.rerender(<Capture n={3} />)
+    expect(seen.size).toBe(1)
+
+    const next = { viewEnabled: {}, webPanels: [], order: ['git', 'terminal'] }
+    await act(() => latest!(next))
+    expect(setSettingAsync).toHaveBeenLastCalledWith({
+      key: 'panel_config',
+      value: JSON.stringify(next)
+    })
   })
 
   it('in-window change events still reload (Settings dialog, e2e)', async () => {

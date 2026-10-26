@@ -1,27 +1,48 @@
 #!/usr/bin/env bash
 # Guard against the tRPC-cutover infinite-loop class: a useMutation() result
-# object (named `*Mutation`) placed inside a React hook dependency array.
+# object placed inside a React hook dependency array.
 #
 # useMutation()/useQuery() return a NEW object every render — only `.mutate`,
 # `.mutateAsync`, `.refetch` are stable. Depending on the whole object makes the
 # effect/callback re-run every render → mutate → re-render → mutate = infinite
 # loop that saturates the tRPC WebSocket (see commit cecf1d75 / memory
-# project_trpc_usemutation_unstable_deps_loops).
+# project_trpc_usemutation_unstable_deps_loops). The mutation's own state changes
+# (pending → error/success) re-render its host, so even an effect that dedupes its
+# writes loops as soon as a failure re-arms it (useTaskTerminalSession, 2026-10).
 #
 # Fix: for fire-and-forget mutations use the stable vanilla `useTRPCClient()`
 # (`trpcClient.x.y.mutate(...)`); for state-driven `useMutation`, never put the
-# result object in a dep array (dep on stable `.mutateAsync` / nothing).
+# result object in a dep array (`const { mutateAsync: x } = useMutation(...)`, or
+# dep on `.mutateAsync`).
+#
+# Two passes, each reporting `file:line:text`:
+#   (1) any `*Mutation`-named token bare in a one-line array literal (by name);
+#   (2) any identifier bound to a whole `useMutation(` result in the same file, bare
+#       in an array literal — multi-line arrays included (by binding).
+#
+# Usage: bash scripts/check-trpc-stable-deps.sh [dir-or-file ...]
+#        (default: packages/domains packages/apps/app/src/renderer)
 
 set -euo pipefail
 
+if [ "$#" -gt 0 ]; then
+  ROOTS=("$@")
+else
+  ROOTS=(packages/domains packages/apps/app/src/renderer)
+fi
+
+# Source files under ROOTS (node_modules / build output excluded), NUL-separated.
+source_files() {
+  find "${ROOTS[@]}" \( -name node_modules -o -name dist -o -name out \) -prune \
+    -o -type f \( -name '*.ts' -o -name '*.tsx' \) -print0
+}
+
+# ── (1) by name ──────────────────────────────────────────────────────────────
 # A dep-array literal `[ ... <ident>Mutation ]` where the token is the bare
 # object (no `.` before the closing `]`, so `.mutate` usage is NOT flagged).
 # `useMutation(` declarations have no `[` and are excluded.
-CANDIDATES=$(grep -rnE --include="*.ts" --include="*.tsx" \
-  '\[[^]]*[A-Za-z]+Mutation[^].]*\]' \
-  packages/domains packages/apps/app/src/renderer 2>/dev/null \
-  | grep -v '/node_modules/' \
-  | grep -v '/dist/' \
+CANDIDATES=$(source_files | xargs -0 grep -HnE \
+  '\[[^]]*[A-Za-z]+Mutation[^].]*\]' 2>/dev/null \
   | grep -vE 'useMutation\(' \
   || true)
 
@@ -57,16 +78,90 @@ while IFS= read -r line; do
   [ "$keep" -eq 1 ] && MATCHES="${MATCHES}${line}"$'\n'
 done <<<"$CANDIDATES"
 
-MATCHES=$(printf '%s' "$MATCHES")
+# ── (2) by binding ───────────────────────────────────────────────────────────
+# Pass (1) only sees names ending in `Mutation` on one line, so it missed
+# `const updateTask = useMutation(...)` listed in a multi-line dep array. This pass
+# keys on the binding instead of the name: every identifier bound to a WHOLE
+# useMutation() result (`const x = useMutation(` / `useMutation<T>(` / `ns.useMutation(`;
+# a destructured `{ mutateAsync: x }` is stable and not a binding of the object) is
+# flagged wherever it appears bare in an array literal of that file. Bare = not a
+# member of something else (`a.x`) and not itself dereferenced (`x.mutateAsync`,
+# `x?.reset`, `x!.mutate`, `x(`, `x[`).
+#
+# perl slurps each file so arrays spanning lines are seen whole. Strings and comments
+# are blanked first (same length, newlines kept, so offsets and line numbers hold)
+# so a bracket or a name inside them can't create or hide a match. The array match
+# allows one nesting level and the name search covers the WHOLE body, nested arrays
+# included, so a mis-paired bracket can widen a match (cry wolf) but never drop a
+# real dep out of it (go quiet). Same asymmetry as (1) — and a pass that fails to run
+# fails the check rather than reporting nothing.
+if ! BOUND=$(source_files | xargs -0 perl -0777 -ne '
+  my $src = $_;
+  (my $code = $src) =~ s{
+      //[^\n]*
+    | /\*.*?\*/
+    | "(?:\\.|[^"\\\n])*"
+    | '\''(?:\\.|[^'\''\\\n])*'\''
+    | `(?:\\.|[^`\\])*`
+  }{ (my $s = $&) =~ s/[^\n]/ /g; $s }gsex;
+
+  # The local names that call TanStack useMutation. convex/react exports a
+  # useMutation too, but it returns a memoized function (stable): a file importing
+  # THAT one under the bare name is not this hazard. An alias of the TanStack one
+  # (`useMutation as useRqMutation`) is.
+  my %callees = (useMutation => 1);
+  while ($src =~ /import\s*\{([^}]*)\}\s*from\s*["\x27]([^"\x27]+)["\x27]/g) {
+    my ($list, $from) = ($1, $2);
+    delete $callees{useMutation}
+      if $from eq "convex/react" && $list =~ /\buseMutation\b(?!\s+as\b)/;
+    $callees{$1} = 1
+      if $from eq "\@tanstack/react-query" && $list =~ /\buseMutation\s+as\s+([A-Za-z_\$][\w\$]*)/;
+  }
+  next unless %callees;
+  my $callee = join "|", map { quotemeta } sort keys %callees;
+
+  my %bound;
+  while ($code =~ /\b(?:const|let|var)\s+([A-Za-z_\$][\w\$]*)\s*(?::[^=;]*)?=\s*(?:[\w\$]+\s*\.\s*)*(?:$callee)\b/g) {
+    my $name = $1;
+    # `useMutation(...).mutate` / `.mutateAsync` binds the (stable) member, not the
+    # object. Only a call that parses as exactly that is let off; anything else
+    # (an unparsed generic, say) stays bound.
+    next if substr($code, pos($code)) =~
+      /\A\s*(?<g><(?:[^<>]++|(?&g))*>)?\s*(?<p>\((?:[^()]++|(?&p))*\))\s*!?\s*\??\s*\./;
+    $bound{$name} = 1;
+  }
+  next unless %bound;
+  my $names = join "|", map { quotemeta } sort keys %bound;
+
+  my @lines = split /\n/, $src, -1;
+  my %seen;
+  while ($code =~ /\[((?:[^\[\]]|\[[^\[\]]*\])*)\]/g) {
+    my ($body, $start) = ($1, $-[1]);
+    while ($body =~ /(?<![\w\$.])($names)(?![\w\$])(?!\s*!?\s*(?:\?\.|\.|\(|\[))/g) {
+      my $line = 1 + (substr($code, 0, $start + $-[1]) =~ tr/\n//);
+      next if $seen{$line}++;
+      print "$ARGV:$line:$lines[$line - 1]\n";
+    }
+  }
+'); then
+  echo "check-trpc-stable-deps: the by-binding pass failed to run" >&2
+  exit 2
+fi
+
+[ -n "$BOUND" ] && MATCHES="${MATCHES}${BOUND}"$'\n'
+
+# A line both passes report is listed once.
+MATCHES=$(printf '%s' "$MATCHES" | sed '/^$/d' | sort -t: -k1,1 -k2,2n -u)
 
 if [ -n "$MATCHES" ]; then
   echo "Unstable tRPC mutation object in a hook dependency array (infinite-loop risk)."
   echo "useMutation() returns a new object each render. Use the stable vanilla"
-  echo "useTRPCClient() for fire-and-forget mutations, or dep on .mutateAsync — never"
-  echo "the whole *Mutation object. See memory project_trpc_usemutation_unstable_deps_loops."
+  echo "useTRPCClient() for fire-and-forget mutations, or dep on .mutateAsync"
+  echo "(\`const { mutateAsync: x } = useMutation(...)\`) — never the whole result"
+  echo "object. See memory project_trpc_usemutation_unstable_deps_loops."
   echo ""
   echo "$MATCHES"
   exit 1
 fi
 
-echo "tRPC stable-deps lint passed — no *Mutation objects in hook dep arrays."
+echo "tRPC stable-deps lint passed — no useMutation() result objects in hook dep arrays."

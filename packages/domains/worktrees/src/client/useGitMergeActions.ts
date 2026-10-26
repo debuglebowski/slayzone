@@ -18,9 +18,11 @@ export function useGitMergeActions({
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const stageAllMutation = useMutation(trpc.worktrees.stageAll.mutationOptions())
-  const commitFilesMutation = useMutation(trpc.worktrees.commitFiles.mutationOptions())
-  const mergeWithAiMutation = useMutation(trpc.worktrees.mergeWithAI.mutationOptions())
+  // `mutateAsync` (stable) for the ones the callbacks below depend on — never the
+  // useMutation() result object, which is new on every render.
+  const { mutateAsync: stageAll } = useMutation(trpc.worktrees.stageAll.mutationOptions())
+  const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
+  const { mutateAsync: mergeWithAi } = useMutation(trpc.worktrees.mergeWithAI.mutationOptions())
   const abortMergeMutation = useMutation(trpc.worktrees.abortMerge.mutationOptions())
 
   // Merge-mode: commit and continue merge
@@ -29,8 +31,8 @@ export function useGitMergeActions({
     const targetPath = task.worktree_path ?? projectPath
     if (!targetPath) return
 
-    await stageAllMutation.mutateAsync({ path: targetPath })
-    await commitFilesMutation.mutateAsync({
+    await stageAll({ path: targetPath })
+    await commitFiles({
       repoPath: targetPath,
       message: 'WIP: changes before merge'
     })
@@ -40,7 +42,7 @@ export function useGitMergeActions({
     )
     if (!sourceBranch) throw new Error('Cannot merge: detached HEAD in worktree')
 
-    const result = await mergeWithAiMutation.mutateAsync({
+    const result = await mergeWithAi({
       projectPath: projectPath!,
       worktreePath: task.worktree_path!,
       parentBranch: task.worktree_parent_branch!,
@@ -80,9 +82,9 @@ export function useGitMergeActions({
     onTaskUpdated,
     queryClient,
     trpc,
-    stageAllMutation,
-    commitFilesMutation,
-    mergeWithAiMutation
+    stageAll,
+    commitFiles,
+    mergeWithAi
   ])
 
   const handleAbortMerge = useCallback(async () => {

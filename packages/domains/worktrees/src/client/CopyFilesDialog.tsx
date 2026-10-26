@@ -36,6 +36,12 @@ interface CopyFilesDialogProps {
   onConfirm: (choice: CopyChoice) => void
 }
 
+// The tree while there is none (dialog closed, scan not loaded, scan failed). One
+// shared instance: `tree` is a dep of the preset→selection sync effect, and a fresh
+// `[]` per render made a failed scan (no data, `treeLoaded` true) re-run that effect
+// → setSelected → re-render → new `[]` → … an infinite update loop.
+const NO_TREE: IgnoredFileNode[] = []
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -141,7 +147,7 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
   const treeQuery = useQuery(
     trpc.worktrees.getIgnoredFileTree.queryOptions({ repoPath }, { enabled: open })
   )
-  const tree: IgnoredFileNode[] = open ? (treeQuery.data ?? []) : []
+  const tree: IgnoredFileNode[] = open ? (treeQuery.data ?? NO_TREE) : NO_TREE
   const loading = open && treeQuery.isFetching
   const treeLoaded = open && (treeQuery.isSuccess || treeQuery.isError)
 
