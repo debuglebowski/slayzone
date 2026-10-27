@@ -41,7 +41,7 @@ export function ProjectLockScreen({
       const r = new Date(lockedUntil ?? 0).getTime() - Date.now()
       setRemaining(r)
       if (r <= 0) {
-        overrideDurationLock(project.id)
+        overrideDurationLock(project.id, lockedUntil)
         onUnlocked(project)
       }
     },
@@ -59,7 +59,7 @@ export function ProjectLockScreen({
   )
 
   const handleUnlockEarly = useCallback(() => {
-    if (hasDuration) overrideDurationLock(project.id)
+    if (hasDuration) overrideDurationLock(project.id, lockedUntil)
     else if (schedule) overrideScheduleLock(project.id)
     onUnlocked(project)
   }, [project, hasDuration, schedule, onUnlocked])

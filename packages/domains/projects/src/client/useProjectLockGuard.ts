@@ -20,12 +20,23 @@ export function isRateLimited(project: Project): boolean {
 }
 
 // Session-only lock overrides — reset on app restart
-const durationOverrides = new Set<string>()
+// A duration override belongs to the lock it unlocked (projectId → that lock's
+// locked_until): a NEW lock set later in the session is enforced again.
+const durationOverrides = new Map<string, string>()
 const scheduleOverrides = new Set<string>()
 
-export function overrideDurationLock(projectId: string): void {
-  durationOverrides.add(projectId)
+export function overrideDurationLock(
+  projectId: string,
+  lockedUntil: string | null | undefined
+): void {
+  if (!lockedUntil) return
+  durationOverrides.set(projectId, lockedUntil)
   notifyLockChange()
+}
+
+function isDurationOverridden(project: Project): boolean {
+  const lockedUntil = project.lock_config?.locked_until
+  return !!lockedUntil && durationOverrides.get(project.id) === lockedUntil
 }
 
 export function overrideScheduleLock(projectId: string): void {
@@ -78,7 +89,7 @@ function isWithinSchedule(
 
 export function isProjectDurationLocked(project: Project | null | undefined): boolean {
   if (!project) return false
-  if (durationOverrides.has(project.id)) return false
+  if (isDurationOverridden(project)) return false
   return isWithinDuration(project.lock_config?.locked_until)
 }
 
@@ -96,7 +107,7 @@ export const PROJECT_LOCKED_TOAST = 'Project is locked — cannot open new tabs'
 
 export function hasActiveLockOverride(project: Project | null | undefined): boolean {
   if (!project) return false
-  if (durationOverrides.has(project.id) && isWithinDuration(project.lock_config?.locked_until))
+  if (isDurationOverridden(project) && isWithinDuration(project.lock_config?.locked_until))
     return true
   if (scheduleOverrides.has(project.id) && isWithinSchedule(project.lock_config?.schedule))
     return true

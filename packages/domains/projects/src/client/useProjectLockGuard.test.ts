@@ -102,9 +102,29 @@ describe('isProjectDurationLocked', () => {
       rate_limit: null,
       schedule: null
     })
-    overrideDurationLock(p.id)
+    overrideDurationLock(p.id, p.lock_config?.locked_until)
     expect(isProjectDurationLocked(p)).toBeFalsy()
     clearLockOverrides(p.id)
+  })
+
+  test('an override applies only to the lock it unlocked, never to a newer lock', () => {
+    const id = newId()
+    const first = makeProject(id, {
+      locked_until: futureIso(60_000),
+      rate_limit: null,
+      schedule: null
+    })
+    overrideDurationLock(first.id, first.lock_config?.locked_until)
+    expect(isProjectDurationLocked(first)).toBeFalsy()
+    // Same session, same project: the user sets a NEW duration lock.
+    const relocked = makeProject(id, {
+      locked_until: futureIso(120_000),
+      rate_limit: null,
+      schedule: null
+    })
+    expect(isProjectDurationLocked(relocked)).toBeTruthy()
+    expect(hasActiveLockOverride(relocked)).toBeFalsy()
+    clearLockOverrides(id)
   })
 
   test('clearLockOverrides re-enables duration lock', () => {
@@ -113,7 +133,7 @@ describe('isProjectDurationLocked', () => {
       rate_limit: null,
       schedule: null
     })
-    overrideDurationLock(p.id)
+    overrideDurationLock(p.id, p.lock_config?.locked_until)
     clearLockOverrides(p.id)
     expect(isProjectDurationLocked(p)).toBeTruthy()
   })
@@ -230,7 +250,7 @@ describe('hasActiveLockOverride', () => {
       rate_limit: null,
       schedule: null
     })
-    overrideDurationLock(p.id)
+    overrideDurationLock(p.id, p.lock_config?.locked_until)
     expect(hasActiveLockOverride(p)).toBeTruthy()
     clearLockOverrides(p.id)
   })
@@ -241,7 +261,7 @@ describe('hasActiveLockOverride', () => {
       rate_limit: null,
       schedule: null
     })
-    overrideDurationLock(p.id)
+    overrideDurationLock(p.id, p.lock_config?.locked_until)
     expect(hasActiveLockOverride(p)).toBeFalsy()
     clearLockOverrides(p.id)
   })
@@ -274,7 +294,7 @@ describe('hasActiveLockOverride', () => {
       rate_limit: null,
       schedule: activeSchedule()
     })
-    overrideDurationLock(p.id)
+    overrideDurationLock(p.id, p.lock_config?.locked_until)
     overrideScheduleLock(p.id)
     clearLockOverrides(p.id)
     expect(isProjectDurationLocked(p)).toBeTruthy()

@@ -74,4 +74,14 @@ test.describe('Project lock clears and re-locks on screen', () => {
     await page.getByRole('button', { name: 'Re-lock' }).click()
     await expect(lockScreen).toBeVisible({ timeout: 3_000 })
   })
+  test('a new lock after Unlock early is enforced again', async ({ mainWindow: page }) => {
+    await setLock(page, 60 * 60_000)
+    const lockScreen = page.getByText('Lock Probe locked')
+    await expect(lockScreen).toBeVisible({ timeout: 5_000 })
+    await page.getByRole('button', { name: 'Unlock early' }).click()
+    await expect(lockScreen).toBeHidden({ timeout: 3_000 })
+    // Same session, same project: the user sets a NEW duration lock.
+    await setLock(page, 2 * 60 * 60_000)
+    await expect(lockScreen).toBeVisible({ timeout: 5_000 })
+  })
 })

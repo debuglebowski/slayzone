@@ -45,7 +45,7 @@ describe('useProjectLockState', () => {
     const p = project('p2', new Date(START + 60 * 60_000).toISOString())
     const { result } = renderHook(() => useProjectLockState(p))
     expect(result.current).toEqual({ locked: true, overrideActive: false })
-    act(() => overrideDurationLock('p2'))
+    act(() => overrideDurationLock('p2', p.lock_config?.locked_until))
     expect(result.current).toEqual({ locked: false, overrideActive: true })
     act(() => clearLockOverrides('p2'))
     expect(result.current).toEqual({ locked: true, overrideActive: false })
