@@ -3,7 +3,46 @@
 #  (1) side-car + its transitive deps must never import electron.
 #  (2) @slayzone/app must never import @slayzone/hub — the side-car is
 #      spawned by file path, never bundled into the Electron main process.
+#
+# Every outcome other than a clean "no match" fails: a match is a violation, and a
+# search that could not run (unreadable path, bad pattern, a missing search root,
+# a perl pass that could not read a file) is an error, never a pass. grep's exit
+# status says which: 0 = matches, 1 = none, anything else = the search failed.
 set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+fail_error() {
+  echo "check-server-electron-free: $1 — cannot verify, failing." >&2
+  exit 2
+}
+
+# A search root must exist: a moved directory would otherwise just match nothing.
+require_dir() {
+  [ -d "$1" ] || fail_error "search root $1 does not exist (moved? repoint it)"
+}
+
+# `glob_dirs <glob>` leaves the directories the glob matched in $dirs; at least one
+# must exist, for the same reason (an unmatched glob stays literal and fails here).
+glob_dirs() {
+  local d
+  dirs=()
+  for d in "$@"; do
+    [ -d "$d" ] && dirs+=("$d")
+  done
+  [ "${#dirs[@]}" -gt 0 ] || fail_error "no $* directories (moved? repoint it)"
+}
+
+# `grep_hits ARGS...` runs grep and leaves its matches in $hit (empty = none).
+grep_hits() {
+  local status=0
+  hit=$(grep "$@") || status=$?
+  case "$status" in
+    0 | 1) ;;
+    *) fail_error "grep failed (exit $status) searching ${*: -1}" ;;
+  esac
+}
+
 fail=0
 
 ELECTRON="from ['\"]electron['\"]|require\(['\"]electron['\"]\)"
@@ -11,9 +50,10 @@ ELECTRON="from ['\"]electron['\"]|require\(['\"]electron['\"]\)"
 # into the side-car, and some MUST resolve the electron binary path to spawn the
 # built bins under Electron's node ABI (install-handshake.test.ts).
 for p in packages/apps/hub/src packages/shared/transport/src packages/shared/platform/src; do
-  hit=$(grep -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
+  require_dir "$p"
+  grep_hits -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
     --exclude="*.test.ts" --exclude="*.test.tsx" \
-    "$ELECTRON" "$p" 2>/dev/null || true)
+    "$ELECTRON" "$p"
   if [ -n "$hit" ]; then
     echo "Side-car must not import electron:"
     echo "$hit"
@@ -25,10 +65,10 @@ done
 # packages/domains/<d>/src/server/ is the pure-Node half that @slayzone/hub
 # bundles; an electron import there breaks the headless build. electron/ glue
 # is exempt — only server/ is guarded.
-for d in packages/domains/*/src/server; do
-  [ -d "$d" ] || continue
-  hit=$(grep -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
-    "$ELECTRON" "$d" 2>/dev/null || true)
+glob_dirs packages/domains/*/src/server
+for d in "${dirs[@]}"; do
+  grep_hits -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
+    "$ELECTRON" "$d"
   if [ -n "$hit" ]; then
     echo "Domain server/ must not import electron ($d):"
     echo "$hit"
@@ -37,8 +77,9 @@ for d in packages/domains/*/src/server; do
 done
 
 SERVER_IMPORT="from ['\"]@slayzone/hub"
-hit=$(grep -rnE --include="*.ts" --include="*.tsx" \
-  "$SERVER_IMPORT" packages/apps/app/src 2>/dev/null || true)
+require_dir packages/apps/app/src
+grep_hits -rnE --include="*.ts" --include="*.tsx" \
+  "$SERVER_IMPORT" packages/apps/app/src
 if [ -n "$hit" ]; then
   echo "@slayzone/app must not import @slayzone/hub (spawn dist/bin.js by path):"
   echo "$hit"
@@ -61,10 +102,14 @@ fi
 #      compile-enforced at every wiring site.
 #
 #      `import type` stays exempt (fully erased). Strip it before searching —
-#      perl handles the multiline form a line-based grep can't.
-for p in packages/apps/hub/src packages/shared/transport/src packages/domains/*/src/server; do
-  [ -d "$p" ] || continue
-  hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 2>/dev/null | xargs -0 perl -0777 -ne '
+#      perl handles the multiline form a line-based grep can't. A file perl cannot
+#      open is fatal (`-Mwarnings=FATAL,inplace`; by default perl warns, skips it
+#      and exits 0), so with pipefail any find/perl failure fails the guard.
+glob_dirs packages/domains/*/src/server
+for p in packages/apps/hub/src packages/shared/transport/src "${dirs[@]}"; do
+  require_dir "$p"
+  # shellcheck disable=SC2016 # single-quoted perl source: its $vars are perl's
+  hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 | xargs -0 perl -Mwarnings=FATAL,inplace -0777 -ne '
     my $src = $_;
     $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;   # multiline type imports
     while ($src =~ /from\s+'\''(\@slayzone\/[a-z0-9-]+\/electron[^'\'']*)'\''/g) {
@@ -73,7 +118,7 @@ for p in packages/apps/hub/src packages/shared/transport/src packages/domains/*/
     while ($src =~ /import\s*\(\s*'\''(\@slayzone\/[a-z0-9-]+\/electron[^'\'']*)'\''\s*\)/g) {
       print "$ARGV: dynamic import of $1\n";
     }
-  ' 2>/dev/null || true)
+  ') || fail_error "the /electron-entry scan of $p failed"
   if [ -n "$hit" ]; then
     echo "Server-side code must not import a domain /electron entry ($p) — use AppDeps:"
     echo "$hit"
@@ -90,13 +135,15 @@ done
 LEGACY_HELPERS="from ['\"]@slayzone/task/shared['\"]|from ['\"]@slayzone/task['\"]"
 LEGACY_NAMES="getProviderConversationId|setProviderConversationId|appendProviderConversationId|chatConversationId"
 client_hits=""
-for p in packages/domains/*/src/client packages/apps/app/src/renderer packages/apps/website/src; do
-  [ -d "$p" ] || continue
+glob_dirs packages/domains/*/src/client
+for p in "${dirs[@]}" packages/apps/app/src/renderer website/src; do
+  require_dir "$p"
   # Two greps: first find files that import from the task barrels, then
   # check those files for the legacy symbols. Cheap + lint-clean.
-  files=$(grep -rlE --include="*.ts" --include="*.tsx" "$LEGACY_HELPERS" "$p" 2>/dev/null || true)
+  grep_hits -rlE --include="*.ts" --include="*.tsx" "$LEGACY_HELPERS" "$p"
+  files=$hit
   for f in $files; do
-    hit=$(grep -nE "$LEGACY_NAMES" "$f" 2>/dev/null || true)
+    grep_hits -nE "$LEGACY_NAMES" "$f"
     if [ -n "$hit" ]; then
       client_hits+="${f}:${hit}"$'\n'
     fi
@@ -129,7 +176,10 @@ for f in $BOARD_OPS; do
     fail=1
     continue
   fi
-  if ! grep -q "parseAndColorTask" "$f"; then
+  status=0
+  grep -q "parseAndColorTask" "$f" || status=$?
+  [ "$status" -le 1 ] || fail_error "grep failed (exit $status) reading $f"
+  if [ "$status" -eq 1 ]; then
     echo "Task op feeds the renderer store but does not hydrate currentConversationByMode:"
     echo "  $f — use parseAndColorTask(s) (see attachCurrentConversationByMode), not bare parseTask(s)."
     fail=1
@@ -150,26 +200,25 @@ done
 #     files (the hub pointer, the service install prefix), which are legitimately
 #     on disk. It anchors on $HOME directly and never consults SLAYZONE_ROOT.
 CLI_SRC="packages/apps/cli/src"
-if [ -d "$CLI_SRC" ]; then
-  hit=$(grep -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
-    "from ['\"]node:sqlite['\"]|require\(['\"]node:sqlite['\"]\)" "$CLI_SRC" 2>/dev/null || true)
-  if [ -n "$hit" ]; then
-    echo "The slay CLI must not open a database — route it through the hub's REST surface:"
-    echo "$hit"
-    fail=1
-  fi
+require_dir "$CLI_SRC"
+grep_hits -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
+  "from ['\"]node:sqlite['\"]|require\(['\"]node:sqlite['\"]\)" "$CLI_SRC"
+if [ -n "$hit" ]; then
+  echo "The slay CLI must not open a database — route it through the hub's REST surface:"
+  echo "$hit"
+  fail=1
+fi
 
-  # Layout derivation. getStorageDir/getSlayzoneHomeDir/getSupervisedRoot all
-  # resolve SLAYZONE_ROOT; any of them in the CLI means it is guessing at the
-  # app's on-disk layout again.
-  hit=$(grep -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
-    --exclude="cli-state.ts" \
-    "getStorageDir|getSlayzoneHomeDir|getSupervisedRoot" "$CLI_SRC" 2>/dev/null || true)
-  if [ -n "$hit" ]; then
-    echo "The slay CLI must not derive the app's storage layout (only cli-state.ts owns paths):"
-    echo "$hit"
-    fail=1
-  fi
+# Layout derivation. getStorageDir/getSlayzoneHomeDir/getSupervisedRoot all
+# resolve SLAYZONE_ROOT; any of them in the CLI means it is guessing at the
+# app's on-disk layout again.
+grep_hits -rnE --include="*.ts" --include="*.mts" --exclude="*.test.ts" \
+  --exclude="cli-state.ts" \
+  "getStorageDir|getSlayzoneHomeDir|getSupervisedRoot" "$CLI_SRC"
+if [ -n "$hit" ]; then
+  echo "The slay CLI must not derive the app's storage layout (only cli-state.ts owns paths):"
+  echo "$hit"
+  fail=1
 fi
 
 # (6) The Electron main process must not open the SHARED database. The hub owns
@@ -197,26 +246,26 @@ fi
 #     `*.test.ts` is exempt only while the migration tests still live under
 #     main/db/; P5 relocates them to transport/src/db-bootstrap/.
 MAIN_SRC="packages/apps/app/src/main"
-if [ -d "$MAIN_SRC" ]; then
-  hit=$(find "$MAIN_SRC" -name "*.ts" -not -name "*.test.ts" \
-      ! -path "*/db/diag-worker.ts" \
-      ! -path "*/client-settings-migration.ts" -print0 2>/dev/null \
-    | xargs -0 perl -0777 -ne '
-      my $src = $_;
-      $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;  # import type { X } from
-      $src =~ s/import\s+type\s+\w+\s+from\s+'\''[^'\'']*'\''//gs;        # import type X from
-      while ($src =~ /from\s+'\''(better-sqlite3|node:sqlite)'\''/g) {
-        print "$ARGV: value import of $1\n";
-      }
-      while ($src =~ /require\s*\(\s*'\''(better-sqlite3|node:sqlite)'\''\s*\)/g) {
-        print "$ARGV: require of $1\n";
-      }
-    ' 2>/dev/null || true)
-  if [ -n "$hit" ]; then
-    echo "Electron main must not open the shared database — the hub owns it in every mode:"
-    echo "$hit"
-    fail=1
-  fi
+require_dir "$MAIN_SRC"
+# shellcheck disable=SC2016 # single-quoted perl source: its $vars are perl's
+hit=$(find "$MAIN_SRC" -name "*.ts" -not -name "*.test.ts" \
+    ! -path "*/db/diag-worker.ts" \
+    ! -path "*/client-settings-migration.ts" -print0 \
+  | xargs -0 perl -Mwarnings=FATAL,inplace -0777 -ne '
+    my $src = $_;
+    $src =~ s/import\s+type\s+\{[^}]*\}\s+from\s+'\''[^'\'']*'\''//gs;  # import type { X } from
+    $src =~ s/import\s+type\s+\w+\s+from\s+'\''[^'\'']*'\''//gs;        # import type X from
+    while ($src =~ /from\s+'\''(better-sqlite3|node:sqlite)'\''/g) {
+      print "$ARGV: value import of $1\n";
+    }
+    while ($src =~ /require\s*\(\s*'\''(better-sqlite3|node:sqlite)'\''\s*\)/g) {
+      print "$ARGV: require of $1\n";
+    }
+  ') || fail_error "the shared-database scan of $MAIN_SRC failed"
+if [ -n "$hit" ]; then
+  echo "Electron main must not open the shared database — the hub owns it in every mode:"
+  echo "$hit"
+  fail=1
 fi
 
 if [ "$fail" -eq 0 ]; then

@@ -10,12 +10,28 @@ else
   SEARCH_BIN="grep"
 fi
 
+# `contains FILE LITERAL`: 0 = present, 1 = absent. The search's own exit status says
+# which (0 = match, 1 = none); anything else means it could not run (missing or
+# unreadable file) and fails the whole check — never read as "absent", which would
+# silently pass every require_not_contains on that file.
+contains() {
+  local status=0
+  "$SEARCH_BIN" -F -q -- "$2" "$1" || status=$?
+  case "$status" in
+    0 | 1) return "$status" ;;
+    *)
+      echo "Policy check error: $SEARCH_BIN failed (exit $status) reading $1 — cannot verify, failing." >&2
+      exit 2
+      ;;
+  esac
+}
+
 require_contains() {
   local file="$1"
   local literal="$2"
   local description="$3"
 
-  if ! "$SEARCH_BIN" -F -q -- "$literal" "$file"; then
+  if ! contains "$file" "$literal"; then
     echo "Policy check failed: $description"
     echo "  Missing in $file: $literal"
     exit 1
@@ -27,7 +43,7 @@ require_not_contains() {
   local literal="$2"
   local description="$3"
 
-  if "$SEARCH_BIN" -F -q -- "$literal" "$file"; then
+  if contains "$file" "$literal"; then
     echo "Policy check failed: $description"
     echo "  Forbidden in $file: $literal"
     exit 1
@@ -79,6 +95,7 @@ require_contains \
   "container: ubuntu:22.04" \
   "release-foundation.yml must build Linux in the pinned glibc-floor container (#165)"
 
+# shellcheck disable=SC2016 # a literal GitHub expression, not a shell one
 require_contains \
   ".github/workflows/release-foundation.yml" \
   'Publish (${{ matrix.channel }})' \

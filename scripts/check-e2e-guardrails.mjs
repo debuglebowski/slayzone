@@ -32,8 +32,15 @@ const TEST_TIMEOUT_MS = 30_000
 
 const violations = []
 
+// A moved e2e root must fail the guard, not pass it as "0 files clean".
+if (!fs.existsSync(E2E_ROOT)) {
+  console.error(
+    `✖ e2e guardrails: search root ${E2E_ROOT} does not exist (moved? repoint it) — cannot verify, failing.`
+  )
+  process.exit(2)
+}
+
 function walk(dir, out = []) {
-  if (!fs.existsSync(dir)) return out
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name)
     if (entry.isDirectory()) walk(p, out)

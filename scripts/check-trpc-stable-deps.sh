@@ -20,6 +20,9 @@
 #   (2) any identifier bound to a whole `useMutation(` result in the same file, bare
 #       in an array literal — multi-line arrays included (by binding).
 #
+# A search that could not run (missing root, unreadable file, grep/perl failure)
+# fails the check with exit 2 — it is never read as "no matches".
+#
 # Usage: bash scripts/check-trpc-stable-deps.sh [dir-or-file ...]
 #        (default: packages/domains packages/apps/app/src/renderer)
 
@@ -41,10 +44,27 @@ source_files() {
 # A dep-array literal `[ ... <ident>Mutation ]` where the token is the bare
 # object (no `.` before the closing `]`, so `.mutate` usage is NOT flagged).
 # `useMutation(` declarations have no `[` and are excluded.
-CANDIDATES=$(source_files | xargs -0 grep -HnE \
-  '\[[^]]*[A-Za-z]+Mutation[^].]*\]' 2>/dev/null \
-  | grep -vE 'useMutation\(' \
-  || true)
+#
+# grep exits 0 = matches, 1 = none, anything else = it failed. xargs folds every
+# non-zero batch status into one (123), so map them per batch first: "none" is
+# success, a failed grep stays a failure — and with pipefail so does a failed find.
+# shellcheck disable=SC2016 # single-quoted sh source: its $vars are the inner shell's
+if ! CANDIDATES=$(source_files | xargs -0 sh -c '
+  pattern=$1
+  shift
+  grep -HnE -- "$pattern" "$@" || [ "$?" -eq 1 ]
+' sh '\[[^]]*[A-Za-z]+Mutation[^].]*\]'); then
+  echo "check-trpc-stable-deps: the by-name pass failed to run" >&2
+  exit 2
+fi
+if [ -n "$CANDIDATES" ]; then
+  status=0
+  CANDIDATES=$(printf '%s\n' "$CANDIDATES" | grep -vE 'useMutation\(') || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "check-trpc-stable-deps: the by-name filter failed (exit $status)" >&2
+    exit 2
+  fi
+fi
 
 # The match above is purely textual: it fires on ANY identifier ending in
 # `Mutation`, including ones that have nothing to do with `useMutation()`. A
@@ -94,8 +114,10 @@ done <<<"$CANDIDATES"
 # allows one nesting level and the name search covers the WHOLE body, nested arrays
 # included, so a mis-paired bracket can widen a match (cry wolf) but never drop a
 # real dep out of it (go quiet). Same asymmetry as (1) — and a pass that fails to run
-# fails the check rather than reporting nothing.
-if ! BOUND=$(source_files | xargs -0 perl -0777 -ne '
+# fails the check rather than reporting nothing. A file perl cannot open is fatal
+# (`-Mwarnings=FATAL,inplace`); by default perl warns, skips it and exits 0.
+# shellcheck disable=SC2016 # single-quoted perl source: its $vars are perl's
+if ! BOUND=$(source_files | xargs -0 perl -Mwarnings=FATAL,inplace -0777 -ne '
   my $src = $_;
   (my $code = $src) =~ s{
       //[^\n]*
