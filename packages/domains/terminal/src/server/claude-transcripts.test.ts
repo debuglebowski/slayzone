@@ -1,4 +1,4 @@
-import { writeFileSync, mkdtempSync, mkdirSync } from 'fs'
+import { writeFileSync, mkdtempSync, mkdirSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -87,6 +87,18 @@ async function main(): Promise<void> {
   const meta2 = await readClaudeTranscriptMeta(file2)
   assert(meta2.hasHumanTurn === false, 'sidechain-only → no human turn')
   assert(meta2.cwd === '/repo', 'still reads cwd from sidechain record')
+
+  // ---- early exit must close the file (the healer re-reads every transcript;
+  // a leaked fd per read exhausted the hub and broke every spawn, git included) ----
+  const big = join(dir, 'big.jsonl')
+  const filler = JSON.stringify({ type: 'progress', pad: 'x'.repeat(200) })
+  writeFileSync(big, [lines[3], ...Array.from({ length: 20_000 }, () => filler)].join('\n') + '\n')
+  const openFds = (): number => readdirSync('/dev/fd').length
+  const fdsBefore = openFds()
+  for (let i = 0; i < 20; i++) await readClaudeTranscriptMeta(big)
+  await new Promise((r) => setTimeout(r, 100))
+  const leaked = openFds() - fdsBefore
+  assert(leaked <= 0, `early exit closes the transcript (leaked ${leaked} fds over 20 reads)`)
 
   // ---- claudeTranscriptRetentionMs (`cleanupPeriodDays` in ~/.claude/settings.json) ----
   const DAY = 24 * 60 * 60 * 1000

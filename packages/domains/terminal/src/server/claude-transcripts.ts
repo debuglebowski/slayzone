@@ -114,10 +114,8 @@ export async function readClaudeTranscriptMeta(
     gitBranch: null,
     hasHumanTurn: false
   }
-  const rl = createInterface({
-    input: createReadStream(filePath, { encoding: 'utf8' }),
-    crlfDelay: Infinity
-  })
+  const input = createReadStream(filePath, { encoding: 'utf8' })
+  const rl = createInterface({ input, crlfDelay: Infinity })
   try {
     let count = 0
     for await (const line of rl) {
@@ -141,7 +139,11 @@ export async function readClaudeTranscriptMeta(
       if (meta.cwd && meta.firstTsMs != null && meta.gitBranch != null && meta.hasHumanTurn) break
     }
   } finally {
+    // rl.close() does NOT close `input`: on an early break the fd stays open. The
+    // healer re-reads every transcript, so each pass leaked one fd per file until
+    // the hub hit its fd limit and every spawn (git included) failed.
     rl.close()
+    input.destroy()
   }
   return meta
 }
