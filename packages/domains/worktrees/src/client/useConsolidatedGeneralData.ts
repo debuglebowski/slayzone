@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type {
@@ -154,7 +154,6 @@ export function useConsolidatedGeneralData(
   const [baseCount, setBaseCount] = useState(0)
   const [taskBranch, setTaskBranch] = useState<string | null>(null)
   const [diffStats, setDiffStats] = useState<DiffStatsSummary | null>(null)
-  const [linkedPr, setLinkedPr] = useState<GhPullRequest | null>(null)
   const [metadata, setMetadata] = useState<WorktreeMetadata | null>(null)
   const [branchLoading, setBranchLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -334,28 +333,18 @@ export function useConsolidatedGeneralData(
     await fetchGitData()
   }, [fetchGitData])
 
-  // PR — the manual link when there is one (reactive fetch when pr_url changes),
-  // else the one gh resolves for the checked-out branch (shared useBranchPr query).
+  // PR — the manual link when there is one (keyed by pr_url, so a new link is a
+  // fresh query), else the one gh resolves for the checked-out branch (shared
+  // useBranchPr query).
   const branchPr = useBranchPr({ task, projectPath, enabled: visible })
-  useEffect(() => {
-    const repoPath = projectPath || targetPath
-    if (!repoPath || !task.pr_url) {
-      setLinkedPr(null)
-      return
-    }
-    let cancelled = false
-    const apply = (next: GhPullRequest | null) => {
-      if (!cancelled) setLinkedPr(next)
-    }
-    queryClient
-      .fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath, url: task.pr_url }))
-      .then(apply)
-      .catch(() => apply(null))
-    return () => {
-      cancelled = true
-    }
-  }, [task.pr_url, projectPath, targetPath, queryClient, trpc])
-  const pr = task.pr_url ? linkedPr : branchPr.pr
+  const prRepoPath = projectPath || targetPath
+  const linkedPrQuery = useQuery(
+    trpc.worktrees.getPrByUrl.queryOptions(
+      { repoPath: prRepoPath ?? '', url: task.pr_url ?? '' },
+      { enabled: !!prRepoPath && !!task.pr_url }
+    )
+  )
+  const pr = task.pr_url ? (prRepoPath ? (linkedPrQuery.data ?? null) : null) : branchPr.pr
 
   // Metadata — one-time per worktree path
   useEffect(() => {

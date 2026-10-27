@@ -23,14 +23,16 @@ vi.mock('@slayzone/ui', async () => {
   }
 })
 
-// Every trpc.<router>.<proc> exposes the option builders; mutations log their input.
+// Every trpc.<router>.<proc> exposes the option builders (query options keep their
+// `enabled` etc.; the QueryClient's default queryFn answers them); mutations log
+// their input.
 const calls: Array<[string, unknown]> = []
 const mutationResults: Record<string, unknown> = {}
 const procs = new Proxy(
   {},
   {
     get: (_t, name: string) => ({
-      queryOptions: (input: unknown) => ({ queryKey: [name, input] }),
+      queryOptions: (input: unknown, opts?: object) => ({ ...opts, queryKey: [name, input] }),
       mutationOptions: () => ({
         mutationFn: async (input: unknown) => {
           calls.push([name, input])
@@ -69,11 +71,22 @@ afterEach(() => {
   toast.mockReset()
 })
 
+/** A QueryClient whose fetchQuery and useQuery both answer through `fetch`. */
+function mockClient(fetch: (key: string, input: unknown) => Promise<unknown>): QueryClient {
+  const byKey = ({ queryKey }: { queryKey: readonly unknown[] }) =>
+    fetch(String(queryKey[0]), queryKey[1])
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { queryFn: byKey as never, retry: false },
+      mutations: { retry: false }
+    }
+  })
+  vi.spyOn(client, 'fetchQuery').mockImplementation(byKey as never)
+  return client
+}
+
 async function setup() {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  vi.spyOn(client, 'fetchQuery').mockImplementation(
-    (async (o: { queryKey: unknown[] }) => queryResults[String(o.queryKey[0])] ?? null) as never
-  )
+  const client = mockClient(async (key) => queryResults[key] ?? null)
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
@@ -149,12 +162,10 @@ describe('useConsolidatedGeneralData — out-of-date responses', () => {
   // rest answer from queryResults right away.
   async function setupWithProps(deferred: string[], initial: { task: Task; projectPath: string }) {
     pending = []
-    const client = new QueryClient()
-    vi.spyOn(client, 'fetchQuery').mockImplementation(((o: { queryKey: unknown[] }) => {
-      const [key, input] = o.queryKey as [string, unknown]
+    const client = mockClient((key, input) => {
       if (!deferred.includes(key)) return Promise.resolve(queryResults[key] ?? null)
       return new Promise((resolve) => pending.push({ key, input, resolve }))
-    }) as never)
+    })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     )
@@ -225,14 +236,16 @@ describe('useConsolidatedGeneralData — out-of-date responses', () => {
       task: wtTask({ worktree_path: '/wt1', pr_url: 'https://x/pr/2' }),
       projectPath: '/repo'
     })
+    // A useQuery result reaches React on react-query's next-macrotask notify.
+    const answer = (url: string, pr: unknown) =>
+      act(async () => {
+        take('getPrByUrl', { repoPath: '/repo', url }).resolve(pr)
+        await new Promise((r) => setTimeout(r, 0))
+      })
     const pr2 = { number: 2 }
-    await act(async () =>
-      take('getPrByUrl', { repoPath: '/repo', url: 'https://x/pr/2' }).resolve(pr2)
-    )
+    await answer('https://x/pr/2', pr2)
     expect(result.current.pr).toBe(pr2)
-    await act(async () =>
-      take('getPrByUrl', { repoPath: '/repo', url: 'https://x/pr/1' }).resolve({ number: 1 })
-    )
+    await answer('https://x/pr/1', { number: 1 })
     expect(result.current.pr).toBe(pr2)
   })
 
