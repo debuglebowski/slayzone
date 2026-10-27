@@ -1,4 +1,4 @@
-import * as yaml from 'js-yaml'
+import { CORE_SCHEMA, loadAll, mergeTag } from 'js-yaml'
 import type { SkillValidationIssue, SkillValidationState } from './types'
 
 export interface ParsedSkillFrontmatter {
@@ -11,6 +11,9 @@ interface YamlExceptionLike extends Error {
   reason?: string
   mark?: { line?: number }
 }
+
+// js-yaml 5's loader schema dropped merge keys (`<<: *anchor`); keep them working.
+const FRONTMATTER_SCHEMA = CORE_SCHEMA.withTags(mergeTag)
 
 function normalizeFrontmatterValue(value: unknown): string {
   if (value === undefined || value === null) return ''
@@ -56,7 +59,10 @@ export function parseSkillFrontmatter(content: string): ParsedSkillFrontmatter |
 
   const rawFrontmatter = lines.slice(startLine + 1, closingLine).join('\n')
   try {
-    const parsed = yaml.load(rawFrontmatter)
+    // `loadAll`, not `load`: js-yaml 5's `load` throws on a source with no document
+    // (blank or comment-only frontmatter), which is valid empty frontmatter. A
+    // second document can't occur — the first `---` line already ended the block.
+    const [parsed] = loadAll(rawFrontmatter, { schema: FRONTMATTER_SCHEMA })
     if (parsed === null || parsed === undefined) {
       // empty frontmatter is valid
     } else if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

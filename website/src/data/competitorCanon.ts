@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
-import yaml from 'js-yaml'
+import { CORE_SCHEMA, load, timestampTag } from 'js-yaml'
 
 export type Verdict = 'yes' | 'partial' | 'no' | 'unknown'
 export type Confidence = 'high' | 'medium' | 'low'
@@ -69,6 +69,10 @@ function assertCanon(value: unknown, slug: string): asserts value is CompetitorC
   }
 }
 
+// js-yaml 5's loader schema leaves timestamps as strings; keep loading them as Dates
+// so normalizeDates trims full datetimes to YYYY-MM-DD exactly as before.
+const CANON_SCHEMA = CORE_SCHEMA.withTags(timestampTag)
+
 function normalizeDates<T>(value: T): T {
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10) as T
@@ -96,7 +100,7 @@ export async function getCompetitorCanon(slug: string): Promise<CompetitorCanon>
     throw new Error(`Missing frontmatter in competitor canon: ${slug}`)
   }
 
-  const parsed = yaml.load(match[1])
+  const parsed = load(match[1], { schema: CANON_SCHEMA })
   assertCanon(parsed, slug)
   return normalizeDates(parsed)
 }
