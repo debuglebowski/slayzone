@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
       - name: Lint GitHub workflows
-        uses: rhysd/actionlint@v1.7.11
+        uses: rhysd/actionlint@v1.7.12
 
       - name: Enforce release workflow policy
         run: bash scripts/ci/check-release-workflow-policy.sh
@@ -24,11 +24,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -69,11 +69,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -95,11 +95,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
