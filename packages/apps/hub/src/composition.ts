@@ -106,9 +106,9 @@ import {
   backfillChatModes,
   setIdleCloseConfigGetter,
   setPtyEnricher,
+  resetTerminalRuntimeForTest,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
-  resetTerminalRuntimeForTest,
 import { SettingsService } from '@slayzone/settings/server'
 import {
   AGENT_STARTUP_SETTING,
@@ -118,9 +118,9 @@ import {
 import {
   createIntegrationOps,
   ensureIntegrationSchema,
+  resetSyncFlags,
   setCredentialCipher
 } from '@slayzone/integrations/server'
-  resetSyncFlags,
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
 import {
@@ -276,11 +276,11 @@ export type ServerComposition = {
   userAccess: UserAccessRevoker
   /** Emergency admin access while sign-in is down (break-glass.ts). */
   breakGlass: BreakGlass
-}
-
   /** E2E-only (`POST /api/dev/reset`): wipe the DB and every runtime cache IN
    *  PROCESS. See `resetForTest` in composeServer. */
   resetForTest: () => Promise<void>
+}
+
 export function composeServer(opts: {
   db: SlayzoneDb
   dataRoot: string
@@ -1790,17 +1790,6 @@ export function composeServer(opts: {
     })
   })
 
-  return {
-    notifyRenderer,
-    automationEngine,
-    restDeps,
-    setBoundPort: (port: number) => {
-      boundPort = port
-    },
-    get computerGateway(): HubComputerGateway | null {
-      return computerGatewayRef
-    },
-    get hubAuth(): HubAuth | null {
   /**
    * E2E-only full reset, in process. It replaced restarting the side-car after
    * the DB wipe (~550ms per spec, and the restart never killed agents running on
@@ -1840,8 +1829,19 @@ export function composeServer(opts: {
     resetAgentHookStateForTest()
   }
 
-      return hubAuthRef
+  return {
     resetForTest,
+    notifyRenderer,
+    automationEngine,
+    restDeps,
+    setBoundPort: (port: number) => {
+      boundPort = port
+    },
+    get computerGateway(): HubComputerGateway | null {
+      return computerGatewayRef
+    },
+    get hubAuth(): HubAuth | null {
+      return hubAuthRef
     },
     computersReady,
     setComputerListenerInfo: (info) => {

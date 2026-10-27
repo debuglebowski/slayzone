@@ -44,12 +44,12 @@ export {
   markSessionUserInput,
   clearSessionUserInputMark
 } from './user-input-tracker'
+// E2E: in-process runtime reset (replaces restarting the side-car per spec).
+export { resetTerminalRuntimeForTest } from './runtime/test-reset'
 // Cross-domain seam: server-side callers (integrations sync) invoke the no-op
 // default; the Electron host injects the real pty-killing impl at boot.
 export { onTaskReachedTerminal, setOnTaskReachedTerminalHandler } from './task-events'
 
-// E2E: in-process runtime reset (replaces restarting the side-car per spec).
-export { resetTerminalRuntimeForTest } from './runtime/test-reset'
 // PTY/chat runtime (slice 6c inversion: electron-free, host-bridged). The
 // Electron entry configures the real window/theme/bus bridge at import time;
 // the standalone server keeps the inert defaults and wires these ops into the
