@@ -21,3 +21,8 @@ export function clearSessionUserInputMark(sessionId: string): void {
 export function hasSessionUserInput(sessionId: string): boolean {
   return sessionsWithUserInput.has(sessionId)
 }
+
+/** E2E reset: forget every mark (the in-process reset keeps this module alive). */
+export function clearAllSessionUserInputMarks(): void {
+  sessionsWithUserInput.clear()
+}

@@ -34,6 +34,7 @@ import {
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
+  resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
   type AutomationsEventMap,
@@ -105,6 +106,7 @@ import {
   setPtyEnricher,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
+  resetTerminalRuntimeForTest,
 import { SettingsService } from '@slayzone/settings/server'
 import {
   AGENT_STARTUP_SETTING,
@@ -116,9 +118,14 @@ import {
   ensureIntegrationSchema,
   setCredentialCipher
 } from '@slayzone/integrations/server'
+  resetSyncFlags,
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
-import { recordDiagnosticEvent, bindDiagnosticsDbs } from '@slayzone/diagnostics/server'
+import {
+  recordDiagnosticEvent,
+  bindDiagnosticsDbs,
+  clearConfigCache as clearDiagnosticsConfigCache
+} from '@slayzone/diagnostics/server'
 import {
   processEvents,
   initProcessManager,
@@ -132,10 +139,16 @@ import {
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
-  setProjectCwdResolver
+  setProjectCwdResolver,
+  killAllProcesses
 } from '@slayzone/processes/server'
-import { createLocalWorkspaceFs } from '@slayzone/file-editor/server'
-import { runGhLocally, setGhExecutor } from '@slayzone/worktrees/server'
+import { createLocalWorkspaceFs, closeAllFileWatchers } from '@slayzone/file-editor/server'
+import {
+  runGhLocally,
+  setGhExecutor,
+  invalidateProjectReposCache,
+  resetWorktreeColorsForTest
+} from '@slayzone/worktrees/server'
 import { missingRootsForProjects } from './local-computer-roots'
 import { seedProjectPaths } from './seed-computer-project-paths'
 import { recordComputerProjectPaths } from '@slayzone/computers/server'
@@ -263,6 +276,9 @@ export type ServerComposition = {
   breakGlass: BreakGlass
 }
 
+  /** E2E-only (`POST /api/dev/reset`): wipe the DB and every runtime cache IN
+   *  PROCESS. See `resetForTest` in composeServer. */
+  resetForTest: () => Promise<void>
 export function composeServer(opts: {
   db: SlayzoneDb
   dataRoot: string
@@ -1774,7 +1790,47 @@ export function composeServer(opts: {
       return computerGatewayRef
     },
     get hubAuth(): HubAuth | null {
+  /**
+   * E2E-only full reset, in process. It replaced restarting the side-car after
+   * the DB wipe (~550ms per spec, and the restart never killed agents running on
+   * the computer — those leaked across specs). Order matters:
+   *  1. stop every agent/process and AWAIT exits, so no exit handler writes into
+   *     the wiped DB;
+   *  2. drop + re-migrate (the `computers` rows survive, so the gateway and the
+   *     computer's connection stay up — no re-dial);
+   *  3. seed the e2e baseline, then re-read every cache that holds DB rows or
+   *     test seams — the seed is raw SQL, so no settings-changed event fires.
+   * Deliberately NOT here: the automation engine (reads the DB per event, and
+   * stop/start would double its listeners) and the gateway.
+   */
+  const resetForTest = async (): Promise<void> => {
+    await resetTerminalRuntimeForTest()
+    killAllProcesses()
+    await db.namedTxn('db:reset-for-test', {})
+    // Post-onboarding baseline every spec was written against. `manual` startup =
+    // the Start gate + no warm pool (a fresh DB defaults to `auto`); specs that
+    // exercise another mode set it themselves.
+    for (const [key, value] of [
+      ['onboarding_completed', 'true'],
+      [AGENT_STARTUP_SETTING, 'manual']
+    ]) {
+      await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
+    }
+    await settingsService.warmCache(IDLE_CLOSE_KEYS)
+    await refreshPrewarm()
+    await initProcessManager(db)
+    await backupOps.startAuto()
+    integrationHandles.testClearGithubMocks()
+    resetSyncFlags()
+    clearDiagnosticsConfigCache()
+    resetWorktreeColorsForTest()
+    invalidateProjectReposCache()
+    closeAllFileWatchers()
+    resetAgentHookStateForTest()
+  }
+
       return hubAuthRef
+    resetForTest,
     },
     computersReady,
     setComputerListenerInfo: (info) => {

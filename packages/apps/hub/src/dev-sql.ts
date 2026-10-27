@@ -85,11 +85,17 @@ type DevSqlBody = {
  * REST stack; when the gate is off this always returns false, so the path simply
  * 404s like any other unknown route.
  */
+export type DevSqlDeps = {
+  getGateway?: () => HubComputerGateway | null
+  /** The composition's in-process full reset. Absent = schema rebuild only. */
+  resetForTest?: () => Promise<void>
+}
+
 export function handleDevSql(
   db: SlayzoneDb,
   req: IncomingMessage,
   res: ServerResponse,
-  getGateway: () => HubComputerGateway | null = () => null
+  deps: DevSqlDeps = {}
 ): boolean {
   if (!isDevSqlEnabled()) return false
   // Co-located callers only, INDEPENDENT of the bearer gate. `PLAYWRIGHT=1` is an
@@ -113,7 +119,7 @@ export function handleDevSql(
   }
 
   if (path === DEV_AWAIT_USABLE_COMPUTER_PATH) {
-    void awaitUsableComputer(getGateway(), AWAIT_USABLE_COMPUTER_TIMEOUT_MS).then((usable) => {
+    void awaitUsableComputer(deps.getGateway?.() ?? null, AWAIT_USABLE_COMPUTER_TIMEOUT_MS).then((usable) => {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ ok: true, result: { usable } }))
     })
@@ -123,9 +129,12 @@ export function handleDevSql(
   if (path === DEV_RESET_PATH) {
     void (async () => {
       try {
-        // Drops every table, re-migrates, re-seeds. Runs HERE because this is the
-        // process holding the connection it rebuilds.
-        await db.namedTxn('db:reset-for-test', {})
+        // Drops every table, re-migrates, re-seeds — and, with the composition's
+        // `resetForTest`, also stops every agent/process and clears every runtime
+        // cache, so the host no longer restarts this process. Runs HERE because
+        // this is the process holding the connection it rebuilds.
+        if (deps.resetForTest) await deps.resetForTest()
+        else await db.namedTxn('db:reset-for-test', {})
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: true }))
       } catch (err) {

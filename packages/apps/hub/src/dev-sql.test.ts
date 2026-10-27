@@ -161,3 +161,21 @@ test('awaitUsableComputer: false (not a throw) on timeout, listener released', a
 test('awaitUsableComputer: no gateway = nothing to wait for', async () => {
   expect(await awaitUsableComputer(null, 5_000)).toBe(false)
 })
+
+test('reset route runs the composition reset (in process), not just the schema rebuild', async () => {
+  process.env.PLAYWRIGHT = '1'
+  let calls = 0
+  const { req, res, status } = fakeReqRes('/api/dev/reset')
+  expect(
+    handleDevSql(h.slayDb, req, res, {
+      resetForTest: async () => {
+        calls += 1
+      }
+    })
+  ).toBe(true)
+  await new Promise((r) => setTimeout(r, 20))
+  expect(calls).toBe(1)
+  expect(status()).toBe(200)
+  if (priorFlag === undefined) delete process.env.PLAYWRIGHT
+  else process.env.PLAYWRIGHT = priorFlag
+})

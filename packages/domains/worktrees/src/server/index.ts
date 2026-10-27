@@ -102,7 +102,8 @@ export {
   ensureColors as ensureWorktreeColors,
   getColor as getWorktreeColor,
   getProjectColors as getProjectWorktreeColors,
-  ensureProjectColors as ensureProjectWorktreeColors
+  ensureProjectColors as ensureProjectWorktreeColors,
+  __resetForTests as resetWorktreeColorsForTest
 } from './color-registry'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
 export { worktreesEvents, type WorktreesEventMap } from './events'

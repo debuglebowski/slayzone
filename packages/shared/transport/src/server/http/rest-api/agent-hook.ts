@@ -187,6 +187,16 @@ const CONVERSATION_ID_CAPTURE_EVENT: Record<string, string> = {
 const firstTurnMarked = new Set<string>()
 
 /**
+ * E2E reset: drop every agent tree and first-turn mark. The e2e reset wipes the DB
+ * in-process (no side-car restart), so without this a reused session id inherits a
+ * stale tree and a reused conversation id skips its first-turn write.
+ */
+export function resetAgentHookStateForTest(): void {
+  agentTrees.clear()
+  firstTurnMarked.clear()
+}
+
+/**
  * Hook events that PROVE a conversation has content on disk. A turn is what makes
  * a provider write its transcript — until one happens, `--resume <id>` fails even
  * though slay has known the id since spawn (see migration v158).

@@ -491,7 +491,6 @@ async function devPost(path: string, body?: unknown): Promise<unknown> {
 
 const devSql = (method: string, sql: string, params?: unknown[]): Promise<unknown> =>
   devPost('/api/dev/sql', { method, sql, params })
-const devSqlRun = (sql: string, params?: unknown[]): Promise<unknown> => devSql('run', sql, params)
 const devReset = (): Promise<unknown> => devPost('/api/dev/reset')
 const devAwaitUsableComputer = (): Promise<unknown> => devPost('/api/dev/await-usable-computer')
 
@@ -4111,51 +4110,40 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         oauthCallbackQueue.length = 0
         oauthCallbackWaiters.clear()
 
-        // 7. Drop all tables + re-migrate. Runs in the SIDE-CAR, which holds the
-        // connection it rebuilds; the host asks over the E2E-gated dev route.
-        await devReset()
-
-        // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard.
-        // `onboarding_completed` is hub-scoped (the renderer reads it over tRPC),
-        // so it is seeded in the hub's database, not the client store.
-        await devSqlRun(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')"
-        )
-        // Agent startup `manual`: the Start gate + no warm pool, the baseline every
-        // spec was written against (a fresh DB would default to `auto`, which boots a
-        // pre-booted agent per open project and auto-starts new tasks). Specs that
-        // exercise another mode set it themselves.
-        await devSqlRun(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('terminal_agent_startup', 'manual')"
-        )
+        // 7. Full reset IN the side-car: stop every agent/process (awaiting exits),
+        // drop + re-migrate, seed the e2e baseline (onboarding done, `manual` agent
+        // startup), and re-read every runtime cache — `resetForTest` in the hub's
+        // composition. It used to restart the whole side-car here instead: ~550ms
+        // per spec plus a computer re-dial, and agents running on the computer
+        // survived the restart and leaked into later specs.
+        //
+        // Fallback: a side-car that cannot answer (a spec SIGKILLed it, or it is
+        // wedged) gets the old restart, then the in-process reset. Remote mode has
+        // no local side-car and never reaches the restart.
+        try {
+          await devReset()
+        } catch (err) {
+          if (isRemoteMode || !sidecarServerHandle) throw err
+          console.warn('[reset-for-test] in-process reset failed, restarting side-car:', err)
+          await sidecarServerHandle.restart()
+          await sidecarServerHandle.waitForReady()
+          await devReset()
+        }
         // Client store is unaffected by the schema rebuild, but re-read anyway so
         // any test that rewrote it takes effect.
         clientSettings = readClientSettings(clientRoot)
 
-        // 8. Restart the side-car so it re-opens the freshly-migrated DB and
-        // re-warms every cache (settings, process registry, pty/chat sessions,
-        // automation engine) — the renderer's data backend. The host cap/REST
-        // servers stayed up (step 3), so the respawned child reconnects with the
-        // same env URLs on the sticky port, and the renderer's tRPC client
-        // reconnects automatically. Remote mode: no local side-car.
-        if (!isRemoteMode && sidecarServerHandle) {
-          await sidecarServerHandle.restart()
-          await sidecarServerHandle.waitForReady()
-          // 8b. The fresh side-car built a fresh computer gateway, so the local
-          // computer (healthy) is re-dialling. Return only once it is usable —
-          // anything spawned in that gap resolves no computer. Event-driven on
-          // the hub side; replaces a fixed 600ms sleep in the e2e `resetApp`.
-          // A computer-less worker (`SLAYZONE_E2E_NO_COMPUTER`) has no handle and
-          // skips it. Not fatal on timeout: same outcome as the old sleep.
-          if (localComputerHandle) {
-            const r = (await devAwaitUsableComputer()) as { usable?: boolean } | null
-            if (!r?.usable) {
-              console.warn('[reset-for-test] no usable computer after side-car restart')
-            }
-          }
+        // 8. The computer connection normally survives (the reset keeps the gateway
+        // and the `computers` rows), so this resolves at once. It still guards the
+        // fallback restart and any spec that bounced the computer: return only once
+        // a computer is usable — anything spawned before that resolves none.
+        // Event-driven hub side. A computer-less worker (`SLAYZONE_E2E_NO_COMPUTER`)
+        // has no handle and skips it. Not fatal on timeout.
+        if (!isRemoteMode && localComputerHandle) {
+          const r = (await devAwaitUsableComputer()) as { usable?: boolean } | null
+          if (!r?.usable) console.warn('[reset-for-test] no usable computer after reset')
         }
 
-        // 9. Process manager is owned + re-inited by the side-car on restart.
         return { ok: true }
       })
 
