@@ -19,7 +19,7 @@ const TERMINAL_STATE_STYLES: Record<string, TerminalStateStyle> = {
   background: {
     color: 'bg-green-400/50',
     textColor: 'text-green-500/50',
-    label: 'Background work'
+    label: 'Subagents working'
   },
   idle: { color: 'bg-sky-400', textColor: 'text-sky-500', label: 'Idle' },
   error: { color: 'bg-red-400', textColor: 'text-red-500', label: 'Error' },
