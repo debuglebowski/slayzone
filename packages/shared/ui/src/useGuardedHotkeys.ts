@@ -1,8 +1,8 @@
+import { useEffect, type DependencyList } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
-import type { DependencyList } from 'react'
 import type { Keys, HotkeyCallback, Options } from 'react-hotkeys-hook'
 import { detectPlatform } from '@slayzone/shortcuts'
-import { isModalDialogOpen } from './is-modal-dialog-open'
+import { installModalDialogKeydownCheck, isModalDialogOpen } from './is-modal-dialog-open'
 
 type OptionsOrDeps = Options | DependencyList
 
@@ -34,6 +34,9 @@ export function useGuardedHotkeys<T extends HTMLElement>(
   // Default enableOnContentEditable so shortcuts work inside editors (CodeMirror, Milkdown).
   // Handlers that must defer to the editor (e.g. undo/redo) guard internally (focusOwnsUndoKey).
   const opts = Array.isArray(options) ? options : { enableOnContentEditable: true, ...options }
+
+  // The modal answer must be taken when the key is pressed, ahead of Radix's Escape.
+  useEffect(installModalDialogKeydownCheck, [])
 
   return useHotkeys<T>(
     resolveMod(keys),

@@ -54,3 +54,25 @@ export function isModalDialogOpen(event?: Event): boolean {
   if (event) answerByEvent.set(event, open)
   return open
 }
+
+let keydownCheckInstalled = false
+
+/**
+ * Takes every keydown's answer in a window capture-phase listener, ahead of all other
+ * listeners, so "when the key was pressed" holds whoever asks first. Without it the first
+ * ask can come after Radix's own document-capture Escape listener has closed the dialog
+ * (React commits between listeners of a real keystroke): the guarded Escape handlers
+ * (exit zen / explode, kanban) then see no modal and fire too. Installed once per window
+ * by the guards themselves, not left to each app to wire an early check.
+ */
+export function installModalDialogKeydownCheck(): void {
+  if (keydownCheckInstalled || typeof window === 'undefined') return
+  keydownCheckInstalled = true
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      isModalDialogOpen(e)
+    },
+    { capture: true }
+  )
+}
