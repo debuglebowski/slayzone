@@ -39,7 +39,16 @@ function makeClient(): unknown {
 let client = makeClient()
 
 vi.mock('@slayzone/transport/client', () => ({
-  useTRPCClient: () => client
+  useTRPCClient: () => client,
+  // useContextManagerStore hydrates at import and persists on a 500ms debounce through
+  // the vanilla client. Not under test here: an inert client keeps those calls out of
+  // `calls`, and a debounce firing after its test can't throw on a missing export.
+  getTrpcClient: () => ({
+    settings: {
+      get: { query: async () => null },
+      set: { mutate: async () => undefined }
+    }
+  })
 }))
 
 vi.mock('@slayzone/ui', async () => ({
