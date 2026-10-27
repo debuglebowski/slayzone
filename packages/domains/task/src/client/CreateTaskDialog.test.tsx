@@ -65,9 +65,15 @@ vi.mock('@slayzone/projects/shared', () => ({ getDefaultStatus: () => 'inbox' })
 vi.mock('@slayzone/tags/client', () => ({ CreateTagDialog: () => null }))
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 
-vi.mock('@slayzone/ui', () => {
+vi.mock('@slayzone/ui', async () => {
+  // Pure shortcut helpers the dialog renders with (key hints) — real ones, not stubs.
+  const { formatKeysForDisplay, isPrimaryModifier } = await vi.importActual<
+    typeof import('../../../../shared/ui/src/shortcut-definitions')
+  >('../../../../shared/ui/src/shortcut-definitions')
   const pass = ({ children }: { children?: React.ReactNode }) => <>{children}</>
   return {
+    formatKeysForDisplay,
+    isPrimaryModifier,
     Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
       open ? <div>{children}</div> : null,
     DialogContent: pass,
