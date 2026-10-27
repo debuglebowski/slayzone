@@ -6,7 +6,7 @@ import {
   type ConversationOrigin
 } from '@slayzone/task/shared'
 import { agentSessionsEvents } from '../events'
-import { TURN_TRACKED_MODES } from './agent-sessions'
+import { isTurnTrackedMode } from './agent-sessions'
 
 /**
  * Append-only ledger of conversation IDs per task per provider (table
@@ -151,14 +151,15 @@ export async function recordConversation(
     // Proven at write (v158) — same rule as `confirmSessionConversation`: a
     // resume, a heal the healer verified on disk, a session the user picked out
     // of the sidebar, or a provider whose turns slay cannot observe. The ONE
-    // exception is a fresh start of a turn-tracked provider: Claude reports its
+    // exception is a fresh start of a mode whose AGENT is turn-tracked
+    // (`isTurnTrackedMode` — claude-code, or a provider wrapping it): Claude reports its
     // id via SessionStart at LAUNCH, before it has written any transcript, so
     // that id stays unproven until `markSessionFirstTurn`. Stamping it here let
     // an agent that never took a prompt be resumed after restart → "No
     // conversation found" → false "session expired". Marking the rest here also
     // keeps intent-bearing rows (`in-band-clear`, `user-selected`) from ever
     // falling through to an older session, which the read-side skip must not do.
-    const provenAtWrite = !(origin === 'slay-spawned-fresh' && TURN_TRACKED_MODES.has(mode))
+    const provenAtWrite = !(origin === 'slay-spawned-fresh' && (await isTurnTrackedMode(db, mode)))
     ops.push({
       type: 'run',
       sql: `INSERT INTO agent_sessions

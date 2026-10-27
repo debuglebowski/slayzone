@@ -1594,6 +1594,93 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
+  // ── User-defined provider: `ctx.mode` ≠ `agentId` ─────────────────────────
+  // A provider wrapping claude-code posts as agent `claude-code` (the only value
+  // `isAgentId` accepts) and names its OWN mode in `ctx.mode`. Every lookup keyed
+  // by mode — the ledger and the PTY registry — must use that mode, or the
+  // provider's conversation lands on the built-in claude-code row of the task.
+
+  test('ctx.mode: SessionStart is gated + recorded under the provider mode, not the agent', async () => {
+    findSessionSpy.mockReturnValue('pty-my-claude')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-task', agentId: 'claude-code', mode: 'my-claude' },
+        raw: {
+          hook_event_name: 'SessionStart',
+          session_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+        },
+        agentId: 'claude-code'
+      })
+      expect(res.status).toBe(200)
+      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cp-task', 'my-claude')
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        taskId: 'cp-task',
+        mode: 'my-claude',
+        conversationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        origin: 'slay-spawned-fresh'
+      })
+      // Both PTY lookups (idle-close conversation mirror + state machine).
+      expect(findSessionSpy.mock.calls.every(([, mode]) => mode === 'my-claude')).toBe(true)
+      expect(findSessionSpy).toHaveBeenCalledTimes(2)
+      expect(noteConversationIdSpy).toHaveBeenCalledWith(
+        'pty-my-claude',
+        'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+      )
+      // Agent-scoped decisions still read the AGENT.
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ agentId: 'claude-code' })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx.mode: a turn drives the provider PTY state machine', async () => {
+    findSessionSpy.mockImplementation((_taskId, mode) => (mode === 'my-claude' ? 'pty-mc' : null))
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-turn', agentId: 'claude-code', mode: 'my-claude' },
+        raw: { hook_event_name: 'UserPromptSubmit', session_id: 'ee-turn' },
+        agentId: 'claude-code'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('pty-mc', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx.mode: in-band /clear checks ownership under the provider mode', async () => {
+    getCurrentConversationIdSpy.mockResolvedValue('old-conv')
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-owner')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-clear', agentId: 'claude-code', mode: 'my-claude' },
+        raw: { hook_event_name: 'SessionStart', session_id: 'new-conv', source: 'clear' },
+        agentId: 'claude-code'
+      })
+      expect(getCurrentConversationIdSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cp-clear',
+        'my-claude'
+      )
+      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cp-clear',
+        'my-claude',
+        'old-conv'
+      )
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        mode: 'my-claude',
+        conversationId: 'new-conv',
+        origin: 'in-band-clear'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
   test('envelope with no usable identity (no agent, no event) → 400', async () => {
     const srv = await startServer()
     try {

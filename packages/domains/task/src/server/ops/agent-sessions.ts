@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task/shared'
+import { isBuiltinTerminalMode, modeAgentId } from '@slayzone/terminal/shared'
 import { agentSessionsEvents } from '../events'
 
 /**
@@ -110,13 +111,32 @@ export function ownedSessionSql(resetAtExpr: string): string {
 }
 
 /**
- * Modes whose first turn slay can actually observe (their agent hooks post
+ * Agents whose first turn slay can actually observe (their hooks post
  * `UserPromptSubmit`). For every other provider the proof is unavailable, so its
- * sessions are marked proven at spawn — the mode-specific knowledge lives at
+ * sessions are marked proven at spawn — the provider-specific knowledge lives at
  * WRITE time so the read predicate stays one uniform `first_turn_at IS NOT NULL`
  * with no provider allowlist in SQL.
+ *
+ * Keyed by AGENT, not mode: ask through `isTurnTrackedMode`.
  */
-export const TURN_TRACKED_MODES: ReadonlySet<string> = new Set(['claude-code'])
+export const TURN_TRACKED_AGENTS: ReadonlySet<string> = new Set(['claude-code'])
+
+/**
+ * Whether a session of `mode` must wait for its first turn to be proven
+ * resumable — i.e. whether the AGENT the mode runs is turn-tracked.
+ *
+ * Testing the raw mode id classified every user-defined provider (own id, wrapping
+ * e.g. claude-code via `terminal_modes.type`) as "turns unobservable", so its
+ * fresh sessions were proven at spawn, before any transcript existed. The next
+ * restart then resumed an id `--resume` cannot find. A built-in never reads the DB
+ * (it is its own agent — see `modeAgentId`).
+ */
+export async function isTurnTrackedMode(db: SlayzoneDb, mode: string): Promise<boolean> {
+  const declaredType = isBuiltinTerminalMode(mode)
+    ? null
+    : (await db.get<{ type: string }>('SELECT type FROM terminal_modes WHERE id = ?', [mode]))?.type
+  return TURN_TRACKED_AGENTS.has(modeAgentId(mode, declaredType))
+}
 
 const TTL_PENDING_MS = 10 * 60 * 1000 // explicit pre-minted expected id → wide window.
 const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // null-expected → tight window (temporal-proximity gate only).
@@ -632,7 +652,7 @@ export async function confirmSessionConversation(
   // until `markSessionFirstTurn`. Confirm is the right seam because it is the
   // first moment the REAL conversation id is known (a pre-mint can be wrong, and
   // providers that mint their own id have none until here).
-  if (usedResume || !TURN_TRACKED_MODES.has(row.mode)) {
+  if (usedResume || !(await isTurnTrackedMode(db, row.mode))) {
     await markSessionFirstTurn(db, args.observedConversationId)
   }
   return origin

@@ -78,8 +78,22 @@ raw.exec(`
     conversation_id TEXT PRIMARY KEY,
     first_turn_at   INTEGER NOT NULL
   );
+  CREATE TABLE terminal_modes (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    is_builtin INTEGER NOT NULL
+  );
 `)
 raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t1', '{}')
+for (const [id, type, builtin] of [
+  ['my-claude', 'claude-code', 0],
+  ['my-codex', 'codex', 0],
+  ['claude-chat', 'claude-code', 1]
+] as const) {
+  raw
+    .prepare('INSERT INTO terminal_modes (id, type, is_builtin) VALUES (?, ?, ?)')
+    .run(id, type, builtin)
+}
 
 const db: SlayzoneDb = {
   async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
@@ -352,6 +366,40 @@ async function main(): Promise<void> {
     origin: 'slay-spawned-fresh'
   })
   assert(proven('FRESH-CODEX'), 'non-turn-tracked mode is proven at write')
+
+  // 13. Turn tracking follows the AGENT a mode runs. A user-defined provider
+  //     wrapping claude-code (the hook path records it under its OWN mode) must
+  //     stay unproven like claude-code — proving it at write made the next
+  //     restart resume an id with no transcript.
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'my-claude',
+    conversationId: 'FRESH-MY-CLAUDE',
+    origin: 'slay-spawned-fresh'
+  })
+  assert(
+    !proven('FRESH-MY-CLAUDE'),
+    'fresh id of a provider wrapping claude-code must stay unproven until its first turn'
+  )
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'my-codex',
+    conversationId: 'FRESH-MY-CODEX',
+    origin: 'slay-spawned-fresh'
+  })
+  assert(
+    proven('FRESH-MY-CODEX'),
+    'a provider wrapping a non-turn-tracked agent is proven at write'
+  )
+  // A built-in chat mode is its own agent — unchanged, although its `type` is claude-code.
+  await recordConversation(db, {
+    taskId: 'tp',
+    mode: 'claude-chat',
+    conversationId: 'FRESH-CLAUDE-CHAT',
+    origin: 'slay-spawned-fresh',
+    legacyJsonField: 'chatConversationId'
+  })
+  assert(proven('FRESH-CLAUDE-CHAT'), 'a built-in chat mode must keep being proven at write')
 
   console.log('OK — task_conversations all checks passed')
 }

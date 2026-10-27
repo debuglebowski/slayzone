@@ -12,6 +12,7 @@ import {
   containsSubmitEnter,
   DEV_SERVER_URL_PATTERN,
   extractOscTitle,
+  modeAgentId,
   SESSION_ID_UNAVAILABLE,
   supportsFreshPreMint
 } from '@slayzone/terminal/shared'
@@ -224,7 +225,8 @@ export function setReinstallHooks(fn: (() => Promise<void>) | null): void {
 }
 
 /**
- * Fire the spawn-time hook self-heal for `mode`, if wired + hook-driven.
+ * Fire the spawn-time hook self-heal for `agentId` — the AGENT a spawn runs
+ * (`modeAgentId`), so a user-defined provider is covered — if wired + hook-driven.
  * Fire-and-forget + throw-safe: a repair hiccup must NEVER block or fail a
  * spawn. Centralised so EVERY agent-spawn path (cold createPty AND the warm
  * pool) triggers the just-in-time repair through one gate — the warm pool is
@@ -232,8 +234,8 @@ export function setReinstallHooks(fn: (() => Promise<void>) | null): void {
  * NOT be the one path that skips the heal. No-op when the seam is unset (tests)
  * or the mode isn't hook-driven (plain shells don't use notify.sh).
  */
-export function maybeReinstallHooksForSpawn(mode: string): void {
-  if (!reinstallHooks || !isHookDrivenMode(mode)) return
+export function maybeReinstallHooksForSpawn(agentId: string): void {
+  if (!reinstallHooks || !isHookDrivenMode(agentId)) return
   void reinstallHooks().catch(() => {
     /* best-effort — a stale-hook repair never blocks a spawn */
   })
@@ -1555,8 +1557,10 @@ export async function createPty(
     // is never re-exec'd here, so re-healing at adoption is redundant. A cold
     // spawn heals here; a warm spawn heals in the warm path — no agent slips
     // through (the warm pool is exactly the population the clobber bug hit).
+    // Gated on the AGENT the mode runs, so a user-defined provider wrapping a
+    // hook-driven agent is healed too (it relies on the same notify.sh).
     if (!opts.adoptPty?.preWarmedAgent) {
-      maybeReinstallHooksForSpawn(terminalMode)
+      maybeReinstallHooksForSpawn(modeAgentId(terminalMode, type))
     }
 
     // Hub/computer split (wave 3): when this session spawns on a computer, resolve

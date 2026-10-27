@@ -395,6 +395,38 @@ await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
   setReinstallHooks(null)
 })
 
+await test('user-defined provider wrapping claude-code fires reinstallHooks', async () => {
+  // Its own mode id is not hook-driven; the agent it declares (`type`) is, and it
+  // posts through the same shared notify.sh — so it must be healed too.
+  let calls = 0
+  setReinstallHooks(async () => {
+    calls++
+  })
+  setConversationResolver(async () => null)
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'healD:healD'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'my-claude',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+  })
+  expect(
+    calls === 1,
+    `reinstallHooks must fire for a provider wrapping claude-code (calls=${calls})`
+  )
+  killPty(sid)
+  setConversationResolver(null)
+  setReinstallHooks(null)
+})
+
 await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => {
   let calls = 0
   setReinstallHooks(async () => {

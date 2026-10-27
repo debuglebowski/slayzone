@@ -139,6 +139,85 @@ const REMOTE: RemoteMcpEnv = {
   )
 }
 
+// A db that knows `terminal_modes` rows (id → declared `type`) and nothing else —
+// enough for buildMcpEnv to resolve the agent a mode runs. Built-in rows are listed
+// too, so a test proves a built-in is NOT re-resolved through its `type`.
+function dbWithModes(types: Record<string, string>): never {
+  return {
+    get: async (sql: string, params: unknown[] = []) => {
+      if (!sql.includes('FROM terminal_modes')) return undefined
+      const type = types[params[0] as string]
+      return type ? { type } : undefined
+    }
+  } as never
+}
+const MODES = dbWithModes({
+  'my-claude': 'claude-code',
+  'my-shell': 'terminal',
+  'my-cursor': 'cursor-agent',
+  'claude-chat': 'claude-code',
+  'codex-chat': 'codex'
+})
+
+// 1d. User-defined provider wrapping a hook-capable agent → hook-capable.
+//     Regression guard: gating on the MODE id made every user-defined provider
+//     hook-incapable, so its conversation was never captured and every restart
+//     started an empty session.
+{
+  const env = await buildMcpEnv(MODES, 'task-c', 'my-claude')
+  assert(
+    env.SLAYZONE_AGENT_HOOK_URL === `http://127.0.0.1:${MCP_PORT}${AGENT_HOOK_PATH}`,
+    `a provider wrapping claude-code must get the hook URL, got: ${env.SLAYZONE_AGENT_HOOK_URL}`
+  )
+  // notify.sh sends this as the envelope's top-level `agentId`, which the server
+  // accepts only when it names a known agent.
+  assert(
+    env.SLAYZONE_AGENT_ID === 'claude-code',
+    `SLAYZONE_AGENT_ID must be the wrapped AGENT, got: ${env.SLAYZONE_AGENT_ID}`
+  )
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(
+    ctx.agentId === 'claude-code',
+    `ctx.agentId must be the wrapped agent, got: ${ctx.agentId}`
+  )
+  assert(
+    ctx.mode === 'my-claude',
+    `ctx.mode must carry the provider's own mode (the ledger key), got: ${ctx.mode}`
+  )
+}
+
+// 1e. Built-in mode → ctx has NO `mode` key: every existing hook payload is unchanged.
+{
+  const env = await buildMcpEnv(MODES, 'task-b', 'claude-code')
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(!('mode' in ctx), 'a built-in ctx must omit `mode`')
+}
+
+// 1f. Built-in CHAT modes stay as they are, although their `type` names a
+//     hook-capable agent: a built-in mode is its own agent, never re-resolved.
+{
+  for (const mode of ['claude-chat', 'codex-chat']) {
+    const env = await buildMcpEnv(MODES, 'task-chat', mode)
+    assert(!('SLAYZONE_AGENT_HOOK_URL' in env), `${mode} must NOT become hook-capable`)
+    assert(!('SLAYZONE_AGENT_ID' in env), `${mode} must NOT set SLAYZONE_AGENT_ID`)
+  }
+}
+
+// 1g. User-defined provider whose `type` is not a hook-capable agent → no hook env.
+{
+  for (const mode of ['my-shell', 'my-cursor']) {
+    const env = await buildMcpEnv(MODES, 'task-d', mode)
+    assert(!('SLAYZONE_AGENT_HOOK_CONTEXT' in env), `${mode} must NOT become hook-capable`)
+  }
+}
+
+// 1h. No db (pre-init spawn) → a user-defined provider cannot be resolved, so it
+//     keeps the pre-fix behavior (no hook env) instead of guessing.
+{
+  const env = await buildMcpEnv(null, 'task-e', 'my-claude')
+  assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'unresolvable provider must NOT get the hook URL')
+}
+
 // 2. Local, explicit `remote = null` → identical to omitting it entirely.
 {
   const a = await buildMcpEnv(null, 'task-2', 'claude-code')
@@ -232,6 +311,17 @@ const REMOTE: RemoteMcpEnv = {
   assertNoHubEnv(env, 'non-hook remote')
   assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'no hook URL for non-hook remote mode')
   assert(!('SLAYZONE_AGENT_HOOK_CONTEXT' in env), 'no ctx blob for non-hook remote mode')
+}
+
+// 6b. Remote user-defined provider wrapping claude-code → same identity as local
+//     (the computer relays the ctx blob verbatim), still no loopback hook URL.
+{
+  const env = await buildMcpEnv(MODES, 'task-r4', 'my-claude', undefined, REMOTE)
+  assertNoHubEnv(env, 'remote user-defined provider')
+  assert(!('SLAYZONE_AGENT_HOOK_URL' in env), 'remote must NOT set the hub-loopback hook URL')
+  assert(env.SLAYZONE_AGENT_ID === 'claude-code', 'remote SLAYZONE_AGENT_ID is the wrapped agent')
+  const ctx = JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)
+  assert(ctx.mode === 'my-claude', `remote ctx.mode must carry the provider mode, got: ${ctx.mode}`)
 }
 
 // ── resolveRemoteMcpEnv: the seam that gates remote vs local ─────────────────

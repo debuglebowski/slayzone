@@ -302,6 +302,34 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
   }
 ]
 
+/** Ids of the built-in modes. `syncTerminalModes` keeps the DB's `is_builtin` rows
+ *  equal to this list (it prunes the rest), so this needs no DB read. */
+const BUILTIN_TERMINAL_MODE_IDS: ReadonlySet<string> = new Set(
+  DEFAULT_TERMINAL_MODES.filter((m) => m.isBuiltin).map((m) => m.id)
+)
+
+export function isBuiltinTerminalMode(mode: string): boolean {
+  return BUILTIN_TERMINAL_MODE_IDS.has(mode)
+}
+
+/**
+ * The AGENT a mode runs — the id that hook support, turn tracking and the hook
+ * envelope's `agentId` are keyed by. Not the same thing as the mode id:
+ *  - a built-in mode IS its agent. That includes the chat modes, whose `type`
+ *    names their engine but whose spawn and session semantics are their own
+ *    (they are not hook-wired), so `type` is never consulted for a built-in;
+ *  - a user-defined provider has its own id and declares the agent it wraps in
+ *    `terminal_modes.type`. Without a known type it falls back to its own id,
+ *    which no agent set contains — i.e. the pre-resolution behavior.
+ *
+ * `declaredType` is the mode row's `type`; callers read it only for a mode that is
+ * not built-in.
+ */
+export function modeAgentId(mode: string, declaredType: string | null | undefined): string {
+  if (isBuiltinTerminalMode(mode)) return mode
+  return declaredType || mode
+}
+
 // Duplicated from @slayzone/projects/shared — neither domain can depend on the
 // other, so both define the same structural type. Keep in sync.
 export type ExecutionContext =

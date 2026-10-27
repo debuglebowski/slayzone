@@ -5,7 +5,13 @@ import {
   isHubLoginRequired
 } from '@slayzone/platform'
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
-import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
+import {
+  HOOK_SUPPORTED_AGENT_IDS,
+  isBuiltinTerminalMode,
+  modeAgentId,
+  type AgentId,
+  type TerminalMode
+} from '../shared'
 
 /** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
 export const AGENT_HOOK_PATH = '/api/agent-hook'
@@ -84,15 +90,20 @@ export async function resolveRemoteMcpEnv(
  * Both transports must inject the same set so `slay` CLI and MCP tools resolve the
  * current task identically. Keep PTY + chat in sync by routing through this helper.
  *
- * When `mode` is supplied AND the agent supports hook lifecycle events
- * (claude-code initially; see HOOK_SUPPORTED_AGENT_IDS), also injects:
+ * When `mode` is supplied AND the agent it runs (`modeAgentId` — the mode itself
+ * for a built-in, the wrapped agent for a user-defined provider) supports hook
+ * lifecycle events (see HOOK_SUPPORTED_AGENT_IDS), also injects:
  *   SLAYZONE_AGENT_HOOK_URL  - URL for POST /api/agent-hook. LOCAL only: the
  *                              loopback URL. On a REMOTE computer it is NOT set
  *                              here — the computer overlays its OWN loopback URL at
  *                              spawn (see computer handlers/pty.ts) and relays to
  *                              the hub over its ws channel, so the agent env is
  *                              byte-identical local vs remote.
- *   SLAYZONE_AGENT_ID        - the mode itself (passed back in the hook envelope)
+ *   SLAYZONE_AGENT_ID        - the AGENT id (passed back as the envelope's top-level
+ *                              `agentId`, which the server accepts only when it
+ *                              names a known agent). Equals the mode for a built-in.
+ *                              The mode travels in the context blob as `mode` when
+ *                              it differs (a user-defined provider).
  *   SLAYZONE_ROOT            - resolved on-disk anchor, set for EVERY spawn (not
  *                              just hook-capable ones): the `slay` CLI inside the
  *                              child finds the DB directly in `<ROOT>` (same one
@@ -101,7 +112,7 @@ export async function resolveRemoteMcpEnv(
  *   SLAYZONE_AGENT_HOOK_CONTEXT
  *                            - an OPAQUE JSON blob carrying every identity field
  *                              the server needs to attribute a hook (taskId,
- *                              projectId, agentId, channel). The
+ *                              projectId, agentId, mode, channel). The
  *                              benign `notify.sh` forwards it VERBATIM without
  *                              naming any field — so adding a new identity field
  *                              later touches only this function + the server,
@@ -159,7 +170,21 @@ export async function buildMcpEnv(
       : undefined)
   if (resolvedProjectId) env.SLAYZONE_PROJECT_ID = resolvedProjectId
 
-  const hookCapable = Boolean(mode && HOOK_SUPPORTED_AGENT_IDS.has(mode as AgentId))
+  // Gate on the AGENT the mode runs, never the mode id. A user-defined provider
+  // has its own id, so gating on that made every one of them hook-INcapable: no
+  // hook env, notify.sh exited at its URL guard, the conversation was never
+  // captured, and each restart started an empty session. Its declared agent is
+  // read only for a non-built-in mode (built-ins never re-resolve — see
+  // `modeAgentId`); with no db (pre-init) it stays unresolved, i.e. not capable.
+  let agentId: string | undefined
+  if (mode) {
+    const declaredType = isBuiltinTerminalMode(mode)
+      ? null
+      : (await db?.get<{ type: string }>('SELECT type FROM terminal_modes WHERE id = ?', [mode]))
+          ?.type
+    agentId = modeAgentId(mode, declaredType)
+  }
+  const hookCapable = Boolean(agentId && HOOK_SUPPORTED_AGENT_IDS.has(agentId as AgentId))
 
   // On-disk anchor for EVERY spawn, hook-capable or not — this hub's own root,
   // which the `slay` CLI inside the child uses to find the DB (post-flattening
@@ -185,12 +210,18 @@ export async function buildMcpEnv(
   // channel fired the hook), so a future cross-release-channel clobber is
   // visible in Diagnostics.
   function setHookIdentity(): void {
-    env.SLAYZONE_AGENT_ID = mode as string
+    env.SLAYZONE_AGENT_ID = agentId as string
     const ctx: Record<string, unknown> = {
       v: 1,
-      agentId: mode,
+      agentId,
       releaseChannel: getSlayzoneReleaseChannel()
     }
+    // The conversation ledger and the PTY registry are keyed by MODE, which equals
+    // the agent only for a built-in. A user-defined provider's mode rides here so
+    // its conversation is filed under its own mode, not under the built-in agent's
+    // (where the two would resume each other's sessions). Omitted when equal, so
+    // every built-in payload is unchanged.
+    if (mode && mode !== agentId) ctx.mode = mode
     if (taskId) ctx.taskId = taskId
     if (resolvedProjectId) ctx.projectId = resolvedProjectId
     env.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify(ctx)

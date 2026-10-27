@@ -164,7 +164,8 @@ function antigravityHookToTerminalState(hookEvent: string): TerminalState | null
 /**
  * Agents whose hook payload carries a resumable CLI session id, mapped to the
  * hook event that delivers it. Persisted to
- * `provider_config[agentId].conversationId` for deterministic resume-by-id.
+ * `provider_config[mode].conversationId` (the hook's mode — see `ResolvedHook.mode`)
+ * for deterministic resume-by-id.
  *
  * - `claude-code`: `SessionStart` fires on startup and on `/clear` (new session id
  *   each time); raw payload carries `session_id`.
@@ -312,6 +313,14 @@ const PayloadSchema = z.object({
  *  (state machine, prompt capture, conversation-id persist) read ONLY this. */
 interface ResolvedHook {
   agentId: HookAgentId
+  /**
+   * The terminal MODE this hook belongs to — the key of the conversation ledger
+   * and the PTY registry. Equals `agentId` for a built-in; a user-defined provider
+   * has its own mode id while running a built-in agent, and only the agent may
+   * travel in `agentId` (`isAgentId`). Carried as `ctx.mode` (see `buildMcpEnv`),
+   * absent when equal — so every built-in and legacy payload resolves unchanged.
+   */
+  mode: string
   hookEvent: string
   taskId?: string
   /** CLI session UUID (claude/codex `session_id`, antigravity `conversationId`). */
@@ -388,6 +397,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
 
   return {
     agentId: agentIdRaw,
+    mode: typeof ctx?.mode === 'string' && ctx.mode ? ctx.mode : agentIdRaw,
     hookEvent,
     source: typeof effRaw?.source === 'string' ? effRaw.source : undefined,
     taskId: body.taskId ?? (typeof ctx?.taskId === 'string' ? ctx.taskId : undefined),
@@ -400,7 +410,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
 
 /**
  * Persist a CLI's session_id (carried by its `SessionStart` hook) to the task's
- * `provider_config[agentId].conversationId` so the session can be resumed
+ * `provider_config[mode].conversationId` so the session can be resumed
  * deterministically by id, AND append it to `conversationHistory`.
  *
  * Applies to the agents in `CONVERSATION_ID_CAPTURE_EVENT` (claude-code, codex,
@@ -417,8 +427,8 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
  * plans/conv-id-robustness-v2.md.
  *
  * The CLI session_id is a UUID — distinct from the SlayZone PTY session id
- * resolved via `bridge.findSession`. `agentId` doubles as the `provider_config`
- * key — for the capture agents the `AgentId` string equals the `TerminalMode`.
+ * resolved via `bridge.findSession`. Keyed by `mode` (`ResolvedHook.mode`), never
+ * the agent id: they differ for a user-defined provider wrapping a capture agent.
  *
  * Reads through the task domain (`getTaskOp` + `getProviderConversationId`)
  * rather than raw SQL so the `provider_config` schema stays owned by that
@@ -434,7 +444,7 @@ function resolveHookIdentity(body: z.infer<typeof PayloadSchema>): ResolvedHook 
  */
 async function persistConversationId(
   deps: RestApiDeps,
-  agentId: string,
+  mode: string,
   taskId: string,
   sessionId: string,
   /** `SessionStart.source` — see `ResolvedHook.source`. Only `'clear'` alters
@@ -478,7 +488,7 @@ async function persistConversationId(
     // but `compact` keeps the same id (already honored, nothing to fix) and
     // `fork`'s id semantics are unverified — left on the existing gate.
     if (source === 'clear') {
-      const outgoing = await getCurrentConversationId(deps.db, taskId, agentId)
+      const outgoing = await getCurrentConversationId(deps.db, taskId, mode)
       // Idempotence: a repeated SessionStart for a clear we already recorded
       // makes the new id the current one, so `outgoing === sessionId`. Nothing to
       // do — falling through would record a duplicate row every replay.
@@ -487,12 +497,12 @@ async function persistConversationId(
       // nothing to claim ownership OF, so skip the lookup and let the standard
       // gate handle it as an ordinary first spawn.
       const ownedSpawn = outgoing
-        ? await findOwnedSpawnForConversation(deps.db, taskId, agentId, outgoing)
+        ? await findOwnedSpawnForConversation(deps.db, taskId, mode, outgoing)
         : null
       if (ownedSpawn) {
         await recordConversation(deps.db, {
           taskId,
-          mode: agentId,
+          mode,
           conversationId: sessionId,
           origin: 'in-band-clear'
         })
@@ -510,7 +520,7 @@ async function persistConversationId(
     // honored on read). This closes the RC1 eager-persist clobber: a manual
     // `claude --resume <foreign>` inside a slay PTY can no longer bind the
     // foreign session to the task.
-    const pending = await findPendingSpawn(deps.db, taskId, agentId)
+    const pending = await findPendingSpawn(deps.db, taskId, mode)
     // No pending → no spawn-intent record: definitely foreign.
     // Pending w/ expectedSessionId === null → fresh PTY spawn where slay did
     // NOT pre-mint a UUID; accept the first observed id as fresh (temporal-
@@ -528,7 +538,7 @@ async function persistConversationId(
           : 'foreign-observed'
     await recordConversation(deps.db, {
       taskId,
-      mode: agentId,
+      mode,
       conversationId: sessionId,
       origin
     })
@@ -672,7 +682,7 @@ export async function processAgentHook(
   }
 
   // PRIMARY resume-id capture — persist the CLI session id into
-  // provider_config[agentId].conversationId for the capture agents. Gated to
+  // provider_config[mode].conversationId for the capture agents. Gated to
   // one event per agent (see CONVERSATION_ID_CAPTURE_EVENT) so this stays off
   // the per-tool hot path. `hook.sessionId` already folded in raw.session_id /
   // raw.conversationId fallbacks during identity resolution.
@@ -682,9 +692,9 @@ export async function processAgentHook(
       // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
       // and the capture event is low-frequency (repeats short-circuit in the
       // helper) — keeping it deterministic beats a fire-and-forget race.
-      await persistConversationId(deps, hook.agentId, hook.taskId, cliSessionId, hook.source)
+      await persistConversationId(deps, hook.mode, hook.taskId, cliSessionId, hook.source)
       // Mirror onto the live PTY session for the idle-close gate.
-      const ptySessionId = bridge?.findSession(hook.taskId, hook.agentId as TerminalMode)
+      const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as TerminalMode)
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
     }
   }
@@ -692,9 +702,9 @@ export async function processAgentHook(
   // Drive the PTY state machine from the hook signal — the source of truth
   // for hook-driven agents (replaces adapter output detection / bullet-glyph
   // regex). gemini/opencode still rely on adapter detection.
+  // Hook-driven is a property of the AGENT; the PTY is found by its MODE.
   if (bridge && isHookDrivenMode(hook.agentId) && hook.taskId) {
-    const mode = hook.agentId as TerminalMode
-    const sessionId = bridge.findSession(hook.taskId, mode)
+    const sessionId = bridge.findSession(hook.taskId, hook.mode as TerminalMode)
     if (sessionId) {
       const newState = hookToTerminalState(hook.agentId, sessionId, hook.hookEvent, hook.raw)
       const subagentId = subagentIdOf(hook.raw)
@@ -711,6 +721,7 @@ export async function processAgentHook(
         // a future cross-release-channel notify.sh clobber visible in Diagnostics.
         payload: {
           agentId: hook.agentId,
+          mode: hook.mode,
           releaseChannel: hook.releaseChannel ?? 'unknown',
           mappedState: newState ?? 'mark-active',
           // WHO fired this hook — the main loop or a background subagent — plus

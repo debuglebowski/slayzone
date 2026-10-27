@@ -87,9 +87,25 @@ raw.exec(`
     conversation_id TEXT PRIMARY KEY,
     first_turn_at   INTEGER NOT NULL
   );
+  CREATE TABLE terminal_modes (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    is_builtin INTEGER NOT NULL
+  );
 `)
 raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t1', '{}')
 raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t3', '{}')
+// A user-defined provider declares the agent it wraps in `type`; a built-in chat
+// mode's `type` names its engine too, but a built-in is its own agent.
+for (const [id, type, builtin] of [
+  ['my-claude', 'claude-code', 0],
+  ['my-codex', 'codex', 0],
+  ['claude-chat', 'claude-code', 1]
+] as const) {
+  raw
+    .prepare('INSERT INTO terminal_modes (id, type, is_builtin) VALUES (?, ?, ?)')
+    .run(id, type, builtin)
+}
 
 const db: SlayzoneDb = {
   async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
@@ -417,6 +433,37 @@ async function main(): Promise<void> {
   const firstMark = markOf('dd9c7775')
   await markSessionFirstTurn(db, 'dd9c7775')
   assert(firstMark === markOf('dd9c7775'), 'first_turn_at must be write-once')
+
+  // 15. Turn tracking is a property of the AGENT a mode runs, not of the mode id.
+  //     A user-defined provider wrapping claude-code reports its id at launch,
+  //     before any transcript exists, exactly like claude-code itself — proving it
+  //     at confirm made the next restart resume an id `--resume` cannot find.
+  const isProven = (id: string): boolean =>
+    raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(id) !== undefined
+  const confirmFresh = async (sessionId: string, mode: string, cid: string): Promise<void> => {
+    await recordSessionSpawn(db, {
+      id: sessionId,
+      taskId: 't1',
+      tabId: 'tab1',
+      mode,
+      cwd: '/k',
+      expectedConversationId: cid,
+      usedResume: false,
+      status: 'bound'
+    })
+    await confirmSessionConversation(db, { sessionId, observedConversationId: cid })
+  }
+  await confirmFresh('S_CUSTOM', 'my-claude', 'c0ffee01')
+  assert(
+    !isProven('c0ffee01'),
+    'a fresh session of a provider wrapping claude-code must stay unproven until its first turn'
+  )
+  // Built-in chat mode: its own agent, so unchanged (proven at confirm).
+  await confirmFresh('S_CHAT', 'claude-chat', 'c0ffee02')
+  assert(isProven('c0ffee02'), 'a built-in chat mode must keep being proven at confirm')
+  // A provider wrapping an agent whose turns slay cannot observe: proven at confirm.
+  await confirmFresh('S_CUSTOM_CODEX', 'my-codex', 'c0ffee03')
+  assert(isProven('c0ffee03'), 'a provider wrapping a non-turn-tracked agent is proven at confirm')
 
   console.log('OK — agent_sessions parity checks passed')
 }
