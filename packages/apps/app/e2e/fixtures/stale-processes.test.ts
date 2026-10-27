@@ -49,7 +49,10 @@ test('ignores blank and malformed pgrep lines', () => {
 test('does NOT select a dev-run process — the regression', () => {
   // Same bundle path as a test run; only the environment tells them apart.
   const candidates = parsePgrepOutput(`4242 Electron ${COMPUTER}`)
-  expect(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), 'dev computer spared').toEqual([])
+  expect(
+    selectTestRunPids(candidates, reader({ 4242: devEnv }), []),
+    'dev computer spared'
+  ).toEqual([])
 })
 
 test('selects a process carrying the Playwright marker', () => {
@@ -76,5 +79,7 @@ test('fails closed when the environment cannot be read', () => {
 test('does not match PLAYWRIGHT as a substring of another variable', () => {
   const candidates = parsePgrepOutput(`4244 Electron ${COMPUTER}`)
   const sneaky = `PATH=/usr/bin NOT_PLAYWRIGHT=1 MY_PLAYWRIGHT_DIR=/tmp`
-  expect(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), 'no substring match').toEqual([])
+  expect(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), 'no substring match').toEqual(
+    []
+  )
 })

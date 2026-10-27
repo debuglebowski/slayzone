@@ -429,9 +429,7 @@ test.describe('File editor', () => {
     await expect(mainWindow.locator('button[title="Show file tree"]:visible').first()).toBeVisible()
 
     // Wait for the debounced save to land in the DB
-    await expect
-      .poll(async () => (await persistedEditorState(mainWindow))?.treeVisible)
-      .toBe(false)
+    await expect.poll(async () => (await persistedEditorState(mainWindow))?.treeVisible).toBe(false)
 
     // Toggle editor off/on
     await mainWindow.keyboard.press('Meta+e')

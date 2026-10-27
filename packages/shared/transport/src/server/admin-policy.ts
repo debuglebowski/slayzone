@@ -750,7 +750,6 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'worktrees.getStashDiff': 'user',
   'worktrees.getStatusSummary': 'user',
   'worktrees.getUntrackedFileDiff': 'user',
-  'worktrees.getUntrackedFileDiffs': 'user',
   'worktrees.getWorkingDiff': 'user',
   'worktrees.getWorktreeMetadata': 'user',
   'worktrees.hasGithubRemote': 'user',

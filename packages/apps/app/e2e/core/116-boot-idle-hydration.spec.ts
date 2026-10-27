@@ -27,7 +27,7 @@ async function waitForPersistedTabs(page: Page, ids: string[]): Promise<void> {
         const raw = await page.evaluate(() =>
           window.getTrpcVanillaClient().settings.get.query({ key: 'viewState' })
         )
-        const tabs: Array<{ taskId?: string }> = raw ? JSON.parse(raw).tabs ?? [] : []
+        const tabs: Array<{ taskId?: string }> = raw ? (JSON.parse(raw).tabs ?? []) : []
         const persisted = new Set(tabs.map((t) => t.taskId))
         return ids.every((id) => persisted.has(id))
       },

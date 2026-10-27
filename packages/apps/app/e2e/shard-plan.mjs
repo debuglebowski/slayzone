@@ -87,9 +87,13 @@ function record(reports) {
       durations[file] = Math.max(1, Math.round(next - start))
     })
   }
-  const sorted = Object.fromEntries(Object.entries(durations).sort(([a], [b]) => a.localeCompare(b)))
+  const sorted = Object.fromEntries(
+    Object.entries(durations).sort(([a], [b]) => a.localeCompare(b))
+  )
   fs.writeFileSync(durationsPath, JSON.stringify(sorted, null, 2) + '\n')
-  console.log(`recorded ${Object.keys(sorted).length} spec durations → ${path.relative(appDir, durationsPath)}`)
+  console.log(
+    `recorded ${Object.keys(sorted).length} spec durations → ${path.relative(appDir, durationsPath)}`
+  )
 }
 
 const [cmd, ...rest] = process.argv.slice(2)

@@ -819,7 +819,6 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'worktrees.getStashDiff': 'never',
   'worktrees.getStatusSummary': 'never',
   'worktrees.getUntrackedFileDiff': 'never',
-  'worktrees.getUntrackedFileDiffs': 'never',
   'worktrees.getWorkingDiff': 'never',
   'worktrees.getWorktreeMetadata': 'never',
   'worktrees.hasGithubRemote': 'never',
