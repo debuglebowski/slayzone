@@ -1,0 +1,14 @@
+{
+  "name": "@slayzone/eslint-ts-parser",
+  "version": "0.36.0",
+  "private": true,
+  "description": "The parser ESLint uses for TS/TSX: Babel 8's @babel/eslint-parser, with the TS/TSX parser plugins chosen per file extension. Its own package so its Babel 8 stays apart from the Babel 7 the React Compiler runs on (babel-plugin-react-compiler is built on Babel 7). No rule needs type information, so no `typescript` package is involved.",
+  "type": "module",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "dependencies": {
+    "@babel/core": "^8.0.6",
+    "@babel/eslint-parser": "^8.0.6"
+  }
+}

@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv, type Plugin } from 'vite'
 import { runtimeImportsRollupPlugin } from '@slayzone/build-guards/runtime-imports'
-import { reactCompilerBabelOptions } from '@slayzone/react-compiler-config'
+import { reactCompilerPlugin } from '@slayzone/react-compiler-config'
 import { buildCspFloor } from './src/main/renderer-csp'
 import { NO_MODULE_RE, reactCompilerCachePlugin } from './vite/react-compiler-cache'
 import { devWatchIgnored, envFilesRestartPlugin } from './vite/dev-watch'
@@ -65,7 +65,7 @@ export default defineConfig(({ mode, command }) => {
 
   // In dev, run React's PRODUCTION build to cut render cost (no dev invariants,
   // no Object.freeze on props/state, no rules-of-hooks validation overhead).
-  // Achieved with ONE mechanism: optimizeDeps.esbuildOptions.define sets
+  // Achieved with ONE mechanism: optimizeDeps.rolldownOptions.transform.define sets
   // NODE_ENV=production at pre-bundle time, so the optimized react/react-dom
   // chunks resolve to their cjs/*.production builds. Source and every
   // pre-bundled dep (convex/react, @convex-dev/auth/react) then share that one
@@ -85,10 +85,10 @@ export default defineConfig(({ mode, command }) => {
 
   // Dev under prod React: the React Compiler pass runs in
   // slayzone:react-compiler-cache (on-disk cache + worker pool, byte-identical
-  // output, no fast refresh — prod react-dom cannot apply it). plugin-react
-  // keeps its config role (preamble, optimizeDeps incl. react/compiler-runtime)
-  // but transforms nothing. `vite build` and the real-dev-React modes keep the
-  // stock plugin-react Babel pass, so prod output is untouched.
+  // output, no fast refresh — prod react-dom cannot apply it). plugin-react and
+  // the compiler plugin keep their config roles (preamble, optimizeDeps incl.
+  // react/compiler-runtime) but transform nothing. `vite build` and the
+  // real-dev-React modes keep the stock compiler pass, so prod output is untouched.
   const cachedReactCompiler = command === 'serve' && useReactProdInDev
 
   return {
@@ -101,7 +101,7 @@ export default defineConfig(({ mode, command }) => {
         __SLAYZONE_CONVEX_URL__: JSON.stringify(env.VITE_CONVEX_URL ?? '')
       },
       build: {
-        rollupOptions: {
+        rolldownOptions: {
           input: {
             index: resolve('src/main/index.ts'),
             // SQLite worker threads — bundled as separate entries so they can be
@@ -119,7 +119,7 @@ export default defineConfig(({ mode, command }) => {
         runtimeImportsGuard('app preload')
       ],
       build: {
-        rollupOptions: {
+        rolldownOptions: {
           input: {
             index: resolve('src/preload/index.ts'),
             'webview-preload': resolve('src/preload/webview-preload.ts'),
@@ -177,17 +177,14 @@ export default defineConfig(({ mode, command }) => {
       // react/jsx-dev-runtime resolve to a stub WITHOUT jsxDEV, so leaving
       // jsxDev on would throw "jsxDEV is not a function". jsx() → jsx-runtime,
       // which the same define resolves to its production build.
-      ...(useReactProdInDev ? { esbuild: { jsxDev: false } } : {}),
+      ...(useReactProdInDev ? { oxc: { jsx: { development: false } } } : {}),
       plugins: [
         // Babel + React Compiler in all modes — auto-memoization cuts re-renders
-        // in both dev and prod. No SWC: compiler has no SWC equivalent. The setup
-        // is shared with vitest.config.ts so the jsdom suites run components
-        // compiled exactly as they ship.
+        // in both dev and prod. The setup is shared with vitest.config.ts so the
+        // jsdom suites run components compiled exactly as they ship.
         cachedReactCompiler && reactCompilerCachePlugin(),
-        react({
-          babel: reactCompilerBabelOptions(),
-          ...(cachedReactCompiler ? { include: NO_MODULE_RE } : {})
-        }),
+        react(cachedReactCompiler ? { include: NO_MODULE_RE } : {}),
+        reactCompilerPlugin(cachedReactCompiler ? { include: NO_MODULE_RE } : {}),
         tailwindcss(),
         cspFloorPlugin(mode !== 'production'),
         envFilesRestartPlugin(root),
@@ -214,7 +211,7 @@ export default defineConfig(({ mode, command }) => {
         // builds. Scoped to the dep optimizer only — does NOT touch Vite's
         // react-refresh runtime (which must stay dev to keep HMR functional).
         ...(useReactProdInDev
-          ? { esbuildOptions: { define: { 'process.env.NODE_ENV': '"production"' } } }
+          ? { rolldownOptions: { transform: { define: { 'process.env.NODE_ENV': '"production"' } } } }
           : {})
       }
     }

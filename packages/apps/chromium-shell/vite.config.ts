@@ -46,7 +46,7 @@ export default defineConfig({
     // relative so the bundle is location-agnostic (dev Vite server + the
     // served chrome:// host both resolve fine).
     assetsDir: 'assets',
-    rollupOptions: {
+    rolldownOptions: {
       input: resolve(__dirname, 'index.html')
     }
   },

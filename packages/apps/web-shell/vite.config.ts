@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { reactCompilerBabelOptions } from '@slayzone/react-compiler-config'
+import { reactCompilerPlugin } from '@slayzone/react-compiler-config'
 import { resolve } from 'node:path'
 
 const root = resolve(__dirname, '../../..')
@@ -53,7 +53,8 @@ export default defineConfig(({ mode }) => {
       forbidMojo(),
       // Babel + React Compiler, same setup as the Electron renderer and the
       // vitest suites — auto-memoization matters most on a phone.
-      react({ babel: reactCompilerBabelOptions() }),
+      react(),
+      reactCompilerPlugin(),
       tailwindcss()
     ],
     // Load env from the monorepo root, same as chromium-shell/electron.vite —
@@ -91,7 +92,7 @@ export default defineConfig(({ mode }) => {
       outDir: resolve(root, 'packages/apps/hub/dist/web'),
       emptyOutDir: true,
       assetsDir: 'assets',
-      rollupOptions: {
+      rolldownOptions: {
         input: resolve(__dirname, 'index.html')
       }
     },

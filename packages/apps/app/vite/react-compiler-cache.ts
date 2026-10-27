@@ -1,7 +1,8 @@
 // Dev-only (`vite serve`) React Compiler transform with an on-disk cache and a
 // worker_threads pool.
 //
-// Why: @vitejs/plugin-react runs Babel + babel-plugin-react-compiler on Vite's
+// Why: the compiler pass (@rolldown/plugin-babel + plugin-react's
+// reactCompilerPreset, see @slayzone/react-compiler-config) runs Babel on Vite's
 // single main thread with only an in-memory cache, so every `pnpm dev` cold
 // start re-compiles the whole renderer graph (~13s CPU for the boot graph,
 // TaskDetailPage alone ~1.8s). This plugin:
@@ -10,10 +11,12 @@
 //     unchanged file is a disk read on the next boot;
 //   - compiles misses in a small worker pool, so cold boots use several cores.
 //
-// Output is byte-identical to plugin-react's compiler pass (see
-// react-compiler-worker.mjs). When this plugin is active, plugin-react is
-// configured to transform nothing (its `include` matches no id) but still
-// provides the refresh preamble + optimizeDeps entries (react/compiler-runtime).
+// Output is byte-identical to the stock compiler pass (see
+// react-compiler-worker.mjs), and the same modules are compiled: plugin-react's
+// include/exclude plus the preset's code filter. When this plugin is active,
+// plugin-react and the compiler plugin are configured to transform nothing (their
+// `include` matches no id) but still provide the refresh preamble + optimizeDeps
+// entries (react/compiler-runtime).
 //
 // Fast refresh is NOT applied: this mode is only used while dev runs React's
 // production build, whose react-dom has no `scheduleRefresh`, so React Refresh
@@ -23,19 +26,23 @@
 // SLAYZONE_PROFILE=1) keeps the stock plugin-react path with fast refresh.
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import type { Plugin } from 'vite'
+import {
+  REACT_COMPILER_CODE_FILTER,
+  REACT_COMPILER_EXCLUDE,
+  REACT_COMPILER_INCLUDE
+} from '@slayzone/react-compiler-config'
 
 const WORKER_PATH = fileURLToPath(new URL('./react-compiler-worker.mjs', import.meta.url))
 
-/** Matches @vitejs/plugin-react's default include/exclude. */
-const INCLUDE_RE = /\.[tj]sx?$/
-const EXCLUDE_RE = /\/node_modules\//
+const INCLUDE_RE = REACT_COMPILER_INCLUDE
+const EXCLUDE_RE = REACT_COMPILER_EXCLUDE
 
 /** Entries untouched this long are swept at server start. Hits refresh mtime daily. */
 const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
@@ -43,7 +50,7 @@ const TOUCH_AFTER_MS = 24 * 60 * 60 * 1000
 /** Extra workers (beyond the first) exit after this long idle; the first stays warm for edits. */
 const WORKER_IDLE_MS = 30_000
 
-/** A regex that matches no module id — hands plugin-react's Babel pass to this plugin. */
+/** A regex that matches no module id — hands the stock compiler pass to this plugin. */
 export const NO_MODULE_RE = /(?!)/
 
 interface WorkerReply {
@@ -185,15 +192,37 @@ class CompilerPool {
 function toolchainKey(): string {
   // Resolve from the app package, like the worker does.
   const appRequire = createRequire(new URL('../package.json', import.meta.url))
-  const versionOf = (name: string): string =>
-    (appRequire(`${name}/package.json`) as { version: string }).version
+  // A package whose `exports` hides package.json (@vitejs/plugin-react): walk up
+  // from its resolved entry to its own manifest.
+  const versionOf = (name: string): string => {
+    try {
+      return (appRequire(`${name}/package.json`) as { version: string }).version
+    } catch {
+      let dir = dirname(appRequire.resolve(name))
+      for (;;) {
+        const file = join(dir, 'package.json')
+        if (existsSync(file)) {
+          const manifest = JSON.parse(readFileSync(file, 'utf8')) as {
+            name?: string
+            version: string
+          }
+          if (manifest.name === name) return manifest.version
+        }
+        const up = dirname(dir)
+        if (up === dir) throw new Error(`no package.json for ${name}`)
+        dir = up
+      }
+    }
+  }
   return JSON.stringify({
     tool: [
       '@babel/core',
       '@babel/parser',
       '@babel/generator',
       '@babel/traverse',
-      'babel-plugin-react-compiler'
+      'babel-plugin-react-compiler',
+      // reactCompilerPreset (the compiler options the worker loads) lives here.
+      '@vitejs/plugin-react'
     ].map((n) => `${n}@${versionOf(n)}`),
     // Option changes in the worker invalidate every entry.
     worker: createHash('sha256').update(readFileSync(WORKER_PATH)).digest('hex')
@@ -258,11 +287,21 @@ export function reactCompilerCachePlugin(stats?: ReactCompilerCacheStats): Plugi
       pool.close()
     },
     transform: {
-      filter: { id: { include: INCLUDE_RE, exclude: EXCLUDE_RE } },
+      filter: {
+        id: { include: INCLUDE_RE, exclude: EXCLUDE_RE },
+        code: REACT_COMPILER_CODE_FILTER
+      },
       async handler(code, id, options) {
         const [filepath] = id.split('?')
-        // Same gate as plugin-react: compiler never runs for SSR modules.
-        if (options?.ssr || !INCLUDE_RE.test(filepath) || EXCLUDE_RE.test(filepath)) return
+        // Same gates as the compiler preset: never SSR modules, and only modules
+        // whose code can hold a component or hook.
+        if (
+          options?.ssr ||
+          !INCLUDE_RE.test(filepath) ||
+          EXCLUDE_RE.test(filepath) ||
+          !REACT_COMPILER_CODE_FILTER.test(code)
+        )
+          return
         const key = createHash('sha256')
           .update(baseKey)
           .update('\0')

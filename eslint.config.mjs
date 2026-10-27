@@ -1,12 +1,12 @@
 import { defineConfig } from 'eslint/config'
-import babelParser from '@babel/eslint-parser'
+import { tsParserConfigs } from '@slayzone/eslint-ts-parser'
 import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 
 // Biome owns format + ~all lint. ESLint kept ONLY for React Compiler
 // experimental rules from eslint-plugin-react-hooks v7 — biome has no
 // equivalent — plus the few repo-specific bans below. No rule here needs type
-// information, so TS is parsed by Babel (@babel/preset-typescript picks TS vs
-// TSX from the file extension) instead of typescript-eslint, which needs the
+// information, so TS is parsed by Babel (@slayzone/eslint-ts-parser: Babel 8's
+// eslint parser, TS/TSX syntax per extension) instead of typescript-eslint, which needs the
 // TypeScript 5.x JS compiler API. That keeps TypeScript 7 the only
 // `typescript` in the workspace.
 
@@ -34,19 +34,9 @@ export default defineConfig(
       'chromium/**'
     ]
   },
+  ...tsParserConfigs,
   {
     files: ['**/*.{ts,tsx}'],
-    languageOptions: {
-      parser: babelParser,
-      parserOptions: {
-        requireConfigFile: false,
-        babelOptions: {
-          babelrc: false,
-          configFile: false,
-          presets: ['@babel/preset-typescript']
-        }
-      }
-    },
     plugins: {
       'react-hooks': eslintPluginReactHooks
     },

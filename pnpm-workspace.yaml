@@ -23,6 +23,10 @@ minimumReleaseAgeExclude:
   - astro@7.3.2
   # Renovate security update: diff@8.0.3
   - diff@8.0.3
+  # Already locked since the knip 6 bump (08443aab4); vite 8's shared picomatch/oxc
+  # deps re-resolve knip's subtree, which re-checks it. Drop once it clears the age
+  # gate (2026-10-30).
+  - unbash@4.0.12
   # Hand bump (2026-10-25): v45 features needed now; also fixes the eMudhra cert
   # advisory 44.5.1 is exposed to. Tarball checksums.json verified against the GitHub
   # release SHASUMS256.txt. Drop once 45.0.0 clears the age gate (2026-11-20).
