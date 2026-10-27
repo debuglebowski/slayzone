@@ -9,7 +9,9 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem
+  DropdownMenuItem,
+  useDepsChanged,
+  useStableCallback
 } from '@slayzone/ui'
 import {
   CheckCircle2,
@@ -235,16 +237,23 @@ export function AutomationCard({
   const [expandedRunIds, setExpandedRunIds] = useState<Record<string, boolean>>({})
   const [loadingRunIds, setLoadingRunIds] = useState<Record<string, boolean>>({})
 
+  // A new run (run_count bump) invalidates loaded runs: collapse their details and
+  // drop cached action runs while rendering; an expanded card also reloads its runs,
+  // after commit. Runs never loaded stay that way (the next expand loads them).
+  const runCountChanged = useDepsChanged([automation.run_count])
+  const [runsReloads, setRunsReloads] = useState(0)
+  if (runCountChanged && runsLoaded) {
+    setRunsLoaded(false)
+    setActionRunsByRunId({})
+    setExpandedRunIds({})
+    if (expanded) setRunsReloads((n) => n + 1)
+  }
+  const reloadRuns = useStableCallback(() => {
+    onLoadRuns(automation.id).then(setRuns)
+  })
   useEffect(() => {
-    if (runsLoaded) {
-      setRunsLoaded(false)
-      setActionRunsByRunId({})
-      setExpandedRunIds({})
-      if (expanded) {
-        onLoadRuns(automation.id).then(setRuns)
-      }
-    }
-  }, [automation.run_count]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (runsReloads > 0) reloadRuns()
+  }, [runsReloads, reloadRuns])
 
   async function handleExpand(): Promise<void> {
     if (!expanded && !runsLoaded) {

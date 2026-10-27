@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useDepsChanged } from '@slayzone/ui'
 import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
@@ -16,8 +17,8 @@ export function useTerminalModes() {
   // Imperative refetch into local state (preserves the previous explicit
   // refresh()-after-mutation flow). This hook owns the `modes` state directly
   // rather than reading a useQuery, so mutations re-run refresh() explicitly.
-  const refresh = useCallback(async () => {
-    setLoading(true)
+  // `load` is the fetch alone; whoever starts one marks `loading` first.
+  const load = useCallback(async () => {
     try {
       const list = await trpcClient.pty.modesList.query()
       setModes(list)
@@ -26,9 +27,17 @@ export function useTerminalModes() {
     }
   }, [trpcClient])
 
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    await load()
+  }, [load])
+
+  // A new client reloads the list: `loading` is set while rendering (it starts
+  // true for the mount's load), the fetch starts after commit.
+  if (useDepsChanged([trpcClient])) setLoading(true)
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    void load()
+  }, [load])
 
   const createMutation = useMutation(trpc.pty.modesCreate.mutationOptions())
   const updateMutation = useMutation(trpc.pty.modesUpdate.mutationOptions())

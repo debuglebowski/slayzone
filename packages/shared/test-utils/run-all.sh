@@ -788,6 +788,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
+  packages/domains/terminal/src/client/useTerminalModes.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
@@ -799,6 +800,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/file-editor/src/client/WorkspaceDirPicker.test.tsx \
   packages/domains/settings/src/client/tabs/HubsSettingsTab.test.tsx \
   packages/domains/settings/src/client/settings-reopen.test.ts \
+  packages/domains/settings/src/client/useSettingsReopenTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/domains/settings/src/server/service.test.ts \

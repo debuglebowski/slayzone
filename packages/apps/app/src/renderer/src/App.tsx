@@ -58,7 +58,7 @@ import {
   useTabStore,
   useDialogStore,
   AppearanceProvider,
-  consumeSettingsReopen
+  useSettingsReopenTab
 } from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
 import {
@@ -262,12 +262,17 @@ function App(): React.JSX.Element {
     useState<ProjectIntegrationOnboardingProvider | null>(null)
   const deletingProject = useDialogStore((s) => s.deletingProject)
   const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // A settings save that had to reload the window (e.g. adding a hub, #161) asks
+  // to land back on its tab: Settings then starts open on it.
+  const settingsReopenTab = useSettingsReopenTab()
+  const [settingsOpen, setSettingsOpen] = useState(settingsReopenTab !== null)
   const [settingsRevision, setSettingsRevision] = useState(0)
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
   const [showContextManager, setShowContextManager] = useState(true)
   const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<string>('appearance')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string>(
+    settingsReopenTab ?? 'appearance'
+  )
   const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] =
     useState<ContextManagerSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
@@ -1190,16 +1195,6 @@ function App(): React.JSX.Element {
     setSettingsInitialAiConfigSection(null)
     setSettingsOpen(true)
   }
-
-  // A settings save that had to reload the window (e.g. adding a hub, #161)
-  // asks to land back on its tab.
-  useEffect(() => {
-    const tab = consumeSettingsReopen()
-    if (!tab) return
-    setSettingsInitialTab(tab)
-    setSettingsInitialAiConfigSection(null)
-    setSettingsOpen(true)
-  }, [])
 
   // Custom event listeners for settings
   useEffect(() => {
