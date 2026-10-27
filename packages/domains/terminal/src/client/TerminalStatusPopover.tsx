@@ -90,7 +90,8 @@ export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonPro
 }
 
 function formatDuration(createdAt: number, now: number): string {
-  const s = Math.floor((now - createdAt) / 1000)
+  // `now` is the 1s useNow clock: a session spawned since its last tick is newer than it.
+  const s = Math.max(0, Math.floor((now - createdAt) / 1000))
   if (s < 60) return `${s}s`
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
