@@ -78,15 +78,17 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   // `isGitRepo` gates worktree creation, that failed task creation outright once
   // worktrees started routing. Same divergence class as the proc.* sessionId/id
   // mismatch: two sides declaring the same wire shape independently.
+  //
+  // False only when git RAN and said no (or the directory doesn't exist). A git that
+  // could not be started throws: answering false told the user their repo was "not a
+  // git repository" when the machine simply couldn't run git.
   async function isGitRepo(rawParams: unknown): Promise<{ isGitRepo: boolean }> {
     const { path } = isGitRepoParams.parse(rawParams)
     const repoPath = allow(path)
-    try {
-      await execGit(['rev-parse', '--git-dir'], repoPath)
-      return { isGitRepo: true }
-    } catch {
-      return { isGitRepo: false }
-    }
+    if (!existsSync(repoPath)) return { isGitRepo: false }
+    const result = await execCapture('git', ['rev-parse', '--git-dir'], { cwd: repoPath })
+    if (result.spawnError) throw new Error(`Could not start git: ${result.spawnError}`)
+    return { isGitRepo: result.status === 0 }
   }
 
   async function getCurrentBranch(rawParams: unknown): Promise<{ branch: string | null }> {

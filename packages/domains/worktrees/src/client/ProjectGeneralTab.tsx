@@ -16,6 +16,7 @@ import {
 } from '@slayzone/ui'
 import type { StatusSummary, AheadBehind } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
+import { GitUnavailableFallback } from './general-tab-shared'
 import {
   useBranchGraph,
   BranchGraphToolbar,
@@ -43,6 +44,7 @@ export function ProjectGeneralTab({
   const checkoutBranchMutation = useMutation(trpc.worktrees.checkoutBranch.mutationOptions())
   const createBranchMutation = useMutation(trpc.worktrees.createBranch.mutationOptions())
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
 
@@ -96,13 +98,27 @@ export function ProjectGeneralTab({
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const isRepo = await queryClient.fetchQuery(
-        trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
-      )
+      let isRepo: boolean
+      try {
+        isRepo = await queryClient.fetchQuery(
+          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+        )
+      } catch (err) {
+        // The check itself failed (git could not be started) — not the same as "not a
+        // repo", which would offer `git init` on a healthy repo.
+        const message = err instanceof Error ? err.message : String(err)
+        const hash = JSON.stringify({ gitError: message })
+        if (hash !== lastHashRef.current) {
+          lastHashRef.current = hash
+          setGitError(message)
+        }
+        return hash
+      }
       if (!isRepo) {
         const hash = JSON.stringify({ isRepo: false })
         if (hash !== lastHashRef.current) {
           lastHashRef.current = hash
+          setGitError(null)
           setIsGitRepo(false)
         }
         return hash
@@ -122,6 +138,7 @@ export function ProjectGeneralTab({
       const hash = JSON.stringify({ isRepo: true, branch, status, remote, uab })
       if (hash !== lastHashRef.current) {
         lastHashRef.current = hash
+        setGitError(null)
         setIsGitRepo(true)
         setCurrentBranch(branch)
         setStatusSummary(status)
@@ -215,6 +232,8 @@ export function ProjectGeneralTab({
       </div>
     )
   }
+
+  if (gitError) return <GitUnavailableFallback message={gitError} />
 
   if (isGitRepo === null) {
     return <div className="p-4 text-xs text-muted-foreground">Checking...</div>

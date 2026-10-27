@@ -59,6 +59,9 @@ export interface ExecResult {
   stdout: string
   stderr: string
   status: number | null
+  /** Set when the process could not be STARTED (fd exhaustion, binary missing, bad
+   *  cwd) — the command never ran, so stdout/stderr/status are not its answer. */
+  spawnError?: string
 }
 
 /** Async subprocess execution — won't block the main process. */
@@ -112,7 +115,16 @@ export function execAsync(
     })
     child.on('error', (err) => {
       if (timer) clearTimeout(timer)
-      resolve({ stdout: '', stderr: err.message, status: 1 })
+      // A spawn failure never reaches 'close' with a real exit, so log it here — an
+      // fd-exhausted hub otherwise fails every git call with nothing in diagnostics.
+      recordDiagnosticEvent({
+        level: 'error',
+        source,
+        event: `${source}.spawn_failed`,
+        message: `could not start ${command}: ${err.message}`,
+        payload: { command: label, cwd: opts.cwd, durationMs: Date.now() - startedAt }
+      })
+      resolve({ stdout: '', stderr: err.message, status: 1, spawnError: err.message })
     })
   })
 }

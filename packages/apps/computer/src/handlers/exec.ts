@@ -13,6 +13,8 @@ export interface ExecResult {
   stdout: string
   stderr: string
   status: number | null
+  /** Set when the process could not be STARTED — the command never ran. */
+  spawnError?: string
 }
 
 /** Run a subprocess, capturing stdout/stderr. Never rejects on non-zero exit. */
@@ -43,7 +45,7 @@ export function execCapture(
     })
     child.on('error', (err) => {
       if (timer) clearTimeout(timer)
-      resolve({ stdout: '', stderr: err.message, status: 1 })
+      resolve({ stdout: '', stderr: err.message, status: 1, spawnError: err.message })
     })
   })
 }

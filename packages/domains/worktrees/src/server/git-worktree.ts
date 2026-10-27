@@ -48,13 +48,16 @@ import {
   trimOutput
 } from './exec-async'
 
+/**
+ * False only when git RAN and said no (or the directory doesn't exist). A git that
+ * could not be started throws: answering false made an fd-exhausted hub tell the user
+ * their repo was "not a git repository".
+ */
 export async function isGitRepo(repoPath: string): Promise<boolean> {
-  try {
-    await execGit(['rev-parse', '--git-dir'], { cwd: repoPath })
-    return true
-  } catch {
-    return false
-  }
+  if (!existsSync(repoPath)) return false
+  const result = await execAsync('git', ['rev-parse', '--git-dir'], { cwd: repoPath })
+  if (result.spawnError) throw new Error(`Could not start git: ${result.spawnError}`)
+  return result.status === 0
 }
 
 export async function detectWorktrees(repoPath: string): Promise<DetectedWorktree[]> {

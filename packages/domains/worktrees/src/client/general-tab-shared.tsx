@@ -87,6 +87,20 @@ export function NotGitRepoFallback({
   )
 }
 
+/** The repo check itself failed (e.g. the machine could not start git) — distinct
+ *  from "not a repo", so the user isn't offered `git init` on a healthy repo. */
+export function GitUnavailableFallback({ message }: { message: string }) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="rounded-full bg-muted p-4">
+        <AlertTriangle className="size-8 text-muted-foreground" />
+      </div>
+      <p className="text-sm font-medium">Git unavailable</p>
+      <p className="max-w-md text-xs text-muted-foreground break-words">{message}</p>
+    </div>
+  )
+}
+
 // --- Merge/rebase banner ---
 
 export function MergeBanner({

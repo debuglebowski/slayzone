@@ -19,6 +19,7 @@ import {
   NoProjectFallback,
   CheckingFallback,
   NotGitRepoFallback,
+  GitUnavailableFallback,
   MergeBanner,
   StatusChips,
   WorktreeButton,
@@ -100,6 +101,7 @@ export function GeneralTabContent({
   )
 
   if (!projectPath) return <NoProjectFallback />
+  if (data.gitError) return <GitUnavailableFallback message={data.gitError} />
   if (data.isGitRepo === null) return <CheckingFallback />
   if (data.isGitRepo === false)
     return <NotGitRepoFallback onInit={data.handleInitGit} initializing={data.initializing} />

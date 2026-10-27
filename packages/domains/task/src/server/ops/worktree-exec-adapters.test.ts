@@ -260,3 +260,34 @@ test('maybeAutoCreateWorktree: no computer → skips the worktree, task creation
   expect(calls.filter((c) => c === 'create' || c === 'copy' || c === 'setup')).toHaveLength(0)
   h.cleanup()
 })
+
+test('maybeAutoCreateWorktree: git cannot start → skips with an error event, create still succeeds', async () => {
+  const h = await createTestHarness()
+  const projectId = crypto.randomUUID()
+  const taskId = crypto.randomUUID()
+  seedProject(h, projectId, { copyBehavior: 'all' })
+  seedTask(h, taskId, projectId, 'Git Unavailable Task')
+
+  // isGitRepo throws (not false) when git could not be started — e.g. an
+  // fd-exhausted hub. The create must degrade to the old skip, but say why.
+  const events: Array<{ level: string; event: string; message?: string }> = []
+  const calls: string[] = []
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => tmpdir(),
+    recordDiagnosticEvent: (e) => events.push(e),
+    worktrees: makeFakes(calls, {
+      isGitRepo: async () => {
+        throw new Error('Could not start git: spawn git EMFILE')
+      }
+    })
+  })
+
+  await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'Git Unavailable Task')
+
+  expect(taskRow(h, taskId).worktree_path).toBeNull()
+  expect(calls.filter((c) => c === 'create' || c === 'copy' || c === 'setup')).toHaveLength(0)
+  const skip = events.find((e) => e.event === 'task.auto_worktree_skipped')
+  expect(skip?.level).toBe('error')
+  expect(/EMFILE/.test(skip?.message ?? '')).toBe(true)
+  h.cleanup()
+})

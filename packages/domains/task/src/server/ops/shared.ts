@@ -649,14 +649,34 @@ async function createWorktreeForTask(
 
   // Resolve effective repo path (child repo if multi-repo, otherwise project.path)
   let repoPath = projectRow.path
-  if (repoName) {
-    const childPath = path.join(projectRow.path, repoName)
-    if (await runtimeAdapters.worktrees.isGitRepo(taskId, childPath)) {
-      repoPath = childPath
+  let isRepo: boolean
+  try {
+    if (repoName) {
+      const childPath = path.join(projectRow.path, repoName)
+      if (await runtimeAdapters.worktrees.isGitRepo(taskId, childPath)) {
+        repoPath = childPath
+      }
     }
+    isRepo = await runtimeAdapters.worktrees.isGitRepo(taskId, repoPath)
+  } catch (err) {
+    // The probe throws when git could not be STARTED. Same skip as before it threw
+    // (a failed probe used to read as "not a repo"), but logged as the error it is.
+    // "No computer" is not ours — the caller turns that into its own skip.
+    if (err instanceof Error && err.name === 'NoComputerAvailableError') throw err
+    if (isHubSwitchedOffError(err)) throw err
+    runtimeAdapters.recordDiagnosticEvent({
+      level: 'error',
+      source: 'task',
+      event: 'task.auto_worktree_skipped',
+      taskId,
+      projectId,
+      message: `Git repo probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      payload: { projectPath: repoPath }
+    })
+    return
   }
 
-  if (!(await runtimeAdapters.worktrees.isGitRepo(taskId, repoPath))) {
+  if (!isRepo) {
     runtimeAdapters.recordDiagnosticEvent({
       level: 'info',
       source: 'task',

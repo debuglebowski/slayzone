@@ -325,3 +325,40 @@ describe('useConsolidatedGeneralData — resets', () => {
     expect(result.current.detectedWorktrees).toEqual([])
   })
 })
+
+// "Not a git repository" must mean git said so. A failed CHECK (the machine could not
+// start git) is reported as gitError, so the panel says "Git unavailable" instead of
+// offering `git init` on a healthy repo.
+describe('useConsolidatedGeneralData — repo check failure', () => {
+  async function setupIsGitRepo(answer: () => Promise<unknown>) {
+    const client = new QueryClient()
+    vi.spyOn(client, 'fetchQuery').mockImplementation(((o: { queryKey: unknown[] }) => {
+      const key = String(o.queryKey[0])
+      if (key === 'isGitRepo') return answer()
+      return Promise.resolve(queryResults[key] ?? null)
+    }) as never)
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const hook = renderHook(
+      () => useConsolidatedGeneralData(task, '/repo', true, 5000, async () => task),
+      { wrapper }
+    )
+    await act(async () => {})
+    return hook
+  }
+
+  it('a check that throws sets gitError and leaves isGitRepo unknown', async () => {
+    const { result } = await setupIsGitRepo(() =>
+      Promise.reject(new Error('Could not start git: spawn git EMFILE'))
+    )
+    expect(result.current.gitError).toBe('Could not start git: spawn git EMFILE')
+    expect(result.current.isGitRepo).toBeNull()
+  })
+
+  it('git answering no is "not a repo", with no gitError', async () => {
+    const { result } = await setupIsGitRepo(() => Promise.resolve(false))
+    expect(result.current.isGitRepo).toBe(false)
+    expect(result.current.gitError).toBeNull()
+  })
+})

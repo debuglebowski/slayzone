@@ -37,6 +37,8 @@ export interface CopyFilesDialogState {
 export interface ConsolidatedGeneralData {
   // General data
   isGitRepo: boolean | null
+  /** The repo check itself failed (e.g. git could not be started); null otherwise. */
+  gitError: string | null
   currentBranch: string | null
   worktreeBranch: string | null
   statusSummary: StatusSummary | null
@@ -122,6 +124,7 @@ export function useConsolidatedGeneralData(
 
   // General state
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
@@ -164,13 +167,27 @@ export function useConsolidatedGeneralData(
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const isRepo = await queryClient.fetchQuery(
-        trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
-      )
+      let isRepo: boolean
+      try {
+        isRepo = await queryClient.fetchQuery(
+          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+        )
+      } catch (err) {
+        // The check itself failed (git could not be started) — not the same as "not a
+        // repo", which would offer `git init` on a healthy repo.
+        const message = err instanceof Error ? err.message : String(err)
+        const hash = JSON.stringify({ gitError: message })
+        if (hash !== lastGitHashRef.current) {
+          lastGitHashRef.current = hash
+          setGitError(message)
+        }
+        return hash
+      }
       if (!isRepo) {
         const hash = JSON.stringify({ isRepo: false })
         if (hash !== lastGitHashRef.current) {
           lastGitHashRef.current = hash
+          setGitError(null)
           setIsGitRepo(false)
         }
         return hash
@@ -203,6 +220,7 @@ export function useConsolidatedGeneralData(
       const hash = JSON.stringify({ isRepo: true, branch, remote, status, uab })
       if (hash !== lastGitHashRef.current) {
         lastGitHashRef.current = hash
+        setGitError(null)
         setIsGitRepo(true)
         setCurrentBranch(branch)
         setRemoteUrl(remote)
@@ -740,6 +758,7 @@ export function useConsolidatedGeneralData(
 
   return {
     isGitRepo,
+    gitError,
     currentBranch,
     worktreeBranch,
     statusSummary,

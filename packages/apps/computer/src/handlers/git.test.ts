@@ -53,6 +53,29 @@ describe('createGitHandlers — git.isGitRepo', () => {
   })
 })
 
+describe('createGitHandlers — git.isGitRepo when git cannot start', () => {
+  let savedPath: string | undefined
+  beforeEach(() => {
+    savedPath = process.env.PATH
+  })
+  afterEach(() => {
+    process.env.PATH = savedPath
+  })
+
+  it('throws instead of answering false', async () => {
+    const handlers = createGitHandlers(ctxWithRoots(roots))
+    process.env.PATH = join(dir, 'empty-bin')
+    await expect(handlers['git.isGitRepo']({ path: dir })).rejects.toThrow(/could not start git/i)
+  })
+
+  it('is false for a path that does not exist', async () => {
+    const handlers = createGitHandlers(ctxWithRoots(roots))
+    expect(await handlers['git.isGitRepo']({ path: join(dir, 'missing') })).toEqual({
+      isGitRepo: false
+    })
+  })
+})
+
 describe('createGitHandlers — git.getCurrentBranch', () => {
   it('returns the checked-out branch name', async () => {
     git(['init'], dir)
