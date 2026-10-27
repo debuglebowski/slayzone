@@ -38,7 +38,8 @@ const PLAINTEXT_PREFIX = 'plain:'
  * or a wired cipher whose `isEncryptionAvailable()` is false), so plaintext is its
  * ONLY option and forcing an extra opt-in flag was pure ceremony. Encryption is
  * used whenever a working cipher exists — plaintext is a fallback, never a
- * preference. (`NODE_ENV=test` also permits it so unit tests need no OS keychain.)
+ * preference. Never NODE_ENV: a process started with `test` must not read
+ * plaintext past a working keychain (unit tests inject no cipher instead).
  * Replaces the former SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS knob.
  */
 async function cipherAvailable(): Promise<boolean> {
@@ -46,7 +47,7 @@ async function cipherAvailable(): Promise<boolean> {
 }
 
 async function allowPlaintextFallback(): Promise<boolean> {
-  return process.env.NODE_ENV === 'test' || !(await cipherAvailable())
+  return !(await cipherAvailable())
 }
 
 function toSettingKey(ref: string): string {

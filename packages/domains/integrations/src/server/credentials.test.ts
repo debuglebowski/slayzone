@@ -4,7 +4,7 @@
  * SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS env flag: encrypt when a cipher works,
  * fall back to plaintext when none exists (headless standalone hub).
  */
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, describe, expect, test } from 'vitest'
 import {
   type CredentialCipher,
   readCredential,
@@ -86,11 +86,6 @@ function fakeCipher(available: boolean, key = 'k1'): CredentialCipher {
 const prevNodeEnv = process.env.NODE_ENV
 
 describe('credentials fallback (cipher-availability gated)', () => {
-  // Force the non-test branch so availability — not NODE_ENV=test — is the gate.
-  beforeAll(() => {
-    process.env.NODE_ENV = 'development'
-  })
-
   afterAll(() => {
     setCredentialCipher(null)
     if (prevNodeEnv === undefined) delete process.env.NODE_ENV
@@ -124,6 +119,15 @@ describe('credentials fallback (cipher-availability gated)', () => {
     await storeCredential(db as never, ref, 'secret-later-blocked')
     // A working cipher now exists → the stored plaintext is no longer trusted.
     setCredentialCipher(fakeCipher(true))
+    await expect(readCredential(db as never, ref)).rejects.toThrow()
+  })
+
+  test('NODE_ENV=test does not unlock a plaintext cred once a working cipher exists', async () => {
+    setCredentialCipher(null)
+    const ref = `cred-${crypto.randomUUID()}`
+    await storeCredential(db as never, ref, 'secret-test-mode')
+    setCredentialCipher(fakeCipher(true))
+    process.env.NODE_ENV = 'test'
     await expect(readCredential(db as never, ref)).rejects.toThrow()
   })
 
