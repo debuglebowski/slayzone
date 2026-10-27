@@ -24,7 +24,7 @@
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "fzf": "^0.5.2",
     "lucide-react": "^1.48.0",
     "@slayzone/platform": "workspace:*"

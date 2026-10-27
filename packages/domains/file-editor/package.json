@@ -48,7 +48,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "codemirror": "^6.0.1",
     "codemirror-lang-hcl": "^0.2.0",
     "ignore": "^7.0.10",

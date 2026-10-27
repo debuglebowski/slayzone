@@ -18,7 +18,7 @@
   "dependencies": {
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {

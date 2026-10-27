@@ -43,7 +43,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "@tanstack/react-virtual": "^3.14.13",
     "codemirror": "^6.0.1",
     "lucide-react": "^1.48.0"

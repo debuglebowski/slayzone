@@ -252,8 +252,8 @@ importers:
         specifier: ^0.13.0
         version: 0.13.0(supports-color@7.2.0)
       electron-updater:
-        specifier: ^6.8.9
-        version: 6.8.9(supports-color@7.2.0)
+        specifier: ^6.8.10
+        version: 6.8.10(supports-color@7.2.0)
       express:
         specifier: ^5.2.1
         version: 5.2.1(supports-color@7.2.0)
@@ -261,8 +261,8 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       ws:
-        specifier: ^8.21.3
-        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -430,8 +430,8 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -716,8 +716,8 @@ importers:
         specifier: ^2.2.1
         version: 2.2.6
       ws:
-        specifier: ^8.21.3
-        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     devDependencies:
       '@slayzone/build-guards':
         specifier: workspace:*
@@ -896,8 +896,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -924,8 +924,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/transport
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -1004,8 +1004,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -1038,8 +1038,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
@@ -1084,8 +1084,8 @@ importers:
         specifier: workspace:*
         version: link:../terminal
       ws:
-        specifier: ^8.21.3
-        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -1241,8 +1241,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       codemirror:
         specifier: ^6.0.1
         version: 6.0.2
@@ -1436,8 +1436,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -1498,8 +1498,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/workflow
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -1593,8 +1593,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -1713,8 +1713,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -1742,7 +1742,7 @@ importers:
         version: 3.2.2(react@19.3.1)
       '@hookform/resolvers':
         specifier: ^5.9.1
-        version: 5.9.1(@standard-schema/spec@1.1.0)(ajv@8.20.0)(react-hook-form@7.88.0(react@19.3.1))(zod@4.6.5)
+        version: 5.9.1(@standard-schema/spec@1.1.0)(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.5)
       '@milkdown/core':
         specifier: ^7.22.2
         version: 7.22.2(supports-color@7.2.0)
@@ -1801,8 +1801,8 @@ importers:
         specifier: workspace:*
         version: link:../worktrees
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       '@types/archiver':
         specifier: ^8.0.0
         version: 8.0.0
@@ -1825,8 +1825,8 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       react-hook-form:
-        specifier: ^7.88.0
-        version: 7.88.0(react@19.3.1)
+        specifier: ^7.89.0
+        version: 7.89.0(@types/react@19.3.0)(react@19.3.1)
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -1871,8 +1871,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       diff:
         specifier: ^9.0.0
         version: 9.0.0
@@ -1932,8 +1932,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -1975,8 +1975,8 @@ importers:
         specifier: workspace:*
         version: link:../worktrees
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -2030,8 +2030,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
@@ -2064,11 +2064,11 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       posthog-js:
-        specifier: ^1.434.13
-        version: 1.434.13(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1)
+        specifier: ^1.434.15
+        version: 1.434.15(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -2101,8 +2101,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.292
         version: 0.12.0-beta.292(@xterm/xterm@6.1.0-beta.292)
@@ -2159,8 +2159,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       picomatch:
         specifier: ^4.0.7
         version: 4.0.7
@@ -2196,8 +2196,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
@@ -2293,8 +2293,8 @@ importers:
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       '@tanstack/react-virtual':
         specifier: ^3.14.13
         version: 3.14.13(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2665,8 +2665,8 @@ importers:
         specifier: workspace:*
         version: link:../../domains/worktrees
       '@tanstack/react-query':
-        specifier: ^5.103.2
-        version: 5.103.2(react@19.3.1)
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       '@trpc/client':
         specifier: ^11.19.0
         version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
@@ -2675,7 +2675,7 @@ importers:
         version: 11.19.0(typescript@7.1.0-beta)
       '@trpc/tanstack-react-query':
         specifier: ^11.19.0
-        version: 11.19.0(@tanstack/react-query@5.103.2(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)
+        version: 11.19.0(@tanstack/react-query@5.104.0(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -2692,8 +2692,8 @@ importers:
         specifier: ^2.2.1
         version: 2.2.6
       ws:
-        specifier: ^8.21.3
-        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -2861,8 +2861,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(@types/react@19.3.0)(react@19.3.1)
       react-hook-form:
-        specifier: ^7.88.0
-        version: 7.88.0(react@19.3.1)
+        specifier: ^7.89.0
+        version: 7.89.0(@types/react@19.3.0)(react@19.3.1)
       react-hotkeys-hook:
         specifier: ^5.2.3
         version: 5.3.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -6462,11 +6462,11 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tanstack/query-core@5.103.2':
-    resolution: {integrity: sha512-I8DkFXls5jXLqtm8+QpOhEmG07hIblhSZFzafg9wHsMSEvMzULy9hK17wU1T/ahfhMbtITJhbxutwwCoihkR7A==}
+  '@tanstack/query-core@5.104.0':
+    resolution: {integrity: sha512-JrC2r/JQlXt7khBSdUpsgxNvybzOg+aITa+ARRMlP2AFo93Y8vIqz077rp+e61mJetSZ0T6AJbwW1JHer1vrPQ==}
 
-  '@tanstack/react-query@5.103.2':
-    resolution: {integrity: sha512-B+fWiYZBc+0uUD5zDZAeLw9dKj7XEsdnuu6zRZ+no6LNKpeE3P3bJ+N6HINjcIlWR6fW3vUoTneEaGa2V6ehqw==}
+  '@tanstack/react-query@5.104.0':
+    resolution: {integrity: sha512-e1TZmDCQnWIfiDVryIHeA6Idj+Lfx1hORLOhXS/l5wcgvtVD4yYqbTDl378sGQKIi2cSgb0TEMC9cKK8GGoJEw==}
     peerDependencies:
       react: ^18 || ^19
 
@@ -8052,8 +8052,8 @@ packages:
   electron-to-chromium@1.5.267:
     resolution: {integrity: sha512-0Drusm6MVRXSOJpGbaSVgcQsuB4hEkMpHXaVstcPmhu5LIedxs1xNK/nIxmQIU/RPC0+1/o0AVZfBTkTNJOdUw==}
 
-  electron-updater@6.8.9:
-    resolution: {integrity: sha512-ZhVxM9iGONUpZGI1FxdMRgJjUFXi7AYGVa5PwKlO1tV1/4zDxQmfKpXOHVztKrd6L9rLcFjERvi1Mf2vxyTkig==}
+  electron-updater@6.8.10:
+    resolution: {integrity: sha512-6ZSwTUoBNtI1f9Pp8y6zCigD8LKV18Rb1+1A7sZzvKvA17o2sqSqKmm0t6uvKeF+HZqA4vsmw4qq0JSS241USQ==}
 
   electron-vite@6.0.0:
     resolution: {integrity: sha512-zafg2uizgll7jdx0BNDkkzO/SowsUBsiHqYN3v9Ieq7XPDHreRGZ4G9IRY/+RslgBktpLOjLM4jlP+IVpV0BGw==}
@@ -9912,8 +9912,8 @@ packages:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  posthog-js@1.434.13:
-    resolution: {integrity: sha512-xqY2Pk7+aLBgS2z5bQXfEBh3kacrK/VwHhCSuAzr2mJ2RCoqGU+WuP7U5weH0pFzhhAsZ6HGHUVlq+JiaTcpqQ==}
+  posthog-js@1.434.15:
+    resolution: {integrity: sha512-ZfBkNrQiFr1Q43G3dR0USzTRdfx+6gKPebyoWDmKnLUhG3yRgYjLH914J6ifEDRnH+RaGOx7rsWKxKcvaSJXHg==}
     peerDependencies:
       '@types/react': '>=16.8.0'
       react: '>=16.8.0'
@@ -10212,11 +10212,15 @@ packages:
   react-fast-compare@3.2.2:
     resolution: {integrity: sha512-nsO+KSNgo1SbJqJEYRE9ERzo7YtYbou/OqjSQKxV7jcKox7+usiUVZOAC+XnDOABXggQTno0Y1CpVnuWEc1boQ==}
 
-  react-hook-form@7.88.0:
-    resolution: {integrity: sha512-QRaLOWhX93YCnMiRfnOFRSwWXZNt8qhm2JTZwypoDvKpSffTJHmpzMXt8U6PV5UThvL3IiiLDUWe2nHMtz6Mmw==}
+  react-hook-form@7.89.0:
+    resolution: {integrity: sha512-vKcoCfy8RKZDrhSdqsRFp0uEOdS1AhLjOL6hR7Wmfzg1akNxEhaPf5WORx8SgEQPVXakdDyDkqQp+KNxVnnPHg==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
+      '@types/react': '*'
       react: ^16.8.0 || ^17 || ^18 || ^19
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   react-hotkeys-hook@5.3.3:
     resolution: {integrity: sha512-aswgyWUnE25hmhzHTfKDmKzsaSE5DJ4LKaU/o6rQSXkDd/1Bh9TfAFQbHkf6fLy11HvlYkp+cDDarGdhmCDhoQ==}
@@ -11402,8 +11406,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  ws@8.21.3:
-    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -12778,10 +12782,10 @@ snapshots:
     dependencies:
       hono: 4.11.9
 
-  '@hookform/resolvers@5.9.1(@standard-schema/spec@1.1.0)(ajv@8.20.0)(react-hook-form@7.88.0(react@19.3.1))(zod@4.6.5)':
+  '@hookform/resolvers@5.9.1(@standard-schema/spec@1.1.0)(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.5)':
     dependencies:
       '@standard-schema/utils': 0.3.0
-      react-hook-form: 7.88.0(react@19.3.1)
+      react-hook-form: 7.89.0(@types/react@19.3.0)(react@19.3.1)
     optionalDependencies:
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
@@ -15019,11 +15023,11 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  '@tanstack/query-core@5.103.2': {}
+  '@tanstack/query-core@5.104.0': {}
 
-  '@tanstack/react-query@5.103.2(react@19.3.1)':
+  '@tanstack/react-query@5.104.0(react@19.3.1)':
     dependencies:
-      '@tanstack/query-core': 5.103.2
+      '@tanstack/query-core': 5.104.0
       react: 19.3.1
 
   '@tanstack/react-virtual@3.14.13(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
@@ -15064,9 +15068,9 @@ snapshots:
     dependencies:
       typescript: 7.1.0-beta
 
-  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.103.2(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)':
+  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.0(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)':
     dependencies:
-      '@tanstack/react-query': 5.103.2(react@19.3.1)
+      '@tanstack/react-query': 5.104.0(react@19.3.1)
       '@trpc/client': 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@trpc/server': 11.19.0(typescript@7.1.0-beta)
       react: 19.3.1
@@ -16772,7 +16776,7 @@ snapshots:
 
   electron-to-chromium@1.5.267: {}
 
-  electron-updater@6.8.9(supports-color@7.2.0):
+  electron-updater@6.8.10(supports-color@7.2.0):
     dependencies:
       builder-util-runtime: 9.7.0(supports-color@7.2.0)
       fs-extra: 10.1.0
@@ -19123,7 +19127,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  posthog-js@1.434.13(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1):
+  posthog-js@1.434.15(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1):
     dependencies:
       '@posthog/browser-common': 0.9.0
       '@posthog/core': 1.55.2
@@ -19484,9 +19488,11 @@ snapshots:
 
   react-fast-compare@3.2.2: {}
 
-  react-hook-form@7.88.0(react@19.3.1):
+  react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       react: 19.3.1
+    optionalDependencies:
+      '@types/react': 19.3.0
 
   react-hotkeys-hook@5.3.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
@@ -20804,7 +20810,7 @@ snapshots:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6
 
-  ws@8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6):
+  ws@8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6

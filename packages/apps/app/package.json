@@ -32,10 +32,10 @@
     "bufferutil": "^4.1.0",
     "electron-chrome-extensions": "^4.9.0",
     "electron-chrome-web-store": "^0.13.0",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.10",
     "express": "^5.2.1",
     "node-pty": "^1.1.0",
-    "ws": "^8.21.3",
+    "ws": "^8.22.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
@@ -93,7 +93,7 @@
     "@slayzone/worktrees": "workspace:*",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
