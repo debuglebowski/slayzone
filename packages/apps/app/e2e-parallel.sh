@@ -27,8 +27,9 @@
 #
 # Failure count is not monotonic in parallelism — the variance WITHIN the 6-group
 # config exceeded the differences between configs — so cutting processes buys wall
-# clock loss without buying green. `core` (53 specs) is the critical path and
-# equals total wall clock; rebalance IT before touching the process count.
+# clock loss without buying green. `core` (73 specs, ~2x any other group) was
+# the critical path and equalled total wall clock, so it is split into shards
+# (see `shard_count` below) instead of raising the process count everywhere.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -73,7 +74,39 @@ for dir in e2e/*/; do
   total=$((total + ${#specs[@]}))
 done
 
-echo "Running $total specs across ${#groups[@]} groups: ${groups[*]}"
+# ── Sharded groups ───────────────────────────────────────────────────────────
+# A group that alone outlasts the rest is split across several processes. The
+# split is duration-balanced and DETERMINISTIC (e2e/shard-plan.mjs, weights in
+# e2e/spec-durations.json): the same spec always shares an app with the same
+# neighbours, so failure identity stays comparable run to run. Re-record weights
+# from a kept run: `node e2e/shard-plan.mjs record "$E2E_RUN_DIR"/report-*.json`.
+shard_count() {
+  case "$1" in
+    core) echo 2 ;;
+    *) echo 1 ;;
+  esac
+}
+
+# One "unit" = one Playwright process: a name plus the spec args it runs.
+unit_names=()
+unit_args=()
+for name in "${groups[@]}"; do
+  n=$(shard_count "$name")
+  if [[ "$n" -le 1 ]]; then
+    unit_names+=("$name")
+    unit_args+=("e2e/$name/")
+    continue
+  fi
+  i=0
+  while IFS= read -r files; do
+    i=$((i + 1))
+    [[ -n "$files" ]] || continue
+    unit_names+=("$name-$i")
+    unit_args+=("$files")
+  done < <(node e2e/shard-plan.mjs plan "e2e/$name" "$n")
+done
+
+echo "Running $total specs across ${#groups[@]} groups in ${#unit_names[@]} processes: ${unit_names[*]}"
 
 # ── Host covariates ──────────────────────────────────────────────────────────
 # A suite result is not interpretable without them. Measured on this box, the
@@ -96,7 +129,12 @@ start_time=$SECONDS
 
 # Launch each group in parallel
 pids=()
-for name in "${groups[@]}"; do
+for u in "${!unit_names[@]}"; do
+  name=${unit_names[$u]}
+  # Word-split on purpose: a shard's args are a space-separated spec list
+  # (spec paths never contain spaces).
+  # shellcheck disable=SC2206
+  spec_args=(${unit_args[$u]})
   logfile="$tmpdir/log-$name.txt"
 
   # `list` keeps the human log readable; `json` is what the cross-run
@@ -107,18 +145,18 @@ for name in "${groups[@]}"; do
       npx playwright test \
         --config playwright.config.ts \
         --reporter=list,json \
-        "e2e/$name/" \
+        "${spec_args[@]}" \
         > "$logfile" 2>&1 &
   else
     npx playwright test \
       --config playwright.config.ts \
-      "e2e/$name/" \
+      "${spec_args[@]}" \
       > "$logfile" 2>&1 &
   fi
   pids+=($!)
 done
 
-echo "Launched ${#pids[@]} groups, waiting..."
+echo "Launched ${#pids[@]} processes, waiting..."
 
 # Wait and collect results
 fail=0
@@ -148,15 +186,15 @@ if [[ -d "e2e/$PERF_GROUP" && -e "${perf_specs[0]}" ]]; then
     fail=1
   fi
   unset PLAYWRIGHT_JSON_OUTPUT_NAME
-  groups+=("$PERF_GROUP")
+  unit_names+=("$PERF_GROUP")
 fi
 
 elapsed=$(( SECONDS - start_time ))
 
-# Print results per group
+# Print results per process
 echo ""
 echo "========================================="
-for name in "${groups[@]}"; do
+for name in "${unit_names[@]}"; do
   logfile="$tmpdir/log-$name.txt"
   timing=$(grep -oE '\([0-9.]+[ms]+\)' "$logfile" 2>/dev/null | tail -1)
   summary=$(grep -oE '[0-9]+ (passed|failed|skipped)' "$logfile" 2>/dev/null | paste -sd', ' -)
@@ -166,7 +204,7 @@ done
 # Print failures from all groups
 echo ""
 failed_tests=()
-for name in "${groups[@]}"; do
+for name in "${unit_names[@]}"; do
   logfile="$tmpdir/log-$name.txt"
   while IFS= read -r line; do
     failed_tests+=("$line")
