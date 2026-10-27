@@ -19,6 +19,19 @@ vi.mock('@slayzone/diagnostics/server', () => ({
     if (e.payload?.command) commands.push(e.payload.command)
   }
 }))
+// git < 2.41 (e.g. Ubuntu 22.04's 2.34) has no `%(ahead-behind:)` atom: for-each-ref
+// fails with "unknown field name". Simulated here, since CI's git is newer.
+const sim = vi.hoisted(() => ({ oldGit: false }))
+vi.mock('./exec-async', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./exec-async')>()
+  return {
+    ...real,
+    execGit: (args: string[], options: { cwd: string }) =>
+      sim.oldGit && args.some((a) => a.includes('%(ahead-behind:'))
+        ? Promise.reject(new Error('fatal: unknown field name: ahead-behind:main'))
+        : real.execGit(args, options)
+  }
+})
 
 const { resolveChildBranches, listBranchesDetailed } = await import('./git-worktree')
 
@@ -72,6 +85,7 @@ beforeAll(() => {
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 beforeEach(() => {
   commands.length = 0
+  sim.oldGit = false
 })
 
 describe('resolveChildBranches', () => {
@@ -113,5 +127,36 @@ describe('listBranchesDetailed', () => {
   it('spawns a constant number of git processes', async () => {
     await listBranchesDetailed(repo)
     expect(commands.length).toBeLessThanOrEqual(4)
+  })
+
+  it('git without %(ahead-behind:) → per-branch counts for the 10 newest branches', async () => {
+    sim.oldGit = true
+    const { branches, defaultBranch } = await listBranchesDetailed(repo)
+    expect(defaultBranch).toBe('main')
+    expect(branches).toHaveLength(BRANCHES + 3) // + main, merged-one, pages
+    // Newest-first, as before: the first 10 are computed, the rest are null.
+    branches.forEach((b, i) => {
+      if (b.isDefault || i >= 10) expect(b.aheadBehindDefault, b.name).toBeNull()
+      else if (b.name.startsWith('feat-')) {
+        expect(b.aheadBehindDefault, b.name).toEqual({ ahead: 2, behind: 1 })
+      } else expect(b.aheadBehindDefault, b.name).not.toBeNull()
+    })
+    // Upstream counts don't need the new atom: still there, for every branch.
+    const feat0 = branches.find((b) => b.name === 'feat-0')
+    expect(feat0?.aheadBehindUpstream).toEqual({ ahead: 2, behind: 2 })
+  })
+
+  it('default branch with no local ref (origin/HEAD → develop) → zero counts, no failure', async () => {
+    git('symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop')
+    try {
+      const { branches, defaultBranch } = await listBranchesDetailed(repo)
+      expect(defaultBranch).toBe('develop')
+      expect(branches).toHaveLength(BRANCHES + 3)
+      branches.forEach((b, i) => {
+        expect(b.aheadBehindDefault, b.name).toEqual(i < 10 ? { ahead: 0, behind: 0 } : null)
+      })
+    } finally {
+      git('symbolic-ref --delete refs/remotes/origin/HEAD')
+    }
   })
 })
