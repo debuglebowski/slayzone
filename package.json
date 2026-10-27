@@ -2,30 +2,6 @@
   "name": "slayzone-monorepo",
   "private": true,
   "license": "GPL-3.0-only",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild",
-      "node-pty",
-      "posix"
-    ],
-    "overrides": {
-      "zod": "^4.5.4",
-      "d3-shape>d3-path": "^3.1.0",
-      "node-abi": "^4.35.0",
-      "posix>nan": "^2.29.0",
-      "electron-chrome-web-store>adm-zip": "^0.6.1",
-      "prosemirror-view": "^1.42.3",
-      "prosemirror-model": "^1.25.12"
-    },
-    "patchedDependencies": {
-      "@convex-dev/auth@0.0.95": "patches/@convex-dev__auth@0.0.95.patch",
-      "posix@4.2.0": "patches/posix@4.2.0.patch",
-      "@radix-ui/react-menu@2.1.24": "patches/@radix-ui__react-menu@2.1.24.patch",
-      "electron-chrome-extensions@4.9.0": "patches/electron-chrome-extensions@4.9.0.patch",
-      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
-    }
-  },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "dev": "pnpm --filter @slayzone/app dev",
@@ -97,8 +73,8 @@
   },
   "engines": {
     "node": ">=24",
-    "pnpm": ">=10.34.5"
+    "pnpm": ">=12.7.0"
   },
   "version": "0.36.0",
-  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
+  "packageManager": "pnpm@12.7.0+sha512.9c56477e360068d6e9dca6a92efb4e46b3dc5a52fcebf3d84d78b9736c0ded589a561621a52f68219a7a39facc63cdc079c3226ef9c9d5f02b79f74e69a807b6"
 }

@@ -8,7 +8,7 @@ Electron + pnpm monorepo + electron-builder has many sharp edges. This documents
 
 ## pnpm layout
 
-`.npmrc` must have `node-linker=hoisted`. Without it, domain packages can't resolve transitive deps (typecheck fails) and electron-builder chokes on the `.pnpm` virtual store.
+`pnpm-workspace.yaml` must have `nodeLinker: hoisted` (pnpm 11+ reads no settings from `.npmrc`). Without it, domain packages can't resolve transitive deps (typecheck fails) and electron-builder chokes on the `.pnpm` virtual store.
 
 ## Workspace packages
 

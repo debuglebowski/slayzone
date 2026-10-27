@@ -130,6 +130,7 @@ SlayZone is built with SlayZone. PRs, issues, and ideas are all welcome.
 
 ```bash
 git clone https://github.com/debuglebowski/slayzone.git
+npm i -g corepack@latest   # pnpm 12 is a native binary: needs corepack >= 0.36
 cd slayzone && pnpm install
 pnpm dev
 ```

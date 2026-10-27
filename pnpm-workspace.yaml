@@ -17,8 +17,6 @@ minimumReleaseAgeExclude:
   - scheduler
   # Renovate security update: picomatch@4.0.4
   - picomatch@4.0.4
-  # Renovate security update: pnpm@10.34.5
-  - pnpm@10.34.5
   # Renovate security update: astro@7.3.2
   - astro@7.3.2
   # Renovate security update: diff@8.0.3
@@ -36,3 +34,43 @@ minimumReleaseAgeExclude:
   # comment → main crashed at boot. 6.0.0 parses the AST. Drop once 6.0.0 clears the
   # age gate (2026-11-13).
   - electron-vite@6.0.0
+
+# The workspace has dependency cycles (transport/types/task/...): `pnpm -r` runs their
+# tasks in arbitrary order, as pnpm 10 did (pnpm 11+ fails on a cycle by default).
+ignoreWorkspaceCycles: true
+
+# Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
+nodeLinker: hoisted
+publicHoistPattern:
+  - vite
+
+# Only `true` entries may run install scripts; one not listed fails the install
+# (strictDepBuilds). The `false` ones never ran them before pnpm 11 either:
+# bufferutil is rebuilt for Electron by scripts/postinstall.js, the rest need none.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  node-pty: true
+  posix: true
+  '@swc/core': false
+  bufferutil: false
+  core-js: false
+  electron-winstaller: false
+  sharp: false
+  utf-8-validate: false
+
+overrides:
+  'zod': '^4.5.4'
+  'd3-shape>d3-path': '^3.1.0'
+  'node-abi': '^4.35.0'
+  'posix>nan': '^2.29.0'
+  'electron-chrome-web-store>adm-zip': '^0.6.1'
+  'prosemirror-view': '^1.42.3'
+  'prosemirror-model': '^1.25.12'
+
+patchedDependencies:
+  '@convex-dev/auth@0.0.95': patches/@convex-dev__auth@0.0.95.patch
+  'posix@4.2.0': patches/posix@4.2.0.patch
+  '@radix-ui/react-menu@2.1.24': patches/@radix-ui__react-menu@2.1.24.patch
+  'electron-chrome-extensions@4.9.0': patches/electron-chrome-extensions@4.9.0.patch
+  'node-pty@1.1.0': patches/node-pty@1.1.0.patch
