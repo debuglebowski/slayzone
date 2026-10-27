@@ -29,6 +29,6 @@
     "@slayzone/test-utils": "workspace:*",
     "@types/node": "^24.19.0",
     "@types/ws": "^8.5.13",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   }
 }
