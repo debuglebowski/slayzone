@@ -1496,16 +1496,14 @@ export async function listBranchesDetailed(repoPath: string): Promise<BranchList
     const fallbackDefault = batchedDefault
       ? []
       : await Promise.all(
-          parsed
-            .slice(0, 10)
-            .map((b) =>
-              b.name !== defaultBranch
-                ? getAheadBehind(repoPath, b.name, defaultBranch).catch(() => ({
-                    ahead: 0,
-                    behind: 0
-                  }))
-                : Promise.resolve(null)
-            )
+          parsed.slice(0, 10).map((b) =>
+            b.name !== defaultBranch
+              ? getAheadBehind(repoPath, b.name, defaultBranch).catch(() => ({
+                  ahead: 0,
+                  behind: 0
+                }))
+              : Promise.resolve(null)
+          )
         )
 
     const branches: BranchDetail[] = parsed.map((b, i) => {

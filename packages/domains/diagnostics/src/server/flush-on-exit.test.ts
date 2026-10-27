@@ -3,8 +3,14 @@
  * event still queued when the process exits naturally must not be lost.
  *
  * Runs itself as a child: the child binds a file-backed diagnostics DB, records
- * one info event (queued behind the 2s flush timer) and returns. The parent
- * asserts the child exited well before that timer, and that the row landed.
+ * one info event (queued behind the 2s flush timer) and returns. The child then
+ * reports the DB row count at two lifecycle points, read synchronously:
+ *   - the FIRST `beforeExit` (the event loop drained) — must be 0: the event is
+ *     still queued, i.e. the armed timer did not keep the loop alive. A ref'd
+ *     timer holds the loop until it fires and flushes, so the row would already
+ *     be there by the time the loop first drains.
+ *   - `exit` — must be 1: the beforeExit flush landed before the process exited.
+ * Lifecycle ordering, not wall-clock: holds however slow the host is.
  *
  * The child runs under plain Electron-as-node + tsx (not vitest), so it gets
  * explicit tsx + loader flags rather than this worker's `process.execArgv`.
@@ -21,6 +27,19 @@ import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harne
 import { bindDiagnosticsDbs, recordDiagnosticEvent } from './index.js'
 
 const CHILD_DB_ENV = 'SLAYZONE_TEST_DIAG_EXIT_DB_PATH'
+const CHILD_REPORT_ENV = 'SLAYZONE_TEST_DIAG_EXIT_REPORT_PATH'
+
+/** What the child observed about its own exit; written synchronously at `exit`. */
+interface ChildExitReport {
+  /** Rows on disk when the event loop FIRST drained (`beforeExit`), before any listener ran. */
+  rowsAtFirstBeforeExit: number | null
+  beforeExitCount: number
+  /** Rows on disk at `exit`. */
+  rowsAtExit: number
+  /** Enqueue → first `beforeExit` / `exit`, child-side. Failure context only, never asserted. */
+  msToFirstBeforeExit: number | null
+  msToExit: number
+}
 
 const DIAG_SCHEMA = `
   CREATE TABLE diagnostics_events (
@@ -43,7 +62,11 @@ const DIAG_SCHEMA = `
 const childDbPath = process.env[CHILD_DB_ENV]
 
 if (childDbPath) {
+  const reportPath = process.env[CHILD_REPORT_ENV]
+  if (!reportPath) throw new Error(`${CHILD_REPORT_ENV} not set`)
   const raw = new Database(childDbPath)
+  const countRows = (): number =>
+    (raw.prepare(`SELECT COUNT(*) AS n FROM diagnostics_events`).get() as { n: number }).n
   bindDiagnosticsDbs({
     diagnosticsDb: createSlayzoneDbAdapter(raw),
     blobDir: path.join(path.dirname(childDbPath), 'blobs')
@@ -53,6 +76,28 @@ if (childDbPath) {
     source: 'diagnostics',
     event: 'test.exit',
     message: 'queued'
+  })
+  const enqueuedAt = performance.now()
+  let rowsAtFirstBeforeExit: number | null = null
+  let msToFirstBeforeExit: number | null = null
+  let beforeExitCount = 0
+  // Prepended: runs before the store's own beforeExit flush, so it sees the DB
+  // exactly as the drained event loop left it.
+  process.prependListener('beforeExit', () => {
+    if (beforeExitCount++ === 0) {
+      rowsAtFirstBeforeExit = countRows()
+      msToFirstBeforeExit = Math.round(performance.now() - enqueuedAt)
+    }
+  })
+  process.on('exit', () => {
+    const report: ChildExitReport = {
+      rowsAtFirstBeforeExit,
+      beforeExitCount,
+      rowsAtExit: countRows(),
+      msToFirstBeforeExit,
+      msToExit: Math.round(performance.now() - enqueuedAt)
+    }
+    fs.writeFileSync(reportPath, JSON.stringify(report))
   })
   // Nothing else: the process must now exit on its own, flushing first.
 } else {
@@ -69,6 +114,7 @@ if (childDbPath) {
   describe('write-queue flush on exit', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-exit-'))
     const dbPath = path.join(dir, 'diagnostics.sqlite')
+    const reportPath = path.join(dir, 'exit-report.json')
 
     afterAll(() => {
       fs.rmSync(dir, { recursive: true, force: true })
@@ -79,27 +125,30 @@ if (childDbPath) {
       setup.exec(DIAG_SCHEMA)
       setup.close()
 
-      const started = Date.now()
       const child = spawnSync(process.execPath, [...CHILD_EXEC_ARGV, import.meta.filename], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', [CHILD_DB_ENV]: dbPath },
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          [CHILD_DB_ENV]: dbPath,
+          [CHILD_REPORT_ENV]: reportPath
+        },
         encoding: 'utf8',
-        timeout: 15_000
+        // Absolute backstop only (a hung child); the proof is the ordering below.
+        timeout: 60_000
       })
-      const elapsed = Date.now() - started
       expect(child.status, `${child.stdout}\n${child.stderr}`).toBe(0)
 
-      // Baseline: the child's own startup (tsx + loader) with the timer cleared.
-      // The 2s timer holding the loop pushes it past startup + 2000ms.
-      const baseline = spawnSync(process.execPath, [...CHILD_EXEC_ARGV, '-e', ''], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-        timeout: 15_000
-      })
-      expect(baseline.status).toBe(0)
-      const startupMs = Date.now() - started - elapsed
+      const report = JSON.parse(fs.readFileSync(reportPath, 'utf8')) as ChildExitReport
+      const context = JSON.stringify(report)
       expect(
-        elapsed,
-        `child took ${elapsed}ms vs ~${startupMs}ms startup: the flush timer held it`
-      ).toBeLessThan(startupMs + 1500)
+        report.beforeExitCount,
+        `child never drained its event loop: ${context}`
+      ).toBeGreaterThan(0)
+      expect(
+        report.rowsAtFirstBeforeExit,
+        `event already flushed when the loop first drained — the flush timer held the process open until it fired: ${context}`
+      ).toBe(0)
+      expect(report.rowsAtExit, `beforeExit flush did not land before exit: ${context}`).toBe(1)
     })
 
     test('event queued at natural exit is flushed, not lost', () => {
