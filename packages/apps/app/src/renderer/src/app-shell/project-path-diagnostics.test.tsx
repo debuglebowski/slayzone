@@ -236,6 +236,38 @@ describe('Home "path missing" UI (unchanged behavior)', () => {
     expect(homeShowsMissing()).toBe(false)
   })
 
+  it('an unchanged answer does not re-render the shell (focus re-probes)', async () => {
+    // App hosts this hook: before the PathCheck refactor an identical answer was a
+    // same-value setState (bailed out), so a window focus re-rendered nothing.
+    let childRenders = 0
+    function RenderCounter(): null {
+      childRenders++
+      return null
+    }
+    function CountingShell({ selectedProjectId }: { selectedProjectId: string }) {
+      const guard = useProjectPathGuard(selectedProjectId, PROJECTS, () => {})
+      return (
+        <>
+          <span data-testid="home-path-missing">{String(guard.projectPathMissing)}</span>
+          <RenderCounter />
+        </>
+      )
+    }
+    render(<CountingShell selectedProjectId="A" />)
+    await answer(0, MISSING)
+    expect(homeShowsMissing()).toBe(true)
+    const rendersAfterFirstAnswer = childRenders
+
+    fireEvent.focus(window)
+    await answer(1, MISSING)
+    fireEvent.focus(window)
+    await answer(2, MISSING)
+
+    expect(probes).toHaveLength(3)
+    expect(homeShowsMissing()).toBe(true)
+    expect(childRenders).toBe(rendersAfterFirstAnswer)
+  })
+
   it('validateProjectPath (called by App after a settings save) updates the flag', async () => {
     render(<Shell selectedProjectId="A" />)
     await answer(0, PRESENT)

@@ -37,6 +37,18 @@ function noPathCheck(project: Project | undefined): PathCheck {
   return { projectId: project?.id ?? null, path: null, missing: false }
 }
 
+/**
+ * State update to `next` that keeps the current object when it already holds the same
+ * answer, so a repeated identical answer (every window-focus re-probe) is a same-value
+ * update React bails out of instead of re-rendering the host (App).
+ */
+function toCheck(next: PathCheck): (prev: PathCheck) => PathCheck {
+  return (prev) =>
+    prev.projectId === next.projectId && prev.path === next.path && prev.missing === next.missing
+      ? prev
+      : next
+}
+
 // Validates that the selected project's path still exists — on selection change
 // and on window focus (the dir may have moved). Exposes a fixer that re-points
 // the project at a new directory.
@@ -61,7 +73,7 @@ export function useProjectPathGuard(
   const probe = useCallback(
     (projectId: string, path: string): Promise<void> =>
       trpcClient.workspace.pathExists.query({ projectId, path }).then((res) => {
-        setCheck({ projectId, path, missing: res.reachable && !res.exists })
+        setCheck(toCheck({ projectId, path, missing: res.reachable && !res.exists }))
       }),
     [trpcClient]
   )
@@ -69,7 +81,7 @@ export function useProjectPathGuard(
   const validateProjectPath = useCallback(
     async (project: Project | undefined) => {
       if (!project?.path) {
-        setCheck(noPathCheck(project))
+        setCheck(toCheck(noPathCheck(project)))
         return
       }
       return probe(project.id, project.path)
@@ -85,7 +97,7 @@ export function useProjectPathGuard(
   const [checkedFor, setCheckedFor] = useState({ selectedProjectId, projects })
   if (checkedFor.selectedProjectId !== selectedProjectId || checkedFor.projects !== projects) {
     setCheckedFor({ selectedProjectId, projects })
-    if (!selectedProject?.path) setCheck(noPathCheck(selectedProject))
+    if (!selectedProject?.path) setCheck(toCheck(noPathCheck(selectedProject)))
   }
 
   useEffect(() => {
