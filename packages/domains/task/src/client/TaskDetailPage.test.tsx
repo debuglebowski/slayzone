@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import type { ComponentProps, ReactNode } from 'react'
 import type { TaskDetailData } from './taskDetailCache'
 
@@ -122,8 +122,8 @@ vi.mock('@slayzone/ui', async (importOriginal) => {
       notesShowToolbar: false,
       notesSpellcheck: false
     }),
-    matchesShortcut: () => false,
-    useShortcutStore: () => ({ overrides: {}, isRecording: false }),
+    // matchesShortcut + useShortcutStore stay REAL (from the spread original): the
+    // panel-shortcut tests below drive the page's keydown handler end to end.
     useShortcutDisplay: () => null,
     useStableCallback: <T,>(fn: T) => fn,
     withModalGuard: <T,>(fn: T) => fn,
@@ -210,11 +210,17 @@ vi.mock('./usePanelSizes', () => ({
   applyBoundaryResize: () => ({})
 }))
 
+// Per-test web panels. One array instance, mutated in place, so the page's
+// `enabledWebPanels` dep stays referentially stable across renders.
+const panelConfigMock = vi.hoisted(() => ({
+  enabledWebPanels: [] as { id: string; name: string; baseUrl: string; shortcut?: string }[]
+}))
+
 vi.mock('./usePanelConfig', () => ({
   usePanelConfig: () => ({
     config: { order: [], webPanels: [] },
     updateConfig: vi.fn().mockResolvedValue(undefined),
-    enabledWebPanels: [],
+    enabledWebPanels: panelConfigMock.enabledWebPanels,
     isBuiltinEnabled: () => true,
     getOrderedTaskIds: () => []
   })
@@ -291,6 +297,7 @@ vi.mock('@tanstack/react-query', () => {
 
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
+import { detectPlatform } from '@slayzone/ui'
 
 // --- Test helpers ---
 
@@ -392,5 +399,74 @@ describe('TaskDetailPage — subtask race condition', () => {
     // BUG: current code checks only props.task, ignoring initialData.task
     expect(screen.queryByText('Task not found')).toBeNull()
     expect(screen.getByText('My Subtask')).toBeDefined()
+  })
+})
+
+describe('TaskDetailPage — web panel shortcut', () => {
+  // A web panel stores only its letter; the tab label shows it as mod+letter
+  // (⌘L on macOS, CtrlL elsewhere). Real matchesShortcut, so `mod` resolves for
+  // the platform running the suite: Cmd on macOS, Ctrl elsewhere.
+  const isMac = detectPlatform() === 'mac'
+  const primary = isMac ? { metaKey: true } : { ctrlKey: true }
+  const otherMod = isMac ? { ctrlKey: true } : { metaKey: true }
+  const panelSelector = '[data-panel-id="web:test"]'
+
+  afterEach(() => {
+    panelConfigMock.enabledWebPanels.length = 0
+  })
+
+  function renderWithWebPanel(): HTMLInputElement {
+    panelConfigMock.enabledWebPanels.push({
+      id: 'web:test',
+      name: 'TestPanel',
+      baseUrl: 'https://example.com',
+      shortcut: 'l'
+    })
+    render(
+      <TaskDetailPage
+        {...requiredProps}
+        isActive
+        task={null}
+        project={null}
+        initialData={makeTaskDetailData()}
+      />
+    )
+    expect(document.querySelector(panelSelector)).toBeNull()
+    return screen.getByDisplayValue('My Subtask') as HTMLInputElement
+  }
+
+  it('primary modifier + letter toggles the panel on and off', () => {
+    const title = renderWithWebPanel()
+    fireEvent.keyDown(title, { key: 'l', code: 'KeyL', ...primary })
+    expect(document.querySelector(panelSelector)).not.toBeNull()
+    fireEvent.keyDown(title, { key: 'l', code: 'KeyL', ...primary })
+    expect(document.querySelector(panelSelector)).toBeNull()
+  })
+
+  it('typing the bare letter in an input does not toggle the panel', () => {
+    const title = renderWithWebPanel()
+    fireEvent.keyDown(title, { key: 'l', code: 'KeyL' })
+    expect(document.querySelector(panelSelector)).toBeNull()
+  })
+
+  it('the bare letter with nothing focused does not toggle the panel', () => {
+    renderWithWebPanel()
+    fireEvent.keyDown(document.body, { key: 'l', code: 'KeyL' })
+    expect(document.querySelector(panelSelector)).toBeNull()
+  })
+
+  // One combo per case: a toggle is its own inverse, so two misfires in one test
+  // would cancel out and pass.
+  it.each([
+    ['the other modifier (Ctrl on macOS, Win/Super elsewhere)', { key: 'l', ...otherMod }],
+    // e.key stays 'l' with Alt off macOS (on macOS it composes, e.g. '¬').
+    ['Alt', { key: 'l', altKey: true }],
+    ['Shift', { key: 'L', shiftKey: true }],
+    // macOS Chromium reports the unshifted letter while Cmd is held.
+    ['primary + Shift', { key: isMac ? 'l' : 'L', shiftKey: true, ...primary }]
+  ])('the letter with %s does not toggle the panel', (_label, init) => {
+    const title = renderWithWebPanel()
+    fireEvent.keyDown(title, { code: 'KeyL', ...init })
+    expect(document.querySelector(panelSelector)).toBeNull()
   })
 })

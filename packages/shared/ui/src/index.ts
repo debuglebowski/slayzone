@@ -17,6 +17,7 @@ export {
   registry,
   scopeTracker,
   getBlockedWebPanelKeys,
+  webPanelShortcutKeys,
   type ShortcutDefinition,
   type ShortcutScope
 } from './shortcut-definitions'

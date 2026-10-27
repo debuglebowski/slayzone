@@ -4,9 +4,7 @@ import { goHome } from './electron'
 type ProjectSection = 'providers' | 'instructions' | 'skills' | 'mcp'
 
 export async function closeTopDialog(mainWindow: Page): Promise<void> {
-  const openDialogs = mainWindow.locator(
-    '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
-  )
+  const openDialogs = mainWindow.locator('[role="dialog"][data-state="open"]')
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if ((await openDialogs.count()) === 0) return
 

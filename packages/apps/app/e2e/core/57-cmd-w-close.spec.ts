@@ -140,9 +140,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
   }
 
   const closeOpenDialogs = async (page: Page) => {
-    const openDialogs = page.locator(
-      '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
-    )
+    const openDialogs = page.locator('[role="dialog"][data-state="open"]')
     for (let attempt = 0; attempt < 8; attempt += 1) {
       if ((await openDialogs.count()) === 0) return
       const top = openDialogs.last()

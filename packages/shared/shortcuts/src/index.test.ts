@@ -11,6 +11,7 @@ import {
   detectPlatform,
   isPrimaryModifier,
   getBlockedWebPanelKeys,
+  webPanelShortcutKeys,
   type ElectronInput
 } from './index'
 
@@ -362,5 +363,35 @@ describe('getBlockedWebPanelKeys', () => {
     const blocked = getBlockedWebPanelKeys()
     const available = 'abcdefghijklmnopqrstuvwxyz'.split('').filter((l) => !blocked.has(l))
     expect(available.length).toBeGreaterThan(0)
+  })
+})
+
+describe('webPanelShortcutKeys', () => {
+  const key = (overrides: Partial<KeyboardEvent>): KeyboardEvent =>
+    ({
+      key: 'y',
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      ...overrides
+    }) as KeyboardEvent
+
+  it('binds the stored letter to the primary modifier', () => {
+    expect(webPanelShortcutKeys('y')).toBe('mod+y')
+  })
+
+  it('is null for a panel without a shortcut', () => {
+    expect(webPanelShortcutKeys(undefined)).toBeNull()
+    expect(webPanelShortcutKeys('')).toBeNull()
+  })
+
+  it('matches only what the tab label shows (⌘Y on macOS)', () => {
+    const keys = webPanelShortcutKeys('y')
+    expect(formatKeysForDisplay(keys)).toBe('⌘Y')
+    expect(matchesShortcut(key({ metaKey: true }), keys)).toBe(true)
+    expect(matchesShortcut(key({}), keys)).toBe(false)
+    expect(matchesShortcut(key({ ctrlKey: true }), keys)).toBe(false)
+    expect(matchesShortcut(key({ key: 'Y', shiftKey: true }), keys)).toBe(false)
   })
 })

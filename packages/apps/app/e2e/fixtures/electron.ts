@@ -1332,9 +1332,7 @@ export async function openProjectSettings(
   }
 
   // Clean up any stray modal/dialog left by prior specs.
-  const openDialogs = page.locator(
-    '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
-  )
+  const openDialogs = page.locator('[role="dialog"][data-state="open"]')
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if ((await openDialogs.count()) === 0) break
     const top = openDialogs.last()

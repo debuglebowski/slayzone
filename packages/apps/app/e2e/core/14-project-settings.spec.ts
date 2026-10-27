@@ -633,20 +633,24 @@ test.describe('Project settings & context menu', () => {
     expect(renamed).toBeTruthy()
   })
 
-  test('context menu Delete action can be invoked', async ({ mainWindow }) => {
+  test('context menu Delete opens the confirmation; Cancel keeps the project', async ({
+    mainWindow
+  }) => {
+    const projectCount = (await seed(mainWindow).getProjects()).length
     const blob = projectBlob(mainWindow, projectAbbrev)
     await blob.click({ button: 'right' })
     await mainWindow.getByRole('menuitem', { name: 'Delete' }).click()
 
-    const deleteDialog = mainWindow.locator('[role="dialog"][aria-modal="true"]:visible').last()
-    if (await deleteDialog.isVisible({ timeout: 1_200 }).catch(() => false)) {
-      const cancelBtn = deleteDialog.getByRole('button', { name: /Cancel/i })
-      if (await cancelBtn.isVisible().catch(() => false)) {
-        await cancelBtn.click()
-      } else {
-        await mainWindow.keyboard.press('Escape')
-      }
-      await expect(deleteDialog).not.toBeVisible({ timeout: 3_000 })
-    }
+    // DeleteProjectDialog is a Radix AlertDialog: role="alertdialog", no aria-modal.
+    const deleteDialog = mainWindow
+      .getByRole('alertdialog')
+      .filter({ has: mainWindow.getByRole('heading', { name: 'Delete Project' }) })
+    await expect(deleteDialog).toBeVisible({ timeout: 5_000 })
+    await expect(deleteDialog).toContainText('This will permanently delete')
+
+    await deleteDialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(deleteDialog).not.toBeVisible({ timeout: 3_000 })
+    expect((await seed(mainWindow).getProjects()).length).toBe(projectCount)
+    await expect(projectBlob(mainWindow, projectAbbrev)).toBeVisible()
   })
 })

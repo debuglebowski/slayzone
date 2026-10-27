@@ -67,7 +67,8 @@ import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
-  formatKeysForDisplay
+  formatKeysForDisplay,
+  webPanelShortcutKeys
 } from '@slayzone/ui'
 import {
   DropdownMenu,
@@ -1423,9 +1424,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         e.preventDefault()
         handlePanelToggle('settings', !panelVisibility.settings)
       } else {
-        // Web panel shortcuts (not in registry — dynamic per-project config)
+        // Web panel shortcuts (not in registry — dynamic per-project config):
+        // primary modifier + the panel's letter, exactly as its tab label shows it.
         for (const wp of enabledWebPanels) {
-          if (wp.shortcut && e.key === wp.shortcut) {
+          if (matchesShortcut(e, webPanelShortcutKeys(wp.shortcut))) {
             e.preventDefault()
             handlePanelToggle(wp.id, !panelVisibility[wp.id])
             return
@@ -2600,9 +2602,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       id: wp.id,
                       icon: Globe,
                       label: wp.name,
-                      shortcut: wp.shortcut
-                        ? (formatKeysForDisplay(`mod+${wp.shortcut}`) ?? undefined)
-                        : undefined
+                      shortcut: formatKeysForDisplay(webPanelShortcutKeys(wp.shortcut)) ?? undefined
                     }
                   }
                   const ordered = orderedTaskIds

@@ -12,6 +12,16 @@ const OS_RESERVED_KEYS = new Set([
 ])
 
 /**
+ * The shortcut a web panel binds: primary modifier + its stored letter (`'y'` → `'mod+y'`,
+ * ⌘Y on macOS, Ctrl+Y elsewhere). Panels store only the letter (every writer validates a
+ * single lowercase a–z), so the keydown matcher and the tab label both derive the combo
+ * here and cannot drift apart. Null when the panel has no shortcut.
+ */
+export function webPanelShortcutKeys(letter: string | null | undefined): string | null {
+  return letter ? `mod+${letter}` : null
+}
+
+/**
  * Compute which single letters cannot be used as web panel shortcuts (Cmd+{letter}).
  * Derived from actual shortcut definitions (global + task scope Cmd+letter bindings)
  * plus OS-level reserved keys.

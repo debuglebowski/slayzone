@@ -13,6 +13,7 @@ export {
   registry,
   scopeTracker,
   getBlockedWebPanelKeys,
+  webPanelShortcutKeys,
   type ShortcutDefinition,
   type ShortcutScope,
   type Platform

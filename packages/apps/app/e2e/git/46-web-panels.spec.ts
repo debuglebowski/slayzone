@@ -254,6 +254,55 @@ test.describe('Web panels', () => {
     })
   })
 
+  // Regression: the handler compared e.key alone, so the bare letter toggled the
+  // panel from any text field. Only primary modifier + letter (⌘L / Ctrl+L, as the
+  // panel tab shows it) may toggle it.
+  test('bare shortcut letter typed in the task title does not toggle the web panel', async ({
+    mainWindow
+  }) => {
+    // Every web panel, hidden or not: a just-toggled panel may not be laid out yet.
+    const webPanels = mainWindow.locator('[data-panel-id^="web:"]')
+    await expect(webPanels).toHaveCount(0)
+
+    // The title <input> has no testid and React sets its value as a property,
+    // so pick the first visible input whose live value is the task title.
+    let title: import('@playwright/test').Locator | null = null
+    for (const el of await mainWindow.locator('input:visible').all()) {
+      if ((await el.inputValue().catch(() => '')) === 'WP test task') {
+        title = el
+        break
+      }
+    }
+    if (!title) throw new Error('task title input not found')
+
+    await title.click()
+    await expect(title).toBeEditable()
+    await expect(title).toBeFocused()
+    try {
+      await mainWindow.keyboard.press('l')
+      // The key reached the input. A toggle from the same keydown commits before
+      // the input event, so the panel would already be in the DOM here.
+      await expect(title).not.toHaveValue('WP test task')
+      await expect(webPanels).toHaveCount(0)
+    } finally {
+      // Put the title back (Enter saves; a no-op when unchanged) so later tests
+      // still find 'WP test task'. Click first: a failed run may have left it read-only.
+      await title.click()
+      await title.fill('WP test task')
+      await title.press('Enter')
+    }
+    await expect(title).toHaveValue('WP test task')
+    await expect(title).not.toBeEditable()
+
+    // Same focus, primary modifier: the shortcut still toggles from the title field.
+    await mainWindow.keyboard.press('ControlOrMeta+l')
+    await expect(mainWindow.locator('[data-panel-id^="web:"]:visible')).toHaveCount(1, {
+      timeout: 5_000
+    })
+    await mainWindow.keyboard.press('ControlOrMeta+l')
+    await expect(webPanels).toHaveCount(0, { timeout: 3_000 })
+  })
+
   // ── Delete panels ──
 
   test('delete Figma panel, stays deleted after reopen', async ({ mainWindow }) => {

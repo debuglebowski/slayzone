@@ -20,4 +20,4 @@ export {
 } from './accelerator'
 export { registry, ShortcutRegistry, type HandlerEntry } from './registry'
 export { scopeTracker, ScopeTracker } from './scope-tracker'
-export { getBlockedWebPanelKeys } from './blocked-keys'
+export { getBlockedWebPanelKeys, webPanelShortcutKeys } from './blocked-keys'
