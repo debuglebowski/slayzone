@@ -119,6 +119,33 @@ describe('createHubRequestHandler dispatch table', () => {
     await vi.waitFor(() => expect(liveWatches()).toBeLessThanOrEqual(before), { timeout: 2_000 })
     rmSync(root, { recursive: true, force: true })
   })
+
+  // The login-shell PATH probe (~1s on a heavy zshrc) runs alongside enrollment.
+  // git/gh/proc requests can need it; a pty starts the user's login shell, which
+  // builds its own PATH — so terminals restore without waiting for the probe.
+  it('holds non-pty requests until the login-shell PATH is adopted, never pty ones', async () => {
+    let adopt!: () => void
+    const pathReady = new Promise<void>((resolve) => (adopt = resolve))
+    const { handle } = createHubRequestHandler({
+      shutdown: () => {},
+      dialer: fakeDialer,
+      config: testConfig,
+      pathReady
+    })
+
+    expect(await handle(HubToComputerMethods.ptyList, {}, ACTOR)).toBeDefined()
+
+    // A cheap fs call (one stat): ungated it settles well inside the wait below.
+    let settled = false
+    const exists = handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, ACTOR).then(
+      () => (settled = true)
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    expect(settled).toBe(false)
+    adopt()
+    await exists
+    expect(settled).toBe(true)
+  })
 })
 
 describe('startComputer TLS', () => {

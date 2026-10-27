@@ -31,6 +31,7 @@ import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/par
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { ENV_VARS, ignoredCertPinNotices, loadComputerConfig } from './config'
+import { adoptLoginShellPath } from './login-shell-path'
 import { startComputer } from './main'
 
 /**
@@ -201,8 +202,21 @@ async function main(): Promise<void> {
     await installAgentHooks(log)
   }
 
+  // The user's login-shell PATH: every process this computer starts inherits
+  // process.env, and started from the Dock or a service manager that PATH is the
+  // OS's bare one. Probed alongside enrollment, not before it — a heavy zshrc takes
+  // ~1s — and requests that can need it wait for it (see `pathReady`).
+  const pathReady = adoptLoginShellPath().then((adopted) =>
+    log(
+      adopted
+        ? `PATH: adopted login-shell PATH (+${adopted.added.length} entries)`
+        : 'PATH: no login-shell PATH probed — keeping the inherited one'
+    )
+  )
+
   const handle = startComputer(config, {
     log,
+    pathReady,
     onShutdown: () => {
       process.exitCode = 0
     }

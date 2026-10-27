@@ -4,10 +4,14 @@ import { platform } from 'os'
 import { promisify } from 'util'
 import {
   resolveUserShell,
-  getShellStartupArgs,
   quoteForShell,
   shellExists,
-  getShellOverride
+  getShellOverride,
+  loginShellPathProbes,
+  parseLoginShellPathOutput,
+  mergePathLists,
+  probeLoginShellPath,
+  LOGIN_SHELL_PATH_PROBE_TIMEOUT_MS
 } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type { ValidationResult } from './adapters/types'
@@ -41,6 +45,7 @@ export {
  * (chat-handlers) so subprocess Bash tools find the same binaries the user has.
  */
 let cachedEnrichedPath: string | null | undefined
+let enrichedPathProbe: Promise<string | null> | undefined
 export function getEnrichedPath(): string | null {
   // Probes THIS machine's login shell: refused on a hub with processes switched
   // off (T-06), where nothing should run here to need the PATH anyway.
@@ -50,37 +55,31 @@ export function getEnrichedPath(): string | null {
   return cachedEnrichedPath
 }
 
+/** {@link getEnrichedPath} without blocking: same cache, probed asynchronously. */
+export function getEnrichedPathAsync(): Promise<string | null> {
+  assertHubLocalExecEnabled({ op: 'shell.path' })
+  if (cachedEnrichedPath !== undefined) return Promise.resolve(cachedEnrichedPath)
+  enrichedPathProbe ??= probeLoginShellPath().then((path) => {
+    cachedEnrichedPath ??= path
+    return cachedEnrichedPath
+  })
+  return enrichedPathProbe
+}
+
 function resolveEnrichedPath(): string | null {
-  if (platform() === 'win32') return null
-  const shell = resolveUserShell()
-  // Fish: $PATH is a list — `echo $PATH` prints space-separated, invalid as OS PATH.
-  // `string join ":" $PATH` produces colon-joined.
-  const isFish = shell.endsWith('/fish')
-  const cmd = isFish ? 'string join ":" $PATH' : 'echo $PATH'
-
-  // Interactive login shell first — sources .zshrc/.bashrc where pnpm/nvm add PATH
-  try {
-    const args = getShellStartupArgs(shell)
-    const result = execFileSync(shell, [...args, '-c', cmd], {
-      timeout: 5000,
-      encoding: 'utf-8'
-    }).trim()
-    if (result) return result
-  } catch {
-    /* fall through */
+  for (const probe of loginShellPathProbes(resolveUserShell())) {
+    try {
+      const stdout = execFileSync(probe.file, probe.args, {
+        timeout: LOGIN_SHELL_PATH_PROBE_TIMEOUT_MS,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+      const path = parseLoginShellPathOutput(stdout)
+      if (path) return path
+    } catch {
+      /* fall through */
+    }
   }
-
-  // Fallback: login only — sources .zprofile/.bash_profile
-  try {
-    const result = execFileSync(shell, ['-l', '-c', cmd], {
-      timeout: 5000,
-      encoding: 'utf-8'
-    }).trim()
-    if (result) return result
-  } catch {
-    /* fall through */
-  }
-
   return null
 }
 
@@ -142,7 +141,7 @@ export function validateShellEnv(): ValidationResult {
 }
 
 /**
- * Find a binary by name using the same shell startup context as PTY sessions.
+ * Find a binary by name on the PATH PTY sessions get (the login shell's).
  * Returns the resolved path or null if not found.
  */
 export async function whichBinary(name: string): Promise<string | null> {
@@ -159,10 +158,17 @@ export async function whichBinary(name: string): Promise<string | null> {
   }
 
   try {
-    const shell = resolveUserShell()
-    const shellArgs = getShellStartupArgs(shell)
+    // Plain sh over the login-shell PATH, not the interactive shell itself: its
+    // startup files print to the same stdout `command -v` answers on, so the first
+    // line read back could be a prompt theme instead of a path.
+    const enrichedPath = await getEnrichedPathAsync()
     const checkCmd = `command -v ${quoteForShell(name)}`
-    const { stdout } = await execFileAsync(shell, [...shellArgs, '-c', checkCmd], { timeout: 3000 })
+    const { stdout } = await execFileAsync('/bin/sh', ['-c', checkCmd], {
+      timeout: 3000,
+      env: enrichedPath
+        ? { ...process.env, PATH: mergePathLists(enrichedPath, process.env.PATH) }
+        : process.env
+    })
     const found = stdout.trim().split('\n')[0]
     return found || null
   } catch {

@@ -1,4 +1,4 @@
-import { whichBinary, resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/server'
+import { whichBinary } from '@slayzone/terminal/server'
 import type {
   GhPullRequest,
   GhPrComment,
@@ -44,7 +44,9 @@ export interface GhExecutor {
 }
 
 /**
- * Run gh in THIS process, with the user's shell environment so PATH is correct.
+ * Run gh on THIS machine: the resolved binary with argv, no shell. Through the
+ * user's interactive shell, its startup output (prompt themes, gitstatus) landed on
+ * the stdout gh's JSON comes back on. `execAsync` supplies the login-shell PATH.
  *
  * Exported so a routed executor can delegate to it for the zero-computer case,
  * where this host's disk is the only one and its own `gh` is therefore the only
@@ -53,14 +55,10 @@ export interface GhExecutor {
  */
 export const runGhLocally: GhExecutor = async (args, opts) => {
   assertHubLocalExecEnabled({ op: 'gh' })
-  if (!ghPath) await resolveGhPath()
-  if (!ghPath) throw new Error('gh CLI not found')
+  const gh = await resolveGhPath()
+  if (!gh) throw new Error('gh CLI not found')
 
-  const shell = resolveUserShell()
-  const shellArgs = getShellStartupArgs(shell)
-  const cmd = [ghPath, ...args].map((a) => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ')
-
-  return execAsync(shell, [...shellArgs, '-c', cmd], { ...opts, source: 'gh' })
+  return execAsync(gh, args, { ...opts, source: 'gh' })
 }
 
 let ghExecutor: GhExecutor = runGhLocally

@@ -3,7 +3,9 @@ import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { basename } from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { DiagnosticSource } from '@slayzone/diagnostics/shared'
+import { mergePathLists } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { getEnrichedPath } from '@slayzone/terminal/server'
 
 /**
  * The ONE place this package starts a process. Everything here runs on the hub's
@@ -16,16 +18,33 @@ function refuseOnSwitchedOffHub(command: string): void {
   assertHubLocalExecEnabled({ op: 'exec', detail: { command: basename(command) } })
 }
 
-/** `spawn`, refused first on a hub with processes switched off. */
+/**
+ * `spawn`'s trailing `(args?, options?)` with the user's login-shell PATH merged into
+ * `options.env` (or the inherited env). A hub started from the Dock or a service
+ * manager has the OS's bare PATH, so `gh` and the tools a repo's git hooks call
+ * (Git LFS) — installed via Homebrew, nvm, … — would not resolve.
+ */
+function withLoginShellPath(rest: unknown[]): unknown[] {
+  const at = Array.isArray(rest[0]) ? 1 : 0
+  const options = (rest[at] ?? {}) as { env?: NodeJS.ProcessEnv }
+  const enrichedPath = getEnrichedPath()
+  if (!enrichedPath) return rest
+  const env = options.env ?? process.env
+  const next = [...rest]
+  next[at] = { ...options, env: { ...env, PATH: mergePathLists(enrichedPath, env.PATH) } }
+  return next
+}
+
+/** `spawn` with the login-shell PATH, refused first on a hub with processes switched off. */
 export const hubSpawn = ((command: string, ...rest: unknown[]): ChildProcess => {
   refuseOnSwitchedOffHub(command)
-  return (spawn as (...a: unknown[]) => ChildProcess)(command, ...rest)
+  return (spawn as (...a: unknown[]) => ChildProcess)(command, ...withLoginShellPath(rest))
 }) as typeof spawn
 
-/** `spawnSync`, refused first on a hub with processes switched off. */
+/** `spawnSync` with the login-shell PATH, refused first on a hub with processes switched off. */
 export const hubSpawnSync = ((command: string, ...rest: unknown[]) => {
   refuseOnSwitchedOffHub(command)
-  return (spawnSync as (...a: unknown[]) => unknown)(command, ...rest)
+  return (spawnSync as (...a: unknown[]) => unknown)(command, ...withLoginShellPath(rest))
 }) as typeof spawnSync
 
 export function trimOutput(value: unknown, maxLength = 1200): string | null {

@@ -146,6 +146,15 @@ export {
   buildExecCommand,
   buildShellInvocation
 } from './shell'
+export {
+  LOGIN_SHELL_PATH_MARKER,
+  LOGIN_SHELL_PATH_PROBE_TIMEOUT_MS,
+  loginShellPathProbes,
+  parseLoginShellPathOutput,
+  mergePathLists,
+  probeLoginShellPath,
+  type LoginShellPathProbe
+} from './login-shell-path'
 // Re-export so main-process code can pull URL helpers from the main barrel.
 // Renderer code MUST import from '@slayzone/platform/slz-file-url' to avoid
 // pulling node:fs into the browser bundle.

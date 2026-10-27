@@ -71,6 +71,8 @@ export interface ComputerRuntimeDeps {
    * `~/.slayzone`). Tests pass a temp dir.
    */
   stateDir?: string
+  /** See {@link HubRequestHandlerDeps.pathReady}. Shared by every hub's dispatch. */
+  pathReady?: Promise<unknown>
 }
 
 export interface ComputerHandle {
@@ -112,6 +114,13 @@ export interface HubRequestHandlerDeps {
   requestLog?: RequestLog
   /** Host of the hub this dispatch serves, for the request log. */
   hubHost?: string
+  /**
+   * Settles once the login-shell PATH is adopted (see login-shell-path.ts). Every
+   * request but the pty ones waits for it: git, gh, setup scripts and chat agents
+   * look their tools up on PATH, while a pty starts the user's login shell, which
+   * builds its own — so terminals restore without waiting on the probe.
+   */
+  pathReady?: Promise<unknown>
 }
 
 export interface HubRequestDispatch {
@@ -176,6 +185,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const hub = deps.hubHost ?? 'unknown'
+  const ptyMethods = new Set(Object.keys(pty.handlers))
 
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
@@ -212,6 +222,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       throw err
     }
     try {
+      if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady
       const result = await entry(params)
       record('ok')
       return result
@@ -385,7 +396,8 @@ export function startComputer(
       getProjectPaths: () => projectPaths,
       admission,
       requestLog,
-      hubHost: hubHostFromUrl(hubUrl)
+      hubHost: hubHostFromUrl(hubUrl),
+      ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
     })
 
     // Every line carries the hub, because with more than one connection "reconnect

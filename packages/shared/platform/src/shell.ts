@@ -6,8 +6,9 @@
  * package that needs to spawn a command — terminal, process-manager, ai-config —
  * shares one implementation. The terminal domain re-exports them for back-compat.
  *
- * PATH-enrichment and ulimit helpers stay in the terminal domain: they depend on
- * spawning the shell and on terminal-only types.
+ * The login-shell PATH probe lives in `./login-shell-path`; the ulimit helpers stay
+ * in the terminal domain: they depend on spawning the shell and on terminal-only
+ * types.
  */
 import fs from 'node:fs'
 import { platform, userInfo } from 'os'

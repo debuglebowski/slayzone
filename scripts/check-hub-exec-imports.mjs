@@ -55,6 +55,8 @@ const ALLOWLIST = {
     'turn snapshots; every git spawn refuses (T-06)',
   'packages/domains/terminal/src/server/shell-env.ts':
     'login-shell PATH and which probes; refuse (T-06)',
+  'packages/shared/platform/src/login-shell-path.ts':
+    'login-shell PATH probe; the hub runs it only through shell-env getEnrichedPathAsync, which refuses (T-06)',
   'packages/domains/terminal/src/server/files-scan.ts':
     '@file autocomplete git ls-files; refuses (T-06)',
   'packages/domains/terminal/src/server/runtime/pty-store.ts':
