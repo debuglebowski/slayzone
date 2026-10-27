@@ -1,14 +1,10 @@
 /**
  * REST: POST /api/tasks/:id/archive contract tests.
- * Run with: pnpm tsx --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/archive.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/archive.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../../../../test-utils/event-spy.js'
 import {
@@ -49,7 +45,7 @@ function seedTask(id: string = crypto.randomUUID()): string {
   return id
 }
 
-await describe('POST /api/tasks/:id/archive', () => {
+describe('POST /api/tasks/:id/archive', () => {
   test('happy: 200 + archived payload + DB archived_at set', async () => {
     const id = seedTask()
     __resetIpcEmitCalls()
@@ -154,5 +150,7 @@ await describe('POST /api/tasks/:id/archive', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

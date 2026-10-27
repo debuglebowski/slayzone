@@ -4,9 +4,10 @@
  * shared MCP sidecar process, which has no per-request env to fall back to. Every
  * agent has that variable, warm-pool agents included (they boot with the id their
  * task is later created under), so there is no second id to resolve it through.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { registerGetCurrentTaskIdTool } from './get-current-task-id.js'
 
@@ -41,7 +42,7 @@ async function invoke(args: {
   }
 }
 
-await describe('mcp get_current_task_id', () => {
+describe('mcp get_current_task_id', () => {
   test('register: tool registered', () => {
     expect(stub.has('get_current_task_id')).toBe(true)
   })
@@ -71,4 +72,4 @@ await describe('mcp get_current_task_id', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

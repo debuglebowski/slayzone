@@ -5,17 +5,11 @@
  * filesystem: the command would create a marker file, and it never appears. Every
  * refusal is one `automation.run_command` audit line. The default path is
  * engine.test.ts.
- *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { taskEvents } from '@slayzone/task/server'
@@ -90,7 +84,7 @@ async function refused(fn: () => Promise<unknown>): Promise<unknown> {
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
 
-await describe('processes off: save', () => {
+describe('processes off: save', () => {
   for (const [kind, action] of [
     ['run_command', runCommand(marker('save'))],
     ['ai', aiAction]
@@ -137,7 +131,7 @@ await describe('processes off: save', () => {
   })
 })
 
-await describe('processes off: run (row inserted directly)', () => {
+describe('processes off: run (row inserted directly)', () => {
   test('manual run: refused to the caller, no run row, no exec', async () => {
     h.db.prepare('DELETE FROM automations').run()
     const id = insertRow([runCommand(marker('manual'))])
@@ -158,11 +152,17 @@ await describe('processes off: run (row inserted directly)', () => {
     const before = lines.length
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await new Promise((r) => setTimeout(r, 300))
+    // The engine runs off the event asynchronously; a fixed 300ms sleep raced it when
+    // this file runs alongside other suites. Wait (deadline-bounded) for the run row
+    // to settle instead.
+    const deadline = Date.now() + 10_000
+    while (Date.now() < deadline && runsOf(id)[0]?.status !== 'error') {
+      await new Promise((r) => setTimeout(r, 25))
+    }
     const runs = runsOf(id)
     expect(runs).toHaveLength(1)
     expect(runs[0].status).toBe('error')
-    expect(String(runs[0].error).includes('SLAYZONE_HUB_ENABLE_PROCESSES=0')).toBe(true)
+    expect(String(runs[0].error)).toContain('SLAYZONE_HUB_ENABLE_PROCESSES=0')
     expect(existsSync(marker('event'))).toBe(false)
     expect(lines.length).toBe(before + 1)
     expect(lines[before].event).toBe('automation.run_command')
@@ -178,7 +178,7 @@ await describe('processes off: run (row inserted directly)', () => {
   })
 })
 
-await describe('processes on (default)', () => {
+describe('processes on (default)', () => {
   test('the same rule saves and runs', async () => {
     delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
     h.db.prepare('DELETE FROM automations').run()
@@ -196,5 +196,7 @@ await describe('processes on (default)', () => {
   })
 })
 
-engine.stop()
-setSecurityLogSink()
+afterAll(() => {
+  engine.stop()
+  setSecurityLogSink()
+})

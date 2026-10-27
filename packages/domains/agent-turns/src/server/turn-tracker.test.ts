@@ -1,13 +1,8 @@
 /**
  * turn-tracker integration tests (worktree-scoped).
- * Run: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/turn-tracker.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   recordTurnBoundary,
   initChatTurnSubscriber,
@@ -41,6 +36,18 @@ const h = await createTestHarness()
 const projectId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
 
+/**
+ * The chat/pty subscribers record their boundary fire-and-forget (a git snapshot
+ * spawn), so a fixed 250ms sleep raced it on a loaded machine. Wait, deadline-bounded,
+ * until the worktree has `n` turns; the deadline keeps a dropped boundary a failure.
+ */
+async function waitForTurns(repo: string, n: number): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline && (await listTurnsForWorktree(h.slayDb, repo)).length < n) {
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
+
 function freshTask(): { taskId: string; tabId: string; repo: string } {
   const repo = mkRepo()
   repos.push(repo)
@@ -55,7 +62,7 @@ function freshTask(): { taskId: string; tabId: string; repo: string } {
   return { taskId, tabId, repo }
 }
 
-await describe('recordTurnBoundary — single snapshot per call', () => {
+describe('recordTurnBoundary — single snapshot per call', () => {
   test('first call inserts row scoped to worktree, prev_snapshot_sha null', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'first.txt'), 'first edit')
@@ -94,7 +101,7 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
   })
 })
 
-await describe('multi-task in same worktree', () => {
+describe('multi-task in same worktree', () => {
   test('two tasks share one worktree → unified turn list, task_id preserved per row', async () => {
     const repo = mkRepo()
     repos.push(repo)
@@ -127,7 +134,7 @@ await describe('multi-task in same worktree', () => {
   })
 })
 
-await describe('task deletion sets task_id to NULL but keeps the turn', () => {
+describe('task deletion sets task_id to NULL but keeps the turn', () => {
   test('ON DELETE SET NULL', async () => {
     const { taskId, tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'before-delete.txt'), 'data')
@@ -144,7 +151,7 @@ await describe('task deletion sets task_id to NULL but keeps the turn', () => {
   })
 })
 
-await describe('worktree path fallback', () => {
+describe('worktree path fallback', () => {
   test('uses project.path when task.worktree_path empty', async () => {
     const repo = mkRepo()
     repos.push(repo)
@@ -185,7 +192,7 @@ await describe('worktree path fallback', () => {
   })
 })
 
-await describe('snapshot fail (no .git)', () => {
+describe('snapshot fail (no .git)', () => {
   test('no row inserted', async () => {
     const { tabId, repo } = freshTask()
     fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })
@@ -194,7 +201,7 @@ await describe('snapshot fail (no .git)', () => {
   })
 })
 
-await describe('prompt_preview truncation', () => {
+describe('prompt_preview truncation', () => {
   test('clamps to 200 chars + collapses whitespace', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'a.txt'), 'something')
@@ -205,7 +212,7 @@ await describe('prompt_preview truncation', () => {
   })
 })
 
-await describe('retention: 50 per worktree', () => {
+describe('retention: 50 per worktree', () => {
   test('51st turn pushes out turn #1 in same worktree', async () => {
     const { tabId, repo } = freshTask()
     let firstId: string | null = null
@@ -216,31 +223,31 @@ await describe('retention: 50 per worktree', () => {
     }
     const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(50)
-    expect(list.find((t) => t.id === firstId!) === undefined).toBe(true)
+    expect(list.find((t) => t.id === firstId!)).toBeUndefined()
   })
 })
 
-await describe('initChatTurnSubscriber', () => {
+describe('initChatTurnSubscriber', () => {
   test('user-message stash → result records boundary with text', async () => {
     const { tabId, repo } = freshTask()
     const sub = initChatTurnSubscriber(h.slayDb)
     sub(tabId, { kind: 'user-message', text: 'fix me' } as never)
     fs.writeFileSync(path.join(repo, 'fixed.txt'), 'patched')
     sub(tabId, { kind: 'result', isError: false } as never)
-    await new Promise((r) => setTimeout(r, 250))
+    await waitForTurns(repo, 1)
     const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     expect(list[0].prompt_preview).toBe('fix me')
   })
 })
 
-await describe('initPtyTurnSubscriber', () => {
+describe('initPtyTurnSubscriber', () => {
   test('claude-code mode tab + non-empty Enter → row w/ empty prompt', async () => {
     const { tabId, repo, taskId } = freshTask()
     fs.writeFileSync(path.join(repo, 'pty.txt'), 'change')
     const sub = initPtyTurnSubscriber(h.slayDb)
     sub(`${taskId}:${tabId}`, taskId, 'do work\n')
-    await new Promise((r) => setTimeout(r, 250))
+    await waitForTurns(repo, 1)
     const list = await listTurnsForWorktree(h.slayDb, repo)
     expect(list).toHaveLength(1)
     // Raw PTY stdin is unreliable (contains edit keystrokes/escapes) — we don't
@@ -270,11 +277,13 @@ await describe('initPtyTurnSubscriber', () => {
 })
 
 // Cleanup
-for (const r of repos) {
-  try {
-    fs.rmSync(r, { recursive: true, force: true })
-  } catch {
-    /* ignore */
+afterAll(() => {
+  for (const r of repos) {
+    try {
+      fs.rmSync(r, { recursive: true, force: true })
+    } catch {
+      /* ignore */
+    }
   }
-}
-h.cleanup()
+  h.cleanup()
+})

@@ -1,14 +1,10 @@
 /**
  * REST: GET /api/tasks/:id contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/get.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/get.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerGetTaskRoute } from './get.js'
 
@@ -60,7 +56,7 @@ interface Detail {
   error?: string
 }
 
-await describe('GET /api/tasks/:id', () => {
+describe('GET /api/tasks/:id', () => {
   test('happy: full id returns task + project_name + tags + blockers + blocking', async () => {
     const res = await rest.request<Detail>('GET', `/api/tasks/${taskId}`)
     expect(res.status).toBe(200)
@@ -97,5 +93,7 @@ await describe('GET /api/tasks/:id', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

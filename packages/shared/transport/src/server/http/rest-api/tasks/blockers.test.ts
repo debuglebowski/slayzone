@@ -1,14 +1,10 @@
 /**
  * REST: GET+POST+DELETE /api/tasks/:id/blockers contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/blockers.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/blockers.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTaskBlockersRoutes } from './blockers.js'
 
@@ -39,7 +35,7 @@ const rest = await mountRestApp(app)
 
 type BlockersResponse = { ok: boolean; data: { id: string }[]; error?: string }
 
-await describe('GET/POST/DELETE /api/tasks/:id/blockers', () => {
+describe('GET/POST/DELETE /api/tasks/:id/blockers', () => {
   test('GET: empty initially', async () => {
     const res = await rest.request<BlockersResponse>('GET', `/api/tasks/${a}/blockers`)
     expect(res.status).toBe(200)
@@ -118,5 +114,7 @@ await describe('GET/POST/DELETE /api/tasks/:id/blockers', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

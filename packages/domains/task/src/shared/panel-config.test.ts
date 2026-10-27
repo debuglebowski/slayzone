@@ -1,41 +1,9 @@
 /**
  * Panel config merge contract tests
- * Run with: npx tsx packages/domains/task/src/shared/panel-config.test.ts
  */
+import { expect, test } from 'vitest'
 import type { PanelConfig } from './types.js'
 import { mergePanelOrder, mergePredefinedWebPanels } from './panel-config.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (error) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${String(actual)} to be ${String(expected)}`)
-    },
-    toBeDefined() {
-      if (actual === undefined) throw new Error('Expected value to be defined')
-    },
-    toEqual(expected: unknown) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`)
-      }
-    }
-  }
-}
 
 test('migrates legacy blocked panels to inferred handoff protocol and host scope', () => {
   const config: PanelConfig = {
@@ -95,6 +63,3 @@ test('mergePanelOrder dedupes when both legacy "assets" and "artifacts" are pres
   // existing 'artifacts' viewEnabled wins over legacy 'assets'.
   expect(merged.viewEnabled.task?.artifacts).toBe(true)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

@@ -9,32 +9,13 @@
  * replays the warm scrollback the way a real computer does: as the first chunk on the
  * adopted session's ordinary data path. Fake pty + fake window + stub db — nothing
  * spawns anywhere.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb, BatchOp } from '@slayzone/platform'
 import { createPty, hasPty, getBuffer, killPty, setDatabase } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 
 interface FakePty {
   pid: number
@@ -118,7 +99,7 @@ function installFakeBackend(fake: FakePty): void {
   } as unknown as PtyBackend)
 }
 
-await test('adopt: registers the provided pty without a fresh spawn', async () => {
+test('adopt: registers the provided pty without a fresh spawn', async () => {
   const fake = makeFakePty()
   installFakeBackend(fake)
   const sessionId = 'taskA:taskA'
@@ -133,12 +114,12 @@ await test('adopt: registers the provided pty without a fresh spawn', async () =
     defaultFlags: '--allow-dangerously-skip-permissions',
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
-  expect(res.success === true, `createPty failed: ${res.error}`)
-  expect(hasPty(sessionId), 'session not registered under real id')
+  expect(res.success, `createPty failed: ${res.error}`).toBe(true)
+  expect(hasPty(sessionId), 'session not registered under real id').toBeTruthy()
   killPty(sessionId)
 })
 
-await test('adopt: exports task identity then execs the agent', async () => {
+test('adopt: exports task identity then execs the agent', async () => {
   const fake = makeFakePty()
   installFakeBackend(fake)
   const sessionId = 'taskB:taskB'
@@ -154,21 +135,20 @@ await test('adopt: exports task identity then execs the agent', async () => {
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
-  expect(cmd.includes('export SLAYZONE_TASK_ID='), `no task-id export in: ${cmd}`)
-  expect(cmd.includes('taskB'), `task id not exported: ${cmd}`)
-  expect(cmd.includes('SLAYZONE_PROJECT_ID='), `no project-id export in: ${cmd}`)
-  expect(cmd.includes('exec '), `no exec in: ${cmd}`)
-  expect(cmd.includes('claude'), `agent binary missing: ${cmd}`)
-  expect(cmd.includes('conv-2'), `conversation id missing: ${cmd}`)
+  expect(cmd, `no task-id export in: ${cmd}`).toContain('export SLAYZONE_TASK_ID=')
+  expect(cmd, `task id not exported: ${cmd}`).toContain('taskB')
+  expect(cmd, `no project-id export in: ${cmd}`).toContain('SLAYZONE_PROJECT_ID=')
+  expect(cmd, `no exec in: ${cmd}`).toContain('exec ')
+  expect(cmd, `agent binary missing: ${cmd}`).toContain('claude')
+  expect(cmd, `conversation id missing: ${cmd}`).toContain('conv-2')
   // export must come before exec (env set before the shell is replaced)
-  expect(
-    cmd.indexOf('export SLAYZONE_TASK_ID=') < cmd.indexOf('exec '),
-    `export must precede exec: ${cmd}`
+  expect(cmd.indexOf('export SLAYZONE_TASK_ID='), `export must precede exec: ${cmd}`).toBeLessThan(
+    cmd.indexOf('exec ')
   )
   killPty(sessionId)
 })
 
-await test('adopt: warm scrollback reaches the RingBuffer via the data path', async () => {
+test('adopt: warm scrollback reaches the RingBuffer via the data path', async () => {
   const fake = makeFakePty()
   installFakeBackend(fake)
   // Delivered BY THE COMPUTER in the adopt reply, then emitted on this session's
@@ -190,12 +170,12 @@ await test('adopt: warm scrollback reaches the RingBuffer via the data path', as
   // onData is registered during createPty; the replay is queued as a microtask.
   await new Promise((r) => setTimeout(r, 10))
   const buf = getBuffer(sessionId) ?? ''
-  expect(buf.includes('WARM-PROMPT$ '), `warm scrollback not in buffer: ${JSON.stringify(buf)}`)
+  expect(buf, `warm scrollback not in buffer: ${JSON.stringify(buf)}`).toContain('WARM-PROMPT$ ')
   warmScrollback = ''
   killPty(sessionId)
 })
 
-await test("adopt: resizes the warm pty to the tab's real dimensions", async () => {
+test("adopt: resizes the warm pty to the tab's real dimensions", async () => {
   // The warm pool spawns the shell with no cols/rows (placeholder 80x24) — adoption
   // must apply the tab's actual requested size, or the already-running agent's
   // first paint is laid out for the wrong terminal size.
@@ -218,11 +198,11 @@ await test("adopt: resizes the warm pty to the tab's real dimensions", async () 
   expect(
     fake.resized.some(([c, r]) => c === 217 && r === 53),
     `pty not resized to requested dims: ${JSON.stringify(fake.resized)}`
-  )
+  ).toBe(true)
   killPty(sessionId)
 })
 
-await test('adopt: resizes to the 80x24 default when the tab requests no explicit size', async () => {
+test('adopt: resizes to the 80x24 default when the tab requests no explicit size', async () => {
   const fake = makeFakePty()
   installFakeBackend(fake)
   const sessionId = 'taskF:taskF'
@@ -240,11 +220,11 @@ await test('adopt: resizes to the 80x24 default when the tab requests no explici
   expect(
     fake.resized.some(([c, r]) => c === 80 && r === 24),
     `pty not resized to default dims: ${JSON.stringify(fake.resized)}`
-  )
+  ).toBe(true)
   killPty(sessionId)
 })
 
-await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled session (B4)', async () => {
+test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled session (B4)', async () => {
   // Real in-memory db so we can assert the bind actually happened.
   const raw = new Database(':memory:')
   raw.exec(`
@@ -302,30 +282,27 @@ await test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled
     expect(
       fake.resized.some(([c, r]) => c === 180 && r === 45),
       `pre-warmed adoption did not resize to real dims: ${JSON.stringify(fake.resized)}`
-    )
+    ).toBe(true)
     const cmd = fake.written.join('')
     // The agent is already running — it must NOT receive an exec/export (that
     // would be typed into its live TUI as input).
-    expect(
-      !cmd.includes('exec ') && !cmd.includes('export SLAYZONE_TASK_ID'),
-      `pre-warmed agent must not be re-exec'd: ${JSON.stringify(cmd)}`
+    expect(cmd, `pre-warmed agent must not be re-exec'd: ${JSON.stringify(cmd)}`).not.toContain(
+      'exec '
+    )
+    expect(cmd, `pre-warmed agent must not be re-exec'd: ${JSON.stringify(cmd)}`).not.toContain(
+      'export SLAYZONE_TASK_ID'
     )
     // The task's initial prompt is sent to the live agent.
-    expect(cmd.includes('HELLO-PROMPT'), `initial prompt not sent: ${JSON.stringify(cmd)}`)
+    expect(cmd, `initial prompt not sent: ${JSON.stringify(cmd)}`).toContain('HELLO-PROMPT')
     // The pooled session entity was bound to the task (set-once).
     const row = raw
       .prepare("SELECT task_id, status FROM agent_sessions WHERE id = 'poolS'")
       .get() as { task_id: string | null; status: string }
-    expect(
-      row.task_id === 'taskD' && row.status === 'bound',
-      `pooled session not bound: ${JSON.stringify(row)}`
-    )
+    expect(row.task_id, `pooled session not bound: ${JSON.stringify(row)}`).toBe('taskD')
+    expect(row.status, `pooled session not bound: ${JSON.stringify(row)}`).toBe('bound')
     killPty(sessionId)
   } finally {
     setDatabase(stubDb)
     raw.close()
   }
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

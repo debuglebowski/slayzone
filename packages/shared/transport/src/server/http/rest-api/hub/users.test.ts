@@ -19,8 +19,8 @@
  * can produce is loopback — which is why the auth-required matrix is asserted
  * directly against the pure function as well as through a request.
  */
+import { describe, expect, test } from 'vitest'
 import express from 'express'
-import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
@@ -91,7 +91,7 @@ async function call<T>(
   }
 }
 
-await describe('POST /api/hub/users', () => {
+describe('POST /api/hub/users', () => {
   test('creates an account and returns the generated password once', async () => {
     const res = await call<{
       ok: boolean
@@ -222,7 +222,7 @@ await describe('POST /api/hub/users', () => {
   })
 })
 
-await describe('POST /api/hub/users on a hub with Entra sign-in', () => {
+describe('POST /api/hub/users on a hub with Entra sign-in', () => {
   test('an admin account asked for: 409 with the stable code, not "already exists"', async () => {
     const res = await call<{ ok: boolean; code: string; error: string }>(
       stubUsers({ create: async () => ({ ok: false as const, reason: 'sso-managed' as const }) }),
@@ -235,7 +235,7 @@ await describe('POST /api/hub/users on a hub with Entra sign-in', () => {
   })
 })
 
-await describe('POST /api/hub/users with password sign-in off (T-10)', () => {
+describe('POST /api/hub/users with password sign-in off (T-10)', () => {
   test('403 with the switch code and message, not a 500', async () => {
     const res = await call<{ ok: boolean; code: string; error: string }>(
       stubUsers({
@@ -254,7 +254,7 @@ await describe('POST /api/hub/users with password sign-in off (T-10)', () => {
   })
 })
 
-await describe('GET /api/hub/users', () => {
+describe('GET /api/hub/users', () => {
   test('lists accounts', async () => {
     const rows = [
       {
@@ -293,7 +293,7 @@ await describe('GET /api/hub/users', () => {
   })
 })
 
-await describe('PATCH /api/hub/users', () => {
+describe('PATCH /api/hub/users', () => {
   /** Records which capability method a PATCH reached, with what. */
   function recording(outcome: 'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin') {
     const calls: string[] = []
@@ -404,7 +404,7 @@ await describe('PATCH /api/hub/users', () => {
   })
 })
 
-await describe('DELETE /api/hub/users', () => {
+describe('DELETE /api/hub/users', () => {
   test('410: accounts are disabled, never removed — names the renamed command', async () => {
     const { users, calls } = (() => {
       const calls: string[] = []
@@ -427,7 +427,7 @@ await describe('DELETE /api/hub/users', () => {
   })
 })
 
-await describe('the capability gate (slot absent / not ready)', () => {
+describe('the capability gate (slot absent / not ready)', () => {
   test('503 on every method when the slot is absent (e.g. the Electron host)', async () => {
     for (const [method, body] of [
       ['POST', { email: 'a@b.c' }],
@@ -471,7 +471,7 @@ await describe('the capability gate (slot absent / not ready)', () => {
  * `restAuth` is present and `required()` is true, a loopback caller is no longer
  * special — this is the regression fix (see `hubUsersAuthDecision` below).
  */
-await describe('the peer/bearer gate (auth-required matrix, through a real request)', () => {
+describe('the peer/bearer gate (auth-required matrix, through a real request)', () => {
   test('with no restAuth slot, loopback administers with no bearer check', async () => {
     const res = await call<{ ok: boolean }>(stubUsers(), 'GET')
     expect(res.status).toBe(200)
@@ -638,7 +638,7 @@ await describe('the peer/bearer gate (auth-required matrix, through a real reque
  * same reverse-proxy shape threatened both routes, fixed the same way, and they
  * must not be allowed to diverge silently.
  */
-await describe('hubUsersAuthDecision', () => {
+describe('hubUsersAuthDecision', () => {
   test('auth NOT required (supervised): loopback allows, off-box is forbidden', () => {
     expect(
       hubUsersAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
@@ -689,7 +689,7 @@ await describe('hubUsersAuthDecision', () => {
   })
 })
 
-await describe('isLoopbackAddress (the loopback-only decision, no restAuth slot)', () => {
+describe('isLoopbackAddress (the loopback-only decision, no restAuth slot)', () => {
   test('accepts every loopback form node reports', () => {
     for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '127.0.0.53', '127.1.2.3']) {
       expect(isLoopbackAddress(addr)).toBe(true)
@@ -710,7 +710,7 @@ await describe('isLoopbackAddress (the loopback-only decision, no restAuth slot)
   })
 })
 
-await describe('audit (T-03)', () => {
+describe('audit (T-03)', () => {
   test('a refusal writes authz.denied; account commands run as the verified caller', async () => {
     const audit: Array<Record<string, unknown>> = []
     setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))

@@ -32,8 +32,8 @@
  * var is scrubbed, and all ports are OS-assigned.
  *
  * Native ABI: hub (better-sqlite3) and computer (node-pty) bundles run under
- * `ELECTRON_RUN_AS_NODE=1 electron`, and so does this test (run_test_electron_strict_
- * loader). Needs the `openssl` CLI for the test CA. Bundles are (re)built on demand.
+ * `ELECTRON_RUN_AS_NODE=1 electron`, and so does this test. Needs the `openssl` CLI for
+ * the test CA. Bundles are (re)built on demand.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes, X509Certificate } from 'node:crypto'
@@ -55,6 +55,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { connect as tlsConnect } from 'node:tls'
 import { fileURLToPath } from 'node:url'
+import { afterAll, assert, beforeAll, describe, expect, test } from 'vitest'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
@@ -73,23 +74,6 @@ const ELECTRON_BIN = require('electron') as unknown as string
 // The CLI is plain node (no native deps) — what a user runs. NOT process.execPath:
 // that is Electron here, and without ELECTRON_RUN_AS_NODE it would open a window.
 const NODE_BIN = process.env.SLZ_TEST_NODE ?? 'node'
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Newest mtime under a dir tree (for stale-build detection). */
 function newestMtime(dir: string): number {
@@ -308,11 +292,47 @@ function legacyPinnedToken(hubUrl: string): string {
   return `szjt1.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`
 }
 
-async function main(): Promise<void> {
-  console.log('\nhub behind a TLS front end — CA-verified, no pin')
-  console.log('─'.repeat(52))
+const platformSrc = join(PACKAGES, 'shared', 'platform', 'src')
 
-  const platformSrc = join(PACKAGES, 'shared', 'platform', 'src')
+let root = ''
+let hubRoot = ''
+let computerRoot = ''
+let legacyRoot = ''
+let workDir = ''
+let home = ''
+let ca: ReturnType<typeof createTestCa> | undefined
+let leafA: TestLeaf
+let leafB: TestLeaf
+let restoreCa: (() => void) | null = null
+let childCa: { NODE_EXTRA_CA_CERTS: string }
+const upstream = { port: 0 }
+let front: FrontEnd | undefined
+let publicHost = ''
+let wssComputers = ''
+
+let hub: Proc | null = null
+let computer: Proc | null = null
+let legacy: Proc | null = null
+const wsClients: Array<{ close: () => void }> = []
+const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+const superjson = (await import('superjson')).default
+type ComputerRow = { id: string; name: string; connected: boolean }
+const trpcOverFrontEnd = (token: string) => {
+  const client = createWSClient({
+    url: `wss://${publicHost}/trpc`,
+    connectionParams: () => ({ token })
+  })
+  wsClients.push(client)
+  return createTRPCClient({
+    links: [wsLink({ client, transformer: superjson })]
+  }) as unknown as { computers: { list: { query: () => Promise<ComputerRow[]> } } }
+}
+
+const hubSecret = randomBytes(32).toString('hex')
+let hubDbPath = ''
+let ownerToken = ''
+
+beforeAll(async () => {
   ensureBuilt(HUB_DIR, HUB_BIN, 'hub', [
     join(HUB_DIR, 'src'),
     platformSrc,
@@ -327,153 +347,144 @@ async function main(): Promise<void> {
   ])
   ensureBuilt(CLI_DIR, CLI_BIN, 'cli', [join(CLI_DIR, 'src'), platformSrc])
 
-  const root = mkdtempSync(join(tmpdir(), 'slz-tls-front-end-'))
-  const hubRoot = join(root, 'hub-root')
-  const computerRoot = join(root, 'computer-root')
-  const legacyRoot = join(root, 'legacy-computer-root')
-  const workDir = join(root, 'work')
-  const home = join(root, 'home')
+  root = mkdtempSync(join(tmpdir(), 'slz-tls-front-end-'))
+  hubRoot = join(root, 'hub-root')
+  computerRoot = join(root, 'computer-root')
+  legacyRoot = join(root, 'legacy-computer-root')
+  workDir = join(root, 'work')
+  home = join(root, 'home')
   for (const d of [hubRoot, computerRoot, legacyRoot, workDir, home]) {
     mkdirSync(d, { recursive: true })
   }
 
-  const ca = createTestCa()
-  const leafA = ca.issueLeaf()
-  const leafB = ca.issueLeaf()
+  ca = createTestCa()
+  leafA = ca.issueLeaf()
+  leafB = ca.issueLeaf()
   // This process's own clients (fetch, tRPC websocket, the served-leaf probe) trust
   // the CA through Node's default store — the in-process NODE_EXTRA_CA_CERTS.
-  const restoreCa = trustTestCaInThisProcess(ca.caPem)
-  const childCa = { NODE_EXTRA_CA_CERTS: ca.caPath }
+  restoreCa = trustTestCaInThisProcess(ca.caPem)
+  childCa = { NODE_EXTRA_CA_CERTS: ca.caPath }
 
-  const upstream = { port: 0 }
-  const front = await startFrontEnd(leafA, upstream)
-  const publicHost = `localhost:${front.port}`
-  const wssComputers = `wss://${publicHost}/computers`
+  const fe = await startFrontEnd(leafA, upstream)
+  front = fe
+  publicHost = `localhost:${front.port}`
+  wssComputers = `wss://${publicHost}/computers`
 
-  let hub: Proc | null = null
-  let computer: Proc | null = null
-  let legacy: Proc | null = null
-  const wsClients: Array<{ close: () => void }> = []
-  const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
-  const superjson = (await import('superjson')).default
-  type ComputerRow = { id: string; name: string; connected: boolean }
-  const trpcOverFrontEnd = (token: string) => {
-    const client = createWSClient({
-      url: `wss://${publicHost}/trpc`,
-      connectionParams: () => ({ token })
-    })
-    wsClients.push(client)
-    return createTRPCClient({
-      links: [wsLink({ client, transformer: superjson })]
-    }) as unknown as { computers: { list: { query: () => Promise<ComputerRow[]> } } }
-  }
-
-  const hubSecret = randomBytes(32).toString('hex')
-  try {
-    hub = spawnElectronChild(HUB_BIN, {
-      ...scrubbedEnv(home),
-      SLAYZONE_ROOT: hubRoot,
-      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
-      SLAYZONE_HUB_PUBLIC_ADDRESS: publicHost,
-      SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-      SLAYZONE_HUB_AUTH_SECRET: hubSecret
-    })
-    const listen = await poll(
-      async () => hub!.logs.find((l) => l.includes('listening on http://')) ?? null,
-      40_000,
-      'hub listening line'
-    )
-    const m = listen.match(/http:\/\/127\.0\.0\.1:(\d+).*db=([^)\s]+)/)
-    assert(m, `hub listening line parseable: ${listen}`)
-    upstream.port = Number(m[1])
-    const hubDbPath = m[2]!
-    // A reachable hub keeps no owner file (T-11): the owner's password derives from the
-    // secret, and it signs in like any client.
-    assert(!existsSync(join(hubRoot, 'hub.owner.json')), 'no hub.owner.json on a reachable hub')
-    const ownerSignIn = await poll(
-      async () => {
-        const r = await fetch(`http://127.0.0.1:${upstream.port}/api/auth/sign-in/email`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            origin: hubUrlFromAddr(publicHost, 'http')
-          },
-          body: JSON.stringify({
-            email: BOOTSTRAP_OWNER_EMAIL,
-            password: deriveBootstrapOwnerPassword(hubSecret)
-          })
-        })
-        return r.ok ? r : null
-      },
-      20_000,
-      'bootstrap owner sign-in'
-    )
-    const ownerToken = ownerSignIn.headers.get('set-auth-token')
-    assert(ownerToken, 'bootstrap owner token present')
-
-    await test('the hub serves plain http and created no identity/ directory', async () => {
-      const health = await poll(
-        async () => {
-          const r = await fetch(`http://127.0.0.1:${upstream.port}/health`)
-          return r.status === 200 ? r : null
+  hub = spawnElectronChild(HUB_BIN, {
+    ...scrubbedEnv(home),
+    SLAYZONE_ROOT: hubRoot,
+    SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+    SLAYZONE_HUB_PUBLIC_ADDRESS: publicHost,
+    SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+    SLAYZONE_HUB_AUTH_SECRET: hubSecret
+  })
+  const listen = await poll(
+    async () => hub!.logs.find((l) => l.includes('listening on http://')) ?? null,
+    40_000,
+    'hub listening line'
+  )
+  const m = listen.match(/http:\/\/127\.0\.0\.1:(\d+).*db=([^)\s]+)/)
+  assert(m, `hub listening line parseable: ${listen}`)
+  upstream.port = Number(m[1])
+  hubDbPath = m[2]!
+  // A reachable hub keeps no owner file (T-11): the owner's password derives from the
+  // secret, and it signs in like any client.
+  expect(existsSync(join(hubRoot, 'hub.owner.json')), 'no hub.owner.json on a reachable hub').toBe(
+    false
+  )
+  const ownerSignIn = await poll(
+    async () => {
+      const r = await fetch(`http://127.0.0.1:${upstream.port}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: hubUrlFromAddr(publicHost, 'http')
         },
-        15_000,
-        'hub /health'
-      )
-      assert(health.status === 200, 'plain http on the hub port')
-      assert(!existsSync(join(hubRoot, 'identity')), 'no identity/ directory: the hub has no cert')
-    })
+        body: JSON.stringify({
+          email: BOOTSTRAP_OWNER_EMAIL,
+          password: deriveBootstrapOwnerPassword(hubSecret)
+        })
+      })
+      return r.ok ? r : null
+    },
+    20_000,
+    'bootstrap owner sign-in'
+  )
+  const signedInToken = ownerSignIn.headers.get('set-auth-token')
+  assert(signedInToken, 'bootstrap owner token present')
+  ownerToken = signedInToken
 
-    await test('https through the front end verifies against the CA (no override)', async () => {
-      const r = await fetch(`https://${publicHost}/health`)
-      assert(r.status === 200, `front end /health → 200, got ${r.status}`)
-      assert(
-        (await servedLeafSha256(front.port)) === leafSha256(leafA),
-        'the front end serves leaf A'
-      )
-    })
+  // The CLI reaches the hub the way an operator's laptop would: a saved https
+  // target (what `slay hub login https://…` writes) and the CA in NODE_EXTRA_CA_CERTS.
+  mkdirSync(join(home, '.slayzone', 'cli'), { recursive: true })
+  writeFileSync(
+    join(home, '.slayzone', 'cli', 'hub-target.json'),
+    JSON.stringify({ url: `https://${publicHost}`, token: ownerToken })
+  )
+})
 
-    // The CLI reaches the hub the way an operator's laptop would: a saved https
-    // target (what `slay hub login https://…` writes) and the CA in NODE_EXTRA_CA_CERTS.
-    mkdirSync(join(home, '.slayzone', 'cli'), { recursive: true })
-    writeFileSync(
-      join(home, '.slayzone', 'cli', 'hub-target.json'),
-      JSON.stringify({ url: `https://${publicHost}`, token: ownerToken })
-    )
+afterAll(async () => {
+  for (const c of wsClients) c.close()
+  if (legacy) await (legacy as Proc).stop()
+  if (computer) await computer.stop()
+  if (hub) await hub.stop()
+  await front?.close()
+  restoreCa?.()
+  ca?.cleanup()
+  if (root) rmSync(root, { recursive: true, force: true })
+})
 
-    await test('the CLI refuses the front end when its CA is not trusted', async () => {
-      // Exit 1 is the CLI's own connect-failure exit (a hang would be a kill, not 1);
-      // the identical call with the CA trusted succeeds below, so the CA is the cause.
-      const res = await slay(['projects', 'list', '--json'], home)
-      assert(
-        res.status === 1,
-        `untrusted CA must fail with exit 1, got ${res.status}: ${res.stdout}`
-      )
-      assert(
-        /could not connect/i.test(res.stderr),
-        `connect failure reported: ${res.stderr.trim()}`
-      )
-    })
+test('the hub serves plain http and created no identity/ directory', async () => {
+  const health = await poll(
+    async () => {
+      const r = await fetch(`http://127.0.0.1:${upstream.port}/health`)
+      return r.status === 200 ? r : null
+    },
+    15_000,
+    'hub /health'
+  )
+  expect(health.status, 'plain http on the hub port').toBe(200)
+  expect(existsSync(join(hubRoot, 'identity')), 'no identity/ directory: the hub has no cert').toBe(
+    false
+  )
+})
 
-    let token = ''
-    await test('the CLI mints a join token over https with the CA trusted the normal way', async () => {
-      const res = await slay(
-        ['computer', 'mint', 'tls-front-end', '--json', '--for', BOOTSTRAP_OWNER_EMAIL],
-        home,
-        childCa
-      )
-      assert(res.status === 0, `mint exit 0, got ${res.status}: ${res.stderr.trim()}`)
-      const minted = JSON.parse(res.stdout) as { token: string; hubUrl: string }
-      token = minted.token
-      const payload = JSON.parse(
-        Buffer.from(token.slice('szjt1.'.length), 'base64url').toString('utf8')
-      ) as Record<string, unknown>
-      assert(!('certFingerprint' in payload), 'the token carries no certificate pin')
-      // The public address is loopback, so the token says ws:// (rule A1) — the
-      // computer below is pointed at the front end's wss:// url explicitly.
-      assert(minted.hubUrl === `ws://${publicHost}/computers`, `token url: ${minted.hubUrl}`)
-    })
+test('https through the front end verifies against the CA (no override)', async () => {
+  const r = await fetch(`https://${publicHost}/health`)
+  expect(r.status, `front end /health → 200, got ${r.status}`).toBe(200)
+  expect(await servedLeafSha256(front!.port), 'the front end serves leaf A').toBe(leafSha256(leafA))
+})
 
+test('the CLI refuses the front end when its CA is not trusted', async () => {
+  // Exit 1 is the CLI's own connect-failure exit (a hang would be a kill, not 1);
+  // the identical call with the CA trusted succeeds below, so the CA is the cause.
+  const res = await slay(['projects', 'list', '--json'], home)
+  expect(res.status, `untrusted CA must fail with exit 1, got ${res.status}: ${res.stdout}`).toBe(1)
+  expect(res.stderr, `connect failure reported: ${res.stderr.trim()}`).toMatch(/could not connect/i)
+})
+
+let token = ''
+test('the CLI mints a join token over https with the CA trusted the normal way', async () => {
+  const res = await slay(
+    ['computer', 'mint', 'tls-front-end', '--json', '--for', BOOTSTRAP_OWNER_EMAIL],
+    home,
+    childCa
+  )
+  expect(res.status, `mint exit 0, got ${res.status}: ${res.stderr.trim()}`).toBe(0)
+  const minted = JSON.parse(res.stdout) as { token: string; hubUrl: string }
+  token = minted.token
+  const payload = JSON.parse(
+    Buffer.from(token.slice('szjt1.'.length), 'base64url').toString('utf8')
+  ) as Record<string, unknown>
+  assert(!('certFingerprint' in payload), 'the token carries no certificate pin')
+  // The public address is loopback, so the token says ws:// (rule A1) — the
+  // computer below is pointed at the front end's wss:// url explicitly.
+  expect(minted.hubUrl, `token url: ${minted.hubUrl}`).toBe(`ws://${publicHost}/computers`)
+})
+
+describe('a computer through the front end', () => {
+  let trpc: ReturnType<typeof trpcOverFrontEnd>
+  beforeAll(() => {
     writeFileSync(
       join(computerRoot, 'computer.config.json'),
       JSON.stringify({
@@ -489,139 +500,120 @@ async function main(): Promise<void> {
       SLAYZONE_HUB_JOIN_TOKEN: token
     })
 
-    const trpc = trpcOverFrontEnd(ownerToken)
-    let computerId = ''
-    await test('the computer enrolls over wss:// through the front end, with no pin', async () => {
-      const row = await poll(
-        async () => {
-          const r = (await trpc.computers.list.query()).find(
-            (x) => x.name === 'tls-front-end-computer'
-          )
-          return r?.connected ? r : null
-        },
-        30_000,
-        `computer connected (computer logs:\n${computer!.logs.join('\n')})`
-      )
-      computerId = row.id
-      assert(
-        computer!.logs.some((l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')),
-        'computer logged an enroll'
-      )
-      assert(
-        !computer!.logs.some((l) => l.includes('ignoring the certificate pin')),
-        'a current token carries nothing to ignore'
-      )
-    })
+    trpc = trpcOverFrontEnd(ownerToken)
+  })
 
-    await test('a new front-end certificate (same CA) drops nothing on reconnect', async () => {
-      const credsPath = join(computerRoot, 'computer.state.json')
-      const credsBefore = readFileSync(credsPath, 'utf8')
-      front.swapCert(leafB)
-      front.dropAll()
-      assert(
-        (await servedLeafSha256(front.port)) === leafSha256(leafB),
-        'the front end now serves leaf B'
-      )
-      const fresh = trpcOverFrontEnd(ownerToken)
-      const row = await poll(
-        async () => {
-          const hello = (l: string) =>
-            l.includes('connected to hub') && l.includes('"mode":"hello"')
-          if (!computer!.logs.some(hello)) return null
-          const r = (await fresh.computers.list.query()).find((x) => x.id === computerId)
-          return r?.connected ? r : null
-        },
-        30_000,
-        `computer reconnected (computer logs:\n${computer!.logs.join('\n')})`
-      )
-      assert(row.id === computerId, 'same computer id')
-      const rows = (await fresh.computers.list.query()).filter(
-        (x) => x.name === 'tls-front-end-computer'
-      )
-      assert(rows.length === 1, `still one row, got ${rows.length}`)
-      assert(readFileSync(credsPath, 'utf8') === credsBefore, 'stored credentials untouched')
-      assert(
-        computer!.logs.filter(
-          (l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')
-        ).length === 1,
-        `reconnected with hello, never re-enrolled:\n${computer!.logs.join('\n')}`
-      )
-    })
-
-    await test('the CLI keeps working against the new certificate', async () => {
-      const res = await slay(['projects', 'list', '--json'], home, childCa)
-      assert(res.status === 0, `projects list exit 0, got ${res.status}: ${res.stderr.trim()}`)
-      assert(Array.isArray(JSON.parse(res.stdout)), 'a JSON array of projects')
-    })
-
-    await test('a join token from an OLDER hub (with a pin) still enrolls; the pin is ignored', async () => {
-      // What an upgrade leaves behind: an unused token an older hub minted, its hash in
-      // join_tokens. Written straight into the hub's database, as that hub would have.
-      const legacyToken = legacyPinnedToken(wssComputers)
-      const { DatabaseSync } = await import('node:sqlite')
-      const db = new DatabaseSync(hubDbPath)
-      try {
-        db.exec('PRAGMA busy_timeout = 5000')
-        const now = Date.now()
-        db.prepare(
-          `INSERT INTO join_tokens
-             (id, token_hash, label, created_at, expires_at, used_at, computer_id, minted_by_user_id)
-           VALUES (?, ?, 'older-hub', ?, ?, NULL, NULL, NULL)`
-        ).run(
-          `legacy-${randomBytes(4).toString('hex')}`,
-          createHash('sha256').update(legacyToken, 'utf8').digest('hex'),
-          now,
-          now + 15 * 60_000
+  let computerId = ''
+  test('the computer enrolls over wss:// through the front end, with no pin', async () => {
+    const row = await poll(
+      async () => {
+        const r = (await trpc.computers.list.query()).find(
+          (x) => x.name === 'tls-front-end-computer'
         )
-      } finally {
-        db.close()
-      }
+        return r?.connected ? r : null
+      },
+      30_000,
+      `computer connected (computer logs:\n${computer!.logs.join('\n')})`
+    )
+    computerId = row.id
+    expect(
+      computer!.logs.some((l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')),
+      'computer logged an enroll'
+    ).toBe(true)
+    expect(
+      computer!.logs.some((l) => l.includes('ignoring the certificate pin')),
+      'a current token carries nothing to ignore'
+    ).toBe(false)
+  })
 
-      writeFileSync(
-        join(legacyRoot, 'computer.config.json'),
-        JSON.stringify({ computerName: 'legacy-pin-computer', allowedRoots: [workDir] })
+  test('a new front-end certificate (same CA) drops nothing on reconnect', async () => {
+    const credsPath = join(computerRoot, 'computer.state.json')
+    const credsBefore = readFileSync(credsPath, 'utf8')
+    front!.swapCert(leafB)
+    front!.dropAll()
+    expect(await servedLeafSha256(front!.port), 'the front end now serves leaf B').toBe(
+      leafSha256(leafB)
+    )
+    const fresh = trpcOverFrontEnd(ownerToken)
+    const row = await poll(
+      async () => {
+        const hello = (l: string) => l.includes('connected to hub') && l.includes('"mode":"hello"')
+        if (!computer!.logs.some(hello)) return null
+        const r = (await fresh.computers.list.query()).find((x) => x.id === computerId)
+        return r?.connected ? r : null
+      },
+      30_000,
+      `computer reconnected (computer logs:\n${computer!.logs.join('\n')})`
+    )
+    expect(row.id, 'same computer id').toBe(computerId)
+    const rows = (await fresh.computers.list.query()).filter(
+      (x) => x.name === 'tls-front-end-computer'
+    )
+    expect(rows, `still one row, got ${rows.length}`).toHaveLength(1)
+    expect(readFileSync(credsPath, 'utf8'), 'stored credentials untouched').toBe(credsBefore)
+    expect(
+      computer!.logs.filter((l) => l.includes('connected to hub') && l.includes('"mode":"enroll"')),
+      `reconnected with hello, never re-enrolled:\n${computer!.logs.join('\n')}`
+    ).toHaveLength(1)
+  })
+
+  test('the CLI keeps working against the new certificate', async () => {
+    const res = await slay(['projects', 'list', '--json'], home, childCa)
+    expect(res.status, `projects list exit 0, got ${res.status}: ${res.stderr.trim()}`).toBe(0)
+    expect(Array.isArray(JSON.parse(res.stdout)), 'a JSON array of projects').toBe(true)
+  })
+
+  test('a join token from an OLDER hub (with a pin) still enrolls; the pin is ignored', async () => {
+    // What an upgrade leaves behind: an unused token an older hub minted, its hash in
+    // join_tokens. Written straight into the hub's database, as that hub would have.
+    const legacyToken = legacyPinnedToken(wssComputers)
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(hubDbPath)
+    try {
+      db.exec('PRAGMA busy_timeout = 5000')
+      const now = Date.now()
+      db.prepare(
+        `INSERT INTO join_tokens
+           (id, token_hash, label, created_at, expires_at, used_at, computer_id, minted_by_user_id)
+         VALUES (?, ?, 'older-hub', ?, ?, NULL, NULL, NULL)`
+      ).run(
+        `legacy-${randomBytes(4).toString('hex')}`,
+        createHash('sha256').update(legacyToken, 'utf8').digest('hex'),
+        now,
+        now + 15 * 60_000
       )
-      legacy = spawnElectronChild(COMPUTER_BIN, {
-        ...scrubbedEnv(home),
-        ...childCa,
-        SLAYZONE_ROOT: legacyRoot,
-        SLAYZONE_HUB_JOIN_TOKEN: legacyToken
-      })
-      const fresh = trpcOverFrontEnd(ownerToken)
-      await poll(
-        async () => {
-          const r = (await fresh.computers.list.query()).find(
-            (x) => x.name === 'legacy-pin-computer'
-          )
-          return r?.connected ? r : null
-        },
-        30_000,
-        `legacy computer connected (logs:\n${legacy!.logs.join('\n')})`
-      )
-      assert(
-        legacy!.logs.some((l) => l.includes('ignoring the certificate pin in the join token')),
-        `the computer says it ignores the pin:\n${legacy!.logs.join('\n')}`
-      )
+    } finally {
+      db.close()
+    }
+
+    writeFileSync(
+      join(legacyRoot, 'computer.config.json'),
+      JSON.stringify({ computerName: 'legacy-pin-computer', allowedRoots: [workDir] })
+    )
+    legacy = spawnElectronChild(COMPUTER_BIN, {
+      ...scrubbedEnv(home),
+      ...childCa,
+      SLAYZONE_ROOT: legacyRoot,
+      SLAYZONE_HUB_JOIN_TOKEN: legacyToken
     })
+    const fresh = trpcOverFrontEnd(ownerToken)
+    await poll(
+      async () => {
+        const r = (await fresh.computers.list.query()).find((x) => x.name === 'legacy-pin-computer')
+        return r?.connected ? r : null
+      },
+      30_000,
+      `legacy computer connected (logs:\n${legacy!.logs.join('\n')})`
+    )
+    expect(
+      legacy!.logs.some((l) => l.includes('ignoring the certificate pin in the join token')),
+      `the computer says it ignores the pin:\n${legacy!.logs.join('\n')}`
+    ).toBe(true)
+  })
 
-    await test('no process created an identity/ directory', async () => {
-      for (const dir of [hubRoot, computerRoot, legacyRoot]) {
-        assert(!existsSync(join(dir, 'identity')), `no identity/ under ${dir}`)
-      }
-    })
-  } finally {
-    for (const c of wsClients) c.close()
-    if (legacy) await (legacy as Proc).stop()
-    if (computer) await computer.stop()
-    if (hub) await hub.stop()
-    await front.close()
-    restoreCa()
-    ca.cleanup()
-    rmSync(root, { recursive: true, force: true })
-  }
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+  test('no process created an identity/ directory', async () => {
+    for (const dir of [hubRoot, computerRoot, legacyRoot]) {
+      expect(existsSync(join(dir, 'identity')), `no identity/ under ${dir}`).toBe(false)
+    }
+  })
+})

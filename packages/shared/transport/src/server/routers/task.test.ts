@@ -26,14 +26,15 @@
  *     a thrown error whose `.message` still carries the original substring
  *     (tRPC wraps the plain Error but preserves the message).
  *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import type { CreateTaskInput, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { taskRouter } from './task.js'
 import { setTaskDeps } from '../app-deps.js'

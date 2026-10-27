@@ -1,7 +1,7 @@
 /**
  * auto-start (agent startup mode) unit tests
- * Run with: pnpm tsx packages/domains/terminal/src/shared/auto-start.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   agentStartsOnOpen,
   nextAgentStartupMode,
@@ -13,23 +13,6 @@ import {
   type AgentState
 } from './auto-start.js'
 
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}\n    ${e}`)
-    failed++
-  }
-}
-function expectEq<T>(actual: T, expected: T, label = '') {
-  if (actual !== expected)
-    throw new Error(`${label} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-}
-
 // The agreed behaviour table (plans/agent-startup-mode.md), row by row.
 const TABLE: Record<AgentStartupMode, Record<AgentState, boolean>> = {
   manual: { running: false, auto_stopped: false, stopped: false, new: false },
@@ -40,10 +23,8 @@ const TABLE: Record<AgentStartupMode, Record<AgentState, boolean>> = {
 test('agentStartsOnOpen matches the behaviour table', () => {
   for (const mode of Object.keys(TABLE) as AgentStartupMode[]) {
     for (const state of Object.keys(TABLE[mode]) as AgentState[]) {
-      expectEq(
-        agentStartsOnOpen({ mode, state, isTemporary: false }),
-        TABLE[mode][state],
-        `${mode}/${state}:`
+      expect(agentStartsOnOpen({ mode, state, isTemporary: false }), `${mode}/${state}:`).toBe(
+        TABLE[mode][state]
       )
     }
   }
@@ -52,38 +33,35 @@ test('agentStartsOnOpen matches the behaviour table', () => {
 test('temporary tasks always start, in every mode and state', () => {
   for (const mode of Object.keys(TABLE) as AgentStartupMode[]) {
     for (const state of Object.keys(TABLE[mode]) as AgentState[]) {
-      expectEq(agentStartsOnOpen({ mode, state, isTemporary: true }), true, `${mode}/${state}:`)
+      expect(agentStartsOnOpen({ mode, state, isTemporary: true }), `${mode}/${state}:`).toBe(true)
     }
   }
 })
 
 test('warm pool + boot restore run in auto and instant, not manual', () => {
-  expectEq(warmPoolEnabled('manual'), false)
-  expectEq(warmPoolEnabled('auto'), true)
-  expectEq(warmPoolEnabled('instant'), true)
-  expectEq(restoresRunningAgentsOnBoot('manual'), false)
-  expectEq(restoresRunningAgentsOnBoot('auto'), true)
-  expectEq(restoresRunningAgentsOnBoot('instant'), true)
+  expect(warmPoolEnabled('manual')).toBe(false)
+  expect(warmPoolEnabled('auto')).toBe(true)
+  expect(warmPoolEnabled('instant')).toBe(true)
+  expect(restoresRunningAgentsOnBoot('manual')).toBe(false)
+  expect(restoresRunningAgentsOnBoot('auto')).toBe(true)
+  expect(restoresRunningAgentsOnBoot('instant')).toBe(true)
 })
 
 test('parseAgentStartupMode defaults unknown/unset to auto', () => {
-  expectEq(parseAgentStartupMode(null), 'auto')
-  expectEq(parseAgentStartupMode(undefined), 'auto')
-  expectEq(parseAgentStartupMode('1'), 'auto')
-  expectEq(parseAgentStartupMode('manual'), 'manual')
-  expectEq(parseAgentStartupMode('instant'), 'instant')
+  expect(parseAgentStartupMode(null)).toBe('auto')
+  expect(parseAgentStartupMode(undefined)).toBe('auto')
+  expect(parseAgentStartupMode('1')).toBe('auto')
+  expect(parseAgentStartupMode('manual')).toBe('manual')
+  expect(parseAgentStartupMode('instant')).toBe('instant')
 })
 
 test('parseAgentState defaults unknown to stopped', () => {
-  expectEq(parseAgentState(null), 'stopped')
-  expectEq(parseAgentState('bogus'), 'stopped')
-  expectEq(parseAgentState('auto_stopped'), 'auto_stopped')
+  expect(parseAgentState(null)).toBe('stopped')
+  expect(parseAgentState('bogus')).toBe('stopped')
+  expect(parseAgentState('auto_stopped')).toBe('auto_stopped')
 })
 
 test('"Don\'t show again" steps one mode more automatic', () => {
-  expectEq(nextAgentStartupMode('manual'), 'auto')
-  expectEq(nextAgentStartupMode('auto'), 'instant')
+  expect(nextAgentStartupMode('manual')).toBe('auto')
+  expect(nextAgentStartupMode('auto')).toBe('instant')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

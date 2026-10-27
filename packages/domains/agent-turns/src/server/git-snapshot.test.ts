@@ -1,8 +1,7 @@
 /**
  * git-snapshot integration tests — uses a real temp git repo.
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/git-snapshot.test.ts
  */
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
 import {
   snapshotWorktree,
   deleteTurnRef,
@@ -46,14 +45,14 @@ function freshRepo(): string {
   return r
 }
 
-await describe('snapshotWorktree — clean tree', () => {
+describe('snapshotWorktree — clean tree', () => {
   test('always commits a snapshot with parent=HEAD; ref created', async () => {
     const repo = freshRepo()
     const head = git(repo, 'rev-parse', 'HEAD')
     const sha = (await snapshotWorktree(repo, 'turn-A'))?.snapshotSha ?? null
-    expect(sha !== null).toBe(true)
+    expect(sha).not.toBeNull()
     // sha must NOT equal HEAD — always a fresh commit so `<sha>^` reliably points at HEAD-at-snap-time.
-    expect(sha === head).toBe(false)
+    expect(sha).not.toBe(head)
     // Parent of snapshot commit is HEAD.
     const parent = git(repo, 'rev-parse', `${sha}^`)
     expect(parent).toBe(head)
@@ -61,7 +60,7 @@ await describe('snapshotWorktree — clean tree', () => {
   })
 })
 
-await describe('snapshotWorktree — dirty tree', () => {
+describe('snapshotWorktree — dirty tree', () => {
   test('captures tracked edits', async () => {
     const repo = freshRepo()
     fs.writeFileSync(path.join(repo, 'a.txt'), 'one')
@@ -71,8 +70,8 @@ await describe('snapshotWorktree — dirty tree', () => {
 
     fs.writeFileSync(path.join(repo, 'a.txt'), 'two')
     const sha = (await snapshotWorktree(repo, 'turn-B'))?.snapshotSha ?? null
-    expect(sha !== null).toBe(true)
-    expect(sha === headBefore).toBe(false)
+    expect(sha).not.toBeNull()
+    expect(sha).not.toBe(headBefore)
 
     // Working tree NOT mutated by snapshot
     expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf-8')).toBe('two')
@@ -84,7 +83,7 @@ await describe('snapshotWorktree — dirty tree', () => {
     const repo = freshRepo()
     fs.writeFileSync(path.join(repo, 'fresh.txt'), 'brand new')
     const sha = (await snapshotWorktree(repo, 'turn-C'))?.snapshotSha ?? null
-    expect(sha !== null).toBe(true)
+    expect(sha).not.toBeNull()
 
     // Verify the untracked file is reachable from the snapshot commit's tree.
     const tree = git(repo, 'ls-tree', '-r', sha as string)
@@ -95,7 +94,7 @@ await describe('snapshotWorktree — dirty tree', () => {
   })
 })
 
-await describe('snapshotWorktree — failure modes', () => {
+describe('snapshotWorktree — failure modes', () => {
   test('non-git path returns null', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slayzone-no-git-'))
     repos.push(dir)
@@ -104,7 +103,7 @@ await describe('snapshotWorktree — failure modes', () => {
   })
 })
 
-await describe('deleteTurnRef', () => {
+describe('deleteTurnRef', () => {
   test('removes existing ref', async () => {
     const repo = freshRepo()
     await snapshotWorktree(repo, 'turn-D')
@@ -120,7 +119,7 @@ await describe('deleteTurnRef', () => {
   })
 })
 
-await describe('diffIsEmpty', () => {
+describe('diffIsEmpty', () => {
   test('same SHA → true', async () => {
     const repo = freshRepo()
     const head = git(repo, 'rev-parse', 'HEAD')
@@ -158,7 +157,7 @@ await describe('diffIsEmpty', () => {
   })
 })
 
-await describe('snapshot is non-destructive', () => {
+describe('snapshot is non-destructive', () => {
   test('HEAD untouched after snapshot', async () => {
     const repo = freshRepo()
     const headBefore = git(repo, 'rev-parse', 'HEAD')
@@ -221,7 +220,7 @@ await describe('snapshot is non-destructive', () => {
 // 2026-10-25: the hub's stall detector caught `listAgentTurnsForWorktree` freezing
 // the hub's main thread for 4.9s — these list-time reads ran git synchronously,
 // one blocking spawn per turn. Every git call must leave the event loop running.
-await describe('list-time git reads never block the event loop', () => {
+describe('list-time git reads never block the event loop', () => {
   /** Did the event loop get a turn while `run` was in flight? */
   async function loopTurnedDuring(run: () => unknown): Promise<boolean> {
     let turned = false
@@ -273,16 +272,18 @@ await describe('list-time git reads never block the event loop', () => {
       listTreeBlobsCached(repo, snap.snapshotSha),
       listTreeBlobsCached(repo, snap.snapshotSha)
     ]
-    expect(a === b).toBe(true)
+    expect(a).toBe(b)
     await a
   })
 })
 
 // Cleanup
-for (const r of repos) {
-  try {
-    fs.rmSync(r, { recursive: true, force: true })
-  } catch {
-    /* ignore */
+afterAll(() => {
+  for (const r of repos) {
+    try {
+      fs.rmSync(r, { recursive: true, force: true })
+    } catch {
+      /* ignore */
+    }
   }
-}
+})

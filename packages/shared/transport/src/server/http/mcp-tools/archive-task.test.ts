@@ -1,8 +1,9 @@
 /**
  * MCP: archive_task tool tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../test-utils/event-spy.js'
 import {
@@ -42,7 +43,7 @@ function seedTask(): string {
   return id
 }
 
-await describe('mcp archive_task', () => {
+describe('mcp archive_task', () => {
   test('register: tool registered as archive_task with description + schema', () => {
     expect(stub.has('archive_task')).toBe(true)
     const tool = stub.get('archive_task')!
@@ -98,4 +99,4 @@ await describe('mcp archive_task', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

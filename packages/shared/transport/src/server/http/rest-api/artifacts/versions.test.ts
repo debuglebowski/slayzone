@@ -13,19 +13,16 @@
  * and carry embedded NULs + CRLF. Any string hop replaces those with U+FFFD, and
  * every assertion compares HEX.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/versions.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/versions.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
 import { getStorageDir } from '@slayzone/platform'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 // Artifact files live at `<storage dir>/artifacts`, blobs at `<storage dir>/blobs`.
@@ -124,7 +121,13 @@ async function makeArtifact(title: string, bytes: Buffer): Promise<ArtifactRow> 
 let binArtifact: ArtifactRow
 let textArtifact: ArtifactRow
 
-await describe('PUT/POST /api/artifacts/:id/content — write + append', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+  fs.rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+describe('PUT/POST /api/artifacts/:id/content — write + append', () => {
   test('PUT replaces content byte-exact and creates a new version', async () => {
     binArtifact = await makeArtifact('shot.png', Buffer.from('seed'))
     notifyCount = 0
@@ -243,7 +246,7 @@ await describe('PUT/POST /api/artifacts/:id/content — write + append', () => {
   })
 })
 
-await describe('GET /api/artifacts/:id/versions — list', () => {
+describe('GET /api/artifacts/:id/versions — list', () => {
   test('newest first, with limit + offset', async () => {
     const res = await rest.request<{ ok: boolean; data: VersionRow[] }>(
       'GET',
@@ -275,7 +278,7 @@ await describe('GET /api/artifacts/:id/versions — list', () => {
   })
 })
 
-await describe('GET /api/artifacts/:id/versions/content — streamed read', () => {
+describe('GET /api/artifacts/:id/versions/content — streamed read', () => {
   test('streams a version blob byte-exact (ref = int)', async () => {
     // v2 is the pure BINARY fixture written above.
     const res = await raw('GET', `/api/artifacts/${binArtifact.id}/versions/content?ref=2`)
@@ -320,7 +323,7 @@ await describe('GET /api/artifacts/:id/versions/content — streamed read', () =
   })
 })
 
-await describe('versions current / set-current', () => {
+describe('versions current / set-current', () => {
   test('GET .../versions/current returns the HEAD row', async () => {
     const res = await rest.request<{ data: VersionRow }>(
       'GET',
@@ -378,7 +381,7 @@ await describe('versions current / set-current', () => {
   })
 })
 
-await describe('POST /api/artifacts/:id/versions — create from working copy', () => {
+describe('POST /api/artifacts/:id/versions — create from working copy', () => {
   test('creates a row even when content is unchanged (honorUnchanged) and records the author', async () => {
     textArtifact = await makeArtifact('notes.md', Buffer.from('line one\nline two\n'))
     const res = await rest.request<{ data: VersionRow }>(
@@ -405,7 +408,7 @@ await describe('POST /api/artifacts/:id/versions — create from working copy', 
   })
 })
 
-await describe('PATCH /api/artifacts/:id/versions — rename', () => {
+describe('PATCH /api/artifacts/:id/versions — rename', () => {
   test('sets a name by ref', async () => {
     const res = await rest.request<{ data: VersionRow }>(
       'PATCH',
@@ -447,7 +450,7 @@ await describe('PATCH /api/artifacts/:id/versions — rename', () => {
   })
 })
 
-await describe('GET /api/artifacts/:id/versions/diff', () => {
+describe('GET /api/artifacts/:id/versions/diff', () => {
   test('text diff returns hunks with add/del/ctx line kinds', async () => {
     // Working copy currently "line one\nline two\n"; write a changed v3.
     await raw(
@@ -491,7 +494,7 @@ await describe('GET /api/artifacts/:id/versions/diff', () => {
   })
 })
 
-await describe('POST /api/artifacts/:id/versions/prune', () => {
+describe('POST /api/artifacts/:id/versions/prune', () => {
   test('dry run reports without deleting', async () => {
     const before = h.db
       .prepare('SELECT COUNT(*) AS n FROM artifact_versions WHERE artifact_id = ?')
@@ -522,7 +525,7 @@ await describe('POST /api/artifacts/:id/versions/prune', () => {
   })
 })
 
-await describe('PATCH /api/artifacts/:id — update echoes the RAW row (CLI --json parity)', () => {
+describe('PATCH /api/artifacts/:id — update echoes the RAW row (CLI --json parity)', () => {
   test('carries every stored column, incl. the version/view ones', async () => {
     const res = await rest.request<{
       data: Record<string, unknown> & { folderName: string | null }
@@ -569,7 +572,3 @@ await describe('PATCH /api/artifacts/:id — update echoes the RAW row (CLI --js
     expect(fs.readFileSync(newPath).toString('hex')).toBe(BINARY.toString('hex'))
   })
 })
-
-await rest.close()
-h.cleanup()
-fs.rmSync(tmpRoot, { recursive: true, force: true })

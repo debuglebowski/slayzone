@@ -10,8 +10,8 @@
  * tool (pinned below, so adding one fails here until it stamps an owner too); there
  * are no project templates and no seeded/default project anywhere in the hub.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/project-owner-surfaces.test.ts
  */
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -19,7 +19,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import express from 'express'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { createTestHarness, describe, test, expect } from '../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../test-utils/mcp-harness.js'
 import { mountRestApp } from '../../../test-utils/rest-harness.js'
 import { setNotifyEvents, type NotifyEventMap } from './app-deps'
@@ -49,7 +50,7 @@ const ownerByName = (name: string): string | null =>
 const principal = (userId: string) => ({ userId, role: 'user' as const, scopes: ['full' as const] })
 
 // --- tRPC -------------------------------------------------------------------
-await describe('tRPC', () => {
+describe('tRPC', () => {
   test('tRPC projects.create: owner = the signed-in user', async () => {
     const caller = projectsRouter.createCaller({
       db: h.slayDb,
@@ -92,7 +93,7 @@ const post = async (body: unknown, user?: string) => {
   return (await res.json()) as { ok: boolean; data: { id: string; owner_user_id: string | null } }
 }
 
-await describe('REST', () => {
+describe('REST', () => {
   test('REST POST /api/projects (slay projects create): owner = the bound principal', async () => {
     const res = await post({ name: 'rest-owned' }, 'u-b')
     expect(res.ok).toBe(true)
@@ -154,7 +155,7 @@ const caller = (userId: string | null) => ({
   })
 })
 
-await describe('import', () => {
+describe('import', () => {
   test('import: imported projects belong to the importer, whatever the bundle says', async () => {
     const file = bundleFile([
       // Exported from another hub: its owner id means nothing here.
@@ -185,7 +186,7 @@ await describe('import', () => {
 })
 
 // --- MCP ----------------------------------------------------------------------
-await describe('MCP', () => {
+describe('MCP', () => {
   test('MCP has no project-create tool (add one → it must stamp the owner, and this fails)', () => {
     const stub = captureMcpServer()
     registerMcpTools(stub.server as never, { db: h.slayDb, notifyRenderer: () => {} })
@@ -195,5 +196,7 @@ await describe('MCP', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

@@ -1,3 +1,4 @@
+import { describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import { ALL_ORIGINS } from '@slayzone/task/shared'
@@ -9,13 +10,6 @@ import {
   findPendingSpawn,
   prunePendingSpawns
 } from './task-conversations.js'
-
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    console.error('FAIL:', msg)
-    process.exit(1)
-  }
-}
 
 // Minimal harness — `tasks` (for legacy dual-write) + `task_conversations`.
 const raw = new Database(':memory:')
@@ -111,109 +105,127 @@ const db: SlayzoneDb = {
   }
 } as unknown as SlayzoneDb
 
-async function main(): Promise<void> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+// Steps share one in-memory DB and run in declaration order; each test builds
+// on the state the previous ones left behind.
+describe('task_conversations', () => {
   // 1. Honored read returns latest honored row.
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'C1',
-    origin: 'slay-spawned-fresh'
+  test('latest honored row should be current', async () => {
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'C1',
+      origin: 'slay-spawned-fresh'
+    })
+    await sleep(2)
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'C2',
+      origin: 'slay-spawned-resume'
+    })
+    expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe('C2')
   })
-  await sleep(2)
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'C2',
-    origin: 'slay-spawned-resume'
-  })
-  assert(
-    (await getCurrentConversationId(db, 't1', 'claude-code')) === 'C2',
-    'latest honored row should be current'
-  )
 
   // 2. Foreign-observed rows are NEVER current — even when latest.
-  await sleep(2)
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'F1',
-    origin: 'foreign-observed'
+  test('foreign-observed must not become current — last honored (C2) should win', async () => {
+    await sleep(2)
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'F1',
+      origin: 'foreign-observed'
+    })
+    expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe('C2')
   })
-  assert(
-    (await getCurrentConversationId(db, 't1', 'claude-code')) === 'C2',
-    'foreign-observed must not become current — last honored (C2) should win'
-  )
 
   // 3. Pending-spawn rows are NEVER current.
-  await sleep(2)
-  await recordPendingSpawn(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    expectedSessionId: 'P1',
-    usedResume: false
+  test('pending-spawn must not become current', async () => {
+    await sleep(2)
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      expectedSessionId: 'P1',
+      usedResume: false
+    })
+    expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe('C2')
   })
-  assert(
-    (await getCurrentConversationId(db, 't1', 'claude-code')) === 'C2',
-    'pending-spawn must not become current'
-  )
 
   // 4. Manual-reset is a CUTOFF — later honored rows become current again,
   //    but earlier honored rows (C1/C2) are hidden.
-  await sleep(2)
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: null,
-    origin: 'manual-reset'
+  test('after manual-reset with no later honored row, current must be NULL', async () => {
+    await sleep(2)
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: null,
+      origin: 'manual-reset'
+    })
+    expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBeNull()
   })
-  assert(
-    (await getCurrentConversationId(db, 't1', 'claude-code')) === null,
-    'after manual-reset with no later honored row, current must be NULL'
-  )
 
-  await sleep(2)
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'C3',
-    origin: 'slay-spawned-fresh'
+  test('a fresh row strictly after manual-reset becomes current', async () => {
+    await sleep(2)
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'C3',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe('C3')
   })
-  assert(
-    (await getCurrentConversationId(db, 't1', 'claude-code')) === 'C3',
-    'a fresh row strictly after manual-reset becomes current'
-  )
 
   // 5. listConversationHistory returns every row including foreign + pending.
-  const history = await listConversationHistory(db, 't1', 'claude-code')
-  assert(history.length === 6, `audit history should have all 6 rows, got ${history.length}`)
-  const origins = history.map((h) => h.origin).sort()
-  assert(
-    origins.includes('foreign-observed') && origins.includes('pending-spawn'),
-    'audit history must include foreign + pending rows'
-  )
+  test('audit history should have all 6 rows', async () => {
+    expect(await listConversationHistory(db, 't1', 'claude-code')).toHaveLength(6)
+  })
+
+  test('audit history must include foreign + pending rows', async () => {
+    const origins = (await listConversationHistory(db, 't1', 'claude-code')).map((h) => h.origin)
+    expect(origins).toContain('foreign-observed')
+    expect(origins).toContain('pending-spawn')
+  })
 
   // 6. findPendingSpawn round-trip — null expected ("fresh" sentinel).
-  await recordPendingSpawn(db, {
-    taskId: 't1',
-    mode: 'codex',
-    expectedSessionId: null,
-    usedResume: false
+  let p1: Awaited<ReturnType<typeof findPendingSpawn>>
+  test('fresh pending row should be found', async () => {
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'codex',
+      expectedSessionId: null,
+      usedResume: false
+    })
+    p1 = await findPendingSpawn(db, 't1', 'codex')
+    expect(p1).not.toBeNull()
   })
-  const p1 = await findPendingSpawn(db, 't1', 'codex')
-  assert(p1 !== null, 'fresh pending row should be found')
-  assert(p1?.expectedSessionId === null, 'expectedSessionId should be null')
-  assert(p1?.usedResume === false, 'usedResume preserved')
+
+  test('expectedSessionId should be null', () => {
+    expect(p1?.expectedSessionId).toBeNull()
+  })
+
+  test('usedResume preserved', () => {
+    expect(p1?.usedResume).toBe(false)
+  })
 
   // 7. findPendingSpawn with explicit id.
-  await recordPendingSpawn(db, {
-    taskId: 't1',
-    mode: 'gemini',
-    expectedSessionId: 'EXPECTED',
-    usedResume: true
+  let p2: Awaited<ReturnType<typeof findPendingSpawn>>
+  test('expected id round-tripped', async () => {
+    await recordPendingSpawn(db, {
+      taskId: 't1',
+      mode: 'gemini',
+      expectedSessionId: 'EXPECTED',
+      usedResume: true
+    })
+    p2 = await findPendingSpawn(db, 't1', 'gemini')
+    expect(p2?.expectedSessionId).toBe('EXPECTED')
   })
-  const p2 = await findPendingSpawn(db, 't1', 'gemini')
-  assert(p2?.expectedSessionId === 'EXPECTED', 'expected id round-tripped')
-  assert(p2?.usedResume === true, 'usedResume true preserved')
+
+  test('usedResume true preserved', () => {
+    expect(p2?.usedResume).toBe(true)
+  })
 
   // 7b. Phase 2: TTL window for null-expected pending rows is much tighter
   //     (30 s) than for explicit-expected (10 min). Simulate by inserting a
@@ -221,49 +233,54 @@ async function main(): Promise<void> {
   //     not return it. An explicit-expected row at the same age must still be
   //     returned (10-min window).
   const past60s = Date.now() - 60_000
-  raw
-    .prepare(
-      `INSERT INTO task_conversations
-         (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-       VALUES (?, 't1', 'qwen-code', NULL, 'pending-spawn', ?, ?)`
-    )
-    .run('stale-null-expected', JSON.stringify({ usedResume: false, spawnedAt: past60s }), past60s)
-  assert(
-    (await findPendingSpawn(db, 't1', 'qwen-code')) === null,
-    '60s-old null-expected pending must be outside the tight TTL window'
-  )
-  raw
-    .prepare(
-      `INSERT INTO task_conversations
-         (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-       VALUES (?, 't1', 'qwen-code', 'KEEP', 'pending-spawn', ?, ?)`
-    )
-    .run(
-      'fresh-explicit-expected',
-      JSON.stringify({ usedResume: false, spawnedAt: past60s }),
-      past60s
-    )
-  const p3 = await findPendingSpawn(db, 't1', 'qwen-code')
-  assert(
-    p3?.expectedSessionId === 'KEEP',
-    '60s-old explicit-expected pending must still be inside the 10-min window'
-  )
+  test('60s-old null-expected pending must be outside the tight TTL window', async () => {
+    raw
+      .prepare(
+        `INSERT INTO task_conversations
+           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+         VALUES (?, 't1', 'qwen-code', NULL, 'pending-spawn', ?, ?)`
+      )
+      .run(
+        'stale-null-expected',
+        JSON.stringify({ usedResume: false, spawnedAt: past60s }),
+        past60s
+      )
+    expect(await findPendingSpawn(db, 't1', 'qwen-code')).toBeNull()
+  })
+
+  test('60s-old explicit-expected pending must still be inside the 10-min window', async () => {
+    raw
+      .prepare(
+        `INSERT INTO task_conversations
+           (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+         VALUES (?, 't1', 'qwen-code', 'KEEP', 'pending-spawn', ?, ?)`
+      )
+      .run(
+        'fresh-explicit-expected',
+        JSON.stringify({ usedResume: false, spawnedAt: past60s }),
+        past60s
+      )
+    const p3 = await findPendingSpawn(db, 't1', 'qwen-code')
+    expect(p3?.expectedSessionId).toBe('KEEP')
+  })
 
   // 8. prunePendingSpawns by scope removes pending rows for that (task, mode).
-  const pruned = await prunePendingSpawns(db, { taskId: 't1', mode: 'codex' })
-  assert(pruned === 1, `expected 1 pruned row, got ${pruned}`)
-  assert(
-    (await findPendingSpawn(db, 't1', 'codex')) === null,
-    'codex pending should be gone after prune'
-  )
-  assert(
-    (await findPendingSpawn(db, 't1', 'gemini')) !== null,
-    'gemini pending should still be present'
-  )
+  test('expected 1 pruned row', async () => {
+    const pruned = await prunePendingSpawns(db, { taskId: 't1', mode: 'codex' })
+    expect(pruned).toBe(1)
+  })
+
+  test('codex pending should be gone after prune', async () => {
+    expect(await findPendingSpawn(db, 't1', 'codex')).toBeNull()
+  })
+
+  test('gemini pending should still be present', async () => {
+    expect(await findPendingSpawn(db, 't1', 'gemini')).not.toBeNull()
+  })
 
   // 9. ENUM/CHECK sync — every value in ALL_ORIGINS INSERTs cleanly. This
   //    catches drift between the TS enum and the SQL CHECK constraint.
-  for (const origin of ALL_ORIGINS) {
+  test.each([...ALL_ORIGINS])("origin '%s' INSERTs cleanly (enum/CHECK sync)", async (origin) => {
     await recordConversation(db, {
       taskId: 't1',
       mode: '__enum_sync__',
@@ -272,72 +289,68 @@ async function main(): Promise<void> {
       pendingMeta:
         origin === 'pending-spawn' ? { usedResume: false, spawnedAt: Date.now() } : undefined
     })
-  }
+  })
 
   // 10. Legacy dual-write — honored rows write to provider_config + legacy col.
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'LEG1',
-    origin: 'slay-spawned-fresh'
+  const readTask = () =>
+    raw
+      .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?')
+      .get('t1') as {
+      provider_config: string
+      claude_conversation_id: string | null
+    }
+  test('legacy column must be dual-written for honored origins', async () => {
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'LEG1',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(readTask().claude_conversation_id).toBe('LEG1')
   })
-  const taskRow = raw
-    .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?')
-    .get('t1') as { provider_config: string; claude_conversation_id: string }
-  assert(
-    taskRow.claude_conversation_id === 'LEG1',
-    'legacy column must be dual-written for honored origins'
-  )
-  assert(taskRow.provider_config.includes('LEG1'), 'provider_config JSON must be dual-written')
+
+  test('provider_config JSON must be dual-written', () => {
+    expect(readTask().provider_config).toContain('LEG1')
+  })
 
   // 10b. Phase 1: a `manual-reset` for the same (task, mode) clears the legacy
   //      JSON field AND the legacy column so live consumers immediately stop
   //      seeing the broken binding. Foreign-observed (tested below) must NOT
   //      clear; the two have opposite semantics.
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: null,
-    origin: 'manual-reset'
+  const parsedConfig = () =>
+    JSON.parse(readTask().provider_config) as Record<
+      string,
+      { conversationId?: string | null; chatConversationId?: string | null }
+    >
+  test('manual-reset must clear the legacy *_conversation_id column', async () => {
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: null,
+      origin: 'manual-reset'
+    })
+    expect(readTask().claude_conversation_id).toBeNull()
   })
-  const afterReset = raw
-    .prepare('SELECT provider_config, claude_conversation_id FROM tasks WHERE id = ?')
-    .get('t1') as { provider_config: string; claude_conversation_id: string | null }
-  assert(
-    afterReset.claude_conversation_id === null,
-    'manual-reset must clear the legacy *_conversation_id column'
-  )
-  const parsed = JSON.parse(afterReset.provider_config) as Record<
-    string,
-    { conversationId?: string | null; chatConversationId?: string | null }
-  >
-  assert(
-    (parsed['claude-code']?.conversationId ?? null) === null,
-    'manual-reset must clear provider_config.{mode}.conversationId'
-  )
-  assert(
-    (parsed['claude-code']?.chatConversationId ?? null) === null,
-    'manual-reset must clear provider_config.{mode}.chatConversationId'
-  )
+
+  test('manual-reset must clear provider_config.{mode}.conversationId', () => {
+    expect(parsedConfig()['claude-code']?.conversationId ?? null).toBeNull()
+  })
+
+  test('manual-reset must clear provider_config.{mode}.chatConversationId', () => {
+    expect(parsedConfig()['claude-code']?.chatConversationId ?? null).toBeNull()
+  })
 
   // 11. Foreign / pending writes do NOT touch the legacy field.
-  const beforeLegacy = (
-    raw.prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?').get('t1') as {
-      x: string
-    }
-  ).x
-  await recordConversation(db, {
-    taskId: 't1',
-    mode: 'claude-code',
-    conversationId: 'FORE1',
-    origin: 'foreign-observed'
+  test('foreign-observed must NOT mutate the legacy field', async () => {
+    const beforeLegacy = readTask().claude_conversation_id
+    await recordConversation(db, {
+      taskId: 't1',
+      mode: 'claude-code',
+      conversationId: 'FORE1',
+      origin: 'foreign-observed'
+    })
+    expect(readTask().claude_conversation_id).toBe(beforeLegacy)
   })
-  const afterLegacy = (
-    raw.prepare('SELECT claude_conversation_id AS x FROM tasks WHERE id = ?').get('t1') as {
-      x: string
-    }
-  ).x
-  assert(beforeLegacy === afterLegacy, 'foreign-observed must NOT mutate the legacy field')
 
   // 12. Resumability proof (v158). Claude fires SessionStart at LAUNCH, before
   //     it writes any transcript, so a fresh claude-code id must stay unproven
@@ -345,70 +358,69 @@ async function main(): Promise<void> {
   //     after restart → "No conversation found" → false "session expired".
   const proven = (cid: string): boolean =>
     raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(cid) !== undefined
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'claude-code',
-    conversationId: 'FRESH-CLAUDE',
-    origin: 'slay-spawned-fresh'
+  test('fresh claude-code id must stay unproven until its first turn', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'claude-code',
+      conversationId: 'FRESH-CLAUDE',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(proven('FRESH-CLAUDE')).toBe(false)
   })
-  assert(!proven('FRESH-CLAUDE'), 'fresh claude-code id must stay unproven until its first turn')
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'claude-code',
-    conversationId: 'RESUMED-CLAUDE',
-    origin: 'slay-spawned-resume'
+
+  test('a resume proves itself at write', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'claude-code',
+      conversationId: 'RESUMED-CLAUDE',
+      origin: 'slay-spawned-resume'
+    })
+    expect(proven('RESUMED-CLAUDE')).toBe(true)
   })
-  assert(proven('RESUMED-CLAUDE'), 'a resume proves itself at write')
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'codex',
-    conversationId: 'FRESH-CODEX',
-    origin: 'slay-spawned-fresh'
+
+  test('non-turn-tracked mode is proven at write', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'codex',
+      conversationId: 'FRESH-CODEX',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(proven('FRESH-CODEX')).toBe(true)
   })
-  assert(proven('FRESH-CODEX'), 'non-turn-tracked mode is proven at write')
 
   // 13. Turn tracking follows the AGENT a mode runs. A user-defined provider
   //     wrapping claude-code (the hook path records it under its OWN mode) must
   //     stay unproven like claude-code — proving it at write made the next
   //     restart resume an id with no transcript.
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'my-claude',
-    conversationId: 'FRESH-MY-CLAUDE',
-    origin: 'slay-spawned-fresh'
+  test('fresh id of a provider wrapping claude-code must stay unproven until its first turn', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'my-claude',
+      conversationId: 'FRESH-MY-CLAUDE',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(proven('FRESH-MY-CLAUDE')).toBe(false)
   })
-  assert(
-    !proven('FRESH-MY-CLAUDE'),
-    'fresh id of a provider wrapping claude-code must stay unproven until its first turn'
-  )
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'my-codex',
-    conversationId: 'FRESH-MY-CODEX',
-    origin: 'slay-spawned-fresh'
+
+  test('a provider wrapping a non-turn-tracked agent is proven at write', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'my-codex',
+      conversationId: 'FRESH-MY-CODEX',
+      origin: 'slay-spawned-fresh'
+    })
+    expect(proven('FRESH-MY-CODEX')).toBe(true)
   })
-  assert(
-    proven('FRESH-MY-CODEX'),
-    'a provider wrapping a non-turn-tracked agent is proven at write'
-  )
+
   // A built-in chat mode is its own agent — unchanged, although its `type` is claude-code.
-  await recordConversation(db, {
-    taskId: 'tp',
-    mode: 'claude-chat',
-    conversationId: 'FRESH-CLAUDE-CHAT',
-    origin: 'slay-spawned-fresh',
-    legacyJsonField: 'chatConversationId'
+  test('a built-in chat mode must keep being proven at write', async () => {
+    await recordConversation(db, {
+      taskId: 'tp',
+      mode: 'claude-chat',
+      conversationId: 'FRESH-CLAUDE-CHAT',
+      origin: 'slay-spawned-fresh',
+      legacyJsonField: 'chatConversationId'
+    })
+    expect(proven('FRESH-CLAUDE-CHAT')).toBe(true)
   })
-  assert(proven('FRESH-CLAUDE-CHAT'), 'a built-in chat mode must keep being proven at write')
-
-  console.log('OK — task_conversations all checks passed')
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
 })

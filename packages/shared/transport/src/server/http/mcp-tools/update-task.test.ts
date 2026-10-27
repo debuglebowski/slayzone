@@ -1,12 +1,13 @@
 /**
  * MCP: update_task tool tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/update-task.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/update-task.test.ts
  *
  * Note: Wave 5 audit found update-task.ts only passes `{ ipcMain }` to
  * updateTaskOp (no onMutation), then calls deps.notifyRenderer() manually.
  * This means notifyRenderer fires once (not twice like sibling tools).
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../test-utils/event-spy.js'
 import {
@@ -47,7 +48,7 @@ function seedTask(extra: Record<string, unknown> = {}): string {
   return id
 }
 
-await describe('mcp update_task', () => {
+describe('mcp update_task', () => {
   test('register: tool registered with description + schema', () => {
     expect(stub.has('update_task')).toBe(true)
     const tool = stub.get('update_task')!
@@ -141,4 +142,4 @@ await describe('mcp update_task', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

@@ -10,8 +10,8 @@
  *     its output arrives through ptyEvents 'data' with a monotonic RingBuffer
  *     seq — proving the dark default path is byte-identical.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import { expect, test } from 'vitest'
 import type { PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -26,25 +26,6 @@ import {
   getState
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 
 const fakeWin = {
   isDestroyed: () => false,
@@ -106,7 +87,7 @@ function makeFakeHandle(opts: Partial<Pick<PtyHandle, 'pid' | 'whenSpawned'>> = 
   }
 }
 
-await test('fake backend: createPty routes spawn; onData→ptyEvents data (monotonic seq); write/resize reach handle; onExit→ptyEvents exit', async () => {
+test('fake backend: createPty routes spawn; onData→ptyEvents data (monotonic seq); write/resize reach handle; onExit→ptyEvents exit', async () => {
   const handle = makeFakeHandle()
   let capturedSpec: PtySpawnSpec | null = null
   const fakeBackend: PtyBackend = {
@@ -138,74 +119,73 @@ await test('fake backend: createPty routes spawn; onData→ptyEvents data (monot
   })
 
   // The spawn went through the injected backend, with the hub-local defaults.
-  expect(capturedSpec !== null, 'backend.spawn must be invoked by createPty')
+  expect(capturedSpec, 'backend.spawn must be invoked by createPty').not.toBe(null)
   expect(
-    capturedSpec!.computerId === null,
+    capturedSpec!.computerId,
     `hub-local spawn must carry computerId null, got ${String(capturedSpec!.computerId)}`
-  )
-  expect(capturedSpec!.transport === false, 'host spawn must carry transport=false')
-  expect(
-    typeof capturedSpec!.file === 'string' && capturedSpec!.file.length > 0,
-    'spec must carry a shell file'
-  )
-  expect(capturedSpec!.sessionId === sid, 'spec must carry the sessionId')
+  ).toBe(null)
+  expect(capturedSpec!.transport, 'host spawn must carry transport=false').toBe(false)
+  expect(typeof capturedSpec!.file, 'spec must carry a shell file').toBe('string')
+  expect(capturedSpec!.file.length, 'spec must carry a shell file').toBeGreaterThan(0)
+  expect(capturedSpec!.sessionId, 'spec must carry the sessionId').toBe(sid)
 
   // onData → ptyEvents 'data' with a monotonic RingBuffer seq.
   handle.emitData('BACKEND-CHUNK-1')
   handle.emitData('BACKEND-CHUNK-2')
-  expect(dataEvents.length >= 2, `expected ≥2 data events, got ${dataEvents.length}`)
   expect(
-    dataEvents[0][0].includes('BACKEND-CHUNK-1'),
-    `first data chunk mismatch: ${dataEvents[0][0]}`
+    dataEvents.length,
+    `expected ≥2 data events, got ${dataEvents.length}`
+  ).toBeGreaterThanOrEqual(2)
+  expect(dataEvents[0][0], `first data chunk mismatch: ${dataEvents[0][0]}`).toContain(
+    'BACKEND-CHUNK-1'
+  )
+  expect(dataEvents[1][0], `second data chunk mismatch: ${dataEvents[1][0]}`).toContain(
+    'BACKEND-CHUNK-2'
   )
   expect(
-    dataEvents[1][0].includes('BACKEND-CHUNK-2'),
-    `second data chunk mismatch: ${dataEvents[1][0]}`
-  )
-  expect(
-    dataEvents[1][1] > dataEvents[0][1],
+    dataEvents[1][1],
     `RingBuffer seq must be monotonic: ${dataEvents[0][1]} → ${dataEvents[1][1]}`
-  )
+  ).toBeGreaterThan(dataEvents[0][1])
 
   // writePty / resizePty reach the fake handle.
   writePty(sid, 'typed-input')
   expect(
-    handle.written.join('').includes('typed-input'),
+    handle.written.join(''),
     `write must reach handle, got ${JSON.stringify(handle.written)}`
-  )
+  ).toContain('typed-input')
   resizePty(sid, 120, 40)
   expect(
     handle.resized.some(([c, r]) => c === 120 && r === 40),
     `resize must reach handle, got ${JSON.stringify(handle.resized)}`
-  )
+  ).toBe(true)
 
   // onExit → ptyEvents 'exit'.
   handle.emitExit(0)
-  expect(exitEvents.length >= 1, 'onExit must drive a ptyEvents exit')
-  expect(exitEvents[0][0] === 0, `exit code must be 0, got ${String(exitEvents[0][0])}`)
+  expect(exitEvents.length, 'onExit must drive a ptyEvents exit').toBeGreaterThanOrEqual(1)
+  expect(exitEvents[0][0], `exit code must be 0, got ${String(exitEvents[0][0])}`).toBe(0)
 
   ptyEvents.off('data', dh)
   ptyEvents.off('exit', eh)
   setPtyBackend(null)
 })
 
-await test('fake backend: killPty reaches the handle', async () => {
+test('fake backend: killPty reaches the handle', async () => {
   const handle = makeFakeHandle()
   setPtyBackend({ spawn: () => handle })
   const sid = 'fakeKillTask:fakeKillTask'
   await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
   killPty(sid)
   expect(
-    handle.killed.length >= 1,
+    handle.killed.length,
     `killPty must reach handle.kill, got ${JSON.stringify(handle.killed)}`
-  )
+  ).toBeGreaterThanOrEqual(1)
   // Finalize the session so it doesn't linger (kill on a fake handle never fires
   // onExit on its own).
   handle.emitExit(-2)
   setPtyBackend(null)
 })
 
-await test("createPty replacing a live session id fires `replacing` synchronously, before the outgoing handle is killed — and before the outgoing handle's own (possibly delayed) `exit` can land", async () => {
+test("createPty replacing a live session id fires `replacing` synchronously, before the outgoing handle is killed — and before the outgoing handle's own (possibly delayed) `exit` can land", async () => {
   const handle1 = makeFakeHandle()
   const handle2 = makeFakeHandle()
   let nextHandle = handle1
@@ -219,8 +199,8 @@ await test("createPty replacing a live session id fires `replacing` synchronousl
   ptyEvents.on('replacing', rh)
 
   await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
-  expect(replacingEvents.length === 0, 'first spawn on a fresh id must not fire replacing')
-  expect(handle1.killed.length === 0, 'first spawn must not kill anything')
+  expect(replacingEvents.length, 'first spawn on a fresh id must not fire replacing').toBe(0)
+  expect(handle1.killed.length, 'first spawn must not kill anything').toBe(0)
 
   // Reuse the SAME session id — this is the createPty "Kill existing if any"
   // branch: it must emit `replacing` before calling killPty (source order), so
@@ -230,11 +210,13 @@ await test("createPty replacing a live session id fires `replacing` synchronousl
   await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
 
   expect(
-    replacingEvents.length === 1,
+    replacingEvents.length,
     `expected exactly one replacing event for the reused id, got ${replacingEvents.length}`
+  ).toBe(1)
+  expect(handle1.killed.length, 'outgoing handle must be killed on replace').toBeGreaterThanOrEqual(
+    1
   )
-  expect(handle1.killed.length >= 1, 'outgoing handle must be killed on replace')
-  expect(handle2.killed.length === 0, 'incoming handle must not be killed')
+  expect(handle2.killed.length, 'incoming handle must not be killed').toBe(0)
 
   // The outgoing process's exit landing LATE — after the replacement is
   // already live — must NOT surface as a ptyEvents 'exit' for this id at all:
@@ -251,9 +233,9 @@ await test("createPty replacing a live session id fires `replacing` synchronousl
   ptyEvents.on('exit', seh)
   handle1.emitExit(-2)
   expect(
-    staleExitEvents.length === 0,
+    staleExitEvents.length,
     `outgoing generation's late exit must not surface as ptyEvents 'exit', got ${JSON.stringify(staleExitEvents)}`
-  )
+  ).toBe(0)
   ptyEvents.off('exit', seh)
 
   ptyEvents.off('replacing', rh)
@@ -261,7 +243,7 @@ await test("createPty replacing a live session id fires `replacing` synchronousl
   setPtyBackend(null)
 })
 
-await test('a PLAIN kill (no replace) fires ptyEvents "exit" and an unconditional listener must act on it — regression test for the always-false `!hasPty` guard bug', async () => {
+test('a PLAIN kill (no replace) fires ptyEvents "exit" and an unconditional listener must act on it — regression test for the always-false `!hasPty` guard bug', async () => {
   // Mirrors composition.ts's real wiring: an in-memory tracker standing in for
   // agent-hook.ts's `agentTrees`, evicted by BOTH `replacing` and `exit` with
   // no extra guard on either. This is the common case the whole fix targets —
@@ -287,24 +269,24 @@ await test('a PLAIN kill (no replace) fires ptyEvents "exit" and an unconditiona
   // Simulate a stale subagent id left behind mid-turn (the exact shape of the
   // original bug: a SubagentStop that never arrived).
   fakeAgentTrees.add(sid)
-  expect(fakeAgentTrees.has(sid), 'setup: tracker must hold the id before kill')
+  expect(fakeAgentTrees.has(sid), 'setup: tracker must hold the id before kill').toBe(true)
 
   killPty(sid)
-  expect(handle.killed.length >= 1, 'killPty must reach the handle')
+  expect(handle.killed.length, 'killPty must reach the handle').toBeGreaterThanOrEqual(1)
   handle.emitExit(-2) // no replacement anywhere in this test — a plain kill
 
   expect(
-    !fakeAgentTrees.has(sid),
+    fakeAgentTrees.has(sid),
     'a plain kill must evict the tracked id via the exit listener alone — ' +
       'if this fails, the exit listener is guarded by something that never fires'
-  )
+  ).toBe(false)
 
   ptyEvents.off('replacing', evict)
   ptyEvents.off('exit', evict)
   setPtyBackend(null)
 })
 
-await test('localPtyBackend: real echo shell output reaches ptyEvents with monotonic seq', async () => {
+test('localPtyBackend: real echo shell output reaches ptyEvents with monotonic seq', async () => {
   setPtyBackend(null) // default in-process backend
   const sid = 'localEchoTask:localEchoTask'
   const marker = `SZ_BACKEND_ECHO_${Math.random().toString(36).slice(2, 8)}`
@@ -343,13 +325,13 @@ await test('localPtyBackend: real echo shell output reaches ptyEvents with monot
     `echo marker must arrive via ptyEvents 'data' (events=${dataEvents.length}, sample=${JSON.stringify(
       dataEvents.slice(0, 3)
     )})`
-  )
+  ).toBeTruthy()
   // RingBuffer seq strictly increases across the received chunks.
   for (let i = 1; i < dataEvents.length; i++) {
     expect(
-      dataEvents[i][1] > dataEvents[i - 1][1],
+      dataEvents[i][1],
       `seq must be strictly monotonic at ${i}: ${dataEvents[i - 1][1]} → ${dataEvents[i][1]}`
-    )
+    ).toBeGreaterThan(dataEvents[i - 1][1])
   }
 })
 
@@ -392,16 +374,19 @@ for (const unknownPid of [null, 0] as Array<number | null>) {
     await new Promise((r) => setTimeout(r, 700))
 
     expect(
-      exits.length === 0,
+      exits.length,
       `no exit may be synthesized while the pid is merely unknown, got ${JSON.stringify(exits)}`
-    )
-    expect(hasPty(sid), 'session must still be alive while the spawn reply is in flight')
+    ).toBe(0)
+    expect(
+      hasPty(sid),
+      'session must still be alive while the spawn reply is in flight'
+    ).toBeTruthy()
 
     // The reply lands: the session carries on as normal.
     confirmSpawn({ pid: 4242 })
     await new Promise((r) => setTimeout(r, 50))
-    expect(exits.length === 0, `late reply must not exit either, got ${JSON.stringify(exits)}`)
-    expect(hasPty(sid), 'session must survive its spawn confirmation')
+    expect(exits.length, `late reply must not exit either, got ${JSON.stringify(exits)}`).toBe(0)
+    expect(hasPty(sid), 'session must survive its spawn confirmation').toBeTruthy()
 
     ptyEvents.off('exit', eh)
     killPty(sid)
@@ -410,7 +395,7 @@ for (const unknownPid of [null, 0] as Array<number | null>) {
   })
 }
 
-await test('remote backend: a REJECTED spawn confirmation finalizes the session', async () => {
+test('remote backend: a REJECTED spawn confirmation finalizes the session', async () => {
   // The other half of the contract — deferring to the computer must not mean
   // ignoring it. A spawn the computer refused has to surface as a dead session.
   let failSpawn: (e: Error) => void = () => {}
@@ -442,12 +427,12 @@ await test('remote backend: a REJECTED spawn confirmation finalizes the session'
   failSpawn(new Error('computer refused the spawn'))
   await new Promise((r) => setTimeout(r, 100))
 
-  expect(exits.length >= 1, 'a refused remote spawn must drive an exit')
+  expect(exits.length, 'a refused remote spawn must drive an exit').toBeGreaterThanOrEqual(1)
   ptyEvents.off('exit', eh)
   setPtyBackend(null)
 })
 
-await test('a session declared dead must not leave a live process behind', async () => {
+test('a session declared dead must not leave a live process behind', async () => {
   // Local backend, pid invalid at spawn: a genuine dead-on-arrival pty, and the
   // one case the hub-side pid check legitimately catches. Whatever declares the
   // session dead must also ensure the OS process is gone — a finalize that only
@@ -466,11 +451,13 @@ await test('a session declared dead must not leave a live process behind', async
   await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
   await new Promise((r) => setTimeout(r, 700))
 
-  expect(exits.length >= 1, 'a locally dead-on-arrival pty must still finalize')
-  expect(
-    handle.killed.length >= 1,
-    `finalize must kill the handle so no process is orphaned, got ${JSON.stringify(handle.killed)}`
+  expect(exits.length, 'a locally dead-on-arrival pty must still finalize').toBeGreaterThanOrEqual(
+    1
   )
+  expect(
+    handle.killed.length,
+    `finalize must kill the handle so no process is orphaned, got ${JSON.stringify(handle.killed)}`
+  ).toBeGreaterThanOrEqual(1)
   ptyEvents.off('exit', eh)
   setPtyBackend(null)
 })
@@ -483,7 +470,7 @@ await test('a session declared dead must not leave a live process behind', async
 // the output directly — runs it, and the hub keeps its own only for a backend that
 // confirms it does not.
 
-await test('remote backend: the spawn spec carries the startup deadline for the owner to arm', async () => {
+test('remote backend: the spawn spec carries the startup deadline for the owner to arm', async () => {
   let capturedSpec: PtySpawnSpec | null = null
   const handle = makeFakeHandle({
     whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
@@ -506,15 +493,15 @@ await test('remote backend: the spawn spec carries the startup deadline for the 
 
   const spec = capturedSpec as PtySpawnSpec | null
   expect(
-    spec?.startupTimeoutMs === 10_000,
+    spec?.startupTimeoutMs,
     `spawn spec must carry the adapter's startup deadline, got ${JSON.stringify(spec?.startupTimeoutMs)}`
-  )
+  ).toBe(10_000)
   killPty(sid)
   handle.emitExit(-2)
   setPtyBackend(null)
 })
 
-await test("a computer that OWNS the startup deadline is never second-guessed by the hub; one that does not still gets the hub's", async () => {
+test("a computer that OWNS the startup deadline is never second-guessed by the hub; one that does not still gets the hub's", async () => {
   // Both sessions stay silent past the deadline. Only the one whose owner did NOT
   // claim the deadline may be killed by the hub.
   const owned = makeFakeHandle({
@@ -544,13 +531,17 @@ await test("a computer that OWNS the startup deadline is never second-guessed by
   await new Promise((r) => setTimeout(r, 10_700))
 
   expect(
-    owned.killed.length === 0 && hasPty(ownedSid),
+    owned.killed.length,
     `the hub must not kill a session whose computer owns the deadline, killed=${JSON.stringify(owned.killed)}`
-  )
+  ).toBe(0)
   expect(
-    legacy.killed.includes('SIGKILL'),
+    hasPty(ownedSid),
+    `the hub must not kill a session whose computer owns the deadline, killed=${JSON.stringify(owned.killed)}`
+  ).toBeTruthy()
+  expect(
+    legacy.killed,
     `an older computer's silent session still gets the hub's deadline, killed=${JSON.stringify(legacy.killed)}`
-  )
+  ).toContain('SIGKILL')
 
   killPty(ownedSid)
   owned.emitExit(-2)
@@ -559,7 +550,7 @@ await test("a computer that OWNS the startup deadline is never second-guessed by
   setPtyBackend(null)
 })
 
-await test('an exit the owner attributes to its startup deadline goes through the normal exit path', async () => {
+test('an exit the owner attributes to its startup deadline goes through the normal exit path', async () => {
   const handle = makeFakeHandle({
     whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
   })
@@ -585,14 +576,14 @@ await test('an exit the owner attributes to its startup deadline goes through th
 
   // The real code, not a synthetic -1: the computer's kill IS the exit.
   expect(
-    JSON.stringify(exits) === '[0]',
+    JSON.stringify(exits),
     `startup-timeout exit must report the owner's code once, got ${JSON.stringify(exits)}`
-  )
+  ).toBe('[0]')
   ptyEvents.off('exit', eh)
   setPtyBackend(null)
 })
 
-await test("remote backend: an AGENT's initial spawn asks for admission (visible tab first); a plain shell never does", async () => {
+test("remote backend: an AGENT's initial spawn asks for admission (visible tab first); a plain shell never does", async () => {
   // Restoring a workspace starts every tab's agent; the computer admits them a few
   // at a time. Only the agent's own start queues — shells start at once.
   const captured: Array<{ sid: string; admission: PtySpawnSpec['admission'] }> = []
@@ -622,22 +613,21 @@ await test("remote backend: an AGENT's initial spawn asks for admission (visible
   }
   const byId = Object.fromEntries(captured.map((c) => [c.sid, c.admission ?? null]))
   expect(
-    byId['admShell:admShell'] === null,
+    byId['admShell:admShell'],
     `plain shell must start at once, got ${String(byId['admShell:admShell'])}`
+  ).toBe(null)
+  expect(byId['admBg:admBg'], `hidden agent → background, got ${String(byId['admBg:admBg'])}`).toBe(
+    'background'
   )
   expect(
-    byId['admBg:admBg'] === 'background',
-    `hidden agent → background, got ${String(byId['admBg:admBg'])}`
-  )
-  expect(
-    byId['admFg:admFg'] === 'foreground',
+    byId['admFg:admFg'],
     `visible agent → foreground, got ${String(byId['admFg:admFg'])}`
-  )
+  ).toBe('foreground')
   for (const c of cases) killPty(c.sid)
   setPtyBackend(null)
 })
 
-await test('prioritizePty forwards to the backend for a live session only', async () => {
+test('prioritizePty forwards to the backend for a live session only', async () => {
   const asked: string[] = []
   setPtyBackend({
     spawn: () => makeFakeHandle({ whenSpawned: new Promise<never>(() => {}) as never }),
@@ -654,7 +644,7 @@ await test('prioritizePty forwards to the backend for a live session only', asyn
   })
   prioritizePty(sid)
   prioritizePty('unknown:unknown')
-  expect(JSON.stringify(asked) === JSON.stringify([sid]), `asked=${JSON.stringify(asked)}`)
+  expect(JSON.stringify(asked), `asked=${JSON.stringify(asked)}`).toBe(JSON.stringify([sid]))
   killPty(sid)
   setPtyBackend(null)
 })
@@ -665,7 +655,7 @@ await test('prioritizePty forwards to the backend for a live session only', asyn
 // queued for a start slot (or still booting) looked exactly like a stopped one.
 // The startup deadline bounds it: a session that never prints is killed.
 
-await test('a session stays starting until its first output, then settles to idle', async () => {
+test('a session stays starting until its first output, then settles to idle', async () => {
   const handle = makeFakeHandle({
     whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
   })
@@ -680,22 +670,17 @@ await test('a session stays starting until its first output, then settles to idl
     computerId: 'computer-1'
   })
   await new Promise((r) => setTimeout(r, 300))
-  expect(
-    getState(sid) === 'starting',
-    `before any output: expected starting, got ${String(getState(sid))}`
+  expect(getState(sid), `before any output: expected starting, got ${String(getState(sid))}`).toBe(
+    'starting'
   )
 
   handle.emitData('$ ')
   await new Promise((r) => setTimeout(r, 300))
-  expect(
-    getState(sid) === 'idle',
-    `after first output: expected idle, got ${String(getState(sid))}`
+  expect(getState(sid), `after first output: expected idle, got ${String(getState(sid))}`).toBe(
+    'idle'
   )
 
   killPty(sid)
   handle.emitExit(-2)
   setPtyBackend(null)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

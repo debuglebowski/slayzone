@@ -8,7 +8,8 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import type {
   CreateTaskInput,
   CreateArtifactInput,

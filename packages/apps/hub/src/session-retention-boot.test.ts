@@ -11,10 +11,10 @@
  * it (composition.ts) and that the default is off. A malformed period (B16) is in
  * hub-boot.test.ts with the other refusals.
  *
- * Native ABI: better-sqlite3 needs Electron's node (run_test_electron_strict_loader).
+ * Native ABI: better-sqlite3 needs Electron's node.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/session-retention-boot.test.ts
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { afterAll, beforeAll, expect, test } from 'vitest'
 import { migrations } from '../../../shared/transport/src/db-bootstrap/index.js'
 import { BOOT_SWEEP_DELAY_MS } from './session-retention.js'
 
@@ -35,23 +36,6 @@ const PACKAGES_DIR = join(HUB_DIR, '..', '..')
 const ELECTRON_BIN = require('electron') as unknown as string
 const DB_FILE = 'slayzone.data.sqlite'
 const DAY = 24 * 60 * 60 * 1000
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Newest source mtime under `dir`, skipping build output and dependencies. */
 function newestMtime(dir: string): number {
@@ -200,68 +184,61 @@ function newRoot(): string {
 const sweepLines = (logs: string[]): string[] =>
   logs.filter((l) => l.startsWith('{"type":"security"') && l.includes('"hub.retention.sweep"'))
 
-async function main(): Promise<void> {
-  console.log('\nsession retention at boot, through the real built hub\n')
-  ensureBuilt()
-  const LOOP = { SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' }
+beforeAll(() => ensureBuilt())
+const LOOP = { SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' }
 
+afterAll(() => {
+  for (const r of roots) rmSync(r, { recursive: true, force: true })
+})
+
+test('a hub with a 90-day period sweeps shortly after it listens', async () => {
+  const root = newRoot()
+  seed(root, 91, 89)
+  const hub = await bootHub(root, { ...LOOP, SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90' })
   try {
-    await test('a hub with a 90-day period sweeps shortly after it listens', async () => {
-      const root = newRoot()
-      seed(root, 91, 89)
-      const hub = await bootHub(root, { ...LOOP, SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90' })
-      try {
-        const line = await poll(
-          async () => sweepLines(hub.logs)[0] ?? null,
-          BOOT_SWEEP_DELAY_MS + 20_000,
-          `the boot sweep's audit line (logs:\n${hub.logs.join('\n')})`
-        )
-        const event = JSON.parse(line) as {
-          outcome: string
-          detail: { days: number; deleted: { table: string; rows: number }[] }
-        }
-        assert(event.outcome === 'success', `success: ${line}`)
-        assert(event.detail.days === 90, `period: ${line}`)
-        const rows = Object.fromEntries(event.detail.deleted.map((d) => [d.table, d.rows]))
-        assert(rows.chat_events === 1 && rows.agent_prompts === 1, `counts: ${line}`)
-      } finally {
-        await hub.stop()
-      }
-      const after = contents(root)
-      assert(JSON.stringify(after.events) === '[1]', `chat events: ${after.events}`)
-      assert(JSON.stringify(after.prompts) === '["pr-new"]', `prompts: ${after.prompts}`)
-      assert(JSON.stringify(after.tasks) === '["t1"]', `tasks: ${after.tasks}`)
-    })
-
-    await test('the desktop app’s hub (supervised, nothing set) never sweeps', async () => {
-      const root = newRoot()
-      seed(root, 400, 300)
-      const hub = await bootHub(root, {
-        ...LOOP,
-        SLAYZONE_SUPERVISED: '1',
-        SLAYZONE_HUB_REQUIRE_LOGIN: '0'
-      })
-      try {
-        // Past the moment a boot sweep would have run.
-        await new Promise((r) => setTimeout(r, BOOT_SWEEP_DELAY_MS + 3_000))
-        assert(sweepLines(hub.logs).length === 0, `no sweep:\n${hub.logs.join('\n')}`)
-        assert(
-          !hub.logs.some((l) => l.includes('[session-retention]')),
-          'no retention schedule announced'
-        )
-      } finally {
-        await hub.stop()
-      }
-      const after = contents(root)
-      assert(JSON.stringify(after.events) === '[0,1]', `chat events: ${after.events}`)
-      assert(JSON.stringify(after.prompts) === '["pr-new","pr-old"]', `prompts: ${after.prompts}`)
-    })
+    const line = await poll(
+      async () => sweepLines(hub.logs)[0] ?? null,
+      BOOT_SWEEP_DELAY_MS + 20_000,
+      `the boot sweep's audit line (logs:\n${hub.logs.join('\n')})`
+    )
+    const event = JSON.parse(line) as {
+      outcome: string
+      detail: { days: number; deleted: { table: string; rows: number }[] }
+    }
+    expect(event.outcome, `success: ${line}`).toBe('success')
+    expect(event.detail.days, `period: ${line}`).toBe(90)
+    const rows = Object.fromEntries(event.detail.deleted.map((d) => [d.table, d.rows]))
+    expect(rows.chat_events, `counts: ${line}`).toBe(1)
+    expect(rows.agent_prompts, `counts: ${line}`).toBe(1)
   } finally {
-    for (const r of roots) rmSync(r, { recursive: true, force: true })
+    await hub.stop()
   }
+  const after = contents(root)
+  expect(after.events, `chat events: ${after.events}`).toEqual([1])
+  expect(after.prompts, `prompts: ${after.prompts}`).toEqual(['pr-new'])
+  expect(after.tasks, `tasks: ${after.tasks}`).toEqual(['t1'])
+})
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+test('the desktop app’s hub (supervised, nothing set) never sweeps', async () => {
+  const root = newRoot()
+  seed(root, 400, 300)
+  const hub = await bootHub(root, {
+    ...LOOP,
+    SLAYZONE_SUPERVISED: '1',
+    SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+  })
+  try {
+    // Past the moment a boot sweep would have run.
+    await new Promise((r) => setTimeout(r, BOOT_SWEEP_DELAY_MS + 3_000))
+    expect(sweepLines(hub.logs), `no sweep:\n${hub.logs.join('\n')}`).toHaveLength(0)
+    expect(
+      hub.logs.some((l) => l.includes('[session-retention]')),
+      'no retention schedule announced'
+    ).toBe(false)
+  } finally {
+    await hub.stop()
+  }
+  const after = contents(root)
+  expect(after.events, `chat events: ${after.events}`).toEqual([0, 1])
+  expect(after.prompts, `prompts: ${after.prompts}`).toEqual(['pr-new', 'pr-old'])
+})

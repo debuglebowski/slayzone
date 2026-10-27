@@ -1,14 +1,9 @@
 /**
  * REST: /api/tags CRUD contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tags/crud.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTagsCrudRoutes } from './crud.js'
 
@@ -43,7 +38,7 @@ interface Tag {
   sort_order: number
 }
 
-await describe('/api/tags CRUD', () => {
+describe('/api/tags CRUD', () => {
   test('GET: lists project tags (project by name)', async () => {
     const res = await rest.request<{ ok: boolean; data: Tag[] }>('GET', '/api/tags?project=Alpha')
     expect(res.status).toBe(200)
@@ -111,5 +106,7 @@ await describe('/api/tags CRUD', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

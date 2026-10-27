@@ -1,8 +1,7 @@
 /**
  * Self-heal unit tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/main/self-heal.test.ts
  */
-import { expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -60,22 +59,19 @@ function padToSize(dbPath: string, targetBytes: number): void {
   }
 }
 
-async function run(): Promise<void> {
-  console.log('\nselfHealDiagnosticsDb')
-
+describe('selfHealDiagnosticsDb', () => {
   // 1. Missing file → no-op
-  {
+  test('missing file → no-op', async () => {
     const dir = makeTempDir()
     const dbPath = path.join(dir, 'diag.sqlite')
     const result = selfHealDiagnosticsDb(dbPath)
     expect(result.rotated).toBe(false)
     expect(fs.existsSync(dbPath)).toBe(false)
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ missing file → no-op')
-  }
+  })
 
   // 2. Small file → no rotation
-  {
+  test('small file → no rotation', async () => {
     const dir = makeTempDir()
     const dbPath = path.join(dir, 'diag.sqlite')
     seedDb(dbPath, 10)
@@ -83,11 +79,10 @@ async function run(): Promise<void> {
     expect(result.rotated).toBe(false)
     expect(fs.existsSync(dbPath)).toBe(true)
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ small file → no rotation')
-  }
+  })
 
   // 3. Oversize → rotated to .salvage.<ts>.sqlite, original gone
-  {
+  test('oversize → rotated, original removed', async () => {
     const dir = makeTempDir()
     const dbPath = path.join(dir, 'diag.sqlite')
     seedDb(dbPath, 10)
@@ -98,11 +93,10 @@ async function run(): Promise<void> {
     expect(fs.existsSync(dbPath)).toBe(false)
     expect(fs.existsSync(result.salvagePath!)).toBe(true)
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ oversize → rotated, original removed')
-  }
+  })
 
   // 4. WAL/SHM sidecars rotate too
-  {
+  test('WAL+SHM rotated alongside main file', async () => {
     const dir = makeTempDir()
     const dbPath = path.join(dir, 'diag.sqlite')
     seedDb(dbPath, 10)
@@ -115,13 +109,12 @@ async function run(): Promise<void> {
     expect(fs.existsSync(`${dbPath}-shm`)).toBe(false)
     expect(fs.existsSync(`${result.salvagePath}-wal`)).toBe(true)
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ WAL+SHM rotated alongside main file')
-  }
+  })
+})
 
-  console.log('\nmergeSalvage')
-
+describe('mergeSalvage', () => {
   // 5. Copies newest 100k rows by ts_ms DESC; older rows excluded
-  {
+  test('newest 100k by ts_ms DESC, older rows dropped', async () => {
     const dir = makeTempDir()
     const salvagePath = path.join(dir, 'old.sqlite')
     seedDb(salvagePath, 100_500) // 500 rows above limit
@@ -140,11 +133,10 @@ async function run(): Promise<void> {
     expect(min).toBe(500) // 500 oldest dropped
     fresh.close()
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ newest 100k by ts_ms DESC, older rows dropped')
-  }
+  })
 
   // 6. INSERT OR IGNORE — id collisions skipped, no error
-  {
+  test('INSERT OR IGNORE — collisions skipped, no error', async () => {
     const dir = makeTempDir()
     const salvagePath = path.join(dir, 'old.sqlite')
     seedDb(salvagePath, 100) // ids "row-0".."row-99"
@@ -167,11 +159,10 @@ async function run(): Promise<void> {
     expect(count).toBe(100)
     fresh.close()
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ INSERT OR IGNORE — collisions skipped, no error')
-  }
+  })
 
   // 7. Missing salvage file → no-op
-  {
+  test('missing salvage file → no-op', async () => {
     const dir = makeTempDir()
     const freshPath = path.join(dir, 'new.sqlite')
     const fresh = new Database(freshPath)
@@ -180,15 +171,5 @@ async function run(): Promise<void> {
     expect(result.inserted).toBe(0)
     fresh.close()
     fs.rmSync(dir, { recursive: true })
-    console.log('  ✓ missing salvage file → no-op')
-  }
-}
-
-try {
-  await run()
-} catch (e) {
-  console.error(`  ✗ ${e}`)
-  process.exitCode = 1
-}
-
-console.log('\nDone')
+  })
+})

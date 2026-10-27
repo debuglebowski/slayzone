@@ -1,8 +1,5 @@
 /**
  * Integration test for chat:reset IPC handler.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
- *   packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
  *
  * Uses Electron's bundled Node so better-sqlite3's native module matches. Wires
  * registerChatHandlers against a mock ipcMain + createTestHarness's migrated
@@ -13,6 +10,7 @@
  *   - DB chatConversationId is cleared
  *   - persisted chat_events for the tab are wiped
  */
+import { expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
@@ -24,36 +22,6 @@ import {
   createSlayzoneDbAdapter,
   createTestHarness
 } from '../../../../../shared/test-utils/ipc-harness.js'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T): void {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy(): void {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    },
-    toBeFalsy(): void {
-      if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 function makeFakeChild(): ChildProcess {
   const emitter = new EventEmitter()
@@ -114,9 +82,7 @@ function seedTask(
   }
 }
 
-console.log('\nchat:reset IPC handler tests\n')
-
-await test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversationId', async () => {
+test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversationId', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
 
@@ -222,7 +188,7 @@ await test('chat:reset spawns fresh (no --resume) even when DB has stored chatCo
   expect(evCountAfter.c).toBe(0)
 })
 
-await test('chat:reset still wipes events + clears conv id when no live session exists', async () => {
+test('chat:reset still wipes events + clears conv id when no live session exists', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
 
@@ -280,9 +246,7 @@ await test('chat:reset still wipes events + clears conv id when no live session 
   expect(evCount.c).toBe(0)
 })
 
-console.log('\nchat:setModel / chat:getModel IPC handler tests\n')
-
-await test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=opus) when nothing stored', async () => {
+test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=opus) when nothing stored', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -303,7 +267,7 @@ await test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=o
   expect(['opus', 'sonnet', 'haiku'].includes(got)).toBe(true)
 })
 
-await test('chat:getModel returns stored value', async () => {
+test('chat:getModel returns stored value', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -321,7 +285,7 @@ await test('chat:getModel returns stored value', async () => {
   expect(got).toBe('opus')
 })
 
-await test('chat:getModel falls back to account default for unknown / legacy stored value', async () => {
+test('chat:getModel falls back to account default for unknown / legacy stored value', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -341,7 +305,7 @@ await test('chat:getModel falls back to account default for unknown / legacy sto
   expect(['opus', 'sonnet', 'haiku'].includes(got)).toBe(true)
 })
 
-await test('chat:setModel persists to provider_config + respawns with --model flag', async () => {
+test('chat:setModel persists to provider_config + respawns with --model flag', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -404,7 +368,7 @@ await test('chat:setModel persists to provider_config + respawns with --model fl
   expect(cfg[mode]?.chatModel).toBe('sonnet')
 })
 
-await test('chat:setModel rejects invalid model id', async () => {
+test('chat:setModel rejects invalid model id', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -442,7 +406,7 @@ await test('chat:setModel rejects invalid model id', async () => {
   expect(threw).toBe(true)
 })
 
-await test('chat:start reads stored chatModel and adds --model on cold spawn', async () => {
+test('chat:start reads stored chatModel and adds --model on cold spawn', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -483,7 +447,7 @@ await test('chat:start reads stored chatModel and adds --model on cold spawn', a
   expect(args[idx + 1]).toBe('haiku')
 })
 
-await test('explicit providerFlagsOverride suppresses --model injection', async () => {
+test('explicit providerFlagsOverride suppresses --model injection', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -522,9 +486,7 @@ await test('explicit providerFlagsOverride suppresses --model injection', async 
   expect(spawnArgsLog[0].includes('--model')).toBeFalsy()
 })
 
-console.log('\nlazy-spawn IPC handler tests\n')
-
-await test('chat:hydrate does NOT spawn a subprocess', async () => {
+test('chat:hydrate does NOT spawn a subprocess', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -564,7 +526,7 @@ await test('chat:hydrate does NOT spawn a subprocess', async () => {
   expect(info.pid).toBe(null)
 })
 
-await test('chat:send triggers lazy spawn on a hydrated session', async () => {
+test('chat:send triggers lazy spawn on a hydrated session', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -610,7 +572,7 @@ await test('chat:send triggers lazy spawn on a hydrated session', async () => {
   expect(sent).toBe(true)
 })
 
-await test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', async () => {
+test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -654,7 +616,7 @@ await test('chat:hydrate twice is idempotent — only one skeleton, zero spawns'
   expect(spawnCount.n).toBe(0)
 })
 
-await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () => {
+test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -714,7 +676,7 @@ await test('chat:reset wipes DB and leaves the new session lazy (no spawn)', asy
   expect(cfg[mode]?.chatConversationId).toBe(null)
 })
 
-await test('chat:setMode pre-spawn persists DB without spawning', async () => {
+test('chat:setMode pre-spawn persists DB without spawning', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
   const db = await setupDb()
@@ -767,6 +729,3 @@ await test('chat:setMode pre-spawn persists DB without spawning', async () => {
   const cfg = JSON.parse(cfgRow.provider_config) as Record<string, { chatMode?: string }>
   expect(cfg[mode]?.chatMode).toBe('plan')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

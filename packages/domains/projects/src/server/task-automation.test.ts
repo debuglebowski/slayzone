@@ -1,14 +1,9 @@
 /**
  * Task automation integration tests
  * Tests handleTerminalStateChange: auto-moves tasks based on terminal state + project config
- * Run with: tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/projects/src/main/task-automation.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { handleTerminalStateChange } from './task-automation.js'
 
 const h = await createTestHarness()
@@ -66,7 +61,7 @@ function notifyTasksChanged(change?: { taskIds: readonly string[] }): void {
   lastChange = change
 }
 
-await describe('task automation: state change triggers', async () => {
+describe('task automation: state change triggers', () => {
   test('running triggers on_terminal_active status change', async () => {
     resetNotify()
     const projId = seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: null })
@@ -99,7 +94,7 @@ await describe('task automation: state change triggers', async () => {
   })
 })
 
-await describe('task automation: non-triggering state changes', async () => {
+describe('task automation: non-triggering state changes', () => {
   test('starting->idle does NOT trigger on_terminal_idle', async () => {
     resetNotify()
     const projId = seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: 'review' })
@@ -168,7 +163,7 @@ await describe('task automation: non-triggering state changes', async () => {
   })
 })
 
-await describe('task automation: no-op cases', async () => {
+describe('task automation: no-op cases', () => {
   test('task already in target status is no-op', async () => {
     resetNotify()
     const projId = seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: null })
@@ -225,7 +220,7 @@ await describe('task automation: no-op cases', async () => {
   })
 })
 
-await describe('task automation: sessionId parsing', async () => {
+describe('task automation: sessionId parsing', () => {
   test('extracts taskId from taskId:suffix format', async () => {
     resetNotify()
     const projId = seedProject({ on_terminal_active: 'in_progress', on_terminal_idle: null })
@@ -257,7 +252,7 @@ await describe('task automation: sessionId parsing', async () => {
   })
 })
 
-await describe('task automation: edge cases', async () => {
+describe('task automation: edge cases', () => {
   test('malformed JSON in config does not throw', async () => {
     resetNotify()
     const projId = crypto.randomUUID()
@@ -327,5 +322,4 @@ await describe('task automation: edge cases', async () => {
   })
 })
 
-h.cleanup()
-console.log('\nDone')
+afterAll(() => h.cleanup())

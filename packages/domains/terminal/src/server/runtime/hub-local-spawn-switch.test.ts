@@ -4,9 +4,8 @@
  * the default until the composition root installs the routing backend — while a
  * session routed to a computer still spawns. One `hub.process.spawn` audit line per
  * refused spawn, also through createPty's shell-fallback retry. No real shell spawns.
- *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts <file>
  */
+import { afterAll, expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { execFileSync, type ChildProcess } from 'node:child_process'
@@ -19,22 +18,6 @@ import { localPtyBackend, setPtyBackend, type PtyBackend } from './pty-backend'
 import { childProcessToHandle, createLocalChatBackend } from './chat-proc-handle'
 import * as chat from './chat-transport-manager'
 
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-function expect(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 async function refused(fn: () => unknown): Promise<unknown> {
   try {
     await fn()
@@ -91,9 +74,8 @@ function fakeChild(): ChildProcess {
 }
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-console.log('\nhub-local spawn, processes switched off\n')
 
-await test('localPtyBackend.spawn: refused, no pty started, one audit line', async () => {
+test('localPtyBackend.spawn: refused, no pty started, one audit line', async () => {
   const before = lines.length
   const kids = childPids()
   const err = await refused(() =>
@@ -108,32 +90,31 @@ await test('localPtyBackend.spawn: refused, no pty started, one audit line', asy
       transport: false
     })
   )
-  expect(isHubSwitchedOffError(err), `expected a switch refusal, got ${err}`)
-  expect(childPids() === kids, 'no child process')
-  expect(lines.length === before + 1, `one audit line, got ${lines.length - before}`)
-  expect(lines[before].event === 'hub.process.spawn', 'event hub.process.spawn')
-  expect(lines[before].detail.op === 'pty.spawn', 'op pty.spawn')
+  expect(isHubSwitchedOffError(err), `expected a switch refusal, got ${err}`).toBeTruthy()
+  expect(childPids(), 'no child process').toBe(kids)
+  expect(lines.length, `one audit line, got ${lines.length - before}`).toBe(before + 1)
+  expect(lines[before].event, 'event hub.process.spawn').toBe('hub.process.spawn')
+  expect(lines[before].detail.op, 'op pty.spawn').toBe('pty.spawn')
 })
 
-await test('createPty, hub-local (no computer): refused to the caller, audited once', async () => {
+test('createPty, hub-local (no computer): refused to the caller, audited once', async () => {
   setPtyBackend(null) // the default local backend, as before the gateway is installed
   const before = lines.length
   const err = await refused(() =>
     createPty({ win: fakeWin, sessionId: 'local:local', cwd: '/tmp', mode: 'terminal' } as never)
   )
-  expect(isHubSwitchedOffError(err), `createPty must rethrow the refusal, got ${err}`)
-  expect(
-    lines.length === before + 1,
-    `no second line from the -l retry, got ${lines.length - before}`
+  expect(isHubSwitchedOffError(err), `createPty must rethrow the refusal, got ${err}`).toBeTruthy()
+  expect(lines.length, `no second line from the -l retry, got ${lines.length - before}`).toBe(
+    before + 1
   )
 })
 
-await test('createPty routed to a computer: still spawns', async () => {
+test('createPty routed to a computer: still spawns', async () => {
   let routed = 0
   setPtyBackend({
     spawn: async (spec) => {
       routed++
-      expect(spec.computerId === 'computer-1', 'routed with its computer id')
+      expect(spec.computerId, 'routed with its computer id').toBe('computer-1')
       return fakePty() as never
     }
   } as PtyBackend)
@@ -145,14 +126,14 @@ await test('createPty routed to a computer: still spawns', async () => {
     mode: 'terminal',
     computerId: 'computer-1'
   } as never)
-  expect(res.success === true, `routed spawn succeeds: ${JSON.stringify(res)}`)
-  expect(routed === 1, 'routing backend spawned it')
-  expect(lines.length === before, 'nothing refused')
+  expect(res.success, `routed spawn succeeds: ${JSON.stringify(res)}`).toBe(true)
+  expect(routed, 'routing backend spawned it').toBe(1)
+  expect(lines.length, 'nothing refused').toBe(before)
   killPty('routed:routed')
   setPtyBackend(null)
 })
 
-await test('createLocalChatBackend: refused before resolving a binary', async () => {
+test('createLocalChatBackend: refused before resolving a binary', async () => {
   let whichCalls = 0
   const backend = createLocalChatBackend({
     whichBinary: async () => {
@@ -172,12 +153,12 @@ await test('createLocalChatBackend: refused before resolving a binary', async ()
       env: {}
     })
   )
-  expect(isHubSwitchedOffError(err), 'refused')
-  expect(whichCalls === 0, 'no login shell for whichBinary')
-  expect(lines[lines.length - 1].detail.op === 'chat.spawn', 'op chat.spawn')
+  expect(isHubSwitchedOffError(err), 'refused').toBeTruthy()
+  expect(whichCalls, 'no login shell for whichBinary').toBe(0)
+  expect(lines[lines.length - 1].detail.op, 'op chat.spawn').toBe('chat.spawn')
 })
 
-await test('chat transport, in-process path: refused before whichBinary/spawn', async () => {
+test('chat transport, in-process path: refused before whichBinary/spawn', async () => {
   chat.__resetForTests()
   let whichCalls = 0
   let spawnCalls = 0
@@ -202,11 +183,12 @@ await test('chat transport, in-process path: refused before whichBinary/spawn', 
     providerFlags: []
   })
   const err = await refused(() => chat.ensureSpawned('chat-local'))
-  expect(isHubSwitchedOffError(err), `refused, got ${err}`)
-  expect(whichCalls === 0 && spawnCalls === 0, 'nothing resolved or spawned')
+  expect(isHubSwitchedOffError(err), `refused, got ${err}`).toBeTruthy()
+  expect(whichCalls, 'nothing resolved or spawned').toBe(0)
+  expect(spawnCalls, 'nothing resolved or spawned').toBe(0)
 })
 
-await test('chat transport, routed backend: still spawns', async () => {
+test('chat transport, routed backend: still spawns', async () => {
   chat.__resetForTests()
   let routed = 0
   chat.setTransportDepsForTests({
@@ -228,22 +210,21 @@ await test('chat transport, routed backend: still spawns', async () => {
     providerFlags: []
   })
   await chat.ensureSpawned('chat-routed')
-  expect(routed === 1, 'routed backend spawned the agent')
+  expect(routed, 'routed backend spawned the agent').toBe(1)
   chat.__resetForTests()
   chat.resetTransportDeps()
 })
 
-await test('testExecutionContext: docker/ssh probe refused, host answers', async () => {
+test('testExecutionContext: docker/ssh probe refused, host answers', async () => {
   const err = await refused(() =>
     testExecutionContext({ type: 'docker', container: 'c1' } as never)
   )
-  expect(isHubSwitchedOffError(err), 'docker probe refused')
+  expect(isHubSwitchedOffError(err), 'docker probe refused').toBeTruthy()
   const host = await testExecutionContext({ type: 'host' } as never)
-  expect(host.success === true, 'host needs no process')
+  expect(host.success, 'host needs no process').toBe(true)
 })
 
-delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
-setSecurityLogSink()
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
-process.exit(0)
+afterAll(() => {
+  delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
+  setSecurityLogSink()
+})

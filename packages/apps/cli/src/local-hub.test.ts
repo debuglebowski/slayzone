@@ -8,24 +8,11 @@
  * `isCoLocatedHub` in particular is only reachable over the network by addressing
  * a non-loopback host, which no offline test can arrange portably.
  *
- * Pure Node → runs under plain `npx tsx`.
- *
- * Run with: npx tsx packages/apps/cli/src/local-hub.test.ts
+ * Pure Node.
  */
+import { describe, expect, test } from 'vitest'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
 import { fixedPortForChannel, isCoLocatedHub } from './local-hub'
-
-let passed = 0
-let failed = 0
-function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    passed++
-    console.log(`  ✓ ${name}`)
-  } else {
-    failed++
-    console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ''}`)
-  }
-}
 
 /** Run `fn` with the given SLAYZONE_* env, restoring whatever was there before. */
 async function withEnv(
@@ -48,23 +35,17 @@ async function withEnv(
   }
 }
 
-async function main(): Promise<void> {
-  console.log('\nfixedPortForChannel')
-
-  await withEnv({ SLAYZONE_DEV: '1' }, () => {
-    check(
-      'dev channel resolves the dev sidecar port',
-      fixedPortForChannel() === SIDECAR_FIXED_PORT.dev,
-      `got ${fixedPortForChannel()}, want ${SIDECAR_FIXED_PORT.dev}`
-    )
+describe('fixedPortForChannel', () => {
+  test('dev channel resolves the dev sidecar port', async () => {
+    await withEnv({ SLAYZONE_DEV: '1' }, () => {
+      expect(fixedPortForChannel()).toBe(SIDECAR_FIXED_PORT.dev)
+    })
   })
 
-  await withEnv({ SLAYZONE_DEV: undefined }, () => {
-    check(
-      'unset SLAYZONE_DEV resolves the packaged sidecar port',
-      fixedPortForChannel() === SIDECAR_FIXED_PORT.prod,
-      `got ${fixedPortForChannel()}, want ${SIDECAR_FIXED_PORT.prod}`
-    )
+  test('unset SLAYZONE_DEV resolves the packaged sidecar port', async () => {
+    await withEnv({ SLAYZONE_DEV: undefined }, () => {
+      expect(fixedPortForChannel()).toBe(SIDECAR_FIXED_PORT.prod)
+    })
   })
 
   // The two channels must never collide, or `slay` and `slay --dev` would target
@@ -72,41 +53,45 @@ async function main(): Promise<void> {
   // Widened to `number` so this stays a runtime assertion: compared as literal
   // types, TS proves the inequality at compile time and rejects the check as
   // unintentional — which would silently drop the guard if the constants ever met.
-  const devPort: number = SIDECAR_FIXED_PORT.dev
-  const prodPort: number = SIDECAR_FIXED_PORT.prod
-  check('dev and prod fixed ports are distinct', devPort !== prodPort)
+  test('dev and prod fixed ports are distinct', () => {
+    const devPort: number = SIDECAR_FIXED_PORT.dev
+    const prodPort: number = SIDECAR_FIXED_PORT.prod
+    expect(devPort).not.toBe(prodPort)
+  })
+})
 
-  console.log('\nisCoLocatedHub')
-
+describe('isCoLocatedHub', () => {
   // No hub configured ⇒ the target was found by probing loopback, so it is this
   // machine by construction.
-  await withEnv({ SLAYZONE_HUB_ADDRESS: undefined, SLAYZONE_HUB_TOKEN: undefined }, async () => {
-    // NOTE: this reads the real hub-target file if the developer running the suite
-    // has one. Assert only the shape that holds either way — a boolean, no throw.
-    const got = await isCoLocatedHub()
-    check('no env hub configured answers without throwing', typeof got === 'boolean')
+  test('no env hub configured answers without throwing', async () => {
+    await withEnv({ SLAYZONE_HUB_ADDRESS: undefined, SLAYZONE_HUB_TOKEN: undefined }, async () => {
+      // NOTE: this reads the real hub-target file if the developer running the suite
+      // has one. Assert only the shape that holds either way — a boolean, no throw.
+      expect(typeof (await isCoLocatedHub())).toBe('boolean')
+    })
   })
 
   for (const addr of ['127.0.0.1:51101', 'localhost:51101', '[::1]:51101']) {
-    await withEnv({ SLAYZONE_HUB_ADDRESS: addr }, async () => {
-      check(`loopback hub is co-located (${addr})`, (await isCoLocatedHub()) === true)
+    test(`loopback hub is co-located (${addr})`, async () => {
+      await withEnv({ SLAYZONE_HUB_ADDRESS: addr }, async () => {
+        expect(await isCoLocatedHub()).toBe(true)
+      })
     })
   }
 
   for (const addr of ['hub.example.com:8443', '10.0.0.5:51101', 'slayzone.internal']) {
-    await withEnv({ SLAYZONE_HUB_ADDRESS: addr }, async () => {
-      check(`off-box hub is NOT co-located (${addr})`, (await isCoLocatedHub()) === false)
+    test(`off-box hub is NOT co-located (${addr})`, async () => {
+      await withEnv({ SLAYZONE_HUB_ADDRESS: addr }, async () => {
+        expect(await isCoLocatedHub()).toBe(false)
+      })
     })
   }
 
   // A wildcard bind names every interface, not this one — treating it as
   // co-located would print a local path for an artifact that may live elsewhere.
-  await withEnv({ SLAYZONE_HUB_ADDRESS: '0.0.0.0:51101' }, async () => {
-    check('wildcard address is NOT co-located', (await isCoLocatedHub()) === false)
+  test('wildcard address is NOT co-located', async () => {
+    await withEnv({ SLAYZONE_HUB_ADDRESS: '0.0.0.0:51101' }, async () => {
+      expect(await isCoLocatedHub()).toBe(false)
+    })
   })
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+})

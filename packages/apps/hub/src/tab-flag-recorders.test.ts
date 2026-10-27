@@ -21,15 +21,16 @@
  * exit cascade from clearing the very flags the next boot needs.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/tab-flag-recorders.test.ts
  */
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import {
   getPtyAgentStateTabRecorder,
   getChatAgentStateTabRecorder,
@@ -94,8 +95,8 @@ test('tab-flag recorders: installed recorder round-trips into terminal_tabs', as
 test('composition root: calls wireTabFlagRecorders', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const src = readFileSync(join(here, 'composition.ts'), 'utf8')
-  expect(src.includes("from './tab-flag-recorders.js'")).toBe(true)
-  expect(src.includes('wireTabFlagRecorders(db)')).toBe(true)
+  expect(src).toContain("from './tab-flag-recorders.js'")
+  expect(src).toContain('wireTabFlagRecorders(db)')
 })
 
 test('hub stop(): sets the terminal shutdown gate before tearing down computers', () => {
@@ -106,5 +107,5 @@ test('hub stop(): sets the terminal shutdown gate before tearing down computers'
   const computerTeardownAt = stopBody.indexOf('computerGateway.close()')
   expect(gateAt).toBeGreaterThan(-1)
   expect(computerTeardownAt).toBeGreaterThan(-1)
-  expect(gateAt < computerTeardownAt).toBe(true)
+  expect(gateAt).toBeLessThan(computerTeardownAt)
 })

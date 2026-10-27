@@ -1,17 +1,14 @@
 /**
  * REST: /api/artifacts + /api/artifact-folders CRUD contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 // Point the artifact store's on-disk root at a throwaway dir BEFORE importing
@@ -66,7 +63,13 @@ let artifactId = ''
 let rootFolderId = ''
 let childFolderId = ''
 
-await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+  fs.rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+describe('/api/artifacts + /api/artifact-folders CRUD', () => {
   test('POST /api/artifact-folders: creates a root folder', async () => {
     notifyCount = 0
     const res = await rest.request<FolderResp>('POST', '/api/artifact-folders', {
@@ -266,7 +269,3 @@ await describe('/api/artifacts + /api/artifact-folders CRUD', () => {
     expect(res.status).toBe(404)
   })
 })
-
-await rest.close()
-h.cleanup()
-fs.rmSync(tmpRoot, { recursive: true, force: true })

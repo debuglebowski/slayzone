@@ -22,11 +22,8 @@
  * constants are shrunk through the additive `opts.timing` override (defaults
  * unchanged in production). The parent-death case spawns the real built
  * dist/bin.cjs to exercise the side-car's own self-exit path.
- *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
- *     packages/apps/app/src/main/sidecar-server-supervisor.test.ts
  */
+import { afterAll, expect, test } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import * as fs from 'node:fs'
@@ -42,23 +39,6 @@ import {
   type SidecarServerHandle,
   type SidecarServerOpts
 } from './sidecar-server-supervisor.js'
-
-// --- tiny async test harness (matches repo style — no vitest) -------------
-
-type TestFn = () => Promise<void>
-const tests: Array<{ name: string; fn: TestFn }> = []
-function test(name: string, fn: TestFn): void {
-  tests.push({ name, fn })
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) {
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-  }
-}
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -185,6 +165,7 @@ function writeFakeSidecar(dir: string): string {
 function writeManifest(dir: string, buildId: string): void {
   fs.writeFileSync(path.join(dir, 'sidecar-build.json'), JSON.stringify({ buildId }))
 }
+afterAll(cleanup)
 function cleanup(): void {
   for (const dir of tmpDirs) {
     try {
@@ -279,21 +260,24 @@ test('/health probe drives the child to ready + exposes status', async () => {
   const { handle } = makeHarness(dir, {}, { healthPollIntervalMs: 40 }, { dbPath: dbSentinel })
   try {
     await handle.waitForReady()
-    assertEq(handle.getHealth(), 'ready', 'health after waitForReady')
+    expect(handle.getHealth(), 'health after waitForReady').toBe('ready')
     const port = handle.getPort()
-    assert(typeof port === 'number' && port > 0, 'getPort returns a bound port')
+    expect(typeof port, 'getPort returns a bound port').toBe('number')
+    expect(port, 'getPort returns a bound port').toBeGreaterThan(0)
 
     const status = handle.getStatus()
-    assertEq(status.health, 'ready', 'status.health')
-    assertEq(status.port, port, 'status.port matches getPort')
-    assert(typeof status.pid === 'number' && status.pid! > 0, 'status.pid set')
-    assertEq(status.restarts, 0, 'status.restarts is 0 on clean start')
-    assertEq(status.totalRespawns, 0, 'status.totalRespawns is 0 on clean start')
-    assertEq(status.dbPath, dbSentinel, 'status.dbPath echoes the caller-derived path')
-    assert(typeof status.uptimeMs === 'number' && status.uptimeMs! >= 0, 'uptimeMs set')
+    expect(status.health, 'status.health').toBe('ready')
+    expect(status.port, 'status.port matches getPort').toBe(port)
+    expect(typeof status.pid, 'status.pid set').toBe('number')
+    expect(status.pid!, 'status.pid set').toBeGreaterThan(0)
+    expect(status.restarts, 'status.restarts is 0 on clean start').toBe(0)
+    expect(status.totalRespawns, 'status.totalRespawns is 0 on clean start').toBe(0)
+    expect(status.dbPath, 'status.dbPath echoes the caller-derived path').toBe(dbSentinel)
+    expect(typeof status.uptimeMs, 'uptimeMs set').toBe('number')
+    expect(status.uptimeMs!, 'uptimeMs set').toBeGreaterThanOrEqual(0)
 
     // The supervisor reported ready only because /health answered 200.
-    assertEq(await probe(port!), 200, 'side-car /health answers 200')
+    expect(await probe(port!), 'side-car /health answers 200').toBe(200)
   } finally {
     await handle.stop()
   }
@@ -316,19 +300,17 @@ test('the child gets the hub env: its LISTEN address, login off, never the dial-
   try {
     await handle.waitForReady()
     const env = JSON.parse(fs.readFileSync(dump, 'utf8')) as Record<string, string | undefined>
-    assertEq(
+    expect(
       env.SLAYZONE_HUB_LISTEN_ADDRESS,
-      `127.0.0.1:${handle.getPort()}`,
       'the hub is told where to listen under its own name'
-    )
-    assertEq(env.SLAYZONE_HUB_ADDRESS, undefined, 'the dial-side name never reaches the hub')
-    assertEq(
+    ).toBe(`127.0.0.1:${handle.getPort()}`)
+    expect(env.SLAYZONE_HUB_ADDRESS, 'the dial-side name never reaches the hub').toBe(undefined)
+    expect(
       env.SLAYZONE_HUB_REQUIRE_LOGIN,
-      '0',
       "the desktop app's hub has login off, set explicitly over whatever was inherited"
-    )
-    assertEq(env.SLAYZONE_SUPERVISED, '1', 'still marked as started by the desktop app')
-    assertEq(env.SLAYZONE_MODE, undefined, 'no mode is handed over')
+    ).toBe('0')
+    expect(env.SLAYZONE_SUPERVISED, 'still marked as started by the desktop app').toBe('1')
+    expect(env.SLAYZONE_MODE, 'no mode is handed over').toBe(undefined)
   } finally {
     await handle.stop()
   }
@@ -368,7 +350,10 @@ test('hub-side config the app inherited never reaches the child hub', async () =
   // remembers: a hub variable added to the platform list without a case here is a
   // variable this test no longer proves is stripped.
   for (const name of HUB_PROCESS_ENV) {
-    assert(name in inheritedHubConfig, `${name} is in HUB_PROCESS_ENV but not exercised here`)
+    expect(
+      inheritedHubConfig,
+      `${name} is in HUB_PROCESS_ENV but not exercised here`
+    ).toHaveProperty([name])
   }
   const { handle } = makeHarness(
     dir,
@@ -380,17 +365,15 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     const env = JSON.parse(fs.readFileSync(dump, 'utf8')) as Record<string, string | undefined>
     for (const name of HUB_PROCESS_ENV) {
       if (name === 'SLAYZONE_HUB_LISTEN_ADDRESS' || name === 'SLAYZONE_HUB_REQUIRE_LOGIN') continue
-      assertEq(env[name], undefined, `inherited ${name} was stripped`)
+      expect(env[name], `inherited ${name} was stripped`).toBe(undefined)
     }
     // The two the app sets itself are its own values, not what was inherited.
-    assertEq(
-      env.SLAYZONE_HUB_LISTEN_ADDRESS,
-      `127.0.0.1:${handle.getPort()}`,
-      'listen address is the app’s own'
+    expect(env.SLAYZONE_HUB_LISTEN_ADDRESS, 'listen address is the app’s own').toBe(
+      `127.0.0.1:${handle.getPort()}`
     )
-    assertEq(env.SLAYZONE_HUB_REQUIRE_LOGIN, '0', 'login switch is the app’s own')
+    expect(env.SLAYZONE_HUB_REQUIRE_LOGIN, 'login switch is the app’s own').toBe('0')
     // Unrelated environment still flows through.
-    assertEq(env.SLAYZONE_SUPERVISED, '1', 'still marked as started by the desktop app')
+    expect(env.SLAYZONE_SUPERVISED, 'still marked as started by the desktop app').toBe('1')
   } finally {
     await handle.stop()
   }
@@ -408,11 +391,10 @@ test("the app's own Convex deployment reaches the hub, never an inherited one", 
   try {
     await handle.waitForReady()
     const env = JSON.parse(fs.readFileSync(dump, 'utf8')) as Record<string, string | undefined>
-    assertEq(
+    expect(
       env.SLAYZONE_HUB_CONVEX_ADDRESS,
-      'happy-animal-123.convex.cloud',
       'the hub signs in against the deployment the renderer was built for'
-    )
+    ).toBe('happy-animal-123.convex.cloud')
   } finally {
     await handle.stop()
   }
@@ -435,7 +417,7 @@ test('repeated crash → exponential-backoff restart → permanent failure', asy
     ])
 
     // 1 initial spawn + 5 backoff retries = 6 spawns.
-    assertEq(ctx.spawnTimes.length, 6, 'total spawn count (initial + 5 retries)')
+    expect(ctx.spawnTimes.length, 'total spawn count (initial + 5 retries)').toBe(6)
 
     const gaps: number[] = []
     for (let i = 1; i < ctx.spawnTimes.length; i++) {
@@ -444,24 +426,27 @@ test('repeated crash → exponential-backoff restart → permanent failure', asy
     // Each gap is at least its backoff slot (minus tolerance) and the
     // sequence is strictly increasing — the signature of exponential backoff.
     for (let i = 0; i < gaps.length; i++) {
-      assert(
-        gaps[i] >= backoffMs[i] * 0.7,
+      expect(
+        gaps[i],
         `gap ${i} (${gaps[i]}ms) >= backoff ${backoffMs[i]}ms * 0.7`
-      )
+      ).toBeGreaterThanOrEqual(backoffMs[i] * 0.7)
       if (i > 0) {
-        assert(gaps[i] > gaps[i - 1], `gap ${i} (${gaps[i]}ms) > gap ${i - 1} (${gaps[i - 1]}ms)`)
+        expect(
+          gaps[i],
+          `gap ${i} (${gaps[i]}ms) > gap ${i - 1} (${gaps[i - 1]}ms)`
+        ).toBeGreaterThan(gaps[i - 1])
       }
     }
 
-    assert(ctx.permanentFailure !== null, 'onPermanentFailure fired')
-    assertEq(ctx.permanentFailure!.attempts, 5, 'permanent failure after 5 attempts')
-    assertEq(handle.getHealth(), 'failed', 'health is failed')
+    expect(ctx.permanentFailure, 'onPermanentFailure fired').not.toBe(null)
+    expect(ctx.permanentFailure!.attempts, 'permanent failure after 5 attempts').toBe(5)
+    expect(handle.getHealth(), 'health is failed').toBe('failed')
 
     let rejected = false
     await handle.waitForReady().catch(() => {
       rejected = true
     })
-    assert(rejected, 'waitForReady rejects after permanent failure')
+    expect(rejected, 'waitForReady rejects after permanent failure').toBe(true)
   } finally {
     await handle.stop()
   }
@@ -480,7 +465,7 @@ test('60s healthy streak resets the backoff attempt counter', async () => {
   try {
     await handle.waitForReady()
     // 2 crashes happened before the healthy spawn — the attempt counter is non-zero.
-    assertEq(handle.getStatus().restarts, 2, 'restarts reflects the 2 pre-ready crashes')
+    expect(handle.getStatus().restarts, 'restarts reflects the 2 pre-ready crashes').toBe(2)
 
     // After a healthyResetMs streak the counter resets to 0.
     await waitFor(
@@ -488,7 +473,7 @@ test('60s healthy streak resets the backoff attempt counter', async () => {
       3_000,
       'restarts never reset to 0 after healthy streak'
     )
-    assertEq(handle.getHealth(), 'ready', 'still ready after the streak reset')
+    expect(handle.getHealth(), 'still ready after the streak reset').toBe('ready')
   } finally {
     await handle.stop()
   }
@@ -508,17 +493,17 @@ test('a ready child that exits respawns immediately — no backoff, no attempt++
     await waitFor(() => ctx.spawnTimes.length === 2, 5_000, 'ready child never respawned')
     // Re-spawn happened far faster than the 5s backoff slot → no backoff used.
     const gap = ctx.spawnTimes[1] - ctx.spawnTimes[0]
-    assert(gap < 2_000, `respawn gap ${gap}ms is well under the 5s backoff`)
+    expect(gap, `respawn gap ${gap}ms is well under the 5s backoff`).toBeLessThan(2_000)
     // No backoff scheduling log line was emitted.
-    assert(
-      !ctx.logs.some((l) => l.line.includes('restart in')),
+    expect(
+      ctx.logs.some((l) => l.line.includes('restart in')),
       'no "restart in" backoff log for a ready-child exit'
-    )
+    ).toBe(false)
     await waitFor(() => handle.getHealth() === 'ready', 5_000, 'never returned to ready')
-    assertEq(handle.getStatus().restarts, 0, 'restarts stayed 0 across a ready-child respawn')
+    expect(handle.getStatus().restarts, 'restarts stayed 0 across a ready-child respawn').toBe(0)
     // The lifetime counter DOES move — crash e2e asserts on it since `restarts`
     // never increments on the healthy-crash immediate-respawn path.
-    assertEq(handle.getStatus().totalRespawns, 1, 'totalRespawns counts the respawn')
+    expect(handle.getStatus().totalRespawns, 'totalRespawns counts the respawn').toBe(1)
   } finally {
     await handle.stop()
   }
@@ -538,11 +523,11 @@ test('boot-timeout kills a child that never reports healthy', async () => {
         throw new Error('boot-timeout child never escalated to permanent failure')
       })
     ])
-    assert(
+    expect(
       ctx.logs.some((l) => l.line.includes('health timeout')),
       'supervisor logged a health-timeout kill'
-    )
-    assert(ctx.permanentFailure !== null, 'never-healthy child eventually fails permanently')
+    ).toBe(true)
+    expect(ctx.permanentFailure, 'never-healthy child eventually fails permanently').not.toBe(null)
   } finally {
     await handle.stop()
   }
@@ -554,7 +539,8 @@ test('stop() is graceful and idempotent', async () => {
   try {
     await handle.waitForReady()
     const pid = handle.getStatus().pid
-    assert(typeof pid === 'number' && pid! > 0, 'has a running child pid')
+    expect(typeof pid, 'has a running child pid').toBe('number')
+    expect(pid!, 'has a running child pid').toBeGreaterThan(0)
 
     await handle.stop()
     await handle.stop() // idempotent — must not throw
@@ -562,8 +548,8 @@ test('stop() is graceful and idempotent', async () => {
     // No restart fires after stop().
     const spawnsAfterStop = ctx.spawnTimes.length
     await delay(500)
-    assertEq(ctx.spawnTimes.length, spawnsAfterStop, 'no respawn after stop()')
-    assertEq(handle.getStatus().pid, null, 'no child pid after stop()')
+    expect(ctx.spawnTimes.length, 'no respawn after stop()').toBe(spawnsAfterStop)
+    expect(handle.getStatus().pid, 'no child pid after stop()').toBe(null)
   } finally {
     await handle.stop()
   }
@@ -583,7 +569,7 @@ test('suspendRestarts: a hub that dies during app quit stays down', async () => 
     process.kill(pid, 'SIGKILL')
     await waitFor(() => handle.getStatus().pid === null, 5_000, 'killed hub detached')
     await delay(300)
-    assertEq(ctx.spawnTimes.length, 1, 'no respawn after suspendRestarts')
+    expect(ctx.spawnTimes.length, 'no respawn after suspendRestarts').toBe(1)
   } finally {
     await handle.stop()
   }
@@ -621,8 +607,11 @@ test('stop: resolves only once the hub is gone, SIGKILLing one that ignores SIGT
     const pid = handle.getStatus().pid!
     const started = Date.now()
     await handle.stop()
-    assert(pidGone(pid), 'the hub is gone when stop() resolves')
-    assert(Date.now() - started >= 250, 'SIGTERM got its grace period before the SIGKILL')
+    expect(pidGone(pid), 'the hub is gone when stop() resolves').toBe(true)
+    expect(
+      Date.now() - started,
+      'SIGTERM got its grace period before the SIGKILL'
+    ).toBeGreaterThanOrEqual(250)
   } finally {
     await handle.stop()
   }
@@ -641,7 +630,7 @@ test('stop: a second caller waits for the same reap instead of returning early',
   const pid = handle.getStatus().pid!
   const first = handle.stop()
   await handle.stop()
-  assert(pidGone(pid), 'the second stop() resolved only after the hub was gone')
+  expect(pidGone(pid), 'the second stop() resolved only after the hub was gone').toBe(true)
   await first
 })
 
@@ -656,11 +645,11 @@ test('stop: during a restart, reaps the hub the restart was replacing and spawns
   const outgoing = handle.getStatus().pid!
   const restarting = handle.restart()
   await handle.stop()
-  assert(pidGone(outgoing), 'the outgoing hub is gone when stop() resolves')
+  expect(pidGone(outgoing), 'the outgoing hub is gone when stop() resolves').toBe(true)
   await restarting
   await delay(200)
-  assertEq(handle.getStatus().pid, null, 'the restart spawned no replacement after the stop')
-  assertEq(ctx.spawnTimes.length, 1, 'no second hub was ever spawned')
+  expect(handle.getStatus().pid, 'the restart spawned no replacement after the stop').toBe(null)
+  expect(ctx.spawnTimes.length, 'no second hub was ever spawned').toBe(1)
 })
 
 // --- quit: a graceful stop is never cut shorter than the hub's own deadline ----
@@ -684,13 +673,12 @@ test('quit: a hub whose stop takes ~4s exits by itself, cleanly — never SIGKIL
       stop: () => handle.stop(),
       timeoutMs: QUIT_CHILD_REAP_MS
     })
-    assertEq(result, 'stopped', 'the quit saw the hub gone')
-    assert(Date.now() - started >= 3_900, 'it really took its ~4s')
-    assertEq(
+    expect(result, 'the quit saw the hub gone').toBe('stopped')
+    expect(Date.now() - started, 'it really took its ~4s').toBeGreaterThanOrEqual(3_900)
+    expect(
       fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8') : null,
-      '0',
       'exit 0, not SIGKILL'
-    )
+    ).toBe('0')
   } finally {
     await handle.stop()
   }
@@ -713,10 +701,12 @@ test('quit: a stuck hub is still SIGKILLed — after its own deadline, inside th
       timeoutMs: QUIT_CHILD_REAP_MS
     })
     const elapsed = Date.now() - started
-    assertEq(result, 'stopped', `the quit saw the hub gone, not a timeout (${elapsed}ms)`)
-    assert(pidGone(pid), 'the stuck hub is gone')
-    assertEq(fs.existsSync(exitFile), false, 'it was SIGKILLed: no exit of its own')
-    assert(elapsed >= SUPERVISED_STOP_DEADLINE_MS, `not before its own deadline (${elapsed}ms)`)
+    expect(result, `the quit saw the hub gone, not a timeout (${elapsed}ms)`).toBe('stopped')
+    expect(pidGone(pid), 'the stuck hub is gone').toBe(true)
+    expect(fs.existsSync(exitFile), 'it was SIGKILLed: no exit of its own').toBe(false)
+    expect(elapsed, `not before its own deadline (${elapsed}ms)`).toBeGreaterThanOrEqual(
+      SUPERVISED_STOP_DEADLINE_MS
+    )
   } finally {
     await handle.stop()
   }
@@ -738,10 +728,8 @@ test('restart: keeps its short grace — the replacement waits on the outgoing h
     const started = Date.now()
     await handle.restart()
     const elapsed = Date.now() - started
-    assert(
-      elapsed >= 2_900 && elapsed < SUPERVISED_STOP_DEADLINE_MS,
-      `SIGKILL at 3s (${elapsed}ms)`
-    )
+    expect(elapsed, `SIGKILL at 3s (${elapsed}ms)`).toBeGreaterThanOrEqual(2_900)
+    expect(elapsed, `SIGKILL at 3s (${elapsed}ms)`).toBeLessThan(SUPERVISED_STOP_DEADLINE_MS)
   } finally {
     await handle.stop()
   }
@@ -1100,8 +1088,8 @@ async function waitForRun(
 
 /** The hub's stop hung, and its own supervised deadline is what ended it. */
 function assertStoppedByItsDeadline(run: RealHubRun): void {
-  assert(run.log().includes('forcing exit'), `the hub forced its own exit — log:\n${run.log()}`)
-  assertEq(run.exitCode(), '1', `a forced exit reports failure — log:\n${run.log()}`)
+  expect(run.log(), `the hub forced its own exit — log:\n${run.log()}`).toContain('forcing exit')
+  expect(run.exitCode(), `a forced exit reports failure — log:\n${run.log()}`).toBe('1')
 }
 
 test('parent-death: a SIGKILLed app takes its supervised hub with it, cleanly', async () => {
@@ -1109,7 +1097,7 @@ test('parent-death: a SIGKILLed app takes its supervised hub with it, cleanly', 
   try {
     // No false positive while the app lives: longer than one parent poll.
     await delay(1_500)
-    assert(!pidGone(run.hubPid), 'the hub runs while its app is alive')
+    expect(pidGone(run.hubPid), 'the hub runs while its app is alive').toBe(false)
     run.parent.kill('SIGKILL')
     await waitForRun(
       run,
@@ -1119,10 +1107,9 @@ test('parent-death: a SIGKILLed app takes its supervised hub with it, cleanly', 
     )
     // 0, not 1: a clean stop, not a crash on the first write to the dead app's
     // stdout pipe (nor a forced exit).
-    assertEq(run.exitCode(), '0', `the hub stopped cleanly — log:\n${run.log()}`)
-    assert(
-      /shutting down \(parent-(pipe-closed|output-closed|reparented|exited)\)/.test(run.log()),
-      `the hub said why it stopped — log:\n${run.log()}`
+    expect(run.exitCode(), `the hub stopped cleanly — log:\n${run.log()}`).toBe('0')
+    expect(run.log(), `the hub said why it stopped — log:\n${run.log()}`).toMatch(
+      /shutting down \(parent-(pipe-closed|output-closed|reparented|exited)\)/
     )
   } finally {
     run.cleanup()
@@ -1189,11 +1176,13 @@ test('quit: an app that awaits the bounded stop exits only once its stuck hub is
       15_000,
       'the app never finished its quit'
     )
-    assert(
-      run.parentOutput().includes('[fake-app] quit: stopped'),
-      `the quit saw the hub gone — app:\n${run.parentOutput()}`
+    expect(run.parentOutput(), `the quit saw the hub gone — app:\n${run.parentOutput()}`).toContain(
+      '[fake-app] quit: stopped'
     )
-    assert(pidGone(run.hubPid), `the hub was gone by the time the app quit — log:\n${run.log()}`)
+    expect(
+      pidGone(run.hubPid),
+      `the hub was gone by the time the app quit — log:\n${run.log()}`
+    ).toBe(true)
     assertStoppedByItsDeadline(run)
   } finally {
     run.cleanup()
@@ -1211,9 +1200,8 @@ test('parent-death: a SIGKILLed app is noticed even when stdin is held open else
       REAL_EXIT_BUDGET_MS,
       'hub outlived its app with stdin still open'
     )
-    assert(
-      /shutting down \(parent-(reparented|exited)\)/.test(run.log()),
-      `the parent poll noticed — log:\n${run.log()}`
+    expect(run.log(), `the parent poll noticed — log:\n${run.log()}`).toMatch(
+      /shutting down \(parent-(reparented|exited)\)/
     )
   } finally {
     run.cleanup()
@@ -1227,8 +1215,8 @@ test('parent-death: a standalone hub ignores its parent dying', async () => {
   try {
     run.parent.kill('SIGKILL')
     await delay(4_000) // several parent polls (1s each)
-    assert(!pidGone(run.hubPid), `a standalone hub stopped — log:\n${run.log()}`)
-    assert(!run.log().includes('shutting down'), 'it never watched its parent')
+    expect(pidGone(run.hubPid), `a standalone hub stopped — log:\n${run.log()}`).toBe(false)
+    expect(run.log(), 'it never watched its parent').not.toContain('shutting down')
   } finally {
     run.cleanup()
   }
@@ -1249,11 +1237,13 @@ test('stop: a standalone hub is never cut short by the supervised stop deadline'
       'the hub never got the SIGTERM'
     )
     await delay(6_500) // past the supervised deadline (5s)
-    assert(!pidGone(run.hubPid), `a standalone hub's stop was cut short — log:\n${run.log()}`)
-    assert(!run.log().includes('forcing exit'), 'no forced exit')
+    expect(pidGone(run.hubPid), `a standalone hub's stop was cut short — log:\n${run.log()}`).toBe(
+      false
+    )
+    expect(run.log(), 'no forced exit').not.toContain('forcing exit')
     run.releaseConnections()
     await waitForRun(run, () => pidGone(run.hubPid), 10_000, 'the drained hub never exited')
-    assertEq(run.exitCode(), '0', `the drained hub exited cleanly — log:\n${run.log()}`)
+    expect(run.exitCode(), `the drained hub exited cleanly — log:\n${run.log()}`).toBe('0')
   } finally {
     run.cleanup()
   }
@@ -1273,12 +1263,13 @@ test('stop: the real supervised hub exits on its own, cleanly, when its app stop
       'the app never finished its quit'
     )
     const elapsed = Date.now() - started
-    assertEq(
+    expect(
       run.exitCode(),
-      '0',
       `the hub exited by itself, cleanly, ${elapsed}ms after the app's SIGTERM — log:\n${run.log()}\napp:\n${run.parentOutput()}`
+    ).toBe('0')
+    expect(elapsed, `well inside its own deadline (${elapsed}ms)`).toBeLessThan(
+      SUPERVISED_STOP_DEADLINE_MS
     )
-    assert(elapsed < SUPERVISED_STOP_DEADLINE_MS, `well inside its own deadline (${elapsed}ms)`)
   } finally {
     run.cleanup()
   }
@@ -1383,7 +1374,9 @@ test('parent-death: the real built side-car self-exits when stdin closes', async
     // Electron parent dies. The supervised side-car must self-exit.
     child.stdin?.end()
     const exited = await waitForExit(child, 6_000)
-    assert(exited, `side-car did not self-exit within 6s of stdin close — output: ${out}`)
+    expect(exited, `side-car did not self-exit within 6s of stdin close — output: ${out}`).toBe(
+      true
+    )
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
   }
@@ -1400,9 +1393,9 @@ test('build-identity: running build matches disk manifest ⇒ not stale', async 
   try {
     await handle.waitForReady()
     const s = handle.getStatus()
-    assertEq(s.runningBuildId, 'abc123@2026-07-03T00:00:00.000Z', 'runningBuildId from /health')
-    assertEq(s.diskBuildId, 'abc123@2026-07-03T00:00:00.000Z', 'diskBuildId from manifest')
-    assertEq(s.stale, false, 'not stale when running === disk')
+    expect(s.runningBuildId, 'runningBuildId from /health').toBe('abc123@2026-07-03T00:00:00.000Z')
+    expect(s.diskBuildId, 'diskBuildId from manifest').toBe('abc123@2026-07-03T00:00:00.000Z')
+    expect(s.stale, 'not stale when running === disk').toBe(false)
   } finally {
     await handle.stop()
   }
@@ -1419,13 +1412,15 @@ test('build-identity: disk manifest ahead of running build ⇒ stale + loud log'
   try {
     await handle.waitForReady()
     const s = handle.getStatus()
-    assertEq(s.runningBuildId, 'OLD@2026-07-01T09:00:00.000Z', 'runningBuildId is the old build')
-    assertEq(s.diskBuildId, 'NEW@2026-07-03T09:00:00.000Z', 'diskBuildId is the new on-disk build')
-    assertEq(s.stale, true, 'stale when disk build differs from running build')
-    assert(
+    expect(s.runningBuildId, 'runningBuildId is the old build').toBe('OLD@2026-07-01T09:00:00.000Z')
+    expect(s.diskBuildId, 'diskBuildId is the new on-disk build').toBe(
+      'NEW@2026-07-03T09:00:00.000Z'
+    )
+    expect(s.stale, 'stale when disk build differs from running build').toBe(true)
+    expect(
       ctx.logs.some((l) => l.line.includes('STALE')),
       'a loud STALE log line was emitted on mismatch'
-    )
+    ).toBe(true)
   } finally {
     await handle.stop()
   }
@@ -1443,8 +1438,8 @@ test('hot-restart (flag ON): disk build change relaunches the sidecar onto the n
   )
   try {
     await handle.waitForReady()
-    assertEq(handle.getStatus().runningBuildId, 'v1@2026-07-03T00:00:00.000Z', 'boots on v1')
-    assertEq(handle.getStatus().stale, false, 'v1 not stale')
+    expect(handle.getStatus().runningBuildId, 'boots on v1').toBe('v1@2026-07-03T00:00:00.000Z')
+    expect(handle.getStatus().stale, 'v1 not stale').toBe(false)
     const respawnsBefore = handle.getStatus().totalRespawns
 
     // Simulate a rebuild: bump the on-disk manifest.
@@ -1455,11 +1450,11 @@ test('hot-restart (flag ON): disk build change relaunches the sidecar onto the n
       8_000,
       'sidecar hot-restarted onto the new build'
     )
-    assert(
-      handle.getStatus().totalRespawns > respawnsBefore,
+    expect(
+      handle.getStatus().totalRespawns,
       'a respawn occurred on the build change'
-    )
-    assertEq(handle.getStatus().stale, false, 'not stale after hot-restart (running === disk)')
+    ).toBeGreaterThan(respawnsBefore)
+    expect(handle.getStatus().stale, 'not stale after hot-restart (running === disk)').toBe(false)
   } finally {
     await handle.stop()
   }
@@ -1481,10 +1476,10 @@ test('hot-restart (flag OFF): disk build change surfaces stale, does NOT relaunc
     // Give any (unwanted) watcher time to act.
     await delay(600)
     const s = handle.getStatus()
-    assertEq(s.runningBuildId, 'v1@2026-07-03T00:00:00.000Z', 'still running v1 (no relaunch)')
-    assertEq(s.diskBuildId, 'v2@2026-07-03T01:00:00.000Z', 'disk moved to v2')
-    assertEq(s.stale, true, 'stale surfaces')
-    assertEq(s.totalRespawns, respawnsBefore, 'no respawn without the flag')
+    expect(s.runningBuildId, 'still running v1 (no relaunch)').toBe('v1@2026-07-03T00:00:00.000Z')
+    expect(s.diskBuildId, 'disk moved to v2').toBe('v2@2026-07-03T01:00:00.000Z')
+    expect(s.stale, 'stale surfaces').toBe(true)
+    expect(s.totalRespawns, 'no respawn without the flag').toBe(respawnsBefore)
   } finally {
     await handle.stop()
   }
@@ -1496,16 +1491,17 @@ test('manual restart() cycles a ready child on the same sticky port', async () =
   try {
     await handle.waitForReady()
     const before = handle.getStatus()
-    assert(typeof before.pid === 'number' && before.pid! > 0, 'has a running child pid')
+    expect(typeof before.pid, 'has a running child pid').toBe('number')
+    expect(before.pid!, 'has a running child pid').toBeGreaterThan(0)
 
     await handle.restart()
     await handle.waitForReady()
 
     const after = handle.getStatus()
-    assertEq(after.health, 'ready', 'ready again after manual restart')
-    assert(after.pid !== before.pid, 'a new child pid replaced the old one')
-    assertEq(after.port, before.port, 'sticky port preserved across manual restart')
-    assertEq(after.totalRespawns, before.totalRespawns + 1, 'exactly one respawn')
+    expect(after.health, 'ready again after manual restart').toBe('ready')
+    expect(after.pid, 'a new child pid replaced the old one').not.toBe(before.pid)
+    expect(after.port, 'sticky port preserved across manual restart').toBe(before.port)
+    expect(after.totalRespawns, 'exactly one respawn').toBe(before.totalRespawns + 1)
   } finally {
     await handle.stop()
   }
@@ -1529,13 +1525,13 @@ test('manual restart() recovers from permanent failure with a fresh backoff budg
         throw new Error('permanent failure never reported')
       })
     ])
-    assertEq(handle.getHealth(), 'failed', 'failed after exhausting the backoff budget')
+    expect(handle.getHealth(), 'failed after exhausting the backoff budget').toBe('failed')
 
     await handle.restart()
     await handle.waitForReady()
 
-    assertEq(handle.getHealth(), 'ready', 'manual restart recovers from failed')
-    assertEq(handle.getStatus().restarts, 0, 'backoff attempt counter reset by manual restart')
+    expect(handle.getHealth(), 'manual restart recovers from failed').toBe('ready')
+    expect(handle.getStatus().restarts, 'backoff attempt counter reset by manual restart').toBe(0)
   } finally {
     await handle.stop()
   }
@@ -1564,38 +1560,14 @@ test('fixedPort: binds the given port instead of probing, and keeps it across a 
   )
   try {
     await handle.waitForReady()
-    assertEq(handle.getPort(), fixedPort, 'bound exactly the fixed port, no probing')
+    expect(handle.getPort(), 'bound exactly the fixed port, no probing').toBe(fixedPort)
 
     // Crash-after-ready respawns immediately (existing healthy-crash path) — the
     // fixed port must survive that respawn identically to how stickyPort does.
     await waitFor(() => handle.getStatus().totalRespawns >= 1, 8_000, 'respawn after crash')
     await handle.waitForReady()
-    assertEq(handle.getPort(), fixedPort, 'fixed port unchanged after crash respawn')
+    expect(handle.getPort(), 'fixed port unchanged after crash respawn').toBe(fixedPort)
   } finally {
     await handle.stop()
   }
 })
-
-// --- computer ---------------------------------------------------------------
-
-async function main(): Promise<void> {
-  let passed = 0
-  let failed = 0
-  console.log('\n=== sidecar-server-supervisor crash-recovery ===\n')
-  for (const { name, fn } of tests) {
-    try {
-      await fn()
-      console.log(`  ✓ ${name}`)
-      passed++
-    } catch (err) {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`)
-      failed++
-    }
-  }
-  cleanup()
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  process.exitCode = failed > 0 ? 1 : 0
-}
-
-void main()

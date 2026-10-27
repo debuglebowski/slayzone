@@ -3,20 +3,12 @@
 # it; don't execute it. Every run_* helper below counts into PASS/FAIL and names what
 # failed in FAILED, so the caller decides the exit status (see print_summary).
 #
-# All of them are strict: `set -o pipefail` lets a real non-zero test exit propagate
-# through the grep filter (a suite with no output at all also counts as FAIL).
-
-# LOADER is deliberately left unquoted so it word-splits into node flags.
-# shellcheck disable=SC2086
+# All of them are strict: a non-zero test exit counts as FAIL (`set -o pipefail` lets
+# it propagate through the grep filters; a suite with no output at all also fails).
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 
-# Node 24 removed the bare `--loader` flag; `--experimental-loader` is the working
-# equivalent (eventual replacement: `--import` + `module.register()`). Registers the
-# electron/dep mock loader for both the npx-tsx and Electron computers below.
-LOADER="--experimental-loader ./packages/shared/test-utils/loader.ts"
-TSX="npx tsx"
 PASS=0
 FAIL=0
 FAILED=()
@@ -32,7 +24,7 @@ dry_run() { [ "${SLZ_UNIT_DRY:-}" = 1 ]; }
 
 # The exact test files a package's own vitest run collects, repo-relative. Read from
 # vitest itself rather than assumed from the directory: a package config may exclude
-# files (shared/platform excludes its tsx-harness scripts), and those must still be
+# files (shared/platform excludes its Electron-node suites), and those must still be
 # registered file-by-file. Usage: package_test_files <workspace-name>
 package_test_files() {
   pnpm --filter "$1" exec vitest list --filesOnly --json 2>/dev/null |
@@ -42,34 +34,8 @@ package_test_files() {
       })' "$ROOT_DIR"
 }
 
-run_test() {
-  echo ""
-  echo "=== $1 ==="
-  RAN+=("$1")
-  dry_run && return 0
-  if ( set -o pipefail; $TSX $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-    FAILED+=("$1")
-  fi
-}
-
-# Strict + custom loader. Uses Electron's node so better-sqlite3's native ABI
-# matches. Prefer this for new tests.
-run_test_electron_strict_loader() {
-  echo ""
-  echo "=== $1 (electron+loader, strict) ==="
-  RAN+=("$1")
-  dry_run && return 0
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-    FAILED+=("$1")
-  fi
-}
-
+# Live third-party API suites (run-all.sh gates them on their token): real modules,
+# none of the harness mocks.
 run_test_no_loader() {
   echo ""
   echo "=== $1 (integration) ==="
@@ -83,29 +49,40 @@ run_test_no_loader() {
   fi
 }
 
-run_test_electron_loader() {
-  echo ""
-  echo "=== $1 (electron+loader) ==="
+# Node-environment suites: registered one by one with run_harness (keeps each file's
+# "why" comment next to it in run-all.sh), then run together by run_harness_suites in
+# ONE vitest invocation under vitest.harness.config.ts — parallel forks, one fresh
+# module graph per file. Electron's node, so better-sqlite3's native ABI matches.
+HARNESS_FILES=()
+run_harness() {
   RAN+=("$1")
-  dry_run && return 0
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
-    PASS=$((PASS + 1))
-  else
-    FAIL=$((FAIL + 1))
-    FAILED+=("$1")
-  fi
+  HARNESS_FILES+=("$1")
 }
 
-run_test_electron_strict() {
+# Runs every run_harness file. vitest silently drops an explicit path its config's
+# include glob doesn't match, so the JSON report is checked to hold exactly one result
+# per registered file. SLZ_UNIT_JSON=<path> keeps that report (per-file test counts).
+# Usage: run_harness_suites
+run_harness_suites() {
+  local json ok=1 reported
   echo ""
-  echo "=== $1 (electron, strict) ==="
-  RAN+=("$1")
+  echo "=== vitest (node harness suites: ${#HARNESS_FILES[@]} files) ==="
   dry_run && return 0
-  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
+  json="${SLZ_UNIT_JSON:-$(mktemp -d)/harness.json}"
+  ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/vitest/vitest.mjs run \
+    --config packages/shared/test-utils/vitest.harness.config.ts \
+    --reporter=default --reporter=json --outputFile.json="$json" "${HARNESS_FILES[@]}" || ok=0
+  reported=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).testResults.length' "$json" 2>/dev/null || echo 0)
+  if [ "$reported" != "${#HARNESS_FILES[@]}" ]; then
+    echo "run_harness_suites: vitest reported $reported files for ${#HARNESS_FILES[@]} registered" >&2
+    ok=0
+  fi
+  [ -z "${SLZ_UNIT_JSON:-}" ] && rm -rf "$(dirname "$json")"
+  if [ "$ok" = 1 ]; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    FAILED+=("$1")
+    FAILED+=("vitest (node harness suites)")
   fi
 }
 

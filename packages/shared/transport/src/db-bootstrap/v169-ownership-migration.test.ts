@@ -5,32 +5,13 @@
  * with NO owner — the migration cannot see the users. Assigning them is the hub's
  * boot step (apps/hub ownership-backfill.test.ts / ownership-boot.test.ts).
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
- *   packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import { settingScope } from '@slayzone/settings/server'
 import { bootstrapSchema, LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 function dbUpTo(maxVersion: number): Database.Database {
   const db = new Database(':memory:')
@@ -52,37 +33,30 @@ const columns = (db: Database.Database, table: string): string[] =>
 const dump = (db: Database.Database, table: string, order: string): unknown[] =>
   db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()
 
-async function main(): Promise<void> {
-  console.log('\nv169 project ownership + per-user settings migration')
-
-  await test('is the latest migration, after v168', () => {
-    assert(
-      migrations.some((m) => m.version === 169),
-      'v169 exists'
-    )
-    assert(LATEST_MIGRATION_VERSION >= 169, `latest ${LATEST_MIGRATION_VERSION}`)
+describe('v169 project ownership + per-user settings migration', () => {
+  test('is the latest migration, after v168', () => {
+    // v169 exists
+    expect(migrations.map((m) => m.version)).toContain(169)
+    expect(LATEST_MIGRATION_VERSION).toBeGreaterThanOrEqual(169)
     const versions = migrations.map((m) => m.version)
-    assert(versions.indexOf(169) === versions.indexOf(168) + 1, 'v169 directly follows v168')
+    // v169 directly follows v168
+    expect(versions.indexOf(169)).toBe(versions.indexOf(168) + 1)
   })
 
-  await test('empty DB: owner column, user_settings table, indexes', () => {
+  test('empty DB: owner column, user_settings table, indexes', () => {
     const db = new Database(':memory:')
     try {
       runMigrations(db)
-      assert(db.pragma('user_version', { simple: true }) === LATEST_MIGRATION_VERSION, 'version')
-      assert(columns(db, 'projects').includes('owner_user_id'), 'projects.owner_user_id')
-      assert(
-        JSON.stringify(columns(db, 'user_settings')) ===
-          JSON.stringify(['user_id', 'key', 'value']),
-        `user_settings columns: ${columns(db, 'user_settings')}`
-      )
+      expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
+      expect(columns(db, 'projects')).toContain('owner_user_id')
+      expect(columns(db, 'user_settings')).toEqual(['user_id', 'key', 'value'])
       const indexes = (
         db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index'`).all() as {
           name: string
         }[]
       ).map((r) => r.name)
-      assert(indexes.includes('idx_projects_owner_user_id'), 'owner index')
-      assert(indexes.includes('idx_user_settings_key'), 'user_settings key index')
+      expect(indexes).toContain('idx_projects_owner_user_id')
+      expect(indexes).toContain('idx_user_settings_key')
       // One row per (user, key): a second write for the same pair must replace.
       db.prepare(`INSERT INTO user_settings VALUES ('u1', 'viewState', 'a')`).run()
       db.prepare(`INSERT INTO user_settings VALUES ('u2', 'viewState', 'b')`).run()
@@ -92,13 +66,14 @@ async function main(): Promise<void> {
       } catch {
         dup = true
       }
-      assert(dup, '(user_id, key) is the primary key')
+      // (user_id, key) is the primary key
+      expect(dup).toBe(true)
     } finally {
       db.close()
     }
   })
 
-  await test('populated v168 DB: nothing lost, every project unowned, settings untouched', () => {
+  test('populated v168 DB: nothing lost, every project unowned, settings untouched', () => {
     const db = dbUpTo(168)
     try {
       db.prepare(
@@ -136,34 +111,28 @@ async function main(): Promise<void> {
         })()
       }
 
-      assert(db.pragma('user_version', { simple: true }) === 169, 'version')
+      expect(db.pragma('user_version', { simple: true })).toBe(169)
       const projects = dump(db, 'projects', 'id') as Record<string, unknown>[]
-      assert(projects.length === 2, `2 projects, got ${projects.length}`)
-      assert(
-        projects.every((p) => p.owner_user_id === null),
-        'every pre-existing project is unowned'
-      )
+      expect(projects).toHaveLength(2)
+      // every pre-existing project is unowned
+      expect(projects.map((p) => p.owner_user_id)).toEqual([null, null])
       // Every pre-existing column value is byte-identical; the only change is the
       // new column.
       const stripped = projects.map(({ owner_user_id: _o, ...rest }) => rest)
-      assert(JSON.stringify(stripped) === JSON.stringify(before.projects), 'project rows unchanged')
-      assert(JSON.stringify(dump(db, 'tasks', 'id')) === JSON.stringify(before.tasks), 'tasks')
-      assert(
-        JSON.stringify(dump(db, 'terminal_tabs', 'id')) === JSON.stringify(before.tabs),
-        'terminal tabs'
-      )
-      assert(
-        JSON.stringify(dump(db, 'settings', 'key')) === JSON.stringify(before.settings),
-        'settings unchanged (viewState stays global; the hub moves it at boot, not the migration)'
-      )
+      expect(stripped).toStrictEqual(before.projects)
+      expect(dump(db, 'tasks', 'id')).toStrictEqual(before.tasks)
+      expect(dump(db, 'terminal_tabs', 'id')).toStrictEqual(before.tabs)
+      // settings unchanged (viewState stays global; the hub moves it at boot, not the migration)
+      expect(dump(db, 'settings', 'key')).toStrictEqual(before.settings)
       const n = (db.prepare('SELECT count(*) AS n FROM user_settings').get() as { n: number }).n
-      assert(n === 0, 'user_settings starts empty')
+      // user_settings starts empty
+      expect(n).toBe(0)
     } finally {
       db.close()
     }
   })
 
-  await test('every settings row a fresh database is seeded with is a hub key', () => {
+  test('every settings row a fresh database is seeded with is a hub key', () => {
     // A seeded per-user key would not be a default for everyone on a login hub:
     // users never fall back to a global row, and the boot backfill hands it to the
     // first admin. Seed per-user defaults in the client instead.
@@ -173,15 +142,17 @@ async function main(): Promise<void> {
       const keys = (db.prepare('SELECT key FROM settings').all() as { key: string }[]).map(
         (r) => r.key
       )
-      assert(keys.length > 0, 'something is seeded')
+      // something is seeded
+      expect(keys.length).toBeGreaterThan(0)
       const notHub = keys.filter((k) => settingScope(k) !== 'hub')
-      assert(notHub.length === 0, `seeded keys that are not hub-scoped: ${notHub.join(', ')}`)
+      // seeded keys that are not hub-scoped
+      expect(notHub).toEqual([])
     } finally {
       db.close()
     }
   })
 
-  await test('a project created after the migration can carry an owner', () => {
+  test('a project created after the migration can carry an owner', () => {
     const db = new Database(':memory:')
     try {
       runMigrations(db)
@@ -191,14 +162,9 @@ async function main(): Promise<void> {
       const row = db.prepare(`SELECT owner_user_id FROM projects WHERE id = 'p'`).get() as {
         owner_user_id: string
       }
-      assert(row.owner_user_id === 'user-a', 'owner stored')
+      expect(row.owner_user_id).toBe('user-a')
     } finally {
       db.close()
     }
   })
-
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+})

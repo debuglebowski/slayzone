@@ -27,11 +27,8 @@
  * demand): a supervised computer must never outlive its app — not when the app is
  * SIGKILLed, not when it quits without waiting, not when a leaked handle keeps the
  * computer's loop alive — while a standalone computer ignores its parent entirely.
- *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
- *     packages/apps/app/src/main/local-computer-supervisor.test.ts
  */
+import { afterAll, expect, test } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as net from 'node:net'
@@ -46,23 +43,6 @@ import {
   type LocalComputerHandle,
   type LocalComputerOpts
 } from './local-computer-supervisor.js'
-
-// --- tiny async test harness (matches repo style — no vitest) -------------
-
-type TestFn = () => Promise<void>
-const tests: Array<{ name: string; fn: TestFn }> = []
-function test(name: string, fn: TestFn): void {
-  tests.push({ name, fn })
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) {
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-  }
-}
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -127,6 +107,7 @@ function writeFakeComputer(): string {
   fs.writeFileSync(p, FAKE_COMPUTER)
   return p
 }
+afterAll(cleanup)
 function cleanup(): void {
   for (const dir of tmpDirs) {
     try {
@@ -203,18 +184,17 @@ test('reports the exit code, uptime and the dying child output tail', async () =
   try {
     await waitFor(() => ctx.exits.length >= 1, 15_000, 'first computer exit reported')
     const first = ctx.exits[0]
-    assertEq(first.code, 7, 'exit code surfaced verbatim')
-    assertEq(first.signal, null, 'no signal on a self-exit')
-    assert(first.uptimeMs >= 0, 'uptimeMs is present')
+    expect(first.code, 'exit code surfaced verbatim').toBe(7)
+    expect(first.signal, 'no signal on a self-exit').toBe(null)
+    expect(first.uptimeMs, 'uptimeMs is present').toBeGreaterThanOrEqual(0)
     // The tail is what makes an exit diagnosable — a computer that dies on an
     // uncaught exception prints the stack here and nowhere else.
-    assert(
-      first.tail.includes('computer-line-3'),
+    expect(
+      first.tail,
       `tail carries the child's last stderr line, got ${JSON.stringify(first.tail)}`
-    )
-    assert(
-      first.tail.includes('fake-computer bye'),
-      `tail carries stdout too, got ${JSON.stringify(first.tail)}`
+    ).toContain('computer-line-3')
+    expect(first.tail, `tail carries stdout too, got ${JSON.stringify(first.tail)}`).toContain(
+      'fake-computer bye'
     )
   } finally {
     await handle.stop()
@@ -230,11 +210,11 @@ test('reports the scheduled restart, then reports the give-up exit', async () =>
   )
   try {
     await waitFor(() => ctx.exits.length >= 3, 20_000, 'three computer exits reported')
-    assertEq(ctx.exits[0].restartAttempt, 1, 'first exit schedules restart 1')
-    assertEq(ctx.exits[0].restartDelayMs, 5, 'first exit reports its backoff delay')
-    assertEq(ctx.exits[1].restartAttempt, 2, 'second exit schedules restart 2')
-    assertEq(ctx.exits[2].restartAttempt, null, 'third exit has no restart left')
-    assertEq(ctx.exits[2].restartDelayMs, null, 'no delay when not restarting')
+    expect(ctx.exits[0].restartAttempt, 'first exit schedules restart 1').toBe(1)
+    expect(ctx.exits[0].restartDelayMs, 'first exit reports its backoff delay').toBe(5)
+    expect(ctx.exits[1].restartAttempt, 'second exit schedules restart 2').toBe(2)
+    expect(ctx.exits[2].restartAttempt, 'third exit has no restart left').toBe(null)
+    expect(ctx.exits[2].restartDelayMs, 'no delay when not restarting').toBe(null)
     await waitFor(() => ctx.permanentFailure !== null, 5_000, 'permanent failure reported')
   } finally {
     await handle.stop()
@@ -256,8 +236,8 @@ test('exit report names the cause: the error line of an uncaught throw', async (
   )
   try {
     await waitFor(() => ctx.exits.length >= 1, 15_000, 'crash exit reported')
-    assertEq(ctx.exits[0].code, 1, 'an uncaught throw exits 1')
-    assertEq(ctx.exits[0].reason, `Error: ${NATIVE_LOAD_ERROR}`, 'reason is the error line')
+    expect(ctx.exits[0].code, 'an uncaught throw exits 1').toBe(1)
+    expect(ctx.exits[0].reason, 'reason is the error line').toBe(`Error: ${NATIVE_LOAD_ERROR}`)
   } finally {
     await handle.stop()
   }
@@ -270,7 +250,7 @@ test('exit report without an error line falls back to the exit code', async () =
   )
   try {
     await waitFor(() => ctx.exits.length >= 1, 15_000, 'exit reported')
-    assertEq(ctx.exits[0].reason, 'exited with code 7', 'reason names the code')
+    expect(ctx.exits[0].reason, 'reason names the code').toBe('exited with code 7')
   } finally {
     await handle.stop()
   }
@@ -283,11 +263,10 @@ test('permanent failure carries the last exit reason', async () => {
   )
   try {
     await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
-    assertEq(
+    expect(
       (ctx.permanentFailure as { reason?: string } | null)?.reason,
-      `Error: ${NATIVE_LOAD_ERROR}`,
       'permanent failure names why'
-    )
+    ).toBe(`Error: ${NATIVE_LOAD_ERROR}`)
   } finally {
     await handle.stop()
   }
@@ -301,9 +280,9 @@ test('getStatus: running while up; after the give-up, stalled with the last exit
   try {
     await waitFor(() => live.handle.getPid() !== null, 15_000, 'computer spawned')
     const s = live.handle.getStatus()
-    assertEq(s.running, true, 'a live computer reports running')
-    assertEq(s.stalled, null, 'not stalled')
-    assertEq(s.lastExit, null, 'no exit yet')
+    expect(s.running, 'a live computer reports running').toBe(true)
+    expect(s.stalled, 'not stalled').toBe(null)
+    expect(s.lastExit, 'no exit yet').toBe(null)
   } finally {
     await live.handle.stop()
   }
@@ -315,11 +294,11 @@ test('getStatus: running while up; after the give-up, stalled with the last exit
   try {
     await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
     const s = handle.getStatus()
-    assertEq(s.running, false, 'nothing running after the give-up')
-    assertEq(s.stalled, 'backoff-exhausted', 'stalled: only a restart recovers')
-    assertEq(s.lastExit?.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'last exit names the cause')
-    assertEq(s.lastExit?.code, 1, 'last exit code')
-    assert(typeof s.lastExit?.at === 'number', 'last exit is timestamped')
+    expect(s.running, 'nothing running after the give-up').toBe(false)
+    expect(s.stalled, 'stalled: only a restart recovers').toBe('backoff-exhausted')
+    expect(s.lastExit?.reason, 'last exit names the cause').toBe(`Error: ${NATIVE_LOAD_ERROR}`)
+    expect(s.lastExit?.code, 'last exit code').toBe(1)
+    expect(typeof s.lastExit?.at, 'last exit is timestamped').toBe('number')
   } finally {
     await handle.stop()
   }
@@ -332,7 +311,7 @@ test('getStatus: a needs-re-enrollment exit stalls as such', async () => {
   )
   try {
     await waitFor(() => ctx.needsReEnrollment >= 1, 20_000, 'latched')
-    assertEq(handle.getStatus().stalled, 'needs-re-enrollment', 'stalled on re-enrollment')
+    expect(handle.getStatus().stalled, 'stalled on re-enrollment').toBe('needs-re-enrollment')
   } finally {
     await handle.stop()
   }
@@ -347,8 +326,8 @@ test('awaitStartup: reports a computer that dies right after its spawn', async (
   )
   try {
     const early = await handle.awaitStartup(10_000)
-    assert(early !== null, 'an early death is reported')
-    assertEq(early.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'with its cause')
+    expect(early, 'an early death is reported').not.toBe(null)
+    expect(early!.reason, 'with its cause').toBe(`Error: ${NATIVE_LOAD_ERROR}`)
   } finally {
     await handle.stop()
   }
@@ -362,7 +341,7 @@ test('awaitStartup: also reports a death that landed before it was called', asyn
   try {
     await waitFor(() => ctx.exits.length >= 1, 15_000, 'crash exit reported')
     const early = await handle.awaitStartup(50)
-    assertEq(early?.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'the already-dead spawn is reported')
+    expect(early?.reason, 'the already-dead spawn is reported').toBe(`Error: ${NATIVE_LOAD_ERROR}`)
   } finally {
     await handle.stop()
   }
@@ -375,9 +354,9 @@ test('awaitStartup: null for a computer that stays up through the window', async
   )
   try {
     await waitFor(() => handle.getPid() !== null, 15_000, 'computer spawned')
-    assertEq(await handle.awaitStartup(300), null, 'survived the window')
+    expect(await handle.awaitStartup(300), 'survived the window').toBe(null)
     await handle.restart()
-    assertEq(await handle.awaitStartup(300), null, 'the restarted one survives too')
+    expect(await handle.awaitStartup(300), 'the restarted one survives too').toBe(null)
   } finally {
     await handle.stop()
   }
@@ -395,14 +374,14 @@ test('restart cycles a live computer without reporting it as a crash', async () 
     const firstPid = handle.getPid()
     await handle.restart()
     const secondPid = handle.getPid()
-    assert(secondPid !== null, 'a replacement computer is running after restart')
-    assert(
-      secondPid !== firstPid,
+    expect(secondPid, 'a replacement computer is running after restart').not.toBe(null)
+    expect(
+      secondPid,
       `restart replaced the process (was ${String(firstPid)}, now ${String(secondPid)})`
-    )
+    ).not.toBe(firstPid)
     // The kill was deliberate, so it must NOT reach the crash-reporting channel:
     // that feeds a warn/error diagnostic about every agent on the machine dying.
-    assertEq(ctx.exits.length, 0, 'a deliberate restart is not reported as an exit')
+    expect(ctx.exits.length, 'a deliberate restart is not reported as an exit').toBe(0)
   } finally {
     await handle.stop()
   }
@@ -416,7 +395,7 @@ test('restart re-mints the join token for the new child', async () => {
   )
   try {
     await waitFor(() => tokensSeenByChildren(ctx).length >= 1, 15_000, 'first child echoed a token')
-    assertEq(tokensSeenByChildren(ctx)[0], 'token-boot', 'first spawn uses the env token')
+    expect(tokensSeenByChildren(ctx)[0], 'first spawn uses the env token').toBe('token-boot')
     await handle.restart()
     await waitFor(
       () => tokensSeenByChildren(ctx).length >= 2,
@@ -425,8 +404,8 @@ test('restart re-mints the join token for the new child', async () => {
     )
     // The env token is SINGLE-USE. A restart that reuses it cannot recover the
     // one failure it exists to recover (a refused stored credential).
-    assertEq(ctx.mintedTokens.length, 1, 'restart minted exactly one fresh token')
-    assertEq(tokensSeenByChildren(ctx)[1], 'token-mint-1', 'the new child got the fresh token')
+    expect(ctx.mintedTokens.length, 'restart minted exactly one fresh token').toBe(1)
+    expect(tokensSeenByChildren(ctx)[1], 'the new child got the fresh token').toBe('token-mint-1')
   } finally {
     await handle.stop()
   }
@@ -441,7 +420,7 @@ test('restart recovers a computer that exhausted its backoff budget', async () =
   )
   try {
     await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
-    assertEq(handle.getPid(), null, 'no computer is running after the give-up')
+    expect(handle.getPid(), 'no computer is running after the give-up').toBe(null)
     ctx.exits.length = 0
     await handle.restart()
     // A fresh budget, so the respawned (still-failing) fake gets to retry again —
@@ -466,7 +445,7 @@ test('restart clears the needs-re-enrollment latch', async () => {
   )
   try {
     await waitFor(() => ctx.needsReEnrollment >= 1, 20_000, 'computer latched needs-re-enrollment')
-    assertEq(handle.getPid(), null, 'no computer is running while latched')
+    expect(handle.getPid(), 'no computer is running while latched').toBe(null)
     const spawnsBefore = tokensSeenByChildren(ctx).length
     await handle.restart()
     await waitFor(
@@ -476,7 +455,10 @@ test('restart clears the needs-re-enrollment latch', async () => {
     )
     // Re-enrolling is exactly what a fresh token is for — the latch means the
     // stored credential is dead, so the new child must not be handed the spent one.
-    assert(ctx.mintedTokens.length >= 1, 'restart minted a fresh token to re-enroll with')
+    expect(
+      ctx.mintedTokens.length,
+      'restart minted a fresh token to re-enroll with'
+    ).toBeGreaterThanOrEqual(1)
   } finally {
     await handle.stop()
   }
@@ -498,9 +480,9 @@ test('suspendRestarts: a computer that dies during app quit stays down', async (
     process.kill(pid, 'SIGKILL')
     await waitFor(() => handle.getPid() === null, 15_000, 'killed computer detached')
     await delay(200)
-    assertEq(tokensSeenByChildren(ctx).length, 1, 'no respawn after suspendRestarts')
-    assertEq(handle.getPid(), null, 'nothing running')
-    assertEq(ctx.permanentFailure, null, 'a quit-time death is not a permanent failure')
+    expect(tokensSeenByChildren(ctx).length, 'no respawn after suspendRestarts').toBe(1)
+    expect(handle.getPid(), 'nothing running').toBe(null)
+    expect(ctx.permanentFailure, 'a quit-time death is not a permanent failure').toBe(null)
   } finally {
     await handle.stop()
   }
@@ -536,8 +518,11 @@ test('stop: resolves only once the computer is gone, SIGKILLing one that ignores
     const pid = handle.getPid()!
     const started = Date.now()
     await handle.stop()
-    assert(pidGone(pid), 'the computer is gone when stop() resolves')
-    assert(Date.now() - started >= 250, 'SIGTERM got its grace period before the SIGKILL')
+    expect(pidGone(pid), 'the computer is gone when stop() resolves').toBe(true)
+    expect(
+      Date.now() - started,
+      'SIGTERM got its grace period before the SIGKILL'
+    ).toBeGreaterThanOrEqual(250)
   } finally {
     await handle.stop()
   }
@@ -555,7 +540,7 @@ test('stop: a second caller waits for the same reap instead of returning early',
   const pid = handle.getPid()!
   const first = handle.stop()
   await handle.stop()
-  assert(pidGone(pid), 'the second stop() resolved only after the computer was gone')
+  expect(pidGone(pid), 'the second stop() resolved only after the computer was gone').toBe(true)
   await first
 })
 
@@ -577,11 +562,11 @@ test('stop: during a restart, reaps the computer the restart was replacing', asy
   const outgoing = handle.getPid()!
   const restarting = handle.restart()
   await handle.stop()
-  assert(pidGone(outgoing), 'the outgoing computer is gone when stop() resolves')
+  expect(pidGone(outgoing), 'the outgoing computer is gone when stop() resolves').toBe(true)
   await restarting
   await delay(100)
-  assertEq(handle.getPid(), null, 'the restart spawned no replacement after the stop')
-  assertEq(tokensSeenByChildren(ctx).length, 1, 'no second computer was ever spawned')
+  expect(handle.getPid(), 'the restart spawned no replacement after the stop').toBe(null)
+  expect(tokensSeenByChildren(ctx).length, 'no second computer was ever spawned').toBe(1)
 })
 
 // --- quit: a graceful stop is never cut shorter than the computer's own deadline
@@ -607,9 +592,9 @@ test('quit: a computer whose stop takes ~4s exits by itself, cleanly — never S
       stop: () => handle.stop(),
       timeoutMs: QUIT_CHILD_REAP_MS
     })
-    assertEq(result, 'stopped', 'the quit saw the computer gone')
-    assert(Date.now() - started >= 3_900, 'it really took its ~4s')
-    assertEq(exitCodeIn(exitFile), '0', 'exit 0, not SIGKILL')
+    expect(result, 'the quit saw the computer gone').toBe('stopped')
+    expect(Date.now() - started, 'it really took its ~4s').toBeGreaterThanOrEqual(3_900)
+    expect(exitCodeIn(exitFile), 'exit 0, not SIGKILL').toBe('0')
   } finally {
     await handle.stop()
   }
@@ -630,10 +615,12 @@ test('quit: a stuck computer is still SIGKILLed — after its own deadline, insi
       timeoutMs: QUIT_CHILD_REAP_MS
     })
     const elapsed = Date.now() - started
-    assertEq(result, 'stopped', `the quit saw the computer gone, not a timeout (${elapsed}ms)`)
-    assert(pidGone(pid), 'the stuck computer is gone')
-    assertEq(exitCodeIn(exitFile), null, 'it was SIGKILLed: no exit of its own')
-    assert(elapsed >= SUPERVISED_STOP_DEADLINE_MS, `not before its own deadline (${elapsed}ms)`)
+    expect(result, `the quit saw the computer gone, not a timeout (${elapsed}ms)`).toBe('stopped')
+    expect(pidGone(pid), 'the stuck computer is gone').toBe(true)
+    expect(exitCodeIn(exitFile), 'it was SIGKILLed: no exit of its own').toBe(null)
+    expect(elapsed, `not before its own deadline (${elapsed}ms)`).toBeGreaterThanOrEqual(
+      SUPERVISED_STOP_DEADLINE_MS
+    )
   } finally {
     await handle.stop()
   }
@@ -653,10 +640,8 @@ test('restart: keeps its short grace — the replacement waits on the outgoing c
     const started = Date.now()
     await handle.restart()
     const elapsed = Date.now() - started
-    assert(
-      elapsed >= 2_900 && elapsed < SUPERVISED_STOP_DEADLINE_MS,
-      `SIGKILL at 3s (${elapsed}ms)`
-    )
+    expect(elapsed, `SIGKILL at 3s (${elapsed}ms)`).toBeGreaterThanOrEqual(2_900)
+    expect(elapsed, `SIGKILL at 3s (${elapsed}ms)`).toBeLessThan(SUPERVISED_STOP_DEADLINE_MS)
   } finally {
     await handle.stop()
   }
@@ -944,7 +929,7 @@ test('parent-death: a SIGKILLed app takes its supervised computer with it, clean
   try {
     // No false positive while the app lives: longer than one parent poll.
     await delay(1_500)
-    assert(!pidGone(run.computerPid), 'the computer runs while its app is alive')
+    expect(pidGone(run.computerPid), 'the computer runs while its app is alive').toBe(false)
     run.parent.kill('SIGKILL')
     await waitForRun(
       run,
@@ -954,10 +939,9 @@ test('parent-death: a SIGKILLed app takes its supervised computer with it, clean
     )
     // 0, not 1: a clean stop that disposed its ptys, not a crash on the first
     // write to the dead app's stdout pipe.
-    assertEq(run.exitCode(), '0', `the computer stopped cleanly — log:\n${run.log()}`)
-    assert(
-      /parent app is gone \(parent-(pipe-closed|output-closed|reparented|exited)\)/.test(run.log()),
-      `the computer said why it stopped — log:\n${run.log()}`
+    expect(run.exitCode(), `the computer stopped cleanly — log:\n${run.log()}`).toBe('0')
+    expect(run.log(), `the computer said why it stopped — log:\n${run.log()}`).toMatch(
+      /parent app is gone \(parent-(pipe-closed|output-closed|reparented|exited)\)/
     )
   } finally {
     run.cleanup()
@@ -999,9 +983,8 @@ test('parent-death: a SIGKILLed app is noticed even when stdin is held open else
       REAL_EXIT_BUDGET_MS,
       'computer outlived its app with stdin still open'
     )
-    assert(
-      /parent app is gone \(parent-(reparented|exited)\)/.test(run.log()),
-      `the parent poll noticed — log:\n${run.log()}`
+    expect(run.log(), `the parent poll noticed — log:\n${run.log()}`).toMatch(
+      /parent app is gone \(parent-(reparented|exited)\)/
     )
   } finally {
     run.cleanup()
@@ -1015,8 +998,10 @@ test('parent-death: a standalone computer ignores its parent dying', async () =>
   try {
     run.parent.kill('SIGKILL')
     await delay(4_000) // several parent polls (1s each)
-    assert(!pidGone(run.computerPid), `a standalone computer stopped — log:\n${run.log()}`)
-    assert(!run.log().includes('parent app is gone'), 'it never watched its parent')
+    expect(pidGone(run.computerPid), `a standalone computer stopped — log:\n${run.log()}`).toBe(
+      false
+    )
+    expect(run.log(), 'it never watched its parent').not.toContain('parent app is gone')
   } finally {
     run.cleanup()
   }
@@ -1060,38 +1045,13 @@ test('stop: the real supervised computer still exits on its own when its app sto
     )
     const started = Date.now()
     await handle.stop()
-    assertEq(
+    expect(
       fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8') : null,
-      '0',
       `the computer exited by itself, cleanly — not SIGKILLed after the grace — log:\n${fs.readFileSync(logFile, 'utf8')}`
-    )
-    assert(Date.now() - started < 3_000, 'well inside the SIGTERM grace')
+    ).toBe('0')
+    expect(Date.now() - started, 'well inside the SIGTERM grace').toBeLessThan(3_000)
   } finally {
     await handle.stop()
     hub.close()
   }
 })
-
-// --- computer ---------------------------------------------------------------
-
-async function main(): Promise<void> {
-  let passed = 0
-  let failed = 0
-  console.log('\n=== local-computer-supervisor exit reporting + manual restart ===\n')
-  for (const { name, fn } of tests) {
-    try {
-      await fn()
-      console.log(`  ✓ ${name}`)
-      passed++
-    } catch (err) {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`)
-      failed++
-    }
-  }
-  cleanup()
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  process.exitCode = failed > 0 ? 1 : 0
-}
-
-void main()

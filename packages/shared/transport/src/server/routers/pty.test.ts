@@ -1,8 +1,8 @@
 /**
  * pty tRPC router — `onData`'s server-side session filter.
  *
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/routers/pty.test.ts
  *
  * SCOPE: this file exists for ONE thing — `onData`'s optional `sessionIds`
@@ -15,7 +15,7 @@
  * file does not attempt a full router audit. `attach` is here because it is
  * pure router composition (exists + getState + getBufferSince in one call).
  */
-import { test, expect, describe } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { ptyRouter } from './pty.js'
 import { setPtyDeps, type PtyDeps } from '../app-deps.js'
@@ -26,7 +26,7 @@ setPtyDeps({ ops: {} as unknown as PtyDeps['ops'], events } as unknown as PtyDep
 
 const ctx = { db: {} as never, dataRoot: '' }
 
-await describe('pty router', () => {
+describe('pty router', () => {
   test('onData with NO sessionIds is the unfiltered firehose (unchanged, every existing caller)', async () => {
     const caller = ptyRouter.createCaller(ctx)
     const obs = await caller.onData(undefined)

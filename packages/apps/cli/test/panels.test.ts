@@ -1,13 +1,9 @@
 /**
  * CLI panels command tests
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/panels.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/panels.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAllAsync } from './test-harness.js'
 import type { PanelConfig, WebPanelDefinition } from '../../../domains/task/src/shared/types.js'
 import {
@@ -26,6 +22,7 @@ import {
 } from '../../../domains/task/src/shared/handoff.js'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 // --- helpers ---
@@ -302,6 +299,3 @@ describe('panels enable/disable', () => {
     expect(togglePanel(config, 'nonexistent', false)).toBe(null)
   })
 })
-
-h.cleanup()
-console.log('\nDone')

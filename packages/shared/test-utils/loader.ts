@@ -1,6 +1,9 @@
 /**
- * Custom Node.js module resolve hook that redirects external dependencies to mocks.
- * Usage: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts <test>
+ * Custom Node.js module resolve hook that redirects external dependencies to mocks,
+ * for a child process a suite spawns outside vitest (diagnostics flush-on-exit.test.ts).
+ * Suites themselves get the same redirects from vitest.harness.config.ts — keep the two
+ * maps in step.
+ * Usage: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts <file>
  */
 
 const mockElectronUrl = new URL('./mock-electron.ts', import.meta.url).href

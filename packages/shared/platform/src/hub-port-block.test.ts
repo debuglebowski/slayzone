@@ -10,8 +10,10 @@
  * Pure Node (real binds on loopback, no native deps) → runs under plain
  * `npx tsx`.
  *
- * Run with: npx tsx packages/shared/platform/src/hub-port-block.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/hub-port-block.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import {
@@ -21,98 +23,75 @@ import {
   bindInHubPortBlock
 } from './paths'
 
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => Promise<void>): Promise<void> {
-  return fn()
-    .then(() => {
-      console.log(`  ✓ ${name}`)
-      passed++
-    })
-    .catch((e) => {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${e instanceof Error ? e.message : e}`)
-      failed++
-    })
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected)
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-}
-
-/** Occupies `port` so the walk has to step over it. */
+/**
+ * Occupies `port` so the walk has to step over it. The block is a fixed, shared
+ * range and test files now run concurrently, so another process (a hub another
+ * suite spawned, or the dev app's own) may already hold it — then it is occupied
+ * already, which is all the caller needs, and there is nothing of ours to release.
+ */
 function occupy(port: number): Promise<() => Promise<void>> {
   return new Promise((resolve, reject) => {
     const srv = http.createServer()
-    srv.once('error', reject)
+    srv.once('error', (e: NodeJS.ErrnoException) =>
+      e.code === 'EADDRINUSE' ? resolve(async () => {}) : reject(e)
+    )
     srv.listen(port, '127.0.0.1', () => {
       resolve(() => new Promise((r) => srv.close(() => r())))
     })
   })
 }
 
-async function main(): Promise<void> {
-  console.log('\nhub port block\n')
-
-  await test('the dynamic range sits inside the block, after the supervised head', async () => {
-    assert(HUB_DYNAMIC_PORT_RANGE.start > HUB_PORT_BLOCK.start, 'dynamic starts after block start')
-    assertEq(HUB_DYNAMIC_PORT_RANGE.end, HUB_PORT_BLOCK.end, 'both end together')
+describe('hub port block', () => {
+  test('the dynamic range sits inside the block, after the supervised head', async () => {
+    expect(HUB_DYNAMIC_PORT_RANGE.start, 'dynamic starts after block start').toBeGreaterThan(HUB_PORT_BLOCK.start)
+    expect(HUB_DYNAMIC_PORT_RANGE.end, 'both end together').toBe(HUB_PORT_BLOCK.end)
     // Every fixed supervised port must fall in the RESERVED head, never in the
     // range standalone hubs draw from — else a standalone hub could take the
     // port the desktop app expects to bind.
     for (const [env, port] of Object.entries(SIDECAR_FIXED_PORT)) {
-      assert(port >= HUB_PORT_BLOCK.start, `${env} inside block`)
-      assert(
-        port < HUB_DYNAMIC_PORT_RANGE.start,
-        `${env} in the reserved head, not the dynamic range`
-      )
+      expect(port, `${env} inside block`).toBeGreaterThanOrEqual(HUB_PORT_BLOCK.start)
+      expect(port, `${env} in the reserved head, not the dynamic range`).toBeLessThan(HUB_DYNAMIC_PORT_RANGE.start)
     }
   })
 
-  await test('binds the first free port in the dynamic range', async () => {
+  test('binds the first free port in the dynamic range', async () => {
     const srv = http.createServer()
     try {
       const port = await bindInHubPortBlock(srv, '127.0.0.1')
-      assert(
-        port >= HUB_DYNAMIC_PORT_RANGE.start && port <= HUB_DYNAMIC_PORT_RANGE.end,
-        `port ${port} is inside the dynamic range`
-      )
-      assertEq((srv.address() as AddressInfo).port, port, 'returned port matches the bound socket')
+      expect(port, `port ${port} is inside the dynamic range`).toBeGreaterThanOrEqual(HUB_DYNAMIC_PORT_RANGE.start)
+      expect(port, `port ${port} is inside the dynamic range`).toBeLessThanOrEqual(HUB_DYNAMIC_PORT_RANGE.end)
+      expect((srv.address() as AddressInfo).port, 'returned port matches the bound socket').toBe(port)
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
     }
   })
 
-  await test('steps over an occupied port instead of failing', async () => {
+  test('steps over an occupied port instead of failing', async () => {
     const release = await occupy(HUB_DYNAMIC_PORT_RANGE.start)
     const srv = http.createServer()
     try {
       const port = await bindInHubPortBlock(srv, '127.0.0.1')
-      assert(port > HUB_DYNAMIC_PORT_RANGE.start, `skipped the taken port (got ${port})`)
+      expect(port, `skipped the taken port (got ${port})`).toBeGreaterThan(HUB_DYNAMIC_PORT_RANGE.start)
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
       await release()
     }
   })
 
-  await test('two hubs in a row get distinct ports (no shared state)', async () => {
+  test('two hubs in a row get distinct ports (no shared state)', async () => {
     const a = http.createServer()
     const b = http.createServer()
     try {
       const portA = await bindInHubPortBlock(a, '127.0.0.1')
       const portB = await bindInHubPortBlock(b, '127.0.0.1')
-      assert(portA !== portB, `distinct ports (${portA} vs ${portB})`)
+      expect(portA, `distinct ports (${portA} vs ${portB})`).not.toBe(portB)
     } finally {
       await new Promise((r) => a.close(() => r(undefined)))
       await new Promise((r) => b.close(() => r(undefined)))
     }
   })
 
-  await test('exhausted range fails loud, naming the range', async () => {
+  test('exhausted range fails loud, naming the range', async () => {
     // A one-port window that is already taken → nothing left to try.
     const release = await occupy(HUB_DYNAMIC_PORT_RANGE.start)
     const srv = http.createServer()
@@ -126,18 +105,15 @@ async function main(): Promise<void> {
       } catch (e) {
         message = e instanceof Error ? e.message : String(e)
       }
-      assert(message.length > 0, 'threw rather than resolving')
-      assert(
-        message.includes(String(HUB_DYNAMIC_PORT_RANGE.start)),
-        `error names the range: ${message}`
-      )
+      expect(message.length, 'threw rather than resolving').toBeGreaterThan(0)
+      expect(message, `error names the range: ${message}`).toContain(String(HUB_DYNAMIC_PORT_RANGE.start))
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
       await release()
     }
   })
 
-  await test('a non-EADDRINUSE bind error propagates instead of walking', async () => {
+  test('a non-EADDRINUSE bind error propagates instead of walking', async () => {
     const srv = http.createServer()
     let message = ''
     try {
@@ -149,15 +125,7 @@ async function main(): Promise<void> {
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
     }
-    assert(message.length > 0, 'threw')
-    assert(
-      !message.includes('no free port'),
-      `propagated the real error, not exhaustion: ${message}`
-    )
+    expect(message.length, 'threw').toBeGreaterThan(0)
+    expect(message, `propagated the real error, not exhaustion: ${message}`).not.toContain('no free port')
   })
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+})

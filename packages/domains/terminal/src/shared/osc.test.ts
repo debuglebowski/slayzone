@@ -1,30 +1,8 @@
 /**
  * OSC title extraction tests
- * Run with: pnpm tsx packages/domains/terminal/src/shared/osc.test.ts
  */
+import { expect, test } from 'vitest'
 import { extractOscTitle } from './osc.js'
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    throw e
-  }
-}
-function expect<T>(v: T) {
-  return {
-    toBe(e: T) {
-      if (v !== e) throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(v)}`)
-    },
-    toBeUndefined() {
-      if (v !== undefined) throw new Error(`expected undefined, got ${JSON.stringify(v)}`)
-    }
-  }
-}
-
-console.log('extractOscTitle')
 
 test('extracts OSC 0 title (BEL terminator)', () => {
   expect(extractOscTitle('\x1b]0;my-title\x07')).toBe('my-title')
@@ -69,5 +47,3 @@ test('handles title with spaces and special chars', () => {
 test('ignores incomplete OSC (no terminator)', () => {
   expect(extractOscTitle('\x1b]0;partial')).toBeUndefined()
 })
-
-console.log('\nDone')

@@ -14,11 +14,12 @@
  * mirrors the prod wire: transition fires the same listener app/index.ts
  * registers on onGlobalStateChange — i.e. handleAttentionTransition.
  *
- * Run with: pnpm tsx --loader ./packages/shared/test-utils/loader.ts \
- *   packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import express from 'express'
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
 import { handleAttentionTransition, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'
@@ -58,6 +59,10 @@ function readFlag(id: string): number {
 let currentState: TerminalState = 'idle'
 let hasUserInput = false
 let lastActivityAt = 0
+const pendingAttention: Promise<unknown>[] = []
+async function settleAttention(): Promise<void> {
+  while (pendingAttention.length) await pendingAttention.shift()
+}
 const activityLog: Array<{ kind: 'transition' | 'markActive'; sessionId: string; at: number }> = []
 const bridge: TerminalStateBridge = {
   findSession: (taskId) => taskId,
@@ -66,7 +71,14 @@ const bridge: TerminalStateBridge = {
     currentState = newState
     lastActivityAt = Date.now()
     activityLog.push({ kind: 'transition', sessionId, at: lastActivityAt })
-    handleAttentionTransition(h.slayDb, sessionId, newState, prev, hasUserInput)
+    // handleAttentionTransition is async (DB writes go through the async
+    // SlayzoneDb); prod fires it un-awaited from the state listener. Track it so
+    // postHook can settle it before a test reads the flag — otherwise the read
+    // races the write (lost under vitest, where the first namedTxn's lazy
+    // registry import outlasts the HTTP round trip).
+    pendingAttention.push(
+      handleAttentionTransition(h.slayDb, sessionId, newState, prev, hasUserInput)
+    )
     return true
   },
   markActive: (sessionId) => {
@@ -92,10 +104,16 @@ async function postHook(taskId: string, hookEvent: string, raw?: unknown): Promi
     taskId,
     ...(raw !== undefined ? { raw } : {})
   })
+  await settleAttention()
   return res.status
 }
 
-await describe('POST /api/agent-hook → handleAttentionTransition', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})
+
+describe('POST /api/agent-hook → handleAttentionTransition', () => {
   test('Stop hook + user input → needs_attention set', async () => {
     const id = seedTask()
     currentState = 'running'
@@ -310,11 +328,9 @@ await describe('POST /api/agent-hook → handleAttentionTransition', () => {
       hookEvent: 'task_complete',
       taskId: id
     })
+    await settleAttention()
     expect(res.status).toBe(200)
     expect(readFlag(id)).toBe(0)
     expect(currentState).toBe('running')
   })
 })
-
-await rest.close()
-h.cleanup()

@@ -6,44 +6,21 @@
  * The wiring into the boot itself is ownership-boot.test.ts.
  *
  * Native ABI: the app DB is better-sqlite3 built for Electron, so this runs under
- * the Electron strict loader like hub-users.test.ts.
+ * Electron's node like hub-users.test.ts.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/ownership-backfill.test.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs'
+import { afterAll, assert, expect, test } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { createTestHarness, type TestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { backfillOwnership } from './ownership-backfill.js'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-  }
-}
 
 const tmpDirs: string[] = []
 async function newAuth(): Promise<HubAuth> {
@@ -111,127 +88,115 @@ async function captureAudit<T>(
   }
 }
 
-async function main(): Promise<void> {
-  console.log('\nownership backfill (real hub-auth + app DB)')
-  console.log('─'.repeat(44))
+test('login off (the desktop hub): nothing changes, not even with an admin present', async () => {
+  const auth = await newAuth()
+  await createHubUser(auth, { email: 'admin@example.com' })
+  const h = await seededHarness()
+  const before = { owners: owners(h), keys: settingKeys(h) }
+  const { result, lines } = await captureAudit(() =>
+    backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: false })
+  )
+  expect(result, 'skipped').toBe(null)
+  expect(owners(h), 'owners untouched').toEqual(before.owners)
+  expect(settingKeys(h), 'settings untouched').toEqual(before.keys)
+  expect(userSettings(h), 'no per-user rows').toEqual([])
+  expect(lines.length, 'no audit line').toBe(0)
+})
 
-  await test('login off (the desktop hub): nothing changes, not even with an admin present', async () => {
-    const auth = await newAuth()
-    await createHubUser(auth, { email: 'admin@example.com' })
-    const h = await seededHarness()
-    const before = { owners: owners(h), keys: settingKeys(h) }
-    const { result, lines } = await captureAudit(() =>
-      backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: false })
-    )
-    assertEq(result, null, 'skipped')
-    assertEq(owners(h), before.owners, 'owners untouched')
-    assertEq(settingKeys(h), before.keys, 'settings untouched')
-    assertEq(userSettings(h), [], 'no per-user rows')
-    assertEq(lines.length, 0, 'no audit line')
+test('login on, no account yet: nothing assigned, nothing lost, logged', async () => {
+  const auth = await newAuth()
+  const h = await seededHarness()
+  const logs: string[] = []
+  const result = await backfillOwnership({
+    db: h.slayDb,
+    hubAuth: auth,
+    requireLogin: true,
+    log: (m) => logs.push(m)
   })
+  expect(result, 'no admin → no owner').toEqual({ ownerUserId: null, projects: 0, settings: 0 })
+  expect(owners(h)['p-legacy-1'], 'still unowned').toBe(null)
+  expect(settingKeys(h), 'global viewState kept').toContain('viewState')
+  expect(
+    logs.some((l) => l.includes('2 project(s) have no owner')),
+    `logged: ${JSON.stringify(logs)}`
+  ).toBe(true)
+})
 
-  await test('login on, no account yet: nothing assigned, nothing lost, logged', async () => {
-    const auth = await newAuth()
-    const h = await seededHarness()
-    const logs: string[] = []
-    const result = await backfillOwnership({
-      db: h.slayDb,
-      hubAuth: auth,
-      requireLogin: true,
-      log: (m) => logs.push(m)
-    })
-    assertEq(result, { ownerUserId: null, projects: 0, settings: 0 }, 'no admin → no owner')
-    assertEq(owners(h)['p-legacy-1'], null, 'still unowned')
-    assert(settingKeys(h).includes('viewState'), 'global viewState kept')
-    assert(
-      logs.some((l) => l.includes('2 project(s) have no owner')),
-      `logged: ${JSON.stringify(logs)}`
-    )
+test('login on: unowned projects + pre-login user settings → first admin, once', async () => {
+  const auth = await newAuth()
+  const admin = await createHubUser(auth, { email: 'first@example.com' })
+  const other = await createHubUser(auth, { email: 'second@example.com' })
+  assert(!('error' in admin) && !('error' in other), 'accounts created')
+  expect([admin.role, other.role], 'the first account is the admin').toEqual(['admin', 'user'])
+  const h = await seededHarness()
+
+  const { result, lines } = await captureAudit(() =>
+    backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
+  )
+  expect(result, 'counts').toEqual({ ownerUserId: admin.id, projects: 2, settings: 2 })
+  expect(owners(h), 'unowned → admin; an owned project keeps its owner').toEqual({
+    'p-legacy-1': admin.id,
+    'p-legacy-2': admin.id,
+    'p-owned': 'someone-else'
   })
+  const nTasks = (h.db.prepare('SELECT count(*) AS n FROM tasks').get() as { n: number }).n
+  expect(nTasks, 'tasks untouched').toBe(1)
+  // Per-user keys moved; hub + internal keys stay global.
+  expect(
+    settingKeys(h).filter((k) => ['viewState', 'panel_config'].includes(k)),
+    'per-user keys left the global table'
+  ).toEqual([])
+  expect(settingKeys(h), 'hub key stays global').toContain('default_terminal_mode')
+  expect(settingKeys(h), 'credential stays global').toContain('integration:credential:ref-1')
+  expect(userSettings(h), 'the admin adopted them, byte for byte').toEqual([
+    { user_id: admin.id, key: 'panel_config', value: '{"webPanels":[]}' },
+    {
+      user_id: admin.id,
+      key: 'viewState',
+      value: '{"tabs":[{"type":"task","taskId":"t1","title":"T"}]}'
+    }
+  ])
 
-  await test('login on: unowned projects + pre-login user settings → first admin, once', async () => {
-    const auth = await newAuth()
-    const admin = await createHubUser(auth, { email: 'first@example.com' })
-    const other = await createHubUser(auth, { email: 'second@example.com' })
-    assert(!('error' in admin) && !('error' in other), 'accounts created')
-    assertEq([admin.role, other.role], ['admin', 'user'], 'the first account is the admin')
-    const h = await seededHarness()
+  expect(lines.length, 'one audit line').toBe(1)
+  const line = lines[0]!
+  expect(line.event, 'event').toBe('project.owner.backfill')
+  expect(line.outcome, 'outcome').toBe('success')
+  expect(line.targetKind, 'target kind').toBe('user')
+  expect(line.targetId, 'target = the new owner').toEqual(admin.id)
+  expect(line.detail, 'counts in detail').toEqual({ projectCount: 2, settingCount: 2 })
 
-    const { result, lines } = await captureAudit(() =>
-      backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
-    )
-    assertEq(result, { ownerUserId: admin.id, projects: 2, settings: 2 }, 'counts')
-    assertEq(
-      owners(h),
-      { 'p-legacy-1': admin.id, 'p-legacy-2': admin.id, 'p-owned': 'someone-else' },
-      'unowned → admin; an owned project keeps its owner'
-    )
-    const nTasks = (h.db.prepare('SELECT count(*) AS n FROM tasks').get() as { n: number }).n
-    assertEq(nTasks, 1, 'tasks untouched')
-    // Per-user keys moved; hub + internal keys stay global.
-    assertEq(
-      settingKeys(h).filter((k) => ['viewState', 'panel_config'].includes(k)),
-      [],
-      'per-user keys left the global table'
-    )
-    assert(settingKeys(h).includes('default_terminal_mode'), 'hub key stays global')
-    assert(settingKeys(h).includes('integration:credential:ref-1'), 'credential stays global')
-    assertEq(
-      userSettings(h),
-      [
-        { user_id: admin.id, key: 'panel_config', value: '{"webPanels":[]}' },
-        {
-          user_id: admin.id,
-          key: 'viewState',
-          value: '{"tabs":[{"type":"task","taskId":"t1","title":"T"}]}'
-        }
-      ],
-      'the admin adopted them, byte for byte'
-    )
+  // Second boot: nothing left, nothing logged.
+  const again = await captureAudit(() =>
+    backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
+  )
+  expect(again.result, 'idempotent').toEqual({ ownerUserId: admin.id, projects: 0, settings: 0 })
+  expect(again.lines.length, 'no audit line when nothing changed').toBe(0)
+})
 
-    assertEq(lines.length, 1, 'one audit line')
-    const line = lines[0]!
-    assertEq(line.event, 'project.owner.backfill', 'event')
-    assertEq(line.outcome, 'success', 'outcome')
-    assertEq(line.targetKind, 'user', 'target kind')
-    assertEq(line.targetId, admin.id, 'target = the new owner')
-    assertEq(line.detail, { projectCount: 2, settingCount: 2 }, 'counts in detail')
+test('the first admin is the OLDEST enabled admin, not the newest', async () => {
+  const auth = await newAuth()
+  const first = await createHubUser(auth, { email: 'a@example.com' })
+  await createHubUser(auth, { email: 'b@example.com', role: 'admin' })
+  assert(!('error' in first), 'created')
+  const h = await seededHarness()
+  const result = await backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
+  expect(result?.ownerUserId, 'oldest admin').toEqual(first.id)
+})
 
-    // Second boot: nothing left, nothing logged.
-    const again = await captureAudit(() =>
-      backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
-    )
-    assertEq(again.result, { ownerUserId: admin.id, projects: 0, settings: 0 }, 'idempotent')
-    assertEq(again.lines.length, 0, 'no audit line when nothing changed')
-  })
+test("a key the admin already has keeps the admin's value (never clobbered)", async () => {
+  const auth = await newAuth()
+  const admin = await createHubUser(auth, { email: 'keep@example.com' })
+  assert(!('error' in admin), 'created')
+  const h = await seededHarness()
+  h.db
+    .prepare(`INSERT INTO user_settings (user_id, key, value) VALUES (?, 'viewState', 'mine')`)
+    .run(admin.id)
+  await backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
+  const vs = userSettings(h).find((r) => r.key === 'viewState')
+  expect(vs?.value, "admin's own row kept").toBe('mine')
+  expect(settingKeys(h), 'global copy gone (no stale purge input)').not.toContain('viewState')
+})
 
-  await test('the first admin is the OLDEST enabled admin, not the newest', async () => {
-    const auth = await newAuth()
-    const first = await createHubUser(auth, { email: 'a@example.com' })
-    await createHubUser(auth, { email: 'b@example.com', role: 'admin' })
-    assert(!('error' in first), 'created')
-    const h = await seededHarness()
-    const result = await backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
-    assertEq(result?.ownerUserId, first.id, 'oldest admin')
-  })
-
-  await test("a key the admin already has keeps the admin's value (never clobbered)", async () => {
-    const auth = await newAuth()
-    const admin = await createHubUser(auth, { email: 'keep@example.com' })
-    assert(!('error' in admin), 'created')
-    const h = await seededHarness()
-    h.db
-      .prepare(`INSERT INTO user_settings (user_id, key, value) VALUES (?, 'viewState', 'mine')`)
-      .run(admin.id)
-    await backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
-    const vs = userSettings(h).find((r) => r.key === 'viewState')
-    assertEq(vs?.value, 'mine', "admin's own row kept")
-    assert(!settingKeys(h).includes('viewState'), 'global copy gone (no stale purge input)')
-  })
-
+afterAll(() => {
   for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true })
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+})

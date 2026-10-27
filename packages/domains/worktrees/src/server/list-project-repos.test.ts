@@ -2,7 +2,7 @@
  * Discovery tests for listProjectRepos.
  * Run via the same harness pattern as handlers.test.ts.
  */
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { test, expect, describe } from 'vitest'
 import { listProjectRepos, invalidateProjectReposCache } from './list-project-repos.js'
 import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 
@@ -45,7 +45,7 @@ function tmp(): string {
 
 // ---------- 1: single-repo project ----------
 
-await describe('listProjectRepos: single-repo project', () => {
+describe('listProjectRepos: single-repo project', () => {
   test('returns one project-root entry', async () => {
     invalidateProjectReposCache()
     const root = tmp()
@@ -62,7 +62,7 @@ await describe('listProjectRepos: single-repo project', () => {
 
 // ---------- 2: multi-repo wrapper (root not git) ----------
 
-await describe('listProjectRepos: multi-repo wrapper', () => {
+describe('listProjectRepos: multi-repo wrapper', () => {
   test('returns one child-repo entry per top-level git child', async () => {
     invalidateProjectReposCache()
     const root = tmp()
@@ -84,7 +84,7 @@ await describe('listProjectRepos: multi-repo wrapper', () => {
 
 // ---------- 3: super-repo + 2 submodules ----------
 
-await describe('listProjectRepos: super-repo with submodules', () => {
+describe('listProjectRepos: super-repo with submodules', () => {
   test('returns super + each submodule with parent linkage', async () => {
     invalidateProjectReposCache()
     // Build two donor repos for use as submodule sources (file:// URLs).
@@ -118,7 +118,7 @@ await describe('listProjectRepos: super-repo with submodules', () => {
 
 // ---------- 4: skip-list respected ----------
 
-await describe('listProjectRepos: skip-list', () => {
+describe('listProjectRepos: skip-list', () => {
   test('node_modules / dist children are not enumerated', async () => {
     invalidateProjectReposCache()
     const root = tmp()
@@ -136,7 +136,7 @@ await describe('listProjectRepos: skip-list', () => {
 
 // ---------- 5: isTaskBound flips ----------
 
-await describe('listProjectRepos: taskBoundPath', () => {
+describe('listProjectRepos: taskBoundPath', () => {
   test('flag is set on the matching entry', async () => {
     invalidateProjectReposCache()
     const root = tmp()
@@ -167,7 +167,7 @@ await describe('listProjectRepos: taskBoundPath', () => {
 
 // ---------- 6a: symlinks skipped ----------
 
-await describe('listProjectRepos: symlinks', () => {
+describe('listProjectRepos: symlinks', () => {
   test('symlinked dirs are not followed (no infinite recursion / dup repos)', async () => {
     invalidateProjectReposCache()
     const root = tmp()
@@ -185,7 +185,7 @@ await describe('listProjectRepos: symlinks', () => {
 
 // ---------- 6: depth cap ----------
 
-await describe('listProjectRepos: depth cap', () => {
+describe('listProjectRepos: depth cap', () => {
   test('repo deeper than MAX_CHILD_DEPTH is not found', async () => {
     invalidateProjectReposCache()
     const root = tmp()

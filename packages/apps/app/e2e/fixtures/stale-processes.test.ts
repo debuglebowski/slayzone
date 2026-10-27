@@ -15,23 +15,9 @@
  *
  * Selection fails CLOSED: an unreadable environment is not killed. A missed
  * orphan costs a warning; a killed dev computer costs every running agent.
- *
- * Run with:
- *   npx tsx packages/apps/app/e2e/fixtures/stale-processes.test.ts
  */
+import { expect, test } from 'vitest'
 import { parsePgrepOutput, selectTestRunPids, type StaleCandidate } from './stale-processes.js'
-
-// --- tiny async test harness (matches repo style — no vitest) -------------
-
-const tests: Array<{ name: string; fn: () => void }> = []
-function test(name: string, fn: () => void): void {
-  tests.push({ name, fn })
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  const a = JSON.stringify(actual)
-  const e = JSON.stringify(expected)
-  if (a !== e) throw new Error(`${msg}: expected ${e}, got ${a}`)
-}
 
 const COMPUTER = '/repo/packages/apps/computer/dist/bin.cjs'
 /** An environ blob shaped like `ps eww` output. */
@@ -50,70 +36,45 @@ function reader(map: Record<number, string>): (pid: number) => string {
 
 test('parses `pgrep -af` output into pid + command', () => {
   const out = `1234 Electron ${COMPUTER}\n5678 Electron ${COMPUTER}\n`
-  assertEq(
-    parsePgrepOutput(out),
-    [
-      { pid: 1234, command: `Electron ${COMPUTER}` },
-      { pid: 5678, command: `Electron ${COMPUTER}` }
-    ] satisfies StaleCandidate[],
-    'both lines parsed'
-  )
+  expect(parsePgrepOutput(out), 'both lines parsed').toEqual([
+    { pid: 1234, command: `Electron ${COMPUTER}` },
+    { pid: 5678, command: `Electron ${COMPUTER}` }
+  ] satisfies StaleCandidate[])
 })
 
 test('ignores blank and malformed pgrep lines', () => {
-  assertEq(parsePgrepOutput('\n  \nnotapid something\n'), [], 'nothing selected from junk')
+  expect(parsePgrepOutput('\n  \nnotapid something\n'), 'nothing selected from junk').toEqual([])
 })
 
 test('does NOT select a dev-run process — the regression', () => {
   // Same bundle path as a test run; only the environment tells them apart.
   const candidates = parsePgrepOutput(`4242 Electron ${COMPUTER}`)
-  assertEq(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), [], 'dev computer spared')
+  expect(selectTestRunPids(candidates, reader({ 4242: devEnv }), []), 'dev computer spared').toEqual([])
 })
 
 test('selects a process carrying the Playwright marker', () => {
   const candidates = parsePgrepOutput(`4242 Electron ${COMPUTER}\n4243 Electron ${COMPUTER}`)
-  assertEq(
+  expect(
     selectTestRunPids(candidates, reader({ 4242: devEnv, 4243: e2eEnv }), []),
-    [4243],
     'only the e2e leftover is reaped'
-  )
+  ).toEqual([4243])
 })
 
 test('never selects an excluded pid, marker or not', () => {
   const candidates = parsePgrepOutput(`4243 Electron ${COMPUTER}`)
-  assertEq(
+  expect(
     selectTestRunPids(candidates, reader({ 4243: e2eEnv }), [4243]),
-    [],
     'self/parent pid excluded'
-  )
+  ).toEqual([])
 })
 
 test('fails closed when the environment cannot be read', () => {
   const candidates = parsePgrepOutput(`9999 Electron ${COMPUTER}`)
-  assertEq(selectTestRunPids(candidates, reader({}), []), [], 'unreadable env is not killed')
+  expect(selectTestRunPids(candidates, reader({}), []), 'unreadable env is not killed').toEqual([])
 })
 
 test('does not match PLAYWRIGHT as a substring of another variable', () => {
   const candidates = parsePgrepOutput(`4244 Electron ${COMPUTER}`)
   const sneaky = `PATH=/usr/bin NOT_PLAYWRIGHT=1 MY_PLAYWRIGHT_DIR=/tmp`
-  assertEq(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), [], 'no substring match')
+  expect(selectTestRunPids(candidates, reader({ 4244: sneaky }), []), 'no substring match').toEqual([])
 })
-
-// --- computer ---------------------------------------------------------------
-
-let passed = 0
-let failed = 0
-console.log('\n=== e2e stale-process selection ===\n')
-for (const { name, fn } of tests) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (err) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`)
-    failed++
-  }
-}
-console.log(`\n${passed} passed, ${failed} failed\n`)
-process.exitCode = failed > 0 ? 1 : 0

@@ -9,38 +9,14 @@
  * withheld from non-loopback callers: today `dbPath` is served to anyone who can
  * reach the port.
  *
- * Pure Node (real ephemeral HTTP servers, no native deps) → runs under plain
- * `npx tsx`.
+ * Pure Node (real ephemeral HTTP servers, no native deps).
  *
- * Run with: npx tsx packages/apps/hub/src/health.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { handleHealth, type HealthState } from './health.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => Promise<void>): Promise<void> {
-  return fn()
-    .then(() => {
-      console.log(`  ✓ ${name}`)
-      passed++
-    })
-    .catch((e) => {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${e instanceof Error ? e.message : e}`)
-      failed++
-    })
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected)
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-}
 
 const BASE_STATE: Omit<HealthState, 'ready'> = {
   port: 51110,
@@ -116,234 +92,222 @@ async function nonLoopbackAddress(): Promise<string | null> {
   return null
 }
 
-async function main(): Promise<void> {
-  console.log('\n/health identity + loopback gating\n')
+test('503 while not ready, and leaks nothing', async () => {
+  const srv = await startHealthServer({ ready: false })
+  try {
+    const { status, body } = await getHealth(srv.port)
+    expect(status, 'not-ready status').toBe(503)
+    expect(body.ok, 'ok=false').toBe(false)
+    expect(body.dbPath, 'no dbPath before ready').toBeUndefined()
+    expect(body.root, 'no root before ready').toBeUndefined()
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('503 while not ready, and leaks nothing', async () => {
-    const srv = await startHealthServer({ ready: false })
-    try {
-      const { status, body } = await getHealth(srv.port)
-      assertEq(status, 503, 'not-ready status')
-      assertEq(body.ok, false, 'ok=false')
-      assertEq(body.dbPath, undefined, 'no dbPath before ready')
-      assertEq(body.root, undefined, 'no root before ready')
-    } finally {
-      await srv.close()
-    }
-  })
+test('loopback caller gets the full identity set', async () => {
+  const srv = await startHealthServer()
+  try {
+    const { status, body } = await getHealth(srv.port)
+    expect(status, 'ok status').toBe(200)
+    expect(body.ok, 'ok=true').toBe(true)
+    // Discovery keys off these — `slay hub ls` cannot render a row without them.
+    expect(body.name, 'name').toBe('test-hub')
+    expect(body.root, 'root').toBe('/tmp/slz-test-root')
+    expect(body.pid, 'pid').toBe(4321)
+    expect('mode' in body, 'SLAYZONE_MODE is gone: /health no longer reports a mode').toBeFalsy()
+    expect(body.supervised, 'supervised').toBe(false)
+    expect(body.computersConnected, 'computersConnected resolved from the getter').toBe(2)
+    expect(body.dbPath, 'dbPath').toBe(BASE_STATE.dbPath)
+    expect(body.port, 'port').toBe(51110)
+    expect(typeof body.uptimeMs, 'uptimeMs').toBe('number')
+    expect(body.uptimeMs, 'uptimeMs').toBeGreaterThanOrEqual(5_000)
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('loopback caller gets the full identity set', async () => {
-    const srv = await startHealthServer()
-    try {
-      const { status, body } = await getHealth(srv.port)
-      assertEq(status, 200, 'ok status')
-      assertEq(body.ok, true, 'ok=true')
-      // Discovery keys off these — `slay hub ls` cannot render a row without them.
-      assertEq(body.name, 'test-hub', 'name')
-      assertEq(body.root, '/tmp/slz-test-root', 'root')
-      assertEq(body.pid, 4321, 'pid')
-      assert(!('mode' in body), 'SLAYZONE_MODE is gone: /health no longer reports a mode')
-      assertEq(body.supervised, false, 'supervised')
-      assertEq(body.computersConnected, 2, 'computersConnected resolved from the getter')
-      assertEq(body.dbPath, BASE_STATE.dbPath, 'dbPath')
-      assertEq(body.port, 51110, 'port')
-      assert(typeof body.uptimeMs === 'number' && body.uptimeMs >= 5_000, 'uptimeMs')
-    } finally {
-      await srv.close()
-    }
-  })
+test('computersConnected reflects the live gateway, not a boot snapshot', async () => {
+  let count = 0
+  const srv = await startHealthServer({ computersConnected: () => count })
+  try {
+    expect((await getHealth(srv.port)).body.computersConnected, 'starts at 0').toBe(0)
+    count = 3
+    expect((await getHealth(srv.port)).body.computersConnected, 'follows the getter').toBe(3)
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('computersConnected reflects the live gateway, not a boot snapshot', async () => {
-    let count = 0
-    const srv = await startHealthServer({ computersConnected: () => count })
-    try {
-      assertEq((await getHealth(srv.port)).body.computersConnected, 0, 'starts at 0')
-      count = 3
-      assertEq((await getHealth(srv.port)).body.computersConnected, 3, 'follows the getter')
-    } finally {
-      await srv.close()
-    }
-  })
+test('supervised=true is reported (hub ls tags it, hub stop refuses it)', async () => {
+  const srv = await startHealthServer({ supervised: true })
+  try {
+    expect((await getHealth(srv.port)).body.supervised, 'supervised').toBe(true)
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('supervised=true is reported (hub ls tags it, hub stop refuses it)', async () => {
-    const srv = await startHealthServer({ supervised: true })
-    try {
-      assertEq((await getHealth(srv.port)).body.supervised, true, 'supervised')
-    } finally {
-      await srv.close()
-    }
-  })
+test('non-loopback caller is denied every path/process field', async () => {
+  const external = await nonLoopbackAddress()
+  if (!external) {
+    console.log('    (skipped — host has no non-loopback IPv4)')
+    return
+  }
+  const srv = await startHealthServer({}, '0.0.0.0')
+  try {
+    const { status, body } = await getHealth(srv.port, external)
+    expect(status, 'still 200 — liveness is public').toBe(200)
+    expect(body.ok, 'ok=true').toBe(true)
+    // Public: liveness + build identity, nothing that describes the host.
+    expect(body.port, 'port stays public').toBe(51110)
+    expect(typeof body.uptimeMs, 'uptimeMs stays public').toBe('number')
+    expect('buildId' in body, 'buildId stays public').toBeTruthy()
+    // Withheld: absolute paths + pid. dbPath is the pre-existing leak.
+    expect(body.dbPath, 'dbPath withheld').toBeUndefined()
+    expect(body.root, 'root withheld').toBeUndefined()
+    expect(body.pid, 'pid withheld').toBeUndefined()
+    expect(body.name, 'name withheld').toBeUndefined()
+    expect(body.computersConnected, 'computersConnected withheld').toBeUndefined()
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('non-loopback caller is denied every path/process field', async () => {
-    const external = await nonLoopbackAddress()
-    if (!external) {
-      console.log('    (skipped — host has no non-loopback IPv4)')
-      return
-    }
-    const srv = await startHealthServer({}, '0.0.0.0')
-    try {
-      const { status, body } = await getHealth(srv.port, external)
-      assertEq(status, 200, 'still 200 — liveness is public')
-      assertEq(body.ok, true, 'ok=true')
-      // Public: liveness + build identity, nothing that describes the host.
-      assertEq(body.port, 51110, 'port stays public')
-      assert(typeof body.uptimeMs === 'number', 'uptimeMs stays public')
-      assert('buildId' in body, 'buildId stays public')
-      // Withheld: absolute paths + pid. dbPath is the pre-existing leak.
-      assertEq(body.dbPath, undefined, 'dbPath withheld')
-      assertEq(body.root, undefined, 'root withheld')
-      assertEq(body.pid, undefined, 'pid withheld')
-      assertEq(body.name, undefined, 'name withheld')
-      assertEq(body.computersConnected, undefined, 'computersConnected withheld')
-    } finally {
-      await srv.close()
-    }
-  })
-
-  // A reverse proxy on this machine delivers every remote request from a loopback
-  // socket. On a hub other machines reach, a loopback peer that carries the headers a
-  // proxy adds is therefore NOT a local caller.
-  await test('reachable hub: a loopback peer with proxy headers gets no host fields', async () => {
-    const srv = await startHealthServer({ reachable: true })
-    try {
-      const proxied: Array<Record<string, string>> = [
-        { 'X-Forwarded-For': '203.0.113.9' },
-        { Forwarded: 'for=203.0.113.9;proto=https' },
-        { 'X-Real-IP': '203.0.113.9' },
-        { Via: '1.1 front-end' }
-      ]
-      for (const headers of proxied) {
-        const { status, body } = await getHealth(srv.port, '127.0.0.1', headers)
-        const which = Object.keys(headers)[0]
-        assertEq(status, 200, `${which}: liveness is still public`)
-        assertEq(body.ok, true, `${which}: ok=true`)
-        assertEq(body.authRequired, false, `${which}: authRequired stays public`)
-        assert('switches' in body, `${which}: switches stay public`)
-        for (const field of ['name', 'root', 'dbPath', 'pid', 'supervised', 'computersConnected']) {
-          assert(!(field in body), `${which}: ${field} withheld from a forwarded request`)
-        }
+// A reverse proxy on this machine delivers every remote request from a loopback
+// socket. On a hub other machines reach, a loopback peer that carries the headers a
+// proxy adds is therefore NOT a local caller.
+test('reachable hub: a loopback peer with proxy headers gets no host fields', async () => {
+  const srv = await startHealthServer({ reachable: true })
+  try {
+    const proxied: Array<Record<string, string>> = [
+      { 'X-Forwarded-For': '203.0.113.9' },
+      { Forwarded: 'for=203.0.113.9;proto=https' },
+      { 'X-Real-IP': '203.0.113.9' },
+      { Via: '1.1 front-end' }
+    ]
+    for (const headers of proxied) {
+      const { status, body } = await getHealth(srv.port, '127.0.0.1', headers)
+      const which = Object.keys(headers)[0]
+      expect(status, `${which}: liveness is still public`).toBe(200)
+      expect(body.ok, `${which}: ok=true`).toBe(true)
+      expect(body.authRequired, `${which}: authRequired stays public`).toBe(false)
+      expect('switches' in body, `${which}: switches stay public`).toBeTruthy()
+      for (const field of ['name', 'root', 'dbPath', 'pid', 'supervised', 'computersConnected']) {
+        expect(field in body, `${which}: ${field} withheld from a forwarded request`).toBeFalsy()
       }
-    } finally {
-      await srv.close()
     }
-  })
+  } finally {
+    await srv.close()
+  }
+})
 
-  // `slay hub ls/stop/restart/users add` find a hub by these fields, so a reachable
-  // hub must keep serving them to a direct local caller.
-  await test('reachable hub: a direct loopback caller (no proxy headers) still gets them', async () => {
-    const srv = await startHealthServer({ reachable: true })
-    try {
-      const { body } = await getHealth(srv.port)
-      assertEq(body.name, 'test-hub', 'name')
-      assertEq(body.root, '/tmp/slz-test-root', 'root')
-      assertEq(body.pid, 4321, 'pid')
-      assertEq(body.computersConnected, 2, 'computersConnected')
-    } finally {
-      await srv.close()
-    }
-  })
+// `slay hub ls/stop/restart/users add` find a hub by these fields, so a reachable
+// hub must keep serving them to a direct local caller.
+test('reachable hub: a direct loopback caller (no proxy headers) still gets them', async () => {
+  const srv = await startHealthServer({ reachable: true })
+  try {
+    const { body } = await getHealth(srv.port)
+    expect(body.name, 'name').toBe('test-hub')
+    expect(body.root, 'root').toBe('/tmp/slz-test-root')
+    expect(body.pid, 'pid').toBe(4321)
+    expect(body.computersConnected, 'computersConnected').toBe(2)
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('hub only this machine reaches: proxy headers do not hide the fields', async () => {
-    // Nobody but this machine can connect, so there is no remote caller to hide from.
-    const srv = await startHealthServer({ reachable: false })
-    try {
-      const { body } = await getHealth(srv.port, '127.0.0.1', { 'X-Forwarded-For': '10.0.0.1' })
-      assertEq(body.name, 'test-hub', 'name still served')
-      assertEq(body.pid, 4321, 'pid still served')
-    } finally {
-      await srv.close()
-    }
-  })
+test('hub only this machine reaches: proxy headers do not hide the fields', async () => {
+  // Nobody but this machine can connect, so there is no remote caller to hide from.
+  const srv = await startHealthServer({ reachable: false })
+  try {
+    const { body } = await getHealth(srv.port, '127.0.0.1', { 'X-Forwarded-For': '10.0.0.1' })
+    expect(body.name, 'name still served').toBe('test-hub')
+    expect(body.pid, 'pid still served').toBe(4321)
+  } finally {
+    await srv.close()
+  }
+})
 
-  // The desktop client decides whether to OFFER a sign-in from this bit, and it
-  // has to do so before it holds a token — so it must survive the loopback gate
-  // (an off-box hub is exactly the one that gates).
-  await test('authRequired is public — served to loopback and non-loopback alike', async () => {
-    const srv = await startHealthServer({ authRequired: true })
-    try {
-      assertEq((await getHealth(srv.port)).body.authRequired, true, 'loopback sees it')
-    } finally {
-      await srv.close()
-    }
-    const external = await nonLoopbackAddress()
-    if (!external) {
-      console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
-      return
-    }
-    const wide = await startHealthServer({ authRequired: true }, '0.0.0.0')
-    try {
-      assertEq(
-        (await getHealth(wide.port, external)).body.authRequired,
-        true,
-        'off-box caller sees it too'
-      )
-    } finally {
-      await wide.close()
-    }
-  })
+// The desktop client decides whether to OFFER a sign-in from this bit, and it
+// has to do so before it holds a token — so it must survive the loopback gate
+// (an off-box hub is exactly the one that gates).
+test('authRequired is public — served to loopback and non-loopback alike', async () => {
+  const srv = await startHealthServer({ authRequired: true })
+  try {
+    expect((await getHealth(srv.port)).body.authRequired, 'loopback sees it').toBe(true)
+  } finally {
+    await srv.close()
+  }
+  const external = await nonLoopbackAddress()
+  if (!external) {
+    console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
+    return
+  }
+  const wide = await startHealthServer({ authRequired: true }, '0.0.0.0')
+  try {
+    expect(
+      (await getHealth(wide.port, external)).body.authRequired,
+      'off-box caller sees it too'
+    ).toBe(true)
+  } finally {
+    await wide.close()
+  }
+})
 
-  // O1: every switch is reported, to any caller — a client needs to know what the
-  // hub offers (password? SSO?) before it has signed in. Booleans only.
-  await test('every switch is reported, to loopback and non-loopback callers alike', async () => {
-    const switches = {
-      requireLogin: true,
-      enablePassword: false,
-      enableSso: true,
-      enableProcesses: false,
-      enableIntegrations: false
-    }
-    const srv = await startHealthServer({ authRequired: true, switches })
-    try {
-      const body = (await getHealth(srv.port)).body
-      assertEq(
-        JSON.stringify(body.switches),
-        JSON.stringify(switches),
-        'loopback sees the switches'
-      )
-      assert(!JSON.stringify(body).includes('ecret'), 'no secret anywhere in the payload')
-    } finally {
-      await srv.close()
-    }
-    const external = await nonLoopbackAddress()
-    if (!external) {
-      console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
-      return
-    }
-    const wide = await startHealthServer({ authRequired: true, switches }, '0.0.0.0')
-    try {
-      assertEq(
-        JSON.stringify((await getHealth(wide.port, external)).body.switches),
-        JSON.stringify(switches),
-        'off-box caller sees them too'
-      )
-    } finally {
-      await wide.close()
-    }
-  })
+// O1: every switch is reported, to any caller — a client needs to know what the
+// hub offers (password? SSO?) before it has signed in. Booleans only.
+test('every switch is reported, to loopback and non-loopback callers alike', async () => {
+  const switches = {
+    requireLogin: true,
+    enablePassword: false,
+    enableSso: true,
+    enableProcesses: false,
+    enableIntegrations: false
+  }
+  const srv = await startHealthServer({ authRequired: true, switches })
+  try {
+    const body = (await getHealth(srv.port)).body
+    expect(JSON.stringify(body.switches), 'loopback sees the switches').toBe(
+      JSON.stringify(switches)
+    )
+    expect(JSON.stringify(body), 'no secret anywhere in the payload').not.toContain('ecret')
+  } finally {
+    await srv.close()
+  }
+  const external = await nonLoopbackAddress()
+  if (!external) {
+    console.log('    (non-loopback leg skipped — host has no non-loopback IPv4)')
+    return
+  }
+  const wide = await startHealthServer({ authRequired: true, switches }, '0.0.0.0')
+  try {
+    expect(
+      JSON.stringify((await getHealth(wide.port, external)).body.switches),
+      'off-box caller sees them too'
+    ).toBe(JSON.stringify(switches))
+  } finally {
+    await wide.close()
+  }
+})
 
-  await test('authRequired=false on a non-gating hub (no sign-in offered)', async () => {
-    const srv = await startHealthServer()
-    try {
-      assertEq((await getHealth(srv.port)).body.authRequired, false, 'authRequired=false')
-    } finally {
-      await srv.close()
-    }
-  })
+test('authRequired=false on a non-gating hub (no sign-in offered)', async () => {
+  const srv = await startHealthServer()
+  try {
+    expect((await getHealth(srv.port)).body.authRequired, 'authRequired=false').toBe(false)
+  } finally {
+    await srv.close()
+  }
+})
 
-  await test('non-GET and other paths are not health requests', async () => {
-    const srv = await startHealthServer()
-    try {
-      const post = await fetch(`http://127.0.0.1:${srv.port}/health`, { method: 'POST' })
-      assertEq(post.status, 404, 'POST /health falls through')
-      const other = await fetch(`http://127.0.0.1:${srv.port}/nope`)
-      assertEq(other.status, 404, 'other path falls through')
-    } finally {
-      await srv.close()
-    }
-  })
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+test('non-GET and other paths are not health requests', async () => {
+  const srv = await startHealthServer()
+  try {
+    const post = await fetch(`http://127.0.0.1:${srv.port}/health`, { method: 'POST' })
+    expect(post.status, 'POST /health falls through').toBe(404)
+    const other = await fetch(`http://127.0.0.1:${srv.port}/nope`)
+    expect(other.status, 'other path falls through').toBe(404)
+  } finally {
+    await srv.close()
+  }
+})

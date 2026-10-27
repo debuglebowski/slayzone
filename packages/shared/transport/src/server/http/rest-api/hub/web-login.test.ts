@@ -13,8 +13,8 @@
  * helper — that helper discards response headers, and `Set-Cookie` is the one
  * thing this route's contract actually depends on.
  */
+import { describe, expect, test } from 'vitest'
 import express from 'express'
-import { test, expect, describe } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerWebLoginRoute } from './web-login.js'
 import type { RestApiDeps } from '../types.js'
@@ -32,7 +32,7 @@ function mount(webLogin: RestApiDeps['webLogin']) {
   return mountRestApp(app)
 }
 
-await describe('POST /api/auth/web-login', () => {
+describe('POST /api/auth/web-login', () => {
   test("a successful login sets the hub's cookie and returns NO token in the body (T-13)", async () => {
     const cookie =
       'slayzone_web_session=szw_test-token; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=604800'

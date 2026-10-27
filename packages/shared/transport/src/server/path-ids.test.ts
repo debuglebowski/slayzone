@@ -17,8 +17,8 @@
  * directory, and the blob store cannot name a path outside `blobs/`.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/shared/transport/src/server/path-ids.test.ts
  */
 import crypto from 'node:crypto'
@@ -36,7 +36,8 @@ import {
   type ArtifactDownloadHost
 } from '@slayzone/task/server'
 import { BlobStore } from '@slayzone/task-artifacts/server'
-import { createTestHarness, describe, expect, test } from '../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../test-utils/rest-harness.js'
 import { appRouter } from './router.js'
 import { setAuthGate, setTaskDeps } from './app-deps.js'
@@ -45,6 +46,7 @@ import { registerArchiveManyTaskTool } from './http/mcp-tools/archive-many-task.
 import type { RestApiDeps } from './http/rest-api/types.js'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 setTaskDeps({ ops: taskOps })
 
 // <root>/storage is the hub's data dir; <root> holds one file of its own.
@@ -173,7 +175,7 @@ for (const [label, principal] of [
   ['hub without login (the desktop app)', null],
   ['hub with login (a signed-in user)', { userId: 'user-7', role: 'user', scopes: ['full'] }]
 ] as const) {
-  await describe(`${label}: bad ids are refused, nothing on disk changes`, () => {
+  describe(`${label}: bad ids are refused, nothing on disk changes`, () => {
     test('setup', () => {
       setAuthGate(() => principal !== null)
       lines.length = 0
@@ -220,7 +222,7 @@ for (const [label, principal] of [
   })
 }
 
-await describe('valid ids still work', () => {
+describe('valid ids still work', () => {
   test('setup', () => setAuthGate(() => false))
 
   test('artifacts.create writes under artifacts/<taskId>/', async () => {
@@ -257,7 +259,7 @@ await describe('valid ids still work', () => {
   })
 })
 
-await describe('REST and MCP archive-many', () => {
+describe('REST and MCP archive-many', () => {
   const app = express()
   app.use(express.json())
   registerArchiveManyTaskRoute(app, {
@@ -305,7 +307,7 @@ await describe('REST and MCP archive-many', () => {
   })
 })
 
-await describe('names that are not ids stay inside their base too', () => {
+describe('names that are not ids stay inside their base too', () => {
   test('a folder download refuses a title that climbs out of the chosen dir', async () => {
     const store = createArtifactStore(dataRoot)
     const dest = path.join(h.tmpDir(), 'dest')

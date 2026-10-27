@@ -4,13 +4,14 @@
  * IPC-handler test (domains/projects/src/electron/handlers.test.ts): CRUD, column
  * reindex + status remap, linear state-mapping reconciliation, reorder, and the
  * task_automation_config CRUD + stale-reference cleanup.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { projectsRouter } from './projects.js'
 
 const h = await createTestHarness()

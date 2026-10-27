@@ -1,13 +1,9 @@
 /**
  * CLI tasks extensions tests — tags, due dates, templates
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/tasks-ext.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/tasks-ext.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProject } from '../src/db-helpers.mjs'
 import {
@@ -17,6 +13,7 @@ import {
 } from '../src/commands/task-json.ts'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 const projectId = crypto.randomUUID()
@@ -67,7 +64,7 @@ function createTask(title: string, extra: Record<string, unknown> = {}) {
 
 // --- TAG SUBCOMMAND ---
 
-await describe('tasks tag --set', () => {
+describe('tasks tag --set', () => {
   test('replaces all tags', () => {
     const taskId = createTask('TagSetTest')
     // Set to bug + feat
@@ -90,7 +87,7 @@ await describe('tasks tag --set', () => {
   })
 })
 
-await describe('tasks tag --add', () => {
+describe('tasks tag --add', () => {
   test('adds a tag', () => {
     const taskId = createTask('TagAddTest')
     h.db
@@ -118,7 +115,7 @@ await describe('tasks tag --add', () => {
   })
 })
 
-await describe('tasks tag --remove', () => {
+describe('tasks tag --remove', () => {
   test('removes a tag', () => {
     const taskId = createTask('TagRemoveTest')
     h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(taskId, bugTagId)
@@ -132,7 +129,7 @@ await describe('tasks tag --remove', () => {
   })
 })
 
-await describe('tasks tag --clear', () => {
+describe('tasks tag --clear', () => {
   test('removes all tags', () => {
     const taskId = createTask('TagClearTest')
     h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(taskId, bugTagId)
@@ -145,7 +142,7 @@ await describe('tasks tag --clear', () => {
   })
 })
 
-await describe('tasks tag read-only', () => {
+describe('tasks tag read-only', () => {
   test('shows current tags', () => {
     const taskId = createTask('TagReadTest')
     h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(taskId, bugTagId)
@@ -163,7 +160,7 @@ await describe('tasks tag read-only', () => {
   })
 })
 
-await describe('tasks tag — unknown tag name', () => {
+describe('tasks tag — unknown tag name', () => {
   test('tag name lookup fails for nonexistent tag', () => {
     const tags = db.query<{ id: string }>(
       `SELECT id FROM tags WHERE project_id = :pid AND LOWER(name) = LOWER(:name)`,
@@ -175,7 +172,7 @@ await describe('tasks tag — unknown tag name', () => {
 
 // --- DUE DATE ---
 
-await describe('tasks create --due', () => {
+describe('tasks create --due', () => {
   test('stores due_date', () => {
     const id = createTask('DueTest', { due_date: '2026-12-31' })
     const row = h.db.prepare('SELECT due_date FROM tasks WHERE id = ?').get(id) as {
@@ -193,7 +190,7 @@ await describe('tasks create --due', () => {
   })
 })
 
-await describe('tasks update --due / --no-due', () => {
+describe('tasks update --due / --no-due', () => {
   test('--due sets date', () => {
     const id = createTask('UpdateDue')
     h.db
@@ -219,7 +216,7 @@ await describe('tasks update --due / --no-due', () => {
 
 // --- TEMPLATE ---
 
-await describe('tasks create --template', () => {
+describe('tasks create --template', () => {
   test('template defaults apply', () => {
     const tplId = crypto.randomUUID()
     h.db
@@ -285,7 +282,7 @@ await describe('tasks create --template', () => {
 
 // --- VIEW includes due_date + tags ---
 
-await describe('tasks view output', () => {
+describe('tasks view output', () => {
   test('view query includes due_date and tags', () => {
     const taskId = createTask('ViewTest', { due_date: '2026-03-15' })
     h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(taskId, bugTagId)
@@ -310,7 +307,7 @@ await describe('tasks view output', () => {
 
 // --- LIST --json includes tags ---
 
-await describe('tasks list --json tag augmentation', () => {
+describe('tasks list --json tag augmentation', () => {
   test('batch tag lookup works', () => {
     const t1 = createTask('List1')
     const t2 = createTask('List2')
@@ -336,7 +333,7 @@ await describe('tasks list --json tag augmentation', () => {
 
 // --- LIST --json contract (issue #78) ---
 
-await describe('tasks list --json public contract', () => {
+describe('tasks list --json public contract', () => {
   test('serializer exposes description, status, and core fields', () => {
     const taskId = createTask('WithDesc', { status: 'in_progress' })
     h.db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run('body text', taskId)
@@ -390,6 +387,3 @@ await describe('tasks list --json public contract', () => {
     }
   })
 })
-
-h.cleanup()
-console.log('\nDone')

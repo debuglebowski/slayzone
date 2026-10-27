@@ -1,46 +1,12 @@
 /**
  * Tests for session-registry merge logic.
- * Run with: pnpm dlx tsx packages/domains/terminal/src/main/session-registry.test.ts
  *
  * Tests the pure `mergeSessions` helper. The IPC-facing `listSessions` /
  * `getSessionState` are thin wrappers around it + electron-bound modules,
  * exercised end-to-end via manual reload verification.
  */
+import { expect, test } from 'vitest'
 import { mergeSessions } from '../session-merge'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: unknown) {
-      const a = JSON.stringify(actual)
-      const b = JSON.stringify(expected)
-      if (a !== b) throw new Error(`Expected ${b}, got ${a}`)
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
-
-console.log('\nSessionRegistry tests\n')
 
 test('mergeSessions: tags PTY entries with kind:"pty"', () => {
   const out = mergeSessions({
@@ -102,6 +68,3 @@ test('mergeSessions: preserves all chat states unchanged', () => {
     expect(out[0].state).toBe(s)
   }
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

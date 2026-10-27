@@ -1,3 +1,4 @@
+import { expect, test } from 'vitest'
 import {
   decideConversationHeal,
   type HealInput,
@@ -5,24 +6,19 @@ import {
 } from './conversation-heal'
 import { parseSqliteUtc } from './types'
 
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    console.error('FAIL:', msg)
-    process.exit(1)
-  }
-}
-
 // ---- parseSqliteUtc (timezone correctness) -------------------------------
-assert(
-  parseSqliteUtc('2026-06-04 06:57:50') === Date.parse('2026-06-04T06:57:50Z'),
-  'SQLite space-form parsed as UTC'
-)
-assert(
-  parseSqliteUtc('2026-06-04T06:57:50.869Z') === Date.parse('2026-06-04T06:57:50.869Z'),
-  'ISO-Z preserved'
-)
-assert(Number.isNaN(parseSqliteUtc(null)), 'null → NaN')
-assert(Number.isNaN(parseSqliteUtc('')), 'empty → NaN')
+test('SQLite space-form parsed as UTC', () => {
+  expect(parseSqliteUtc('2026-06-04 06:57:50')).toBe(Date.parse('2026-06-04T06:57:50Z'))
+})
+test('ISO-Z preserved', () => {
+  expect(parseSqliteUtc('2026-06-04T06:57:50.869Z')).toBe(Date.parse('2026-06-04T06:57:50.869Z'))
+})
+test('null → NaN', () => {
+  expect(parseSqliteUtc(null)).toBeNaN()
+})
+test('empty → NaN', () => {
+  expect(parseSqliteUtc('')).toBeNaN()
+})
 
 // ---- decideConversationHeal ---------------------------------------------
 const T0 = Date.parse('2026-06-03T21:22:20Z') // task creation
@@ -61,22 +57,24 @@ const id = (i: HealInput): string | undefined => {
 }
 
 // keep: healthy pointers are never touched
-assert(act(base({ storedExists: true })) === 'keep', 'stored transcript exists → keep')
-assert(act(base({ storedId: null })) === 'keep', 'no stored id → keep (nothing to resume)')
+test('stored transcript exists → keep', () => {
+  expect(act(base({ storedExists: true }))).toBe('keep')
+})
+test('no stored id → keep (nothing to resume)', () => {
+  expect(act(base({ storedId: null }))).toBe('keep')
+})
 
 // PROOF-OF-LIFE: transcript-on-disk is the ONLY evidence a stored id is
 // resumable. `storedInHistory` alone is NOT proof — a zero-turn session (or one
 // whose transcript was pruned) is in history but has no `.jsonl` to resume, so
 // `claude --resume` fails forever. When history-membership is the only signal
 // and the transcript is gone, heal must NOT keep the phantom.
-assert(
-  act(base({ storedInHistory: true, storedExists: true })) === 'keep',
-  'in history AND transcript exists → keep'
-)
-assert(
-  act(base({ storedInHistory: true, storedExists: false })) === 'overlay',
-  'in history but transcript MISSING → overlay (phantom, not resumable)'
-)
+test('in history AND transcript exists → keep', () => {
+  expect(act(base({ storedInHistory: true, storedExists: true }))).toBe('keep')
+})
+test('in history but transcript MISSING → overlay (phantom, not resumable)', () => {
+  expect(act(base({ storedInHistory: true, storedExists: false }))).toBe('overlay')
+})
 // …and if a surviving history entry exists, repoint to it rather than keep the
 // phantom (the stored id itself must be skipped, per rule 2).
 const phantomWithFallback = base({
@@ -87,15 +85,14 @@ const phantomWithFallback = base({
     { id: 'survivor', exists: true }
   ]
 })
-assert(
-  act(phantomWithFallback) === 'history' && id(phantomWithFallback) === 'survivor',
-  'phantom-in-history with a surviving sibling → repoint to survivor'
-)
+test('phantom-in-history with a surviving sibling → repoint to survivor', () => {
+  expect(act(phantomWithFallback)).toBe('history')
+  expect(id(phantomWithFallback)).toBe('survivor')
+})
 // even with a perfect orphan candidate, a healthy stored id wins
-assert(
-  act(base({ storedExists: true, candidates: [cand({})] })) === 'keep',
-  'healthy stored id beats any candidate'
-)
+test('healthy stored id beats any candidate', () => {
+  expect(act(base({ storedExists: true, candidates: [cand({})] }))).toBe('keep')
+})
 
 // history: exact fallback to a surviving recorded id
 const hInput = base({
@@ -104,7 +101,10 @@ const hInput = base({
     { id: 'old2', exists: true }
   ]
 })
-assert(act(hInput) === 'history' && id(hInput) === 'old2', 'falls back to surviving history entry')
+test('falls back to surviving history entry', () => {
+  expect(act(hInput)).toBe('history')
+  expect(id(hInput)).toBe('old2')
+})
 // most-recent-first selection
 const hInput2 = base({
   history: [
@@ -112,79 +112,85 @@ const hInput2 = base({
     { id: 'b', exists: true }
   ]
 })
-assert(id(hInput2) === 'b', 'history picks most-recent surviving')
+test('history picks most-recent surviving', () => {
+  expect(id(hInput2)).toBe('b')
+})
 // history is preferred over orphan
 const hInput3 = base({ history: [{ id: 'h', exists: true }], candidates: [cand({})] })
-assert(act(hInput3) === 'history', 'history preferred over orphan disk-guess')
+test('history preferred over orphan disk-guess', () => {
+  expect(act(hInput3)).toBe('history')
+})
 // a history entry equal to the (broken) stored id is skipped
 const hInput4 = base({ history: [{ id: 'phantom', exists: true }] })
-assert(act(hInput4) === 'overlay', 'history entry == stored phantom is ignored')
+test('history entry == stored phantom is ignored', () => {
+  expect(act(hInput4)).toBe('overlay')
+})
 
 // orphan: the single near-certain case
-assert(act(base({ candidates: [cand({})] })) === 'orphan', 'sole in-window orphan → orphan')
-assert(id(base({ candidates: [cand({ id: 'real' })] })) === 'real', 'orphan returns the matched id')
+test('sole in-window orphan → orphan', () => {
+  expect(act(base({ candidates: [cand({})] }))).toBe('orphan')
+})
+test('orphan returns the matched id', () => {
+  expect(id(base({ candidates: [cand({ id: 'real' })] }))).toBe('real')
+})
 
 // non-legacy tasks never disk-guess
-assert(
-  act(
-    base({
-      task: { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false },
-      candidates: [cand({})]
-    })
-  ) === 'overlay',
-  'non-legacy task never uses orphan path'
-)
+test('non-legacy task never uses orphan path', () => {
+  expect(
+    act(
+      base({
+        task: { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false },
+        candidates: [cand({})]
+      })
+    )
+  ).toBe('overlay')
+})
 
 // MISATTRIBUTION GUARDS — every one must be overlay
-assert(act(base({ candidates: [cand({ cwd: '/other' })] })) === 'overlay', 'wrong cwd → overlay')
-assert(
-  act(base({ candidates: [cand({ id: 'a' }), cand({ id: 'b' })] })) === 'overlay',
-  'two candidates in dir+window → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ referenced: true })] })) === 'overlay',
-  'referenced orphan → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ firstTsMs: T0 - 1 })] })) === 'overlay',
-  'started before task creation → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ firstTsMs: T0 + WINDOW + 1 })] })) === 'overlay',
-  'started after window → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ gitBranch: 'feature' })] })) === 'overlay',
-  'branch mismatch → overlay'
-)
-assert(
-  act(
-    base({
-      task: { cwd: '/repo', gitBranch: null, createdAtMs: T0, isLegacy: true },
-      candidates: [cand({ gitBranch: null })]
-    })
-  ) === 'overlay',
-  'unknown task branch → overlay (never guess across branches)'
-)
-assert(
-  act(base({ candidates: [cand({ gitBranch: null })] })) === 'overlay',
-  'candidate branch unknown → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ hasHumanTurn: false })] })) === 'overlay',
-  'sidechain-only orphan → overlay'
-)
-assert(
-  act(base({ candidates: [cand({ firstTsMs: null })] })) === 'overlay',
-  'no timestamp → overlay'
-)
+test('wrong cwd → overlay', () => {
+  expect(act(base({ candidates: [cand({ cwd: '/other' })] }))).toBe('overlay')
+})
+test('two candidates in dir+window → overlay', () => {
+  expect(act(base({ candidates: [cand({ id: 'a' }), cand({ id: 'b' })] }))).toBe('overlay')
+})
+test('referenced orphan → overlay', () => {
+  expect(act(base({ candidates: [cand({ referenced: true })] }))).toBe('overlay')
+})
+test('started before task creation → overlay', () => {
+  expect(act(base({ candidates: [cand({ firstTsMs: T0 - 1 })] }))).toBe('overlay')
+})
+test('started after window → overlay', () => {
+  expect(act(base({ candidates: [cand({ firstTsMs: T0 + WINDOW + 1 })] }))).toBe('overlay')
+})
+test('branch mismatch → overlay', () => {
+  expect(act(base({ candidates: [cand({ gitBranch: 'feature' })] }))).toBe('overlay')
+})
+test('unknown task branch → overlay (never guess across branches)', () => {
+  expect(
+    act(
+      base({
+        task: { cwd: '/repo', gitBranch: null, createdAtMs: T0, isLegacy: true },
+        candidates: [cand({ gitBranch: null })]
+      })
+    )
+  ).toBe('overlay')
+})
+test('candidate branch unknown → overlay', () => {
+  expect(act(base({ candidates: [cand({ gitBranch: null })] }))).toBe('overlay')
+})
+test('sidechain-only orphan → overlay', () => {
+  expect(act(base({ candidates: [cand({ hasHumanTurn: false })] }))).toBe('overlay')
+})
+test('no timestamp → overlay', () => {
+  expect(act(base({ candidates: [cand({ firstTsMs: null })] }))).toBe('overlay')
+})
 
 // a second referenced conversation in the same dir+window still blocks (ambiguous)
-assert(
-  act(base({ candidates: [cand({ id: 'mine' }), cand({ id: 'neighbor', referenced: true })] })) ===
-    'overlay',
-  'a referenced sibling in dir+window → ambiguous → overlay'
-)
+test('a referenced sibling in dir+window → ambiguous → overlay', () => {
+  expect(
+    act(base({ candidates: [cand({ id: 'mine' }), cand({ id: 'neighbor', referenced: true })] }))
+  ).toBe('overlay')
+})
 
 // NEVER-WRITTEN: Claude writes `<id>.jsonl` at the first prompt, and prunes it
 // only once its mtime is older than `cleanupPeriodDays`. So a missing transcript
@@ -194,34 +200,36 @@ assert(
 // spawned, never prompted, every reopen showed the overlay).
 const young = { storedFirstSeenAtMs: NOW - 60 * 60 * 1000, retentionMs: 90 * DAY }
 const nonLegacy = { cwd: '/repo', gitBranch: 'main', createdAtMs: T0, isLegacy: false }
-assert(act(base(young)) === 'fresh', 'young id, no transcript, nothing on disk → fresh')
-assert(
-  act(base({ ...young, task: nonLegacy })) === 'fresh',
-  'non-legacy task: young never-written id → fresh'
-)
-assert(
-  act(base({ ...young, storedFirstSeenAtMs: NOW - 91 * DAY })) === 'overlay',
-  'older than retention → may have been pruned → overlay'
-)
-assert(
-  act(base({ ...young, storedFirstSeenAtMs: NOW - 90 * DAY })) === 'overlay',
-  'exactly one retention period old → overlay (boundary is conservative)'
-)
-assert(
-  act(base({ ...young, storedFirstSeenAtMs: null })) === 'overlay',
-  'first-seen unknown → overlay'
-)
-assert(act(base({ ...young, retentionMs: null })) === 'overlay', 'retention unknown → overlay')
-assert(act(base({ ...young, retentionMs: 0 })) === 'overlay', 'retention 0 → overlay')
-assert(act(base({ ...young, storedExists: true })) === 'keep', 'young AND on disk → keep')
-assert(
-  act(base({ ...young, history: [{ id: 'survivor', exists: true }] })) === 'history',
-  'a surviving sibling beats fresh'
-)
-assert(act(base({ ...young, candidates: [cand({})] })) === 'orphan', 'a legacy orphan beats fresh')
-assert(
-  act(base({ ...young, candidates: [cand({ id: 'a' }), cand({ id: 'b' })] })) === 'fresh',
-  'ambiguous orphans are never attached; young id still → fresh'
-)
-
-console.log('conversation-heal: all passed')
+test('young id, no transcript, nothing on disk → fresh', () => {
+  expect(act(base(young))).toBe('fresh')
+})
+test('non-legacy task: young never-written id → fresh', () => {
+  expect(act(base({ ...young, task: nonLegacy }))).toBe('fresh')
+})
+test('older than retention → may have been pruned → overlay', () => {
+  expect(act(base({ ...young, storedFirstSeenAtMs: NOW - 91 * DAY }))).toBe('overlay')
+})
+test('exactly one retention period old → overlay (boundary is conservative)', () => {
+  expect(act(base({ ...young, storedFirstSeenAtMs: NOW - 90 * DAY }))).toBe('overlay')
+})
+test('first-seen unknown → overlay', () => {
+  expect(act(base({ ...young, storedFirstSeenAtMs: null }))).toBe('overlay')
+})
+test('retention unknown → overlay', () => {
+  expect(act(base({ ...young, retentionMs: null }))).toBe('overlay')
+})
+test('retention 0 → overlay', () => {
+  expect(act(base({ ...young, retentionMs: 0 }))).toBe('overlay')
+})
+test('young AND on disk → keep', () => {
+  expect(act(base({ ...young, storedExists: true }))).toBe('keep')
+})
+test('a surviving sibling beats fresh', () => {
+  expect(act(base({ ...young, history: [{ id: 'survivor', exists: true }] }))).toBe('history')
+})
+test('a legacy orphan beats fresh', () => {
+  expect(act(base({ ...young, candidates: [cand({})] }))).toBe('orphan')
+})
+test('ambiguous orphans are never attached; young id still → fresh', () => {
+  expect(act(base({ ...young, candidates: [cand({ id: 'a' }), cand({ id: 'b' })] }))).toBe('fresh')
+})

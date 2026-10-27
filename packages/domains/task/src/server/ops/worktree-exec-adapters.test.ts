@@ -8,13 +8,14 @@
  *     → task still linked, copy/setup skipped
  *   - cleanupTaskFull shared-worktree guard: removal skipped while another live
  *     task references the same worktree; batchIds unblocks it
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import {
   cleanupTaskFull,
   configureTaskRuntimeAdapters,

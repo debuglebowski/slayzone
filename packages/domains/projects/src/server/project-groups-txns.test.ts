@@ -2,12 +2,10 @@
  * Project-group ordering txn tests — pure better-sqlite3, no electron.
  * Exercises the shared top-level sort_order space (ungrouped projects + groups)
  * and within-group ordering directly against the worker-safe named txns.
- *
- * Run with: npx tsx packages/domains/projects/src/main/project-groups-txns.test.ts
  */
 import Database from 'better-sqlite3'
 import path from 'node:path'
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { beforeAll, describe, expect, test } from 'vitest'
 import { projectsTxns } from './projects-txns.js'
 
 // projectsTxns entries are typed with `params: never` (satisfies guard) — cast
@@ -52,11 +50,14 @@ const gOrder = (db: Database.Database, id: string): number =>
     }
   ).sort_order
 
-await describe('project-groups: create', async () => {
-  const db = await freshDb()
-  addProject(db, 'a', 0)
-  addProject(db, 'b', 1)
-  addProject(db, 'c', 2)
+describe('project-groups: create', () => {
+  let db: Database.Database
+  beforeAll(async () => {
+    db = await freshDb()
+    addProject(db, 'a', 0)
+    addProject(db, 'b', 1)
+    addProject(db, 'c', 2)
+  })
 
   test('appends group after the last top-level slot', () => {
     txn['project-groups:create'](db, { id: 'g1', name: 'Work', createdAt: 'now', updatedAt: 'now' })
@@ -64,12 +65,15 @@ await describe('project-groups: create', async () => {
   })
 })
 
-await describe('project-groups: moveProject in/out + within', async () => {
-  const db = await freshDb()
-  addProject(db, 'a', 0)
-  addProject(db, 'b', 1)
-  addProject(db, 'c', 2)
-  txn['project-groups:create'](db, { id: 'g1', name: '', createdAt: 'now', updatedAt: 'now' }) // g1 @ 3
+describe('project-groups: moveProject in/out + within', () => {
+  let db: Database.Database
+  beforeAll(async () => {
+    db = await freshDb()
+    addProject(db, 'a', 0)
+    addProject(db, 'b', 1)
+    addProject(db, 'c', 2)
+    txn['project-groups:create'](db, { id: 'g1', name: '', createdAt: 'now', updatedAt: 'now' }) // g1 @ 3
+  })
 
   test('move A into G1 → A grouped @0; top-level re-packs (B,C,G1 → 0,1,2)', () => {
     txn['project-groups:moveProject'](db, { projectId: 'a', groupId: 'g1', targetIndex: 0 })
@@ -116,11 +120,14 @@ await describe('project-groups: moveProject in/out + within', async () => {
   })
 })
 
-await describe('project-groups: createWith (Discord drag-onto)', async () => {
-  const db = await freshDb()
-  addProject(db, 'a', 0)
-  addProject(db, 'b', 1)
-  addProject(db, 'c', 2)
+describe('project-groups: createWith (Discord drag-onto)', () => {
+  let db: Database.Database
+  beforeAll(async () => {
+    db = await freshDb()
+    addProject(db, 'a', 0)
+    addProject(db, 'b', 1)
+    addProject(db, 'c', 2)
+  })
 
   test('folder takes target slot; members [b,a]; c re-packs', () => {
     // drop A onto B → folder [B, A] at B's slot
@@ -142,11 +149,14 @@ await describe('project-groups: createWith (Discord drag-onto)', async () => {
   })
 })
 
-await describe('project-groups: reorderTopLevel interleaves projects + groups', async () => {
-  const db = await freshDb()
-  addProject(db, 'a', 0)
-  addProject(db, 'b', 1)
-  txn['project-groups:create'](db, { id: 'g1', name: '', createdAt: 'now', updatedAt: 'now' }) // @2
+describe('project-groups: reorderTopLevel interleaves projects + groups', () => {
+  let db: Database.Database
+  beforeAll(async () => {
+    db = await freshDb()
+    addProject(db, 'a', 0)
+    addProject(db, 'b', 1)
+    txn['project-groups:create'](db, { id: 'g1', name: '', createdAt: 'now', updatedAt: 'now' }) // @2
+  })
 
   test('explicit interleaved order is written verbatim', () => {
     txn['project-groups:reorderTopLevel'](db, {

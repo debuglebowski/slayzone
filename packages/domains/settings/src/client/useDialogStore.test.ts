@@ -1,7 +1,7 @@
 /**
  * Dialog store unit tests
- * Run with: npx tsx packages/domains/settings/src/client/useDialogStore.test.ts
  */
+import { beforeEach, expect, test } from 'vitest'
 
 import { useDialogStore } from './useDialogStore.js'
 
@@ -11,42 +11,27 @@ function reset() {
   store.setState(store.getInitialState())
 }
 
-function assert(condition: boolean, msg: string) {
-  if (!condition) throw new Error(`FAIL: ${msg}`)
-}
-
-function test(name: string, fn: () => void) {
-  reset()
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-  } catch (e) {
-    console.error(`  ✗ ${name}: ${(e as Error).message}`)
-    process.exitCode = 1
-  }
-}
-
-console.log('useDialogStore')
+beforeEach(reset)
 
 test('starts with all dialogs closed', () => {
   const s = store.getState()
-  assert(!s.createTaskOpen, 'createTaskOpen')
-  assert(!s.editingTask, 'editingTask')
-  assert(!s.deletingTask, 'deletingTask')
-  assert(!s.createProjectOpen, 'createProjectOpen')
-  assert(!s.deletingProject, 'deletingProject')
-  assert(!s.onboardingOpen, 'onboardingOpen')
-  assert(!s.changelogOpen, 'changelogOpen')
-  assert(!s.searchOpen, 'searchOpen')
-  assert(!s.completeTaskDialogOpen, 'completeTaskDialogOpen')
-  assert(!s.showAnimatedTour, 'showAnimatedTour')
+  expect(s.createTaskOpen, 'createTaskOpen').toBeFalsy()
+  expect(s.editingTask, 'editingTask').toBeFalsy()
+  expect(s.deletingTask, 'deletingTask').toBeFalsy()
+  expect(s.createProjectOpen, 'createProjectOpen').toBeFalsy()
+  expect(s.deletingProject, 'deletingProject').toBeFalsy()
+  expect(s.onboardingOpen, 'onboardingOpen').toBeFalsy()
+  expect(s.changelogOpen, 'changelogOpen').toBeFalsy()
+  expect(s.searchOpen, 'searchOpen').toBeFalsy()
+  expect(s.completeTaskDialogOpen, 'completeTaskDialogOpen').toBeFalsy()
+  expect(s.showAnimatedTour, 'showAnimatedTour').toBeFalsy()
 })
 
 test('openCreateTask with no defaults', () => {
   store.getState().openCreateTask()
   const s = store.getState()
-  assert(s.createTaskOpen, 'open')
-  assert(Object.keys(s.createTaskDraft).length === 0, 'draft empty')
+  expect(s.createTaskOpen, 'open').toBeTruthy()
+  expect(Object.keys(s.createTaskDraft).length, 'draft empty').toBe(0)
 })
 
 test('openCreateTask with draft', () => {
@@ -58,56 +43,56 @@ test('openCreateTask with draft', () => {
     priority: 2
   })
   const s = store.getState()
-  assert(s.createTaskOpen, 'open')
-  assert(s.createTaskDraft.projectId === 'project-1', 'projectId')
-  assert(s.createTaskDraft.title === 'Link: Docs', 'title')
-  assert(s.createTaskDraft.description === 'https://example.com/docs', 'description')
-  assert(s.createTaskDraft.status === 'todo', 'status')
-  assert(s.createTaskDraft.priority === 2, 'priority')
+  expect(s.createTaskOpen, 'open').toBeTruthy()
+  expect(s.createTaskDraft.projectId, 'projectId').toBe('project-1')
+  expect(s.createTaskDraft.title, 'title').toBe('Link: Docs')
+  expect(s.createTaskDraft.description, 'description').toBe('https://example.com/docs')
+  expect(s.createTaskDraft.status, 'status').toBe('todo')
+  expect(s.createTaskDraft.priority, 'priority').toBe(2)
 })
 
 test('closeCreateTask resets draft', () => {
   store.getState().openCreateTask({ priority: 3 })
   store.getState().closeCreateTask()
   const s = store.getState()
-  assert(!s.createTaskOpen, 'closed')
-  assert(Object.keys(s.createTaskDraft).length === 0, 'draft reset')
+  expect(s.createTaskOpen, 'closed').toBeFalsy()
+  expect(Object.keys(s.createTaskDraft).length, 'draft reset').toBe(0)
 })
 
 test('openEditTask sets task payload', () => {
   const task = { id: '1', title: 'test' } as never
   store.getState().openEditTask(task)
-  assert(store.getState().editingTask?.id === '1', 'task set')
+  expect(store.getState().editingTask?.id, 'task set').toBe('1')
 })
 
 test('closeEditTask clears payload', () => {
   store.getState().openEditTask({ id: '1' } as never)
   store.getState().closeEditTask()
-  assert(!store.getState().editingTask, 'cleared')
+  expect(store.getState().editingTask, 'cleared').toBeFalsy()
 })
 
 test('openDeleteTask sets task payload', () => {
   const task = { id: '2', title: 'del' } as never
   store.getState().openDeleteTask(task)
-  assert(store.getState().deletingTask?.id === '2', 'task set')
+  expect(store.getState().deletingTask?.id, 'task set').toBe('2')
 })
 
 test('closeDeleteTask clears payload', () => {
   store.getState().openDeleteTask({ id: '2' } as never)
   store.getState().closeDeleteTask()
-  assert(!store.getState().deletingTask, 'cleared')
+  expect(store.getState().deletingTask, 'cleared').toBeFalsy()
 })
 
 test('openDeleteProject sets project payload', () => {
   const project = { id: 'p1', name: 'proj' } as never
   store.getState().openDeleteProject(project)
-  assert(store.getState().deletingProject?.id === 'p1', 'project set')
+  expect(store.getState().deletingProject?.id, 'project set').toBe('p1')
 })
 
 test('closeDeleteProject clears payload', () => {
   store.getState().openDeleteProject({ id: 'p1' } as never)
   store.getState().closeDeleteProject()
-  assert(!store.getState().deletingProject, 'cleared')
+  expect(store.getState().deletingProject, 'cleared').toBeFalsy()
 })
 
 test('boolean dialogs toggle independently', () => {
@@ -115,40 +100,38 @@ test('boolean dialogs toggle independently', () => {
   store.getState().openChangelog()
   store.getState().openOnboarding()
   const s = store.getState()
-  assert(s.searchOpen, 'search')
-  assert(s.changelogOpen, 'changelog')
-  assert(s.onboardingOpen, 'onboarding')
-  assert(!s.completeTaskDialogOpen, 'completeTask still closed')
-  assert(!s.showAnimatedTour, 'tour still closed')
+  expect(s.searchOpen, 'search').toBeTruthy()
+  expect(s.changelogOpen, 'changelog').toBeTruthy()
+  expect(s.onboardingOpen, 'onboarding').toBeTruthy()
+  expect(s.completeTaskDialogOpen, 'completeTask still closed').toBeFalsy()
+  expect(s.showAnimatedTour, 'tour still closed').toBeFalsy()
 })
 
 test('closing one dialog does not affect others', () => {
   store.getState().openSearch()
   store.getState().openChangelog()
   store.getState().closeSearch()
-  assert(!store.getState().searchOpen, 'search closed')
-  assert(store.getState().changelogOpen, 'changelog still open')
+  expect(store.getState().searchOpen, 'search closed').toBeFalsy()
+  expect(store.getState().changelogOpen, 'changelog still open').toBeTruthy()
 })
 
 test('createProject open/close', () => {
   store.getState().openCreateProject()
-  assert(store.getState().createProjectOpen, 'open')
+  expect(store.getState().createProjectOpen, 'open').toBeTruthy()
   store.getState().closeCreateProject()
-  assert(!store.getState().createProjectOpen, 'closed')
+  expect(store.getState().createProjectOpen, 'closed').toBeFalsy()
 })
 
 test('completeTaskDialog open/close', () => {
   store.getState().openCompleteTaskDialog()
-  assert(store.getState().completeTaskDialogOpen, 'open')
+  expect(store.getState().completeTaskDialogOpen, 'open').toBeTruthy()
   store.getState().closeCompleteTaskDialog()
-  assert(!store.getState().completeTaskDialogOpen, 'closed')
+  expect(store.getState().completeTaskDialogOpen, 'closed').toBeFalsy()
 })
 
 test('animatedTour open/close', () => {
   store.getState().openAnimatedTour()
-  assert(store.getState().showAnimatedTour, 'open')
+  expect(store.getState().showAnimatedTour, 'open').toBeTruthy()
   store.getState().closeAnimatedTour()
-  assert(!store.getState().showAnimatedTour, 'closed')
+  expect(store.getState().showAnimatedTour, 'closed').toBeFalsy()
 })
-
-console.log('Done')

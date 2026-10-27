@@ -3,10 +3,8 @@
  * AVAILABILITY (a working OS keychain), not the former
  * SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS env flag: encrypt when a cipher works,
  * fall back to plaintext when none exists (headless standalone hub).
- *
- * Run with: npx tsx packages/domains/integrations/src/server/credentials.test.ts
  */
-import assert from 'node:assert/strict'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   type CredentialCipher,
   readCredential,
@@ -85,74 +83,58 @@ function fakeCipher(available: boolean, key = 'k1'): CredentialCipher {
   }
 }
 
-let passed = 0
-let failed = 0
-async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    passed++
-    console.log(`  ✓ ${name}`)
-  } catch (error) {
-    failed++
-    console.error(`  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
 const prevNodeEnv = process.env.NODE_ENV
 
-async function main(): Promise<void> {
-  console.log('\ncredentials fallback (cipher-availability gated)')
-
+describe('credentials fallback (cipher-availability gated)', () => {
   // Force the non-test branch so availability — not NODE_ENV=test — is the gate.
-  process.env.NODE_ENV = 'development'
+  beforeAll(() => {
+    process.env.NODE_ENV = 'development'
+  })
 
-  await runTest('encrypts when a working cipher is available', async () => {
+  afterAll(() => {
+    setCredentialCipher(null)
+    if (prevNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = prevNodeEnv
+  })
+
+  test('encrypts when a working cipher is available', async () => {
     setCredentialCipher(fakeCipher(true))
     const ref = `cred-${crypto.randomUUID()}`
     await storeCredential(db as never, ref, 'secret-enc')
-    assert.equal(await readCredential(db as never, ref), 'secret-enc')
+    expect(await readCredential(db as never, ref)).toBe('secret-enc')
   })
 
-  await runTest('falls back to plaintext when NO cipher is wired (headless hub)', async () => {
+  test('falls back to plaintext when NO cipher is wired (headless hub)', async () => {
     setCredentialCipher(null)
     const ref = `cred-${crypto.randomUUID()}`
     await storeCredential(db as never, ref, 'secret-plain')
-    assert.equal(await readCredential(db as never, ref), 'secret-plain')
+    expect(await readCredential(db as never, ref)).toBe('secret-plain')
   })
 
-  await runTest('falls back to plaintext when cipher reports unavailable', async () => {
+  test('falls back to plaintext when cipher reports unavailable', async () => {
     setCredentialCipher(fakeCipher(false))
     const ref = `cred-${crypto.randomUUID()}`
     await storeCredential(db as never, ref, 'secret-unavail')
-    assert.equal(await readCredential(db as never, ref), 'secret-unavail')
+    expect(await readCredential(db as never, ref)).toBe('secret-unavail')
   })
 
-  await runTest('reading a plaintext cred is blocked once a working cipher exists', async () => {
+  test('reading a plaintext cred is blocked once a working cipher exists', async () => {
     setCredentialCipher(null)
     const ref = `cred-${crypto.randomUUID()}`
     await storeCredential(db as never, ref, 'secret-later-blocked')
     // A working cipher now exists → the stored plaintext is no longer trusted.
     setCredentialCipher(fakeCipher(true))
-    await assert.rejects(() => readCredential(db as never, ref))
+    await expect(readCredential(db as never, ref)).rejects.toThrow()
   })
 
-  await runTest('re-encrypts + persists when the keychain key rotated', async () => {
+  test('re-encrypts + persists when the keychain key rotated', async () => {
     setCredentialCipher(fakeCipher(true, 'k1'))
     const ref = `cred-${crypto.randomUUID()}`
     await storeCredential(db as never, ref, 'secret:rot')
     setCredentialCipher(fakeCipher(true, 'k2'))
-    assert.equal(await readCredential(db as never, ref), 'secret:rot')
+    expect(await readCredential(db as never, ref)).toBe('secret:rot')
     const stored = Buffer.from(db.raw(`integration:credential:${ref}`)!, 'base64').toString()
-    assert.equal(stored, 'enc:k2:secret:rot')
-    assert.equal(await readCredential(db as never, ref), 'secret:rot')
+    expect(stored).toBe('enc:k2:secret:rot')
+    expect(await readCredential(db as never, ref)).toBe('secret:rot')
   })
-
-  setCredentialCipher(null)
-  if (prevNodeEnv === undefined) delete process.env.NODE_ENV
-  else process.env.NODE_ENV = prevNodeEnv
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-await main()
+})

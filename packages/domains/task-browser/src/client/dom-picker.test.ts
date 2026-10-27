@@ -1,36 +1,8 @@
 /**
  * Tests for DOM picker snippet formatting
- * Run with: npx tsx packages/domains/task-browser/src/client/dom-picker.test.ts
  */
+import { expect, test } from 'vitest'
 import { buildDomElementSnippet } from './dom-picker'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect(actual: string) {
-  return {
-    toContain(expected: string) {
-      if (!actual.includes(expected))
-        throw new Error(`Expected "${actual}" to contain "${expected}"`)
-    },
-    notToContain(expected: string) {
-      if (actual.includes(expected))
-        throw new Error(`Expected "${actual}" not to contain "${expected}"`)
-    }
-  }
-}
 
 test('uses first selector candidate', () => {
   const snippet = buildDomElementSnippet({
@@ -82,8 +54,5 @@ test('appends optional note', () => {
     note: 'Selection came from iframe boundary'
   })
   expect(snippet).toContain('[Selection came from iframe boundary]')
-  expect(snippet).notToContain('text="')
+  expect(snippet).not.toContain('text="')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

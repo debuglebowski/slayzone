@@ -1,7 +1,7 @@
 /**
  * Tests for chat-timeline reducer (correlation + pairing + in-flight).
- * Run with: pnpm dlx tsx packages/domains/terminal/src/client/chat-timeline.test.ts
  */
+import { expect, test } from 'vitest'
 import type { AgentEvent } from '../shared/agent-events'
 import {
   initialState,
@@ -10,33 +10,6 @@ import {
   isAwaitingUserQuestion,
   deriveLoadingLabel
 } from './chat-timeline'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 const ev = {
   turnInit: (sessionId = 'sid-1'): AgentEvent => ({
@@ -85,8 +58,6 @@ const ev = {
     permissionDenials: []
   })
 }
-
-console.log('\nChat timeline reducer tests\n')
 
 test('agent-plan: first update appends a plan card', () => {
   let s = initialState()
@@ -1646,6 +1617,3 @@ test('spawn-token: replay determinism across spawn-token boundary', () => {
   expect(s.bgShells.has('shell-a')).toBe(false)
   expect(s.currentSpawnId).toBe('sp-new')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

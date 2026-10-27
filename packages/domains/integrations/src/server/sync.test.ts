@@ -1,66 +1,61 @@
 /**
  * Auth-error classifier contract tests
- * Run with: npx tsx packages/domains/integrations/src/main/sync.test.ts
  */
-import assert from 'node:assert/strict'
+import { describe, expect, test } from 'vitest'
 import { isAuthError } from './sync-classifiers.js'
 
-// Linear shape — see linear-client.ts:135
-assert.equal(
-  isAuthError(new Error('Linear API request failed: HTTP 401 - {"errors":[{"message":"..."}]}')),
-  true,
-  'Linear 401 should classify as auth'
-)
-assert.equal(
-  isAuthError(new Error('Linear API request failed: HTTP 403 - forbidden')),
-  true,
-  'Linear 403 should classify as auth'
-)
+describe('isAuthError', () => {
+  // Linear shape — see linear-client.ts:135
+  test('Linear 401 should classify as auth', () => {
+    expect(
+      isAuthError(new Error('Linear API request failed: HTTP 401 - {"errors":[{"message":"..."}]}'))
+    ).toBe(true)
+  })
+  test('Linear 403 should classify as auth', () => {
+    expect(isAuthError(new Error('Linear API request failed: HTTP 403 - forbidden'))).toBe(true)
+  })
 
-// GitHub shape — see github-client.ts:177
-assert.equal(
-  isAuthError(new Error('GitHub API request failed: HTTP 401 - Bad credentials')),
-  true,
-  'GitHub 401 should classify as auth'
-)
+  // GitHub shape — see github-client.ts:177
+  test('GitHub 401 should classify as auth', () => {
+    expect(isAuthError(new Error('GitHub API request failed: HTTP 401 - Bad credentials'))).toBe(
+      true
+    )
+  })
 
-// Jira shape
-assert.equal(
-  isAuthError(new Error('Jira API request failed: HTTP 401 - unauthorized')),
-  true,
-  'Jira 401 should classify as auth'
-)
+  // Jira shape
+  test('Jira 401 should classify as auth', () => {
+    expect(isAuthError(new Error('Jira API request failed: HTTP 401 - unauthorized'))).toBe(true)
+  })
 
-// Non-auth HTTP errors
-assert.equal(
-  isAuthError(new Error('Linear API request failed: HTTP 500 - server error')),
-  false,
-  '500 should NOT classify as auth'
-)
-assert.equal(
-  isAuthError(new Error('Linear API request failed: HTTP 404 - not found')),
-  false,
-  '404 should NOT classify as auth'
-)
+  // Non-auth HTTP errors
+  test('500 should NOT classify as auth', () => {
+    expect(isAuthError(new Error('Linear API request failed: HTTP 500 - server error'))).toBe(false)
+  })
+  test('404 should NOT classify as auth', () => {
+    expect(isAuthError(new Error('Linear API request failed: HTTP 404 - not found'))).toBe(false)
+  })
 
-// Network errors
-assert.equal(isAuthError(new Error('fetch failed')), false, 'fetch failed is network, not auth')
-assert.equal(
-  isAuthError(new Error('ENOTFOUND api.linear.app')),
-  false,
-  'ENOTFOUND is network, not auth'
-)
+  // Network errors
+  test('fetch failed is network, not auth', () => {
+    expect(isAuthError(new Error('fetch failed'))).toBe(false)
+  })
+  test('ENOTFOUND is network, not auth', () => {
+    expect(isAuthError(new Error('ENOTFOUND api.linear.app'))).toBe(false)
+  })
 
-// Non-Error inputs
-assert.equal(isAuthError('HTTP 401'), false, 'string input must be Error')
-assert.equal(isAuthError(null), false, 'null input must be Error')
-assert.equal(isAuthError(undefined), false, 'undefined input must be Error')
+  // Non-Error inputs
+  test('string input must be Error', () => {
+    expect(isAuthError('HTTP 401')).toBe(false)
+  })
+  test('null input must be Error', () => {
+    expect(isAuthError(null)).toBe(false)
+  })
+  test('undefined input must be Error', () => {
+    expect(isAuthError(undefined)).toBe(false)
+  })
 
-// Word-boundary safety — don't match e.g. "HTTP 4011"
-assert.equal(
-  isAuthError(new Error('Linear API request failed: HTTP 4011 - bogus')),
-  false,
-  'HTTP 4011 should not match (word boundary)'
-)
-
-console.log('✓ sync.test.ts — isAuthError contract OK')
+  // Word-boundary safety — don't match e.g. "HTTP 4011"
+  test('HTTP 4011 should not match (word boundary)', () => {
+    expect(isAuthError(new Error('Linear API request failed: HTTP 4011 - bogus'))).toBe(false)
+  })
+})

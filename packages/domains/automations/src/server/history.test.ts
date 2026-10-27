@@ -1,13 +1,8 @@
 /**
  * Automation history integration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ../../../../shared/test-utils/loader.ts src/server/history.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine } from './engine.js'
 import { taskEvents } from '@slayzone/task/server'
 
@@ -65,7 +60,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-await describe('automation history', () => {
+/**
+ * Waits for the automation's latest run to leave `running` (the engine executes it
+ * asynchronously off the task event). A fixed sleep raced the shell spawn when this
+ * file runs alongside other suites; the deadline keeps a stuck run a failure.
+ */
+async function settledRun(automationId: string): Promise<void> {
+  const deadline = Date.now() + 10_000
+  for (;;) {
+    const row = h.db
+      .prepare(
+        'SELECT status FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1'
+      )
+      .get(automationId) as { status: string } | undefined
+    if ((row && row.status !== 'running') || Date.now() > deadline) return
+    await sleep(25)
+  }
+}
+
+describe('automation history', () => {
   test('successful run records action steps and a task timeline event', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -75,7 +88,7 @@ await describe('automation history', () => {
     const automationId = createAutomation('printf success')
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await sleep(200)
+    await settledRun(automationId)
 
     const run = h.db
       .prepare(
@@ -115,7 +128,7 @@ await describe('automation history', () => {
     const automationId = createAutomation(longOutputCommand)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await sleep(200)
+    await settledRun(automationId)
 
     const run = h.db
       .prepare(
@@ -128,14 +141,15 @@ await describe('automation history', () => {
       .prepare('SELECT status, error, output_tail FROM automation_action_runs WHERE run_id = ?')
       .get(run.id) as { status: string; error: string | null; output_tail: string | null }
     expect(actionRun.status).toBe('error')
-    expect(Boolean(actionRun.error)).toBe(true)
-    expect((actionRun.output_tail ?? '').length <= 4000).toBe(true)
-    expect((actionRun.output_tail ?? '').endsWith('boom')).toBe(true)
+    expect(actionRun.error).toBeTruthy()
+    expect((actionRun.output_tail ?? '').length).toBeLessThanOrEqual(4000)
+    expect(actionRun.output_tail ?? '').toMatch(/boom$/)
 
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
   })
 })
 
-engine.stop()
-h.cleanup()
-process.exit(process.exitCode ?? 0)
+afterAll(() => {
+  engine.stop()
+  h.cleanup()
+})

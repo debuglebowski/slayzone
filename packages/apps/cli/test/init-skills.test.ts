@@ -4,18 +4,15 @@
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProjectByPath } from '../src/db-helpers.mjs'
 import { BUILTIN_SKILLS, PROVIDER_PATHS } from '../../../domains/ai-config/src/shared/index.js'
 import { createHash } from 'node:crypto'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 // ---------------------------------------------------------------------------
@@ -272,6 +269,3 @@ describe('init skills — file writing', () => {
     )
   })
 })
-
-h.cleanup()
-console.log('\nDone')

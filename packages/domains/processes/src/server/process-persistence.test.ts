@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { beforeAll, describe, expect, test } from 'vitest'
 import {
   initProcessManagerWith,
   createProcess,
@@ -12,12 +13,8 @@ import type { PersistedProcess, ProcessPersistence, ProcessRow } from './process
 import { setProcessBackend } from './process-backend'
 import type { ProcessBackend, ProcHandle } from './process-backend'
 
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    console.error('FAIL:', msg)
-    process.exit(1)
-  }
-}
+// One sequential scenario against the process manager's module state; vitest runs
+// tests in declaration order, so later tests read the state earlier ones produced.
 
 // Fake persistence: records every call so the create→update→kill lifecycle
 // can be asserted without a DB. loadAll seeds one pre-existing row to cover
@@ -115,155 +112,208 @@ const reapTestBackend: ProcessBackend = {
   }
 }
 
-async function main(): Promise<void> {
+describe('process manager lifecycle over the persistence seam', () => {
   // --- loadAll hydration on init ---
-  await initProcessManagerWith(fake)
-  const seeded = listAllProcesses().find((p) => p.id === 'seed-1')
-  assert(seeded !== undefined, 'init hydrates processes from loadAll')
-  assert(seeded!.taskId === 'task-9', 'hydration maps task_id → taskId')
-  assert(seeded!.projectId === 'proj-9', 'hydration maps project_id → projectId')
-  assert(seeded!.label === 'seeded', 'hydration keeps label')
-  assert(seeded!.command === 'echo seeded', 'hydration keeps command')
-  assert(seeded!.cwd === '/tmp', 'hydration keeps cwd')
-  assert(seeded!.autoRestart === true, 'hydration maps auto_restart=1 → true')
-  assert(seeded!.status === 'stopped', 'hydrated processes start stopped')
-  assert(seeded!.pid === null, 'hydrated processes have no pid')
-  assert(
-    listAllProcesses().find((p) => p.id === 'seed-match')?.pid === 4242,
-    'hydration carries a leftover pid through from a previous, uncleanly-terminated run'
-  )
+  describe('loadAll hydration on init', () => {
+    const seeded = (): ReturnType<typeof listAllProcesses>[number] | undefined =>
+      listAllProcesses().find((p) => p.id === 'seed-1')
+
+    beforeAll(async () => {
+      await initProcessManagerWith(fake)
+    })
+
+    test('init hydrates processes from loadAll', () => {
+      expect(seeded()).not.toBeUndefined()
+    })
+    test('hydration maps task_id → taskId', () => {
+      expect(seeded()!.taskId).toBe('task-9')
+    })
+    test('hydration maps project_id → projectId', () => {
+      expect(seeded()!.projectId).toBe('proj-9')
+    })
+    test('hydration keeps label', () => {
+      expect(seeded()!.label).toBe('seeded')
+    })
+    test('hydration keeps command', () => {
+      expect(seeded()!.command).toBe('echo seeded')
+    })
+    test('hydration keeps cwd', () => {
+      expect(seeded()!.cwd).toBe('/tmp')
+    })
+    test('hydration maps auto_restart=1 → true', () => {
+      expect(seeded()!.autoRestart).toBe(true)
+    })
+    test('hydrated processes start stopped', () => {
+      expect(seeded()!.status).toBe('stopped')
+    })
+    test('hydrated processes have no pid', () => {
+      expect(seeded()!.pid).toBe(null)
+    })
+    test('hydration carries a leftover pid through from a previous, uncleanly-terminated run', () => {
+      expect(listAllProcesses().find((p) => p.id === 'seed-match')?.pid).toBe(4242)
+    })
+  })
 
   // --- reap-on-restart: restartProcess is the real entry point a "start this
   //     again" click hits for a row reloaded at boot (see ProcessDialog.tsx —
   //     an existing process always restarts, only a brand-new one spawns) ---
-  setProcessBackend(reapTestBackend)
+  describe('reap-on-restart', () => {
+    beforeAll(() => {
+      setProcessBackend(reapTestBackend)
+    })
 
-  liveCommandByPid = { 4242: 'echo seeded2' } // matches seedMatching.command
-  assert(await restartProcess('seed-match'), 'restartProcess succeeds for a hydrated row')
-  assert(
-    reapKillCalls.some((c) => c.pid === 4242),
-    'a leftover pid whose command line still matches is reaped'
-  )
-  assert(
-    listAllProcesses().find((p) => p.id === 'seed-match')?.pid == null,
-    'reaped pid is cleared from the in-memory row'
-  )
-  assert(
-    pidUpdates.some((u) => u.id === 'seed-match' && u.pid === null),
-    'reaped pid is cleared in persistence too'
-  )
+    test('restartProcess succeeds for a hydrated row', async () => {
+      liveCommandByPid = { 4242: 'echo seeded2' } // matches seedMatching.command
+      expect(await restartProcess('seed-match')).toBe(true)
+    })
+    test('a leftover pid whose command line still matches is reaped', () => {
+      expect(reapKillCalls.map((c) => c.pid)).toContain(4242)
+    })
+    test('reaped pid is cleared from the in-memory row', () => {
+      expect(listAllProcesses().find((p) => p.id === 'seed-match')?.pid ?? null).toBe(null)
+    })
+    test('reaped pid is cleared in persistence too', () => {
+      expect(pidUpdates).toContainEqual({ id: 'seed-match', pid: null })
+    })
 
-  reapKillCalls.length = 0
-  liveCommandByPid = { 5555: 'totally-unrelated-process --flag' } // does NOT match seedMismatched.command
-  await restartProcess('seed-mismatch')
-  assert(
-    !reapKillCalls.some((c) => c.pid === 5555),
-    'a live pid that no longer matches the stored command is left running, not killed'
-  )
-  assert(
-    listAllProcesses().find((p) => p.id === 'seed-mismatch')?.pid == null,
-    'a mismatched pid is still cleared from our own bookkeeping (it is not ours to track anymore)'
-  )
+    test('a live pid that no longer matches the stored command is left running, not killed', async () => {
+      reapKillCalls.length = 0
+      liveCommandByPid = { 5555: 'totally-unrelated-process --flag' } // does NOT match seedMismatched.command
+      await restartProcess('seed-mismatch')
+      expect(reapKillCalls.map((c) => c.pid)).not.toContain(5555)
+    })
+    test('a mismatched pid is still cleared from our own bookkeeping (it is not ours to track anymore)', () => {
+      expect(listAllProcesses().find((p) => p.id === 'seed-mismatch')?.pid ?? null).toBe(null)
+    })
 
-  liveCommandByPid = {} // 6666 absent → getCommandLine resolves null → "not alive"
-  await restartProcess('seed-dead')
-  assert(reapKillCalls.length === 0, 'a pid that is no longer alive is never sent a kill')
-  assert(
-    listAllProcesses().find((p) => p.id === 'seed-dead')?.pid == null,
-    'a dead pid is cleared from the in-memory row'
-  )
+    test('a pid that is no longer alive is never sent a kill', async () => {
+      liveCommandByPid = {} // 6666 absent → getCommandLine resolves null → "not alive"
+      await restartProcess('seed-dead')
+      expect(reapKillCalls).toEqual([])
+    })
+    test('a dead pid is cleared from the in-memory row', () => {
+      expect(listAllProcesses().find((p) => p.id === 'seed-dead')?.pid ?? null).toBe(null)
+      setProcessBackend(null) // restore localProcessBackend for the rest of the suite
+    })
+  })
 
-  setProcessBackend(null) // restore localProcessBackend for the rest of the suite
+  describe('create / update / kill', () => {
+    let id = ''
 
-  // --- create → insert ---
-  const id = await createProcess('proj-a', 'task-1', 'dev server', 'echo hi', '/tmp', false)
-  assert(inserts.length === 1, 'createProcess persists exactly one insert')
-  const ins = inserts[0]
-  assert(
-    ins.id === id &&
-      ins.projectId === 'proj-a' &&
-      ins.taskId === 'task-1' &&
-      ins.label === 'dev server' &&
-      ins.command === 'echo hi' &&
-      ins.cwd === '/tmp' &&
-      ins.autoRestart === false,
-    'insert receives the full persisted process'
-  )
+    // --- create → insert ---
+    test('createProcess persists exactly one insert', async () => {
+      id = await createProcess('proj-a', 'task-1', 'dev server', 'echo hi', '/tmp', false)
+      expect(inserts).toHaveLength(1)
+    })
+    test('insert receives the full persisted process', () => {
+      expect(inserts[0]).toEqual({
+        id,
+        projectId: 'proj-a',
+        taskId: 'task-1',
+        label: 'dev server',
+        command: 'echo hi',
+        cwd: '/tmp',
+        autoRestart: false
+      })
+    })
 
-  // --- update → update (merged in-memory state, not just the patch) ---
-  assert(
-    await updateProcess(id, { label: 'renamed', autoRestart: true }),
-    'updateProcess returns true'
-  )
-  assert(updates.length === 1, 'updateProcess persists exactly one update')
-  const upd = updates[0]
-  assert(
-    upd.id === id &&
-      upd.label === 'renamed' &&
-      upd.autoRestart === true &&
-      upd.command === 'echo hi' &&
-      upd.cwd === '/tmp' &&
-      upd.projectId === 'proj-a' &&
-      upd.taskId === 'task-1',
-    'update receives merged state (patched + untouched fields)'
-  )
-  assert(!(await updateProcess('nope', { label: 'x' })), 'updateProcess unknown id returns false')
-  assert(updates.length === 1, 'unknown-id update persists nothing')
+    // --- update → update (merged in-memory state, not just the patch) ---
+    test('updateProcess returns true', async () => {
+      expect(await updateProcess(id, { label: 'renamed', autoRestart: true })).toBe(true)
+    })
+    test('updateProcess persists exactly one update', () => {
+      expect(updates).toHaveLength(1)
+    })
+    test('update receives merged state (patched + untouched fields)', () => {
+      expect(updates[0]).toMatchObject({
+        id,
+        label: 'renamed',
+        autoRestart: true,
+        command: 'echo hi',
+        cwd: '/tmp',
+        projectId: 'proj-a',
+        taskId: 'task-1'
+      })
+    })
+    test('updateProcess unknown id returns false', async () => {
+      expect(await updateProcess('nope', { label: 'x' })).toBe(false)
+    })
+    test('unknown-id update persists nothing', () => {
+      expect(updates).toHaveLength(1)
+    })
 
-  // --- a write the database refuses fails the call, never floats (T-102) ---
-  refuseWrites = new Error('FOREIGN KEY constraint failed')
-  const listed = listAllProcesses().length
-  const createErr = await createProcess('proj-a', 'gone', 'x', 'echo x', '/tmp', false).then(
-    () => null,
-    (e: unknown) => e
-  )
-  assert(createErr === refuseWrites, 'refused insert: createProcess rejects with the DB error')
-  assert(listAllProcesses().length === listed, 'refused insert: nothing registered')
-  const updateErr = await updateProcess(id, { taskId: 'gone' }).then(
-    () => null,
-    (e: unknown) => e
-  )
-  assert(updateErr === refuseWrites, 'refused update: updateProcess rejects with the DB error')
-  assert(
-    listAllProcesses().find((p) => p.id === id)?.taskId === 'task-1',
-    'refused update: the live record is unchanged'
-  )
-  refuseWrites = null
+    // --- a write the database refuses fails the call, never floats (T-102) ---
+    describe('a write the database refuses fails the call, never floats (T-102)', () => {
+      let listed = 0
+      beforeAll(() => {
+        refuseWrites = new Error('FOREIGN KEY constraint failed')
+        listed = listAllProcesses().length
+      })
 
-  // --- a patch sets only the editable fields; undefined leaves one as it is ---
-  assert(
-    await updateProcess(id, { pid: 1, logBuffer: 'x', label: undefined } as never),
-    'update with non-editable keys answers true'
-  )
-  const patched = listAllProcesses().find((p) => p.id === id)
-  assert(
-    patched?.pid === null && Array.isArray(patched.logBuffer) && patched.label === 'renamed',
-    'pid and logBuffer untouched, undefined label kept'
-  )
+      test('refused insert: createProcess rejects with the DB error', async () => {
+        const createErr = await createProcess('proj-a', 'gone', 'x', 'echo x', '/tmp', false).then(
+          () => null,
+          (e: unknown) => e
+        )
+        expect(createErr).toBe(refuseWrites)
+      })
+      test('refused insert: nothing registered', () => {
+        expect(listAllProcesses().length).toBe(listed)
+      })
+      test('refused update: updateProcess rejects with the DB error', async () => {
+        const updateErr = await updateProcess(id, { taskId: 'gone' }).then(
+          () => null,
+          (e: unknown) => e
+        )
+        expect(updateErr).toBe(refuseWrites)
+      })
+      test('refused update: the live record is unchanged', () => {
+        expect(listAllProcesses().find((p) => p.id === id)?.taskId).toBe('task-1')
+        refuseWrites = null
+      })
+    })
 
-  // --- kill → remove (after in-memory delete) ---
-  assert(killProcess(id), 'killProcess returns true')
-  assert(removes.length === 1 && removes[0].id === id, 'killProcess persists exactly one remove')
-  assert(!removes[0].stillListed, 'remove fires after processes.delete (order preserved)')
-  assert(
-    listAllProcesses().every((p) => p.id !== id),
-    'killed process gone from memory'
-  )
+    // --- a patch sets only the editable fields; undefined leaves one as it is ---
+    test('update with non-editable keys answers true', async () => {
+      expect(await updateProcess(id, { pid: 1, logBuffer: 'x', label: undefined } as never)).toBe(
+        true
+      )
+    })
+    test('pid and logBuffer untouched, undefined label kept', () => {
+      const patched = listAllProcesses().find((p) => p.id === id)
+      expect(patched?.pid).toBe(null)
+      expect(Array.isArray(patched?.logBuffer)).toBe(true)
+      expect(patched?.label).toBe('renamed')
+    })
 
-  // Hydrated (never-spawned) processes are removable too.
-  assert(killProcess('seed-1'), 'killProcess works on hydrated process')
-  assert(removes.length === 2 && removes[1].id === 'seed-1', 'hydrated kill persists remove')
+    // --- kill → remove (after in-memory delete) ---
+    test('killProcess returns true', () => {
+      expect(killProcess(id)).toBe(true)
+    })
+    test('killProcess persists exactly one remove', () => {
+      expect(removes.map((r) => r.id)).toEqual([id])
+    })
+    test('remove fires after processes.delete (order preserved)', () => {
+      expect(removes[0].stillListed).toBe(false)
+    })
+    test('killed process gone from memory', () => {
+      expect(listAllProcesses().map((p) => p.id)).not.toContain(id)
+    })
 
-  await testDbAdapter()
-
-  console.log('process-persistence seam: all passed')
-  process.exit(0)
-}
+    // Hydrated (never-spawned) processes are removable too.
+    test('killProcess works on hydrated process', () => {
+      expect(killProcess('seed-1')).toBe(true)
+    })
+    test('hydrated kill persists remove', () => {
+      expect(removes.map((r) => r.id)).toEqual([id, 'seed-1'])
+    })
+  })
+})
 
 // --- createDbProcessPersistence: SQL text + placeholder/param order ---
 // The adapter is the piece that must stay byte-compatible with the pre-seam
 // inline statements; a stub SlayzoneDb records what it would execute.
-async function testDbAdapter(): Promise<void> {
+describe('createDbProcessPersistence', () => {
   const calls: Array<{ sql: string; params: unknown[] }> = []
   const dbRows: ProcessRow[] = [
     {
@@ -303,100 +353,113 @@ async function testDbAdapter(): Promise<void> {
     cwd: '/the/cwd',
     autoRestart: true
   }
+  const squash = (sql: string): string => sql.replace(/\s+/g, ' ').trim()
 
-  assert((await persistenceOverDb.loadAll()) === dbRows, 'loadAll returns rows from SELECT')
-  assert(
-    calls[0].sql === 'SELECT * FROM processes ORDER BY created_at' && calls[0].params.length === 0,
-    'loadAll runs the exact pre-seam SELECT'
-  )
+  test('loadAll returns rows from SELECT', async () => {
+    expect(await persistenceOverDb.loadAll()).toBe(dbRows)
+  })
+  test('loadAll runs the exact pre-seam SELECT', () => {
+    expect(calls[0]).toEqual({ sql: 'SELECT * FROM processes ORDER BY created_at', params: [] })
+  })
 
-  await persistenceOverDb.insert(p)
-  assert(
-    calls[1].sql ===
-      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    'insert runs the exact pre-seam INSERT'
-  )
-  assert(
-    JSON.stringify(calls[1].params) ===
-      JSON.stringify(['the-id', 'the-project', 'the-task', 'the-label', 'the-cmd', '/the/cwd', 1]),
-    'insert binds params in column order (project_id before task_id, autoRestart→1)'
-  )
+  test('insert runs the exact pre-seam INSERT', async () => {
+    await persistenceOverDb.insert(p)
+    expect(calls[1].sql).toBe(
+      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+  })
+  test('insert binds params in column order (project_id before task_id, autoRestart→1)', () => {
+    expect(calls[1].params).toEqual([
+      'the-id',
+      'the-project',
+      'the-task',
+      'the-label',
+      'the-cmd',
+      '/the/cwd',
+      1
+    ])
+  })
 
-  await persistenceOverDb.update({ ...p, autoRestart: false })
-  assert(
-    calls[2].sql.replace(/\s+/g, ' ').trim() ===
-      'UPDATE processes SET project_id = ?, task_id = ?, label = ?, command = ?, cwd = ?, auto_restart = ? WHERE id = ?',
-    'update runs the exact pre-seam UPDATE'
-  )
-  assert(
-    JSON.stringify(calls[2].params) ===
-      JSON.stringify(['the-project', 'the-task', 'the-label', 'the-cmd', '/the/cwd', 0, 'the-id']),
-    'update binds set-list params then id last (autoRestart→0)'
-  )
+  test('update runs the exact pre-seam UPDATE', async () => {
+    await persistenceOverDb.update({ ...p, autoRestart: false })
+    expect(squash(calls[2].sql)).toBe(
+      'UPDATE processes SET project_id = ?, task_id = ?, label = ?, command = ?, cwd = ?, auto_restart = ? WHERE id = ?'
+    )
+  })
+  test('update binds set-list params then id last (autoRestart→0)', () => {
+    expect(calls[2].params).toEqual([
+      'the-project',
+      'the-task',
+      'the-label',
+      'the-cmd',
+      '/the/cwd',
+      0,
+      'the-id'
+    ])
+  })
 
-  await persistenceOverDb.remove('the-id')
-  assert(
-    calls[3].sql === 'DELETE FROM process_pids WHERE process_id = ?' &&
-      JSON.stringify(calls[3].params) === JSON.stringify(['the-id']),
-    'remove deletes pid history first (no FK cascade to rely on)'
-  )
-  assert(
-    calls[4].sql === 'DELETE FROM processes WHERE id = ?' &&
-      JSON.stringify(calls[4].params) === JSON.stringify(['the-id']),
-    'remove then runs the exact pre-seam DELETE on processes'
-  )
+  test('remove deletes pid history first (no FK cascade to rely on)', async () => {
+    await persistenceOverDb.remove('the-id')
+    expect(calls[3]).toEqual({
+      sql: 'DELETE FROM process_pids WHERE process_id = ?',
+      params: ['the-id']
+    })
+  })
+  test('remove then runs the exact pre-seam DELETE on processes', () => {
+    expect(calls[4]).toEqual({ sql: 'DELETE FROM processes WHERE id = ?', params: ['the-id'] })
+  })
 
-  await persistenceOverDb.updatePid('the-id', 4242)
-  assert(
-    calls[5].sql.replace(/\s+/g, ' ').trim() === 'UPDATE processes SET pid = ? WHERE id = ?' &&
-      JSON.stringify(calls[5].params) === JSON.stringify([4242, 'the-id']),
-    'updatePid runs a minimal UPDATE, pid then id'
-  )
-  await persistenceOverDb.updatePid('the-id', null)
-  assert(
-    JSON.stringify(calls[6].params) === JSON.stringify([null, 'the-id']),
-    'updatePid accepts null to clear the pid'
-  )
+  test('updatePid runs a minimal UPDATE, pid then id', async () => {
+    await persistenceOverDb.updatePid('the-id', 4242)
+    expect(squash(calls[5].sql)).toBe('UPDATE processes SET pid = ? WHERE id = ?')
+    expect(calls[5].params).toEqual([4242, 'the-id'])
+  })
+  test('updatePid accepts null to clear the pid', async () => {
+    await persistenceOverDb.updatePid('the-id', null)
+    expect(calls[6].params).toEqual([null, 'the-id'])
+  })
 
-  await persistenceOverDb.recordPid('the-id', 7777)
-  assert(
-    calls[7].sql === 'INSERT OR REPLACE INTO process_pids (process_id, pid) VALUES (?, ?)' &&
-      JSON.stringify(calls[7].params) === JSON.stringify(['the-id', 7777]),
-    'recordPid inserts-or-replaces a history row, never overwriting a different pid'
-  )
+  test('recordPid inserts-or-replaces a history row, never overwriting a different pid', async () => {
+    await persistenceOverDb.recordPid('the-id', 7777)
+    expect(calls[7]).toEqual({
+      sql: 'INSERT OR REPLACE INTO process_pids (process_id, pid) VALUES (?, ?)',
+      params: ['the-id', 7777]
+    })
+  })
 
-  await persistenceOverDb.listPidHistory('the-id')
-  assert(
-    calls[8].sql ===
-      'SELECT pid, spawned_at as spawnedAt FROM process_pids WHERE process_id = ? ORDER BY spawned_at' &&
-      JSON.stringify(calls[8].params) === JSON.stringify(['the-id']),
-    'listPidHistory selects every recorded pid for this row, oldest first'
-  )
+  test('listPidHistory selects every recorded pid for this row, oldest first', async () => {
+    await persistenceOverDb.listPidHistory('the-id')
+    expect(calls[8]).toEqual({
+      sql: 'SELECT pid, spawned_at as spawnedAt FROM process_pids WHERE process_id = ? ORDER BY spawned_at',
+      params: ['the-id']
+    })
+  })
 
-  await persistenceOverDb.removePidHistory('the-id', 7777)
-  assert(
-    calls[9].sql === 'DELETE FROM process_pids WHERE process_id = ? AND pid = ?' &&
-      JSON.stringify(calls[9].params) === JSON.stringify(['the-id', 7777]),
-    'removePidHistory deletes exactly the one entry, not the whole row'
-  )
+  test('removePidHistory deletes exactly the one entry, not the whole row', async () => {
+    await persistenceOverDb.removePidHistory('the-id', 7777)
+    expect(calls[9]).toEqual({
+      sql: 'DELETE FROM process_pids WHERE process_id = ? AND pid = ?',
+      params: ['the-id', 7777]
+    })
+  })
 
   // Sync-throw parity: pre-seam code called db.prepare() synchronously, so a
   // sync prepare throw (sidecar SyncSlayzoneDb on a closed connection) reached
   // the caller synchronously. The adapter must not turn it into a floating
   // rejection.
-  const throwingDb = {
-    prepare(): never {
-      throw new Error('prepare boom')
+  test('prepare() throw propagates synchronously (pre-seam parity)', () => {
+    const throwingDb = {
+      prepare(): never {
+        throw new Error('prepare boom')
+      }
+    } as unknown as SlayzoneDb
+    const throwing = createDbProcessPersistence(throwingDb)
+    let syncThrew = false
+    try {
+      void throwing.insert(p)
+    } catch {
+      syncThrew = true
     }
-  } as unknown as SlayzoneDb
-  const throwing = createDbProcessPersistence(throwingDb)
-  let syncThrew = false
-  try {
-    void throwing.insert(p)
-  } catch {
-    syncThrew = true
-  }
-  assert(syncThrew, 'prepare() throw propagates synchronously (pre-seam parity)')
-}
-
-void main()
+    expect(syncThrew).toBe(true)
+  })
+})

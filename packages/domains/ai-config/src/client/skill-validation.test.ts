@@ -1,33 +1,9 @@
 /**
  * Skill validation parser tests
- * Run with: npx tsx packages/domains/ai-config/src/client/skill-validation.test.ts
  */
+import { expect, test } from 'vitest'
 import { repairSkillFrontmatter } from '../shared'
 import { getSkillValidation } from './skill-validation'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed += 1
-  } catch (error) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${error instanceof Error ? error.message : String(error)}`)
-    failed += 1
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${String(actual)} to be ${String(expected)}`)
-    }
-  }
-}
 
 test('missing frontmatter is invalid', () => {
   const validation = getSkillValidation({
@@ -99,6 +75,3 @@ test('repairSkillFrontmatter preserves body while fixing malformed documents', (
   expect(repaired.includes('trigger: auto')).toBe(true)
   expect(repaired.includes('\nBody\n')).toBe(true)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

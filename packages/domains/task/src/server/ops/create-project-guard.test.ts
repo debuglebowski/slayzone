@@ -7,10 +7,11 @@
  * project id, no hub, and nothing to act on. The REST create path already
  * resolves the project up front (and 404s); this closes the tRPC + MCP paths,
  * which share this op.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { createTaskOp } from './create.js'
 
 const NOOP_DEPS = { ipcMain: undefined, onMutation: undefined } as never

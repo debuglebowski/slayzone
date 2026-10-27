@@ -2,6 +2,7 @@
  * Tests for StateMachine (terminal state transitions + debounce)
  * Run with: npx tsx packages/domains/terminal/src/main/state-machine.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   StateMachine,
   activityToTerminalState,
@@ -15,34 +16,6 @@ import {
 } from './state-machine'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { ActivityState } from './adapters/types'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: T) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected))
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 // Fake timers
 let pendingTimers: { id: number; fn: () => void; delay: number; scheduledAt: number }[] = []
@@ -88,7 +61,7 @@ function useRealTimers() {
 
 // --- Tests ---
 
-console.log('\nStateMachine.transition\n')
+// --- StateMachine.transition ---
 
 test('running transition is immediate', () => {
   useFakeTimers()
@@ -238,7 +211,7 @@ test('new transition replaces pending timer', () => {
   useRealTimers()
 })
 
-console.log('\nactivityToTerminalState\n')
+// --- activityToTerminalState ---
 
 test('working → running', () => {
   expect(activityToTerminalState('working')).toBe('running')
@@ -252,7 +225,7 @@ test('unknown → null', () => {
   expect(activityToTerminalState('unknown')).toBe(null)
 })
 
-console.log('\nshouldRefreshIdleClock\n')
+// --- shouldRefreshIdleClock ---
 
 test('TUI default (undefined): refresh ONLY on detected working', () => {
   expect(shouldRefreshIdleClock({}, 'working')).toBe(true)
@@ -279,7 +252,7 @@ test('TUI: explicit idle does NOT pin clock (timer fallback stays primed)', () =
   expect(shouldRefreshIdleClock({}, 'idle')).toBe(false)
 })
 
-console.log('\nshouldFlipToIdle\n')
+// --- shouldFlipToIdle ---
 
 test('flips when running and silent past timeout', () => {
   expect(shouldFlipToIdle('running', 0, 60_000, 60_000)).toBe(true)
@@ -296,7 +269,7 @@ test('does NOT flip when not running', () => {
   expect(shouldFlipToIdle('dead', 0, 100_000, 60_000)).toBe(false)
 })
 
-console.log('\nshouldFlipToRunningOnInput\n')
+// --- shouldFlipToRunningOnInput ---
 
 test('TUI default + non-empty input + not running → flip', () => {
   expect(shouldFlipToRunningOnInput({}, 'idle', 5)).toBe(true)
@@ -328,7 +301,7 @@ test('hookDriven undefined keeps TUI flip behavior (regression guard)', () => {
   expect(shouldFlipToRunningOnInput({ hookDriven: undefined }, 'idle', 5)).toBe(true)
 })
 
-console.log('\nIntegration: TUI redraw stream → idle flip\n')
+// --- Integration: TUI redraw stream → idle flip ---
 
 /**
  * Regression test for the stuck-running bug. Simulates the chain:
@@ -388,7 +361,7 @@ test('output-driven (false): redraw stream KEEPS idle clock fresh (legacy plain-
   expect(shouldFlipToIdle('running', lastOutputTime, now, idleTimeoutMs)).toBe(false)
 })
 
-console.log('\nrecordWorkingDetection (multi-chunk gate)\n')
+// --- recordWorkingDetection (multi-chunk gate) ---
 
 test('single detection does NOT promote (defeats one-shot chrome glyph)', () => {
   const r = recordWorkingDetection(undefined, 1000)
@@ -519,6 +492,3 @@ test('hibernate: exactly at the window → true', () => {
 
 const _activitySanity: ActivityState = 'working'
 void _activitySanity
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exitCode = 1

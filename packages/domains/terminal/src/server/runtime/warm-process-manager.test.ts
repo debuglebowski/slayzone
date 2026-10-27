@@ -3,8 +3,8 @@
  * Run under Electron's node (pty-manager pulls in `electron`); a fake PtyBackend is
  * injected so nothing is spawned anywhere — warm agents run on COMPUTERS, reached
  * through the backend's warm methods.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import { beforeEach, expect, test } from 'vitest'
 import { tmpdir, homedir } from 'node:os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
@@ -23,36 +23,10 @@ import {
 import { setPtyBackend, type PtyBackend } from './pty-backend'
 import { setReinstallHooks, buildBaseEnv } from './pty-manager'
 
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    __resetForTests()
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    },
-    toBeNull() {
-      if (actual !== null) throw new Error(`Expected null, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
+// The old runner reset the manager before every test.
+beforeEach(() => {
+  __resetForTests()
+})
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 // Past the manager's 150ms reconcile debounce + the async spawn tick.
@@ -176,7 +150,7 @@ function claim(
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-await test('gate 0→1 spawns one warm shell', async () => {
+test('gate 0→1 spawns one warm shell', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -184,7 +158,7 @@ await test('gate 0→1 spawns one warm shell', async () => {
   expect(spawnCount()).toBe(1)
 })
 
-await test('warm spawn pre-boots the agent + records a pooled session (B3b)', async () => {
+test('warm spawn pre-boots the agent + records a pooled session (B3b)', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -199,7 +173,7 @@ await test('warm spawn pre-boots the agent + records a pooled session (B3b)', as
   expect((pooledInsert!.params as unknown[]).includes('pooled')).toBeTruthy()
 })
 
-await test('warm agent boots with its own reserved task id — never a session id', async () => {
+test('warm agent boots with its own reserved task id — never a session id', async () => {
   // The hook env (and its ctx blob) is only built when the hub has a loopback port.
   const g = globalThis as Record<string, unknown>
   const savedPort = g.__serverPort
@@ -226,7 +200,7 @@ await test('warm agent boots with its own reserved task id — never a session i
   expect(UUID.test(agent?.sessionId ?? '')).toBe(true)
 })
 
-await test('the pooled row is recorded BEFORE the agent is asked to boot', async () => {
+test('the pooled row is recorded BEFORE the agent is asked to boot', async () => {
   // Its SessionStart hook confirms the conversation on that row; a hook that beat
   // the INSERT used to lose the confirm.
   init()
@@ -235,7 +209,7 @@ await test('the pooled row is recorded BEFORE the agent is asked to boot', async
   expect(rowsAtSpawn[0]).toBe(1)
 })
 
-await test('a failed warm spawn marks its pooled row dead and leaves no agent', async () => {
+test('a failed warm spawn marks its pooled row dead and leaves no agent', async () => {
   init()
   failNextSpawn = true
   setProjectTabCounts(1, { p1: 1 })
@@ -248,7 +222,7 @@ await test('a failed warm spawn marks its pooled row dead and leaves no agent', 
   )
 })
 
-await test('warm spawn fires the notify.sh self-heal (the clobber-bug population)', async () => {
+test('warm spawn fires the notify.sh self-heal (the clobber-bug population)', async () => {
   // A pre-warmed claude-code agent's hooks fire from warm time and it is never
   // healed at adoption (createPty skips preWarmedAgent) — so if the warm path
   // did not self-heal, this exact population (the one the clobber bug made
@@ -268,7 +242,7 @@ await test('warm spawn fires the notify.sh self-heal (the clobber-bug population
   }
 })
 
-await test('count 1→2→1 does not respawn', async () => {
+test('count 1→2→1 does not respawn', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -279,7 +253,7 @@ await test('count 1→2→1 does not respawn', async () => {
   expect(spawnCount()).toBe(1)
 })
 
-await test('count →0 kills the warm agent on its computer', async () => {
+test('count →0 kills the warm agent on its computer', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -291,7 +265,7 @@ await test('count →0 kills the warm agent on its computer', async () => {
   expect(killCalls.some((c) => c.warmId === warmId && c.computerId === 'computer-1')).toBe(true)
 })
 
-await test('multi-window union keeps warm while any window has the tab', async () => {
+test('multi-window union keeps warm while any window has the tab', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   setProjectTabCounts(2, { p1: 1 })
@@ -307,7 +281,7 @@ await test('multi-window union keeps warm while any window has the tab', async (
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('disabled flag never spawns', async () => {
+test('disabled flag never spawns', async () => {
   init()
   enabled = false
   setProjectTabCounts(1, { p1: 1 })
@@ -316,7 +290,7 @@ await test('disabled flag never spawns', async () => {
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('claim returns the computer handle, not a process (nothing to seed hub-side)', async () => {
+test('claim returns the computer handle, not a process (nothing to seed hub-side)', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -342,7 +316,7 @@ await test('claim returns the computer handle, not a process (nothing to seed hu
   expect((c as unknown as { seedBuffer?: string }).seedBuffer).toBe(undefined as unknown as string)
 })
 
-await test('never warms when no computer resolves (no ownerless billable agent)', async () => {
+test('never warms when no computer resolves (no ownerless billable agent)', async () => {
   init()
   computerId = null
   setProjectTabCounts(1, { p1: 1 })
@@ -353,7 +327,7 @@ await test('never warms when no computer resolves (no ownerless billable agent)'
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
 })
 
-await test('claim refuses a reserved agent on a DIFFERENT computer, and kills it', async () => {
+test('claim refuses a reserved agent on a DIFFERENT computer, and kills it', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -366,7 +340,7 @@ await test('claim refuses a reserved agent on a DIFFERENT computer, and kills it
   expect(unadoptedWarmAgent(taskId)).toBeNull()
 })
 
-await test('reapOrphanWarms kills computer-side warms this hub is not tracking', async () => {
+test('reapOrphanWarms kills computer-side warms this hub is not tracking', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -383,7 +357,7 @@ await test('reapOrphanWarms kills computer-side warms this hub is not tracking',
   expect(killCalls[0].warmId).toBe('warm:orphan-from-a-previous-boot')
 })
 
-await test('reserve hands the ready agent to a new task and re-arms the pool', async () => {
+test('reserve hands the ready agent to a new task and re-arms the pool', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -400,7 +374,7 @@ await test('reserve hands the ready agent to a new task and re-arms the pool', a
   expect(lastSpawn()!.env.SLAYZONE_TASK_ID === bootedAs).toBe(false)
 })
 
-await test('adopt matches: the reserved task id + claude-code + project-root cwd + fresh', async () => {
+test('adopt matches: the reserved task id + claude-code + project-root cwd + fresh', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -415,7 +389,7 @@ await test('adopt matches: the reserved task id + claude-code + project-root cwd
   expect(spawnCount()).toBe(2)
 })
 
-await test('claim by any other task never takes a reserved agent', async () => {
+test('claim by any other task never takes a reserved agent', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -425,7 +399,7 @@ await test('claim by any other task never takes a reserved agent', async () => {
   expect(killCalls.length).toBe(0)
 })
 
-await test('no reservation: a ready agent is never adopted by an existing task', async () => {
+test('no reservation: a ready agent is never adopted by an existing task', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -433,7 +407,7 @@ await test('no reservation: a ready agent is never adopted by an existing task',
   expect(getWarmStatus().p1).toBe('ready')
 })
 
-await test('reserve miss: wrong mode / other flags / project on another computer / none ready', async () => {
+test('reserve miss: wrong mode / other flags / project on another computer / none ready', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -450,7 +424,7 @@ await test('reserve miss: wrong mode / other flags / project on another computer
   expect(spawnCount()).toBe(1)
 })
 
-await test('reserve miss: pre-warm switched off', async () => {
+test('reserve miss: pre-warm switched off', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -458,7 +432,7 @@ await test('reserve miss: pre-warm switched off', async () => {
   expect(await reserve()).toBeNull()
 })
 
-await test('claim mismatch on a reserved agent kills it: resume / cwd / mode / flags', async () => {
+test('claim mismatch on a reserved agent kills it: resume / cwd / mode / flags', async () => {
   const cases: Array<Partial<Parameters<typeof claimWarmShell>[0]>> = [
     { resuming: true },
     { cwd: homedir() },
@@ -478,7 +452,7 @@ await test('claim mismatch on a reserved agent kills it: resume / cwd / mode / f
   }
 })
 
-await test('a reservation nobody adopts is killed after its TTL', async () => {
+test('a reservation nobody adopts is killed after its TTL', async () => {
   init({ reserveTtlMs: 40 })
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -490,7 +464,7 @@ await test('a reservation nobody adopts is killed after its TTL', async () => {
   expect(claim(taskId)).toBeNull()
 })
 
-await test('switching pre-warm off kills reserved agents too', async () => {
+test('switching pre-warm off kills reserved agents too', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -504,7 +478,7 @@ await test('switching pre-warm off kills reserved agents too', async () => {
   expect(unadoptedWarmAgent(taskId)).toBeNull()
 })
 
-await test('teardown kills reserved agents too', async () => {
+test('teardown kills reserved agents too', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -515,7 +489,7 @@ await test('teardown kills reserved agents too', async () => {
   expect(unadoptedWarmAgent(taskId)).toBeNull()
 })
 
-await test('reapOrphanWarms leaves a reserved agent alone (it is tracked)', async () => {
+test('reapOrphanWarms leaves a reserved agent alone (it is tracked)', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
   await settle()
@@ -530,7 +504,7 @@ await test('reapOrphanWarms leaves a reserved agent alone (it is tracked)', asyn
   expect(killCalls.length).toBe(0)
 })
 
-await test('injected ops seam handles mode lookup + session writes (db untouched)', async () => {
+test('injected ops seam handles mode lookup + session writes (db untouched)', async () => {
   spawnCalls = []
   killCalls = []
   listResult = []
@@ -588,7 +562,7 @@ await test('injected ops seam handles mode lookup + session writes (db untouched
 // pool + docker/ssh). It must sanitize the host's env: keep the user env
 // (PATH/HOME) but strip SlayZone infra/secret/identity (and unmanifested
 // SLAYZONE_*, fail closed). Per-spawn identity is re-added later via mcpEnv.
-await test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identity, keeps user env', () => {
+test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identity, keeps user env', () => {
   const saved: Record<string, string | undefined> = {}
   const inject: Record<string, string> = {
     SLAYZONE_HUB_TOKEN: 'host-secret', // secret
@@ -620,6 +594,3 @@ await test('buildBaseEnv sanitizes host env: strips SlayZone infra/secret/identi
     }
   }
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

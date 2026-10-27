@@ -1,8 +1,7 @@
 /**
  * Project lock guard utility tests
- * Run with: npx tsx packages/domains/projects/src/client/useProjectLockGuard.test.ts
  */
-import { describe, expect, test } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import type { Project, ProjectLockConfig } from '../shared/types.js'
 import {
   isProjectDurationLocked,

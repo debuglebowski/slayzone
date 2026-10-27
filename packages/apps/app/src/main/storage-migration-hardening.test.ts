@@ -15,8 +15,9 @@
  * (blobs, artifacts, backups) is non-fatal: skip the bad entry, keep going, withhold the
  * sentinel so the next boot retries.
  *
- * Pure Node (real temp dirs, no electron/native deps) → runs under plain `npx tsx`.
+ * Pure Node (real temp dirs, no electron/native deps).
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   chmodSync,
   existsSync,
@@ -32,18 +33,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureStorageDir } from './storage-migration'
 import { StorageImportError } from './copy-utils'
-
-let passed = 0
-let failed = 0
-function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    passed++
-    console.log(`  ✓ ${name}`)
-  } else {
-    failed++
-    console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ''}`)
-  }
-}
 
 const prevRoot = process.env.SLAYZONE_ROOT
 // chmod 000 only blocks a non-root user, and means nothing on Windows.
@@ -63,171 +52,193 @@ function setup(): { old: string; storage: string } {
 }
 const SENTINEL = '.storage-migrated.prod'
 
-try {
-  // --- 0-byte legacy DB: not a database, nothing to import; boot must not crash ----------
-  {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), '')
-    mkdirSync(join(old, 'blobs', 'ab'), { recursive: true })
-    writeFileSync(join(old, 'blobs', 'ab', 'cd'), 'BLOB')
-    let threw = ''
-    try {
-      ensureStorageDir(old, storage, true)
-    } catch (e) {
-      threw = String(e)
-    }
-    check('0-byte legacy DB does not throw', threw === '', threw)
-    check(
-      '0-byte legacy DB is not planted as the new DB',
-      !existsSync(join(storage, 'slayzone.data.sqlite'))
-    )
-    check('content still imported past a 0-byte DB', existsSync(join(storage, 'blobs', 'ab', 'cd')))
-    check('sentinel written (nothing left to retry)', existsSync(join(storage, SENTINEL)))
-  }
-
-  // --- dangling symlink in artifacts/: copied as a link, never fatal, never a retry loop ---
-  {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
-    mkdirSync(join(old, 'artifacts', 't1'), { recursive: true })
-    writeFileSync(join(old, 'artifacts', 't1', 'a.md'), 'ART')
-    symlinkSync(join(old, 'gone', 'nowhere'), join(old, 'artifacts', 't1', 'dangling'))
-    let threw = ''
-    try {
-      ensureStorageDir(old, storage, true)
-    } catch (e) {
-      threw = String(e)
-    }
-    check('dangling symlink does not throw', threw === '', threw)
-    check(
-      'sibling files still copied',
-      readFileSync(join(storage, 'artifacts', 't1', 'a.md'), 'utf8') === 'ART'
-    )
-    check('DB copied', readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB')
-    check(
-      'sentinel written (a dangling link is not an incomplete copy)',
-      existsSync(join(storage, SENTINEL))
-    )
-  }
-
-  // --- unreadable content file: skipped, NOT fatal, sentinel withheld, next boot heals ----
-  if (canDenyRead) {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
-    mkdirSync(join(old, 'blobs', 'ab'), { recursive: true })
-    writeFileSync(join(old, 'blobs', 'ab', 'good'), 'GOOD')
-    writeFileSync(join(old, 'blobs', 'ab', 'locked'), 'LOCKED')
-    chmodSync(join(old, 'blobs', 'ab', 'locked'), 0o000)
-    let threw = ''
-    let report: { complete: boolean; skipped: string[] } | undefined
-    try {
-      report = ensureStorageDir(old, storage, true) as typeof report
-    } catch (e) {
-      threw = String(e)
-    }
-    check('unreadable blob does not abort boot', threw === '', threw)
-    check(
-      'the readable files and the DB still crossed over',
-      existsSync(join(storage, 'blobs', 'ab', 'good')) &&
-        existsSync(join(storage, 'slayzone.data.sqlite'))
-    )
-    check('sentinel withheld so the next boot retries', !existsSync(join(storage, SENTINEL)))
-    check(
-      'report says incomplete and names the skipped file',
-      report?.complete === false && (report?.skipped ?? []).some((p) => p.endsWith('locked')),
-      JSON.stringify(report)
-    )
-    // Next boot, file readable again → heals and blesses.
-    chmodSync(join(old, 'blobs', 'ab', 'locked'), 0o644)
-    const again = ensureStorageDir(old, storage, true) as { complete: boolean }
-    check(
-      'retry copies the file once readable',
-      readFileSync(join(storage, 'blobs', 'ab', 'locked'), 'utf8') === 'LOCKED'
-    )
-    check(
-      'retry writes the sentinel',
-      again.complete === true && existsSync(join(storage, SENTINEL))
-    )
-  }
-
-  // --- DB copy fails: FATAL, names the source path, leaves NOTHING at the final name -------
-  if (canDenyRead) {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
-    writeFileSync(join(old, 'slayzone.sqlite-wal'), 'WALBYTES')
-    chmodSync(join(old, 'slayzone.sqlite'), 0o000)
-    let err: unknown
-    try {
-      ensureStorageDir(old, storage, true)
-    } catch (e) {
-      err = e
-    }
-    check(
-      'DB copy failure throws a StorageImportError',
-      err instanceof StorageImportError,
-      String(err)
-    )
-    check(
-      'error names the file that failed',
-      err instanceof StorageImportError && err.path.endsWith('slayzone.sqlite'),
-      String((err as any)?.path)
-    )
-    check('no main DB at the final name', !existsSync(join(storage, 'slayzone.data.sqlite')))
-    check(
-      'no stray -wal beside a missing main (a foreign WAL replays into a fresh DB)',
-      !existsSync(join(storage, 'slayzone.data.sqlite-wal')),
-      readdirSync(storage).join(', ')
-    )
-    check('no sentinel', !existsSync(join(storage, SENTINEL)))
-    check('source untouched', readFileSync(join(old, 'slayzone.sqlite-wal'), 'utf8') === 'WALBYTES')
-    chmodSync(join(old, 'slayzone.sqlite'), 0o644)
-    ensureStorageDir(old, storage, true)
-    check(
-      'retry after the cause is fixed imports the DB',
-      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB'
-    )
-  }
-
-  // --- a crashed earlier attempt left temp files: they never block, never survive ----------
-  {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
-    mkdirSync(storage, { recursive: true })
-    // Stale leftovers of an interrupted import, in every shape the importer could leave.
-    writeFileSync(join(storage, 'slayzone.data.sqlite.importing'), 'HALF')
-    writeFileSync(join(storage, 'slayzone.data.sqlite-wal.importing'), 'HALF')
-    ensureStorageDir(old, storage, true)
-    check(
-      'stale temp does not block the import',
-      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'PRODDB'
-    )
-    check(
-      'no importing temp files remain',
-      !readdirSync(storage).some((f) => f.endsWith('.importing')),
-      readdirSync(storage).join(', ')
-    )
-  }
-
-  // --- wal travels with the DB, and a quiescent copy is byte-identical ---------------------
-  {
-    const { old, storage } = setup()
-    writeFileSync(join(old, 'slayzone.sqlite'), 'MAIN-BYTES')
-    writeFileSync(join(old, 'slayzone.sqlite-wal'), 'WAL-BYTES')
-    writeFileSync(join(old, 'slayzone.sqlite-shm'), 'SHM-BYTES')
-    ensureStorageDir(old, storage, true)
-    check(
-      'main/wal/shm all land under the new name',
-      readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8') === 'MAIN-BYTES' &&
-        readFileSync(join(storage, 'slayzone.data.sqlite-wal'), 'utf8') === 'WAL-BYTES' &&
-        readFileSync(join(storage, 'slayzone.data.sqlite-shm'), 'utf8') === 'SHM-BYTES'
-    )
-  }
-} finally {
+afterAll(() => {
   if (prevRoot === undefined) delete process.env.SLAYZONE_ROOT
   else process.env.SLAYZONE_ROOT = prevRoot
   // Every denied-read case restores its mode, so the trees are removable.
   for (const b of bases) rmSync(b, { recursive: true, force: true })
-}
+})
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+// --- 0-byte legacy DB: not a database, nothing to import; boot must not crash ----------
+describe('0-byte legacy DB: not a database, nothing to import; boot must not crash', () => {
+  const { old, storage } = setup()
+  writeFileSync(join(old, 'slayzone.sqlite'), '')
+  mkdirSync(join(old, 'blobs', 'ab'), { recursive: true })
+  writeFileSync(join(old, 'blobs', 'ab', 'cd'), 'BLOB')
+  let threw = ''
+  try {
+    ensureStorageDir(old, storage, true)
+  } catch (e) {
+    threw = String(e)
+  }
+  test('0-byte legacy DB does not throw', () => {
+    expect(threw, threw).toBe('')
+  })
+  test('0-byte legacy DB is not planted as the new DB', () => {
+    expect(existsSync(join(storage, 'slayzone.data.sqlite'))).toBe(false)
+  })
+  test('content still imported past a 0-byte DB', () => {
+    expect(existsSync(join(storage, 'blobs', 'ab', 'cd'))).toBe(true)
+  })
+  test('sentinel written (nothing left to retry)', () => {
+    expect(existsSync(join(storage, SENTINEL))).toBe(true)
+  })
+})
+
+// --- dangling symlink in artifacts/: copied as a link, never fatal, never a retry loop ---
+describe('dangling symlink in artifacts/: copied as a link, never fatal, never a retry loop', () => {
+  const { old, storage } = setup()
+  writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
+  mkdirSync(join(old, 'artifacts', 't1'), { recursive: true })
+  writeFileSync(join(old, 'artifacts', 't1', 'a.md'), 'ART')
+  symlinkSync(join(old, 'gone', 'nowhere'), join(old, 'artifacts', 't1', 'dangling'))
+  let threw = ''
+  try {
+    ensureStorageDir(old, storage, true)
+  } catch (e) {
+    threw = String(e)
+  }
+  test('dangling symlink does not throw', () => {
+    expect(threw, threw).toBe('')
+  })
+  test('sibling files still copied', () => {
+    expect(readFileSync(join(storage, 'artifacts', 't1', 'a.md'), 'utf8')).toBe('ART')
+  })
+  test('DB copied', () => {
+    expect(readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8')).toBe('PRODDB')
+  })
+  test('sentinel written (a dangling link is not an incomplete copy)', () => {
+    expect(existsSync(join(storage, SENTINEL))).toBe(true)
+  })
+})
+
+// --- unreadable content file: skipped, NOT fatal, sentinel withheld, next boot heals ----
+describe.runIf(canDenyRead)(
+  'unreadable content file: skipped, NOT fatal, sentinel withheld, next boot heals',
+  () => {
+    let old: string
+    let storage: string
+    let threw = ''
+    let report: { complete: boolean; skipped: string[] } | undefined
+    beforeAll(() => {
+      ;({ old, storage } = setup())
+      writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
+      mkdirSync(join(old, 'blobs', 'ab'), { recursive: true })
+      writeFileSync(join(old, 'blobs', 'ab', 'good'), 'GOOD')
+      writeFileSync(join(old, 'blobs', 'ab', 'locked'), 'LOCKED')
+      chmodSync(join(old, 'blobs', 'ab', 'locked'), 0o000)
+      try {
+        report = ensureStorageDir(old, storage, true) as typeof report
+      } catch (e) {
+        threw = String(e)
+      }
+    })
+    // Restores the mode even if a test below fails first, so the tree is removable.
+    afterAll(() => chmodSync(join(old, 'blobs', 'ab', 'locked'), 0o644))
+
+    test('unreadable blob does not abort boot', () => {
+      expect(threw, threw).toBe('')
+    })
+    test('the readable files and the DB still crossed over', () => {
+      expect(existsSync(join(storage, 'blobs', 'ab', 'good'))).toBe(true)
+      expect(existsSync(join(storage, 'slayzone.data.sqlite'))).toBe(true)
+    })
+    test('sentinel withheld so the next boot retries', () => {
+      expect(existsSync(join(storage, SENTINEL))).toBe(false)
+    })
+    test('report says incomplete and names the skipped file', () => {
+      expect(report?.complete, JSON.stringify(report)).toBe(false)
+      expect(report?.skipped ?? []).toContainEqual(expect.stringMatching(/locked$/))
+    })
+    // Next boot, file readable again → heals and blesses.
+    let again: { complete: boolean } | undefined
+    test('retry copies the file once readable', () => {
+      chmodSync(join(old, 'blobs', 'ab', 'locked'), 0o644)
+      again = ensureStorageDir(old, storage, true) as { complete: boolean }
+      expect(readFileSync(join(storage, 'blobs', 'ab', 'locked'), 'utf8')).toBe('LOCKED')
+    })
+    test('retry writes the sentinel', () => {
+      expect(again?.complete).toBe(true)
+      expect(existsSync(join(storage, SENTINEL))).toBe(true)
+    })
+  }
+)
+
+// --- DB copy fails: FATAL, names the source path, leaves NOTHING at the final name -------
+describe.runIf(canDenyRead)(
+  'DB copy fails: FATAL, names the source path, leaves NOTHING at the final name',
+  () => {
+    let old: string
+    let storage: string
+    let err: unknown
+    beforeAll(() => {
+      ;({ old, storage } = setup())
+      writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
+      writeFileSync(join(old, 'slayzone.sqlite-wal'), 'WALBYTES')
+      chmodSync(join(old, 'slayzone.sqlite'), 0o000)
+      try {
+        ensureStorageDir(old, storage, true)
+      } catch (e) {
+        err = e
+      }
+    })
+    // Restores the mode even if a test below fails first, so the tree is removable.
+    afterAll(() => chmodSync(join(old, 'slayzone.sqlite'), 0o644))
+
+    test('DB copy failure throws a StorageImportError', () => {
+      expect(err, String(err)).toBeInstanceOf(StorageImportError)
+    })
+    test('error names the file that failed', () => {
+      expect(err, String(err)).toBeInstanceOf(StorageImportError)
+      expect((err as StorageImportError).path).toMatch(/slayzone\.sqlite$/)
+    })
+    test('no main DB at the final name', () => {
+      expect(existsSync(join(storage, 'slayzone.data.sqlite'))).toBe(false)
+    })
+    test('no stray -wal beside a missing main (a foreign WAL replays into a fresh DB)', () => {
+      expect(readdirSync(storage)).not.toContain('slayzone.data.sqlite-wal')
+    })
+    test('no sentinel', () => {
+      expect(existsSync(join(storage, SENTINEL))).toBe(false)
+    })
+    test('source untouched', () => {
+      expect(readFileSync(join(old, 'slayzone.sqlite-wal'), 'utf8')).toBe('WALBYTES')
+    })
+    test('retry after the cause is fixed imports the DB', () => {
+      chmodSync(join(old, 'slayzone.sqlite'), 0o644)
+      ensureStorageDir(old, storage, true)
+      expect(readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8')).toBe('PRODDB')
+    })
+  }
+)
+
+// --- a crashed earlier attempt left temp files: they never block, never survive ----------
+describe('a crashed earlier attempt left temp files: they never block, never survive', () => {
+  const { old, storage } = setup()
+  writeFileSync(join(old, 'slayzone.sqlite'), 'PRODDB')
+  mkdirSync(storage, { recursive: true })
+  // Stale leftovers of an interrupted import, in every shape the importer could leave.
+  writeFileSync(join(storage, 'slayzone.data.sqlite.importing'), 'HALF')
+  writeFileSync(join(storage, 'slayzone.data.sqlite-wal.importing'), 'HALF')
+  ensureStorageDir(old, storage, true)
+  test('stale temp does not block the import', () => {
+    expect(readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8')).toBe('PRODDB')
+  })
+  test('no importing temp files remain', () => {
+    expect(readdirSync(storage).filter((f) => f.endsWith('.importing'))).toEqual([])
+  })
+})
+
+// --- wal travels with the DB, and a quiescent copy is byte-identical ---------------------
+describe('wal travels with the DB, and a quiescent copy is byte-identical', () => {
+  const { old, storage } = setup()
+  writeFileSync(join(old, 'slayzone.sqlite'), 'MAIN-BYTES')
+  writeFileSync(join(old, 'slayzone.sqlite-wal'), 'WAL-BYTES')
+  writeFileSync(join(old, 'slayzone.sqlite-shm'), 'SHM-BYTES')
+  ensureStorageDir(old, storage, true)
+  test('main/wal/shm all land under the new name', () => {
+    expect(readFileSync(join(storage, 'slayzone.data.sqlite'), 'utf8')).toBe('MAIN-BYTES')
+    expect(readFileSync(join(storage, 'slayzone.data.sqlite-wal'), 'utf8')).toBe('WAL-BYTES')
+    expect(readFileSync(join(storage, 'slayzone.data.sqlite-shm'), 'utf8')).toBe('SHM-BYTES')
+  })
+})

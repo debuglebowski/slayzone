@@ -6,15 +6,9 @@
  * "Push ↑" bulk action is an explicit user request and is not covered here.
  *
  * Driven through the ops' GitHub test mocks — no network.
- *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { createIntegrationOps, ensureIntegrationSchema } from './handlers-store.js'
 import { setCredentialCipher } from './credentials.js'
 
@@ -96,7 +90,7 @@ async function remoteTitleAfterPush(syncMode: SyncMode): Promise<string> {
   return issues.issues.find((i: { number: number }) => i.number === 1)?.title ?? ''
 }
 
-await describe('push-on-edit honours sync mode', () => {
+describe('push-on-edit honours sync mode', () => {
   test('one-way mapping: a local edit is NOT pushed to GitHub', async () => {
     expect(await remoteTitleAfterPush('one_way')).toBe('Remote title')
   })
@@ -106,5 +100,4 @@ await describe('push-on-edit honours sync mode', () => {
   })
 })
 
-h.cleanup()
-console.log('\nDone')
+afterAll(() => h.cleanup())

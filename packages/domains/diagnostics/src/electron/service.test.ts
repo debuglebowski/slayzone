@@ -1,13 +1,8 @@
 /**
  * Diagnostics service handler contract tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/main/service.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerDiagnosticsHandlers, stopDiagnostics } from './service.js'
 import { dialog } from 'electron'
 import * as fs from 'node:fs'
@@ -51,11 +46,11 @@ registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, {
 })
 
 // instrumentIpcMain wraps handlers as async, so all invoke() calls return Promises.
-// Run tests sequentially via top-level await to avoid ordering issues.
+// vitest runs this file's tests sequentially in declaration order; later ones
+// depend on the config earlier ones wrote.
 
-async function run() {
-  console.log('\ndiagnostics:getConfig')
-  {
+describe('diagnostics:getConfig', () => {
+  test('returns default config', async () => {
     const config = (await h.invoke('diagnostics:getConfig')) as {
       enabled: boolean
       verbose: boolean
@@ -66,11 +61,11 @@ async function run() {
     expect(config.verbose).toBe(false)
     expect(config.includePtyOutput).toBe(false)
     expect(config.retentionDays).toBe(14)
-    console.log('  \u2713 returns default config')
-  }
+  })
+})
 
-  console.log('\ndiagnostics:setConfig')
-  {
+describe('diagnostics:setConfig', () => {
+  test('updates partial config', async () => {
     const config = (await h.invoke('diagnostics:setConfig', { verbose: true })) as {
       enabled: boolean
       verbose: boolean
@@ -79,16 +74,14 @@ async function run() {
     expect(config.verbose).toBe(true)
     expect(config.enabled).toBe(true)
     expect(config.retentionDays).toBe(14)
-    console.log('  \u2713 updates partial config')
-  }
-  {
+  })
+  test('updates retention days', async () => {
     const config = (await h.invoke('diagnostics:setConfig', { retentionDays: 7 })) as {
       retentionDays: number
     }
     expect(config.retentionDays).toBe(7)
-    console.log('  \u2713 updates retention days')
-  }
-  {
+  })
+  test('roundtrips full config', async () => {
     await h.invoke('diagnostics:setConfig', {
       enabled: false,
       verbose: false,
@@ -105,44 +98,46 @@ async function run() {
     expect(config.verbose).toBe(false)
     expect(config.includePtyOutput).toBe(true)
     expect(config.retentionDays).toBe(30)
-    console.log('  \u2713 roundtrips full config')
-  }
+  })
+})
 
-  console.log('\ndiagnostics:recordClientError')
-  {
+describe('diagnostics:recordClientError', () => {
+  test('does not throw', async () => {
     await h.invoke('diagnostics:setConfig', { enabled: true })
     await h.invoke('diagnostics:recordClientError', {
       type: 'error',
       message: 'Test error',
       stack: 'Error: Test\n  at test.ts:1'
     })
-    console.log('  \u2713 does not throw')
-  }
+  })
+})
 
-  console.log('\ndiagnostics:recordClientEvent')
-  {
+describe('diagnostics:recordClientEvent', () => {
+  test('does not throw', async () => {
     await h.invoke('diagnostics:recordClientEvent', {
       event: 'test.event',
       level: 'info',
       message: 'Test event message'
     })
-    console.log('  \u2713 does not throw')
-  }
+  })
+})
 
+describe('diagnostics:export', () => {
   // The per-invoke IPC instrumentation records its diagnostic events
   // fire-and-forget AFTER the handler returns, and the batched write queue
   // drains to the DB on a timer — a fixed sleep raced both under full-suite
   // load. Poll the DB (load-independent) until the events land, then assert.
-  for (let i = 0; i < 200; i++) {
-    const { c } = h.db.prepare('SELECT COUNT(*) AS c FROM diagnostics_events').get() as {
-      c: number
+  beforeAll(async () => {
+    for (let i = 0; i < 200; i++) {
+      const { c } = h.db.prepare('SELECT COUNT(*) AS c FROM diagnostics_events').get() as {
+        c: number
+      }
+      if (c > 0) break
+      await new Promise((r) => setTimeout(r, 20))
     }
-    if (c > 0) break
-    await new Promise((r) => setTimeout(r, 20))
-  }
+  })
 
-  console.log('\ndiagnostics:export')
-  {
+  test('returns canceled when dialog dismissed', async () => {
     // Test canceled export
     const canceled = (await h.invoke('diagnostics:export', {
       fromTsMs: 0,
@@ -150,11 +145,10 @@ async function run() {
     })) as { success: boolean; canceled?: boolean }
     expect(canceled.success).toBe(false)
     expect(canceled.canceled).toBe(true)
-    console.log('  \u2713 returns canceled when dialog dismissed')
-  }
-  {
+  })
+  test('exports bundle to file', async () => {
     // Patch dialog to return a real tmp file path
-    const tmpFile = path.join(os.tmpdir(), `slayzone-diag-test-${Date.now()}.json`)
+    const tmpFile = path.join(testClientRoot, `slayzone-diag-test-${Date.now()}.json`)
     const original = dialog.showSaveDialog
     // The stub answers only the one overload the exporter calls, so the slot is
     // re-typed as `unknown` rather than electron's full overloaded signature.
@@ -175,24 +169,18 @@ async function run() {
       expect(bundle.events).toBeTruthy()
       expect(bundle.summary).toBeTruthy()
       expect(bundle.summary.total).toBeGreaterThan(0)
-      console.log('  \u2713 exports bundle to file')
 
       // Cleanup
       fs.unlinkSync(tmpFile)
     } finally {
       dialogSlot.showSaveDialog = original
     }
-  }
-}
+  })
+})
 
-try {
-  await run()
-} catch (e) {
-  console.error(`  \u2717 ${e}`)
-  process.exitCode = 1
-}
-
-await new Promise((r) => setTimeout(r, 50))
-stopDiagnostics()
-h.cleanup()
-console.log('\nDone')
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 50))
+  stopDiagnostics()
+  h.cleanup()
+  fs.rmSync(testClientRoot, { recursive: true, force: true })
+})

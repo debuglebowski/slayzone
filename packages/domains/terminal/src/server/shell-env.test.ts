@@ -1,47 +1,21 @@
 /**
  * Tests for wrapShellWithUlimit and related helpers.
- * Run with: npx tsx packages/domains/terminal/src/main/shell-env.test.ts
  */
+import { expect, test } from 'vitest'
 import { execFileSync } from 'child_process'
 import { wrapShellWithUlimit, quoteForShell } from './shell-env'
 
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function eq<T>(actual: T, expected: T, label?: string): void {
-  if (actual !== expected) {
-    throw new Error(
-      `${label ? label + ': ' : ''}expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
-    )
-  }
-}
-
-console.log('\nwrapShellWithUlimit')
-console.log('─'.repeat(40))
-
 test('wraps zsh -i -l into /bin/sh -c with ulimit prefix', () => {
   const r = wrapShellWithUlimit('/bin/zsh', ['-i', '-l'])
-  eq(r.file, '/bin/sh')
-  eq(r.args.length, 2)
-  eq(r.args[0], '-c')
+  expect(r.file).toBe('/bin/sh')
+  expect(r.args.length).toBe(2)
+  expect(r.args[0]).toBe('-c')
   // script must include ulimit, exec, and the quoted shell invocation.
   const script = r.args[1]
-  if (!script.includes('ulimit -n')) throw new Error('script missing ulimit command')
-  if (!script.includes('exec')) throw new Error('script missing exec keyword')
-  if (!script.includes('/bin/zsh')) throw new Error('script missing target shell')
-  if (!script.includes("'-i'") && !script.includes('-i')) throw new Error('script missing -i arg')
+  expect(script, 'script missing ulimit command').toContain('ulimit -n')
+  expect(script, 'script missing exec keyword').toContain('exec')
+  expect(script, 'script missing target shell').toContain('/bin/zsh')
+  expect(script, 'script missing -i arg').toContain('-i')
 })
 
 test('wrapped shell actually raises ulimit when invoked', () => {
@@ -54,8 +28,10 @@ test('wrapped shell actually raises ulimit when invoked', () => {
   if (out === 'unlimited') return // already unlimited, correct non-lowering
   const n = parseInt(out, 10)
   const start = startLimit === 'unlimited' ? Number.MAX_SAFE_INTEGER : parseInt(startLimit, 10)
-  if (n < 65535 && n < start)
-    throw new Error(`expected ulimit >= 65535 (or >= ${start} if preserved), got ${n}`)
+  expect(
+    n,
+    `expected ulimit >= 65535 (or >= ${start} if preserved), got ${n}`
+  ).toBeGreaterThanOrEqual(Math.min(65535, start))
 })
 
 test('wrapped shell does NOT lower an already-higher soft limit', () => {
@@ -80,7 +56,7 @@ test('wrapped shell does NOT lower an already-higher soft limit', () => {
   ).trim()
   if (out === 'unlimited') return
   const n = parseInt(out, 10)
-  if (n < parent) throw new Error(`ulimit lowered — parent had ${parent}, child sees ${n}`)
+  expect(n, `ulimit lowered — parent had ${parent}, child sees ${n}`).toBeGreaterThanOrEqual(parent)
 })
 
 test('quotes args with spaces correctly', () => {
@@ -90,7 +66,7 @@ test('quotes args with spaces correctly', () => {
   // Script should roundtrip-safe quote the embedded args
   // Run it and check echo output
   const out = execFileSync(r.file, r.args, { encoding: 'utf8' }).trim()
-  eq(out, 'hi there')
+  expect(out).toBe('hi there')
 })
 
 test('falls back to no-op on win32 (simulated via platform check)', () => {
@@ -98,13 +74,9 @@ test('falls back to no-op on win32 (simulated via platform check)', () => {
   // test only runs on non-win32 and documents the expected shape on unix.
   const r = wrapShellWithUlimit('/bin/zsh', [])
   if (process.platform !== 'win32') {
-    eq(r.file, '/bin/sh')
+    expect(r.file).toBe('/bin/sh')
   } else {
-    eq(r.file, '/bin/zsh')
-    eq(r.args.length, 0)
+    expect(r.file).toBe('/bin/zsh')
+    expect(r.args.length).toBe(0)
   }
 })
-
-console.log('\n' + '─'.repeat(40))
-console.log(`${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

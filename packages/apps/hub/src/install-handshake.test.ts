@@ -24,9 +24,10 @@
  *
  * Native ABI: better-sqlite3 (hub) + node-pty (computer) are built for Electron's
  * ABI, so both bins run under `ELECTRON_RUN_AS_NODE=1 electron`, and this test
- * runs under the same (run_test_electron_strict_loader in run-all.sh). Bundles
- * are (re)built on demand below. Hand-rolled harness (no vitest import).
+ * runs under the same (vitest on Electron's node). Bundles are (re)built on demand
+ * below.
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
@@ -50,23 +51,6 @@ const COMPUTER_DIR = join(HUB_DIR, '..', 'computer') // packages/apps/computer
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const COMPUTER_BIN = join(COMPUTER_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Newest mtime under a dir tree (for stale-build detection). */
 function newestMtime(dir: string): number {
@@ -93,9 +77,14 @@ function ensureBuilt(pkgDir: string, bin: string, label: string): void {
  * the dogfooding parent leaks vars that would redirect a child at the REAL dev
  * store. Callers re-add only the explicit isolation vars they need.
  */
+// vitest injects these into the test process (TEST=true flips better-auth's isTest()
+// → its origin/CSRF check off); a spawned bin must not inherit them.
+const VITEST_INJECTED = /^(VITEST(_.*)?|TEST|MODE|DEV|PROD|SSR|BASE_URL)$/
+
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
+    if (VITEST_INJECTED.test(k)) continue
     if (v == null) continue
     if (/^(SLAYZONE_|ELECTRON_)/.test(k)) continue
     out[k] = v
@@ -174,34 +163,55 @@ function fingerprint(p: string): string {
   }
 }
 
-async function main(): Promise<void> {
-  console.log('\nhub↔computer install handshake (isolated dev-tree bins)')
-  console.log('─'.repeat(52))
+// Lazy import of the WS tRPC client bits (present in the hub package's deps).
+const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+const superjson = (await import('superjson')).default
 
+const secret = require('node:crypto').randomBytes(32).toString('hex') as string
+let before: string[] = []
+let root = ''
+let hubRootDir = ''
+let computerRootDir = ''
+let workDir = ''
+// DB + state derive directly at <ROOT> (flat, no storage/ wrapper); assert the
+// hub landed there, not the real DB.
+let hubStorageDir = ''
+let hub: Proc | null = null
+let computer: Proc | null = null
+let wsClient: { close: () => void } | null = null
+let hubPort = 0
+let hubDbPath = ''
+let owner: { token?: string; userId?: string } = {}
+let ownerToken: string | undefined
+let tok: { token: string; hubUrl: string }
+let trpc: {
+  computers: { list: { query: () => Promise<Array<{ name: string; connected: boolean }>> } }
+}
+
+beforeAll(() => {
   ensureBuilt(HUB_DIR, HUB_BIN, 'hub')
   ensureBuilt(COMPUTER_DIR, COMPUTER_BIN, 'computer')
 
   // Snapshot the guarded real DBs BEFORE anything spawns.
-  const before = GUARDED.map(fingerprint)
+  before = GUARDED.map(fingerprint)
 
-  const root = mkdtempSync(join(tmpdir(), 'slz-install-handshake-'))
-  const hubRootDir = join(root, 'hub-root')
-  const computerRootDir = join(root, 'computer-root')
-  const workDir = join(root, 'work')
+  root = mkdtempSync(join(tmpdir(), 'slz-install-handshake-'))
+  hubRootDir = join(root, 'hub-root')
+  computerRootDir = join(root, 'computer-root')
+  workDir = join(root, 'work')
   for (const d of [hubRootDir, computerRootDir, workDir]) mkdirSync(d, { recursive: true })
-  // DB + state derive directly at <ROOT> (flat, no storage/ wrapper); assert the
-  // hub landed there, not the real DB.
-  const hubStorageDir = hubRootDir
+  hubStorageDir = hubRootDir
+})
 
-  const secret = require('node:crypto').randomBytes(32).toString('hex') as string
-  let hub: Proc | null = null
-  let computer: Proc | null = null
-  // Lazy import of the WS tRPC client bits (present in the hub package's deps).
-  const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
-  const superjson = (await import('superjson')).default
-  let wsClient: { close: () => void } | null = null
+afterAll(async () => {
+  wsClient?.close()
+  if (computer) await computer.stop()
+  if (hub) await hub.stop()
+  if (root) rmSync(root, { recursive: true, force: true })
+})
 
-  try {
+describe('the hub, booted standalone', () => {
+  beforeAll(async () => {
     // --- boot the hub, standalone + fully isolated ---------------------------
     hub = spawnChild(HUB_BIN, {
       ...scrubbedEnv(),
@@ -220,41 +230,51 @@ async function main(): Promise<void> {
       'hub listening line'
     )
     const m = listen.match(/http:\/\/(127\.0\.0\.1):(\d+).*db=([^)\s]+)/)
-    assert(m, `hub listening line parseable: ${listen}`)
-    const hubPort = Number(m![2])
-    const hubDbPath = m![3]
+    expect(m, `hub listening line parseable: ${listen}`).not.toBeNull()
+    hubPort = Number(m![2])
+    hubDbPath = m![3]!
+  })
 
-    await test('hub boots against the ISOLATED tmp store (not the real dev/prod DB)', async () => {
-      assert(hubDbPath.startsWith(hubStorageDir), `hub db path under tmp store: ${hubDbPath}`)
-      // /health confirms readiness + echoes the same isolated db path.
-      const health = await poll(
-        async () => {
-          const r = await fetch(`http://127.0.0.1:${hubPort}/health`)
-          if (r.status !== 200) return null
-          return (await r.json()) as { ok: boolean; dbPath: string }
-        },
-        15_000,
-        'hub /health ok'
-      )
-      assert(health.ok === true, 'health ok')
-      assert(health.dbPath.startsWith(hubStorageDir), `health db path under tmp: ${health.dbPath}`)
-    })
+  test('hub boots against the ISOLATED tmp store (not the real dev/prod DB)', async () => {
+    expect(
+      hubDbPath.startsWith(hubStorageDir),
+      `hub db path under tmp store: ${hubDbPath}`
+    ).toBeTruthy()
+    // /health confirms readiness + echoes the same isolated db path.
+    const health = await poll(
+      async () => {
+        const r = await fetch(`http://127.0.0.1:${hubPort}/health`)
+        if (r.status !== 200) return null
+        return (await r.json()) as { ok: boolean; dbPath: string }
+      },
+      15_000,
+      'hub /health ok'
+    )
+    expect(health.ok, 'health ok').toBe(true)
+    expect(
+      health.dbPath.startsWith(hubStorageDir),
+      `health db path under tmp: ${health.dbPath}`
+    ).toBeTruthy()
+  })
+})
 
-    // This hub runs with SLAYZONE_HUB_REQUIRE_LOGIN=1, so it requires client auth
-    // on EVERY route — including `/api/computers/join-token`, which used to trust
-    // any loopback peer unconditionally regardless of that. The bootstrap owner
-    // file is exactly the affordance that keeps `slay computer mint` usable on a
-    // clean root with no operator action; read it here too, matching the real
-    // `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
-    // simulating an authenticated caller some other way.
+// This hub runs with SLAYZONE_HUB_REQUIRE_LOGIN=1, so it requires client auth
+// on EVERY route — including `/api/computers/join-token`, which used to trust
+// any loopback peer unconditionally regardless of that. The bootstrap owner
+// file is exactly the affordance that keeps `slay computer mint` usable on a
+// clean root with no operator action; read it here too, matching the real
+// `resolveHubRequestTarget` fallback (api.ts / hub-request.ts) rather than
+// simulating an authenticated caller some other way.
+describe('a join token minted with the bootstrap owner token', () => {
+  beforeAll(async () => {
     const ownerRaw = readFileSync(join(hubRootDir, 'hub.owner.json'), 'utf-8')
-    const owner = JSON.parse(ownerRaw) as { token?: string; userId?: string }
-    const ownerToken = owner.token
-    assert(Boolean(ownerToken), 'bootstrap owner file carries a bearer token')
+    owner = JSON.parse(ownerRaw) as { token?: string; userId?: string }
+    ownerToken = owner.token
+    expect(Boolean(ownerToken), 'bootstrap owner file carries a bearer token').toBe(true)
 
     // --- mint a join token over the loopback REST channel --------------------
     // Poll: the route 503s until the /computers listener has bound (computer mode on).
-    const tok = await poll(
+    tok = await poll(
       async () => {
         const r = await fetch(`http://127.0.0.1:${hubPort}/api/computers/join-token`, {
           method: 'POST',
@@ -271,44 +291,52 @@ async function main(): Promise<void> {
       20_000,
       'join-token mint (listener bound)'
     )
-    // This hub sets no SLAYZONE_HUB_PUBLIC_ADDRESS, so the computer url written into
-    // the token is `ws://` loopback on the hub's own port (deriveComputerHubUrl). The
-    // `wss://`-from-public-address derivation is unit-covered in
-    // computer-tls-listener.test.ts; asserting wss here would contradict the boot.
-    await test('POST /api/computers/join-token mints a pin-less szjt1 token + local ws computer url', async () => {
-      assert(typeof tok.token === 'string' && tok.token.startsWith('szjt1.'), 'szjt1 token')
-      assert(
-        tok.hubUrl === `ws://127.0.0.1:${hubPort}/computers`,
-        `local computer url is ws:// on the hub port, got: ${tok.hubUrl}`
-      )
-      // The hub presents no certificate of its own, so the token carries NO pin:
-      // no certFingerprint field at all.
-      const payload = JSON.parse(
-        Buffer.from(tok.token.slice('szjt1.'.length), 'base64url').toString('utf8')
-      ) as { hubUrl: string; certFingerprint?: unknown }
-      assert(!('certFingerprint' in payload), `pin-less token, got: ${JSON.stringify(payload)}`)
-      assert(payload.hubUrl === tok.hubUrl, 'the token embeds the same url')
-    })
+  })
 
-    await test('the hub created no identity/ directory (it holds no certificate)', async () => {
-      assert(!existsSync(join(hubRootDir, 'identity')), 'no <ROOT>/identity')
-    })
+  // This hub sets no SLAYZONE_HUB_PUBLIC_ADDRESS, so the computer url written into
+  // the token is `ws://` loopback on the hub's own port (deriveComputerHubUrl). The
+  // `wss://`-from-public-address derivation is unit-covered in
+  // computer-tls-listener.test.ts; asserting wss here would contradict the boot.
+  test('POST /api/computers/join-token mints a pin-less szjt1 token + local ws computer url', async () => {
+    expect(typeof tok.token, 'szjt1 token').toBe('string')
+    expect(tok.token.startsWith('szjt1.'), 'szjt1 token').toBeTruthy()
+    expect(tok.hubUrl, `local computer url is ws:// on the hub port, got: ${tok.hubUrl}`).toBe(
+      `ws://127.0.0.1:${hubPort}/computers`
+    )
+    // The hub presents no certificate of its own, so the token carries NO pin:
+    // no certFingerprint field at all.
+    const payload = JSON.parse(
+      Buffer.from(tok.token.slice('szjt1.'.length), 'base64url').toString('utf8')
+    ) as { hubUrl: string; certFingerprint?: unknown }
+    expect(
+      'certFingerprint' in payload,
+      `pin-less token, got: ${JSON.stringify(payload)}`
+    ).toBeFalsy()
+    expect(payload.hubUrl, 'the token embeds the same url').toBe(tok.hubUrl)
+  })
 
-    await test('/health reports every switch and authRequired, and no mode', async () => {
-      const body = (await (await fetch(`http://127.0.0.1:${hubPort}/health`)).json()) as {
-        authRequired?: boolean
-        switches?: Record<string, boolean>
-        mode?: unknown
-      }
-      assert(body.authRequired === true, 'login is required on this hub')
-      assert(body.switches?.requireLogin === true, 'requireLogin reported')
-      assert(body.switches?.enablePassword === true, 'enablePassword default reported')
-      assert(body.switches?.enableSso === false, 'enableSso default reported')
-      assert(body.switches?.enableProcesses === true, 'enableProcesses default reported')
-      assert(body.switches?.enableIntegrations === true, 'enableIntegrations default reported')
-      assert(!('mode' in body), 'no mode in /health')
-    })
+  test('the hub created no identity/ directory (it holds no certificate)', async () => {
+    expect(existsSync(join(hubRootDir, 'identity')), 'no <ROOT>/identity').toBeFalsy()
+  })
 
+  test('/health reports every switch and authRequired, and no mode', async () => {
+    const body = (await (await fetch(`http://127.0.0.1:${hubPort}/health`)).json()) as {
+      authRequired?: boolean
+      switches?: Record<string, boolean>
+      mode?: unknown
+    }
+    expect(body.authRequired, 'login is required on this hub').toBe(true)
+    expect(body.switches?.requireLogin, 'requireLogin reported').toBe(true)
+    expect(body.switches?.enablePassword, 'enablePassword default reported').toBe(true)
+    expect(body.switches?.enableSso, 'enableSso default reported').toBe(false)
+    expect(body.switches?.enableProcesses, 'enableProcesses default reported').toBe(true)
+    expect(body.switches?.enableIntegrations, 'enableIntegrations default reported').toBe(true)
+    expect('mode' in body, 'no mode in /health').toBeFalsy()
+  })
+})
+
+describe('the computer, enrolled with that token', () => {
+  beforeAll(async () => {
     // --- spawn the computer, isolated, pointed at the minted token -------------
     // The computer display name + FS path-jail now come from <ROOT>/computer.config.json
     // (the SLAYZONE_COMPUTER_NAME / SLAYZONE_COMPUTER_ALLOWED_ROOTS env channels are gone).
@@ -335,53 +363,40 @@ async function main(): Promise<void> {
       connectionParams: () => ({ token: ownerToken as string })
     })
     wsClient = built
-    const trpc = createTRPCClient({
+    trpc = createTRPCClient({
       links: [wsLink({ client: built, transformer: superjson })]
-    }) as unknown as {
-      computers: { list: { query: () => Promise<Array<{ name: string; connected: boolean }>> } }
+    }) as unknown as typeof trpc
+  })
+
+  test('the computer enrolls with the PIN-LESS token and reports connected in computers.list', async () => {
+    const row = await poll(
+      async () => {
+        const rows = await trpc.computers.list.query()
+        const r = rows.find((x) => x.name === 'install-handshake-computer')
+        return r && r.connected ? r : null
+      },
+      25_000,
+      'computer connected'
+    )
+    expect(row.connected, 'computer connected').toBe(true)
+  })
+
+  test('the computer logged a successful hub connection', async () => {
+    const connected = await poll(
+      async () => (computer!.logs.some((l) => l.includes('connected to hub')) ? true : null),
+      5_000,
+      'computer connected log'
+    )
+    expect(connected, 'computer logged connected').toBeTruthy()
+  })
+
+  // --- ISOLATION: the real dev/prod DBs are byte-unchanged -----------------
+  test('real dev + prod primary DBs are byte-unchanged (isolation proof)', async () => {
+    const after = GUARDED.map(fingerprint)
+    for (let i = 0; i < GUARDED.length; i++) {
+      expect(before[i], `${GUARDED[i]} unchanged (was ${before[i]}, now ${after[i]})`).toBe(
+        after[i]
+      )
     }
-
-    await test('the computer enrolls with the PIN-LESS token and reports connected in computers.list', async () => {
-      const row = await poll(
-        async () => {
-          const rows = await trpc.computers.list.query()
-          const r = rows.find((x) => x.name === 'install-handshake-computer')
-          return r && r.connected ? r : null
-        },
-        25_000,
-        'computer connected'
-      )
-      assert(row.connected === true, 'computer connected')
-    })
-
-    await test('the computer logged a successful hub connection', async () => {
-      const connected = await poll(
-        async () => (computer!.logs.some((l) => l.includes('connected to hub')) ? true : null),
-        5_000,
-        'computer connected log'
-      )
-      assert(connected, 'computer logged connected')
-    })
-
-    // --- ISOLATION: the real dev/prod DBs are byte-unchanged -----------------
-    await test('real dev + prod primary DBs are byte-unchanged (isolation proof)', async () => {
-      const after = GUARDED.map(fingerprint)
-      for (let i = 0; i < GUARDED.length; i++) {
-        assert(
-          before[i] === after[i],
-          `${GUARDED[i]} unchanged (was ${before[i]}, now ${after[i]})`
-        )
-      }
-    })
-  } finally {
-    wsClient?.close()
-    if (computer) await computer.stop()
-    if (hub) await hub.stop()
-    rmSync(root, { recursive: true, force: true })
-  }
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+  })
+})

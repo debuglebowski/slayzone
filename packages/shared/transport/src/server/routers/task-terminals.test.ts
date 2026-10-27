@@ -3,10 +3,11 @@
  * `createCaller` against the in-memory harness DB. Ports the coverage from the
  * legacy terminal-tabs IPC-handler test
  * (domains/task-terminals/src/electron/handlers.test.ts).
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { taskTerminalsRouter } from './task-terminals.js'
 
 const h = await createTestHarness()

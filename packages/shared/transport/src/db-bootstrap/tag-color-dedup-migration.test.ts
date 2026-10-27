@@ -1,40 +1,11 @@
 /**
  * v123 — tag color dedup + uniqueness migration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import { migrations } from './index'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (error) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    },
-    toBeFalsy() {
-      if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 /**
  * Build a DB migrated to exactly v122 — the schema v123 actually runs against.
@@ -149,119 +120,116 @@ function isPresetPair(bg: string, text: string): boolean {
   return PRESET_PAIRS.has(`${bg}:${text}`)
 }
 
-console.log('\nv123 tag color dedup migration')
-
-test('reassigns newer duplicate to next free preset, keeps oldest', () => {
-  const db = freshDbAt122()
-  try {
-    const projectId = 'p1'
-    seedProject(db, projectId)
-    insertTag(db, {
-      id: 'a',
-      projectId,
-      name: 'old',
-      color: '#22c55e',
-      textColor: '#ffffff',
-      createdAt: '2024-01-01'
-    })
-    insertTag(db, {
-      id: 'b',
-      projectId,
-      name: 'new',
-      color: '#22c55e',
-      textColor: '#ffffff',
-      createdAt: '2024-02-01'
-    })
-
-    applyV123(db)
-
-    expect(getTag(db, 'a')?.color).toBe('#22c55e')
-    expect(getTag(db, 'a')?.text_color).toBe('#ffffff')
-    const newTag = getTag(db, 'b')
-    if (!newTag) throw new Error('tag b missing')
-    if (newTag.color === '#22c55e' && newTag.text_color === '#ffffff') {
-      throw new Error('tag b not reassigned (still on original color pair)')
-    }
-    // reassigned tag must land on a preset pair (both bg and text from same preset)
-    expect(isPresetPair(newTag.color, newTag.text_color)).toBe(true)
-    expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
-  } finally {
-    db.close()
-  }
-})
-
-test('migrates custom (non-preset) colors to nearest preset', () => {
-  const db = freshDbAt122()
-  try {
-    const projectId = 'p2'
-    seedProject(db, projectId)
-    // custom orange w/ black text — bg matches preset #f97316 but text_color
-    // (#000000) does not. Migration must replace BOTH to land on preset pair.
-    insertTag(db, { id: 'r', projectId, name: 'orange', color: '#f97316', textColor: '#000000' })
-
-    applyV123(db)
-
-    const tag = getTag(db, 'r')
-    if (!tag) throw new Error('tag missing')
-    expect(isPresetPair(tag.color, tag.text_color)).toBe(true)
-    // nearest by RGB to #f97316 is #f97316 itself
-    expect(tag.color).toBe('#f97316')
-    expect(tag.text_color).toBe('#ffffff')
-  } finally {
-    db.close()
-  }
-})
-
-test('same color across different projects is allowed', () => {
-  const db = freshDbAt122()
-  try {
-    seedProject(db, 'pa')
-    seedProject(db, 'pb')
-    insertTag(db, { id: 'a', projectId: 'pa', name: 'g', color: '#22c55e' })
-    insertTag(db, { id: 'b', projectId: 'pb', name: 'g', color: '#22c55e' })
-
-    applyV123(db)
-
-    expect(getTag(db, 'a')?.color).toBe('#22c55e')
-    expect(getTag(db, 'b')?.color).toBe('#22c55e')
-    expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
-  } finally {
-    db.close()
-  }
-})
-
-test('unique index blocks post-migration duplicate insert', () => {
-  const db = freshDbAt122()
-  try {
-    seedProject(db, 'p3')
-    insertTag(db, { id: 't1', projectId: 'p3', name: 'first', color: '#3b82f6' })
-
-    applyV123(db)
-
-    let threw = false
+describe('v123 tag color dedup migration', () => {
+  test('reassigns newer duplicate to next free preset, keeps oldest', () => {
+    const db = freshDbAt122()
     try {
-      insertTag(db, { id: 't2', projectId: 'p3', name: 'second', color: '#3b82f6' })
-    } catch {
-      threw = true
+      const projectId = 'p1'
+      seedProject(db, projectId)
+      insertTag(db, {
+        id: 'a',
+        projectId,
+        name: 'old',
+        color: '#22c55e',
+        textColor: '#ffffff',
+        createdAt: '2024-01-01'
+      })
+      insertTag(db, {
+        id: 'b',
+        projectId,
+        name: 'new',
+        color: '#22c55e',
+        textColor: '#ffffff',
+        createdAt: '2024-02-01'
+      })
+
+      applyV123(db)
+
+      expect(getTag(db, 'a')?.color).toBe('#22c55e')
+      expect(getTag(db, 'a')?.text_color).toBe('#ffffff')
+      const newTag = getTag(db, 'b')
+      if (!newTag) throw new Error('tag b missing')
+      if (newTag.color === '#22c55e' && newTag.text_color === '#ffffff') {
+        throw new Error('tag b not reassigned (still on original color pair)')
+      }
+      // reassigned tag must land on a preset pair (both bg and text from same preset)
+      expect(isPresetPair(newTag.color, newTag.text_color)).toBe(true)
+      expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
+    } finally {
+      db.close()
     }
-    expect(threw).toBe(true)
-  } finally {
-    db.close()
-  }
-})
+  })
 
-test('idempotent — second run is no-op', () => {
-  const db = freshDbAt122()
-  try {
-    seedProject(db, 'p4')
-    insertTag(db, { id: 'x', projectId: 'p4', name: 'x', color: '#22c55e' })
-    applyV123(db)
-    applyV123(db) // re-entrant: must not throw or reshuffle colors
-    expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
-  } finally {
-    db.close()
-  }
-})
+  test('migrates custom (non-preset) colors to nearest preset', () => {
+    const db = freshDbAt122()
+    try {
+      const projectId = 'p2'
+      seedProject(db, projectId)
+      // custom orange w/ black text — bg matches preset #f97316 but text_color
+      // (#000000) does not. Migration must replace BOTH to land on preset pair.
+      insertTag(db, { id: 'r', projectId, name: 'orange', color: '#f97316', textColor: '#000000' })
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1
+      applyV123(db)
+
+      const tag = getTag(db, 'r')
+      if (!tag) throw new Error('tag missing')
+      expect(isPresetPair(tag.color, tag.text_color)).toBe(true)
+      // nearest by RGB to #f97316 is #f97316 itself
+      expect(tag.color).toBe('#f97316')
+      expect(tag.text_color).toBe('#ffffff')
+    } finally {
+      db.close()
+    }
+  })
+
+  test('same color across different projects is allowed', () => {
+    const db = freshDbAt122()
+    try {
+      seedProject(db, 'pa')
+      seedProject(db, 'pb')
+      insertTag(db, { id: 'a', projectId: 'pa', name: 'g', color: '#22c55e' })
+      insertTag(db, { id: 'b', projectId: 'pb', name: 'g', color: '#22c55e' })
+
+      applyV123(db)
+
+      expect(getTag(db, 'a')?.color).toBe('#22c55e')
+      expect(getTag(db, 'b')?.color).toBe('#22c55e')
+      expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('unique index blocks post-migration duplicate insert', () => {
+    const db = freshDbAt122()
+    try {
+      seedProject(db, 'p3')
+      insertTag(db, { id: 't1', projectId: 'p3', name: 'first', color: '#3b82f6' })
+
+      applyV123(db)
+
+      let threw = false
+      try {
+        insertTag(db, { id: 't2', projectId: 'p3', name: 'second', color: '#3b82f6' })
+      } catch {
+        threw = true
+      }
+      expect(threw).toBe(true)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('idempotent — second run is no-op', () => {
+    const db = freshDbAt122()
+    try {
+      seedProject(db, 'p4')
+      insertTag(db, { id: 'x', projectId: 'p4', name: 'x', color: '#22c55e' })
+      applyV123(db)
+      applyV123(db) // re-entrant: must not throw or reshuffle colors
+      expect(indexExists(db, 'tags_project_color_unique')).toBe(true)
+    } finally {
+      db.close()
+    }
+  })
+})

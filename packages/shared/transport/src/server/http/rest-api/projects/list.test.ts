@@ -1,14 +1,9 @@
 /**
  * REST: GET /api/projects contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/projects/list.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerProjectsListRoute } from './list.js'
 
@@ -42,7 +37,7 @@ type ProjectsResponse = {
   data: { id: string; name: string; path: string; task_count: number }[]
 }
 
-await describe('GET /api/projects', () => {
+describe('GET /api/projects', () => {
   test('happy: name-ordered rows with visible-task counts', async () => {
     const res = await rest.request<ProjectsResponse>('GET', '/api/projects')
     expect(res.status).toBe(200)
@@ -52,5 +47,7 @@ await describe('GET /api/projects', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

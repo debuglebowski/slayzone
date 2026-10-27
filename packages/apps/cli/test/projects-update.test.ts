@@ -1,15 +1,12 @@
 /**
  * CLI projects update command tests
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/projects-update.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/projects-update.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 
 const projectId = crypto.randomUUID()
 h.db
@@ -65,6 +62,3 @@ describe('projects update', () => {
     expect(after === before).toBe(false)
   })
 })
-
-h.cleanup()
-console.log('\nDone')

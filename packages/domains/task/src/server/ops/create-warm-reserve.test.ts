@@ -7,10 +7,11 @@
  * task's terminal will auto-start in the project root: anything else (a worktree, a
  * child repo, a subtask in its parent's workspace, a Start gate) would make the
  * claim miss, and a missed reservation kills a booted agent.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { createTaskOp } from './create.js'
 import type { OpDeps } from './shared.js'
 

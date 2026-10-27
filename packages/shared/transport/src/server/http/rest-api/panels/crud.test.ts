@@ -1,14 +1,9 @@
 /**
  * REST: /api/panels contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { bindRestPrincipal } from '../principal.js'
 import { registerPanelsCrudRoutes } from './crud.js'
@@ -37,7 +32,7 @@ type OneResponse = { ok: boolean; data: Panel; error?: string }
 
 let createdId = ''
 
-await describe('/api/panels', () => {
+describe('/api/panels', () => {
   test('GET: returns predefined panels with no stored config', async () => {
     const res = await rest.request<ListResponse>('GET', '/api/panels')
     expect(res.status).toBe(200)
@@ -175,7 +170,7 @@ const call = async <T>(method: string, path: string, user?: string, body?: unkno
   return { status: res.status, body: (await res.json()) as T }
 }
 
-await describe('/api/panels per user', () => {
+describe('/api/panels per user', () => {
   test("a user's custom panel is theirs: not another user's, not the global config", async () => {
     const created = await call<OneResponse>('POST', '/api/panels', 'user-a', {
       name: 'A only',
@@ -198,6 +193,8 @@ await describe('/api/panels per user', () => {
   })
 })
 
-await userRest.close()
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await userRest.close()
+  await rest.close()
+  h.cleanup()
+})

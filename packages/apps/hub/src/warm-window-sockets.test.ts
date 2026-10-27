@@ -7,33 +7,15 @@
  * closes never sends an empty report, so without this its last snapshot kept warm
  * agents (billable) running with no tab to use them.
  *
- * Pure (fake sockets, fake timers) → runs under plain `npx tsx`.
+ * Pure (fake sockets, fake timers).
  *
- * Run with: npx tsx packages/apps/hub/src/warm-window-sockets.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
+ *   packages/apps/hub/src/warm-window-sockets.test.ts
  */
 import { EventEmitter } from 'node:events'
+import { expect, test } from 'vitest'
 import { createWarmWindowSockets } from './warm-window-sockets.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-  }
-}
 
 class FakeSocket extends EventEmitter {
   close(): void {
@@ -86,9 +68,9 @@ test('a window whose socket closes for good loses its counts after the grace', (
   sockets.track(7, s)
   s.close()
   t.advance(9_999)
-  assertEq(cleared, [], 'not before the grace')
+  expect(cleared, 'not before the grace').toEqual([])
   t.advance(1)
-  assertEq(cleared, [7], 'cleared once the grace runs out')
+  expect(cleared, 'cleared once the grace runs out').toEqual([7])
 })
 
 test('a reload or reconnect within the grace keeps the counts', () => {
@@ -99,7 +81,7 @@ test('a reload or reconnect within the grace keeps the counts', () => {
   t.advance(2_000)
   sockets.track(7, new FakeSocket())
   t.advance(60_000)
-  assertEq(cleared, [], 'the window came back')
+  expect(cleared, 'the window came back').toEqual([])
 })
 
 test('only the last open socket of a window counts', () => {
@@ -110,10 +92,10 @@ test('only the last open socket of a window counts', () => {
   sockets.track(7, b)
   a.close()
   t.advance(60_000)
-  assertEq(cleared, [], 'one socket still open')
+  expect(cleared, 'one socket still open').toEqual([])
   b.close()
   t.advance(10_000)
-  assertEq(cleared, [7], 'cleared after the last one')
+  expect(cleared, 'cleared after the last one').toEqual([7])
 })
 
 test('windows are independent', () => {
@@ -123,7 +105,7 @@ test('windows are independent', () => {
   sockets.track(2, new FakeSocket())
   a.close()
   t.advance(10_000)
-  assertEq(cleared, [1], 'only the closed window')
+  expect(cleared, 'only the closed window').toEqual([1])
 })
 
 test('a socket that closes twice is counted once', () => {
@@ -135,8 +117,5 @@ test('a socket that closes twice is counted once', () => {
   a.close()
   a.close()
   t.advance(10_000)
-  assertEq(cleared, [], 'b is still open')
+  expect(cleared, 'b is still open').toEqual([])
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

@@ -14,25 +14,12 @@
  * constraints a synthesized row cannot satisfy (a CHECK on an enum) is reported and
  * skipped, never silently: the test also requires the tables that matter most were seeded.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/db-bootstrap/v145-chain-conserves-rows.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v145-chain-conserves-rows.test.ts
  */
 import Database from 'better-sqlite3'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { migrations, runMigrations } from './index'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (error) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-}
 
 const LATEST = migrations[migrations.length - 1].version
 
@@ -160,53 +147,60 @@ function seedEverything(
 const count = (db: Database.Database, t: string): number =>
   (db.prepare(`SELECT count(*) AS n FROM ${q(t)}`).get() as { n: number }).n
 
-console.log('\nv145 → latest conserves every row')
+describe('v145 → latest conserves every row', () => {
+  // One database shared by the tests below, in order: seed at v145, migrate, inspect.
+  let db: Database.Database
+  let seeded: Map<string, number>
 
-const db = dbAtV145()
-const { seeded, skipped } = seedEverything(db)
-console.log(`  (seeded ${seeded.size} tables, skipped ${skipped.size})`)
-for (const [t, why] of skipped) console.log(`    skipped ${t}: ${why}`)
+  beforeAll(() => {
+    db = dbAtV145()
+    const result = seedEverything(db)
+    seeded = result.seeded
+    console.log(`  (seeded ${seeded.size} tables, skipped ${result.skipped.size})`)
+    for (const [t, why] of result.skipped) console.log(`    skipped ${t}: ${why}`)
+  })
 
-test('the tables that matter most were actually seeded', () => {
-  const missing = MUST_SEED.filter((t) => !seeded.has(t))
-  if (missing.length) throw new Error(`not seeded: ${missing.join(', ')}`)
-})
+  afterAll(() => {
+    db?.close()
+  })
 
-test('the full chain applies to latest', () => {
-  runMigrations(db)
-  const v = db.pragma('user_version', { simple: true })
-  if (v !== LATEST) throw new Error(`ended at v${String(v)}, expected v${LATEST}`)
-})
+  test('the tables that matter most were actually seeded', () => {
+    const missing = MUST_SEED.filter((t) => !seeded.has(t))
+    expect(missing).toEqual([])
+  })
 
-test('no seeded table lost a row (or vanished without a successor)', () => {
-  const finalTables = new Set(
-    (
-      db
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-        .all() as { name: string }[]
-    ).map((r) => r.name)
-  )
-  const problems: string[] = []
-  for (const [t, n] of seeded) {
-    const home = finalTables.has(t) ? t : SUCCESSOR[t]
-    if (!home || !finalTables.has(home)) {
-      problems.push(`${t}: table is gone and not on the successor list`)
-      continue
+  test('the full chain applies to latest', () => {
+    runMigrations(db)
+    const v = db.pragma('user_version', { simple: true })
+    expect(v).toBe(LATEST)
+  })
+
+  test('no seeded table lost a row (or vanished without a successor)', () => {
+    const finalTables = new Set(
+      (
+        db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+          .all() as { name: string }[]
+      ).map((r) => r.name)
+    )
+    const problems: string[] = []
+    for (const [t, n] of seeded) {
+      const home = finalTables.has(t) ? t : SUCCESSOR[t]
+      if (!home || !finalTables.has(home)) {
+        problems.push(`${t}: table is gone and not on the successor list`)
+        continue
+      }
+      const now = count(db, home)
+      if (now < n)
+        problems.push(`${t}${home === t ? '' : ` → ${home}`}: ${n} rows seeded, ${now} left`)
     }
-    const now = count(db, home)
-    if (now < n)
-      problems.push(`${t}${home === t ? '' : ` → ${home}`}: ${n} rows seeded, ${now} left`)
-  }
-  if (problems.length) throw new Error(problems.join('\n    '))
-})
+    expect(problems).toEqual([])
+  })
 
-test('integrity_check ok and no foreign-key violations', () => {
-  const integrity = db.pragma('integrity_check', { simple: true })
-  if (integrity !== 'ok') throw new Error(`integrity_check: ${String(integrity)}`)
-  const violations = db.pragma('foreign_key_check') as unknown[]
-  if (violations.length) throw new Error(`${violations.length} foreign-key violations`)
+  test('integrity_check ok and no foreign-key violations', () => {
+    const integrity = db.pragma('integrity_check', { simple: true })
+    expect(integrity).toBe('ok')
+    const violations = db.pragma('foreign_key_check') as unknown[]
+    expect(violations).toEqual([])
+  })
 })
-
-db.close()
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

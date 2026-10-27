@@ -1,18 +1,15 @@
 /**
  * CLI tags command tests
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/tags.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/tags.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProject } from '../src/db-helpers.mjs'
 import type Database from 'better-sqlite3'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 const projectId = crypto.randomUUID()
@@ -131,6 +128,3 @@ describe('tags delete', () => {
     expect(ttRow).toBeUndefined()
   })
 })
-
-h.cleanup()
-console.log('\nDone')

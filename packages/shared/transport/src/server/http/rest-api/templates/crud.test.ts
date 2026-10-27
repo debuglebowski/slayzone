@@ -1,14 +1,10 @@
 /**
  * REST: /api/templates CRUD contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTemplatesCrudRoutes } from './crud.js'
 
@@ -44,7 +40,7 @@ type Many = { ok: boolean; data: Template[] }
 let firstId = ''
 let secondId = ''
 
-await describe('/api/templates CRUD', () => {
+describe('/api/templates CRUD', () => {
   test('POST: creates template (project by name) + notifies', async () => {
     notifyCount = 0
     const res = await rest.request<One>('POST', '/api/templates', {
@@ -141,5 +137,7 @@ await describe('/api/templates CRUD', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

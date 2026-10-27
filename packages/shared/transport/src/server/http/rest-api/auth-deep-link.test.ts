@@ -13,11 +13,11 @@
  * the empty-host `slayzone:///auth/callback` normalization, error passthrough, and
  * the 400/no-emit rejections.
  *
- * Run with: pnpm tsx --loader ./packages/shared/test-utils/loader.ts \
- *   packages/shared/transport/src/server/http/rest-api/auth-deep-link.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/auth-deep-link.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import express from 'express'
-import { test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
 import { TypedEmitter } from '@slayzone/platform/events'
 // Relative (NOT the barrel) so the module-global authEvents singleton this test
@@ -45,7 +45,11 @@ interface DeepLinkRes {
 
 const q = (url: string): string => `/api/auth/deep-link?url=${encodeURIComponent(url)}`
 
-await describe('POST /api/auth/deep-link', () => {
+afterAll(async () => {
+  await rest.close()
+})
+
+describe('POST /api/auth/deep-link', () => {
   test('?url= query form (curl/PowerShell helper) emits callback{code}', async () => {
     received.length = 0
     const res = await rest.request<DeepLinkRes>('POST', q('slayzone://auth/callback?code=ABC123'))
@@ -102,5 +106,3 @@ await describe('POST /api/auth/deep-link', () => {
     expect(received.length).toBe(0)
   })
 })
-
-await rest.close()

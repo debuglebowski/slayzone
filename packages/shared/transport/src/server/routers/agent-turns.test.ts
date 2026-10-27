@@ -3,11 +3,12 @@
  * rules + re-threading) and the `onChanged` streaming subscription. Ports the
  * coverage from the legacy agent-turns IPC-handler test
  * (domains/agent-turns/src/electron/handlers.test.ts) onto `caller.list`.
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/routers/agent-turns.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { agentTurnsRouter } from './agent-turns.js'
 import { agentTurnsEvents, recordTurnBoundary } from '@slayzone/agent-turns/server'
 import { spawnSync } from 'node:child_process'
@@ -20,7 +21,7 @@ import type { AgentTurnRange } from '@slayzone/agent-turns/shared'
 
 const subCtx = { db: {} as never, dataRoot: '' }
 
-await describe('agentTurns.onChanged subscription', () => {
+describe('agentTurns.onChanged subscription', () => {
   test('forwards each agent-turns:changed emit, stops after unsubscribe', async () => {
     const caller = agentTurnsRouter.createCaller(subCtx)
     const obs = await caller.onChanged()
@@ -85,7 +86,7 @@ function freshTask(): { taskId: string; tabId: string; repo: string } {
 const list = (repo: string): Promise<AgentTurnRange[]> =>
   caller.list({ worktreePath: repo }) as Promise<AgentTurnRange[]>
 
-await describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sha', () => {
+describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sha', () => {
   test('drops a row whose snapshot equals prev (legacy noop)', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'a.txt'), '1')
@@ -372,10 +373,12 @@ await describe('agentTurns.list filters empty-diff turns + re-threads prev_snaps
   })
 })
 
-for (const r of repos) {
-  try {
-    fs.rmSync(r, { recursive: true, force: true })
-  } catch {
-    /* ignore */
+afterAll(() => {
+  for (const r of repos) {
+    try {
+      fs.rmSync(r, { recursive: true, force: true })
+    } catch {
+      /* ignore */
+    }
   }
-}
+})

@@ -8,10 +8,9 @@
  *
  * Real `startServer()` in this process (see owner-checks-harness.ts for why).
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
- *   packages/apps/hub/src/diagnostics-retention.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import {
   existsSync,
@@ -25,23 +24,6 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const roots: string[] = []
@@ -95,51 +77,57 @@ const rowExists = (db: Database.Database, id: string): boolean =>
 const g = globalThis as Record<string, unknown>
 g.__dirname ??= dirname(fileURLToPath(import.meta.url))
 
-async function main(): Promise<void> {
-  const { startServer } = await import('./server.js')
-  const { getServerDiagnosticsDatabasePath } = await import('./db.js')
-  const { runScheduledRetentionNow } = await import('@slayzone/diagnostics/server')
+const { startServer } = await import('./server.js')
+const { getServerDiagnosticsDatabasePath } = await import('./db.js')
+const { runScheduledRetentionNow } = await import('@slayzone/diagnostics/server')
 
-  console.log('unsupervised hub — owns retention')
-  {
+type Handle = Awaited<ReturnType<typeof startServer>>
+
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true })
+})
+
+describe('unsupervised hub — owns retention', () => {
+  let handle: Handle
+  let db: Database.Database
+  let oldBlob: string
+  let freshBlob: string
+  beforeAll(async () => {
     const { blobDir } = prepareHub(false)
-    const { oldBlob, freshBlob } = seedBlobs(blobDir)
-    const handle = await startServer()
-    const db = seedRows(getServerDiagnosticsDatabasePath())
+    ;({ oldBlob, freshBlob } = seedBlobs(blobDir))
+    handle = await startServer()
+    db = seedRows(getServerDiagnosticsDatabasePath())
+  })
 
-    await test('a retention pass prunes expired rows and blobs, keeps fresh ones', async () => {
-      assert((await runScheduledRetentionNow()) === true, 'the hub runs a retention scheduler')
-      assert(!rowExists(db, 'row-old'), 'expired row pruned')
-      assert(rowExists(db, 'row-fresh'), 'fresh row kept')
-      assert(!existsSync(oldBlob), 'expired blob pruned')
-      assert(existsSync(freshBlob), 'fresh blob kept')
-    })
+  test('a retention pass prunes expired rows and blobs, keeps fresh ones', async () => {
+    expect(await runScheduledRetentionNow(), 'the hub runs a retention scheduler').toBe(true)
+    expect(rowExists(db, 'row-old'), 'expired row pruned').toBe(false)
+    expect(rowExists(db, 'row-fresh'), 'fresh row kept').toBe(true)
+    expect(existsSync(oldBlob), 'expired blob pruned').toBe(false)
+    expect(existsSync(freshBlob), 'fresh blob kept').toBe(true)
+  })
 
+  test('stopping the hub stops its scheduler', async () => {
     db.close()
     await handle.stop()
+    expect(await runScheduledRetentionNow(), 'no scheduler after stop').toBe(false)
+  })
+})
 
-    await test('stopping the hub stops its scheduler', async () => {
-      assert((await runScheduledRetentionNow()) === false, 'no scheduler after stop')
-    })
-  }
-
-  console.log('supervised hub — the desktop host owns retention')
-  {
+describe('supervised hub — the desktop host owns retention', () => {
+  let handle: Handle
+  let oldBlob: string
+  beforeAll(async () => {
     const { blobDir } = prepareHub(true)
-    const { oldBlob } = seedBlobs(blobDir)
-    const handle = await startServer()
-
-    await test('runs no scheduler and leaves the shared blobs alone', async () => {
-      assert((await runScheduledRetentionNow()) === false, 'no scheduler in a supervised hub')
-      assert(existsSync(oldBlob), 'the host, not this hub, prunes the shared blob dir')
-    })
-
+    ;({ oldBlob } = seedBlobs(blobDir))
+    handle = await startServer()
+  })
+  afterAll(async () => {
     await handle.stop()
-  }
+  })
 
-  for (const root of roots) rmSync(root, { recursive: true, force: true })
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+  test('runs no scheduler and leaves the shared blobs alone', async () => {
+    expect(await runScheduledRetentionNow(), 'no scheduler in a supervised hub').toBe(false)
+    expect(existsSync(oldBlob), 'the host, not this hub, prunes the shared blob dir').toBe(true)
+  })
+})

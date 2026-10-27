@@ -1,144 +1,121 @@
 /**
  * Tests for filterBufferData (underline stripping from PTY output)
- * Run with: npx tsx packages/domains/terminal/src/main/filter-buffer-data.test.ts
  */
+import { expect, test } from 'vitest'
 import { filterBufferData } from './filter-buffer-data'
 import { stripUnderlineCodes } from '../shared/strip-underline'
 
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function assert(actual: string, expected: string, label?: string) {
-  if (actual !== expected) {
-    const vis = (s: string) => s.replace(/\x1b/g, 'ESC')
-    throw new Error(`${label ? label + ': ' : ''}expected ${vis(expected)}, got ${vis(actual)}`)
-  }
-}
-
-console.log('\nfilterBufferData')
-console.log('─'.repeat(40))
-
 // Basic underline stripping
 test('strips standalone SGR 4 (underline)', () => {
-  assert(filterBufferData('\x1b[4m'), '')
+  expect(filterBufferData('\x1b[4m')).toBe('')
 })
 
 test('strips SGR 4 with subparameters (curly underline 4:3)', () => {
-  assert(filterBufferData('\x1b[4:3m'), '')
+  expect(filterBufferData('\x1b[4:3m')).toBe('')
 })
 
 test('strips all underline variants 4:1 through 4:5', () => {
   for (let i = 1; i <= 5; i++) {
-    assert(filterBufferData(`\x1b[4:${i}m`), '', `4:${i}`)
+    expect(filterBufferData(`\x1b[4:${i}m`), `4:${i}`).toBe('')
   }
 })
 
 test('strips double underline (4:2)', () => {
-  assert(filterBufferData('\x1b[4:2m'), '')
+  expect(filterBufferData('\x1b[4:2m')).toBe('')
 })
 
 // Combined SGR codes
 test('strips underline from combined codes (bold+underline+red)', () => {
-  assert(filterBufferData('\x1b[1;4;31m'), '\x1b[1;31m')
+  expect(filterBufferData('\x1b[1;4;31m')).toBe('\x1b[1;31m')
 })
 
 test('strips curly underline from combined codes', () => {
-  assert(filterBufferData('\x1b[1;4:3;32m'), '\x1b[1;32m')
+  expect(filterBufferData('\x1b[1;4:3;32m')).toBe('\x1b[1;32m')
 })
 
 test('preserves other codes when underline removed', () => {
-  assert(filterBufferData('\x1b[1;4;31;42m'), '\x1b[1;31;42m')
+  expect(filterBufferData('\x1b[1;4;31;42m')).toBe('\x1b[1;31;42m')
 })
 
 // Edge cases
 test('preserves SGR 24 (underline off) — not the same as SGR 4', () => {
-  assert(filterBufferData('\x1b[24m'), '\x1b[24m')
+  expect(filterBufferData('\x1b[24m')).toBe('\x1b[24m')
 })
 
 test('preserves SGR 0 (reset)', () => {
-  assert(filterBufferData('\x1b[0m'), '\x1b[0m')
+  expect(filterBufferData('\x1b[0m')).toBe('\x1b[0m')
 })
 
 test('preserves bare reset ESC[m', () => {
-  assert(filterBufferData('\x1b[m'), '\x1b[m')
+  expect(filterBufferData('\x1b[m')).toBe('\x1b[m')
 })
 
 test('preserves color codes unchanged', () => {
-  assert(filterBufferData('\x1b[31m'), '\x1b[31m')
-  assert(filterBufferData('\x1b[38;5;200m'), '\x1b[38;5;200m')
-  assert(filterBufferData('\x1b[38;2;100;150;200m'), '\x1b[38;2;100;150;200m')
+  expect(filterBufferData('\x1b[31m')).toBe('\x1b[31m')
+  expect(filterBufferData('\x1b[38;5;200m')).toBe('\x1b[38;5;200m')
+  expect(filterBufferData('\x1b[38;2;100;150;200m')).toBe('\x1b[38;2;100;150;200m')
 })
 
 test('preserves bold, italic, inverse, strikethrough', () => {
-  assert(filterBufferData('\x1b[1m'), '\x1b[1m')
-  assert(filterBufferData('\x1b[3m'), '\x1b[3m')
-  assert(filterBufferData('\x1b[7m'), '\x1b[7m')
-  assert(filterBufferData('\x1b[9m'), '\x1b[9m')
+  expect(filterBufferData('\x1b[1m')).toBe('\x1b[1m')
+  expect(filterBufferData('\x1b[3m')).toBe('\x1b[3m')
+  expect(filterBufferData('\x1b[7m')).toBe('\x1b[7m')
+  expect(filterBufferData('\x1b[9m')).toBe('\x1b[9m')
 })
 
 test('preserves plain text unchanged', () => {
-  assert(filterBufferData('hello world'), 'hello world')
+  expect(filterBufferData('hello world')).toBe('hello world')
 })
 
 test('handles mixed text and SGR codes', () => {
-  assert(filterBufferData('hello \x1b[1;4;31mworld\x1b[0m'), 'hello \x1b[1;31mworld\x1b[0m')
+  expect(filterBufferData('hello \x1b[1;4;31mworld\x1b[0m')).toBe('hello \x1b[1;31mworld\x1b[0m')
 })
 
 test('strips underline code 44 is NOT stripped (it is bg blue)', () => {
-  assert(filterBufferData('\x1b[44m'), '\x1b[44m')
+  expect(filterBufferData('\x1b[44m')).toBe('\x1b[44m')
 })
 
 test('handles SGR 4 alone in combined becoming empty', () => {
-  assert(filterBufferData('\x1b[4m'), '')
+  expect(filterBufferData('\x1b[4m')).toBe('')
 })
 
 // OSC stripping
 test('strips title-setting OSC sequences', () => {
-  assert(filterBufferData('\x1b]0;my title\x07'), '')
-  assert(filterBufferData('\x1b]2;my title\x07'), '')
+  expect(filterBufferData('\x1b]0;my title\x07')).toBe('')
+  expect(filterBufferData('\x1b]2;my title\x07')).toBe('')
 })
 
 test('strips clipboard OSC sequences', () => {
-  assert(filterBufferData('\x1b]52;c;base64data\x07'), '')
+  expect(filterBufferData('\x1b]52;c;base64data\x07')).toBe('')
 })
 
 test('preserves non-title OSC sequences', () => {
   // OSC 7 (cwd notification) should pass through
-  assert(filterBufferData('\x1b]7;file:///path\x07'), '\x1b]7;file:///path\x07')
+  expect(filterBufferData('\x1b]7;file:///path\x07')).toBe('\x1b]7;file:///path\x07')
 })
 
 // RGB/256 color combined with underline
 test('strips underline from RGB color sequence', () => {
-  assert(filterBufferData('\x1b[38;2;100;150;200;4m'), '\x1b[38;2;100;150;200m')
+  expect(filterBufferData('\x1b[38;2;100;150;200;4m')).toBe('\x1b[38;2;100;150;200m')
 })
 
 test('strips underline from 256-color sequence', () => {
-  assert(filterBufferData('\x1b[38;5;200;4m'), '\x1b[38;5;200m')
+  expect(filterBufferData('\x1b[38;5;200;4m')).toBe('\x1b[38;5;200m')
 })
 
 test('strips curly underline from RGB color sequence', () => {
-  assert(filterBufferData('\x1b[38;2;100;150;200;4:3m'), '\x1b[38;2;100;150;200m')
+  expect(filterBufferData('\x1b[38;2;100;150;200;4:3m')).toBe('\x1b[38;2;100;150;200m')
 })
 
 test('strips underline between color params', () => {
-  assert(filterBufferData('\x1b[1;4;38;5;200m'), '\x1b[1;38;5;200m')
+  expect(filterBufferData('\x1b[1;4;38;5;200m')).toBe('\x1b[1;38;5;200m')
 })
 
 // Regression: multiple underlines in one stream
 test('strips multiple underline sequences in one buffer', () => {
-  assert(filterBufferData('\x1b[4mfoo\x1b[0m bar \x1b[4:3mbaz\x1b[0m'), 'foo\x1b[0m bar baz\x1b[0m')
+  expect(filterBufferData('\x1b[4mfoo\x1b[0m bar \x1b[4:3mbaz\x1b[0m')).toBe(
+    'foo\x1b[0m bar baz\x1b[0m'
+  )
 })
 
 // Split sequence simulation — server filter applied per chunk, client filter on joined batch
@@ -146,8 +123,8 @@ test('split sequence: server filter misses split escape', () => {
   // Server processes chunks independently — split escape slips through
   const chunk1 = filterBufferData('hello\x1b[')
   const chunk2 = filterBufferData('4mworld')
-  assert(chunk1, 'hello\x1b[', 'chunk1 preserves partial escape')
-  assert(chunk2, '4mworld', 'chunk2 passes through unmatched')
+  expect(chunk1, 'chunk1 preserves partial escape').toBe('hello\x1b[')
+  expect(chunk2, 'chunk2 passes through unmatched').toBe('4mworld')
 })
 
 test('split sequence: client-side join + filter catches it', () => {
@@ -155,36 +132,36 @@ test('split sequence: client-side join + filter catches it', () => {
   const chunk1 = filterBufferData('hello\x1b[')
   const chunk2 = filterBufferData('4mworld')
   const joined = stripUnderlineCodes(chunk1 + chunk2)
-  assert(joined, 'helloworld', 'joined + filtered strips underline')
+  expect(joined, 'joined + filtered strips underline').toBe('helloworld')
 })
 
 // SGR sub-parameter safety — `4` as a color sub-parameter must NOT be stripped.
 // `38`/`48`/`58` followed by `5;<idx>` or `2;<r>;<g>;<b>` consume those tokens as a
 // color spec; a `4` appearing as the index or an RGB component is not SGR underline.
 test('preserves 256-color fg index 4', () => {
-  assert(filterBufferData('\x1b[38;5;4m'), '\x1b[38;5;4m')
+  expect(filterBufferData('\x1b[38;5;4m')).toBe('\x1b[38;5;4m')
 })
 
 test('preserves 256-color bg index 4', () => {
-  assert(filterBufferData('\x1b[48;5;4m'), '\x1b[48;5;4m')
+  expect(filterBufferData('\x1b[48;5;4m')).toBe('\x1b[48;5;4m')
 })
 
 test('preserves underline-color (SGR 58) index 4', () => {
-  assert(filterBufferData('\x1b[58;5;4m'), '\x1b[58;5;4m')
+  expect(filterBufferData('\x1b[58;5;4m')).toBe('\x1b[58;5;4m')
 })
 
 test('preserves RGB fg with component 4', () => {
-  assert(filterBufferData('\x1b[38;2;4;120;200m'), '\x1b[38;2;4;120;200m')
-  assert(filterBufferData('\x1b[38;2;120;4;200m'), '\x1b[38;2;120;4;200m')
-  assert(filterBufferData('\x1b[38;2;4;4;4m'), '\x1b[38;2;4;4;4m')
+  expect(filterBufferData('\x1b[38;2;4;120;200m')).toBe('\x1b[38;2;4;120;200m')
+  expect(filterBufferData('\x1b[38;2;120;4;200m')).toBe('\x1b[38;2;120;4;200m')
+  expect(filterBufferData('\x1b[38;2;4;4;4m')).toBe('\x1b[38;2;4;4;4m')
 })
 
 test('strips standalone underline but keeps color index 4 in same sequence', () => {
-  assert(filterBufferData('\x1b[1;4;38;5;4m'), '\x1b[1;38;5;4m')
+  expect(filterBufferData('\x1b[1;4;38;5;4m')).toBe('\x1b[1;38;5;4m')
 })
 
 test('preserves colon-form extended color with index 4', () => {
-  assert(filterBufferData('\x1b[38:5:4m'), '\x1b[38:5:4m')
+  expect(filterBufferData('\x1b[38:5:4m')).toBe('\x1b[38:5:4m')
 })
 
 // Device-status queries must NEVER reach the replayable buffer. A stored query
@@ -193,35 +170,37 @@ test('preserves colon-form extended color with index 4', () => {
 // reads a row=1 answer as "screen externally wiped" → submits `/clear` → new
 // session. Buffers on live tasks held 24k–35k copies before this filter.
 test('strips DECXCPR ?6n — the spontaneous-/clear trigger', () => {
-  assert(filterBufferData('\x1b[?6n'), '')
+  expect(filterBufferData('\x1b[?6n')).toBe('')
 })
 
 test('strips an accumulated ?6n poll burst but keeps surrounding output', () => {
   const burst = '\x1b[?6n'.repeat(200)
-  assert(filterBufferData(`\x1b[1;31mhello\x1b[0m${burst}world`), '\x1b[1;31mhello\x1b[0mworld')
+  expect(filterBufferData(`\x1b[1;31mhello\x1b[0m${burst}world`)).toBe(
+    '\x1b[1;31mhello\x1b[0mworld'
+  )
 })
 
 test('strips plain CPR 6n and DSR 5n from the buffer', () => {
-  assert(filterBufferData('\x1b[6n'), '')
-  assert(filterBufferData('\x1b[5n'), '')
+  expect(filterBufferData('\x1b[6n')).toBe('')
+  expect(filterBufferData('\x1b[5n')).toBe('')
 })
 
 test('preserves alt-screen + cursor-visibility private modes (not queries)', () => {
-  assert(filterBufferData('\x1b[?1049h'), '\x1b[?1049h')
-  assert(filterBufferData('\x1b[?1049l'), '\x1b[?1049l')
-  assert(filterBufferData('\x1b[?25l'), '\x1b[?25l')
+  expect(filterBufferData('\x1b[?1049h')).toBe('\x1b[?1049h')
+  expect(filterBufferData('\x1b[?1049l')).toBe('\x1b[?1049l')
+  expect(filterBufferData('\x1b[?25l')).toBe('\x1b[?25l')
 })
 
 // filterBufferData's output is ALSO what streams live to the renderer, so the
 // strip set must stay narrow: queries the renderer legitimately answers have to
 // survive, or capability detection breaks.
 test('preserves renderer-answered queries (DECRQM / XTVERSION)', () => {
-  assert(filterBufferData('\x1b[?2026$p'), '\x1b[?2026$p')
-  assert(filterBufferData('\x1b[>0q'), '\x1b[>0q')
+  expect(filterBufferData('\x1b[?2026$p')).toBe('\x1b[?2026$p')
+  expect(filterBufferData('\x1b[>0q')).toBe('\x1b[>0q')
 })
 
 test('preserves cursor movement adjacent to stripped queries', () => {
-  assert(filterBufferData('\x1b[10;20H\x1b[?6n\x1b[2J'), '\x1b[10;20H\x1b[2J')
+  expect(filterBufferData('\x1b[10;20H\x1b[?6n\x1b[2J')).toBe('\x1b[10;20H\x1b[2J')
 })
 
 // ---------------------------------------------------------------------------
@@ -235,20 +214,20 @@ test('preserves cursor movement adjacent to stripped queries', () => {
 // ---------------------------------------------------------------------------
 
 test('implicit reset survives when the underline is stripped (ESC[;4m → ESC[m)', () => {
-  assert(filterBufferData('\x1b[;4munderlined'), '\x1b[munderlined')
+  expect(filterBufferData('\x1b[;4munderlined')).toBe('\x1b[munderlined')
 })
 
 test('explicit reset + underline keeps the reset (regression guard)', () => {
-  assert(filterBufferData('\x1b[0;4mtext'), '\x1b[0mtext')
+  expect(filterBufferData('\x1b[0;4mtext')).toBe('\x1b[0mtext')
 })
 
 test('a bare underline with no other params still strips to nothing', () => {
-  assert(filterBufferData('\x1b[4mtext'), 'text')
+  expect(filterBufferData('\x1b[4mtext')).toBe('text')
 })
 
 test('multiple empty params are preserved', () => {
   // `ESC[;;4m` is reset;reset;underline — the two implicit resets remain.
-  assert(filterBufferData('\x1b[;;4mtext'), '\x1b[;mtext')
+  expect(filterBufferData('\x1b[;;4mtext')).toBe('\x1b[;mtext')
 })
 
 // ---------------------------------------------------------------------------
@@ -261,37 +240,33 @@ test('multiple empty params are preserved', () => {
 // ---------------------------------------------------------------------------
 
 test('CMYK extended colour (selector 4) survives intact', () => {
-  assert(filterBufferData('\x1b[38;4;10;20;30;40mtext'), '\x1b[38;4;10;20;30;40mtext')
+  expect(filterBufferData('\x1b[38;4;10;20;30;40mtext')).toBe('\x1b[38;4;10;20;30;40mtext')
 })
 
 test('CMY extended colour (selector 3) survives intact', () => {
-  assert(filterBufferData('\x1b[38;3;10;20;30mtext'), '\x1b[38;3;10;20;30mtext')
+  expect(filterBufferData('\x1b[38;3;10;20;30mtext')).toBe('\x1b[38;3;10;20;30mtext')
 })
 
 test('transparent / implementation-defined selectors 0 and 1 survive', () => {
-  assert(filterBufferData('\x1b[38;0mtext'), '\x1b[38;0mtext')
-  assert(filterBufferData('\x1b[38;1mtext'), '\x1b[38;1mtext')
+  expect(filterBufferData('\x1b[38;0mtext')).toBe('\x1b[38;0mtext')
+  expect(filterBufferData('\x1b[38;1mtext')).toBe('\x1b[38;1mtext')
 })
 
 test('a CMYK component that is literally 4 is not treated as underline', () => {
   // Every component set to 4 — the pathological case for the old walk.
-  assert(filterBufferData('\x1b[48;4;4;4;4;4mtext'), '\x1b[48;4;4;4;4;4mtext')
+  expect(filterBufferData('\x1b[48;4;4;4;4;4mtext')).toBe('\x1b[48;4;4;4;4;4mtext')
 })
 
 test('underline after a CMYK spec is still stripped', () => {
   // The walk must resume filtering once the colour spec is consumed.
-  assert(filterBufferData('\x1b[38;4;1;2;3;4;4mtext'), '\x1b[38;4;1;2;3;4mtext')
+  expect(filterBufferData('\x1b[38;4;1;2;3;4;4mtext')).toBe('\x1b[38;4;1;2;3;4mtext')
 })
 
 test('indexed and RGB colours still survive (regression guard)', () => {
-  assert(filterBufferData('\x1b[38;5;4mtext'), '\x1b[38;5;4mtext')
-  assert(filterBufferData('\x1b[38;2;4;4;4mtext'), '\x1b[38;2;4;4;4mtext')
+  expect(filterBufferData('\x1b[38;5;4mtext')).toBe('\x1b[38;5;4mtext')
+  expect(filterBufferData('\x1b[38;2;4;4;4mtext')).toBe('\x1b[38;2;4;4;4mtext')
 })
 
 test('underline color 58 with CMYK survives', () => {
-  assert(filterBufferData('\x1b[58;4;9;8;7;6mtext'), '\x1b[58;4;9;8;7;6mtext')
+  expect(filterBufferData('\x1b[58;4;9;8;7;6mtext')).toBe('\x1b[58;4;9;8;7;6mtext')
 })
-
-console.log('─'.repeat(40))
-console.log(`\n${passed} passed, ${failed} failed\n`)
-process.exit(failed > 0 ? 1 : 0)

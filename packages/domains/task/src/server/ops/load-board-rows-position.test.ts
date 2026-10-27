@@ -3,10 +3,11 @@
  * the renderer can patch a created or moved row into its board at the place a full
  * reload would put it — and `createTaskOp` can therefore announce its insert as a
  * scoped change instead of forcing every window to reload the whole board.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { createTaskOp } from './create.js'
 import { loadBoardDataOp, loadBoardRowsOp } from './load-board-data.js'
 import type { TasksChange } from '../../shared/tasks-changed.js'

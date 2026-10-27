@@ -22,30 +22,10 @@
  * test anywhere. This asserts against the SHIPPED BUNDLE rather than the
  * package.json version string, so it holds regardless of how the version is
  * spelled or which beta the fix first landed in.
- *
- * Run with: pnpm exec tsx packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function ok(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 
 /**
  * Read a file out of the installed `@xterm/addon-webgl` package. Resolved via
@@ -60,27 +40,25 @@ function readAddonFile(relPath: string): string {
   return readFileSync(`${pkgDir}/${relPath}`, 'utf8')
 }
 
-function run(): void {
-  console.log('\n=== xterm shared-atlas fix (downgrade guard) ===\n')
-
+describe('xterm shared-atlas fix (downgrade guard)', () => {
   test('shipped ESM bundle contains the pageLayoutVersion fix', () => {
     const bundle = readAddonFile('lib/addon-webgl.mjs')
-    ok(
+    expect(
       bundle.includes('pageLayoutVersion'),
       'installed @xterm/addon-webgl/lib/addon-webgl.mjs has no `pageLayoutVersion` — ' +
         'this build predates the shared-atlas fix (xterm.js #6042/#6055). Clearing the ' +
         'texture atlas on one terminal will scramble every terminal sharing that atlas. ' +
         'Re-pin @xterm/* forward; see plans/terminal-scramble-and-byte-filters.md.'
-    )
+    ).toBe(true)
   })
 
   test('shipped CJS bundle contains the fix too', () => {
     // Vite may resolve either entry depending on the consumer; both must carry it.
     const bundle = readAddonFile('lib/addon-webgl.js')
-    ok(
+    expect(
       bundle.includes('pageLayoutVersion'),
       'installed @xterm/addon-webgl/lib/addon-webgl.js (CJS entry) has no `pageLayoutVersion`'
-    )
+    ).toBe(true)
   })
 
   test('TextureAtlas source bumps the version inside clearTexture()', () => {
@@ -91,13 +69,13 @@ function run(): void {
     // neither of which is our path).
     const src = readAddonFile('src/TextureAtlas.ts')
     const start = src.indexOf('public clearTexture()')
-    ok(start !== -1, 'could not locate `public clearTexture()` in TextureAtlas.ts')
+    expect(start, 'could not locate `public clearTexture()` in TextureAtlas.ts').not.toBe(-1)
     const body = src.slice(start, src.indexOf('\n  }', start))
-    ok(
+    expect(
       body.includes('_pageLayoutVersion++'),
       'clearTexture() does not bump `_pageLayoutVersion` — sibling renderers sharing ' +
         'this atlas receive no invalidation signal and will paint stale texcoords'
-    )
+    ).toBe(true)
   })
 
   test('GlyphRenderer tracks the version per renderer', () => {
@@ -105,16 +83,10 @@ function run(): void {
     // atlas-level flag (the pre-fix shape, and what the community patch #6018
     // proposed) repairs exactly one sibling and stays broken for N > 2 panes.
     const src = readAddonFile('src/GlyphRenderer.ts')
-    ok(
+    expect(
       src.includes('_lastSeenPageLayoutVersion'),
       'GlyphRenderer has no `_lastSeenPageLayoutVersion` — invalidation is not tracked ' +
         'per renderer, so only one of N sharing terminals would recover'
-    )
+    ).toBe(true)
   })
-
-  console.log('─'.repeat(40))
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-run()
+})

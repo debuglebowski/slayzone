@@ -1,7 +1,7 @@
 /**
  * chat tRPC router — proc delegation + streaming subscription wiring.
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --loader ./packages/shared/test-utils/loader.ts \
+ * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/routers/chat.test.ts
  *
  * The chat ops logic is covered by the terminal domain's own tests; here we
@@ -9,7 +9,7 @@
  * (setChatDeps), and the 4 subscriptions forward every emit + tear their
  * listener down on unsubscribe.
  */
-import { test, expect, describe } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { chatRouter } from './chat.js'
 import { setChatDeps, type ChatDeps } from '../app-deps.js'
@@ -40,7 +40,7 @@ setChatDeps({ ops, queueOps, events, queueEvents } as unknown as ChatDeps)
 // The router reads ops via the getChatDeps() singleton, not ctx — stub is enough.
 const ctx = { db: {} as never, dataRoot: '' }
 
-await describe('chat router', () => {
+describe('chat router', () => {
   test('procedures + nested queue delegate to injected ops', async () => {
     const caller = chatRouter.createCaller(ctx)
     expect(await caller.supports({ mode: 'claude-chat' })).toEqual(true)

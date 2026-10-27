@@ -1,25 +1,9 @@
 /**
  * Keys typed between "open a new terminal" and that terminal existing (early-input.ts).
- * Run with: pnpm exec tsx packages/domains/terminal/src/client/early-input.test.ts
  */
+import { expect, test } from 'vitest'
 import { createEarlyInputCapture, keyToTerminalData } from './early-input'
 
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-function ok(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 const key = (
   k: string,
   mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}
@@ -33,36 +17,37 @@ const key = (
 })
 
 test('maps the keys a terminal would send', () => {
-  ok(keyToTerminalData(key('a')) === 'a', 'printable')
-  ok(keyToTerminalData(key('A')) === 'A', 'shifted printable')
-  ok(keyToTerminalData(key(' ')) === ' ', 'space')
-  ok(keyToTerminalData(key('Enter')) === '\r', 'enter')
-  ok(keyToTerminalData(key('Backspace')) === '\x7f', 'backspace')
-  ok(keyToTerminalData(key('Tab')) === '\t', 'tab')
-  ok(keyToTerminalData(key('Escape')) === '\x1b', 'escape')
-  ok(keyToTerminalData(key('ArrowLeft')) === '\x1b[D', 'arrow')
-  ok(keyToTerminalData(key('c', { ctrlKey: true })) === '\x03', 'ctrl+c')
+  expect(keyToTerminalData(key('a')), 'printable').toBe('a')
+  expect(keyToTerminalData(key('A')), 'shifted printable').toBe('A')
+  expect(keyToTerminalData(key(' ')), 'space').toBe(' ')
+  expect(keyToTerminalData(key('Enter')), 'enter').toBe('\r')
+  expect(keyToTerminalData(key('Backspace')), 'backspace').toBe('\x7f')
+  expect(keyToTerminalData(key('Tab')), 'tab').toBe('\t')
+  expect(keyToTerminalData(key('Escape')), 'escape').toBe('\x1b')
+  expect(keyToTerminalData(key('ArrowLeft')), 'arrow').toBe('\x1b[D')
+  expect(keyToTerminalData(key('c', { ctrlKey: true })), 'ctrl+c').toBe('\x03')
 })
 
 test('leaves app shortcuts and unknown keys alone', () => {
-  ok(keyToTerminalData(key('n', { metaKey: true })) === null, 'cmd shortcut')
-  ok(keyToTerminalData(key('Shift')) === null, 'bare modifier')
-  ok(keyToTerminalData(key('F5')) === null, 'unmapped key')
-  ok(keyToTerminalData({ ...key('a'), isComposing: true }) === null, 'IME composition')
+  expect(keyToTerminalData(key('n', { metaKey: true })), 'cmd shortcut').toBe(null)
+  expect(keyToTerminalData(key('Shift')), 'bare modifier').toBe(null)
+  expect(keyToTerminalData(key('F5')), 'unmapped key').toBe(null)
+  expect(keyToTerminalData({ ...key('a'), isComposing: true }), 'IME composition').toBe(null)
 })
 
 test('captured keys go to the session the capture is bound to, once', () => {
   const now = 0
   const cap = createEarlyInputCapture({ now: () => now, ttlMs: 3000 })
   const c = cap.start()
-  ok(cap.onKey(key('h')) && cap.onKey(key('i')), 'consumed while capturing')
+  expect(cap.onKey(key('h')), 'consumed while capturing').toBe(true)
+  expect(cap.onKey(key('i')), 'consumed while capturing').toBe(true)
   c.bind('s1')
-  ok(cap.take('s2') === '', 'another session gets nothing')
-  ok(cap.capturing(), 'capturing until taken')
-  ok(cap.take('s1') === 'hi', 'bound session gets the keys')
-  ok(!cap.capturing(), 'not capturing once taken')
-  ok(cap.take('s1') === '', 'taken once')
-  ok(!cap.onKey(key('x')), 'capture stopped after take')
+  expect(cap.take('s2'), 'another session gets nothing').toBe('')
+  expect(cap.capturing(), 'capturing until taken').toBe(true)
+  expect(cap.take('s1'), 'bound session gets the keys').toBe('hi')
+  expect(cap.capturing(), 'not capturing once taken').toBe(false)
+  expect(cap.take('s1'), 'taken once').toBe('')
+  expect(cap.onKey(key('x')), 'capture stopped after take').toBe(false)
 })
 
 test('keys keep buffering after bind until the terminal takes them', () => {
@@ -71,7 +56,7 @@ test('keys keep buffering after bind until the terminal takes them', () => {
   cap.onKey(key('a'))
   c.bind('s1')
   cap.onKey(key('b'))
-  ok(cap.take('s1') === 'ab', 'both halves delivered')
+  expect(cap.take('s1'), 'both halves delivered').toBe('ab')
 })
 
 test('an expired or cancelled capture delivers nothing and stops capturing', () => {
@@ -81,12 +66,12 @@ test('an expired or cancelled capture delivers nothing and stops capturing', () 
   cap.onKey(key('a'))
   c.bind('s1')
   now = 3001
-  ok(!cap.onKey(key('b')), 'expired: not captured')
-  ok(cap.take('s1') === '', 'expired: nothing delivered')
+  expect(cap.onKey(key('b')), 'expired: not captured').toBe(false)
+  expect(cap.take('s1'), 'expired: nothing delivered').toBe('')
   const c2 = cap.start()
   cap.onKey(key('z'))
   c2.cancel()
-  ok(!cap.onKey(key('y')), 'cancelled: not captured')
+  expect(cap.onKey(key('y')), 'cancelled: not captured').toBe(false)
 })
 
 test('a new capture replaces an older one', () => {
@@ -97,9 +82,6 @@ test('a new capture replaces an older one', () => {
   const c2 = cap.start()
   cap.onKey(key('b'))
   c2.bind('s2')
-  ok(cap.take('s1') === '', 'older capture dropped')
-  ok(cap.take('s2') === 'b', 'newer capture delivered')
+  expect(cap.take('s1'), 'older capture dropped').toBe('')
+  expect(cap.take('s2'), 'newer capture delivered').toBe('b')
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-process.exit(failed > 0 ? 1 : 0)

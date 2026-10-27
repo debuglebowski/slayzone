@@ -1,8 +1,7 @@
 /**
  * Project column utility tests
- * Run with: npx tsx packages/domains/projects/src/shared/columns.test.ts
  */
-import { describe, expect, test } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import { DEFAULT_COLUMNS, type ColumnConfig } from './types.js'
 import {
   getDefaultStatus,
@@ -144,5 +143,3 @@ describe('resolveStatusId', () => {
     expect(resolveStatusId('nope', customColumns)).toBeNull()
   })
 })
-
-console.log('\nDone')

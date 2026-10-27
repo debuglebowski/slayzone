@@ -17,9 +17,9 @@
  * hits `slay hub login` (password sign-in on a password hub) while a cookie request with
  * no Origin is still refused.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   packages/apps/hub/src/hub-device-sign-in.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import {
   constants,
@@ -62,23 +62,6 @@ const MICROSOFT = 'https://login.microsoftonline.com'
 const PUBLIC = 'hub.example.com'
 const PUBLIC_ORIGIN = `https://${PUBLIC}`
 
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-
 function newestMtime(dir: string): number {
   let newest = 0
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -94,9 +77,14 @@ function ensureBuilt(pkgDir: string, bin: string): void {
   if (!existsSync(bin)) throw new Error(`build did not produce ${bin}`)
 }
 
+// vitest injects these into the test process (TEST=true flips better-auth's isTest()
+// → its origin/CSRF check off); a spawned bin must not inherit them.
+const VITEST_INJECTED = /^(VITEST(_.*)?|TEST|MODE|DEV|PROD|SSR|BASE_URL)$/
+
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
+    if (VITEST_INJECTED.test(k)) continue
     if (v == null || /^(SLAYZONE_|ELECTRON_|SSH_)/.test(k) || k === 'DISPLAY') continue
     out[k] = v
   }
@@ -322,8 +310,8 @@ async function printedCode(cli: Cli): Promise<{ page: URL; code: string }> {
     `the CLI to print a code:\n${cli.out()}`
   )
   const page = /^\s+(https:\/\/\S+)$/m.exec(cli.out())?.[1]
-  assert(page, `the CLI printed the page: ${cli.out()}`)
-  return { page: new URL(page), code }
+  expect(page, `the CLI printed the page: ${cli.out()}`).toBeTruthy()
+  return { page: new URL(page!), code }
 }
 
 class Browser {
@@ -377,14 +365,14 @@ class Browser {
     const first = await this.get(page.pathname + page.search)
     if (first.status !== 302) return first
     const authorize = new URL(first.headers.get('location') ?? '')
-    assert(
-      authorize.origin === MICROSOFT,
+    expect(
+      authorize.origin,
       `the page sends the browser to Microsoft, got ${authorize.origin}`
-    )
+    ).toBe(MICROSOFT)
     const code = this.entra.issueCode(authorize, claims)
     const state = authorize.searchParams.get('state') ?? ''
     const callback = await this.get(`/api/auth/callback/microsoft?code=${code}&state=${state}`)
-    assert(callback.status === 302, `callback redirects, got ${callback.status}`)
+    expect(callback.status, `callback redirects, got ${callback.status}`).toBe(302)
     const back = new URL(callback.headers.get('location') ?? '/', PUBLIC_ORIGIN)
     return this.get(back.pathname + back.search)
   }
@@ -394,11 +382,15 @@ const MFA: Claims = { oid: 'ada', amr: ['pwd', 'mfa'] }
 
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
-  console.log('\ndevice sign-in through the real hub and the real CLI\n')
+let tmp = ''
+let entra: FakeEntra
+let hub: Awaited<ReturnType<typeof startHub>>
+const secrets: string[] = []
+
+beforeAll(async () => {
   ensureBuilt(HUB_DIR, HUB_BIN)
   ensureBuilt(CLI_DIR, CLI_BIN)
-  const tmp = mkdtempSync(join(tmpdir(), 'slz-hub-device-'))
+  tmp = mkdtempSync(join(tmpdir(), 'slz-hub-device-'))
   const certPath = join(tmp, 'sso-cert.pem')
   const keyPath = join(tmp, 'sso-key.pem')
   execFileSync(
@@ -418,11 +410,11 @@ async function main(): Promise<void> {
   )
   const preload = join(tmp, 'entra-fetch-preload.mjs')
   writeFileSync(preload, PRELOAD)
-  const entra = new FakeEntra(new X509Certificate(readFileSync(certPath)))
+  entra = new FakeEntra(new X509Certificate(readFileSync(certPath)))
   await entra.start()
   const ssoRoot = join(tmp, 'sso-hub')
   mkdirSync(ssoRoot)
-  const hub = await startHub(
+  hub = await startHub(
     ssoRoot,
     {
       SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
@@ -439,187 +431,191 @@ async function main(): Promise<void> {
     },
     preload
   )
-  const secrets: string[] = []
-  try {
-    await test('the hub reports SSO on and password off', async () => {
-      const health = (await (await fetch(`${hub.base}/health`)).json()) as {
-        switches?: Record<string, boolean>
-      }
-      assert(health.switches?.enableSso === true, 'enableSso')
-      assert(health.switches?.enablePassword === false, 'enablePassword off')
-    })
+})
 
-    await test('slay hub login: device sign-in, browser approval with MFA, bearer works on REST', async () => {
-      const home = join(tmp, 'home-ok')
-      const cli = runCli(home, ['hub', 'login', hub.base, '--no-browser'])
-      try {
-        const { page, code } = await printedCode(cli)
-        assert(page.origin === PUBLIC_ORIGIN, `page on the public address, got ${page.origin}`)
-        assert(page.pathname === '/device', `page path, got ${page.pathname}`)
-        secrets.push(code.replace('-', ''))
-        const browser = new Browser(hub, entra)
-        const view = await browser.open(page, MFA)
-        const html = await view.text()
-        assert(view.status === 200, `approval page, got ${view.status}: ${html.slice(0, 300)}`)
-        assert(html.includes(code), 'the page shows the same code')
-        assert(html.includes('SlayZone CLI (slay)'), 'the page names the client')
-        assert(html.includes(PUBLIC), 'the page names the hub')
-        assert(!/<script/i.test(html), 'no script on the page')
-        // A cookie-authenticated POST without an Origin is refused.
-        const noOrigin = await browser.post('/device/approve', { user_code: code }, null)
-        assert(noOrigin.status === 403, `no Origin → 403, got ${noOrigin.status}`)
-        const ok = await browser.post('/device/approve', { user_code: code }, PUBLIC_ORIGIN)
-        assert(ok.status === 200, `approve → 200, got ${ok.status}`)
-        const exit = await Promise.race([
-          cli.exit,
-          new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 30_000))
-        ])
-        assert(exit === 0, `CLI exit 0, got ${String(exit)}:\n${cli.out()}`)
-        assert(cli.out().includes('as ada@normain.test'), `signed-in line:\n${cli.out()}`)
-        const stored = JSON.parse(
-          readFileSync(join(home, '.slayzone', 'cli', 'hub-target.json'), 'utf8')
-        ) as { url: string; token: string }
-        secrets.push(stored.token)
-        const tasks = await fetch(`${hub.base}/api/tasks`, {
-          headers: { authorization: `Bearer ${stored.token}` }
-        })
-        assert(tasks.status === 200, `GET /api/tasks with the bearer → 200, got ${tasks.status}`)
-        const none = await fetch(`${hub.base}/api/tasks`)
-        assert(none.status === 401, `without it → 401, got ${none.status}`)
+afterAll(async () => {
+  await entra?.stop()
+  if (tmp) rmSync(tmp, { recursive: true, force: true })
+})
 
-        // The browser's session cookie without an Origin is still refused by better-auth.
-        const signOut = await fetch(`${hub.base}/api/auth/sign-out`, {
-          method: 'POST',
-          headers: { cookie: browser.cookie, 'content-type': 'application/json' },
-          body: '{}'
-        })
-        const body = await signOut.text()
-        assert(
-          signOut.status === 403 && body.includes('MISSING_OR_NULL_ORIGIN'),
-          `cookie + no Origin → 403 MISSING_OR_NULL_ORIGIN, got ${signOut.status} ${body}`
-        )
-      } finally {
-        cli.kill()
-      }
-    })
+describe('a hub with Entra sign-in on and password sign-in off', () => {
+  afterAll(async () => {
+    await hub?.stop()
+  })
 
-    await test('denial in the browser ends slay hub login with a clean error', async () => {
-      const cli = runCli(join(tmp, 'home-deny'), ['hub', 'login', hub.base, '--no-browser'])
-      try {
-        const { page, code } = await printedCode(cli)
-        secrets.push(code.replace('-', ''))
-        const browser = new Browser(hub, entra)
-        assert((await browser.open(page, MFA)).status === 200, 'approval page')
-        const denied = await browser.post('/device/deny', { user_code: code }, PUBLIC_ORIGIN)
-        assert(denied.status === 200, `deny → 200, got ${denied.status}`)
-        const exit = await cli.exit
-        assert(exit === 1, `CLI exit 1, got ${String(exit)}`)
-        assert(cli.out().includes('denied in the browser'), `denied message:\n${cli.out()}`)
-      } finally {
-        cli.kill()
-      }
-    })
+  test('the hub reports SSO on and password off', async () => {
+    const health = (await (await fetch(`${hub.base}/health`)).json()) as {
+      switches?: Record<string, boolean>
+    }
+    expect(health.switches?.enableSso, 'enableSso').toBe(true)
+    expect(health.switches?.enablePassword, 'enablePassword off').toBe(false)
+  })
 
-    await test('no token without MFA: the sign-in is refused, the CLI keeps waiting', async () => {
-      const cli = runCli(join(tmp, 'home-nomfa'), ['hub', 'login', hub.base, '--no-browser'])
-      try {
-        const { page, code } = await printedCode(cli)
-        secrets.push(code.replace('-', ''))
-        const browser = new Browser(hub, entra)
-        const view = await browser.open(page, { oid: 'bob', amr: ['pwd'] })
-        assert(view.status === 401, `refused sign-in page, got ${view.status}`)
-        const approve = await browser.post('/device/approve', { user_code: code }, PUBLIC_ORIGIN)
-        assert(approve.status === 401, `no session → approve refused, got ${approve.status}`)
-        await new Promise((r) => setTimeout(r, 6_000))
-        assert(cli.out().includes('Waiting for approval'), 'still waiting')
-        assert(!cli.out().includes('Signed in'), `no token:\n${cli.out()}`)
-        assert(
-          hub.logs.some((l) => l.includes('"event":"auth.signin"') && l.includes('"no_mfa"')),
-          'auth.signin denied no_mfa audited'
-        )
-      } finally {
-        cli.kill()
-      }
-    })
-
-    await test('slay hub login --email is refused on a hub with password sign-in off', async () => {
-      const cli = runCli(join(tmp, 'home-pw'), [
-        'hub',
-        'login',
-        hub.base,
-        '--email',
-        'ada@normain.test',
-        '--password',
-        'x'
-      ])
-      const exit = await cli.exit
-      assert(exit === 1, `exit 1, got ${String(exit)}`)
-      assert(cli.out().includes('Password sign-in is off'), `message:\n${cli.out()}`)
-    })
-
-    await test('audit: the flow is on the record, no code or token in any line', async () => {
-      const security = hub.logs.filter((l) => l.startsWith('{"type":"security"'))
-      const events = security.map((l) => {
-        const e = JSON.parse(l) as { event: string; outcome: string; detail: { method?: string } }
-        return `${e.event}:${e.outcome}${e.detail.method ? `:${e.detail.method}` : ''}`
-      })
-      for (const want of [
-        'auth.device.code:success',
-        'auth.device.approve:success',
-        'auth.device.deny:success',
-        'auth.signin:success:sso',
-        'auth.signin:success:device'
-      ]) {
-        assert(events.includes(want), `${want} audited (got ${events.join(', ')})`)
-      }
-      const all = hub.logs.join('\n')
-      for (const s of secrets) assert(!all.includes(s), 'no code or token in the hub output')
-    })
-  } finally {
-    await hub.stop()
-  }
-
-  // A hub with password sign-in (no SSO): the CLI's password path. `fetch` sent
-  // `Sec-Fetch-Mode: cors`, which better-auth answered MISSING_OR_NULL_ORIGIN.
-  await test('MISSING_OR_NULL_ORIGIN no longer hits slay hub login (password hub)', async () => {
-    const root = join(tmp, 'pw-hub')
-    mkdirSync(root)
-    const pwHub = await startHub(root, {
-      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
-      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
-    })
+  test('slay hub login: device sign-in, browser approval with MFA, bearer works on REST', async () => {
+    const home = join(tmp, 'home-ok')
+    const cli = runCli(home, ['hub', 'login', hub.base, '--no-browser'])
     try {
-      const owner = await waitFor(() => {
-        try {
-          return JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as {
-            email: string
-            password: string
-          }
-        } catch {
-          return null
-        }
-      }, 'hub.owner.json')
-      const cli = runCli(join(tmp, 'home-pwhub'), [
-        'hub',
-        'login',
-        pwHub.base,
-        '--email',
-        owner.email,
-        '--password',
-        owner.password
+      const { page, code } = await printedCode(cli)
+      expect(page.origin, `page on the public address, got ${page.origin}`).toBe(PUBLIC_ORIGIN)
+      expect(page.pathname, `page path, got ${page.pathname}`).toBe('/device')
+      secrets.push(code.replace('-', ''))
+      const browser = new Browser(hub, entra)
+      const view = await browser.open(page, MFA)
+      const html = await view.text()
+      expect(view.status, `approval page, got ${view.status}: ${html.slice(0, 300)}`).toBe(200)
+      expect(html, 'the page shows the same code').toContain(code)
+      expect(html, 'the page names the client').toContain('SlayZone CLI (slay)')
+      expect(html, 'the page names the hub').toContain(PUBLIC)
+      expect(!/<script/i.test(html), 'no script on the page').toBe(true)
+      // A cookie-authenticated POST without an Origin is refused.
+      const noOrigin = await browser.post('/device/approve', { user_code: code }, null)
+      expect(noOrigin.status, `no Origin → 403, got ${noOrigin.status}`).toBe(403)
+      const ok = await browser.post('/device/approve', { user_code: code }, PUBLIC_ORIGIN)
+      expect(ok.status, `approve → 200, got ${ok.status}`).toBe(200)
+      const exit = await Promise.race([
+        cli.exit,
+        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 30_000))
       ])
-      const exit = await cli.exit
-      assert(exit === 0, `exit 0, got ${String(exit)}:\n${cli.out()}`)
-      assert(!cli.out().includes('403'), 'no 403')
+      expect(exit, `CLI exit 0, got ${String(exit)}:\n${cli.out()}`).toBe(0)
+      expect(cli.out(), `signed-in line:\n${cli.out()}`).toContain('as ada@normain.test')
+      const stored = JSON.parse(
+        readFileSync(join(home, '.slayzone', 'cli', 'hub-target.json'), 'utf8')
+      ) as { url: string; token: string }
+      secrets.push(stored.token)
+      const tasks = await fetch(`${hub.base}/api/tasks`, {
+        headers: { authorization: `Bearer ${stored.token}` }
+      })
+      expect(tasks.status, `GET /api/tasks with the bearer → 200, got ${tasks.status}`).toBe(200)
+      const none = await fetch(`${hub.base}/api/tasks`)
+      expect(none.status, `without it → 401, got ${none.status}`).toBe(401)
+
+      // The browser's session cookie without an Origin is still refused by better-auth.
+      const signOut = await fetch(`${hub.base}/api/auth/sign-out`, {
+        method: 'POST',
+        headers: { cookie: browser.cookie, 'content-type': 'application/json' },
+        body: '{}'
+      })
+      const body = await signOut.text()
+      expect(
+        signOut.status,
+        `cookie + no Origin → 403 MISSING_OR_NULL_ORIGIN, got ${signOut.status} ${body}`
+      ).toBe(403)
+      expect(
+        body,
+        `cookie + no Origin → 403 MISSING_OR_NULL_ORIGIN, got ${signOut.status} ${body}`
+      ).toContain('MISSING_OR_NULL_ORIGIN')
     } finally {
-      await pwHub.stop()
+      cli.kill()
     }
   })
 
-  await entra.stop()
-  rmSync(tmp, { recursive: true, force: true })
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
+  test('denial in the browser ends slay hub login with a clean error', async () => {
+    const cli = runCli(join(tmp, 'home-deny'), ['hub', 'login', hub.base, '--no-browser'])
+    try {
+      const { page, code } = await printedCode(cli)
+      secrets.push(code.replace('-', ''))
+      const browser = new Browser(hub, entra)
+      expect((await browser.open(page, MFA)).status, 'approval page').toBe(200)
+      const denied = await browser.post('/device/deny', { user_code: code }, PUBLIC_ORIGIN)
+      expect(denied.status, `deny → 200, got ${denied.status}`).toBe(200)
+      const exit = await cli.exit
+      expect(exit, `CLI exit 1, got ${String(exit)}`).toBe(1)
+      expect(cli.out(), `denied message:\n${cli.out()}`).toContain('denied in the browser')
+    } finally {
+      cli.kill()
+    }
+  })
 
-void main()
+  test('no token without MFA: the sign-in is refused, the CLI keeps waiting', async () => {
+    const cli = runCli(join(tmp, 'home-nomfa'), ['hub', 'login', hub.base, '--no-browser'])
+    try {
+      const { page, code } = await printedCode(cli)
+      secrets.push(code.replace('-', ''))
+      const browser = new Browser(hub, entra)
+      const view = await browser.open(page, { oid: 'bob', amr: ['pwd'] })
+      expect(view.status, `refused sign-in page, got ${view.status}`).toBe(401)
+      const approve = await browser.post('/device/approve', { user_code: code }, PUBLIC_ORIGIN)
+      expect(approve.status, `no session → approve refused, got ${approve.status}`).toBe(401)
+      await new Promise((r) => setTimeout(r, 6_000))
+      expect(cli.out(), 'still waiting').toContain('Waiting for approval')
+      expect(cli.out(), `no token:\n${cli.out()}`).not.toContain('Signed in')
+      expect(
+        hub.logs.some((l) => l.includes('"event":"auth.signin"') && l.includes('"no_mfa"')),
+        'auth.signin denied no_mfa audited'
+      ).toBeTruthy()
+    } finally {
+      cli.kill()
+    }
+  })
+
+  test('slay hub login --email is refused on a hub with password sign-in off', async () => {
+    const cli = runCli(join(tmp, 'home-pw'), [
+      'hub',
+      'login',
+      hub.base,
+      '--email',
+      'ada@normain.test',
+      '--password',
+      'x'
+    ])
+    const exit = await cli.exit
+    expect(exit, `exit 1, got ${String(exit)}`).toBe(1)
+    expect(cli.out(), `message:\n${cli.out()}`).toContain('Password sign-in is off')
+  })
+
+  test('audit: the flow is on the record, no code or token in any line', async () => {
+    const security = hub.logs.filter((l) => l.startsWith('{"type":"security"'))
+    const events = security.map((l) => {
+      const e = JSON.parse(l) as { event: string; outcome: string; detail: { method?: string } }
+      return `${e.event}:${e.outcome}${e.detail.method ? `:${e.detail.method}` : ''}`
+    })
+    for (const want of [
+      'auth.device.code:success',
+      'auth.device.approve:success',
+      'auth.device.deny:success',
+      'auth.signin:success:sso',
+      'auth.signin:success:device'
+    ]) {
+      expect(events, `${want} audited (got ${events.join(', ')})`).toContain(want)
+    }
+    const all = hub.logs.join('\n')
+    for (const s of secrets) expect(all, 'no code or token in the hub output').not.toContain(s)
+  })
+})
+
+// A hub with password sign-in (no SSO): the CLI's password path. `fetch` sent
+// `Sec-Fetch-Mode: cors`, which better-auth answered MISSING_OR_NULL_ORIGIN.
+test('MISSING_OR_NULL_ORIGIN no longer hits slay hub login (password hub)', async () => {
+  const root = join(tmp, 'pw-hub')
+  mkdirSync(root)
+  const pwHub = await startHub(root, {
+    SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+    SLAYZONE_HUB_REQUIRE_LOGIN: '1'
+  })
+  try {
+    const owner = await waitFor(() => {
+      try {
+        return JSON.parse(readFileSync(join(root, 'hub.owner.json'), 'utf8')) as {
+          email: string
+          password: string
+        }
+      } catch {
+        return null
+      }
+    }, 'hub.owner.json')
+    const cli = runCli(join(tmp, 'home-pwhub'), [
+      'hub',
+      'login',
+      pwHub.base,
+      '--email',
+      owner.email,
+      '--password',
+      owner.password
+    ])
+    const exit = await cli.exit
+    expect(exit, `exit 0, got ${String(exit)}:\n${cli.out()}`).toBe(0)
+    expect(cli.out(), 'no 403').not.toContain('403')
+  } finally {
+    await pwHub.stop()
+  }
+})

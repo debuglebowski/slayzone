@@ -1,30 +1,8 @@
 /**
  * agent-event-handler unit tests
- * Run with: pnpm tsx packages/domains/terminal/src/shared/agent-event-handler.test.ts
  */
+import { expect, test } from 'vitest'
 import { mapEventType, HOOK_SUPPORTED_AGENT_IDS } from './agent-event-handler.js'
-
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}\n    ${e}`)
-    failed++
-  }
-}
-function expect<T>(v: T) {
-  return {
-    toBe(e: T) {
-      if (v !== e) throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(v)}`)
-    }
-  }
-}
-
-console.log('\nagent-event-handler\n')
 
 const cases: Array<[string, ReturnType<typeof mapEventType>]> = [
   // Claude Code canonical names.
@@ -121,6 +99,3 @@ test('HOOK_SUPPORTED_AGENT_IDS contains codex', () => {
 test('HOOK_SUPPORTED_AGENT_IDS contains gemini', () => {
   expect(HOOK_SUPPORTED_AGENT_IDS.has('gemini')).toBe(true)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

@@ -1,37 +1,13 @@
 /**
  * Tests for the pure idle-close engagement helpers (browser-panel / other-panel
  * interaction → keep the main agent's idle clock fresh).
- * Run with: npx tsx packages/domains/terminal/src/server/engagement.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   isEngagementInputType,
   shouldReportEngagement,
   ENGAGEMENT_TOUCH_THROTTLE_MS
 } from './engagement'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 // --- isEngagementInputType -----------------------------------------------------
 // Genuine engagement: typing, clicking, scrolling. Mirrors the terminal's own
@@ -107,6 +83,3 @@ test('throttle: well past the window fires', () => {
 test('throttle: window matches the terminal touch throttle (4s)', () => {
   expect(ENGAGEMENT_TOUCH_THROTTLE_MS).toBe(4000)
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exitCode = 1

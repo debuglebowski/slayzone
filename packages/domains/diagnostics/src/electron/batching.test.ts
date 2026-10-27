@@ -1,8 +1,8 @@
 /**
  * Batched async write tests
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/electron/batching.test.ts
  */
-import { expect, createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import Database from 'better-sqlite3'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -81,9 +81,8 @@ function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-async function run(clientRoot: string): Promise<void> {
-  console.log('\nbatched writes')
-
+describe('batched writes', () => {
+  const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
   const h = makeHarness()
   // `clientRoot` is MANDATORY here, not tidiness: diagnostics config now comes
   // from the client store, and without an injected root this resolves
@@ -91,13 +90,22 @@ async function run(clientRoot: string): Promise<void> {
   // writes to it. Signature is (ipcMain, eventsDb, options); it used to take the
   // shared settings DB as its second argument, and this call was left behind when
   // that parameter went away.
-  registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, {
-    clientRoot,
-    blobDir: path.join(clientRoot, 'diagnostics')
+  beforeAll(() => {
+    registerDiagnosticsHandlers(h.ipcMain as never, h.slayDb, {
+      clientRoot,
+      blobDir: path.join(clientRoot, 'diagnostics')
+    })
+  })
+
+  afterAll(async () => {
+    // Always stop: a failed case left the 2s flush timer pending, which kept the
+    // process alive forever. Idempotent after the in-test stop.
+    await stopDiagnostics()
+    fs.rmSync(clientRoot, { recursive: true, force: true })
   })
 
   // 1. enqueue does not write immediately
-  {
+  test('recordDiagnosticEvent does not write immediately', async () => {
     h.reset()
     recordDiagnosticEvent({
       level: 'info',
@@ -108,18 +116,16 @@ async function run(clientRoot: string): Promise<void> {
     expect(countRows(h.eventsDb)).toBe(0)
     await settle()
     expect(countRows(h.eventsDb)).toBe(0)
-    console.log('  ✓ recordDiagnosticEvent does not write immediately')
-  }
+  })
 
   // 2. flushWriteQueue drains
-  {
+  test('flushWriteQueue drains queue into single transaction', async () => {
     await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(1)
-    console.log('  ✓ flushWriteQueue drains queue into single transaction')
-  }
+  })
 
   // 3. error events flush immediately
-  {
+  test('error-level events flush immediately', async () => {
     h.reset()
     recordDiagnosticEvent({
       level: 'error',
@@ -129,11 +135,10 @@ async function run(clientRoot: string): Promise<void> {
     })
     await settle()
     expect(countRows(h.eventsDb)).toBe(1)
-    console.log('  ✓ error-level events flush immediately')
-  }
+  })
 
   // 4. batch size triggers flush
-  {
+  test('flushes on reaching WRITE_BATCH_SIZE (1000)', async () => {
     h.reset()
     // Enqueue 999 — below batch threshold (1000)
     for (let i = 0; i < 999; i++) {
@@ -156,11 +161,10 @@ async function run(clientRoot: string): Promise<void> {
     })
     await settle()
     expect(countRows(h.eventsDb)).toBe(1000)
-    console.log('  ✓ flushes on reaching WRITE_BATCH_SIZE (1000)')
-  }
+  })
 
   // 5. queue cap drops events under runaway load
-  {
+  test('3500 events under load all preserved when flush keeps up', async () => {
     h.reset()
     await flushWriteQueue() // clear any residue
 
@@ -183,11 +187,10 @@ async function run(clientRoot: string): Promise<void> {
     }
     await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(TOTAL)
-    console.log('  ✓ 3500 events under load all preserved when flush keeps up')
-  }
+  })
 
   // 6. debug events dropped when !verbose
-  {
+  test('debug events dropped when verbose=false (default)', async () => {
     h.reset()
     recordDiagnosticEvent({
       level: 'debug',
@@ -197,11 +200,10 @@ async function run(clientRoot: string): Promise<void> {
     })
     await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(0)
-    console.log('  ✓ debug events dropped when verbose=false (default)')
-  }
+  })
 
   // 7. debug events kept when verbose
-  {
+  test('debug events kept when verbose=true', async () => {
     h.reset()
     // Config lives in the client store under `clientRoot`; the setConfig IPC
     // handler persists it there and refreshes the store's cache.
@@ -216,11 +218,10 @@ async function run(clientRoot: string): Promise<void> {
     })
     await flushWriteQueue()
     expect(countRows(h.eventsDb)).toBe(2) // setConfig records db.mutation too
-    console.log('  ✓ debug events kept when verbose=true')
-  }
+  })
 
   // 8. queue cap drops are surfaced via diag.dropped event
-  {
+  test('queue cap drops surfaced as diag.dropped event (count=1000)', async () => {
     // Drain any residue from prior tests, then reset verbose=false and drain
     // the setConfig noise so test 8 starts with a clean queue.
     await flushWriteQueue()
@@ -272,25 +273,8 @@ async function run(clientRoot: string): Promise<void> {
     expect(payload.droppedCount).toBe(1000)
     expect(payload.queueCap).toBe(5000)
 
-    console.log('  ✓ queue cap drops surfaced as diag.dropped event (count=1000)')
     // Stop while `fresh` is still open so the final flush has somewhere to write.
     await stopDiagnostics()
     fresh.close()
-  }
-}
-
-const clientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-diag-batching-'))
-try {
-  await run(clientRoot)
-} catch (e) {
-  console.error(`  ✗ ${e}`)
-  if (e instanceof Error && e.stack) console.error(e.stack)
-  process.exitCode = 1
-} finally {
-  // Always stop: a failed case left the 2s flush timer pending, which kept the
-  // process alive forever. Idempotent after the in-run stop.
-  await stopDiagnostics()
-  fs.rmSync(clientRoot, { recursive: true, force: true })
-}
-
-console.log('\nDone')
+  })
+})

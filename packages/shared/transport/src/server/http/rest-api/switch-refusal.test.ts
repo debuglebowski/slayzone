@@ -7,12 +7,14 @@
  * hub, at save (POST/PATCH) and at run. With the switch unset the same routes answer
  * as before.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/switch-refusal.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/switch-refusal.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import express from 'express'
 import { AutomationEngine } from '@slayzone/automations/server'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
 import type { RestApiDeps } from './types'
 import { registerProcessesListRoute } from './processes/list.js'
@@ -77,7 +79,12 @@ const runCommand = [{ type: 'run_command', params: { command: 'echo hi' } }]
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
 
-await describe('processes switched off', () => {
+afterAll(async () => {
+  setSecurityLogSink()
+  await rest.close()
+})
+
+describe('processes switched off', () => {
   for (const [method, path, op] of [
     ['GET', '/api/processes', 'list'],
     ['GET', '/api/processes/p1/logs', 'logs'],
@@ -154,7 +161,7 @@ await describe('processes switched off', () => {
   })
 })
 
-await describe('processes on (default)', () => {
+describe('processes on (default)', () => {
   test('GET /api/processes answers again', async () => {
     delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
     const before = lines.length
@@ -164,6 +171,3 @@ await describe('processes on (default)', () => {
     expect(lines.length).toBe(before)
   })
 })
-
-setSecurityLogSink()
-await rest.close()

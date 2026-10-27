@@ -1,14 +1,10 @@
 /**
  * REST: GET /api/tasks/:id/progress contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/progress.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/progress.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTaskProgressRoute } from './progress.js'
 
@@ -30,7 +26,7 @@ const rest = await mountRestApp(app)
 
 type ProgressResponse = { ok: boolean; data: { id: string; progress: number } }
 
-await describe('GET /api/tasks/:id/progress', () => {
+describe('GET /api/tasks/:id/progress', () => {
   test('happy: returns progress by full id', async () => {
     const res = await rest.request<ProgressResponse>('GET', `/api/tasks/${taskId}/progress`)
     expect(res.status).toBe(200)
@@ -49,5 +45,7 @@ await describe('GET /api/tasks/:id/progress', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

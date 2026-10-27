@@ -1,14 +1,10 @@
 /**
  * REST: POST /api/tasks/:id/reset-conversation contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/reset-conversation.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/reset-conversation.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTaskResetConversationRoute } from './reset-conversation.js'
 
@@ -38,7 +34,7 @@ const rest = await mountRestApp(app)
 
 type ResetResponse = { ok: boolean; data: { id: string; reset: string[] }; error?: string }
 
-await describe('POST /api/tasks/:id/reset-conversation', () => {
+describe('POST /api/tasks/:id/reset-conversation', () => {
   test('happy: resets every mode with rows; sentinel + session_resets appended', async () => {
     const res = await rest.request<ResetResponse>(
       'POST',
@@ -107,5 +103,7 @@ await describe('POST /api/tasks/:id/reset-conversation', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

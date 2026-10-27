@@ -1,7 +1,7 @@
 /**
  * Context manager sync view-model tests
- * Run with: npx tsx packages/domains/ai-config/src/client/sync-view-model.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   aggregateProviderSyncHealth,
   groupProvidersByPath,
@@ -10,30 +10,6 @@ import {
   type ProviderSyncEntry
 } from './sync-view-model'
 import type { CliProvider } from '../shared'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed += 1
-  } catch (error) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${error instanceof Error ? error.message : String(error)}`)
-    failed += 1
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${String(actual)} to be ${String(expected)}`)
-    }
-  }
-}
 
 const linkedSynced: ProviderSyncEntry = { syncHealth: 'synced', syncReason: null }
 const linkedStale: ProviderSyncEntry = { syncHealth: 'stale', syncReason: 'external_edit' }
@@ -163,6 +139,3 @@ test('groupProvidersByPath returns single-provider row when path is unique', () 
   expect(groups[1].providers.join(',')).toBe('cursor')
   expect(groups[1].syncHealth).toBe('synced')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

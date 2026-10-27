@@ -4,15 +4,9 @@
  * left from before the switch was turned off cannot be read — so no provider call can
  * be made with it. One `integration.connect` audit line per refusal. Defaults (switch
  * unset) are credentials.test.ts and the integrations router test.
- *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { createIntegrationOps, ensureIntegrationSchema } from './handlers-store.js'
@@ -66,7 +60,7 @@ async function refused(fn: () => Promise<unknown>): Promise<unknown> {
 
 process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS = '0'
 
-await describe('integrations switched off', () => {
+describe('integrations switched off', () => {
   const connects: Array<[string, () => Promise<unknown>]> = [
     ['github', () => ops.connectGithub({ token: 'ghp_new' } as never)],
     ['linear', () => ops.connectLinear({ apiKey: 'lin_new' } as never)],
@@ -125,7 +119,7 @@ await describe('integrations switched off', () => {
   })
 })
 
-await describe('integrations on (default)', () => {
+describe('integrations on (default)', () => {
   test('storeCredential writes again once the switch is unset', async () => {
     delete process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS
     const before = lines.length
@@ -135,5 +129,7 @@ await describe('integrations on (default)', () => {
   })
 })
 
-globalThis.fetch = realFetch
-setSecurityLogSink()
+afterAll(() => {
+  globalThis.fetch = realFetch
+  setSecurityLogSink()
+})

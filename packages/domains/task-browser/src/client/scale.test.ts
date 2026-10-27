@@ -1,36 +1,8 @@
 /**
  * Tests for scale-to-fit computation
- * Run with: npx tsx packages/domains/task-browser/src/client/scale.test.ts
  */
+import { expect, test } from 'vitest'
 import { computeScale } from './scale'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect(actual: number) {
-  return {
-    toBe(expected: number) {
-      if (actual !== expected) throw new Error(`Expected ${expected}, got ${actual}`)
-    },
-    toBeCloseTo(expected: number, precision = 4) {
-      const diff = Math.abs(actual - expected)
-      const epsilon = 10 ** -precision
-      if (diff > epsilon) throw new Error(`Expected ~${expected}, got ${actual} (diff ${diff})`)
-    }
-  }
-}
 
 // --- No scaling needed ---
 
@@ -49,25 +21,25 @@ test('device exactly fills available space → scale 1', () => {
 test('desktop 1080p in 800x600 container → width-constrained', () => {
   // avail: 760x560, scale = min(1, 760/1920, 560/1080) = min(1, 0.3958, 0.5185) = 0.3958
   const s = computeScale({ width: 800, height: 600 }, { width: 1920, height: 1080 })
-  expect(s).toBeCloseTo(760 / 1920)
+  expect(s).toBeCloseTo(760 / 1920, 4)
 })
 
 test('wide device in narrow container → width-constrained', () => {
   const s = computeScale({ width: 500, height: 800 }, { width: 1920, height: 1080 })
-  expect(s).toBeCloseTo(460 / 1920)
+  expect(s).toBeCloseTo(460 / 1920, 4)
 })
 
 // --- Height-constrained ---
 
 test('tall device in short container → height-constrained', () => {
   const s = computeScale({ width: 800, height: 400 }, { width: 1024, height: 1366 })
-  expect(s).toBeCloseTo(360 / 1366)
+  expect(s).toBeCloseTo(360 / 1366, 4)
 })
 
 test('iPad Pro in 600x500 container → height-constrained', () => {
   const s = computeScale({ width: 600, height: 500 }, { width: 1024, height: 1366 })
   // avail: 560x460, scale = min(1, 560/1024, 460/1366) = min(1, 0.5468, 0.3367) = 0.3367
-  expect(s).toBeCloseTo(460 / 1366)
+  expect(s).toBeCloseTo(460 / 1366, 4)
 })
 
 // --- Edge cases ---
@@ -106,14 +78,11 @@ test('never exceeds 1 even with tiny device', () => {
 test('1920x1080 in typical 700x500 panel', () => {
   const s = computeScale({ width: 700, height: 500 }, { width: 1920, height: 1080 })
   // avail: 660x460, width-constrained: 660/1920 ≈ 0.3437
-  expect(s).toBeCloseTo(660 / 1920)
+  expect(s).toBeCloseTo(660 / 1920, 4)
 })
 
 test('2560x1440 in typical 700x500 panel', () => {
   const s = computeScale({ width: 700, height: 500 }, { width: 2560, height: 1440 })
   // avail: 660x460, width-constrained: 660/2560 ≈ 0.2578
-  expect(s).toBeCloseTo(660 / 2560)
+  expect(s).toBeCloseTo(660 / 2560, 4)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

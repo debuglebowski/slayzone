@@ -6,7 +6,7 @@
  * Ports the coverage of the two now-dead integration IPC-handler tests:
  *   - domains/integrations/src/electron/handlers.db.test.ts  (DB-only channels)
  *   - domains/integrations/src/electron/handlers.api.test.ts (Linear-API channels)
- * The Linear network calls are mocked: the test-utils loader redirects the ops'
+ * The Linear network calls are mocked: the harness vitest config redirects the ops'
  * `./linear-client` import to `mock-linear-client.ts`; we drive return values via
  * the mutable `_mock` object. Credentials use the plaintext fallback.
  *
@@ -20,10 +20,13 @@
  * Top-level `test()` calls run SEQUENTIALLY in file order and SHARE one harness +
  * caller, mirroring the handler tests' sequential shared-state structure. We do
  * NOT call `h.cleanup()` (it closes the DB before deferred async tests run).
+ * Seeding that must land between tests lives in `(setup)` tests (vitest runs
+ * top-level code at collection, before any test).
  *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { _mock } from '../../../../test-utils/mock-linear-client.js'
 import { integrationsRouter } from './integrations.js'
 import { setIntegrationOps } from '../app-deps.js'
@@ -433,21 +436,26 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
 const ALL_ISSUES = Object.values(FIXTURES)
 
 // Seed an API-test connection (with a readable plaintext credential) + project.
+// Inside a (setup) test, not top-level: vitest runs top-level code at collection,
+// BEFORE every test, and this must land after the DB-only tests above (as it did).
 const apiConnId = 'conn-test-api'
 const apiCredRef = 'cred-test-api'
-seedCredential(apiCredRef, 'lin_test_key')
-h.db
-  .prepare(`
-  INSERT OR REPLACE INTO integration_connections (id, provider, credential_ref, enabled)
-  VALUES (?, 'linear', ?, 1)
-`)
-  .run(apiConnId, apiCredRef)
-
 const apiProjectId = 'proj-api-test'
-h.db
-  .prepare(`INSERT OR IGNORE INTO projects (id, name, color, path, created_at, updated_at)
-  VALUES (?, 'API Test', '#888888', '/tmp/api-test', datetime('now'), datetime('now'))`)
-  .run(apiProjectId)
+
+test('(setup) seed Linear API connection + project', () => {
+  seedCredential(apiCredRef, 'lin_test_key')
+  h.db
+    .prepare(`
+    INSERT OR REPLACE INTO integration_connections (id, provider, credential_ref, enabled)
+    VALUES (?, 'linear', ?, 1)
+  `)
+    .run(apiConnId, apiCredRef)
+
+  h.db
+    .prepare(`INSERT OR IGNORE INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, 'API Test', '#888888', '/tmp/api-test', datetime('now'), datetime('now'))`)
+    .run(apiProjectId)
+})
 
 test('connectLinear: creates new connection', async () => {
   _mock.getViewer = async () => ({

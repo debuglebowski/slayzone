@@ -14,11 +14,9 @@
  * goes there, and with the switch unset everything runs locally exactly as before —
  * which also shows the spies see real calls.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/local-exec-refusals.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
@@ -26,12 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import superjson from 'superjson'
-import {
-  createTestHarness,
-  describe,
-  expect,
-  test
-} from '../../../shared/test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 
 // --- A directory outside the hub's root, holding something worth reading --------
 const OUTSIDE = realpathSync(mkdtempSync(join(tmpdir(), 't06-outside-')))
@@ -239,7 +232,7 @@ const routedFs = createRemoteFsAdapters({ gateway: fakeGateway, local: createLoc
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
 
-await describe('processes off, zero computers: every hub-local call refuses (exec layer)', () => {
+describe('processes off, zero computers: every hub-local call refuses (exec layer)', () => {
   const local = createLocalWorkspaceFs()
   test('workspace fs: browse, read, git status, discovery, probe, watch', async () => {
     await expectRefused('listRoots', () => local.listRoots())
@@ -317,7 +310,7 @@ await describe('processes off, zero computers: every hub-local call refuses (exe
   })
 })
 
-await describe('processes off, zero computers: the wire shape (tRPC)', () => {
+describe('processes off, zero computers: the wire shape (tRPC)', () => {
   for (const [path, input] of [
     ['worktrees.getCurrentBranch', { path: OUTSIDE }],
     // Swallows a git error into `false` — the router gate refuses before that.
@@ -369,7 +362,7 @@ await describe('processes off, zero computers: the wire shape (tRPC)', () => {
   })
 })
 
-await describe('processes off, a computer connected: routed as today', () => {
+describe('processes off, a computer connected: routed as today', () => {
   test('workspace fs routes to the computer, no audit line, nothing local', async () => {
     const before = { lines: lines.length, exec: execCalls.length, touched: touched.length }
     const res = await routedFs.readFile('computer-1', OUTSIDE, 'secret.txt')
@@ -396,7 +389,7 @@ await describe('processes off, a computer connected: routed as today', () => {
   })
 })
 
-await describe('defaults (switch unset): local, exactly as before', () => {
+describe('defaults (switch unset): local, exactly as before', () => {
   test('workspace fs reads locally (and the fs spy sees it)', async () => {
     delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
     blockExec = false
@@ -422,5 +415,7 @@ await describe('defaults (switch unset): local, exactly as before', () => {
   })
 })
 
-setSecurityLogSink()
-h.cleanup()
+afterAll(() => {
+  setSecurityLogSink()
+  h.cleanup()
+})

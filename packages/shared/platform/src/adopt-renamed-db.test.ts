@@ -11,14 +11,15 @@
  *   - an interrupted rename must resume correctly on the next boot;
  *   - an ambiguous state must fail loudly rather than open a fresh empty database.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/platform/src/adopt-renamed-db.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/adopt-renamed-db.test.ts
  * (Electron's node because the last test opens a real better-sqlite3 database.)
  */
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import Database from 'better-sqlite3'
-import { test, expect } from '../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
 import { adoptRenamedDatabase } from './adopt-renamed-db.js'
 import { getDbName, getLegacyDbName, getDiagnosticsDbName } from './db.js'
 

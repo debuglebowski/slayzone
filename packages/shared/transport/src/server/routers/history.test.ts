@@ -4,13 +4,14 @@
  * coverage from the legacy task-history integration test
  * (domains/task/src/electron/history.test.ts): task/tag ops record activity
  * events, rollback-on-history-insert-failure, and cursor pagination.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { taskRouter } from './task.js'
 import { tagsRouter } from './tags.js'
 import { historyRouter } from './history.js'

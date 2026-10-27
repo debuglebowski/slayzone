@@ -1,7 +1,7 @@
 /**
  * Tests for ChatTransportManager.
- * Run with: pnpm dlx tsx packages/domains/terminal/src/main/chat-transport-manager.test.ts
  */
+import { expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -13,33 +13,6 @@ import type { AgentEvent } from '../../shared/agent-events'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 interface FakeChild extends ChildProcess {
   _stdinRef: { value: string }
@@ -101,9 +74,7 @@ async function createChat(
   return info
 }
 
-console.log('\nChatTransportManager tests\n')
-
-await test('createChat: unknown mode → throws ChatTransportError', async () => {
+test('createChat: unknown mode → throws ChatTransportError', async () => {
   await setup()
   let err: Error | null = null
   try {
@@ -122,7 +93,7 @@ await test('createChat: unknown mode → throws ChatTransportError', async () =>
   expect(err?.message.includes('nonexistent-mode')).toBeTruthy()
 })
 
-await test('createChat: missing binary → throws ChatTransportError', async () => {
+test('createChat: missing binary → throws ChatTransportError', async () => {
   await setup()
   mgr.setTransportDepsForTests({
     whichBinary: async () => null,
@@ -146,7 +117,7 @@ await test('createChat: missing binary → throws ChatTransportError', async () 
   expect(err?.message.includes('not found on PATH')).toBeTruthy()
 })
 
-await test('createChat: pipes fixture NDJSON → emits typed events + ring buffer populated', async () => {
+test('createChat: pipes fixture NDJSON → emits typed events + ring buffer populated', async () => {
   await setup()
   const captured: Array<{ tabId: string; kind: string; seq: number }> = []
   const fake = makeFakeChild()
@@ -181,7 +152,7 @@ await test('createChat: pipes fixture NDJSON → emits typed events + ring buffe
   expect(buf[buf.length - 1].seq).toBe(buf.length - 1)
 })
 
-await test('getEventBufferSince: returns only events with seq > afterSeq', async () => {
+test('getEventBufferSince: returns only events with seq > afterSeq', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -206,7 +177,7 @@ await test('getEventBufferSince: returns only events with seq > afterSeq', async
   if (tail.length > 0) expect(tail[0].seq).toBe(3)
 })
 
-await test('persist callback fires on turn-init', async () => {
+test('persist callback fires on turn-init', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -231,7 +202,7 @@ await test('persist callback fires on turn-init', async () => {
   expect(persisted[0].length > 0).toBeTruthy()
 })
 
-await test('sendUserMessage: writes NDJSON line to stdin', async () => {
+test('sendUserMessage: writes NDJSON line to stdin', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -256,7 +227,7 @@ await test('sendUserMessage: writes NDJSON line to stdin', async () => {
   expect(parsed.message.content).toBe('hello')
 })
 
-await test('sendToolResult: writes NDJSON tool_result envelope keyed by tool_use_id', async () => {
+test('sendToolResult: writes NDJSON tool_result envelope keyed by tool_use_id', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -288,13 +259,13 @@ await test('sendToolResult: writes NDJSON tool_result envelope keyed by tool_use
   expect(block.content).toBe('{"answers":{"Pick":"A"}}')
 })
 
-await test('sendToolResult: returns false for unknown tab', async () => {
+test('sendToolResult: returns false for unknown tab', async () => {
   await setup()
   const ok = mgr.sendToolResult('nonexistent-tab', { toolUseId: 'x', content: 'y' })
   expect(ok).toBe(false)
 })
 
-await test('sendControlRequest: writes envelope + resolves on matching control_response', async () => {
+test('sendControlRequest: writes envelope + resolves on matching control_response', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -337,7 +308,7 @@ await test('sendControlRequest: writes envelope + resolves on matching control_r
   await promise
 })
 
-await test('sendControlRequest: rejects on error subtype', async () => {
+test('sendControlRequest: rejects on error subtype', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -376,7 +347,7 @@ await test('sendControlRequest: rejects on error subtype', async () => {
   expect(err?.message).toBe('rejected by SDK')
 })
 
-await test('respondToPermissionRequest: writes control_response success on stdin', async () => {
+test('respondToPermissionRequest: writes control_response success on stdin', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -407,7 +378,7 @@ await test('respondToPermissionRequest: writes control_response success on stdin
   expect(parsed.response.response.behavior).toBe('allow')
 })
 
-await test('respondToPermissionRequest: false for unknown tab', async () => {
+test('respondToPermissionRequest: false for unknown tab', async () => {
   await setup()
   const ok = mgr.respondToPermissionRequest('nonexistent-tab', {
     requestId: 'x',
@@ -416,7 +387,7 @@ await test('respondToPermissionRequest: false for unknown tab', async () => {
   expect(ok).toBe(false)
 })
 
-await test('sendControlRequest: rejects when adapter has no control channel', async () => {
+test('sendControlRequest: rejects when adapter has no control channel', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -437,7 +408,7 @@ await test('sendControlRequest: rejects when adapter has no control channel', as
   expect(err?.message).toBe('no live session')
 })
 
-await test('invalid --resume: onInvalidResume fires + auto-retry with fresh session', async () => {
+test('invalid --resume: onInvalidResume fires + auto-retry with fresh session', async () => {
   await setup()
   const persisted: string[] = []
   let invalidResumeCalled = 0
@@ -497,7 +468,7 @@ await test('invalid --resume: onInvalidResume fires + auto-retry with fresh sess
   expect(lastArgs[1].includes('--session-id')).toBe(true)
 })
 
-await test('invalid --resume: failed spawn events never broadcast or persist', async () => {
+test('invalid --resume: failed spawn events never broadcast or persist', async () => {
   await setup()
   const broadcastEvents: Array<{ tabId: string; kind: string }> = []
   const persistedEvents: Array<{ tabId: string; kind: string }> = []
@@ -561,7 +532,7 @@ await test('invalid --resume: failed spawn events never broadcast or persist', a
   expect(spawnCount).toBe(2)
 })
 
-await test('valid --resume: first healthy event flushes staged events in order', async () => {
+test('valid --resume: first healthy event flushes staged events in order', async () => {
   await setup()
   const broadcastEvents: Array<{ kind: string; seq: number }> = []
   const fake = makeFakeChild()
@@ -630,7 +601,7 @@ await test('valid --resume: first healthy event flushes staged events in order',
   expect(broadcastEvents[atIdx].seq).toBe(2)
 })
 
-await test('exit event: fires process-exit + chat:exit broadcast', async () => {
+test('exit event: fires process-exit + chat:exit broadcast', async () => {
   await setup()
   const fake = makeFakeChild()
   const eventKinds: string[] = []
@@ -656,7 +627,7 @@ await test('exit event: fires process-exit + chat:exit broadcast', async () => {
   expect(exits[0].code).toBe(0)
 })
 
-await test('exit event: chat:exit broadcast carries dying session sessionId', async () => {
+test('exit event: chat:exit broadcast carries dying session sessionId', async () => {
   await setup()
   const fake = makeFakeChild()
   const exits: Array<{ sessionId: string }> = []
@@ -680,7 +651,7 @@ await test('exit event: chat:exit broadcast carries dying session sessionId', as
   expect(exits[0].sessionId).toBe(info.sessionId)
 })
 
-await test('reset race: old session exit fires after removeSession — broadcast swallowed', async () => {
+test('reset race: old session exit fires after removeSession — broadcast swallowed', async () => {
   await setup()
   let spawnCount = 0
   const children: FakeChild[] = []
@@ -736,7 +707,7 @@ await test('reset race: old session exit fires after removeSession — broadcast
   expect(events.filter((k) => k === 'process-exit').length).toBe(0)
 })
 
-await test('reset race: live session exit (not stale) still broadcasts', async () => {
+test('reset race: live session exit (not stale) still broadcasts', async () => {
   await setup()
   const fake = makeFakeChild()
   const events: string[] = []
@@ -763,7 +734,7 @@ await test('reset race: live session exit (not stale) still broadcasts', async (
   expect(events.includes('process-exit')).toBeTruthy()
 })
 
-await test('createChat: same tabId with different (taskId,cwd) → tears down zombie + spawns fresh', async () => {
+test('createChat: same tabId with different (taskId,cwd) → tears down zombie + spawns fresh', async () => {
   await setup()
   const fakeOld = makeFakeChild()
   const fakeNew = makeFakeChild()
@@ -813,7 +784,7 @@ await test('createChat: same tabId with different (taskId,cwd) → tears down zo
   expect(events.some((e) => e.kind === 'turn-init')).toBeTruthy()
 })
 
-await test('createChat: same tabId AND same identity → returns existing session (idempotent)', async () => {
+test('createChat: same tabId AND same identity → returns existing session (idempotent)', async () => {
   await setup()
   const fake = makeFakeChild()
   let spawnCount = 0
@@ -846,7 +817,7 @@ await test('createChat: same tabId AND same identity → returns existing sessio
   expect(spawnCount).toBe(1)
 })
 
-await test('onStateChange: fires alongside broadcastStateChange so global listeners see chat activity', async () => {
+test('onStateChange: fires alongside broadcastStateChange so global listeners see chat activity', async () => {
   await setup()
   const fake = makeFakeChild()
   const broadcasts: Array<{ sessionId: string; next: string; old: string }> = []
@@ -879,7 +850,7 @@ await test('onStateChange: fires alongside broadcastStateChange so global listen
   expect(globalNotices.some((g) => g.next === 'idle' && g.old === 'running')).toBeTruthy()
 })
 
-await test('createChat: initialBuffer with unfinished turn → emits synthetic interrupted', async () => {
+test('createChat: initialBuffer with unfinished turn → emits synthetic interrupted', async () => {
   await setup()
   const fake = makeFakeChild()
   const events: Array<{ tabId: string; kind: string; seq: number }> = []
@@ -921,7 +892,7 @@ await test('createChat: initialBuffer with unfinished turn → emits synthetic i
   expect(interrupted!.seq).toBe(2)
 })
 
-await test('createChat: initialBuffer with completed turn → no synthetic interrupted', async () => {
+test('createChat: initialBuffer with completed turn → no synthetic interrupted', async () => {
   await setup()
   const fake = makeFakeChild()
   const events: Array<{ kind: string }> = []
@@ -981,7 +952,7 @@ await test('createChat: initialBuffer with completed turn → no synthetic inter
   expect(events.some((e) => e.kind === 'interrupted')).toBe(false)
 })
 
-await test('permission-request ExitPlanMode → auto-deny on stdin, no broadcast', async () => {
+test('permission-request ExitPlanMode → auto-deny on stdin, no broadcast', async () => {
   await setup()
   const events: AgentEvent[] = []
   const fake = makeFakeChild()
@@ -1025,7 +996,7 @@ await test('permission-request ExitPlanMode → auto-deny on stdin, no broadcast
   expect(events.some((e) => e.kind === 'permission-request')).toBe(false)
 })
 
-await test('permission-request AskUserQuestion → broadcast, no auto-deny', async () => {
+test('permission-request AskUserQuestion → broadcast, no auto-deny', async () => {
   await setup()
   const events: AgentEvent[] = []
   const fake = makeFakeChild()
@@ -1062,7 +1033,7 @@ await test('permission-request AskUserQuestion → broadcast, no auto-deny', asy
   expect(events.some((e) => e.kind === 'permission-request')).toBe(true)
 })
 
-await test('permission-request → flips terminal state to idle + sets awaitingUserInput', async () => {
+test('permission-request → flips terminal state to idle + sets awaitingUserInput', async () => {
   await setup()
   const stateChanges: { next: string; old: string }[] = []
   const fake = makeFakeChild()
@@ -1116,7 +1087,7 @@ await test('permission-request → flips terminal state to idle + sets awaitingU
   expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(false)
 })
 
-await test('awaitingUserInput stays true across stderr / non-progress events', async () => {
+test('awaitingUserInput stays true across stderr / non-progress events', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -1156,7 +1127,7 @@ await test('awaitingUserInput stays true across stderr / non-progress events', a
   expect(mgr.isSessionAwaitingUserInput('tab-ask-noclear')).toBe(true)
 })
 
-await test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQuestion)', async () => {
+test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQuestion)', async () => {
   await setup()
   const fake = makeFakeChild()
   mgr.setTransportDepsForTests({
@@ -1195,7 +1166,7 @@ await test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQues
 // agent_state lifecycle (formerly was_spawned) — restore-warm-on-reboot
 // ---------------------------------------------------------------------------
 
-await test('agentStateRecorder: records running on spawn-success with tabId', async () => {
+test('agentStateRecorder: records running on spawn-success with tabId', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
@@ -1224,7 +1195,7 @@ await test('agentStateRecorder: records running on spawn-success with tabId', as
   }
 })
 
-await test('agentStateRecorder: records stopped on natural subprocess exit', async () => {
+test('agentStateRecorder: records stopped on natural subprocess exit', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
@@ -1256,7 +1227,7 @@ await test('agentStateRecorder: records stopped on natural subprocess exit', asy
   }
 })
 
-await test('agentStateRecorder: shutdown gate keeps running on exit', async () => {
+test('agentStateRecorder: shutdown gate keeps running on exit', async () => {
   await setup()
   const fake = makeFakeChild()
   const recorder: Array<{ tabId: string; v: boolean }> = []
@@ -1294,7 +1265,7 @@ await test('agentStateRecorder: shutdown gate keeps running on exit', async () =
   }
 })
 
-await test('shutdownAll: waits for chat exits and preserves warm flags', async () => {
+test('shutdownAll: waits for chat exits and preserves warm flags', async () => {
   await setup()
   const fake = makeFakeChild()
   const kills: string[] = []
@@ -1334,7 +1305,7 @@ await test('shutdownAll: waits for chat exits and preserves warm flags', async (
   }
 })
 
-await test('shutdownAll: escalates stuck chat process and resolves', async () => {
+test('shutdownAll: escalates stuck chat process and resolves', async () => {
   await setup()
   const fake = makeFakeChild()
   const kills: string[] = []
@@ -1369,7 +1340,7 @@ await test('shutdownAll: escalates stuck chat process and resolves', async () =>
   }
 })
 
-await test('codex-chat: a fatal driver-start failure kills the subprocess + goes dead', async () => {
+test('codex-chat: a fatal driver-start failure kills the subprocess + goes dead', async () => {
   await setup()
   const stateChanges: string[] = []
   const fakes: Array<ReturnType<typeof makeFakeChild>> = []
@@ -1417,7 +1388,7 @@ await test('codex-chat: a fatal driver-start failure kills the subprocess + goes
   expect(stateChanges.includes('dead')).toBe(true)
 })
 
-await test('codex-chat: handshake with no user message rests at `idle`, not `running`', async () => {
+test('codex-chat: handshake with no user message rests at `idle`, not `running`', async () => {
   // Regression: the driver emits a synthetic `turn-init` at handshake to seed
   // the timeline. That event is session metadata — it must NOT flip the state
   // machine to `running`, or a freshly spawned / resumed codex-chat session
@@ -1538,14 +1509,14 @@ async function driveCodexToRunning(child: ReturnType<typeof makeFakeChild>): Pro
   await wait(20)
 }
 
-await test('watchdog: stuck `starting`, process dead → reaps to `dead`', async () => {
+test('watchdog: stuck `starting`, process dead → reaps to `dead`', async () => {
   const h = await watchdogHarness({ alive: false })
   // Never emit 'spawn' — the session is stuck in `starting`.
   await wait(160)
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
 
-await test('watchdog: stuck `starting`, process alive → SIGTERM → SIGKILL → `dead`', async () => {
+test('watchdog: stuck `starting`, process alive → SIGTERM → SIGKILL → `dead`', async () => {
   const h = await watchdogHarness({ alive: true })
   await wait(150) // two kill-grace ticks
   expect(h.killed.includes('SIGTERM')).toBe(true)
@@ -1555,7 +1526,7 @@ await test('watchdog: stuck `starting`, process alive → SIGTERM → SIGKILL �
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
 
-await test('watchdog: stalled `running` turn → `dead`', async () => {
+test('watchdog: stalled `running` turn → `dead`', async () => {
   const h = await watchdogHarness({ alive: false })
   await driveCodexToRunning(h.child)
   expect(h.stateChanges.includes('running')).toBe(true)
@@ -1563,7 +1534,7 @@ await test('watchdog: stalled `running` turn → `dead`', async () => {
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
 
-await test('watchdog: a `running` turn with steady progress is NOT killed', async () => {
+test('watchdog: a `running` turn with steady progress is NOT killed', async () => {
   const h = await watchdogHarness({ alive: false })
   await driveCodexToRunning(h.child)
   // Stream a delta every 30ms (< 80ms stall bound) for ~240ms.
@@ -1582,7 +1553,7 @@ await test('watchdog: a `running` turn with steady progress is NOT killed', asyn
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
 
-await test('watchdog: missed-exit reap emits exactly one exit (idempotent)', async () => {
+test('watchdog: missed-exit reap emits exactly one exit (idempotent)', async () => {
   const h = await watchdogHarness({ alive: false })
   await driveCodexToRunning(h.child)
   await wait(200) // watchdog reaps via a synthesized exit
@@ -1593,7 +1564,7 @@ await test('watchdog: missed-exit reap emits exactly one exit (idempotent)', asy
   expect(h.getExits()).toBe(1)
 })
 
-await test('watchdog: a session resting in `idle` is never killed', async () => {
+test('watchdog: a session resting in `idle` is never killed', async () => {
   const h = await watchdogHarness({ alive: false })
   ;(h.child as unknown as EventEmitter).emit('spawn') // starting → idle
   await wait(200) // well past every bound
@@ -1601,7 +1572,7 @@ await test('watchdog: a session resting in `idle` is never killed', async () => 
   expect(h.stateChanges[h.stateChanges.length - 1]).toBe('idle')
 })
 
-await test('watchdog: __resetForTests cancels a pending timer', async () => {
+test('watchdog: __resetForTests cancels a pending timer', async () => {
   const h = await watchdogHarness({ alive: false })
   // Session is in `starting` with the watchdog armed; reset before it fires.
   mgr.__resetForTests()
@@ -1609,7 +1580,7 @@ await test('watchdog: __resetForTests cancels a pending timer', async () => {
   expect(h.getExits()).toBe(0)
 })
 
-await test('watchdog: fatal handshake failure escalates to SIGKILL', async () => {
+test('watchdog: fatal handshake failure escalates to SIGKILL', async () => {
   const h = await watchdogHarness({ alive: true })
   ;(h.child as unknown as EventEmitter).emit('spawn')
   await wait(30)
@@ -1624,6 +1595,3 @@ await test('watchdog: fatal handshake failure escalates to SIGKILL', async () =>
   await wait(100)
   expect(h.stateChanges.includes('dead')).toBe(true)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

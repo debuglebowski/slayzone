@@ -6,30 +6,12 @@
  * The guard refuses a declared length over the cap (413) and a body with no declared
  * length (411); Node enforces that the bytes received match the declared length.
  *
- * Run with: npx tsx packages/apps/hub/src/auth-body-limit.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, expect, test } from 'vitest'
 import { createServer, request, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { AUTH_BODY_MAX_BYTES, guardAuthRequestBody } from './auth-body-limit'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function eq<T>(actual: T, expected: T, label: string): void {
-  if (actual !== expected) throw new Error(`${label}: expected ${expected}, got ${actual}`)
-}
 
 /** Stands in for better-auth: echoes how many body bytes it read. */
 const server: Server = createServer((req, res) => {
@@ -43,6 +25,7 @@ const server: Server = createServer((req, res) => {
 })
 await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready))
 const port = (server.address() as AddressInfo).port
+afterAll(() => new Promise<void>((closed) => server.close(() => closed())))
 
 function send(
   method: string,
@@ -68,36 +51,30 @@ function send(
   })
 }
 
-console.log('auth-body-limit')
-
-await test('a normal sign-in body passes through untouched', async () => {
+test('a normal sign-in body passes through untouched', async () => {
   const body = Buffer.from(JSON.stringify({ email: 'a@b.c', password: 'x'.repeat(40) }))
   const res = await send('POST', body)
-  eq(res.status, 200, 'status')
-  eq(res.body, String(body.length), 'bytes the handler read')
+  expect(res.status, 'status').toBe(200)
+  expect(res.body, 'bytes the handler read').toBe(String(body.length))
 })
 
-await test('a body exactly at the cap passes', async () => {
+test('a body exactly at the cap passes', async () => {
   const res = await send('POST', Buffer.alloc(AUTH_BODY_MAX_BYTES, 0x20))
-  eq(res.status, 200, 'status')
+  expect(res.status, 'status').toBe(200)
 })
 
-await test('a declared length over the cap → 413, handler never reads it', async () => {
+test('a declared length over the cap → 413, handler never reads it', async () => {
   const res = await send('POST', Buffer.alloc(AUTH_BODY_MAX_BYTES + 1, 0x20))
-  eq(res.status, 413, 'status')
+  expect(res.status, 'status').toBe(413)
 })
 
-await test('a body with no declared length (chunked) → 411', async () => {
+test('a body with no declared length (chunked) → 411', async () => {
   const res = await send('POST', Buffer.from('{"email":"a@b.c"}'), { chunked: true })
-  eq(res.status, 411, 'status')
+  expect(res.status, 'status').toBe(411)
 })
 
-await test('a request with no body (GET callback) passes', async () => {
+test('a request with no body (GET callback) passes', async () => {
   const res = await send('GET', null)
-  eq(res.status, 200, 'status')
-  eq(res.body, '0', 'bytes')
+  expect(res.status, 'status').toBe(200)
+  expect(res.body, 'bytes').toBe('0')
 })
-
-await new Promise<void>((closed) => server.close(() => closed()))
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

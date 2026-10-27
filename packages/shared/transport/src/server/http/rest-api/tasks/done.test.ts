@@ -1,14 +1,10 @@
 /**
  * REST: POST /api/tasks/:id/done contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/done.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/done.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../../../../test-utils/event-spy.js'
 import {
@@ -120,7 +116,7 @@ type DoneBody = {
   error: string
 }
 
-await describe('POST /api/tasks/:id/done', () => {
+describe('POST /api/tasks/:id/done', () => {
   test('happy: writes the project default-columns done status + dual-emits', async () => {
     const id = seedTask()
     reset()
@@ -237,7 +233,9 @@ await describe('POST /api/tasks/:id/done', () => {
   })
 })
 
-await rest.close()
-await headlessRest.close()
-await noListenerRest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  await headlessRest.close()
+  await noListenerRest.close()
+  h.cleanup()
+})

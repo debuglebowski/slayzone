@@ -2,8 +2,10 @@
  * The per-hub switches (B4): `0|1` only, defaults = the desktop app's hub.
  * Pure Node → runs under plain `npx tsx`.
  *
- * Run with: npx tsx packages/shared/platform/src/hub-switches.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/hub-switches.test.ts
  */
+import { expect, test } from 'vitest'
 import { ENV_MANIFEST } from './env-manifest'
 import {
   HUB_ALLOWED_WEB_ORIGINS_ENV,
@@ -17,17 +19,6 @@ import {
   resolveHubSwitches
 } from './hub-switches'
 
-let passed = 0
-let failed = 0
-function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    passed++
-    console.log(`  ✓ ${name}`)
-  } else {
-    failed++
-    console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ''}`)
-  }
-}
 function throwsWith(fn: () => unknown): string | null {
   try {
     fn()
@@ -39,28 +30,50 @@ function throwsWith(fn: () => unknown): string | null {
 
 // --- defaults = the desktop app's hub ---
 const defaults = resolveHubSwitches({})
-check('default: login not required', defaults.requireLogin === false)
-check('default: password on', defaults.enablePassword === true)
-check('default: SSO off', defaults.enableSso === false)
-check('default: processes on', defaults.enableProcesses === true)
-check('default: integrations on', defaults.enableIntegrations === true)
-check(
-  'defaults equal HUB_SWITCH_DEFAULTS',
-  JSON.stringify(defaults) === JSON.stringify(HUB_SWITCH_DEFAULTS)
-)
+test('default: login not required', () => {
+  expect(defaults.requireLogin).toBe(false)
+})
+
+test('default: password on', () => {
+  expect(defaults.enablePassword).toBe(true)
+})
+
+test('default: SSO off', () => {
+  expect(defaults.enableSso).toBe(false)
+})
+
+test('default: processes on', () => {
+  expect(defaults.enableProcesses).toBe(true)
+})
+
+test('default: integrations on', () => {
+  expect(defaults.enableIntegrations).toBe(true)
+})
+
+test('defaults equal HUB_SWITCH_DEFAULTS', () => {
+  expect(JSON.stringify(defaults)).toBe(JSON.stringify(HUB_SWITCH_DEFAULTS))
+})
 
 // --- env names ---
-check('env name: REQUIRE_LOGIN', HUB_SWITCH_ENV.requireLogin === 'SLAYZONE_HUB_REQUIRE_LOGIN')
-check('env name: ENABLE_PASSWORD', HUB_SWITCH_ENV.enablePassword === 'SLAYZONE_HUB_ENABLE_PASSWORD')
-check('env name: ENABLE_SSO', HUB_SWITCH_ENV.enableSso === 'SLAYZONE_HUB_ENABLE_SSO')
-check(
-  'env name: ENABLE_PROCESSES',
-  HUB_SWITCH_ENV.enableProcesses === 'SLAYZONE_HUB_ENABLE_PROCESSES'
-)
-check(
-  'env name: ENABLE_INTEGRATIONS',
-  HUB_SWITCH_ENV.enableIntegrations === 'SLAYZONE_HUB_ENABLE_INTEGRATIONS'
-)
+test('env name: REQUIRE_LOGIN', () => {
+  expect(HUB_SWITCH_ENV.requireLogin).toBe('SLAYZONE_HUB_REQUIRE_LOGIN')
+})
+
+test('env name: ENABLE_PASSWORD', () => {
+  expect(HUB_SWITCH_ENV.enablePassword).toBe('SLAYZONE_HUB_ENABLE_PASSWORD')
+})
+
+test('env name: ENABLE_SSO', () => {
+  expect(HUB_SWITCH_ENV.enableSso).toBe('SLAYZONE_HUB_ENABLE_SSO')
+})
+
+test('env name: ENABLE_PROCESSES', () => {
+  expect(HUB_SWITCH_ENV.enableProcesses).toBe('SLAYZONE_HUB_ENABLE_PROCESSES')
+})
+
+test('env name: ENABLE_INTEGRATIONS', () => {
+  expect(HUB_SWITCH_ENV.enableIntegrations).toBe('SLAYZONE_HUB_ENABLE_INTEGRATIONS')
+})
 
 // --- 1 / 0 flip each switch ---
 {
@@ -71,11 +84,26 @@ check(
     SLAYZONE_HUB_ENABLE_PROCESSES: '0',
     SLAYZONE_HUB_ENABLE_INTEGRATIONS: '0'
   })
-  check('1 turns requireLogin on', on.requireLogin === true)
-  check('0 turns enablePassword off', on.enablePassword === false)
-  check('1 turns enableSso on', on.enableSso === true)
-  check('0 turns enableProcesses off', on.enableProcesses === false)
-  check('0 turns enableIntegrations off', on.enableIntegrations === false)
+
+  test('1 turns requireLogin on', () => {
+    expect(on.requireLogin).toBe(true)
+  })
+
+  test('0 turns enablePassword off', () => {
+    expect(on.enablePassword).toBe(false)
+  })
+
+  test('1 turns enableSso on', () => {
+    expect(on.enableSso).toBe(true)
+  })
+
+  test('0 turns enableProcesses off', () => {
+    expect(on.enableProcesses).toBe(false)
+  })
+
+  test('0 turns enableIntegrations off', () => {
+    expect(on.enableIntegrations).toBe(false)
+  })
 }
 
 // --- B4: anything but exactly 0 / 1 refuses, naming the variable ---
@@ -97,11 +125,11 @@ for (const key of Object.keys(HUB_SWITCH_ENV) as Array<keyof typeof HUB_SWITCH_E
     ''
   ]) {
     const msg = throwsWith(() => resolveHubSwitches({ [name]: bad }))
-    check(
-      `B4: ${name}='${bad}' refuses boot and names the variable`,
-      msg !== null && msg.includes(name) && /must be 0 or 1/.test(msg),
-      String(msg)
-    )
+    test(`B4: ${name}='${bad}' refuses boot and names the variable`, () => {
+      expect(msg, String(msg)).not.toBeNull()
+      expect(msg, String(msg)).toContain(name)
+      expect(msg, String(msg)).toMatch(/must be 0 or 1/)
+    })
   }
 }
 {
@@ -111,41 +139,55 @@ for (const key of Object.keys(HUB_SWITCH_ENV) as Array<keyof typeof HUB_SWITCH_E
   } catch (e) {
     err = e
   }
-  check(
-    'B4: the error is a HubSwitchValueError carrying variable + value',
-    err instanceof HubSwitchValueError &&
-      err.variable === 'SLAYZONE_HUB_ENABLE_SSO' &&
-      err.value === 'maybe'
-  )
+  test('B4: the error is a HubSwitchValueError carrying variable + value', () => {
+    expect(err).toBeInstanceOf(HubSwitchValueError)
+    expect(err).toMatchObject({ variable: 'SLAYZONE_HUB_ENABLE_SSO', value: 'maybe' })
+  })
 }
-check('parseSwitchValue: unset → undefined', parseSwitchValue('X', undefined) === undefined)
+test('parseSwitchValue: unset → undefined', () => {
+  expect(parseSwitchValue('X', undefined)).toBeUndefined()
+})
 
 // --- isHubLoginRequired is lenient (it runs inside an already-validated hub) ---
-check('isHubLoginRequired: =1 → true', isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: '1' }))
-check('isHubLoginRequired: =0 → false', !isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: '0' }))
-check('isHubLoginRequired: unset → false', !isHubLoginRequired({}))
-check(
-  'isHubLoginRequired: garbage → false (does not throw)',
-  !isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: 'garbage' })
-)
+test('isHubLoginRequired: =1 → true', () => {
+  expect(isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: '1' })).toBe(true)
+})
+
+test('isHubLoginRequired: =0 → false', () => {
+  expect(isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: '0' })).toBeFalsy()
+})
+
+test('isHubLoginRequired: unset → false', () => {
+  expect(isHubLoginRequired({})).toBeFalsy()
+})
+
+test('isHubLoginRequired: garbage → false (does not throw)', () => {
+  expect(isHubLoginRequired({ SLAYZONE_HUB_REQUIRE_LOGIN: 'garbage' })).toBeFalsy()
+})
 
 // --- SSO settings: blank = unset; MFA required unless exactly 0 ---
 {
   const none = resolveHubSso({})
-  check(
-    'sso: nothing set → empty, MFA required',
-    !none.tenantId && !none.clientId && !none.certPath && !none.keyPath && none.requireMfa
-  )
+  test('sso: nothing set → empty, MFA required', () => {
+    expect(none.tenantId).toBeFalsy()
+    expect(none.clientId).toBeFalsy()
+    expect(none.certPath).toBeFalsy()
+    expect(none.keyPath).toBeFalsy()
+    expect(none.requireMfa).toBeTruthy()
+  })
   const blank = resolveHubSso({
     SLAYZONE_HUB_SSO_TENANT_ID: '  ',
     SLAYZONE_HUB_SSO_CLIENT_ID: '',
     SLAYZONE_HUB_SSO_CERT_PATH: ' ',
     SLAYZONE_HUB_SSO_KEY_PATH: ''
   })
-  check(
-    'sso: blank values count as unset',
-    !blank.tenantId && !blank.clientId && !blank.certPath && !blank.keyPath
-  )
+
+  test('sso: blank values count as unset', () => {
+    expect(blank.tenantId).toBeFalsy()
+    expect(blank.clientId).toBeFalsy()
+    expect(blank.certPath).toBeFalsy()
+    expect(blank.keyPath).toBeFalsy()
+  })
   const full = resolveHubSso({
     SLAYZONE_HUB_SSO_TENANT_ID: 't',
     SLAYZONE_HUB_SSO_CLIENT_ID: 'c',
@@ -153,34 +195,38 @@ check(
     SLAYZONE_HUB_SSO_KEY_PATH: '/k.pem',
     SLAYZONE_HUB_SSO_REQUIRE_MFA: '0'
   })
-  check(
-    'sso: all read',
-    full.tenantId === 't' &&
-      full.clientId === 'c' &&
-      full.certPath === '/c.pem' &&
-      full.keyPath === '/k.pem' &&
-      full.requireMfa === false
-  )
-  check(
-    'sso: the retired client secret is not read',
-    !('clientSecret' in resolveHubSso({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 's' }))
-  )
+
+  test('sso: all read', () => {
+    expect(full.tenantId).toBe('t')
+    expect(full.clientId).toBe('c')
+    expect(full.certPath).toBe('/c.pem')
+    expect(full.keyPath).toBe('/k.pem')
+    expect(full.requireMfa).toBe(false)
+  })
+
+  test('sso: the retired client secret is not read', () => {
+    expect('clientSecret' in resolveHubSso({ SLAYZONE_HUB_SSO_CLIENT_SECRET: 's' })).toBeFalsy()
+  })
   let threw: unknown = null
   try {
     resolveHubSso({ SLAYZONE_HUB_SSO_REQUIRE_MFA: 'yes' })
   } catch (e) {
     threw = e
   }
-  check('sso: REQUIRE_MFA other than 0|1 throws (B4)', threw instanceof HubSwitchValueError)
+  test('sso: REQUIRE_MFA other than 0|1 throws (B4)', () => {
+    expect(threw).toBeInstanceOf(HubSwitchValueError)
+  })
 }
 
 // --- HUB_PROCESS_ENV: everything a parent must clear before spawning a hub ---
 {
   const list = new Set(HUB_PROCESS_ENV)
-  check('process env: no duplicates', list.size === HUB_PROCESS_ENV.length)
-  check(
-    'process env: every switch, SSO var and address var',
-    [
+  test('process env: no duplicates', () => {
+    expect(list.size).toBe(HUB_PROCESS_ENV.length)
+  })
+
+  test('process env: every switch, SSO var and address var', () => {
+    expect([
       ...Object.values(HUB_SWITCH_ENV),
       'SLAYZONE_HUB_SSO_TENANT_ID',
       'SLAYZONE_HUB_SSO_CLIENT_ID',
@@ -192,12 +238,13 @@ check(
       'SLAYZONE_HUB_LISTEN_ADDRESS',
       'SLAYZONE_HUB_PUBLIC_ADDRESS',
       'SLAYZONE_HUB_AUTH_SECRET'
-    ].every((n) => list.has(n))
-  )
-  check(
-    'process env: the retired/dial-side address and the web-origin list',
-    list.has('SLAYZONE_HUB_ADDRESS') && list.has(HUB_ALLOWED_WEB_ORIGINS_ENV)
-  )
+    ].every((n) => list.has(n))).toBe(true)
+  })
+
+  test('process env: the retired/dial-side address and the web-origin list', () => {
+    expect(list.has('SLAYZONE_HUB_ADDRESS')).toBe(true)
+    expect(list.has(HUB_ALLOWED_WEB_ORIGINS_ENV)).toBe(true)
+  })
   // Drift guard: a hub-side SLAYZONE_HUB_* var added to the manifest but not to the
   // list would slip past every parent that strips with it. The few that are NOT hub
   // process config are named here, with the reason.
@@ -209,16 +256,12 @@ check(
   const missing = Object.keys(ENV_MANIFEST).filter(
     (k) => k.startsWith('SLAYZONE_HUB_') && !list.has(k) && !(k in NOT_HUB_PROCESS_CONFIG)
   )
-  check(
-    'process env: every manifested SLAYZONE_HUB_* var is in the list or named as an exception',
-    missing.length === 0,
-    `missing: ${missing.join(', ')}`
-  )
-  check(
-    'process env: the exceptions really are in the manifest (no stale allowance)',
-    Object.keys(NOT_HUB_PROCESS_CONFIG).every((k) => k in ENV_MANIFEST)
-  )
+  test('process env: every manifested SLAYZONE_HUB_* var is in the list or named as an exception', () => {
+    expect(missing).toEqual([])
+  })
+
+  test('process env: the exceptions really are in the manifest (no stale allowance)', () => {
+    expect(Object.keys(NOT_HUB_PROCESS_CONFIG).every((k) => k in ENV_MANIFEST)).toBe(true)
+  })
 }
 
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

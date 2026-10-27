@@ -3,8 +3,10 @@
  * Pure Node (real temp files, a scripted fake IO — no TTY, no native deps) → runs
  * under plain `npx tsx`.
  *
- * Run with: npx tsx packages/shared/platform/src/config-prompt.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/config-prompt.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,28 +18,6 @@ import { updateJsonFile } from './slayzone-config'
  *  rather than through a role-specific loader. */
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
-}
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : e}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected)
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
 }
 
 function tmp(): string {
@@ -91,38 +71,33 @@ function withEnv(
   restore()
 }
 
-async function main(): Promise<void> {
-  console.log('\nconfig-prompt: canPrompt')
-  console.log('─'.repeat(40))
-
-  await test('canPrompt false when stdin is not a TTY (test env)', () => {
+describe('config-prompt: canPrompt', () => {
+  test('canPrompt false when stdin is not a TTY (test env)', () => {
     // The test harness stdin is a pipe (isTTY undefined) → never interactive.
     withEnv({ SLAYZONE_SUPERVISED: undefined, SLAYZONE_NONINTERACTIVE: undefined }, () => {
-      assertEq(canPrompt(), false, 'non-TTY ⇒ false')
+      expect(canPrompt(), 'non-TTY ⇒ false').toBe(false)
     })
   })
 
-  await test('canPrompt false under SLAYZONE_SUPERVISED / SLAYZONE_NONINTERACTIVE', () => {
-    withEnv({ SLAYZONE_SUPERVISED: '1' }, () => assertEq(canPrompt(), false, 'supervised ⇒ false'))
+  test('canPrompt false under SLAYZONE_SUPERVISED / SLAYZONE_NONINTERACTIVE', () => {
+    withEnv({ SLAYZONE_SUPERVISED: '1' }, () => expect(canPrompt(), 'supervised ⇒ false').toBe(false))
     withEnv({ SLAYZONE_NONINTERACTIVE: '1' }, () =>
-      assertEq(canPrompt(), false, 'noninteractive ⇒ false')
+      expect(canPrompt(), 'noninteractive ⇒ false').toBe(false)
     )
   })
+})
 
-  console.log('\nconfig-prompt: confirm')
-  console.log('─'.repeat(40))
-
-  await test('confirm defaults yes on empty [Y/n], no on empty [y/N]', async () => {
-    assertEq(await confirm(fakeIo(['']), 'ok?', { defaultYes: true }), true, 'empty ⇒ default yes')
-    assertEq(await confirm(fakeIo(['']), 'ok?', { defaultYes: false }), false, 'empty ⇒ default no')
-    assertEq(await confirm(fakeIo(['y']), 'ok?', { defaultYes: false }), true, 'y ⇒ yes')
-    assertEq(await confirm(fakeIo(['nope']), 'ok?', { defaultYes: true }), false, 'nope ⇒ no')
+describe('config-prompt: confirm', () => {
+  test('confirm defaults yes on empty [Y/n], no on empty [y/N]', async () => {
+    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: true }), 'empty ⇒ default yes').toBe(true)
+    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: false }), 'empty ⇒ default no').toBe(false)
+    expect(await confirm(fakeIo(['y']), 'ok?', { defaultYes: false }), 'y ⇒ yes').toBe(true)
+    expect(await confirm(fakeIo(['nope']), 'ok?', { defaultYes: true }), 'nope ⇒ no').toBe(false)
   })
+})
 
-  console.log('\nconfig-prompt: runInteractiveConfig')
-  console.log('─'.repeat(40))
-
-  await test('no missing fields ⇒ nothing collected, no confirm, no write', async () => {
+describe('config-prompt: runInteractiveConfig', () => {
+  test('no missing fields ⇒ nothing collected, no confirm, no write', async () => {
     const dir = tmp()
     try {
       const io = fakeIo([])
@@ -131,16 +106,16 @@ async function main(): Promise<void> {
         io,
         configPath: join(dir, 'config.json')
       })
-      assertEq(res.collected.length, 0, 'nothing collected')
-      assertEq(res.saved, false, 'not saved')
-      assertEq(io.asked.length, 0, 'no questions asked')
-      assert(!existsSync(join(dir, 'config.json')), 'no config written')
+      expect(res.collected.length, 'nothing collected').toBe(0)
+      expect(res.saved, 'not saved').toBe(false)
+      expect(io.asked.length, 'no questions asked').toBe(0)
+      expect(existsSync(join(dir, 'config.json')), 'no config written').toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  await test('collect + confirm-yes persists to config.json and seeds env', async () => {
+  test('collect + confirm-yes persists to config.json and seeds env', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
     const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
@@ -159,11 +134,11 @@ async function main(): Promise<void> {
           }
         ]
       })
-      assertEq(res.saved, true, 'saved')
-      assertEq(res.collected.length, 1, 'one collected')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env seeded')
-      assertEq(readJson(cfgPath).publicAddress, 'hub.example.com:8443', 'persisted to file')
-      assert(io.closed === false, 'injected io NOT closed by the computer')
+      expect(res.saved, 'saved').toBe(true)
+      expect(res.collected.length, 'one collected').toBe(1)
+      expect(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'env seeded').toBe('hub.example.com:8443')
+      expect(readJson(cfgPath).publicAddress, 'persisted to file').toBe('hub.example.com:8443')
+      expect(io.closed, 'injected io NOT closed by the computer').toBe(false)
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
       else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
@@ -171,7 +146,7 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('confirm-no seeds env for this run but does NOT persist', async () => {
+  test('confirm-no seeds env for this run but does NOT persist', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
     const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
@@ -189,9 +164,9 @@ async function main(): Promise<void> {
           }
         ]
       })
-      assertEq(res.saved, false, 'not saved')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'hub.example.com:8443', 'env still seeded')
-      assert(!existsSync(cfgPath), 'config file NOT written')
+      expect(res.saved, 'not saved').toBe(false)
+      expect(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'env still seeded').toBe('hub.example.com:8443')
+      expect(existsSync(cfgPath), 'config file NOT written').toBe(false)
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
       else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
@@ -199,7 +174,7 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('empty answer with no default is skipped (not collected/seeded)', async () => {
+  test('empty answer with no default is skipped (not collected/seeded)', async () => {
     const dir = tmp()
     const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
     delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
@@ -216,9 +191,9 @@ async function main(): Promise<void> {
           }
         ]
       })
-      assertEq(res.collected.length, 0, 'nothing collected')
-      assertEq(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, undefined, 'env NOT seeded')
-      assert(!existsSync(join(dir, 'config.json')), 'no config written')
+      expect(res.collected.length, 'nothing collected').toBe(0)
+      expect(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'env NOT seeded').toBe(undefined)
+      expect(existsSync(join(dir, 'config.json')), 'no config written').toBe(false)
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
       else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
@@ -226,7 +201,7 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('empty answer WITH a default collects the default', async () => {
+  test('empty answer WITH a default collects the default', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
     const prevEnv = process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS
@@ -246,10 +221,10 @@ async function main(): Promise<void> {
           }
         ]
       })
-      assertEq(res.collected.length, 1, 'default collected')
-      assertEq(process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS, '/work', 'env seeded with default')
+      expect(res.collected.length, 'default collected').toBe(1)
+      expect(process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS, 'env seeded with default').toBe('/work')
       const roots = readJson(cfgPath).allowedRoots
-      assert(Array.isArray(roots) && roots[0] === '/work', 'persisted array')
+      expect(roots, 'persisted array').toEqual(['/work'])
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS
       else process.env.SLAYZONE_COMPUTER_ALLOWED_ROOTS = prevEnv
@@ -257,7 +232,7 @@ async function main(): Promise<void> {
     }
   })
 
-  await test('save merges over existing config keys (does not clobber)', async () => {
+  test('save merges over existing config keys (does not clobber)', async () => {
     const dir = tmp()
     const cfgPath = join(dir, 'config.json')
     const prevEnv = process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
@@ -278,17 +253,12 @@ async function main(): Promise<void> {
         ]
       })
       const cfg = readJson(cfgPath)
-      assertEq(cfg.address, '0.0.0.0:9999', 'pre-existing key preserved')
-      assertEq(cfg.publicAddress, 'hub.example.com:8443', 'new key merged in')
+      expect(cfg.address, 'pre-existing key preserved').toBe('0.0.0.0:9999')
+      expect(cfg.publicAddress, 'new key merged in').toBe('hub.example.com:8443')
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS
       else process.env.SLAYZONE_HUB_PUBLIC_ADDRESS = prevEnv
       rmSync(dir, { recursive: true, force: true })
     }
   })
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+})

@@ -24,18 +24,15 @@
  * export to that format, 404 for a missing file, and the mermaid flag reaching
  * the renderer.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 // `artifactsDir` is a module-load const — point ROOT at a throwaway dir BEFORE
@@ -135,7 +132,13 @@ const restNoExporter = await mountRestApp(noExporter)
 
 const out = (name: string): string => path.join(tmpRoot, 'out', name)
 
-await describe('artifact export routes', () => {
+afterAll(async () => {
+  await rest.close()
+  await restNoExporter.close()
+  fs.rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+describe('artifact export routes', () => {
   test('501 for every format when no exporter is wired (standalone hub)', async () => {
     const id = seedArtifact('doc.md', null)
     for (const fmt of ['pdf', 'png', 'html']) {
@@ -214,7 +217,3 @@ await describe('artifact export routes', () => {
     expect(fs.readFileSync(dest, 'utf-8').includes('BODY')).toBe(true)
   })
 })
-
-await rest.close()
-await restNoExporter.close()
-fs.rmSync(tmpRoot, { recursive: true, force: true })

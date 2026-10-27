@@ -15,29 +15,11 @@
  * anything but a generic connection error.
  *
  * Pure Node (no electron/native deps — see app-deps.ts's own "import type
- * only" discipline) → runs under plain `npx tsx`.
- *
- * Run with: npx tsx packages/apps/app/src/main/desktop-bridge-server.test.ts
+ * only" discipline).
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDesktopBridgeServer, type DesktopBridgeServerHandle } from './desktop-bridge-server'
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Attempt a raw WS connect to `/cap`, resolving with how it ended — never
  *  throwing, so both accept and reject paths are plain return values. */
@@ -75,71 +57,58 @@ function attemptConnect(
   })
 }
 
-async function main(): Promise<void> {
-  console.log('\n/cap bearer gate (desktop-bridge-server)\n')
-
+describe('/cap bearer gate (desktop-bridge-server)', () => {
   let handle: DesktopBridgeServerHandle | null = null
-  try {
+  let port: number
+  let token: string
+  beforeAll(async () => {
     handle = await startDesktopBridgeServer({})
-    const { port, token } = handle
-
-    await test('two servers mint DIFFERENT per-boot tokens', async () => {
-      const second = await startDesktopBridgeServer({})
-      try {
-        assert(second.token !== token, `tokens must differ: ${second.token} vs ${token}`)
-      } finally {
-        await second.stop()
-      }
-    })
-
-    await test('no token at all → upgrade rejected (401), socket never opens', async () => {
-      const result = await attemptConnect(port, '')
-      assert(
-        result.kind === 'rejected' && result.status === 401,
-        `expected rejected/401, got ${JSON.stringify(result)}`
-      )
-    })
-
-    await test('wrong token → upgrade rejected (401)', async () => {
-      const result = await attemptConnect(port, '?token=not-the-right-one')
-      assert(
-        result.kind === 'rejected' && result.status === 401,
-        `expected rejected/401, got ${JSON.stringify(result)}`
-      )
-    })
-
-    await test('right token but WRONG LENGTH → rejected, not a crash', async () => {
-      // Regression guard: timingSafeEqual throws on unequal-length buffers.
-      // The length check must run first so a short/long guess degrades to a
-      // clean 401 instead of crashing the verifyClient callback (which would
-      // hang the client forever with no response at all).
-      const result = await attemptConnect(port, `?token=${token}extra`)
-      assert(
-        result.kind === 'rejected' && result.status === 401,
-        `expected rejected/401, got ${JSON.stringify(result)}`
-      )
-    })
-
-    await test('correct token → handshake succeeds', async () => {
-      const result = await attemptConnect(port, `?token=${encodeURIComponent(token)}`)
-      assert(result.kind === 'open', `expected open, got ${JSON.stringify(result)}`)
-    })
-
-    await test('malformed request url → rejected, not a crash', async () => {
-      // `new URL(...)` inside verifyClient must not throw past the handler on a
-      // pathological url — same "degrade to 401" requirement as the length case.
-      const result = await attemptConnect(port, '?token=%')
-      assert(
-        result.kind === 'rejected' && result.status === 401,
-        `expected rejected/401, got ${JSON.stringify(result)}`
-      )
-    })
-  } finally {
+    ;({ port, token } = handle)
+  })
+  afterAll(async () => {
     if (handle) await handle.stop()
-  }
+  })
 
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
+  test('two servers mint DIFFERENT per-boot tokens', async () => {
+    const second = await startDesktopBridgeServer({})
+    try {
+      expect(second.token, 'tokens must differ').not.toBe(token)
+    } finally {
+      await second.stop()
+    }
+  })
 
-void main()
+  test('no token at all → upgrade rejected (401), socket never opens', async () => {
+    expect(await attemptConnect(port, '')).toEqual({ kind: 'rejected', status: 401 })
+  })
+
+  test('wrong token → upgrade rejected (401)', async () => {
+    expect(await attemptConnect(port, '?token=not-the-right-one')).toEqual({
+      kind: 'rejected',
+      status: 401
+    })
+  })
+
+  test('right token but WRONG LENGTH → rejected, not a crash', async () => {
+    // Regression guard: timingSafeEqual throws on unequal-length buffers.
+    // The length check must run first so a short/long guess degrades to a
+    // clean 401 instead of crashing the verifyClient callback (which would
+    // hang the client forever with no response at all).
+    expect(await attemptConnect(port, `?token=${token}extra`)).toEqual({
+      kind: 'rejected',
+      status: 401
+    })
+  })
+
+  test('correct token → handshake succeeds', async () => {
+    expect(await attemptConnect(port, `?token=${encodeURIComponent(token)}`)).toEqual({
+      kind: 'open'
+    })
+  })
+
+  test('malformed request url → rejected, not a crash', async () => {
+    // `new URL(...)` inside verifyClient must not throw past the handler on a
+    // pathological url — same "degrade to 401" requirement as the length case.
+    expect(await attemptConnect(port, '?token=%')).toEqual({ kind: 'rejected', status: 401 })
+  })
+})

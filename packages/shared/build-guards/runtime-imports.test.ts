@@ -7,8 +7,10 @@
  * loaded the package's raw TS source at runtime → ERR_MODULE_NOT_FOUND, caught
  * and logged every retention tick.
  *
- * Run with: pnpm exec tsx packages/shared/build-guards/runtime-imports.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/build-guards/runtime-imports.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,26 +22,8 @@ import {
   type RuntimeImportsGuardOptions
 } from './runtime-imports.mjs'
 
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : String(e)}`)
-    failed++
-  }
-}
-
-function assert(condition: unknown, message: string): void {
-  if (!condition) throw new Error(message)
-}
-
 const root = mkdtempSync(join(tmpdir(), 'slz-build-guards-'))
+afterAll(() => rmSync(root, { recursive: true, force: true }))
 let fixtureSeq = 0
 
 function fixture(source: string): string {
@@ -108,58 +92,56 @@ const app = (extra: Partial<RuntimeImportsGuardOptions> = {}): RuntimeImportsGua
   ...extra
 })
 
-async function main(): Promise<void> {
-  console.log('runtime-imports guard — Rollup')
-
-  await test('rejects require() of a workspace package left in ESM output (the shipped bug)', async () => {
+describe('runtime-imports guard — Rollup', () => {
+  test('rejects require() of a workspace package left in ESM output (the shipped bug)', async () => {
     const err = await rollupGuard(
       `export function dir() { return require('@slayzone/platform').getStorageDir() }`,
       app()
     )
-    assert(err, 'expected the build to fail')
-    assert(err!.includes('@slayzone/platform'), `error should name the specifier: ${err}`)
-    assert(err!.includes('entry.js'), `error should name the output file: ${err}`)
+    expect(err, 'expected the build to fail').not.toBeNull()
+    expect(err, 'error should name the specifier').toContain('@slayzone/platform')
+    expect(err, 'error should name the output file').toContain('entry.js')
   })
 
-  await test('rejects a workspace package even when declared as a dependency', async () => {
+  test('rejects a workspace package even when declared as a dependency', async () => {
     const err = await rollupGuard(`import { x } from '@slayzone/platform'\nexport { x }`, app())
-    assert(err?.includes('@slayzone/platform'), `expected workspace import rejected: ${err}`)
+    expect(err, 'expected workspace import rejected').toContain('@slayzone/platform')
   })
 
-  await test('rejects require.resolve() of an undeclared package', async () => {
+  test('rejects require.resolve() of an undeclared package', async () => {
     const err = await rollupGuard(
       `export const p = () => require.resolve('mermaid/dist/mermaid.min.js')`,
       app()
     )
-    assert(err?.includes('mermaid/dist/mermaid.min.js'), `expected mermaid rejected: ${err}`)
+    expect(err, 'expected mermaid rejected').toContain('mermaid/dist/mermaid.min.js')
   })
 
-  await test('rejects a call through a createRequire()-bound name (electron-vite shim)', async () => {
+  test('rejects a call through a createRequire()-bound name (electron-vite shim)', async () => {
     const err = await rollupGuard(
       `import __cjs_mod__ from 'node:module'\nconst require2 = __cjs_mod__.createRequire(import.meta.url)\nexport const f = () => require2('left-pad')`,
       app()
     )
-    assert(err?.includes('left-pad'), `expected left-pad rejected: ${err}`)
+    expect(err, 'expected left-pad rejected').toContain('left-pad')
   })
 
-  await test('rejects an immediately-invoked createRequire(...)(...)', async () => {
+  test('rejects an immediately-invoked createRequire(...)(...)', async () => {
     const err = await rollupGuard(
       `import { createRequire } from 'node:module'\nexport const f = () => createRequire(import.meta.url)('left-pad')`,
       app()
     )
-    assert(err?.includes('left-pad'), `expected left-pad rejected: ${err}`)
+    expect(err, 'expected left-pad rejected').toContain('left-pad')
   })
 
-  await test('rejects undeclared static and dynamic external imports', async () => {
+  test('rejects undeclared static and dynamic external imports', async () => {
     const err = await rollupGuard(
       `import a from 'undeclared-static'\nexport const f = () => import('undeclared-dynamic')\nexport { a }`,
       app()
     )
-    assert(err?.includes('undeclared-static'), `expected static import rejected: ${err}`)
-    assert(err?.includes('undeclared-dynamic'), `expected dynamic import rejected: ${err}`)
+    expect(err, 'expected static import rejected').toContain('undeclared-static')
+    expect(err, 'expected dynamic import rejected').toContain('undeclared-dynamic')
   })
 
-  await test('allows builtins, declared and optional dependencies', async () => {
+  test('allows builtins, declared and optional dependencies', async () => {
     const err = await rollupGuard(
       [
         `import { join } from 'node:path'`,
@@ -170,71 +152,65 @@ async function main(): Promise<void> {
       ].join('\n'),
       app()
     )
-    assert(err === null, `expected pass, got: ${err}`)
+    expect(err).toBeNull()
   })
 
-  await test('ignores require-looking text inside string literals (ajv codegen)', async () => {
+  test('ignores require-looking text inside string literals (ajv codegen)', async () => {
     const err = await rollupGuard(`export const code = 'require("ajv/dist/runtime/equal")'`, app())
-    assert(err === null, `expected pass, got: ${err}`)
+    expect(err).toBeNull()
   })
 
-  await test('ignores non-literal specifiers', async () => {
+  test('ignores non-literal specifiers', async () => {
     const err = await rollupGuard(`export const f = (m) => [require(m), import(m)]`, app())
-    assert(err === null, `expected pass, got: ${err}`)
+    expect(err).toBeNull()
   })
 
-  await test('electron is allowed only for Electron bundles', async () => {
+  test('electron is allowed only for Electron bundles', async () => {
     const src = `export const f = () => require('electron')`
-    assert(
-      (await rollupGuard(src, app({ electron: true }))) === null,
+    expect(
+      await rollupGuard(src, app({ electron: true })),
       'expected pass with electron: true'
-    )
+    ).toBeNull()
     const err = await rollupGuard(src, app())
-    assert(err?.includes('electron'), `expected electron rejected without electron: true: ${err}`)
+    expect(err, 'expected electron rejected without electron: true').toContain('electron')
   })
 
-  await test('optionalExternals are allowed', async () => {
+  test('optionalExternals are allowed', async () => {
     const err = await rollupGuard(
       `export const f = () => require('bufferutil')`,
       app({ optionalExternals: ['bufferutil'] })
     )
-    assert(err === null, `expected pass, got: ${err}`)
+    expect(err).toBeNull()
   })
 
-  await test('lists every violation in one error', async () => {
+  test('lists every violation in one error', async () => {
     const err = await rollupGuard(
       `export const f = () => [require('@slayzone/a'), require('@slayzone/b'), require('nope')]`,
       app()
     )
     for (const s of ['@slayzone/a', '@slayzone/b', 'nope']) {
-      assert(err?.includes(s), `expected ${s} in error: ${err}`)
+      expect(err, `expected ${s} in error`).toContain(s)
     }
   })
+})
 
-  console.log('runtime-imports guard — esbuild')
-
-  await test('rejects an undeclared external', async () => {
+describe('runtime-imports guard — esbuild', () => {
+  test('rejects an undeclared external', async () => {
     const err = await esbuildGuard(`require('undeclared')`, ['undeclared'], app())
-    assert(err?.includes('undeclared'), `expected undeclared rejected: ${err}`)
+    expect(err, 'expected undeclared rejected').toContain('undeclared')
   })
 
-  await test('rejects an externalized workspace package', async () => {
+  test('rejects an externalized workspace package', async () => {
     const err = await esbuildGuard(`require('@slayzone/platform')`, ['@slayzone/platform'], app())
-    assert(err?.includes('@slayzone/platform'), `expected workspace rejected: ${err}`)
+    expect(err, 'expected workspace rejected').toContain('@slayzone/platform')
   })
 
-  await test('allows builtins, declared deps and optionalExternals', async () => {
+  test('allows builtins, declared deps and optionalExternals', async () => {
     const err = await esbuildGuard(
       `require('node:fs'); require('path'); require('declared-dep'); require('bufferutil')`,
       ['declared-dep', 'bufferutil'],
       app({ optionalExternals: ['bufferutil'] })
     )
-    assert(err === null, `expected pass, got: ${err}`)
+    expect(err).toBeNull()
   })
-
-  rmSync(root, { recursive: true, force: true })
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+})

@@ -29,14 +29,12 @@
  * logic (mirrors hub-dialer: load creds → `hello`, else `enroll` + save).
  *
  * Native ABI: SlayzoneDb rides better-sqlite3 (Electron ABI) and createHubAuth
- * uses node:sqlite — so this runs under the Electron strict loader, like
- * computer-auth.test.ts. Hand-rolled harness (no vitest).
+ * uses node:sqlite — so this runs under vitest on Electron's node, like
+ * computer-auth.test.ts.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/computer-restart-survival.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, expect, test } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,30 +48,6 @@ import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
 import { runMigrations } from '@slayzone/transport/db-bootstrap'
 import { createComputerAuthAdapters } from './computer-auth.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected) {
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-  }
-}
 
 function createMigratedDb(): { db: SlayzoneDb; close: () => void } {
   const raw = new Database(':memory:')
@@ -154,127 +128,116 @@ function localComputerCount(db: SlayzoneDb): Promise<number> {
   return listComputers(db).then((rows) => rows.filter((r) => r.name === LOCAL_NAME).length)
 }
 
-async function main(): Promise<void> {
-  console.log('\ncomputer restart-survival (local computer stays ONE row across reboots)')
-  console.log('─'.repeat(64))
+const tmpDir = mkdtempSync(join(tmpdir(), 'computer-restart-'))
+const auth = await createHubAuth({
+  dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
+  baseURL: 'http://127.0.0.1:9998',
+  secret: 'computer-restart-survival-secret-at-least-32-chars'
+})
 
-  const tmpDir = mkdtempSync(join(tmpdir(), 'computer-restart-'))
-  const auth = await createHubAuth({
-    dbPath: join(tmpDir, 'slayzone.auth.sqlite'),
-    baseURL: 'http://127.0.0.1:9998',
-    secret: 'computer-restart-survival-secret-at-least-32-chars'
-  })
+afterAll(async () => {
+  rmSync(tmpDir, { recursive: true, force: true })
+})
 
+test('stable hub port ⇒ boot 2 HELLOs into the same row (count stays 1)', async () => {
+  const { db, close } = createMigratedDb()
+  const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-stable-'))
   try {
-    await test('stable hub port ⇒ boot 2 HELLOs into the same row (count stays 1)', async () => {
-      const { db, close } = createMigratedDb()
-      const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-stable-'))
-      try {
-        const boot1 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
-        assertEq(boot1.authMode, 'enroll', 'boot 1 enrolls (no prior creds)')
-        assertEq(await localComputerCount(db), 1, 'one local computer after boot 1')
+    const boot1 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
+    expect(boot1.authMode, 'boot 1 enrolls (no prior creds)').toBe('enroll')
+    expect(await localComputerCount(db), 'one local computer after boot 1').toBe(1)
 
-        // Boot 2: same stable hub port → identical credential key → hello.
-        const boot2 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
-        assertEq(boot2.hubUrl, boot1.hubUrl, 'boot 2 derives the identical computer URL')
-        assertEq(boot2.authMode, 'hello', 'boot 2 HELLOs with the persisted creds')
-        assertEq(boot2.computerId, boot1.computerId, 'same computerId across reboots')
-        assertEq(await localComputerCount(db), 1, 'STILL one local computer after boot 2')
+    // Boot 2: same stable hub port → identical credential key → hello.
+    const boot2 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
+    expect(boot2.hubUrl, 'boot 2 derives the identical computer URL').toBe(boot1.hubUrl)
+    expect(boot2.authMode, 'boot 2 HELLOs with the persisted creds').toBe('hello')
+    expect(boot2.computerId, 'same computerId across reboots').toBe(boot1.computerId)
+    expect(await localComputerCount(db), 'STILL one local computer after boot 2').toBe(1)
 
-        // A third boot for good measure — the survival property must hold steady.
-        const boot3 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
-        assertEq(boot3.authMode, 'hello', 'boot 3 also HELLOs')
-        assertEq(await localComputerCount(db), 1, 'still one local computer after boot 3')
-      } finally {
-        close()
-      }
-    })
-
-    await test('regression guard: a CHANGED hub port would change the credential key (why stability matters)', async () => {
-      // Documents the failure the single-listener model structurally prevents: if
-      // the hub port differed between boots, the computer's credential key
-      // (hubHostFromUrl → host_port) would differ → creds miss → re-enroll. The
-      // production hub port is fixed per-environment (SIDECAR_FIXED_PORT), so this
-      // can't happen; the assertion pins the property so a future change that
-      // reintroduces a churning port is caught.
-      const { close } = createMigratedDb()
-      const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-portchange-'))
-      try {
-        const url1 = deriveComputerHubUrl({ host: HOST, port: 60000 })!
-        const url2 = deriveComputerHubUrl({ host: HOST, port: 60001 })!
-        const store1 = createFileCredentialStore(hubHostFromUrl(url1), { baseDir: credsBaseDir })
-        const store2 = createFileCredentialStore(hubHostFromUrl(url2), { baseDir: credsBaseDir })
-        await store1.save({ computerId: 'x', apiKey: 'k' })
-        assert((await store1.load()) !== null, 'boot-1 key reads its own creds')
-        assertEq(
-          await store2.load(),
-          null,
-          'a DIFFERENT hub port yields a different credential key → would re-enroll'
-        )
-      } finally {
-        close()
-      }
-    })
-
-    await test('PART 2 dedup collapses pre-existing duplicates to one on next local enroll', async () => {
-      // Seed the user's current broken state: multiple orphaned local rows (from
-      // pre-fix relaunches, each a fresh-uuid enroll under the local name), plus a
-      // legitimate REMOTE computer that must survive.
-      const { db, close } = createMigratedDb()
-      const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-dedup-'))
-      try {
-        const remoteAdapters = createComputerAuthAdapters({ db, auth }) // no localComputerName → fresh uuids
-        for (const label of ['orphan-1', 'orphan-2', 'orphan-3']) {
-          const t = await mintJoinToken(db, {
-            hubUrl: `wss://${HOST}:59999/computers`,
-            ttlMs: 60_000,
-            label
-          })
-          await remoteAdapters.verifyEnrollment({
-            joinToken: t.token,
-            name: LOCAL_NAME,
-            platform: 'p',
-            version: 'v',
-            capabilities: [],
-            protocolVersion: COMPUTER_PROTOCOL_VERSION
-          })
-        }
-        // A real remote computer (different name) — a sleeping laptop; must NOT be reaped.
-        const remoteToken = await mintJoinToken(db, {
-          hubUrl: `wss://${HOST}:59999/computers`,
-          ttlMs: 60_000,
-          label: 'sleeping-laptop'
-        })
-        const remote = await remoteAdapters.verifyEnrollment({
-          joinToken: remoteToken.token,
-          name: 'sleeping-laptop',
-          platform: 'p',
-          version: 'v',
-          capabilities: [],
-          protocolVersion: COMPUTER_PROTOCOL_VERSION
-        })
-        assertEq(await localComputerCount(db), 3, 'three orphaned local rows seeded')
-
-        // The next computer-enabled boot: the local computer enrolls → dedup collapses.
-        const boot = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
-        assertEq(boot.authMode, 'enroll', 'first boot in this store enrolls')
-        assertEq(await localComputerCount(db), 1, 'collapsed to a single local computer')
-        // Remote computer untouched — dedup is identity-only (by local name), never
-        // status-based and never touches a remote computer.
-        assert(
-          (await listComputers(db)).some((r) => r.id === remote.computerId),
-          'remote computer survives'
-        )
-      } finally {
-        close()
-      }
-    })
+    // A third boot for good measure — the survival property must hold steady.
+    const boot3 = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
+    expect(boot3.authMode, 'boot 3 also HELLOs').toBe('hello')
+    expect(await localComputerCount(db), 'still one local computer after boot 3').toBe(1)
   } finally {
-    rmSync(tmpDir, { recursive: true, force: true })
+    close()
   }
+})
 
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
+test('regression guard: a CHANGED hub port would change the credential key (why stability matters)', async () => {
+  // Documents the failure the single-listener model structurally prevents: if
+  // the hub port differed between boots, the computer's credential key
+  // (hubHostFromUrl → host_port) would differ → creds miss → re-enroll. The
+  // production hub port is fixed per-environment (SIDECAR_FIXED_PORT), so this
+  // can't happen; the assertion pins the property so a future change that
+  // reintroduces a churning port is caught.
+  const { close } = createMigratedDb()
+  const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-portchange-'))
+  try {
+    const url1 = deriveComputerHubUrl({ host: HOST, port: 60000 })!
+    const url2 = deriveComputerHubUrl({ host: HOST, port: 60001 })!
+    const store1 = createFileCredentialStore(hubHostFromUrl(url1), { baseDir: credsBaseDir })
+    const store2 = createFileCredentialStore(hubHostFromUrl(url2), { baseDir: credsBaseDir })
+    await store1.save({ computerId: 'x', apiKey: 'k' })
+    expect(await store1.load(), 'boot-1 key reads its own creds').not.toBeNull()
+    expect(
+      await store2.load(),
+      'a DIFFERENT hub port yields a different credential key → would re-enroll'
+    ).toBeNull()
+  } finally {
+    close()
+  }
+})
 
-void main()
+test('PART 2 dedup collapses pre-existing duplicates to one on next local enroll', async () => {
+  // Seed the user's current broken state: multiple orphaned local rows (from
+  // pre-fix relaunches, each a fresh-uuid enroll under the local name), plus a
+  // legitimate REMOTE computer that must survive.
+  const { db, close } = createMigratedDb()
+  const credsBaseDir = mkdtempSync(join(tmpDir, 'creds-dedup-'))
+  try {
+    const remoteAdapters = createComputerAuthAdapters({ db, auth }) // no localComputerName → fresh uuids
+    for (const label of ['orphan-1', 'orphan-2', 'orphan-3']) {
+      const t = await mintJoinToken(db, {
+        hubUrl: `wss://${HOST}:59999/computers`,
+        ttlMs: 60_000,
+        label
+      })
+      await remoteAdapters.verifyEnrollment({
+        joinToken: t.token,
+        name: LOCAL_NAME,
+        platform: 'p',
+        version: 'v',
+        capabilities: [],
+        protocolVersion: COMPUTER_PROTOCOL_VERSION
+      })
+    }
+    // A real remote computer (different name) — a sleeping laptop; must NOT be reaped.
+    const remoteToken = await mintJoinToken(db, {
+      hubUrl: `wss://${HOST}:59999/computers`,
+      ttlMs: 60_000,
+      label: 'sleeping-laptop'
+    })
+    const remote = await remoteAdapters.verifyEnrollment({
+      joinToken: remoteToken.token,
+      name: 'sleeping-laptop',
+      platform: 'p',
+      version: 'v',
+      capabilities: [],
+      protocolVersion: COMPUTER_PROTOCOL_VERSION
+    })
+    expect(await localComputerCount(db), 'three orphaned local rows seeded').toBe(3)
+
+    // The next computer-enabled boot: the local computer enrolls → dedup collapses.
+    const boot = await simulateBoot({ db, auth, credsBaseDir, localComputerName: LOCAL_NAME })
+    expect(boot.authMode, 'first boot in this store enrolls').toBe('enroll')
+    expect(await localComputerCount(db), 'collapsed to a single local computer').toBe(1)
+    // Remote computer untouched — dedup is identity-only (by local name), never
+    // status-based and never touches a remote computer.
+    expect(
+      (await listComputers(db)).some((r) => r.id === remote.computerId),
+      'remote computer survives'
+    ).toBeTruthy()
+  } finally {
+    close()
+  }
+})

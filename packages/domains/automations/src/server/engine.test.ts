@@ -1,13 +1,8 @@
 /**
  * AutomationEngine tests
- * Run with: pnpm tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/automations/src/server/engine.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine, cronMatches } from './engine.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/server'
@@ -104,7 +99,7 @@ function getAutomation(id: string) {
 
 // --- STATUS CHANGE FILTERING ---
 
-await describe('status change filtering', () => {
+describe('status change filtering', () => {
   test('oldStatus === newStatus → no event fired', () => {
     const id = createAutomation({ toStatus: 'todo' })
     notifyCount = 0
@@ -146,7 +141,7 @@ await describe('status change filtering', () => {
 
 // --- TRIGGER MATCHING ---
 
-await describe('trigger matching', () => {
+describe('trigger matching', () => {
   test('matching toStatus → fires', async () => {
     // Clean slate
     h.db.prepare('DELETE FROM automations').run()
@@ -228,7 +223,7 @@ await describe('trigger matching', () => {
 
 // --- CONDITION EVALUATION ---
 
-await describe('condition evaluation', () => {
+describe('condition evaluation', () => {
   test('no conditions → passes', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -400,7 +395,7 @@ await describe('condition evaluation', () => {
 
 // --- RUN LIFECYCLE ---
 
-await describe('run lifecycle', () => {
+describe('run lifecycle', () => {
   test('success → status, duration, completed_at set', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -461,7 +456,7 @@ await describe('run lifecycle', () => {
 
 // --- DEPTH / CASCADE ---
 
-await describe('depth tracking', () => {
+describe('depth tracking', () => {
   test('depth >= MAX_DEPTH (5) → nothing executes', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -482,7 +477,7 @@ await describe('depth tracking', () => {
 
 // --- RETENTION ---
 
-await describe('run retention', () => {
+describe('run retention', () => {
   test('keeps max 100 runs per automation', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -523,7 +518,7 @@ await describe('run retention', () => {
 
 // --- EXECUTE MANUAL ---
 
-await describe('executeManual', () => {
+describe('executeManual', () => {
   test('valid automation → returns run', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -560,7 +555,7 @@ await describe('executeManual', () => {
 
 // --- TEMPLATE CONTEXT ---
 
-await describe('template context building', () => {
+describe('template context building', () => {
   test('task fields populated in command', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -577,7 +572,7 @@ await describe('template context building', () => {
 
 // --- MULTIPLE AUTOMATIONS MATCHING ---
 
-await describe('multiple automations matching same event', () => {
+describe('multiple automations matching same event', () => {
   test('both fire', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -602,7 +597,7 @@ await describe('multiple automations matching same event', () => {
 
 // --- CROSS-PROJECT ISOLATION ---
 
-await describe('cross-project isolation in engine', () => {
+describe('cross-project isolation in engine', () => {
   test('automation for project B does not fire on project A events', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -637,7 +632,7 @@ await describe('cross-project isolation in engine', () => {
 
 // --- NONEXISTENT TASK / PROJECT ---
 
-await describe('missing task or project in context', () => {
+describe('missing task or project in context', () => {
   test('nonexistent taskId → engine handles gracefully (task not found)', () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -664,7 +659,7 @@ await describe('missing task or project in context', () => {
 
 // --- UNKNOWN ACTION TYPE ---
 
-await describe('unknown action type', () => {
+describe('unknown action type', () => {
   test('throws error, run marked as error', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -677,7 +672,7 @@ await describe('unknown action type', () => {
 
 // --- MULTI-ACTION ERROR MIDWAY ---
 
-await describe('multi-action error handling', () => {
+describe('multi-action error handling', () => {
   test('action 1 succeeds, action 2 fails → run marked error', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -695,7 +690,7 @@ await describe('multi-action error handling', () => {
 
 // --- RUN_COMMAND WITH CWD ---
 
-await describe('run_command with explicit cwd', () => {
+describe('run_command with explicit cwd', () => {
   test('uses provided cwd', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -709,7 +704,7 @@ await describe('run_command with explicit cwd', () => {
 
 // --- IN CONDITION ON TAGS FIELD ---
 
-await describe('in condition on tags field', () => {
+describe('in condition on tags field', () => {
   test('in operator + task has matching tag → passes', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -777,7 +772,7 @@ await describe('in condition on tags field', () => {
 
 // --- IN CONDITION STRING COERCION ---
 
-await describe('in condition on regular field', () => {
+describe('in condition on regular field', () => {
   test('string values match numeric DB field via String() coercion', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -827,7 +822,7 @@ await describe('in condition on regular field', () => {
 
 // --- EXISTS / NOT_EXISTS WITH EMPTY STRING ---
 
-await describe('exists/not_exists with empty string', () => {
+describe('exists/not_exists with empty string', () => {
   test('exists + empty string → fails (treated as non-existent)', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -867,7 +862,7 @@ await describe('exists/not_exists with empty string', () => {
 
 // --- TASK_CREATED TRIGGER ---
 
-await describe('task_created trigger', () => {
+describe('task_created trigger', () => {
   test('fires automation on task creation event', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -897,7 +892,7 @@ await describe('task_created trigger', () => {
 
 // --- TASK_ARCHIVED TRIGGER ---
 
-await describe('task_archived trigger', () => {
+describe('task_archived trigger', () => {
   test('fires automation on task archive event', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -926,7 +921,7 @@ await describe('task_archived trigger', () => {
 
 // --- TASK_TAG_CHANGED TRIGGER ---
 
-await describe('task_tag_changed trigger', () => {
+describe('task_tag_changed trigger', () => {
   test('fires automation on tag change event', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -954,7 +949,7 @@ await describe('task_tag_changed trigger', () => {
 
 // --- CRON MATCHING ---
 
-await describe('cronMatches', () => {
+describe('cronMatches', () => {
   test('wildcard (* * * * *) matches any date', () => {
     expect(cronMatches('* * * * *', new Date(2026, 0, 1, 12, 30))).toBe(true)
   })
@@ -1010,7 +1005,7 @@ await describe('cronMatches', () => {
 
 // --- TEMPLATE CONTEXT: TERMINAL_MODE_FLAGS ---
 
-await describe('template context: terminal_mode_flags', () => {
+describe('template context: terminal_mode_flags', () => {
   test('resolved from provider_config JSON', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -1042,7 +1037,7 @@ await describe('template context: terminal_mode_flags', () => {
 
 // --- STDERR HANDLING ---
 
-await describe('runCatchup (missed cron fires)', () => {
+describe('runCatchup (missed cron fires)', () => {
   function createCronAutomation(opts: {
     expression: string
     lastRunAt: string | null
@@ -1158,7 +1153,7 @@ await describe('runCatchup (missed cron fires)', () => {
   })
 })
 
-await describe('run_command stderr handling', () => {
+describe('run_command stderr handling', () => {
   test('stderr with exit 0 → still success', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -1175,7 +1170,7 @@ await describe('run_command stderr handling', () => {
 // T-102: automations.create stores its config as sent, and the engine reads it off
 // the caller's stack (task events, the cron timer). A malformed row used to throw
 // there with nobody listening, which ends the process; on every boot again for cron.
-await describe('malformed rows never escape the engine', () => {
+describe('malformed rows never escape the engine', () => {
   test('bad trigger/condition/cron rows are skipped; the good row still fires', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -1218,7 +1213,8 @@ await describe('malformed rows never escape the engine', () => {
   })
 })
 
-taskEvents.removeAllListeners()
-engine.stop()
-h.cleanup()
-console.log('\nDone')
+afterAll(() => {
+  taskEvents.removeAllListeners()
+  engine.stop()
+  h.cleanup()
+})

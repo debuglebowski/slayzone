@@ -1,14 +1,15 @@
 /**
  * CLI artifacts mv/mvdir tests
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/artifacts-mv.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/artifacts-mv.test.ts
  */
 import Database from 'better-sqlite3'
-import { test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
 import { createSlayDbAdapter } from './test-harness.js'
 
 // Create in-memory DB with just the tables we need (avoids dagre barrel import via migrations)
 const rawDb = new Database(':memory:')
 rawDb.pragma('foreign_keys = ON')
+afterAll(() => rawDb.close())
 rawDb.exec(`
   CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT);
   CREATE TABLE tasks (
@@ -92,7 +93,7 @@ function getArtifactFolder(artifactId: string): string | null {
 
 // --- mv (artifact move) ---
 
-await describe('artifacts mv — move artifact to folder', () => {
+describe('artifacts mv — move artifact to folder', () => {
   test('moves artifact into a folder', () => {
     const taskId = createTask('MvArtifactToFolder')
     const folderId = createFolder(taskId, 'TargetFolder')
@@ -124,7 +125,7 @@ await describe('artifacts mv — move artifact to folder', () => {
 
 // --- mvdir (folder move) ---
 
-await describe('artifacts mvdir — move folder to parent', () => {
+describe('artifacts mvdir — move folder to parent', () => {
   test('moves folder into another folder', () => {
     const taskId = createTask('MvdirInto')
     const parentId = createFolder(taskId, 'Parent')
@@ -152,7 +153,7 @@ await describe('artifacts mvdir — move folder to parent', () => {
   })
 })
 
-await describe('artifacts mvdir — cycle detection', () => {
+describe('artifacts mvdir — cycle detection', () => {
   test('detects direct cycle (move into own child)', () => {
     const taskId = createTask('CycleDirect')
     const parentId = createFolder(taskId, 'Parent')
@@ -242,7 +243,7 @@ await describe('artifacts mvdir — cycle detection', () => {
   })
 })
 
-await describe('artifacts mvdir — preserves children', () => {
+describe('artifacts mvdir — preserves children', () => {
   test('child artifacts stay in moved folder', () => {
     const taskId = createTask('MvdirKeepsArtifacts')
     const folderA = createFolder(taskId, 'A')
@@ -279,6 +280,3 @@ await describe('artifacts mvdir — preserves children', () => {
     expect(getFolderParent(root)).toBe(target)
   })
 })
-
-rawDb.close()
-console.log('\nDone')

@@ -1,9 +1,5 @@
 /**
  * agent-prompts capture + db unit tests.
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --loader ./packages/shared/test-utils/loader.ts \
- *   packages/domains/agent-turns/src/server/prompt-capture.test.ts
- *
  * Self-contains the DB (transport `runMigrations` against an in-memory handle)
  * because the shared `createTestHarness` currently points at a stale migrations
  * path — only the adapter + assertion helpers are reused from it.
@@ -11,17 +7,13 @@
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
 import { runMigrations } from '../../../../shared/transport/src/db-bootstrap/migrations.js'
-import {
-  createSlayzoneDbAdapter,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import { isPromptCaptureMode } from '@slayzone/terminal/shared'
 import { capturePrompt, extractUserPromptText, isUserPromptSubmitEvent } from './prompt-capture.js'
 import { listPromptsForTask } from './prompt-db.js'
 
-await describe('extractUserPromptText', () => {
+describe('extractUserPromptText', () => {
   test('reads raw.prompt (Claude/Codex)', () => {
     expect(extractUserPromptText({ prompt: 'fix the auth bug' })).toBe('fix the auth bug')
   })
@@ -35,7 +27,7 @@ await describe('extractUserPromptText', () => {
   })
 })
 
-await describe('isUserPromptSubmitEvent', () => {
+describe('isUserPromptSubmitEvent', () => {
   test('matches normalized variants', () => {
     expect(isUserPromptSubmitEvent('UserPromptSubmit')).toBe(true)
     expect(isUserPromptSubmitEvent('user_prompt_submit')).toBe(true)
@@ -44,7 +36,7 @@ await describe('isUserPromptSubmitEvent', () => {
   })
 })
 
-await describe('isPromptCaptureMode', () => {
+describe('isPromptCaptureMode', () => {
   test('only capture-capable terminal modes', () => {
     expect(isPromptCaptureMode('claude-code')).toBe(true)
     expect(isPromptCaptureMode('codex')).toBe(true)
@@ -67,7 +59,7 @@ raw
   .prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)')
   .run(taskId, projectId, 'T1')
 
-await describe('capturePrompt', () => {
+describe('capturePrompt', () => {
   test('stores UserPromptSubmit prompt for the task+agent', async () => {
     raw.prepare('DELETE FROM agent_prompts').run()
     await capturePrompt(db, {
@@ -159,7 +151,7 @@ await describe('capturePrompt', () => {
 // Deleting a session from the sessions sidebar writes a `session_deletions`
 // tombstone (migration v157). The message history must follow: a session the user
 // removed from the task should leave no messages behind.
-await describe('listPromptsForTask + deleted sessions', () => {
+describe('listPromptsForTask + deleted sessions', () => {
   const del = (mode: string, conv: string): void => {
     raw
       .prepare(

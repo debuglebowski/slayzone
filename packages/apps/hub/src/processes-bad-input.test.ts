@@ -26,8 +26,8 @@
  *
  * Native ABI: better-sqlite3 in the hub needs Electron's node.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/processes-bad-input.test.ts
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
@@ -47,6 +47,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createTRPCClient, createWSClient, TRPCClientError, wsLink } from '@trpc/client'
 import superjson from 'superjson'
+import { afterAll, assert, beforeAll, describe, expect, test } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -55,23 +56,6 @@ const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const PACKAGES_DIR = join(HUB_DIR, '..', '..')
 const ELECTRON_BIN = require('electron') as unknown as string
 const SECRET = 'processes-bad-input-test-signing-secret-0123456789'
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Newest source mtime under `dir`, skipping build output and dependencies. */
 function newestMtime(dir: string): number {
@@ -196,7 +180,7 @@ async function signedInUser(hub: Hub): Promise<string> {
     body: JSON.stringify({ email })
   })
   const body = (await created.json()) as { data: { password: string } }
-  assert(created.ok, `create user: ${created.status} ${JSON.stringify(body)}`)
+  expect(created.ok, `create user: ${created.status} ${JSON.stringify(body)}`).toBe(true)
   // better-auth checks the Origin of a sign-in; the hub's auth base URL is trusted.
   const signIn = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
     method: 'POST',
@@ -204,7 +188,8 @@ async function signedInUser(hub: Hub): Promise<string> {
     body: JSON.stringify({ email, password: body.data.password })
   })
   const session = (await signIn.json()) as { token?: string }
-  assert(signIn.ok && session.token, `sign in: ${signIn.status}`)
+  expect(signIn.ok, `sign in: ${signIn.status}`).toBe(true)
+  assert(session.token, `sign in: ${signIn.status}`)
   return session.token
 }
 
@@ -219,7 +204,8 @@ async function createProject(hub: Hub, token: string | null): Promise<string> {
     body: JSON.stringify({ name: 'P' })
   })
   const body = (await res.json()) as { data?: { id: string } }
-  assert(res.ok && body.data?.id, `create project: ${res.status} ${JSON.stringify(body)}`)
+  expect(res.ok, `create project: ${res.status} ${JSON.stringify(body)}`).toBe(true)
+  assert(body.data?.id, `create project: ${res.status} ${JSON.stringify(body)}`)
   return body.data.id
 }
 
@@ -276,59 +262,86 @@ async function codeOf(p: Promise<unknown>): Promise<string> {
  */
 async function stillUp(hub: Hub, client: Client, after: string): Promise<void> {
   await sleep(250)
-  assert(
+  expect(
     hub.alive(),
     `hub process exited after ${after}; last lines:\n${hub.logs.slice(-15).join('\n')}`
-  )
+  ).toBe(true)
   const list = await bounded(client.processes.listAll.query(), `listAll after ${after}`)
-  assert(Array.isArray(list), `next request answers after ${after}`)
+  expect(Array.isArray(list), `next request answers after ${after}`).toBe(true)
 }
 
 const LONG = 'x'.repeat(100_000)
 
-async function runHub(
+function describeHub(
   name: string,
   env: Record<string, string>,
   opts: { login: boolean; processes: boolean }
-): Promise<void> {
-  const hub = await bootHub(env)
-  let close = (): void => undefined
-  try {
-    const token = opts.login ? await signedInUser(hub) : null
-    const projectId = await createProject(hub, token)
-    const c = hubClient(hub, token)
-    close = c.close
-    const { client } = c
-    const valid = {
-      projectId,
-      taskId: null,
-      label: 'dev',
-      command: 'echo hi',
-      cwd: '/tmp',
-      autoRestart: false
+): void {
+  describe(name, () => {
+    let hub: Hub
+    let close = (): void => undefined
+    let client: Client
+    let valid: {
+      projectId: string
+      taskId: null
+      label: string
+      command: string
+      cwd: string
+      autoRestart: boolean
     }
+    beforeAll(async () => {
+      hub = await bootHub(env)
+      const token = opts.login ? await signedInUser(hub) : null
+      const projectId = await createProject(hub, token)
+      const c = hubClient(hub, token)
+      close = c.close
+      client = c.client
+      valid = {
+        projectId,
+        taskId: null,
+        label: 'dev',
+        command: 'echo hi',
+        cwd: '/tmp',
+        autoRestart: false
+      }
+    })
+    afterAll(async () => {
+      close()
+      await hub?.stop()
+    })
     // Without an id of the caller's, the owner gate answers before validation (T-17).
     const noOwnedId = opts.login ? 'NOT_FOUND' : 'BAD_REQUEST'
 
     const cases: Array<[string, () => Promise<unknown>, string]> = []
     for (const op of ['create', 'spawn'] as const) {
-      const call = (input: unknown) => () => client.processes[op].mutate(input)
-      const { label: _label, ...noLabel } = valid
+      const call = (input: () => unknown) => () => client.processes[op].mutate(input())
+      const noLabel = (): unknown => {
+        const { label: _label, ...rest } = valid
+        return rest
+      }
       cases.push(
         [`${op} without label`, call(noLabel), 'BAD_REQUEST'],
-        [`${op} with label null`, call({ ...valid, label: null }), 'BAD_REQUEST'],
-        [`${op} with an empty label`, call({ ...valid, label: '' }), 'BAD_REQUEST'],
-        [`${op} with a blank label`, call({ ...valid, label: '   ' }), 'BAD_REQUEST'],
-        [`${op} with an oversized label`, call({ ...valid, label: LONG }), 'BAD_REQUEST'],
-        [`${op} with a number label`, call({ ...valid, label: 5 }), 'BAD_REQUEST'],
-        [`${op} without command`, call({ ...valid, command: undefined }), 'BAD_REQUEST'],
-        [`${op} with an oversized command`, call({ ...valid, command: LONG }), 'BAD_REQUEST'],
-        [`${op} with cwd null`, call({ ...valid, cwd: null }), 'BAD_REQUEST'],
-        [`${op} with autoRestart "yes"`, call({ ...valid, autoRestart: 'yes' }), 'BAD_REQUEST'],
-        [`${op} with no input`, call(undefined), noOwnedId],
-        [`${op} with input null`, call(null), noOwnedId],
-        [`${op} with a string input`, call('garbage'), noOwnedId],
-        [`${op} with an array input`, call([valid]), noOwnedId]
+        [`${op} with label null`, call(() => ({ ...valid, label: null })), 'BAD_REQUEST'],
+        [`${op} with an empty label`, call(() => ({ ...valid, label: '' })), 'BAD_REQUEST'],
+        [`${op} with a blank label`, call(() => ({ ...valid, label: '   ' })), 'BAD_REQUEST'],
+        [`${op} with an oversized label`, call(() => ({ ...valid, label: LONG })), 'BAD_REQUEST'],
+        [`${op} with a number label`, call(() => ({ ...valid, label: 5 })), 'BAD_REQUEST'],
+        [`${op} without command`, call(() => ({ ...valid, command: undefined })), 'BAD_REQUEST'],
+        [
+          `${op} with an oversized command`,
+          call(() => ({ ...valid, command: LONG })),
+          'BAD_REQUEST'
+        ],
+        [`${op} with cwd null`, call(() => ({ ...valid, cwd: null })), 'BAD_REQUEST'],
+        [
+          `${op} with autoRestart "yes"`,
+          call(() => ({ ...valid, autoRestart: 'yes' })),
+          'BAD_REQUEST'
+        ],
+        [`${op} with no input`, call(() => undefined), noOwnedId],
+        [`${op} with input null`, call(() => null), noOwnedId],
+        [`${op} with a string input`, call(() => 'garbage'), noOwnedId],
+        [`${op} with an array input`, call(() => [valid]), noOwnedId]
       )
     }
     // Valid shape, refused by the database: a task that does not exist. With login the
@@ -340,17 +353,17 @@ async function runHub(
     ])
 
     for (const [label, call, want] of cases) {
-      await test(`${name}: ${label} → ${want}, hub stays up`, async () => {
-        assert(hub.alive(), 'hub already down')
+      test(`${name}: ${label} → ${want}, hub stays up`, async () => {
+        expect(hub.alive(), 'hub already down').toBe(true)
         const got = await codeOf(call())
-        assert(got === want, `${label}: expected ${want}, got ${got}`)
+        expect(got, `${label}: expected ${want}, got ${got}`).toBe(want)
         await stillUp(hub, client, label)
       })
     }
 
     if (opts.processes) {
       let id = ''
-      await test(`${name}: a valid create still works`, async () => {
+      test(`${name}: a valid create still works`, async () => {
         id = String(await bounded(client.processes.create.mutate(valid), 'valid create'))
         const rows = (await bounded(client.processes.listAll.query(), 'listAll')) as Array<{
           id: string
@@ -361,11 +374,10 @@ async function runHub(
         }>
         const row = rows.find((r) => r.id === id)
         assert(row, 'the created process lists')
-        assert(
-          row.label === 'dev' && row.command === 'echo hi' && row.cwd === '/tmp',
-          `row as sent: ${JSON.stringify(row)}`
-        )
-        assert(row.status === 'stopped', 'created, not spawned')
+        expect(row.label, `row as sent: ${JSON.stringify(row)}`).toBe('dev')
+        expect(row.command, `row as sent: ${JSON.stringify(row)}`).toBe('echo hi')
+        expect(row.cwd, `row as sent: ${JSON.stringify(row)}`).toBe('/tmp')
+        expect(row.status, 'created, not spawned').toBe('stopped')
       })
       const update = (updates: unknown) => () =>
         client.processes.update.mutate({ processId: id, updates })
@@ -378,26 +390,28 @@ async function runHub(
         ['update with a field that is not editable (logBuffer)', update({ logBuffer: 'x' })],
         ['update with updates null', update(null)]
       ] as const) {
-        await test(`${name}: ${label} → BAD_REQUEST, hub stays up`, async () => {
-          assert(hub.alive(), 'hub already down')
+        test(`${name}: ${label} → BAD_REQUEST, hub stays up`, async () => {
+          expect(hub.alive(), 'hub already down').toBe(true)
           const got = await codeOf(call())
-          assert(got === 'BAD_REQUEST', `${label}: expected BAD_REQUEST, got ${got}`)
+          expect(got, `${label}: expected BAD_REQUEST, got ${got}`).toBe('BAD_REQUEST')
           await stillUp(hub, client, label)
         })
       }
       if (!opts.login) {
-        await test(`${name}: update naming a task that does not exist → INTERNAL_SERVER_ERROR, nothing changed`, async () => {
+        test(`${name}: update naming a task that does not exist → INTERNAL_SERVER_ERROR, nothing changed`, async () => {
           const got = await codeOf(update({ taskId: 'no-such-task' })())
-          assert(got === 'INTERNAL_SERVER_ERROR', `expected INTERNAL_SERVER_ERROR, got ${got}`)
+          expect(got, `expected INTERNAL_SERVER_ERROR, got ${got}`).toBe('INTERNAL_SERVER_ERROR')
           await stillUp(hub, client, 'update naming a missing task')
           const rows = (await bounded(client.processes.listAll.query(), 'listAll')) as Array<{
             id: string
             taskId: string | null
           }>
-          assert(rows.find((r) => r.id === id)?.taskId === null, 'the refused update left the row')
+          expect(rows.find((r) => r.id === id)?.taskId, 'the refused update left the row').toBe(
+            null
+          )
         })
       }
-      await test(`${name}: a valid update still works`, async () => {
+      test(`${name}: a valid update still works`, async () => {
         const ok = await bounded(
           client.processes.update.mutate({
             processId: id,
@@ -405,7 +419,7 @@ async function runHub(
           }),
           'valid update'
         )
-        assert(ok === true, 'update answers true')
+        expect(ok, 'update answers true').toBe(true)
         const rows = (await bounded(client.processes.listAll.query(), 'listAll')) as Array<{
           id: string
           label: string
@@ -413,14 +427,14 @@ async function runHub(
           autoRestart: boolean
         }>
         const row = rows.find((r) => r.id === id)
-        assert(
-          row?.label === 'renamed' && row.command === 'echo bye' && row.autoRestart === true,
-          `row updated: ${JSON.stringify(row)}`
-        )
+        assert(row, `row updated: ${JSON.stringify(row)}`)
+        expect(row.label, `row updated: ${JSON.stringify(row)}`).toBe('renamed')
+        expect(row.command, `row updated: ${JSON.stringify(row)}`).toBe('echo bye')
+        expect(row.autoRestart, `row updated: ${JSON.stringify(row)}`).toBe(true)
       })
       // Valid input whose spawn fails after `spawn()` returned: the child reports a
       // missing cwd as an 'error' event, which nobody listened for.
-      await test(`${name}: spawn in a cwd that does not exist → answers, the process errors, hub stays up`, async () => {
+      test(`${name}: spawn in a cwd that does not exist → answers, the process errors, hub stays up`, async () => {
         const spawned = String(
           await bounded(
             client.processes.spawn.mutate({ ...valid, label: 'nowhere', cwd: '/no/such/dir-t102' }),
@@ -441,16 +455,16 @@ async function runHub(
           5_000,
           'the process to report error'
         )
-        assert(
+        expect(
           row.logBuffer.some((l) => l.includes('failed to start')),
           `the reason is in its log: ${JSON.stringify(row.logBuffer)}`
-        )
+        ).toBe(true)
       })
     } else {
       for (const op of ['create', 'spawn'] as const) {
-        await test(`${name}: a valid ${op} is refused by the switch, hub stays up`, async () => {
+        test(`${name}: a valid ${op} is refused by the switch, hub stays up`, async () => {
           const got = await codeOf(client.processes[op].mutate(valid))
-          assert(got === 'FORBIDDEN', `expected FORBIDDEN, got ${got}`)
+          expect(got, `expected FORBIDDEN, got ${got}`).toBe('FORBIDDEN')
           await stillUp(hub, client, `a valid ${op}`)
         })
       }
@@ -459,7 +473,7 @@ async function runHub(
     // The same shape outside processes: `fileEditor.watch` started its watcher in a
     // floated `.then` (a refusal there was an unhandled rejection: processes off, no
     // computer), and the hub-local watcher's callback threw on a file named `...`.
-    await test(`${name}: fileEditor.watch ${opts.processes ? 'survives a file named "..."' : 'refusal reaches the stream'}, hub stays up`, async () => {
+    test(`${name}: fileEditor.watch ${opts.processes ? 'survives a file named "..."' : 'refusal reaches the stream'}, hub stays up`, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'slz-t102-watch-'))
       const changed: string[] = []
       let error: unknown = null
@@ -487,7 +501,7 @@ async function runHub(
           await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
           const code =
             error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
-          assert(code === 'FORBIDDEN', `refused FORBIDDEN, got ${code}`)
+          expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
         }
         await stillUp(hub, client, 'fileEditor.watch')
       } finally {
@@ -496,40 +510,30 @@ async function runHub(
       }
     })
 
-    await test(`${name}: the hub process is still running at the end`, async () => {
+    test(`${name}: the hub process is still running at the end`, async () => {
       await sleep(500)
-      assert(hub.alive(), `hub exited; last lines:\n${hub.logs.slice(-15).join('\n')}`)
+      expect(hub.alive(), `hub exited; last lines:\n${hub.logs.slice(-15).join('\n')}`).toBe(true)
       const r = await fetch(`http://127.0.0.1:${hub.port}/health`)
-      assert(r.ok, '/health answers')
+      expect(r.ok, '/health answers').toBe(true)
     })
-  } finally {
-    close()
-    await hub.stop()
-  }
+  })
 }
 
-async function main(): Promise<void> {
-  console.log('\nbad processes.* input on a real built hub: a clean error, never an exit\n')
-  ensureBuilt()
-  await runHub(
-    'desktop hub (login off, processes on)',
-    { SLAYZONE_SUPERVISED: '1', SLAYZONE_HUB_REQUIRE_LOGIN: '0' },
-    { login: false, processes: true }
-  )
-  // Loopback, so better-auth's base URL (a trusted sign-in origin) is the fixed
-  // `http://127.0.0.1:8788` the sign-in below sends.
-  const login = {
-    SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-    SLAYZONE_HUB_AUTH_SECRET: SECRET
-  }
-  await runHub('shared hub (login on, processes on)', login, { login: true, processes: true })
-  await runHub(
-    'Normain hub (login on, processes off)',
-    { ...login, SLAYZONE_HUB_ENABLE_PROCESSES: '0' },
-    { login: true, processes: false }
-  )
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
+beforeAll(() => ensureBuilt())
+describeHub(
+  'desktop hub (login off, processes on)',
+  { SLAYZONE_SUPERVISED: '1', SLAYZONE_HUB_REQUIRE_LOGIN: '0' },
+  { login: false, processes: true }
+)
+// Loopback, so better-auth's base URL (a trusted sign-in origin) is the fixed
+// `http://127.0.0.1:8788` the sign-in below sends.
+const login = {
+  SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+  SLAYZONE_HUB_AUTH_SECRET: SECRET
 }
-
-void main()
+describeHub('shared hub (login on, processes on)', login, { login: true, processes: true })
+describeHub(
+  'Normain hub (login on, processes off)',
+  { ...login, SLAYZONE_HUB_ENABLE_PROCESSES: '0' },
+  { login: true, processes: false }
+)

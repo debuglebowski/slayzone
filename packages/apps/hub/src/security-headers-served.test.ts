@@ -9,7 +9,8 @@
  * public address (`hub.example.com` → HSTS on every response). Both require login,
  * so the bearer gate's own answers are on the path too.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/security-headers-served.test.ts
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
@@ -18,6 +19,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { afterAll, assert, expect, test } from 'vitest'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { API_CSP, webShellCsp } from './security-headers.js'
@@ -28,27 +30,6 @@ const HUB_DIR = join(__dirname, '..')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const WEB_INDEX = join(HUB_DIR, 'dist', 'web', 'index.html')
 const ELECTRON_BIN = require('electron') as unknown as string
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected)
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-}
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -161,7 +142,7 @@ async function spawnHub(extraEnv: Record<string, string>): Promise<Hub> {
       'hub listening line'
     )
     const port = Number(listen.match(/http:\/\/127\.0\.0\.1:(\d+)/)?.[1])
-    assert(port > 0, `hub listening line parseable: ${listen}`)
+    expect(port, `hub listening line parseable: ${listen}`).toBeGreaterThan(0)
     const base = `http://127.0.0.1:${port}`
     await poll(
       async () => ((await fetch(`${base}/health`)).ok ? true : null),
@@ -197,14 +178,16 @@ interface Expected {
 
 function checkHeaders(r: Response, exp: Expected, label: string): void {
   const h = r.headers
-  assertEq(h.get('content-security-policy'), exp.csp, `${label}: content-security-policy`)
-  assertEq(h.get('cache-control'), exp.cacheControl, `${label}: cache-control`)
-  assertEq(h.get('strict-transport-security'), exp.hsts, `${label}: strict-transport-security`)
-  assertEq(h.get('x-content-type-options'), 'nosniff', `${label}: x-content-type-options`)
-  assertEq(h.get('x-frame-options'), 'DENY', `${label}: x-frame-options`)
-  assertEq(h.get('referrer-policy'), 'same-origin', `${label}: referrer-policy`)
-  assertEq(h.get('x-powered-by'), null, `${label}: x-powered-by`)
-  assert(!h.has('access-control-allow-origin'), `${label}: no CORS header added`)
+  expect(h.get('content-security-policy'), `${label}: content-security-policy`).toEqual(exp.csp)
+  expect(h.get('cache-control'), `${label}: cache-control`).toEqual(exp.cacheControl)
+  expect(h.get('strict-transport-security'), `${label}: strict-transport-security`).toEqual(
+    exp.hsts
+  )
+  expect(h.get('x-content-type-options'), `${label}: x-content-type-options`).toBe('nosniff')
+  expect(h.get('x-frame-options'), `${label}: x-frame-options`).toBe('DENY')
+  expect(h.get('referrer-policy'), `${label}: referrer-policy`).toBe('same-origin')
+  expect(h.get('x-powered-by'), `${label}: x-powered-by`).toBe(null)
+  expect(h.has('access-control-allow-origin'), `${label}: no CORS header added`).toBe(false)
 }
 
 async function checkHub(name: string, hub: Hub, publicAddress: string | undefined): Promise<void> {
@@ -213,101 +196,95 @@ async function checkHub(name: string, hub: Hub, publicAddress: string | undefine
   const api = { csp: API_CSP, cacheControl: 'no-store', hsts }
   const bearer = { authorization: `Bearer ${hub.owner.token}` }
 
-  await test(`${name}: web shell document`, async () => {
+  test(`${name}: web shell document`, async () => {
     const r = await fetch(`${hub.base}/`)
-    assertEq(r.status, 200, 'status')
-    assert((await r.text()).includes('<div id="root">'), 'serves the shell')
+    expect(r.status, 'status').toBe(200)
+    expect(await r.text(), 'serves the shell').toContain('<div id="root">')
     checkHeaders(r, { ...shell, cacheControl: 'no-cache' }, '/')
   })
 
-  await test(`${name}: hashed asset`, async () => {
+  test(`${name}: hashed asset`, async () => {
     const html = await (await fetch(`${hub.base}/`)).text()
     const asset = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1]
     assert(asset, 'index.html names its entry script')
     const r = await fetch(`${hub.base}${asset}`)
-    assertEq(r.status, 200, 'status')
-    assertEq(r.headers.get('content-type'), 'text/javascript; charset=utf-8', 'content-type kept')
+    expect(r.status, 'status').toBe(200)
+    expect(r.headers.get('content-type'), 'content-type kept').toBe(
+      'text/javascript; charset=utf-8'
+    )
     checkHeaders(r, { ...shell, cacheControl: 'public, max-age=31536000, immutable' }, asset)
   })
 
-  await test(`${name}: /health (before the gate)`, async () => {
+  test(`${name}: /health (before the gate)`, async () => {
     const r = await fetch(`${hub.base}/health`)
-    assertEq(r.status, 200, 'status')
+    expect(r.status, 'status').toBe(200)
     checkHeaders(r, api, '/health')
   })
 
-  await test(`${name}: better-auth /api/auth/get-session`, async () => {
+  test(`${name}: better-auth /api/auth/get-session`, async () => {
     const r = await fetch(`${hub.base}/api/auth/get-session`, { headers: bearer })
-    assert(r.status < 500, `status ${r.status}`)
+    expect(r.status, `status ${r.status}`).toBeLessThan(500)
     checkHeaders(r, api, '/api/auth/get-session')
   })
 
-  await test(`${name}: REST route, with and without a bearer`, async () => {
+  test(`${name}: REST route, with and without a bearer`, async () => {
     const ok = await fetch(`${hub.base}/api/projects`, { headers: bearer })
-    assertEq(ok.status, 200, 'status with bearer')
+    expect(ok.status, 'status with bearer').toBe(200)
     checkHeaders(ok, api, 'GET /api/projects')
     const denied = await fetch(`${hub.base}/api/projects`)
-    assertEq(denied.status, 401, 'status without bearer (the gate answers)')
+    expect(denied.status, 'status without bearer (the gate answers)').toBe(401)
     checkHeaders(denied, api, 'GET /api/projects (401)')
   })
 
-  await test(`${name}: express 404 under /api`, async () => {
+  test(`${name}: express 404 under /api`, async () => {
     const r = await fetch(`${hub.base}/api/does-not-exist`, { headers: bearer })
-    assertEq(r.status, 404, 'status')
+    expect(r.status, 'status').toBe(404)
     checkHeaders(r, api, '/api/does-not-exist')
   })
 
-  await test(`${name}: /trpc over plain HTTP`, async () => {
+  test(`${name}: /trpc over plain HTTP`, async () => {
     const r = await fetch(`${hub.base}/trpc`)
-    assertEq(r.status, 404, 'status (tRPC is websocket only)')
+    expect(r.status, 'status (tRPC is websocket only)').toBe(404)
     checkHeaders(r, api, 'GET /trpc')
   })
 
-  await test(`${name}: a 404 outside the API`, async () => {
+  test(`${name}: a 404 outside the API`, async () => {
     const r = await fetch(`${hub.base}/`, { method: 'POST' })
-    assertEq(r.status, 404, 'status')
+    expect(r.status, 'status').toBe(404)
     checkHeaders(r, { ...shell, cacheControl: 'no-store' }, 'POST /')
   })
 }
 
-async function main(): Promise<void> {
-  console.log('\nsecurity headers on a real hub\n')
-  ensureBuilt()
-  const hubs: Hub[] = []
-  try {
-    const loopback = await spawnHub({})
-    hubs.push(loopback)
-    await checkHub('loopback hub', loopback, undefined)
-
-    await test('loopback hub: password sign-in sets its session cookie with no-store', async () => {
-      const r = await fetch(`${loopback.base}/api/auth/web-login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: loopback.base },
-        body: JSON.stringify({ email: loopback.owner.email, password: loopback.owner.password })
-      })
-      assertEq(r.status, 200, `status (${await r.clone().text()})`)
-      assert(
-        (r.headers.get('set-cookie') ?? '').startsWith('slayzone_web_session=szw_'),
-        'sets the cookie'
-      )
-      checkHeaders(r, { csp: API_CSP, cacheControl: 'no-store', hsts: null }, 'web-login')
-    })
-
-    const reachable = await spawnHub({
-      SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
-      SLAYZONE_HUB_AUTH_SECRET: 's'.repeat(48)
-    })
-    hubs.push(reachable)
-    await checkHub('https public address', reachable, 'hub.example.com')
-  } finally {
-    for (const h of hubs) {
-      await h.stop()
-      rmSync(h.root, { recursive: true, force: true })
-    }
+ensureBuilt()
+const hubs: Hub[] = []
+afterAll(async () => {
+  for (const h of hubs) {
+    await h.stop()
+    rmSync(h.root, { recursive: true, force: true })
   }
+})
 
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
+const loopback = await spawnHub({})
+hubs.push(loopback)
+await checkHub('loopback hub', loopback, undefined)
 
-void main()
+test('loopback hub: password sign-in sets its session cookie with no-store', async () => {
+  const r = await fetch(`${loopback.base}/api/auth/web-login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: loopback.base },
+    body: JSON.stringify({ email: loopback.owner.email, password: loopback.owner.password })
+  })
+  expect(r.status, `status (${await r.clone().text()})`).toBe(200)
+  expect(
+    (r.headers.get('set-cookie') ?? '').startsWith('slayzone_web_session=szw_'),
+    'sets the cookie'
+  ).toBe(true)
+  checkHeaders(r, { csp: API_CSP, cacheControl: 'no-store', hsts: null }, 'web-login')
+})
+
+const reachable = await spawnHub({
+  SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+  SLAYZONE_HUB_AUTH_SECRET: 's'.repeat(48)
+})
+hubs.push(reachable)
+await checkHub('https public address', reachable, 'hub.example.com')

@@ -6,13 +6,9 @@
  *
  * Electron strict loader (better-sqlite3 native ABI via the harness DB).
  */
+import { describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { setAuthGate } from '../../../app-deps.js'
 import { bindRestPrincipal } from '../principal.js'
@@ -54,7 +50,7 @@ const user = (userId: string, role: 'admin' | 'user' = 'user'): RestPrincipal =>
   scopes: ['full']
 })
 
-await describe('GET /api/computers', () => {
+describe('GET /api/computers', () => {
   test("a hub with login: the caller's own; every one for an admin", async () => {
     setAuthGate(() => true)
     try {

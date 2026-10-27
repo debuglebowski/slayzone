@@ -13,13 +13,8 @@
  * config to the host over the capability bridge, and the host persists it to the
  * client store. Tested here rather than at the router because the notification
  * must fire for EVERY config write, not just the one transport that exists today.
- *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/domains/diagnostics/src/server/config-push.test.ts
  */
-import { test, expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '../shared/index.js'
 import { bindDiagnosticsDbs, saveDiagnosticsConfig, clearConfigCache } from './diagnostics-store.js'

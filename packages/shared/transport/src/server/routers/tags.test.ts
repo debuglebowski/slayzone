@@ -2,10 +2,11 @@
  * tags router contract tests — exercise the procedures via tRPC `createCaller`
  * against the in-memory harness DB (async SlayzoneDb). Ports the coverage from
  * the legacy tags IPC-handler test (domains/tags/src/electron/handlers.test.ts).
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { tagsRouter } from './tags.js'
 
 const h = await createTestHarness()

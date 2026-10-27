@@ -1,8 +1,5 @@
 /**
  * Unit tests for the ChatDataOps local-DB implementation (createDbChatDataOps).
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
- *   packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
  *
  * Covers the three behaviors the hub/computer split must not regress:
  *   - provider_config merge writes are idempotent (no-op writes are skipped)
@@ -11,39 +8,10 @@
  *     report `false` so the caller skips the tasks:changed broadcast)
  *   - corrupt provider_config / chat_events JSON is tolerated, never thrown
  */
+import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createDbChatDataOps } from './chat-data-ops'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T): void {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy(): void {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    },
-    toBeFalsy(): void {
-      if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 /**
  * Minimal async SlayzoneDb bridge over a raw better-sqlite3 handle, mirroring
@@ -92,11 +60,7 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
 const updateCount = (runLog: string[]): number =>
   runLog.filter((sql) => sql.startsWith('UPDATE tasks SET provider_config')).length
 
-console.log('\nchat-data-ops tests\n')
-
-console.log('provider_config merge idempotency\n')
-
-await test('writeChatMode skips the UPDATE when the value is unchanged', async () => {
+test('writeChatMode skips the UPDATE when the value is unchanged', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t1')
   const ops = createDbChatDataOps(db)
@@ -112,7 +76,7 @@ await test('writeChatMode skips the UPDATE when the value is unchanged', async (
   expect(updateCount(runLog)).toBe(2)
 })
 
-await test('writes merge per-mode: one key does not clobber the others', async () => {
+test('writes merge per-mode: one key does not clobber the others', async () => {
   const { raw, db } = makeDb()
   raw
     .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')
@@ -126,7 +90,7 @@ await test('writes merge per-mode: one key does not clobber the others', async (
   expect(cfg.chatModel).toBe('sonnet')
 })
 
-await test('writeChatEffort/writeChatFastMode treat missing as null/false (no-op skip)', async () => {
+test('writeChatEffort/writeChatFastMode treat missing as null/false (no-op skip)', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t3')
   const ops = createDbChatDataOps(db)
@@ -141,7 +105,7 @@ await test('writeChatEffort/writeChatFastMode treat missing as null/false (no-op
   expect(updateCount(runLog)).toBe(2)
 })
 
-await test('clearChatConversationId no-ops when nothing stored, clears when set', async () => {
+test('clearChatConversationId no-ops when nothing stored, clears when set', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t4')
   const ops = createDbChatDataOps(db)
@@ -164,9 +128,7 @@ await test('clearChatConversationId no-ops when nothing stored, clears when set'
   expect(updateCount(runLog)).toBe(writes)
 })
 
-console.log('\nbumpLastInteraction monotonic guard\n')
-
-await test('bumpLastInteraction only moves forward and reports changed', async () => {
+test('bumpLastInteraction only moves forward and reports changed', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t5')
   const ops = createDbChatDataOps(db)
@@ -199,9 +161,7 @@ await test('bumpLastInteraction only moves forward and reports changed', async (
   expect(await ops.bumpLastInteraction('missing', 3000)).toBe(false)
 })
 
-console.log('\ncorrupt-JSON tolerance\n')
-
-await test('readProviderConfig returns {} for corrupt provider_config', async () => {
+test('readProviderConfig returns {} for corrupt provider_config', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t6', '{not json')
   const ops = createDbChatDataOps(db)
@@ -209,7 +169,7 @@ await test('readProviderConfig returns {} for corrupt provider_config', async ()
   expect(Object.keys(cfg).length).toBe(0)
 })
 
-await test('writeChatMode replaces corrupt provider_config with a fresh valid object', async () => {
+test('writeChatMode replaces corrupt provider_config with a fresh valid object', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t7', '{not json')
   const ops = createDbChatDataOps(db)
@@ -221,7 +181,7 @@ await test('writeChatMode replaces corrupt provider_config with a fresh valid ob
   expect(cfg['claude-chat']?.chatMode).toBe('plan')
 })
 
-await test('clearChatConversationId leaves corrupt provider_config untouched (no throw)', async () => {
+test('clearChatConversationId leaves corrupt provider_config untouched (no throw)', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t8', '{not json')
   const ops = createDbChatDataOps(db)
@@ -233,7 +193,7 @@ await test('clearChatConversationId leaves corrupt provider_config untouched (no
   expect(row.v).toBe('{not json')
 })
 
-await test('loadChatEvents drops corrupt event rows instead of throwing', async () => {
+test('loadChatEvents drops corrupt event rows instead of throwing', async () => {
   const { raw, db } = makeDb()
   const ops = createDbChatDataOps(db)
   await ops.persistChatEvent('tab-1', 0, {
@@ -249,6 +209,3 @@ await test('loadChatEvents drops corrupt event rows instead of throwing', async 
   expect(events[0].seq).toBe(0)
   expect(await ops.getNextSeqForTab('tab-1')).toBe(2)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

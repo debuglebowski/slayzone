@@ -2,63 +2,14 @@
  * Tests for resolveCommitGraph + resolveForkGraph + computeDagLayout
  * Ensures correct translation from raw git data → ResolvedGraph → DagLayout
  *
- * Run with: npx tsx packages/domains/worktrees/src/main/resolve-graph.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/domains/worktrees/src/server/resolve-graph.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import type { DagCommit, CommitInfo, ResolvedGraph, ResolvedCommit } from '../shared/types'
 import { resolveCommitGraph, resolveForkGraph } from './git-worktree'
 import { computeDagLayout } from '../client/CommitGraph'
 import type { DagLayout } from '../client/CommitGraph'
-
-let passed = 0
-let failed = 0
-
-function describe(name: string, fn: () => void) {
-  console.log(`\n${name}`)
-  fn()
-}
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: T) {
-      const a = JSON.stringify(actual),
-        b = JSON.stringify(expected)
-      if (a !== b) throw new Error(`Expected ${b}, got ${a}`)
-    },
-    toHaveLength(n: number) {
-      if (!Array.isArray(actual)) throw new Error(`Expected array, got ${typeof actual}`)
-      if (actual.length !== n) throw new Error(`Expected length ${n}, got ${actual.length}`)
-    },
-    toContain(item: unknown) {
-      if (!Array.isArray(actual)) throw new Error(`Expected array, got ${typeof actual}`)
-      if (!actual.includes(item))
-        throw new Error(
-          `Expected array to contain ${JSON.stringify(item)}, got ${JSON.stringify(actual)}`
-        )
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    },
-    toBeFalsy() {
-      if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 // --- Helpers to build test data ---
 
@@ -3877,8 +3828,3 @@ describe('computeDagLayout — cross-column edge color matches target branch', (
     expect(crossEdge!.color !== '#e2e2e2').toBe(true)
   })
 })
-
-// ─── Summary ───────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

@@ -11,15 +11,13 @@
  * passes the real ones. The last test is a source guard: the failure mode was a call that
  * disappeared in a move, so the test fails if the hub's composition root stops making it.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/integrations-pollers.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { test, expect } from '../../../shared/test-utils/ipc-harness.js'
+
 import { startIntegrationPollers } from './integrations-pollers.js'
 
 const db = { marker: 'db' } as unknown as SlayzoneDb

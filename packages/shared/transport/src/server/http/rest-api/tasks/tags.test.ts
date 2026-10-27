@@ -1,14 +1,10 @@
 /**
  * REST: POST+DELETE /api/tasks/:id/tags contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/tags.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/tags.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTaskTagsRoutes } from './tags.js'
 
@@ -48,7 +44,7 @@ const rest = await mountRestApp(app)
 
 type TagsResponse = { ok: boolean; data: string[]; error?: string }
 
-await describe('POST/DELETE /api/tasks/:id/tags', () => {
+describe('POST/DELETE /api/tasks/:id/tags', () => {
   test('POST add: case-insensitive name match + notifies', async () => {
     notifyCount = 0
     const res = await rest.request<TagsResponse>('POST', `/api/tasks/${taskId}/tags`, {
@@ -118,5 +114,7 @@ await describe('POST/DELETE /api/tasks/:id/tags', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

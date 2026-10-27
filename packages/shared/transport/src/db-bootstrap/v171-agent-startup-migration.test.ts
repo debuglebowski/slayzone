@@ -3,31 +3,12 @@
  * `terminal_agent_startup` replaces `terminal_auto_start` + `terminal_prewarm_enabled`
  * (plans/agent-startup-mode.md).
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
- *   packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import { migrations, runMigrations } from './index'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 function dbUpTo(maxVersion: number): Database.Database {
   const db = new Database(':memory:')
@@ -66,10 +47,8 @@ function setOld(db: Database.Database, autoStart: string | null, prewarm: string
     )
 }
 
-async function main(): Promise<void> {
-  console.log('\nv171 agent startup mode migration')
-
-  await test('tab flags become agent_state; old columns dropped', () => {
+describe('v171 agent startup mode migration', () => {
+  test('tab flags become agent_state; old columns dropped', () => {
     const db = dbUpTo(170)
     seedTask(db)
     const ins = db.prepare(
@@ -86,14 +65,15 @@ async function main(): Promise<void> {
           agent_state: string
         }
       ).agent_state
-    assert(state('t1') === 'running', `t1 ${state('t1')}`)
-    assert(state('t2') === 'auto_stopped', `t2 ${state('t2')}`)
-    assert(state('t3') === 'stopped', `t3 ${state('t3')}`)
+    expect(state('t1')).toBe('running')
+    expect(state('t2')).toBe('auto_stopped')
+    expect(state('t3')).toBe('stopped')
     const cols = columns(db, 'terminal_tabs')
-    assert(!cols.includes('was_spawned') && !cols.includes('hibernated'), `cols ${cols}`)
+    expect(cols).not.toContain('was_spawned')
+    expect(cols).not.toContain('hibernated')
   })
 
-  await test('new tab row defaults to stopped', () => {
+  test('new tab row defaults to stopped', () => {
     const db = dbUpTo(170)
     seedTask(db)
     runMigrations(db)
@@ -104,7 +84,7 @@ async function main(): Promise<void> {
     const row = db.prepare(`SELECT agent_state FROM terminal_tabs WHERE id = 't1'`).get() as {
       agent_state: string
     }
-    assert(row.agent_state === 'stopped', row.agent_state)
+    expect(row.agent_state).toBe('stopped')
   })
 
   const cases: Array<[string | null, string | null, string]> = [
@@ -117,47 +97,39 @@ async function main(): Promise<void> {
     [null, '1', 'manual']
   ]
   for (const [autoStart, prewarm, expected] of cases) {
-    await test(`existing install: auto_start=${autoStart} prewarm=${prewarm} → ${expected}`, () => {
+    test(`existing install: auto_start=${autoStart} prewarm=${prewarm} → ${expected}`, () => {
       const db = dbUpTo(170)
       seedTask(db)
       setOld(db, autoStart, prewarm)
       runMigrations(db)
-      assert(
-        setting(db, 'terminal_agent_startup') === expected,
-        `${setting(db, 'terminal_agent_startup')}`
-      )
-      assert(setting(db, 'terminal_auto_start') === undefined, 'old auto_start removed')
-      assert(setting(db, 'terminal_prewarm_enabled') === undefined, 'old prewarm removed')
+      expect(setting(db, 'terminal_agent_startup')).toBe(expected)
+      // old auto_start / prewarm rows removed
+      expect(setting(db, 'terminal_auto_start')).toBeUndefined()
+      expect(setting(db, 'terminal_prewarm_enabled')).toBeUndefined()
     })
   }
 
-  await test('login hub: auto_start on in user_settings counts', () => {
+  test('login hub: auto_start on in user_settings counts', () => {
     const db = dbUpTo(170)
     seedTask(db)
     db.prepare(
       `INSERT INTO user_settings (user_id, key, value) VALUES ('u1', 'terminal_auto_start', '1')`
     ).run()
     runMigrations(db)
-    assert(
-      setting(db, 'terminal_agent_startup') === 'auto',
-      `${setting(db, 'terminal_agent_startup')}`
-    )
+    expect(setting(db, 'terminal_agent_startup')).toBe('auto')
     const left = db
       .prepare(`SELECT COUNT(*) AS n FROM user_settings WHERE key = 'terminal_auto_start'`)
       .get() as {
       n: number
     }
-    assert(left.n === 0, 'user_settings row removed')
+    // user_settings row removed
+    expect(left.n).toBe(0)
   })
 
-  await test('fresh install (no tasks): no row written → default auto', () => {
+  test('fresh install (no tasks): no row written → default auto', () => {
     const db = new Database(':memory:')
     runMigrations(db)
-    assert(setting(db, 'terminal_agent_startup') === undefined, 'no row')
+    // no row
+    expect(setting(db, 'terminal_agent_startup')).toBeUndefined()
   })
-
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+})

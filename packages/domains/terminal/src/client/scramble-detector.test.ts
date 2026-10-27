@@ -2,8 +2,8 @@
  * Unit tests for the WebGL renderer scramble detectors —
  * verifies frame-time threshold + WebGL-canvas scramble probe lifecycle
  * without a GPU or a real xterm instance.
- * Run with: pnpm exec tsx packages/domains/terminal/src/client/scramble-detector.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import {
   monitorFrameTime,
@@ -13,25 +13,6 @@ import {
   type ScrambleProbeOptions,
   type ScrambleProbeTerminal
 } from './scramble-detector'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function ok(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 
 /** Stub xterm — records refresh calls + serves a swappable visible-buffer string. */
 function makeStubTerminal(initialLines: string[] = ['']): {
@@ -115,10 +96,7 @@ function makeStubSampler(initial: Uint8Array | null = new Uint8Array([1, 2, 3, 4
 // monitorFrameTime — Signal B (unchanged from earlier rebuild)
 // ---------------------------------------------------------------------------
 
-function runFrameTimeTests(): void {
-  console.log('\nmonitorFrameTime')
-  console.log('─'.repeat(40))
-
+describe('monitorFrameTime', () => {
   function ftHarness(opts: { deltas: number[]; sampleCount?: number; thresholdMs?: number }): {
     state: {
       aborted: boolean
@@ -185,22 +163,22 @@ function runFrameTimeTests(): void {
   test('avg under threshold: no downgrade fired', () => {
     const h = ftHarness({ deltas: [16, 16, 16, 16, 16], sampleCount: 5, thresholdMs: 50 })
     h.flushFrames()
-    ok(h.state.downgrades.length === 0, 'no downgrade for healthy frame time')
-    ok(h.addonCalls.disposed === 0, 'addon not disposed')
+    expect(h.state.downgrades, 'no downgrade for healthy frame time').toHaveLength(0)
+    expect(h.addonCalls.disposed, 'addon not disposed').toBe(0)
   })
 
   test('avg over threshold: fires downgrade with reason=frame-time', () => {
     const h = ftHarness({ deltas: [100, 100, 100, 100, 100], sampleCount: 5, thresholdMs: 50 })
     h.flushFrames()
-    ok(h.state.downgrades.length === 1, 'one downgrade fired')
-    ok(h.state.downgrades[0] === 'frame-time', 'reason is frame-time')
-    ok(h.addonCalls.disposed === 1, 'addon disposed')
+    expect(h.state.downgrades, 'one downgrade fired').toHaveLength(1)
+    expect(h.state.downgrades[0], 'reason is frame-time').toBe('frame-time')
+    expect(h.addonCalls.disposed, 'addon disposed').toBe(1)
   })
 
   test('avg exactly at threshold: no fire (strict >)', () => {
     const h = ftHarness({ deltas: [50, 50, 50, 50, 50], sampleCount: 5, thresholdMs: 50 })
     h.flushFrames()
-    ok(h.state.downgrades.length === 0, 'no downgrade at exact threshold')
+    expect(h.state.downgrades, 'no downgrade at exact threshold').toHaveLength(0)
   })
 
   test('aborted mid-sampling: no fire', () => {
@@ -208,14 +186,14 @@ function runFrameTimeTests(): void {
     h.flushFrames()
     h.state.aborted = true
     h.flushFrames()
-    ok(h.state.downgrades.length === 0, 'no downgrade after abort')
+    expect(h.state.downgrades, 'no downgrade after abort').toHaveLength(0)
   })
 
   test('isCurrent false: stops sampling, no fire', () => {
     const h = ftHarness({ deltas: [100, 100, 100, 100, 100], sampleCount: 5, thresholdMs: 50 })
     h.state.current = false
     h.flushFrames()
-    ok(h.state.downgrades.length === 0, 'no downgrade when isCurrent false')
+    expect(h.state.downgrades, 'no downgrade when isCurrent false').toHaveLength(0)
   })
 
   // Boot-jank regression: a busy renderer boot made every terminal's rAF deltas
@@ -271,8 +249,8 @@ function runFrameTimeTests(): void {
   test('canSample false (hidden / busy boot): no samples, no downgrade', () => {
     const h = gatedHarness({ deltas: Array(20).fill(200), canSample: () => false })
     h.flush()
-    ok(h.downgrades.length === 0, 'slow frames while not sampleable never downgrade')
-    ok(h.timers.length === 1, 'waits on a timer (not rAF) to re-check')
+    expect(h.downgrades, 'slow frames while not sampleable never downgrade').toHaveLength(0)
+    expect(h.timers, 'waits on a timer (not rAF) to re-check').toHaveLength(1)
   })
 
   test('frames overlapping long tasks are discarded, not averaged', () => {
@@ -283,13 +261,13 @@ function runFrameTimeTests(): void {
       maxFrames: 40
     })
     h.flush()
-    ok(h.downgrades.length === 0, 'jank-only frames never downgrade')
+    expect(h.downgrades, 'jank-only frames never downgrade').toHaveLength(0)
   })
 
   test('slow frames with no long task still downgrade (real slow GPU)', () => {
     const h = gatedHarness({ deltas: Array(10).fill(200), isJanky: () => false })
     h.flush()
-    ok(h.downgrades.length === 1 && h.downgrades[0] === 'frame-time', 'downgraded')
+    expect(h.downgrades, 'downgraded').toEqual(['frame-time'])
   })
 
   test('janky frames dropped, clean slow frames still judged', () => {
@@ -300,25 +278,22 @@ function runFrameTimeTests(): void {
       isJanky: (from) => Math.round(from / 200) % 2 === 0
     })
     h.flush()
-    ok(h.downgrades.length === 1, 'downgrade from the clean samples alone')
+    expect(h.downgrades, 'downgrade from the clean samples alone').toHaveLength(1)
   })
 
   test('explicit stop(): cancels pending frame, no fire', () => {
     const h = ftHarness({ deltas: [100], sampleCount: 5, thresholdMs: 50 })
     h.stop()
     h.flushFrames()
-    ok(h.state.downgrades.length === 0, 'no downgrade after explicit stop')
+    expect(h.state.downgrades, 'no downgrade after explicit stop').toHaveLength(0)
   })
-}
+})
 
 // ---------------------------------------------------------------------------
 // createScrambleProbe — Signal C
 // ---------------------------------------------------------------------------
 
-function runScrambleProbeTests(): void {
-  console.log('\ncreateScrambleProbe')
-  console.log('─'.repeat(40))
-
+describe('createScrambleProbe', () => {
   function spHarness(over: Partial<ScrambleProbeOptions> = {}): {
     state: { aborted: boolean; current: boolean; activeAddon: WebglAddon | null }
     addon: WebglAddon
@@ -378,8 +353,8 @@ function runScrambleProbeTests(): void {
   test('first probe captures baseline silently (no fire)', () => {
     const h = spHarness()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire on first probe')
-    ok(h.addonCalls.disposed === 0, 'addon not disposed')
+    expect(h.downgrades, 'no fire on first probe').toHaveLength(0)
+    expect(h.addonCalls.disposed, 'addon not disposed').toBe(0)
   })
 
   test('stable buffer + stable pixels: no fire across many probes', () => {
@@ -389,7 +364,7 @@ function runScrambleProbeTests(): void {
     h.flushIntervals()
     h.flushIntervals()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire when both buffer + pixels stable')
+    expect(h.downgrades, 'no fire when both buffer + pixels stable').toHaveLength(0)
   })
 
   test('same buffer + drifted pixels for N=3: fires downgrade with reason=canary', () => {
@@ -398,11 +373,11 @@ function runScrambleProbeTests(): void {
     h.samp.setBytes(new Uint8Array([99, 99, 99, 99, 99, 99, 99, 99]))
     h.flushIntervals() // drift #1
     h.flushIntervals() // drift #2
-    ok(h.downgrades.length === 0, 'still under debounce after 2 drifts')
+    expect(h.downgrades, 'still under debounce after 2 drifts').toHaveLength(0)
     h.flushIntervals() // drift #3 → fire
-    ok(h.downgrades.length === 1, 'one downgrade after 3 drifts')
-    ok(h.downgrades[0] === 'canary', 'reason is canary')
-    ok(h.addonCalls.disposed === 1, 'addon disposed')
+    expect(h.downgrades, 'one downgrade after 3 drifts').toHaveLength(1)
+    expect(h.downgrades[0], 'reason is canary').toBe('canary')
+    expect(h.addonCalls.disposed, 'addon disposed').toBe(1)
   })
 
   test('buffer content changes mid-flight: silent rebaseline, no fire', () => {
@@ -415,7 +390,7 @@ function runScrambleProbeTests(): void {
     h.flushIntervals() // matches new baseline
     h.flushIntervals() // matches new baseline
     h.flushIntervals() // matches new baseline
-    ok(h.downgrades.length === 0, 'content change suppressed false-positive scramble')
+    expect(h.downgrades, 'content change suppressed false-positive scramble').toHaveLength(0)
   })
 
   test('matching probe between drifts: counter resets, no fire', () => {
@@ -429,7 +404,7 @@ function runScrambleProbeTests(): void {
     h.samp.setBytes(new Uint8Array([99, 99, 99, 99, 99, 99, 99, 99]))
     h.flushIntervals() // drift #1 again
     h.flushIntervals() // drift #2
-    ok(h.downgrades.length === 0, 'no fire — recovery between drifts broke the streak')
+    expect(h.downgrades, 'no fire — recovery between drifts broke the streak').toHaveLength(0)
   })
 
   test('sampler not ready: probe is silent', () => {
@@ -437,7 +412,7 @@ function runScrambleProbeTests(): void {
     h.samp.setReady(false)
     h.flushIntervals()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire when sampler not ready')
+    expect(h.downgrades, 'no fire when sampler not ready').toHaveLength(0)
   })
 
   test('sampler returns null (context lost): probe is silent', () => {
@@ -445,7 +420,7 @@ function runScrambleProbeTests(): void {
     h.samp.setBytes(null)
     h.flushIntervals()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire when sample returns null')
+    expect(h.downgrades, 'no fire when sample returns null').toHaveLength(0)
   })
 
   test('aborted: probe is a no-op', () => {
@@ -456,7 +431,7 @@ function runScrambleProbeTests(): void {
     h.flushIntervals()
     h.flushIntervals()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire when aborted')
+    expect(h.downgrades, 'no fire when aborted').toHaveLength(0)
   })
 
   test('addon superseded: probe is a no-op', () => {
@@ -467,7 +442,7 @@ function runScrambleProbeTests(): void {
     h.flushIntervals()
     h.flushIntervals()
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire when addon superseded')
+    expect(h.downgrades, 'no fire when addon superseded').toHaveLength(0)
   })
 
   test('manual rebaseline(): recaptures silently on next probe', () => {
@@ -479,7 +454,7 @@ function runScrambleProbeTests(): void {
     h.flushIntervals() // rebaselines silently
     h.flushIntervals() // matches new baseline
     h.flushIntervals() // matches new baseline
-    ok(h.downgrades.length === 0, 'manual rebaseline suppressed false-positive')
+    expect(h.downgrades, 'manual rebaseline suppressed false-positive').toHaveLength(0)
   })
 
   test('dispose(): no further fires, interval cleared', () => {
@@ -488,23 +463,12 @@ function runScrambleProbeTests(): void {
     h.probe.dispose()
     h.samp.setBytes(new Uint8Array([99, 99, 99, 99, 99, 99, 99, 99]))
     h.flushIntervals()
-    ok(h.downgrades.length === 0, 'no fire after dispose')
+    expect(h.downgrades, 'no fire after dispose').toHaveLength(0)
   })
 
   test('dispose() is idempotent', () => {
     const h = spHarness()
     h.probe.dispose()
-    h.probe.dispose() // must not throw
-    ok(true, 'second dispose did not throw')
+    expect(() => h.probe.dispose(), 'second dispose did not throw').not.toThrow() // must not throw
   })
-}
-
-function run(): void {
-  runFrameTimeTests()
-  runScrambleProbeTests()
-  console.log('\n' + '─'.repeat(40))
-  console.log(`${passed} passed, ${failed} failed\n`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-run()
+})

@@ -1,33 +1,8 @@
 /**
  * Tests for the adaptive paint cadence used by Terminal.tsx.
- * Run with: pnpm tsx packages/domains/terminal/src/client/paint-throttle.test.ts
  */
+import { expect, test } from 'vitest'
 import { decideThrottle, type ThrottleState } from './paint-throttle'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T): { toBe: (expected: T) => void } {
-  return {
-    toBe(expected: T): void {
-      if (actual !== expected) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    }
-  }
-}
 
 const OPTS = {
   slowDripThresholdMs: 500,
@@ -109,9 +84,7 @@ test('EMA decays toward zero across small frames', () => {
     score = (1 - OPTS.floodEmaAlpha) * score + OPTS.floodEmaAlpha * 50
   }
   // After 50 frames of 50-byte chunks, EMA should be well under threshold.
-  if (score > OPTS.floodBytesThreshold) {
-    throw new Error(`EMA did not decay below threshold (got ${score})`)
-  }
+  expect(score).toBeLessThanOrEqual(OPTS.floodBytesThreshold)
 })
 
 test('boundary: exactly slowDripThresholdMs is NOT slow-drip (strict >)', () => {
@@ -144,6 +117,3 @@ test('activity bump exits throttle immediately on next frame', () => {
   expect(decision.skip).toBe(false)
   expect(decision.nextSkipCounter).toBe(0)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

@@ -1,8 +1,8 @@
 /**
  * Retention chunk tests
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/diagnostics/src/main/retention.test.ts
  */
-import { expect, createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import Database from 'better-sqlite3'
 import {
   runBlobRetention,
@@ -63,32 +63,28 @@ function rowCount(db: Database.Database): number {
   return (db.prepare('SELECT COUNT(*) as c FROM diagnostics_events').get() as { c: number }).c
 }
 
-async function run(): Promise<void> {
-  console.log('\nrunRetentionChunk — cheap row-count proxy + bigger chunks')
-
+describe('runRetentionChunk — cheap row-count proxy + bigger chunks', () => {
   // 1. Empty DB → no work
-  {
+  test('empty DB → no work', async () => {
     const db = makeDb()
     const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
     expect(result.deleted).toBe(0)
     expect(result.moreWork).toBe(false)
     db.close()
-    console.log('  ✓ empty DB → no work')
-  }
+  })
 
   // 2. Under hard cap, all rows fresh → no delete
-  {
+  test('under cap, fresh rows → no delete', async () => {
     const db = makeDb()
     seed(db, 1000, Date.now()) // all rows ts = now → no expiry
     const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
     expect(result.deleted).toBe(0)
     expect(rowCount(db)).toBe(1000)
     db.close()
-    console.log('  ✓ under cap, fresh rows → no delete')
-  }
+  })
 
   // 3. Over hard cap → delete oldest, up to CHUNK_LIMIT (10_000)
-  {
+  test('over cap → deletes 10k chunk, signals moreWork', async () => {
     const db = makeDb()
     seed(db, 215_000, Date.now()) // 15k over cap of 200k
     const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, Date.now())
@@ -97,11 +93,10 @@ async function run(): Promise<void> {
     expect(result.moreWork).toBe(true) // still over cap after one chunk
     expect(rowCount(db)).toBe(205_000)
     db.close()
-    console.log('  ✓ over cap → deletes 10k chunk, signals moreWork')
-  }
+  })
 
   // 4. Rows older than retention window → deleted
-  {
+  test('retention by date — expired rows dropped, fresh kept', async () => {
     const db = makeDb()
     const now = Date.now()
     const oldCutoff = now - 30 * 24 * 60 * 60 * 1000 // 30 days ago
@@ -112,11 +107,10 @@ async function run(): Promise<void> {
     expect(result.deleted).toBe(500) // only the old ones
     expect(rowCount(db)).toBe(500) // fresh remain
     db.close()
-    console.log('  ✓ retention by date — expired rows dropped, fresh kept')
-  }
+  })
 
   // 5. CHUNK_LIMIT respected on date-based delete
-  {
+  test('date-based delete respects 10k CHUNK_LIMIT', async () => {
     const db = makeDb()
     const now = Date.now()
     const oldCutoff = now - 30 * 24 * 60 * 60 * 1000
@@ -127,11 +121,10 @@ async function run(): Promise<void> {
     expect(result.moreWork).toBe(true)
     expect(rowCount(db)).toBe(2_000)
     db.close()
-    console.log('  ✓ date-based delete respects 10k CHUNK_LIMIT')
-  }
+  })
 
   // 6. approxRowCount handles non-contiguous rowids correctly
-  {
+  test('tolerates rowid gaps — overestimate harmless under cap', async () => {
     const db = makeDb()
     const now = Date.now()
     seed(db, 100, now - 100) // fresh rows (last 100 ms)
@@ -141,11 +134,10 @@ async function run(): Promise<void> {
     const result = await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     expect(result.deleted).toBe(0) // not over cap, not expired
     db.close()
-    console.log('  ✓ tolerates rowid gaps — overestimate harmless under cap')
-  }
+  })
 
   // 7. incremental_vacuum actually frees pages (auto_vacuum=INCREMENTAL)
-  {
+  test('incremental_vacuum reclaims disk', async () => {
     const db = makeDb(true) // auto_vacuum on
     const now = Date.now()
     const oldCutoff = now - 30 * 24 * 60 * 60 * 1000
@@ -153,19 +145,16 @@ async function run(): Promise<void> {
     const pagesBefore = db.pragma('page_count', { simple: true }) as number
     await runRetentionChunk(createSlayzoneDbAdapter(db), CONFIG, now)
     const pagesAfter = db.pragma('page_count', { simple: true }) as number
-    if (pagesAfter >= pagesBefore) {
-      throw new Error(`Expected pages to shrink, got ${pagesBefore} → ${pagesAfter}`)
-    }
+    expect(pagesAfter, `pages should shrink from ${pagesBefore}`).toBeLessThan(pagesBefore)
     db.close()
-    console.log(`  ✓ incremental_vacuum reclaims disk (${pagesBefore} → ${pagesAfter} pages)`)
-  }
+  })
+})
 
-  console.log('\nrunBlobRetention — payload blobs pruned with the rows')
-
+describe('runBlobRetention — payload blobs pruned with the rows', () => {
   // 8. Blobs past the retention window are deleted, using the SAME retentionDays
   //    as the event rows. Row deletion reclaims no disk on its own, so without
   //    this step the offloaded screenshots leaked forever.
-  {
+  test('blobs older than retentionDays are deleted', async () => {
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const removed: string[] = []
@@ -181,11 +170,10 @@ async function run(): Promise<void> {
     })
     expect(result.deleted).toBe(1)
     expect(removed.join(',')).toBe('old.png')
-    console.log('  ✓ blobs older than retentionDays are deleted')
-  }
+  })
 
   // 9. A failing filesystem must not throw into the retention tick.
-  {
+  test('an unreadable blob dir is survivable', async () => {
     const result = runBlobRetention(CONFIG, Date.now(), {
       list: () => {
         throw new Error('ENOENT')
@@ -193,15 +181,14 @@ async function run(): Promise<void> {
       remove: () => {}
     })
     expect(result.deleted).toBe(0)
-    console.log('  ✓ an unreadable blob dir is survivable')
-  }
+  })
+})
 
-  console.log('\nscheduler — retention is independent of recording')
-
+describe('scheduler — retention is independent of recording', () => {
   // 10. Turning recording OFF must not freeze what was already recorded: `enabled`
   //     gates new events, retention bounds the disk. Skipping the pass while
   //     disabled kept every row and blob of someone who opted out, forever.
-  {
+  test('prunes expired rows and blobs while recording is off', async () => {
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const db = makeDb()
@@ -230,11 +217,10 @@ async function run(): Promise<void> {
       stopRetentionScheduler()
       db.close()
     }
-    console.log('  ✓ prunes expired rows and blobs while recording is off')
-  }
+  })
 
   // 11. No DB bound yet → nothing to prune, and no throw.
-  {
+  test('an unbound DB is a no-op; a stopped scheduler runs nothing', async () => {
     startRetentionScheduler({ getDb: () => null, getConfig: () => CONFIG })
     try {
       expect(await runScheduledRetentionNow()).toBe(true)
@@ -242,16 +228,5 @@ async function run(): Promise<void> {
       stopRetentionScheduler()
     }
     expect(await runScheduledRetentionNow()).toBe(false)
-    console.log('  ✓ an unbound DB is a no-op; a stopped scheduler runs nothing')
-  }
-}
-
-try {
-  await run()
-} catch (e) {
-  console.error(`  ✗ ${e}`)
-  if (e instanceof Error && e.stack) console.error(e.stack)
-  process.exitCode = 1
-}
-
-console.log('\nDone')
+  })
+})

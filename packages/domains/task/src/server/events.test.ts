@@ -1,12 +1,11 @@
 /**
  * taskEvents bus contract tests.
- * Run with: npx tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/task/src/main/events.test.ts
  */
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import { taskEvents } from './events.js'
 import type { TaskEventMap } from './events.js'
 
-await describe('taskEvents bus', () => {
+describe('taskEvents bus', () => {
   test('emit fires registered listener with typed payload', () => {
     const calls: TaskEventMap['task:created'][] = []
     const listener = (p: TaskEventMap['task:created']) => calls.push(p)

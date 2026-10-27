@@ -1,27 +1,8 @@
 /**
  * Tests for useLoopMode pure functions.
- * Run with: pnpm tsx packages/domains/terminal/src/client/useLoopMode.test.ts
  */
-
+import { expect, test } from 'vitest'
 import { checkCriteria, stripAnsi } from './useLoopMode'
-
-let passed = 0
-let failed = 0
-
-const tests: Array<{ name: string; fn: () => void | Promise<void> }> = []
-
-function test(name: string, fn: () => void | Promise<void>) {
-  tests.push({ name, fn })
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 // --- stripAnsi ---
 
@@ -82,22 +63,3 @@ test('regex: returns false on invalid regex', () => {
 test('regex: works with ANSI in output', () => {
   expect(checkCriteria('\x1b[1m42\x1b[0m', 'regex', '^42$')).toBe(true)
 })
-
-export {}
-
-// --- Run ---
-
-for (const t of tests) {
-  try {
-    await t.fn()
-    console.log(`✓ ${t.name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${t.name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

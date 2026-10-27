@@ -6,13 +6,14 @@
  *     setProjectDefaultComputer, revokeComputer) — works with NO gateway wired.
  *   - live-computer ops (list connection-status merge, mintJoinToken) — driven by a
  *     fake ComputersDeps registry (setComputersDeps) standing in for the hub gateway.
- * Runs under the electron strict loader (better-sqlite3 native ABI).
+ * Runs under vitest on Electron's node (better-sqlite3 native ABI).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { computersRouter } from './computers.js'
 import { setAuthGate, setComputersDeps, type ComputersDeps } from '../app-deps.js'
 import { appRouter } from '../router.js'

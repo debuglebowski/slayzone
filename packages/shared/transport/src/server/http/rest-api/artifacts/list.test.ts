@@ -1,14 +1,11 @@
 /**
  * REST: GET /api/tasks/:id/artifacts contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerArtifactsListRoute } from './list.js'
 
@@ -45,7 +42,12 @@ type ListResponse = {
   data: { folders: { id: string; name: string }[]; artifacts: { id: string; title: string }[] }
 }
 
-await describe('GET /api/tasks/:id/artifacts', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})
+
+describe('GET /api/tasks/:id/artifacts', () => {
   test('happy: returns folders + artifacts ordered by "order"', async () => {
     const res = await rest.request<ListResponse>('GET', `/api/tasks/${taskId}/artifacts`)
     expect(res.status).toBe(200)
@@ -69,6 +71,3 @@ await describe('GET /api/tasks/:id/artifacts', () => {
     expect(res.status).toBe(404)
   })
 })
-
-await rest.close()
-h.cleanup()

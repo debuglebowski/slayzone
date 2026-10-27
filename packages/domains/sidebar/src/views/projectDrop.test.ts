@@ -1,9 +1,9 @@
 /**
  * resolveProjectDrop — the shared drag-drop decision matrix for both views.
- * Pure, no electron/react. Run: npx tsx .../views/projectDrop.test.ts
+ * Pure, no electron/react.
  */
 import type { TopLevelEntryRef } from '@slayzone/projects/shared'
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import {
   resolveProjectDrop,
   dropModeFromPointer,
@@ -30,7 +30,7 @@ function input(partial: {
   return { ...partial, topLevel: TOP, members }
 }
 
-await describe('dropModeFromPointer (pointer, not dragged-rect center)', async () => {
+describe('dropModeFromPointer (pointer, not dragged-rect center)', () => {
   const rect = { top: 100, height: 30 } // thirds: <110 before, >120 after, else merge
   test('top third → before', () => expect(dropModeFromPointer(104, rect)).toBe('before'))
   test('middle third → merge', () => expect(dropModeFromPointer(115, rect)).toBe('merge'))
@@ -44,7 +44,7 @@ await describe('dropModeFromPointer (pointer, not dragged-rect center)', async (
   })
 })
 
-await describe('resolveDropMode (shared rail + tree mode decision)', async () => {
+describe('resolveDropMode (shared rail + tree mode decision)', () => {
   const rect = { top: 100, height: 30 } // center 115; thirds: <110 before, >120 after
   const base = { overIsMember: false, activeIsGroup: false }
 
@@ -87,7 +87,7 @@ await describe('resolveDropMode (shared rail + tree mode decision)', async () =>
     expect(resolveDropMode({ ...base, pointerY: 115, rect: null })).toBe('merge'))
 })
 
-await describe('resolveProjectDrop', async () => {
+describe('resolveProjectDrop', () => {
   test('top-level project onto top-level project MIDDLE → createFolder [target, dragged]', () => {
     const a = resolveProjectDrop(
       input({

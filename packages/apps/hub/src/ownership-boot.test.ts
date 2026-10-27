@@ -13,10 +13,10 @@
  * ownership-backfill.test.ts pins the step itself; this proves the boot runs it,
  * in the right place (after the bootstrap owner exists, before the hub serves).
  *
- * Native ABI: better-sqlite3 needs Electron's node (run_test_electron_strict_loader).
+ * Native ABI: better-sqlite3 needs Electron's node.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/ownership-boot.test.ts
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { afterAll, assert, beforeAll, expect, test } from 'vitest'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { migrations } from '../../../shared/transport/src/db-bootstrap/index.js'
@@ -37,23 +38,6 @@ const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const PACKAGES_DIR = join(HUB_DIR, '..', '..')
 const ELECTRON_BIN = require('electron') as unknown as string
 const DB_FILE = 'slayzone.data.sqlite'
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Newest source mtime under `dir`, skipping build output and dependencies. */
 function newestMtime(dir: string): number {
@@ -220,144 +204,133 @@ async function createProject(
   return { status: res.status, data: body.data }
 }
 
-async function main(): Promise<void> {
-  console.log('\nproject ownership at boot, through the real built hub\n')
-  ensureBuilt()
-  const LOOP = { SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' }
+beforeAll(() => ensureBuilt())
+const LOOP = { SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' }
 
+afterAll(() => {
+  for (const r of roots) rmSync(r, { recursive: true, force: true })
+})
+
+test('login off (the desktop app’s hub): upgrade assigns nobody, everything works as before', async () => {
+  const root = newRoot()
+  seedV168(root)
+  const hub = await bootHub(root, {
+    ...LOOP,
+    SLAYZONE_SUPERVISED: '1',
+    SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+  })
+  let createdId = ''
   try {
-    await test('login off (the desktop app’s hub): upgrade assigns nobody, everything works as before', async () => {
-      const root = newRoot()
-      seedV168(root)
-      const hub = await bootHub(root, {
-        ...LOOP,
-        SLAYZONE_SUPERVISED: '1',
-        SLAYZONE_HUB_REQUIRE_LOGIN: '0'
+    const created = await createProject(hub.port, 'Desktop new')
+    expect(created.status, `create → 200, got ${created.status}`).toBe(200)
+    assert(created.data, `create → 200, got ${created.status}`)
+    expect(created.data.owner_user_id, 'no user on the request → no owner').toBe(null)
+    createdId = created.data.id
+    const list = (await (await fetch(`http://127.0.0.1:${hub.port}/api/projects`)).json()) as {
+      data: { name: string }[]
+    }
+    const names = list.data.map((p) => p.name).sort()
+    // every project lists, unfiltered
+    expect(names).toEqual(['Desktop new', 'Legacy A', 'Legacy B'])
+    expect(
+      hub.logs.some((l) => l.includes('"project.owner.backfill"')),
+      'no backfill without login'
+    ).toBe(false)
+  } finally {
+    await hub.stop()
+  }
+  readDb(root, (db) => {
+    const owners = db.prepare('SELECT id, owner_user_id FROM projects ORDER BY id').all() as {
+      id: string
+      owner_user_id: string | null
+    }[]
+    expect(owners, `3 projects, got ${owners.length}`).toHaveLength(3)
+    // all unowned
+    expect(owners.map((o) => o.owner_user_id)).toEqual([null, null, null])
+    // the new project persisted
+    expect(owners.map((o) => o.id)).toContain(createdId)
+    const vs = db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()
+    expect(vs, 'viewState stays in the global table').toBeTruthy()
+    const n = (db.prepare('SELECT count(*) AS n FROM user_settings').get() as { n: number }).n
+    expect(n, 'no per-user settings').toBe(0)
+    const scratch = db.prepare(`SELECT id FROM tasks WHERE id = 'scratch'`).get()
+    expect(scratch, 'the open temporary task survived the boot purge').toBeTruthy()
+  })
+})
+
+test('login on: after boot every existing project belongs to the first admin; REST stamps the creator', async () => {
+  const root = newRoot()
+  seedV168(root)
+  const secret = 'ownership-boot-test-signing-secret-0123456789'
+  const hub = await bootHub(root, {
+    ...LOOP,
+    SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+    SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+    SLAYZONE_HUB_AUTH_SECRET: secret
+  })
+  let ownerId = ''
+  let createdId = ''
+  try {
+    // A reachable hub keeps no owner file (T-11): the owner signs in with the
+    // password derived from the secret.
+    const res = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://hub.example.com' },
+      body: JSON.stringify({
+        email: BOOTSTRAP_OWNER_EMAIL,
+        password: deriveBootstrapOwnerPassword(secret)
       })
-      let createdId = ''
-      try {
-        const created = await createProject(hub.port, 'Desktop new')
-        assert(created.status === 200 && created.data, `create → 200, got ${created.status}`)
-        assert(created.data.owner_user_id === null, 'no user on the request → no owner')
-        createdId = created.data.id
-        const list = (await (await fetch(`http://127.0.0.1:${hub.port}/api/projects`)).json()) as {
-          data: { name: string }[]
-        }
-        const names = list.data.map((p) => p.name).sort()
-        assert(
-          JSON.stringify(names) === JSON.stringify(['Desktop new', 'Legacy A', 'Legacy B']),
-          `every project lists, unfiltered: ${names}`
-        )
-        assert(
-          !hub.logs.some((l) => l.includes('"project.owner.backfill"')),
-          'no backfill without login'
-        )
-      } finally {
-        await hub.stop()
-      }
-      readDb(root, (db) => {
-        const owners = db.prepare('SELECT id, owner_user_id FROM projects ORDER BY id').all() as {
+    })
+    const owner = {
+      userId: ((await res.json()) as { user?: { id?: string } }).user?.id ?? '',
+      token: res.headers.get('set-auth-token') ?? ''
+    }
+    ownerId = owner.userId
+    expect(ownerId, `bootstrap owner provisioned, sign-in ${res.status}`).not.toBe('')
+    expect(owner.token, `bootstrap owner provisioned, sign-in ${res.status}`).not.toBe('')
+
+    const audit = hub.logs
+      .filter((l) => l.startsWith('{"type":"security"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.event === 'project.owner.backfill')
+    expect(audit, `one backfill audit line, got ${audit.length}`).toHaveLength(1)
+    expect(audit[0]!.targetId, 'to the bootstrap owner (the first admin)').toBe(ownerId)
+    const detail = audit[0]!.detail as { projectCount: number; settingCount: number }
+    expect(detail.projectCount, `projectCount ${detail.projectCount}`).toBe(2)
+    expect(detail.settingCount, `settingCount ${detail.settingCount}`).toBe(1)
+
+    const anon = await createProject(hub.port, 'No bearer')
+    expect(anon.status, `no bearer → 401, got ${anon.status}`).toBe(401)
+    const created = await createProject(hub.port, 'Owner new', owner.token)
+    expect(created.status, `create → 200, got ${created.status}`).toBe(200)
+    assert(created.data, `create → 200, got ${created.status}`)
+    expect(created.data.owner_user_id, 'the creator owns it').toBe(ownerId)
+    createdId = created.data.id
+  } finally {
+    await hub.stop()
+  }
+  readDb(root, (db) => {
+    const owners = Object.fromEntries(
+      (
+        db.prepare('SELECT id, owner_user_id FROM projects').all() as {
           id: string
           owner_user_id: string | null
         }[]
-        assert(owners.length === 3, `3 projects, got ${owners.length}`)
-        assert(
-          owners.every((o) => o.owner_user_id === null),
-          `all unowned: ${JSON.stringify(owners)}`
-        )
-        assert(
-          owners.some((o) => o.id === createdId),
-          'the new project persisted'
-        )
-        const vs = db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()
-        assert(vs, 'viewState stays in the global table')
-        const n = (db.prepare('SELECT count(*) AS n FROM user_settings').get() as { n: number }).n
-        assert(n === 0, 'no per-user settings')
-        const scratch = db.prepare(`SELECT id FROM tasks WHERE id = 'scratch'`).get()
-        assert(scratch, 'the open temporary task survived the boot purge')
-      })
-    })
-
-    await test('login on: after boot every existing project belongs to the first admin; REST stamps the creator', async () => {
-      const root = newRoot()
-      seedV168(root)
-      const secret = 'ownership-boot-test-signing-secret-0123456789'
-      const hub = await bootHub(root, {
-        ...LOOP,
-        SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
-        SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-        SLAYZONE_HUB_AUTH_SECRET: secret
-      })
-      let ownerId = ''
-      let createdId = ''
-      try {
-        // A reachable hub keeps no owner file (T-11): the owner signs in with the
-        // password derived from the secret.
-        const res = await fetch(`http://127.0.0.1:${hub.port}/api/auth/sign-in/email`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', origin: 'https://hub.example.com' },
-          body: JSON.stringify({
-            email: BOOTSTRAP_OWNER_EMAIL,
-            password: deriveBootstrapOwnerPassword(secret)
-          })
-        })
-        const owner = {
-          userId: ((await res.json()) as { user?: { id?: string } }).user?.id ?? '',
-          token: res.headers.get('set-auth-token') ?? ''
-        }
-        ownerId = owner.userId
-        assert(ownerId && owner.token, `bootstrap owner provisioned, sign-in ${res.status}`)
-
-        const audit = hub.logs
-          .filter((l) => l.startsWith('{"type":"security"'))
-          .map((l) => JSON.parse(l) as Record<string, unknown>)
-          .filter((e) => e.event === 'project.owner.backfill')
-        assert(audit.length === 1, `one backfill audit line, got ${audit.length}`)
-        assert(audit[0]!.targetId === ownerId, 'to the bootstrap owner (the first admin)')
-        const detail = audit[0]!.detail as { projectCount: number; settingCount: number }
-        assert(detail.projectCount === 2, `projectCount ${detail.projectCount}`)
-        assert(detail.settingCount === 1, `settingCount ${detail.settingCount}`)
-
-        const anon = await createProject(hub.port, 'No bearer')
-        assert(anon.status === 401, `no bearer → 401, got ${anon.status}`)
-        const created = await createProject(hub.port, 'Owner new', owner.token)
-        assert(created.status === 200 && created.data, `create → 200, got ${created.status}`)
-        assert(created.data.owner_user_id === ownerId, 'the creator owns it')
-        createdId = created.data.id
-      } finally {
-        await hub.stop()
-      }
-      readDb(root, (db) => {
-        const owners = Object.fromEntries(
-          (
-            db.prepare('SELECT id, owner_user_id FROM projects').all() as {
-              id: string
-              owner_user_id: string | null
-            }[]
-          ).map((r) => [r.id, r.owner_user_id])
-        )
-        assert(owners['legacy-a'] === ownerId, `legacy-a → admin: ${owners['legacy-a']}`)
-        assert(owners['legacy-b'] === ownerId, `legacy-b → admin: ${owners['legacy-b']}`)
-        assert(owners[createdId] === ownerId, 'the REST-created project')
-        assert(Object.keys(owners).length === 3, 'nothing lost, nothing extra')
-        const tasks = (
-          db.prepare('SELECT id FROM tasks ORDER BY id').all() as { id: string }[]
-        ).map((r) => r.id)
-        assert(JSON.stringify(tasks) === JSON.stringify(['scratch', 'task-a']), `tasks: ${tasks}`)
-        const globalVs = db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()
-        assert(!globalVs, 'the pre-login viewState left the global table')
-        const mine = db
-          .prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'viewState'`)
-          .get(ownerId) as { value: string } | undefined
-        assert(mine?.value.includes('scratch'), 'the first admin adopted it')
-      })
-    })
-  } finally {
-    for (const r of roots) rmSync(r, { recursive: true, force: true })
-  }
-
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main()
+      ).map((r) => [r.id, r.owner_user_id])
+    )
+    expect(owners['legacy-a'], `legacy-a → admin: ${owners['legacy-a']}`).toBe(ownerId)
+    expect(owners['legacy-b'], `legacy-b → admin: ${owners['legacy-b']}`).toBe(ownerId)
+    expect(owners[createdId], 'the REST-created project').toBe(ownerId)
+    expect(Object.keys(owners), 'nothing lost, nothing extra').toHaveLength(3)
+    const tasks = (db.prepare('SELECT id FROM tasks ORDER BY id').all() as { id: string }[]).map(
+      (r) => r.id
+    )
+    expect(tasks).toEqual(['scratch', 'task-a'])
+    const globalVs = db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()
+    expect(globalVs, 'the pre-login viewState left the global table').toBeUndefined()
+    const mine = db
+      .prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'viewState'`)
+      .get(ownerId) as { value: string } | undefined
+    expect(mine?.value, 'the first admin adopted it').toContain('scratch')
+  })
+})

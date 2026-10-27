@@ -1,17 +1,14 @@
 /**
  * CLI db-helpers tests — resolveProject
- * Run with: npx tsx --loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/db.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/db.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProject, resolveProjectArg } from '../src/db-helpers.mjs'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 const projectId = crypto.randomUUID()
@@ -93,6 +90,3 @@ describe('resolveProjectArg', () => {
     }
   })
 })
-
-h.cleanup()
-console.log('\nDone')

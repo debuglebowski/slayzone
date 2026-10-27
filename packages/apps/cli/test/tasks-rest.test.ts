@@ -10,7 +10,7 @@
  * Subprocess CLI hits localhost:<port> which routes through OUR registered
  * handlers — so taskEvents + ipcMain spies in this process still fire.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/tasks-rest.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/tasks-rest.test.ts
  *
  * Pre-req: pnpm --filter @slayzone/cli build  (or rely on existing dist/slay.js)
  */
@@ -21,12 +21,8 @@ import * as os from 'node:os'
 import { spawn, execSync } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import {
-  test,
-  expect,
-  describe,
-  createSlayzoneDbAdapter
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/ops/shared.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
@@ -50,9 +46,11 @@ import { registerGetTaskRoute } from '../../../shared/transport/src/server/http/
 import { BrowserWindow, ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
-if (!fs.existsSync(SLAY_BIN)) {
+// Without the bundle there is nothing to spawn: every suite below is skipped (the old
+// runner's `process.exit(0)` SKIP, kept). CI builds the CLI before the unit tests.
+const HAS_SLAY_BIN = fs.existsSync(SLAY_BIN)
+if (!HAS_SLAY_BIN) {
   console.error(`SKIP: dist/slay.js not built. Run \`pnpm --filter @slayzone/cli build\` first.`)
-  process.exit(0)
 }
 
 /**
@@ -279,7 +277,7 @@ async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<v
   )
 }
 
-await describe('CLI tasks create → REST', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create → REST', () => {
   test('happy: subprocess CLI hits POST /api/tasks; DB row appears; taskEvents fires', async () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:created')
@@ -328,7 +326,7 @@ await describe('CLI tasks create → REST', () => {
   })
 })
 
-await describe('CLI tasks update → REST', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks update → REST', () => {
   test('happy: PATCH /api/tasks/:id; DB updates; taskEvents fires', async () => {
     const id = crypto.randomUUID()
     db.prepare(
@@ -347,7 +345,7 @@ await describe('CLI tasks update → REST', () => {
   })
 })
 
-await describe('CLI tasks update --worktree-path', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks update --worktree-path', () => {
   function git(cmd: string, cwd: string): string {
     return execSync(cmd, {
       cwd,
@@ -497,7 +495,7 @@ await describe('CLI tasks update --worktree-path', () => {
   })
 })
 
-await describe('CLI tasks archive → REST', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks archive → REST', () => {
   test('happy: POST /api/tasks/:id/archive; DB archived_at set; taskEvents fires', async () => {
     const id = crypto.randomUUID()
     db.prepare(
@@ -523,7 +521,7 @@ await describe('CLI tasks archive → REST', () => {
  * (where that file does not exist) died on `openDb()`'s "Database not found"
  * `process.exit(1)`. The hub still has the DB; this CLI does not.
  */
-await describe('CLI id-prefix addressing works without a local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI id-prefix addressing works without a local database', () => {
   const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-no-db-'))
   const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
 
@@ -661,15 +659,19 @@ await describe('CLI id-prefix addressing works without a local database', () => 
  * moved into POST /api/tasks; the external id is now written BY the insert rather
  * than by a follow-up UPDATE behind the hub's back.
  */
-await describe('CLI tasks create works without a local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create works without a local database', () => {
   const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-no-db-create-'))
   const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
 
   const tplId = crypto.randomUUID()
-  db.prepare(
-    `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_status, default_priority)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(tplId, projectId, 'Hotfix', 'codex', 'in_progress', 2)
+  // Seeded when this suite starts (not at collection), as the old inline runner did, so
+  // the earlier suites never see this template.
+  beforeAll(() => {
+    db.prepare(
+      `INSERT INTO task_templates (id, project_id, name, terminal_mode, default_status, default_priority)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(tplId, projectId, 'Hotfix', 'codex', 'in_progress', 2)
+  })
 
   test('sanity: this root really has no database file', () => {
     expect(fs.existsSync(path.join(storageDirFor(noDbRoot), getDbName(false)))).toBe(false)
@@ -873,14 +875,18 @@ await describe('CLI tasks create works without a local database', () => {
   })
 })
 
-await describe('CLI tasks open → REST /api/open-task', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI tasks open → REST /api/open-task', () => {
   // Create a task once to reuse across these tests.
   const openTaskId = crypto.randomUUID()
-  const now = new Date().toISOString()
-  db.prepare(
-    `INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, "order", created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-  ).run(openTaskId, projectId, 'OpenMe', 'todo', 3, 'claude-code', '{}', now, now)
+  // Seeded when this suite starts (not at collection), as the old inline runner did, so
+  // the earlier suites never see this task.
+  beforeAll(() => {
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, "order", created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    ).run(openTaskId, projectId, 'OpenMe', 'todo', 3, 'claude-code', '{}', now, now)
+  })
 
   test('default (no flag): broadcasts (id, false) + main window show/focus', async () => {
     resetOpenSpies()
@@ -907,7 +913,7 @@ await describe('CLI tasks open → REST /api/open-task', () => {
   })
 })
 
-await describe('CLI app-down path', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI app-down path', () => {
   test('apiPost exits with helpful stderr when REST unreachable', async () => {
     // Reserved port 1 — connection refused immediately. An explicit
     // SLAYZONE_HUB_ADDRESS names a hub, so the failure reads as a hub connect
@@ -948,6 +954,8 @@ await describe('CLI app-down path', () => {
   })
 })
 
-await rest.close()
-db.close()
-fs.rmSync(tmpDir, { recursive: true, force: true })
+afterAll(async () => {
+  await rest.close()
+  db.close()
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+})

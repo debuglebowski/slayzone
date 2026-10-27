@@ -1,14 +1,10 @@
 /**
  * REST: PATCH /api/tasks/:id contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../../../../test-utils/event-spy.js'
 import {
@@ -51,7 +47,7 @@ function seedTask(extra: Record<string, unknown> = {}): string {
   return id
 }
 
-await describe('PATCH /api/tasks/:id', () => {
+describe('PATCH /api/tasks/:id', () => {
   test('happy: 200 updates title; emits dual signals', async () => {
     const id = seedTask()
     __resetIpcEmitCalls()
@@ -266,5 +262,7 @@ await describe('PATCH /api/tasks/:id', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

@@ -13,31 +13,12 @@
  * left out of the derived tables, every REACHABLE row crosses over untouched, and the
  * chain reaches the latest version.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm packages/shared/transport/src/db-bootstrap/orphan-rows-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/orphan-rows-migration.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import { migrations, runMigrations } from './index'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (error) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-}
-
-function expectEqual(actual: unknown, expected: unknown): void {
-  const a = JSON.stringify(actual)
-  const e = JSON.stringify(expected)
-  if (a !== e) throw new Error(`Expected ${e}, got ${a}`)
-}
 
 const LATEST = migrations[migrations.length - 1].version
 
@@ -79,74 +60,70 @@ function seedOrphan(db: Database.Database, id: string, taskId = 'ghost-task'): v
   db.pragma('foreign_keys = ON')
 }
 
-console.log('\norphan rows do not block the migration chain')
+describe('orphan rows do not block the migration chain', () => {
+  test('an orphaned task_conversations row does not stop v145 → latest', () => {
+    const db = dbAtV145()
+    try {
+      seedTaskWithLedger(db)
+      seedOrphan(db, 'orphan1')
+      runMigrations(db)
+      expect(db.pragma('user_version', { simple: true })).toEqual(LATEST)
+    } finally {
+      db.close()
+    }
+  })
 
-test('an orphaned task_conversations row does not stop v145 → latest', () => {
-  const db = dbAtV145()
-  try {
-    seedTaskWithLedger(db)
-    seedOrphan(db, 'orphan1')
-    runMigrations(db)
-    expectEqual(db.pragma('user_version', { simple: true }), LATEST)
-  } finally {
-    db.close()
-  }
-})
+  test('every reachable row still crosses over; the orphan is not carried into agent_sessions', () => {
+    const db = dbAtV145()
+    try {
+      seedTaskWithLedger(db)
+      seedOrphan(db, 'orphan1')
+      runMigrations(db)
+      const ids = (
+        db.prepare("SELECT id FROM agent_sessions WHERE task_id = 't1' ORDER BY id").all() as {
+          id: string
+        }[]
+      ).map((r) => r.id)
+      expect(ids).toEqual(['r1', 'r2'])
+      expect(
+        (
+          db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE id = 'orphan1'").get() as {
+            n: number
+          }
+        ).n
+      ).toBe(0)
+    } finally {
+      db.close()
+    }
+  })
 
-test('every reachable row still crosses over; the orphan is not carried into agent_sessions', () => {
-  const db = dbAtV145()
-  try {
-    seedTaskWithLedger(db)
-    seedOrphan(db, 'orphan1')
-    runMigrations(db)
-    const ids = (
-      db.prepare("SELECT id FROM agent_sessions WHERE task_id = 't1' ORDER BY id").all() as {
-        id: string
-      }[]
-    ).map((r) => r.id)
-    expectEqual(ids, ['r1', 'r2'])
-    expectEqual(
-      (
-        db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE id = 'orphan1'").get() as {
+  test('the database passes foreign_key_check once migrated', () => {
+    const db = dbAtV145()
+    try {
+      seedTaskWithLedger(db)
+      seedOrphan(db, 'orphan1')
+      seedOrphan(db, 'orphan2', 'another-ghost')
+      runMigrations(db)
+      expect(db.pragma('foreign_key_check')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('a clean v145 database is unaffected (same sessions, nothing dropped)', () => {
+    const db = dbAtV145()
+    try {
+      seedTaskWithLedger(db)
+      runMigrations(db)
+      const n = (
+        db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE task_id = 't1'").get() as {
           n: number
         }
-      ).n,
-      0
-    )
-  } finally {
-    db.close()
-  }
+      ).n
+      expect(n).toBe(2)
+      expect(db.pragma('user_version', { simple: true })).toEqual(LATEST)
+    } finally {
+      db.close()
+    }
+  })
 })
-
-test('the database passes foreign_key_check once migrated', () => {
-  const db = dbAtV145()
-  try {
-    seedTaskWithLedger(db)
-    seedOrphan(db, 'orphan1')
-    seedOrphan(db, 'orphan2', 'another-ghost')
-    runMigrations(db)
-    expectEqual(db.pragma('foreign_key_check'), [])
-  } finally {
-    db.close()
-  }
-})
-
-test('a clean v145 database is unaffected (same sessions, nothing dropped)', () => {
-  const db = dbAtV145()
-  try {
-    seedTaskWithLedger(db)
-    runMigrations(db)
-    const n = (
-      db.prepare("SELECT count(*) AS n FROM agent_sessions WHERE task_id = 't1'").get() as {
-        n: number
-      }
-    ).n
-    expectEqual(n, 2)
-    expectEqual(db.pragma('user_version', { simple: true }), LATEST)
-  } finally {
-    db.close()
-  }
-})
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

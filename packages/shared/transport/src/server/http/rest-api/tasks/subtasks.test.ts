@@ -1,14 +1,10 @@
 /**
  * REST: GET+POST /api/tasks/:id/subtasks contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/subtasks.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/subtasks.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerTaskSubtasksRoutes } from './subtasks.js'
 
@@ -61,7 +57,7 @@ type CreateResponse = {
   error?: string
 }
 
-await describe('GET /api/tasks/:id/subtasks', () => {
+describe('GET /api/tasks/:id/subtasks', () => {
   test('happy: lists visible subtasks only', async () => {
     const res = await rest.request<SubtasksResponse>('GET', `/api/tasks/${parentId}/subtasks`)
     expect(res.status).toBe(200)
@@ -74,7 +70,7 @@ await describe('GET /api/tasks/:id/subtasks', () => {
   })
 })
 
-await describe('POST /api/tasks/:id/subtasks', () => {
+describe('POST /api/tasks/:id/subtasks', () => {
   test('happy: creates subtask inheriting project + terminal mode; notifies', async () => {
     notifyCount = 0
     const res = await rest.request<CreateResponse>('POST', `/api/tasks/${parentId}/subtasks`, {
@@ -169,5 +165,7 @@ await describe('POST /api/tasks/:id/subtasks', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

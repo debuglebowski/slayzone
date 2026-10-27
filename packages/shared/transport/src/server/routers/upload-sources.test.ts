@@ -9,8 +9,8 @@
  * nothing is read from the hub's disk except its own artifact store (`NO_COMPUTER_
  * CONNECTED` otherwise). With login off (the desktop app's hub) everything is as before.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/routers/upload-sources.test.ts
  */
 import {
@@ -26,7 +26,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { createTestHarness, describe, expect, test } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { setAuthGate } from '../app-deps.js'
 import { appRouter } from '../router.js'
 
@@ -149,7 +150,7 @@ const FORBIDDEN_SOURCES: [string, string][] = [
   ['a link to the SSO key inside A’s project', join(aRoot, 'key-link.pem')]
 ]
 
-await describe('T-107 artifacts.upload (login on)', () => {
+describe('T-107 artifacts.upload (login on)', () => {
   test("A's own project file: copied", async () => {
     const art = await a.artifacts.upload({ taskId: 'tA', sourcePath: join(aRoot, 'README.md') })
     expect(await a.artifacts.readContent({ id: art!.id })).toBe('A-OWN')
@@ -161,7 +162,7 @@ await describe('T-107 artifacts.upload (login on)', () => {
   }
 })
 
-await describe('T-107 artifacts.pasteFiles (login on)', () => {
+describe('T-107 artifacts.pasteFiles (login on)', () => {
   test("A's own project file: copied", async () => {
     const created = await a.artifacts.pasteFiles({
       sourcePaths: [join(aRoot, 'README.md')],
@@ -184,7 +185,7 @@ await describe('T-107 artifacts.pasteFiles (login on)', () => {
   }
 })
 
-await describe('T-107 artifacts.uploadDir (login on): the whole tree is checked', () => {
+describe('T-107 artifacts.uploadDir (login on): the whole tree is checked', () => {
   test("A's own directory: copied", async () => {
     const r = await a.artifacts.uploadDir({
       taskId: 'tA',
@@ -210,7 +211,7 @@ await describe('T-107 artifacts.uploadDir (login on): the whole tree is checked'
   }
 })
 
-await describe('T-107 projects.uploadIcon (login on)', () => {
+describe('T-107 projects.uploadIcon (login on)', () => {
   test("A's own image: copied", async () => {
     const p = await a.projects.uploadIcon({ projectId: 'pA', sourcePath: join(aRoot, 'icon.png') })
     expect(readFileSync(p.icon_image_path!, 'utf-8')).toBe('A-ICON')
@@ -229,7 +230,7 @@ await describe('T-107 projects.uploadIcon (login on)', () => {
   }
 })
 
-await describe('T-107 a project rooted at <ROOT> or at / (its owner sets the path)', () => {
+describe('T-107 a project rooted at <ROOT> or at / (its owner sets the path)', () => {
   test('a project at <ROOT>, or inside it, cannot be created or moved there', async () => {
     expect(await outcome(a.projects.create({ name: 'r', color: '#000000', path: hubRoot }))).toBe(
       'NOT_FOUND'
@@ -262,7 +263,7 @@ await describe('T-107 a project rooted at <ROOT> or at / (its owner sets the pat
   })
 })
 
-await describe('T-107 processes off (Normain): nothing off the hub disk but its artifact store', () => {
+describe('T-107 processes off (Normain): nothing off the hub disk but its artifact store', () => {
   const off = async (fn: () => Promise<void>): Promise<void> => {
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
     try {
@@ -331,7 +332,7 @@ await describe('T-107 processes off (Normain): nothing off the hub disk but its 
   })
 })
 
-await describe('T-107 login off (the desktop app): as before', () => {
+describe('T-107 login off (the desktop app): as before', () => {
   test('any readable path is copied, with no principal and processes on', async () => {
     setAuthGate(() => false)
     try {
@@ -353,7 +354,7 @@ await describe('T-107 login off (the desktop app): as before', () => {
   })
 })
 
-await describe('T-107 afterwards', () => {
+describe('T-107 afterwards', () => {
   test('no hub-stored file holds the hub’s state, an SSO file or B’s content', () => {
     expect(leaked()).toEqual([])
   })

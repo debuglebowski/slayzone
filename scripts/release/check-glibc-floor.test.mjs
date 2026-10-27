@@ -8,8 +8,9 @@
  * .gnu.version_r) so the parser is pinned on every platform without committing
  * binaries.
  *
- * Run with: npx tsx scripts/release/check-glibc-floor.test.mjs
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
+import { test, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -20,26 +21,16 @@ import {
   requiredSymbolVersions
 } from './check-glibc-floor.mjs'
 
-let passed = 0
-let failed = 0
-
-function test(name, fn) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : e}`)
-    failed++
-  }
-}
-
-function eq(actual, expected, label) {
-  const a = JSON.stringify(actual)
-  const b = JSON.stringify(expected)
-  if (a !== b) throw new Error(`${label ? `${label}: ` : ''}expected ${b}, got ${a}`)
-}
+// The release gate runs on plain node; this suite runs on Electron's node, whose fs
+// treats any `*.asar` path as an archive (the fixture's `resources/app.asar` would
+// throw "Invalid package"). Turn that off so fs behaves as on plain node.
+const savedNoAsar = process.noAsar
+beforeAll(() => {
+  process.noAsar = true
+})
+afterAll(() => {
+  process.noAsar = savedNoAsar
+})
 
 /**
  * A minimal ELF whose .gnu.version_r says it needs `needs` = { 'libc.so.6':
@@ -144,13 +135,11 @@ function elf(needs, { bits = 64, littleEndian = true, sections = true } = {}) {
   return out
 }
 
-console.log('\n=== Linux glibc floor gate ===\n')
-
 test('compareVersions orders dotted versions numerically', () => {
-  eq(compareVersions('2.42', '2.35') > 0, true, '2.42 > 2.35')
-  eq(compareVersions('2.9', '2.35') < 0, true, '2.9 < 2.35')
-  eq(compareVersions('2.2.5', '2.2') > 0, true, '2.2.5 > 2.2')
-  eq(compareVersions('3.4.30', '3.4.30'), 0, 'equal')
+  expect(compareVersions('2.42', '2.35'), '2.42 > 2.35').toBeGreaterThan(0)
+  expect(compareVersions('2.9', '2.35'), '2.9 < 2.35').toBeLessThan(0)
+  expect(compareVersions('2.2.5', '2.2'), '2.2.5 > 2.2').toBeGreaterThan(0)
+  expect(compareVersions('3.4.30', '3.4.30'), 'equal').toBe(0)
 })
 
 test('reads every required symbol version, per library', () => {
@@ -158,34 +147,27 @@ test('reads every required symbol version, per library', () => {
     'libc.so.6': ['GLIBC_2.2.5', 'GLIBC_2.42'],
     'libstdc++.so.6': ['GLIBCXX_3.4.21', 'CXXABI_1.3']
   })
-  eq(
-    requiredSymbolVersions(buf),
-    [
-      { lib: 'libc.so.6', version: 'GLIBC_2.2.5' },
-      { lib: 'libc.so.6', version: 'GLIBC_2.42' },
-      { lib: 'libstdc++.so.6', version: 'GLIBCXX_3.4.21' },
-      { lib: 'libstdc++.so.6', version: 'CXXABI_1.3' }
-    ],
-    'versions'
-  )
+  expect(requiredSymbolVersions(buf), 'versions').toEqual([
+    { lib: 'libc.so.6', version: 'GLIBC_2.2.5' },
+    { lib: 'libc.so.6', version: 'GLIBC_2.42' },
+    { lib: 'libstdc++.so.6', version: 'GLIBCXX_3.4.21' },
+    { lib: 'libstdc++.so.6', version: 'CXXABI_1.3' }
+  ])
 })
 
 test('reads 32-bit and big-endian ELF too', () => {
   const needs = { 'libc.so.6': ['GLIBC_2.4'] }
   const want = [{ lib: 'libc.so.6', version: 'GLIBC_2.4' }]
-  eq(requiredSymbolVersions(elf(needs, { bits: 32 })), want, '32-bit')
-  eq(requiredSymbolVersions(elf(needs, { littleEndian: false })), want, 'big-endian')
+  expect(requiredSymbolVersions(elf(needs, { bits: 32 })), '32-bit').toEqual(want)
+  expect(requiredSymbolVersions(elf(needs, { littleEndian: false })), 'big-endian').toEqual(want)
 })
 
 test('a non-ELF file has no requirements; an ELF without a section table is unreadable', () => {
-  eq(requiredSymbolVersions(Buffer.from('#!/bin/sh\necho hi\n')), null, 'not ELF')
-  let threw = false
-  try {
+  expect(requiredSymbolVersions(Buffer.from('#!/bin/sh\necho hi\n')), 'not ELF').toBeNull()
+  // Fails closed rather than passing a file it cannot read.
+  expect(() =>
     requiredSymbolVersions(elf({ 'libc.so.6': ['GLIBC_2.2.5'] }, { sections: false }))
-  } catch {
-    threw = true
-  }
-  eq(threw, true, 'fails closed rather than passing a file it cannot read')
+  ).toThrow()
 })
 
 function tree(files) {
@@ -208,18 +190,14 @@ test('the v0.36.0 node-pty (GLIBC_2.42) fails the gate, naming file and version'
   })
   try {
     const { violations, scanned } = checkGlibcFloor(dir, { GLIBC: '2.35' })
-    eq(scanned, 2, 'scans every ELF file, skips the rest')
-    eq(
-      violations,
-      [
-        {
-          file: 'resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node',
-          version: 'GLIBC_2.42',
-          floor: 'GLIBC_2.35'
-        }
-      ],
-      'only the over-floor requirement'
-    )
+    expect(scanned, 'scans every ELF file, skips the rest').toBe(2)
+    expect(violations, 'only the over-floor requirement').toEqual([
+      {
+        file: 'resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node',
+        version: 'GLIBC_2.42',
+        floor: 'GLIBC_2.35'
+      }
+    ])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -232,11 +210,10 @@ test('libstdc++ requirements are gated too; unrelated version families are not',
   })
   try {
     const { violations } = checkGlibcFloor(dir, { GLIBCXX: '3.4.30', CXXABI: '1.3.13' })
-    eq(
+    expect(
       violations.map((v) => `${v.file} ${v.version}`),
-      ['a.node GLIBCXX_3.4.32', 'a.node CXXABI_1.3.15'],
       'libstdc++ over the floor'
-    )
+    ).toEqual(['a.node GLIBCXX_3.4.32', 'a.node CXXABI_1.3.15'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -245,7 +222,7 @@ test('libstdc++ requirements are gated too; unrelated version families are not',
 test('GLIBC_PRIVATE is never portable', () => {
   const dir = tree({ 'x.node': elf({ 'libc.so.6': ['GLIBC_PRIVATE'] }) })
   try {
-    eq(checkGlibcFloor(dir, { GLIBC: '2.35' }).violations.length, 1, 'violation')
+    expect(checkGlibcFloor(dir, { GLIBC: '2.35' }).violations, 'violation').toHaveLength(1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -255,7 +232,7 @@ test('symlinks are not followed (their targets are scanned where they live)', ()
   const dir = tree({ 'real.node': elf({ 'libc.so.6': ['GLIBC_2.42'] }) })
   try {
     symlinkSync(path.join(dir, 'real.node'), path.join(dir, 'link.node'))
-    eq(checkGlibcFloor(dir, { GLIBC: '2.35' }).violations.length, 1, 'counted once')
+    expect(checkGlibcFloor(dir, { GLIBC: '2.35' }).violations, 'counted once').toHaveLength(1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -263,10 +240,16 @@ test('symlinks are not followed (their targets are scanned where they live)', ()
 
 test('the shipped floor covers Ubuntu 22.04 and Debian 12', () => {
   // Raising it drops a supported distro; read #165 first.
-  eq(compareVersions(LINUX_FLOOR.GLIBC, '2.35') <= 0, true, 'GLIBC ≤ 2.35 (Ubuntu 22.04)')
-  eq(compareVersions(LINUX_FLOOR.GLIBCXX, '3.4.30') <= 0, true, 'GLIBCXX ≤ 3.4.30 (gcc 12)')
-  eq(compareVersions(LINUX_FLOOR.CXXABI, '1.3.13') <= 0, true, 'CXXABI ≤ 1.3.13 (gcc 12)')
+  expect(
+    compareVersions(LINUX_FLOOR.GLIBC, '2.35'),
+    'GLIBC ≤ 2.35 (Ubuntu 22.04)'
+  ).toBeLessThanOrEqual(0)
+  expect(
+    compareVersions(LINUX_FLOOR.GLIBCXX, '3.4.30'),
+    'GLIBCXX ≤ 3.4.30 (gcc 12)'
+  ).toBeLessThanOrEqual(0)
+  expect(
+    compareVersions(LINUX_FLOOR.CXXABI, '1.3.13'),
+    'CXXABI ≤ 1.3.13 (gcc 12)'
+  ).toBeLessThanOrEqual(0)
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-process.exitCode = failed > 0 ? 1 : 0

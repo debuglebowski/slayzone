@@ -6,31 +6,14 @@
  *
  * node-pty is "missing" through a Module._resolveFilename hook installed BEFORE the
  * runtime is imported, which also counts every attempt to resolve it.
- *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts <file>
  */
+import { afterAll, expect, test } from 'vitest'
 import Module from 'node:module'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import type { PtySessionWindow } from '../pty-host'
 
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-function expect(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 async function caught(fn: () => unknown): Promise<unknown> {
   try {
     await fn()
@@ -78,34 +61,37 @@ const spec = {
   transport: false
 }
 
-console.log('\nnode-pty optional: loaded on the first local spawn, never at import\n')
-
-await test('importing the pty runtime does not load node-pty', () => {
-  expect(attempts === 0, `node-pty resolved ${attempts}x at import`)
-  expect(!nodePtyLoaded(), 'node-pty is in the module cache after import')
+test('importing the pty runtime does not load node-pty', () => {
+  expect(attempts, `node-pty resolved ${attempts}x at import`).toBe(0)
+  expect(nodePtyLoaded(), 'node-pty is in the module cache after import').toBeFalsy()
 })
 
-await test('processes off: switch refusal, node-pty never loaded', async () => {
+test('processes off: switch refusal, node-pty never loaded', async () => {
   process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
   try {
     const err = await caught(() => localPtyBackend.spawn(spec))
-    expect(isHubSwitchedOffError(err), `expected the switch refusal, got ${err}`)
-    expect(attempts === 0 && !nodePtyLoaded(), `node-pty resolved ${attempts}x`)
+    expect(isHubSwitchedOffError(err), `expected the switch refusal, got ${err}`).toBeTruthy()
+    expect(attempts, `node-pty resolved ${attempts}x`).toBe(0)
+    expect(nodePtyLoaded(), `node-pty resolved ${attempts}x`).toBeFalsy()
   } finally {
     delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
   }
 })
 
-await test('processes on, node-pty missing: clear refusal at the spawn', async () => {
+test('processes on, node-pty missing: clear refusal at the spawn', async () => {
   const err = await caught(() => localPtyBackend.spawn(spec))
-  expect(err instanceof NodePtyUnavailableError, `expected NodePtyUnavailableError, got ${err}`)
+  expect(err, `expected NodePtyUnavailableError, got ${err}`).toBeInstanceOf(
+    NodePtyUnavailableError
+  )
   const e = err as InstanceType<typeof NodePtyUnavailableError>
-  expect(e.code === 'NODE_PTY_UNAVAILABLE', `code ${e.code}`)
-  expect(/node-pty is not installed/.test(e.message), `message names the cause: ${e.message}`)
-  expect(attempts === 1, `one load attempt, got ${attempts}`)
+  expect(e.code, `code ${e.code}`).toBe('NODE_PTY_UNAVAILABLE')
+  expect(/node-pty is not installed/.test(e.message), `message names the cause: ${e.message}`).toBe(
+    true
+  )
+  expect(attempts, `one load attempt, got ${attempts}`).toBe(1)
 })
 
-await test('createPty, node-pty missing: an error result, and no -l retry', async () => {
+test('createPty, node-pty missing: an error result, and no -l retry', async () => {
   setDatabase({
     get: async () => ({ project_id: 'proj-1' }),
     all: async () => [],
@@ -124,12 +110,12 @@ await test('createPty, node-pty missing: an error result, and no -l retry', asyn
     cwd: '/tmp',
     mode: 'terminal'
   } as never)
-  expect(res.success === false, `createPty must fail, got ${JSON.stringify(res)}`)
-  expect(/node-pty/.test(res.error ?? ''), `error names node-pty: ${res.error}`)
-  expect(attempts - before === 1, `one spawn attempt, got ${attempts - before}`)
+  expect(res.success, `createPty must fail, got ${JSON.stringify(res)}`).toBe(false)
+  expect(/node-pty/.test(res.error ?? ''), `error names node-pty: ${res.error}`).toBe(true)
+  expect(attempts - before, `one spawn attempt, got ${attempts - before}`).toBe(1)
 })
 
-await test('node-pty installed later: the next spawn loads it', async () => {
+test('node-pty installed later: the next spawn loads it', async () => {
   blocked = false
   const p = spawnLocalPty(
     '/bin/echo',
@@ -145,11 +131,10 @@ await test('node-pty installed later: the next spawn loads it', async () => {
     p.onExit(() => resolve())
     setTimeout(resolve, 5_000)
   })
-  expect(out.includes('slz-node-pty-ok'), `echo output, got ${JSON.stringify(out)}`)
+  expect(out, `echo output, got ${JSON.stringify(out)}`).toContain('slz-node-pty-ok')
 })
 
-loader._resolveFilename = realResolve
-setSecurityLogSink()
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
-process.exit(0)
+afterAll(() => {
+  loader._resolveFilename = realResolve
+  setSecurityLogSink()
+})

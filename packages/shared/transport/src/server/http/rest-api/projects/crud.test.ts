@@ -1,14 +1,9 @@
 /**
  * REST: /api/projects CRUD contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/projects/crud.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerProjectsCrudRoutes } from './crud.js'
 
@@ -40,7 +35,7 @@ type OneResponse = { ok: boolean; data: Project; error?: string }
 
 let createdId = ''
 
-await describe('/api/projects CRUD', () => {
+describe('/api/projects CRUD', () => {
   test('POST: creates a project with defaults + notifies', async () => {
     notifyCount = 0
     const res = await rest.request<OneResponse>('POST', '/api/projects', {
@@ -104,5 +99,7 @@ await describe('/api/projects CRUD', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

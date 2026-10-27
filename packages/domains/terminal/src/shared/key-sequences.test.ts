@@ -1,25 +1,8 @@
 /**
  * containsSubmitEnter tests — submit-Enter detection across input encodings.
- * Run with: pnpm tsx packages/domains/terminal/src/shared/key-sequences.test.ts
  */
+import { expect, test } from 'vitest'
 import { containsSubmitEnter, KITTY_SHIFT_ENTER } from './key-sequences.js'
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    throw e
-  }
-}
-function expect(v: boolean) {
-  return {
-    toBe(e: boolean) {
-      if (v !== e) throw new Error(`expected ${e}, got ${v}`)
-    }
-  }
-}
 
 // Legacy encodings — must keep matching.
 test('CR matches', () => expect(containsSubmitEnter('\r')).toBe(true))
@@ -48,5 +31,3 @@ test('empty string does not match', () => expect(containsSubmitEnter('')).toBe(f
 test('bare ESC does not match', () => expect(containsSubmitEnter('\x1b')).toBe(false))
 test('CSI 13~ (legacy F3-style) does not match', () =>
   expect(containsSubmitEnter('\x1b[13~')).toBe(false))
-
-console.log('key-sequences: all tests passed')

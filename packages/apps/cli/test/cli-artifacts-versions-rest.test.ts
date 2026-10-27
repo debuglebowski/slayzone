@@ -16,7 +16,7 @@
  * utf-8 (0xff 0xfe) with embedded NULs + CRLF — a string hop anywhere replaces
  * those with U+FFFD, which is invisible unless you compare bytes.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/cli-artifacts-versions-rest.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/cli-artifacts-versions-rest.test.ts
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -24,12 +24,8 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import {
-  test,
-  expect,
-  describe,
-  createSlayzoneDbAdapter
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
@@ -53,9 +49,11 @@ function storageDirFor(root: string): string {
 }
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
-if (!fs.existsSync(SLAY_BIN)) {
+// Without the bundle there is nothing to spawn: every suite below is skipped (the old
+// runner's `process.exit(0)` SKIP, kept). CI builds the CLI before the unit tests.
+const HAS_SLAY_BIN = fs.existsSync(SLAY_BIN)
+if (!HAS_SLAY_BIN) {
   console.error(`SKIP: dist/slay.js not built. Run \`pnpm --filter @slayzone/cli build\` first.`)
-  process.exit(0)
 }
 
 // The HUB's install root: it holds the DB, the artifact working copies and the blobs.
@@ -178,7 +176,7 @@ interface VersionJson {
   author_id: string | null
 }
 
-await describe('sanity: the CLI root really has no database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('sanity: the CLI root really has no database', () => {
   test('no sqlite file under the CLI root', () => {
     expect(fs.existsSync(path.join(storageDirFor(cliRoot), getDbName(false)))).toBe(false)
   })
@@ -187,7 +185,7 @@ await describe('sanity: the CLI root really has no database', () => {
 let binId = ''
 let textId = ''
 
-await describe('artifacts write / append with NO local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('artifacts write / append with NO local database', () => {
   test('write replaces content from stdin, byte-exact, and reports the new version', async () => {
     binId = await createArtifact('bin.png', Buffer.from('seed'))
     const r = await runCli(['tasks', 'artifacts', 'write', short(binId)], { input: BINARY })
@@ -301,7 +299,7 @@ await describe('artifacts write / append with NO local database', () => {
   })
 })
 
-await describe('artifacts update with NO local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('artifacts update with NO local database', () => {
   test('--title renames and echoes the full row in --json', async () => {
     textId = await createArtifact('notes.md', 'line one\nline two\n')
     const r = await runCli([
@@ -378,7 +376,7 @@ await describe('artifacts update with NO local database', () => {
   })
 })
 
-await describe('artifacts versions * with NO local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('artifacts versions * with NO local database', () => {
   test('versions list --json returns the rows newest-first', async () => {
     const r = await runCli(['tasks', 'artifacts', 'versions', 'list', short(textId), '--json'])
     expect(r.exitCode).toBe(0)
@@ -746,7 +744,7 @@ await describe('artifacts versions * with NO local database', () => {
   })
 })
 
-await describe('artifacts search with NO local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('artifacts search with NO local database', () => {
   let needleId = ''
   let folderId = ''
 
@@ -1033,7 +1031,7 @@ await describe('artifacts search with NO local database', () => {
   })
 })
 
-await describe('no-server path: every converted command reports a dead hub', () => {
+describe.skipIf(!HAS_SLAY_BIN)('no-server path: every converted command reports a dead hub', () => {
   const dead = { SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' }
 
   test('write / append / update / search / versions list all exit 1 with the connect error', async () => {
@@ -1065,7 +1063,7 @@ await describe('no-server path: every converted command reports a dead hub', () 
   })
 })
 
-await describe('path is answered by the HUB, not derived from the CLI root', () => {
+describe.skipIf(!HAS_SLAY_BIN)('path is answered by the HUB, not derived from the CLI root', () => {
   test('prints the hub-side working-copy path when the hub is co-located', async () => {
     // `path` is the ONE artifact subcommand whose answer is a filesystem path, so
     // it is the one that has to know WHOSE filesystem. It no longer opens a local
@@ -1083,7 +1081,9 @@ await describe('path is answered by the HUB, not derived from the CLI root', () 
   })
 })
 
-await rest.close()
-db.close()
-fs.rmSync(hubRoot, { recursive: true, force: true })
-fs.rmSync(cliRoot, { recursive: true, force: true })
+afterAll(async () => {
+  await rest.close()
+  db.close()
+  fs.rmSync(hubRoot, { recursive: true, force: true })
+  fs.rmSync(cliRoot, { recursive: true, force: true })
+})

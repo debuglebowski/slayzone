@@ -6,21 +6,17 @@
  *   - it must NEVER write the sentinel when the read-back does not match;
  *   - it must NEVER clobber a value already set on this device;
  *   - it must NEVER modify the source rows (that is also the downgrade path).
- *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/app/src/main/client-settings-migration.test.ts
  */
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import Database from 'better-sqlite3'
-import { test, expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, expect, test } from 'vitest'
 import { readClientSettings } from '@slayzone/platform/client-settings'
 import { migrateClientSettings } from './client-settings-migration.js'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cs-migration-'))
+afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 
 /** A minimal shared DB with just the settings table the migration reads. */
 function makeDb(name: string, rows: Record<string, string>): string {
@@ -72,7 +68,7 @@ test('SOURCE ROWS ARE UNTOUCHED — copy-only, and the downgrade path', async ()
   }
   db.close()
   expect(row.value).toBe('dark')
-  expect(Buffer.compare(before, fs.readFileSync(dbPath)) === 0).toBe(true)
+  expect(Buffer.compare(before, fs.readFileSync(dbPath))).toBe(0)
 })
 
 test('second run is a no-op via the sentinel', async () => {
@@ -112,7 +108,7 @@ test('no source database → sentinel only, nothing invented', async () => {
     dbPath: path.join(root, 'does-not-exist.sqlite')
   })
   expect(res.status).toBe('no-source')
-  expect(Object.keys(readClientSettings(dir)).length).toBe(0)
+  expect(Object.keys(readClientSettings(dir))).toHaveLength(0)
   expect(fs.existsSync(sentinelOf(dir))).toBe(true)
 })
 

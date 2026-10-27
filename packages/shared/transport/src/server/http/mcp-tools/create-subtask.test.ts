@@ -3,9 +3,10 @@
  * EXPLICIT tool argument (`parent_task_id`, from the agent's own `$SLAYZONE_TASK_ID`)
  * — this handler runs in the shared MCP sidecar process, which has no per-request
  * env to read.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { registerCreateSubtaskTool } from './create-subtask.js'
 
@@ -34,7 +35,7 @@ registerCreateSubtaskTool(stub.server as never, {
   }
 })
 
-await describe('mcp create_subtask', () => {
+describe('mcp create_subtask', () => {
   test('register: tool registered', () => {
     expect(stub.has('create_subtask')).toBe(true)
   })
@@ -80,4 +81,4 @@ await describe('mcp create_subtask', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

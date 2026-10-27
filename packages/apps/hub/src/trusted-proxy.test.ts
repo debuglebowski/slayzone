@@ -26,10 +26,11 @@
  *
  * Isolation: throwaway SLAYZONE_ROOT per hub, every inherited SLAYZONE_/ELECTRON_ var
  * scrubbed, OS-assigned ports. Native ABI: the hub bundle (better-sqlite3) runs under
- * `ELECTRON_RUN_AS_NODE=1 electron`, and so does this test
- * (run_test_electron_strict_loader). The bundle is (re)built on demand.
+ * `ELECTRON_RUN_AS_NODE=1 electron`, and so does this test. The bundle is (re)built
+ * on demand.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/trusted-proxy.test.ts
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
@@ -40,6 +41,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { afterAll, assert, beforeAll, describe, expect, test } from 'vitest'
 import WebSocket from 'ws'
 import { AUTH_RATE_LIMIT_RULES } from '@slayzone/hub-auth/server'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
@@ -51,23 +53,6 @@ const HUB_DIR = join(__dirname, '..') // packages/apps/hub
 const PACKAGES = join(HUB_DIR, '..', '..') // packages/
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -305,7 +290,7 @@ function owner(_hub: Hub): { email: string; password: string } {
 async function restAuditIp(hub: Hub, headers: OutgoingHttpHeaders): Promise<string | null> {
   const mark = hub.logs.length
   const res = await http(hub.port, 'GET', '/api/tasks', headers)
-  assert(res.status === 401, `GET /api/tasks without a bearer is 401, got ${res.status}`)
+  expect(res.status, `GET /api/tasks without a bearer is 401, got ${res.status}`).toBe(401)
   const line = await waitAudit(
     hub,
     mark,
@@ -353,7 +338,7 @@ async function trpcCallAuditIp(hub: Hub, xff: string): Promise<string | null> {
       })
     )
     const msg = await reply
-    assert(msg.includes('UNAUTHORIZED'), `gated call refused without a token: ${msg}`)
+    expect(msg, `gated call refused without a token: ${msg}`).toContain('UNAUTHORIZED')
   } finally {
     r.ws.close()
   }
@@ -392,9 +377,10 @@ async function signIn(
 ): Promise<{ token: string; auditIp: string | null }> {
   const mark = hub.logs.length
   const res = await http(hub.port, 'POST', '/api/auth/sign-in/email', headers, owner(hub))
-  assert(res.status === 200, `owner sign-in is 200, got ${res.status}: ${res.body}`)
+  expect(res.status, `owner sign-in is 200, got ${res.status}: ${res.body}`).toBe(200)
   const token = (JSON.parse(res.body) as { token?: string }).token
-  assert(typeof token === 'string' && token, `sign-in returned a token: ${res.body}`)
+  expect(typeof token, `sign-in returned a token: ${res.body}`).toBe('string')
+  assert(token, `sign-in returned a token: ${res.body}`)
   const line = await waitAudit(
     hub,
     mark,
@@ -412,7 +398,7 @@ async function sessions(
   const res = await http(hub.port, 'GET', '/api/auth/list-sessions', {
     authorization: `Bearer ${token}`
   })
-  assert(res.status === 200, `list-sessions is 200, got ${res.status}: ${res.body}`)
+  expect(res.status, `list-sessions is 200, got ${res.status}: ${res.body}`).toBe(200)
   return JSON.parse(res.body) as Array<{ token?: string; ipAddress?: string }>
 }
 
@@ -437,182 +423,188 @@ const CLIENT_IP_HEADER = 'x-slayzone-client-ip'
 /** Sign-ins one client address may make in a window (better-auth, T-26). */
 const SIGN_IN_MAX = AUTH_RATE_LIMIT_RULES['/sign-in/*']!.max
 
-async function main(): Promise<void> {
-  console.log('\ntrusted front end: the real client IP, through the real built hub\n')
-  ensureBuilt()
+beforeAll(() => ensureBuilt())
 
-  const hubs: Hub[] = []
-  try {
-    // --- through a trusted front end ------------------------------------------
-    const front = await bootHub({
+const hubs: Hub[] = []
+afterAll(async () => {
+  await Promise.all(hubs.map((h) => h.stop()))
+  for (const r of roots) rmSync(r, { recursive: true, force: true })
+})
+
+// --- through a trusted front end ------------------------------------------
+describe('through a trusted front end', () => {
+  let front: Hub
+  beforeAll(async () => {
+    front = await bootHub({
       ...REACHABLE,
       SLAYZONE_HUB_TRUSTED_PROXIES: '127.0.0.1',
       NODE_ENV: 'production'
     })
     hubs.push(front)
+  })
 
-    await test('front end trusted: a REST request is audited with the forwarded client', async () => {
-      const ip = await restAuditIp(front, { 'x-forwarded-for': '203.0.113.7:51234' })
-      assert(ip === '203.0.113.7', `ip = client, got ${ip}`)
+  test('front end trusted: a REST request is audited with the forwarded client', async () => {
+    const ip = await restAuditIp(front, { 'x-forwarded-for': '203.0.113.7:51234' })
+    expect(ip, `ip = client, got ${ip}`).toBe('203.0.113.7')
+  })
+
+  test('front end trusted: what the client put left of the appended entry is ignored', async () => {
+    const chain = await restAuditIp(front, { 'x-forwarded-for': '6.6.6.6, 203.0.113.8:1' })
+    expect(chain, `rightmost untrusted, got ${chain}`).toBe('203.0.113.8')
+    const lines = await restAuditIp(front, { 'x-forwarded-for': ['6.6.6.6', '203.0.113.9:2'] })
+    expect(lines, `two header lines are one list, got ${lines}`).toBe('203.0.113.9')
+    const v6 = await restAuditIp(front, { 'x-forwarded-for': '[2001:db8:cafe::7]:443' })
+    expect(v6, `[v6]:port, got ${v6}`).toBe('2001:db8:cafe::7')
+  })
+
+  test('front end trusted: a malformed entry falls back to the front end, never to it', async () => {
+    const ip = await restAuditIp(front, { 'x-forwarded-for': '203.0.113.7, not-an-ip' })
+    expect(ip, `the peer, got ${ip}`).toBe('127.0.0.1')
+  })
+
+  test('front end trusted: /trpc upgrades — origin refusal and gated call — log the client', async () => {
+    const refused = await trpcOriginAuditIp(front, '203.0.113.41:1')
+    expect(refused, `origin refusal ip, got ${refused}`).toBe('203.0.113.41')
+    const called = await trpcCallAuditIp(front, '203.0.113.40:1000')
+    expect(called, `auth gate ip, got ${called}`).toBe('203.0.113.40')
+  })
+
+  test('front end trusted: a /computers upgrade logs the client', async () => {
+    const ip = await computerAuditIp(front, '203.0.113.42:7')
+    expect(ip, `computer.enroll ip, got ${ip}`).toBe('203.0.113.42')
+  })
+
+  test('front end trusted: better-auth stores and audits the client, not a supplied header', async () => {
+    const { token, auditIp } = await signIn(front, {
+      'x-forwarded-for': '6.6.6.6, 203.0.113.20:4321',
+      [CLIENT_IP_HEADER]: '6.6.6.6'
     })
+    expect(auditIp, `auth.signin ip, got ${auditIp}`).toBe('203.0.113.20')
+    const stored = await sessionIp(front, token)
+    expect(stored, `session.ipAddress, got '${stored}'`).toBe('203.0.113.20')
+    // The scoped browser sign-in calls better-auth in-process: same client address.
+    const web = await http(
+      front.port,
+      'POST',
+      '/api/auth/web-login',
+      { 'x-forwarded-for': '203.0.113.21:9', [CLIENT_IP_HEADER]: '6.6.6.6' },
+      owner(front)
+    )
+    expect(web.status, `web-login is 200, got ${web.status}: ${web.body}`).toBe(200)
+    const ips = (await sessions(front, token)).map((s) => s.ipAddress)
+    expect(ips, `web-login session ipAddress: ${ips}`).toContain('203.0.113.21')
+    expect(ips, `no supplied value stored: ${ips}`).not.toContain('6.6.6.6')
+  })
 
-    await test('front end trusted: what the client put left of the appended entry is ignored', async () => {
-      const chain = await restAuditIp(front, { 'x-forwarded-for': '6.6.6.6, 203.0.113.8:1' })
-      assert(chain === '203.0.113.8', `rightmost untrusted, got ${chain}`)
-      const lines = await restAuditIp(front, { 'x-forwarded-for': ['6.6.6.6', '203.0.113.9:2'] })
-      assert(lines === '203.0.113.9', `two header lines are one list, got ${lines}`)
-      const v6 = await restAuditIp(front, { 'x-forwarded-for': '[2001:db8:cafe::7]:443' })
-      assert(v6 === '2001:db8:cafe::7', `[v6]:port, got ${v6}`)
+  test('front end trusted: better-auth rate-limits per client, not per front end', async () => {
+    const a = { 'x-forwarded-for': '203.0.113.30:1' }
+    const statuses: number[] = []
+    for (let i = 0; i <= SIGN_IN_MAX; i++) statuses.push(await badSignIn(front, a))
+    // client A: SIGN_IN_MAX tries, then 429
+    expect(statuses).toEqual([...Array(SIGN_IN_MAX).fill(401), 429])
+    const b = await badSignIn(front, { 'x-forwarded-for': '203.0.113.31:1' })
+    expect(b, `client B has its own bucket, got ${b}`).toBe(401)
+    // A cannot borrow B's bucket by naming B itself: the gateway appends A.
+    const spoof = await badSignIn(front, {
+      'x-forwarded-for': '203.0.113.31, 203.0.113.30:2',
+      [CLIENT_IP_HEADER]: '203.0.113.31'
     })
+    expect(spoof, `A stays A, got ${spoof}`).toBe(429)
+  })
+})
 
-    await test('front end trusted: a malformed entry falls back to the front end, never to it', async () => {
-      const ip = await restAuditIp(front, { 'x-forwarded-for': '203.0.113.7, not-an-ip' })
-      assert(ip === '127.0.0.1', `the peer, got ${ip}`)
-    })
-
-    await test('front end trusted: /trpc upgrades — origin refusal and gated call — log the client', async () => {
-      const refused = await trpcOriginAuditIp(front, '203.0.113.41:1')
-      assert(refused === '203.0.113.41', `origin refusal ip, got ${refused}`)
-      const called = await trpcCallAuditIp(front, '203.0.113.40:1000')
-      assert(called === '203.0.113.40', `auth gate ip, got ${called}`)
-    })
-
-    await test('front end trusted: a /computers upgrade logs the client', async () => {
-      const ip = await computerAuditIp(front, '203.0.113.42:7')
-      assert(ip === '203.0.113.42', `computer.enroll ip, got ${ip}`)
-    })
-
-    await test('front end trusted: better-auth stores and audits the client, not a supplied header', async () => {
-      const { token, auditIp } = await signIn(front, {
-        'x-forwarded-for': '6.6.6.6, 203.0.113.20:4321',
-        [CLIENT_IP_HEADER]: '6.6.6.6'
-      })
-      assert(auditIp === '203.0.113.20', `auth.signin ip, got ${auditIp}`)
-      const stored = await sessionIp(front, token)
-      assert(stored === '203.0.113.20', `session.ipAddress, got '${stored}'`)
-      // The scoped browser sign-in calls better-auth in-process: same client address.
-      const web = await http(
-        front.port,
-        'POST',
-        '/api/auth/web-login',
-        { 'x-forwarded-for': '203.0.113.21:9', [CLIENT_IP_HEADER]: '6.6.6.6' },
-        owner(front)
-      )
-      assert(web.status === 200, `web-login is 200, got ${web.status}: ${web.body}`)
-      const ips = (await sessions(front, token)).map((s) => s.ipAddress)
-      assert(ips.includes('203.0.113.21'), `web-login session ipAddress: ${ips}`)
-      assert(!ips.includes('6.6.6.6'), `no supplied value stored: ${ips}`)
-    })
-
-    await test('front end trusted: better-auth rate-limits per client, not per front end', async () => {
-      const a = { 'x-forwarded-for': '203.0.113.30:1' }
-      const statuses: number[] = []
-      for (let i = 0; i <= SIGN_IN_MAX; i++) statuses.push(await badSignIn(front, a))
-      assert(
-        statuses.join() === [...Array(SIGN_IN_MAX).fill(401), 429].join(),
-        `client A: ${SIGN_IN_MAX} tries then 429, got ${statuses}`
-      )
-      const b = await badSignIn(front, { 'x-forwarded-for': '203.0.113.31:1' })
-      assert(b === 401, `client B has its own bucket, got ${b}`)
-      // A cannot borrow B's bucket by naming B itself: the gateway appends A.
-      const spoof = await badSignIn(front, {
-        'x-forwarded-for': '203.0.113.31, 203.0.113.30:2',
-        [CLIENT_IP_HEADER]: '203.0.113.31'
-      })
-      assert(spoof === 429, `A stays A, got ${spoof}`)
-    })
-
-    // --- the same headers from a peer the hub does not trust ------------------
-    // No NODE_ENV: the limiter must not need it (T-26).
-    const direct = await bootHub({
+// --- the same headers from a peer the hub does not trust ------------------
+// No NODE_ENV: the limiter must not need it (T-26).
+describe('the same headers from a peer the hub does not trust', () => {
+  let direct: Hub
+  beforeAll(async () => {
+    direct = await bootHub({
       ...REACHABLE,
       SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24'
     })
     hubs.push(direct)
+  })
 
-    await test('untrusted peer: X-Forwarded-For is ignored on REST, /trpc and /computers', async () => {
-      const rest = await restAuditIp(direct, { 'x-forwarded-for': '203.0.113.7:51234' })
-      assert(rest === '127.0.0.1', `REST ip = peer, got ${rest}`)
-      const origin = await trpcOriginAuditIp(direct, '203.0.113.41:1')
-      assert(origin === '127.0.0.1', `/trpc origin ip = peer, got ${origin}`)
-      const call = await trpcCallAuditIp(direct, '203.0.113.40:1')
-      assert(call === '127.0.0.1', `/trpc call ip = peer, got ${call}`)
-      const computer = await computerAuditIp(direct, '203.0.113.42:7')
-      assert(computer === '127.0.0.1', `/computers ip = peer, got ${computer}`)
+  test('untrusted peer: X-Forwarded-For is ignored on REST, /trpc and /computers', async () => {
+    const rest = await restAuditIp(direct, { 'x-forwarded-for': '203.0.113.7:51234' })
+    expect(rest, `REST ip = peer, got ${rest}`).toBe('127.0.0.1')
+    const origin = await trpcOriginAuditIp(direct, '203.0.113.41:1')
+    expect(origin, `/trpc origin ip = peer, got ${origin}`).toBe('127.0.0.1')
+    const call = await trpcCallAuditIp(direct, '203.0.113.40:1')
+    expect(call, `/trpc call ip = peer, got ${call}`).toBe('127.0.0.1')
+    const computer = await computerAuditIp(direct, '203.0.113.42:7')
+    expect(computer, `/computers ip = peer, got ${computer}`).toBe('127.0.0.1')
+  })
+
+  test('untrusted peer: a direct client cannot pick the IP better-auth stores or limits on', async () => {
+    // One successful sign-in (counts toward the sign-in bucket)…
+    const { token, auditIp } = await signIn(direct, {
+      'x-forwarded-for': '203.0.113.20',
+      [CLIENT_IP_HEADER]: '203.0.113.20'
     })
+    expect(auditIp, `auth.signin ip = peer, got ${auditIp}`).toBe('127.0.0.1')
+    const stored = await sessionIp(direct, token)
+    expect(stored, `session.ipAddress = peer, got '${stored}'`).toBe('127.0.0.1')
+    // …then a fresh spoofed address on every try. Before T-22 better-auth keyed on
+    // X-Forwarded-For, so each try had a bucket of its own and the limit never hit.
+    const statuses: number[] = []
+    for (let i = 0; i < SIGN_IN_MAX; i++) {
+      const fake = `198.51.100.${10 + i}`
+      statuses.push(await badSignIn(direct, { 'x-forwarded-for': fake, [CLIENT_IP_HEADER]: fake }))
+    }
+    // one bucket, the peer's
+    expect(statuses).toEqual([...Array(SIGN_IN_MAX - 1).fill(401), 429])
+  })
+})
 
-    await test('untrusted peer: a direct client cannot pick the IP better-auth stores or limits on', async () => {
-      // One successful sign-in (counts toward the sign-in bucket)…
-      const { token, auditIp } = await signIn(direct, {
-        'x-forwarded-for': '203.0.113.20',
-        [CLIENT_IP_HEADER]: '203.0.113.20'
-      })
-      assert(auditIp === '127.0.0.1', `auth.signin ip = peer, got ${auditIp}`)
-      const stored = await sessionIp(direct, token)
-      assert(stored === '127.0.0.1', `session.ipAddress = peer, got '${stored}'`)
-      // …then a fresh spoofed address on every try. Before T-22 better-auth keyed on
-      // X-Forwarded-For, so each try had a bucket of its own and the limit never hit.
-      const statuses: number[] = []
-      for (let i = 0; i < SIGN_IN_MAX; i++) {
-        const fake = `198.51.100.${10 + i}`
-        statuses.push(
-          await badSignIn(direct, { 'x-forwarded-for': fake, [CLIENT_IP_HEADER]: fake })
-        )
-      }
-      assert(
-        statuses.join() === [...Array(SIGN_IN_MAX - 1).fill(401), 429].join(),
-        `one bucket, the peer's: got ${statuses}`
-      )
-    })
-
-    // --- no list: the peer, and a warning when a front end is implied -----------
-    const unlisted = await bootHub(REACHABLE)
+// --- no list: the peer, and a warning when a front end is implied -----------
+describe('a reachable hub with no list', () => {
+  let unlisted: Hub
+  beforeAll(async () => {
+    unlisted = await bootHub(REACHABLE)
     hubs.push(unlisted)
+  })
 
-    await test('reachable hub, empty list: one boot warning, and the peer is recorded', async () => {
-      const warnings = unlisted.stderr.filter((l) => l.includes('SLAYZONE_HUB_TRUSTED_PROXIES'))
-      assert(warnings.length === 1, `one warning on stderr, got:\n${unlisted.stderr.join('\n')}`)
-      assert(warnings[0]!.includes('hub.example.test'), `names the public address: ${warnings[0]}`)
-      const ip = await restAuditIp(unlisted, { 'x-forwarded-for': '203.0.113.7:51234' })
-      assert(ip === '127.0.0.1', `ip = peer, got ${ip}`)
-    })
+  test('reachable hub, empty list: one boot warning, and the peer is recorded', async () => {
+    const warnings = unlisted.stderr.filter((l) => l.includes('SLAYZONE_HUB_TRUSTED_PROXIES'))
+    expect(warnings, `one warning on stderr, got:\n${unlisted.stderr.join('\n')}`).toHaveLength(1)
+    expect(warnings[0]!, `names the public address: ${warnings[0]}`).toContain('hub.example.test')
+    const ip = await restAuditIp(unlisted, { 'x-forwarded-for': '203.0.113.7:51234' })
+    expect(ip, `ip = peer, got ${ip}`).toBe('127.0.0.1')
+  })
+})
 
-    const desktop = await bootHub({ SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' })
+describe('the default hub', () => {
+  let desktop: Hub
+  beforeAll(async () => {
+    desktop = await bootHub({ SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0' })
     hubs.push(desktop)
+  })
 
-    await test('default hub (loopback, login off, no list): no warning, the peer as before', async () => {
-      const warnings = desktop.logs.filter((l) => l.includes('SLAYZONE_HUB_TRUSTED_PROXIES'))
-      assert(warnings.length === 0, `no warning:\n${warnings.join('\n')}`)
-      const ip = await trpcOriginAuditIp(desktop, '203.0.113.41:1')
-      assert(ip === '127.0.0.1', `ip = peer, got ${ip}`)
-    })
+  test('default hub (loopback, login off, no list): no warning, the peer as before', async () => {
+    const warnings = desktop.logs.filter((l) => l.includes('SLAYZONE_HUB_TRUSTED_PROXIES'))
+    expect(warnings, `no warning:\n${warnings.join('\n')}`).toHaveLength(0)
+    const ip = await trpcOriginAuditIp(desktop, '203.0.113.41:1')
+    expect(ip, `ip = peer, got ${ip}`).toBe('127.0.0.1')
+  })
+})
 
-    await test('B15: a malformed list refuses boot through the bin, naming the variable', async () => {
-      const hub = spawnHub({ ...REACHABLE, SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24, appgw' })
-      try {
-        const code = await Promise.race([
-          hub.exit,
-          new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 40_000))
-        ])
-        assert(code !== 'timeout' && code !== 0, `refused, exit ${String(code)}`)
-        const out = hub.logs.join('\n')
-        assert(out.includes('SLAYZONE_HUB_TRUSTED_PROXIES') && out.includes("'appgw'"), out)
-        const audit = hub.logs.filter((l) => l.startsWith('{"type":"security"'))
-        assert(audit.length === 1 && audit[0]!.includes('"rule":"B15"'), `hub.boot B15:\n${out}`)
-      } finally {
-        await hub.stop()
-      }
-    })
+test('B15: a malformed list refuses boot through the bin, naming the variable', async () => {
+  const hub = spawnHub({ ...REACHABLE, SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24, appgw' })
+  try {
+    const code = await Promise.race([
+      hub.exit,
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 40_000))
+    ])
+    expect(code, `refused, exit ${String(code)}`).not.toBe('timeout')
+    expect(code, `refused, exit ${String(code)}`).not.toBe(0)
+    const out = hub.logs.join('\n')
+    expect(out, out).toContain('SLAYZONE_HUB_TRUSTED_PROXIES')
+    expect(out, out).toContain("'appgw'")
+    const audit = hub.logs.filter((l) => l.startsWith('{"type":"security"'))
+    expect(audit, `hub.boot B15:\n${out}`).toHaveLength(1)
+    expect(audit[0]!, `hub.boot B15:\n${out}`).toContain('"rule":"B15"')
   } finally {
-    await Promise.all(hubs.map((h) => h.stop()))
-    for (const r of roots) rmSync(r, { recursive: true, force: true })
+    await hub.stop()
   }
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
 })

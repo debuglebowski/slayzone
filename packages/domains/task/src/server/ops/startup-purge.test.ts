@@ -5,13 +5,14 @@
  * The purge is async (worker-thread DB), so we AWAIT it directly here — the old
  * test read survivors synchronously right after handler registration and raced
  * the fire-and-forget purge.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { purgeStaleAndOrphanedTasks } from './startup-purge.js'
 import { configureTaskRuntimeAdapters } from './shared.js'
 

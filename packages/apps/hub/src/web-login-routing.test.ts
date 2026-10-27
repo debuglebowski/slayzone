@@ -21,10 +21,10 @@
  * ISOLATION: SLAYZONE_ROOT under a throwaway mkdtemp dir, env scrubbed of
  * inherited SLAYZONE_/ELECTRON_ vars, port 0 (OS-assigned) — same discipline
  * as install-handshake.test.ts. Native ABI: better-sqlite3 needs Electron's
- * node ABI, so this runs under `ELECTRON_RUN_AS_NODE=1 electron`
- * (run_test_electron_strict_loader in run-all.sh).
+ * node ABI, so this runs under `ELECTRON_RUN_AS_NODE=1 electron`.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/web-login-routing.test.ts
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
@@ -33,29 +33,13 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { afterAll, assert, beforeAll, describe, expect, test } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const HUB_DIR = join(__dirname, '..')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -122,167 +106,163 @@ async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: st
   }
 }
 
-async function main(): Promise<void> {
-  console.log('\n/api/auth/web-login dispatch routing (real standalone hub)\n')
-  ensureBuilt()
+ensureBuilt()
 
-  const root = mkdtempSync(join(tmpdir(), 'slz-web-login-routing-'))
-  let hub: Proc | null = null
-  let wsClient: { close: () => void } | null = null
+const root = mkdtempSync(join(tmpdir(), 'slz-web-login-routing-'))
+let hub: Proc | null = null
+let wsClient: { close: () => void } | null = null
 
-  try {
-    hub = spawnChild(HUB_BIN, {
-      ...scrubbedEnv(),
-      SLAYZONE_ROOT: root,
-      SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
-      // Login on: the bootstrap owner (and the web login route's whole point)
-      // exist only on a hub that requires sign-in.
-      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
-    })
+afterAll(async () => {
+  wsClient?.close()
+  if (hub) await hub.stop()
+  rmSync(root, { recursive: true, force: true })
+})
 
-    const listen = await poll(
-      async () => hub!.logs.find((l) => l.includes('listening on http://')) ?? null,
-      20_000,
-      'hub listening line'
-    )
-    const m = listen.match(/http:\/\/(127\.0\.0\.1):(\d+)/)
-    assert(m, `hub listening line parseable: ${listen}`)
-    const port = Number(m![2])
+hub = spawnChild(HUB_BIN, {
+  ...scrubbedEnv(),
+  SLAYZONE_ROOT: root,
+  SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+  // Login on: the bootstrap owner (and the web login route's whole point)
+  // exist only on a hub that requires sign-in.
+  SLAYZONE_HUB_REQUIRE_LOGIN: '1'
+})
 
-    const ownerPath = join(root, 'hub.owner.json')
-    const owner = await poll(
-      async () => {
-        const raw = readFileSync(ownerPath, 'utf-8')
-        return JSON.parse(raw) as { email: string; password: string }
-      },
-      15_000,
-      'hub.owner.json written'
-    )
+const listen = await poll(
+  async () => hub!.logs.find((l) => l.includes('listening on http://')) ?? null,
+  20_000,
+  'hub listening line'
+)
+const m = listen.match(/http:\/\/(127\.0\.0\.1):(\d+)/)
+assert(m, `hub listening line parseable: ${listen}`)
+const port = Number(m[2])
 
-    await test('POST /api/auth/web-login with the WRONG password → 401, not 404', async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api/auth/web-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: owner.email, password: 'definitely-wrong' })
-      })
-      // 404 is exactly the regression: it means the request reached authApp
-      // (better-auth's OWN app, which has no /web-login route) instead of
-      // mcpRest.app's real handler.
-      assert(res.status === 401, `expected 401, got ${res.status} (404 = the routing regression)`)
-    })
+const ownerPath = join(root, 'hub.owner.json')
+const owner = await poll(
+  async () => {
+    const raw = readFileSync(ownerPath, 'utf-8')
+    return JSON.parse(raw) as { email: string; password: string }
+  },
+  15_000,
+  'hub.owner.json written'
+)
 
-    let sessionCookie = ''
-    await test('POST /api/auth/web-login with REAL credentials → 200 + the scoped cookie, no token in the body', async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api/auth/web-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: owner.email, password: owner.password })
-      })
-      assert(res.status === 200, `expected 200, got ${res.status}`)
-      const body = (await res.json()) as { ok: boolean; token?: string }
-      assert(body.ok === true, 'ok=true')
-      // T-13: the cookie is the only carrier — no script ever sees the token.
-      assert(body.token === undefined, 'no token in the body')
-      const setCookie = res.headers.get('set-cookie') ?? ''
-      assert(/^slayzone_web_session=szw_[^;]+;/.test(setCookie), `scoped cookie set: ${setCookie}`)
-      assert(setCookie.includes('HttpOnly') && setCookie.includes('SameSite=Lax'), 'HttpOnly, Lax')
-      // A loopback hub with no public address is plain http: no Secure flag.
-      assert(!setCookie.includes('Secure'), 'not Secure on a loopback hub')
-      sessionCookie = setCookie.split(';')[0]!
-    })
+test('POST /api/auth/web-login with the WRONG password → 401, not 404', async () => {
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/web-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: owner.email, password: 'definitely-wrong' })
+  })
+  // 404 is exactly the regression: it means the request reached authApp
+  // (better-auth's OWN app, which has no /web-login route) instead of
+  // mcpRest.app's real handler.
+  expect(res.status, `expected 401, got ${res.status} (404 = the routing regression)`).toBe(401)
+})
 
-    await test("better-auth's OWN /api/auth/sign-in/email still routes to authApp (carve-out is surgical)", async () => {
-      const res = await fetch(`http://127.0.0.1:${port}/api/auth/sign-in/email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: owner.email, password: owner.password })
-      })
-      // NOT asserting 200: better-auth's own CSRF/trusted-origins plugin
-      // separately rejects a bare fetch() with no matching Origin — that
-      // behavior is real, pre-existing, and out of scope here (it's what a
-      // real browser's automatic same-origin Origin header satisfies). What
-      // THIS test guards is narrower and exactly the regression: the request
-      // must reach authApp's real handler chain — evidenced by a
-      // better-auth-shaped error body (a `code` field) — rather than 404ing
-      // because it never got past the /web-login carve-out.
-      assert(res.status !== 404, 'must not 404 — that would mean it never reached authApp')
-      const body = (await res.json()) as { code?: string }
-      assert(
-        typeof body.code === 'string',
-        `expected a better-auth error shape, got ${JSON.stringify(body)}`
-      )
-    })
+let sessionCookie = ''
+test('POST /api/auth/web-login with REAL credentials → 200 + the scoped cookie, no token in the body', async () => {
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/web-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: owner.email, password: owner.password })
+  })
+  expect(res.status, `expected 200, got ${res.status}`).toBe(200)
+  const body = (await res.json()) as { ok: boolean; token?: string }
+  expect(body.ok, 'ok=true').toBe(true)
+  // T-13: the cookie is the only carrier — no script ever sees the token.
+  expect(body.token, 'no token in the body').toBe(undefined)
+  const setCookie = res.headers.get('set-cookie') ?? ''
+  expect(setCookie, `scoped cookie set: ${setCookie}`).toMatch(/^slayzone_web_session=szw_[^;]+;/)
+  expect(setCookie, 'HttpOnly, Lax').toContain('HttpOnly')
+  expect(setCookie, 'HttpOnly, Lax').toContain('SameSite=Lax')
+  // A loopback hub with no public address is plain http: no Secure flag.
+  expect(setCookie, 'not Secure on a loopback hub').not.toContain('Secure')
+  sessionCookie = setCookie.split(';')[0]!
+})
 
-    // Set up the WS connection OUTSIDE the `test()` callback, in the same
-    // scope as `wsClient`'s declaration — matching install-handshake.test.ts's
-    // structure exactly (assigning `wsClient` from within a nested callback
-    // passed to `test()` confuses tsgo's narrowing of the outer `let` binding
-    // by the time the `finally` block reads it).
-    //
-    // Like the web shell (T-13): NO connectionParams token — the browser sends the cookie
-    // with the upgrade, and the page's Origin with it. `ws` stands in for the browser.
-    const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
-    const superjson = (await import('superjson')).default
-    const { WebSocket: NodeWebSocket } = await import('ws')
-    /** A tRPC client whose socket carries the cookie and `origin`, as a browser's would. */
-    const cookieClient = (origin: string) => {
-      class BrowserLikeSocket extends NodeWebSocket {
-        constructor(url: string, protocols?: string | string[]) {
-          super(url, protocols, { headers: { cookie: sessionCookie, origin } })
-        }
-      }
-      const ws = createWSClient({
-        url: `ws://127.0.0.1:${port}/trpc`,
-        WebSocket: BrowserLikeSocket as unknown as typeof WebSocket
-      })
-      const raw = createTRPCClient({ links: [wsLink({ client: ws, transformer: superjson })] })
-      // Untyped test-only client (no AppRouter import here) — cast to the
-      // narrow shape each call actually needs.
-      return {
-        ws,
-        client: raw as unknown as {
-          hub: { describe: { query: () => Promise<{ authRequired: boolean }> } }
-          pty: { create: { mutate: (i: unknown) => Promise<unknown> } }
-        }
-      }
+test("better-auth's OWN /api/auth/sign-in/email still routes to authApp (carve-out is surgical)", async () => {
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/sign-in/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: owner.email, password: owner.password })
+  })
+  // NOT asserting 200: better-auth's own CSRF/trusted-origins plugin
+  // separately rejects a bare fetch() with no matching Origin — that
+  // behavior is real, pre-existing, and out of scope here (it's what a
+  // real browser's automatic same-origin Origin header satisfies). What
+  // THIS test guards is narrower and exactly the regression: the request
+  // must reach authApp's real handler chain — evidenced by a
+  // better-auth-shaped error body (a `code` field) — rather than 404ing
+  // because it never got past the /web-login carve-out.
+  expect(res.status, 'must not 404 — that would mean it never reached authApp').not.toBe(404)
+  const body = (await res.json()) as { code?: string }
+  expect(typeof body.code, `expected a better-auth error shape, got ${JSON.stringify(body)}`).toBe(
+    'string'
+  )
+})
+
+// The WS connections open in a `beforeAll` of the block below: after the login test
+// above set `sessionCookie` (a client's socket reads it when it connects), and
+// `wsClient` is closed by the file's `afterAll`.
+//
+// Like the web shell (T-13): NO connectionParams token — the browser sends the cookie
+// with the upgrade, and the page's Origin with it. `ws` stands in for the browser.
+const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+const superjson = (await import('superjson')).default
+const { WebSocket: NodeWebSocket } = await import('ws')
+/** A tRPC client whose socket carries the cookie and `origin`, as a browser's would. */
+const cookieClient = (origin: string) => {
+  class BrowserLikeSocket extends NodeWebSocket {
+    constructor(url: string, protocols?: string | string[]) {
+      super(url, protocols, { headers: { cookie: sessionCookie, origin } })
     }
-    const codeOf = async (p: Promise<unknown>): Promise<string> => {
-      try {
-        await p
-        return 'none'
-      } catch (err) {
-        return (err as { data?: { code?: string } }).data?.code ?? 'unknown'
-      }
-    }
-    const own = cookieClient(`http://127.0.0.1:${port}`)
-    wsClient = own.ws
-    const foreign = cookieClient('http://localhost:1')
-
-    await test('the cookie alone authenticates a real tRPC connection from the hub page', async () => {
-      // Open procedure: works regardless.
-      const describe = await own.client.hub.describe.query()
-      assert(describe.authRequired === true, 'standalone hub enforces auth')
-
-      // A `never`-scoped procedure must still be refused for a scoped session — FORBIDDEN
-      // (a principal, the wrong scope), not UNAUTHORIZED: the cookie did authenticate,
-      // and the login route working must not silently widen what the session can do.
-      const code = await codeOf(own.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
-      assert(code === 'FORBIDDEN', `pty.create refused as FORBIDDEN, got ${code}`)
-    })
-
-    await test('the same cookie from another page (another localhost port) authenticates nothing', async () => {
-      const code = await codeOf(foreign.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
-      assert(code === 'UNAUTHORIZED', `no principal: UNAUTHORIZED, got ${code}`)
-      foreign.ws.close()
-    })
-  } finally {
-    wsClient?.close()
-    if (hub) await hub.stop()
-    rmSync(root, { recursive: true, force: true })
   }
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
+  const ws = createWSClient({
+    url: `ws://127.0.0.1:${port}/trpc`,
+    WebSocket: BrowserLikeSocket as unknown as typeof WebSocket
+  })
+  const raw = createTRPCClient({ links: [wsLink({ client: ws, transformer: superjson })] })
+  // Untyped test-only client (no AppRouter import here) — cast to the
+  // narrow shape each call actually needs.
+  return {
+    ws,
+    client: raw as unknown as {
+      hub: { describe: { query: () => Promise<{ authRequired: boolean }> } }
+      pty: { create: { mutate: (i: unknown) => Promise<unknown> } }
+    }
+  }
 }
+const codeOf = async (p: Promise<unknown>): Promise<string> => {
+  try {
+    await p
+    return 'none'
+  } catch (err) {
+    return (err as { data?: { code?: string } }).data?.code ?? 'unknown'
+  }
+}
+describe('the session cookie on the /trpc socket', () => {
+  let own: ReturnType<typeof cookieClient>
+  let foreign: ReturnType<typeof cookieClient>
+  beforeAll(() => {
+    own = cookieClient(`http://127.0.0.1:${port}`)
+    wsClient = own.ws
+    foreign = cookieClient('http://localhost:1')
+  })
 
-void main()
+  test('the cookie alone authenticates a real tRPC connection from the hub page', async () => {
+    // Open procedure: works regardless.
+    const describe = await own.client.hub.describe.query()
+    expect(describe.authRequired, 'standalone hub enforces auth').toBe(true)
+
+    // A `never`-scoped procedure must still be refused for a scoped session — FORBIDDEN
+    // (a principal, the wrong scope), not UNAUTHORIZED: the cookie did authenticate,
+    // and the login route working must not silently widen what the session can do.
+    const code = await codeOf(own.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
+    expect(code, `pty.create refused as FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
+  })
+
+  test('the same cookie from another page (another localhost port) authenticates nothing', async () => {
+    const code = await codeOf(foreign.client.pty.create.mutate({ sessionId: 'x', cwd: '/tmp' }))
+    expect(code, `no principal: UNAUTHORIZED, got ${code}`).toBe('UNAUTHORIZED')
+    foreign.ws.close()
+  })
+})

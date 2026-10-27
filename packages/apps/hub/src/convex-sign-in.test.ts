@@ -15,19 +15,12 @@
  *     `<that origin>/api/action` exactly as before, and the host receives the hub's own
  *     origin.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/convex-sign-in.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import superjson from 'superjson'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { convexAddressFromUrl } from '@slayzone/platform/hub-convex'
 import {
@@ -127,7 +120,7 @@ async function expectRefused(convexUrl: unknown, appCode: string, variable: stri
 
 delete process.env[INTEGRATIONS_ENV]
 
-await describe('desktop app hub: the deployment its renderer was built for', () => {
+describe('desktop app hub: the deployment its renderer was built for', () => {
   test('the hub address comes from the build URL', () => {
     expect(convexAddressFromUrl(BUILD_CONVEX_URL)).toBe('happy-animal-123.convex.cloud')
   })
@@ -155,7 +148,7 @@ await describe('desktop app hub: the deployment its renderer was built for', () 
   })
 })
 
-await describe('a client naming another Convex host is refused, nothing sent', () => {
+describe('a client naming another Convex host is refused, nothing sent', () => {
   for (const [label, url] of [
     ['another host', 'https://evil.example.com'],
     ['cloud metadata', 'http://169.254.169.254/latest'],
@@ -172,14 +165,14 @@ await describe('a client naming another Convex host is refused, nothing sent', (
   }
 })
 
-await describe('no Convex deployment configured (a self-hosted hub): refused', () => {
+describe('no Convex deployment configured (a self-hosted hub): refused', () => {
   test('unset: FORBIDDEN HUB_CONVEX_NOT_CONFIGURED, audited, no request', async () => {
     delete process.env[CONVEX_ENV]
     await expectRefused(BUILD_CONVEX_URL, 'HUB_CONVEX_NOT_CONFIGURED', CONVEX_ENV)
   })
 })
 
-await describe('integrations switched off (the Normain hub): refused first', () => {
+describe('integrations switched off (the Normain hub): refused first', () => {
   test('FORBIDDEN HUB_INTEGRATIONS_DISABLED, audited, no request', async () => {
     process.env[INTEGRATIONS_ENV] = '0'
     process.env[CONVEX_ENV] = 'happy-animal-123.convex.cloud'
@@ -188,7 +181,7 @@ await describe('integrations switched off (the Normain hub): refused first', () 
   })
 })
 
-await describe('the standalone host’s backstop', () => {
+describe('the standalone host’s backstop', () => {
   test('called past the router with a foreign URL, it refuses before any request', async () => {
     process.env[CONVEX_ENV] = 'happy-animal-123.convex.cloud'
     const before = outbound.length
@@ -203,4 +196,4 @@ await describe('the standalone host’s backstop', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

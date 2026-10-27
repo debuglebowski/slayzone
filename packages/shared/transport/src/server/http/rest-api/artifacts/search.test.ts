@@ -8,18 +8,15 @@
  * bookkeeping) and returns exactly the `SearchResult[]` the CLI's `--json`
  * printed, so both output modes are byte-identical to the sqlite version.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-search-'))
@@ -94,7 +91,13 @@ let betaId = ''
 let otherTaskId = ''
 let folderId = ''
 
-await describe('GET /api/artifacts/search', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+  fs.rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+describe('GET /api/artifacts/search', () => {
   test('setup fixtures', async () => {
     alphaId = (await makeArtifact(taskA, 'alpha-notes.md', 'first line\nNEEDLE here\nthird line\n'))
       .id
@@ -294,7 +297,3 @@ await describe('GET /api/artifacts/search', () => {
     expect(res.status).toBe(400)
   })
 })
-
-await rest.close()
-h.cleanup()
-fs.rmSync(tmpRoot, { recursive: true, force: true })

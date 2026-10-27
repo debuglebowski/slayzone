@@ -3,16 +3,12 @@
  * SlayzoneDb (the harness's better-sqlite3-backed worker thread).
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/web-sessions.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   mintWebSession,
@@ -39,7 +35,7 @@ import {
 
 const h = await createTestHarness()
 
-await describe('mintWebSession / verifyWebSessionToken', () => {
+describe('mintWebSession / verifyWebSessionToken', () => {
   test('mints a szw_ token that verifies to the same userId + scopes', async () => {
     const minted = await mintWebSession(h.slayDb, { userId: 'u1', scopes: ['read', 'tasks'] })
     expect(minted.token.startsWith(WEB_SESSION_TOKEN_PREFIX)).toBe(true)
@@ -97,7 +93,7 @@ await describe('mintWebSession / verifyWebSessionToken', () => {
   })
 })
 
-await describe('idle refresh, capped at the absolute ceiling', () => {
+describe('idle refresh, capped at the absolute ceiling', () => {
   test('a use within the idle window slides expires_at forward', async () => {
     const created = 10_000_000
     const minted = await mintWebSession(h.slayDb, { userId: 'u6', scopes: ['read'], now: created })
@@ -146,7 +142,7 @@ await describe('idle refresh, capped at the absolute ceiling', () => {
   })
 })
 
-await describe('lifetime on a hub with Entra sign-in (O-8, T-12): 7 days absolute', () => {
+describe('lifetime on a hub with Entra sign-in (O-8, T-12): 7 days absolute', () => {
   const DAY = 24 * 60 * 60 * 1000
   const sso = SSO_WEB_SESSION_LIFETIME
 
@@ -203,7 +199,7 @@ await describe('lifetime on a hub with Entra sign-in (O-8, T-12): 7 days absolut
   })
 })
 
-await describe('listWebSessions / revokeAllWebSessions', () => {
+describe('listWebSessions / revokeAllWebSessions', () => {
   test('lists only live (unrevoked) sessions for a user, newest first', async () => {
     const a = await mintWebSession(h.slayDb, { userId: 'u8', scopes: ['read'], now: 1000 })
     const b = await mintWebSession(h.slayDb, { userId: 'u8', scopes: ['read'], now: 2000 })
@@ -225,7 +221,7 @@ await describe('listWebSessions / revokeAllWebSessions', () => {
   })
 })
 
-await describe('audit (T-03)', () => {
+describe('audit (T-03)', () => {
   test('mint, revoke and revoke-all write auth.web_session lines, never the token', async () => {
     const audit: Array<Record<string, unknown>> = []
     setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
@@ -267,7 +263,7 @@ await describe('audit (T-03)', () => {
   })
 })
 
-await describe('the browser cookie (T-13)', () => {
+describe('the browser cookie (T-13)', () => {
   test('Secure exactly when the public address is https: set and not loopback', () => {
     expect(webSessionCookieSecure('hub.normain.com')).toBe(true)
     expect(webSessionCookieSecure('hub.normain.com:8443')).toBe(true)
@@ -304,7 +300,7 @@ await describe('the browser cookie (T-13)', () => {
     expect(verified.ok && verified.scopes).toEqual(['read', 'tasks', 'agent'])
     const loopback = await mintBrowserWebSession(null, h.slayDb, 'u-cookie', { secure: false })
     expect(loopback.setCookie.includes('Secure')).toBe(false)
-    expect(loopback.setCookie.includes('HttpOnly')).toBe(true)
+    expect(loopback.setCookie).toContain('HttpOnly')
   })
 
   test('mintBrowserWebSession revokes the session the browser cookie still names', async () => {
@@ -338,7 +334,7 @@ await describe('the browser cookie (T-13)', () => {
   })
 })
 
-await describe('isWebSessionToken', () => {
+describe('isWebSessionToken', () => {
   test('recognizes the prefix without a DB round trip', () => {
     expect(isWebSessionToken('szw_abc123')).toBe(true)
     expect(isWebSessionToken('szw_')).toBe(false) // prefix alone, no body
@@ -347,4 +343,4 @@ await describe('isWebSessionToken', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

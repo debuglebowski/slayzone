@@ -16,10 +16,11 @@
  *   B17 reachable ⇒ the env secret matches one this hub generated earlier.
  * A leftover SLAYZONE_MODE is ignored: there is deliberately no rule for it.
  *
- * Pure Node → runs under plain `npx tsx`.
+ * Pure Node.
  *
- * Run with: npx tsx packages/apps/hub/src/boot-rules.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import {
   assertAuthLoaded,
   assertHubBootRules,
@@ -30,23 +31,6 @@ import {
   peekHubReachability,
   type HubBootInput
 } from './boot-rules.js'
-
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** What boot throws, as a message — or null when it boots. */
 function refusal(input: Partial<HubBootInput> & { env?: NodeJS.ProcessEnv }): string | null {
@@ -70,13 +54,16 @@ function assertRefuses(
   ...needles: string[]
 ): void {
   const msg = refusal(input)
-  assert(msg !== null, `expected boot to be refused, but it booted (${JSON.stringify(input.env)})`)
-  for (const n of needles) assert(msg.includes(n), `message should mention '${n}', got: ${msg}`)
+  expect(
+    msg,
+    `expected boot to be refused, but it booted (${JSON.stringify(input.env)})`
+  ).not.toBeNull()
+  for (const n of needles) expect(msg, `message should mention '${n}'`).toContain(n)
 }
 
 function assertBoots(input: Partial<HubBootInput> & { env?: NodeJS.ProcessEnv }): void {
   const msg = refusal(input)
-  assert(msg === null, `expected boot to succeed, but it was refused: ${msg}`)
+  expect(msg, 'expected boot to succeed, but it was refused').toBeNull()
 }
 
 /** A complete, valid configuration for a hub other machines can reach. */
@@ -97,13 +84,13 @@ test('defaults boot on loopback: login off, password on, SSO off, processes + in
     supervised: false,
     devSqlEnabled: false
   })
-  assert(settings.switches.requireLogin === false, 'login not required')
-  assert(settings.switches.enablePassword === true, 'password on')
-  assert(settings.switches.enableSso === false, 'SSO off')
-  assert(settings.switches.enableProcesses === true, 'processes on')
-  assert(settings.switches.enableIntegrations === true, 'integrations on')
-  assert(settings.reachable === false, 'a default hub is reachable only from this machine')
-  assert(settings.publicAddress === undefined, 'no public address')
+  expect(settings.switches.requireLogin, 'login not required').toBe(false)
+  expect(settings.switches.enablePassword, 'password on').toBe(true)
+  expect(settings.switches.enableSso, 'SSO off').toBe(false)
+  expect(settings.switches.enableProcesses, 'processes on').toBe(true)
+  expect(settings.switches.enableIntegrations, 'integrations on').toBe(true)
+  expect(settings.reachable, 'a default hub is reachable only from this machine').toBe(false)
+  expect(settings.publicAddress, 'no public address').toBeUndefined()
 })
 
 test('every loopback host boots with defaults (127.0.0.1, localhost, ::1)', () => {
@@ -176,9 +163,9 @@ test('B5: SLAYZONE_HUB_ADDRESS on the hub refuses boot with a "renamed to …" m
 
 test('B5: the message says what the old name means now, and the usual cause', () => {
   const msg = refusal({ env: { SLAYZONE_HUB_ADDRESS: '0.0.0.0:8080' } })
-  assert(msg !== null, 'refused')
-  assert(/connects to/.test(msg), `says it is now the dial-side name: ${msg}`)
-  assert(/task terminal/.test(msg), `names the inherited-from-a-terminal cause: ${msg}`)
+  expect(msg, 'refused').not.toBeNull()
+  expect(msg, `says it is now the dial-side name: ${msg}`).toMatch(/connects to/)
+  expect(msg, `names the inherited-from-a-terminal cause: ${msg}`).toMatch(/task terminal/)
 })
 
 test('B5: it refuses whatever the value is, and even alongside the new name', () => {
@@ -274,33 +261,34 @@ test('B9: supervised on 127.0.0.1 / localhost / ::1 is fine', () => {
 test('B9 does not apply to a hub that was not started by the app', () => {
   // (It still hits B1/B3 below — but not B9.)
   const msg = refusal({ supervised: false, host: OFF_LOOPBACK })
-  assert(msg !== null && !msg.includes('SLAYZONE_SUPERVISED'), `not a B9 message: ${msg}`)
+  expect(msg, `not a B9 message: ${msg}`).not.toBeNull()
+  expect(msg, `not a B9 message: ${msg}`).not.toContain('SLAYZONE_SUPERVISED')
 })
 
 console.log('\nhub boot rules: B13 — reachable from other machines')
 console.log('─'.repeat(40))
 
 test('B13: reachable = non-loopback listen address OR a public address', () => {
-  assert(isHubReachable('127.0.0.1', undefined) === false, 'loopback only')
-  assert(isHubReachable('localhost', undefined) === false, 'localhost only')
-  assert(isHubReachable('::1', undefined) === false, '::1 only')
-  assert(isHubReachable('0.0.0.0', undefined) === true, 'wildcard listen')
-  assert(isHubReachable('10.0.0.5', undefined) === true, 'LAN address')
-  assert(isHubReachable('::', undefined) === true, 'ipv6 wildcard')
-  assert(isHubReachable('127.0.0.1', 'hub.example.com') === true, 'loopback behind a proxy')
+  expect(isHubReachable('127.0.0.1', undefined), 'loopback only').toBe(false)
+  expect(isHubReachable('localhost', undefined), 'localhost only').toBe(false)
+  expect(isHubReachable('::1', undefined), '::1 only').toBe(false)
+  expect(isHubReachable('0.0.0.0', undefined), 'wildcard listen').toBe(true)
+  expect(isHubReachable('10.0.0.5', undefined), 'LAN address').toBe(true)
+  expect(isHubReachable('::', undefined), 'ipv6 wildcard').toBe(true)
+  expect(isHubReachable('127.0.0.1', 'hub.example.com'), 'loopback behind a proxy').toBe(true)
 })
 
 test('B13: peekHubReachability reads the same answer from env', () => {
-  assert(peekHubReachability({}) === false, 'defaults')
-  assert(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:8080' }) === true, 'listen')
-  assert(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:8080' }) === false, 'loop')
-  assert(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '[::1]:8080' }) === false, '[::1]')
-  assert(peekHubReachability({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'h.example' }) === true, 'public')
-  assert(peekHubReachability({ SLAYZONE_HUB_PUBLIC_ADDRESS: '  ' }) === false, 'blank public')
-  assert(
-    peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: 'not an address' }) === false,
+  expect(peekHubReachability({}), 'defaults').toBe(false)
+  expect(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:8080' }), 'listen').toBe(true)
+  expect(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:8080' }), 'loop').toBe(false)
+  expect(peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: '[::1]:8080' }), '[::1]').toBe(false)
+  expect(peekHubReachability({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'h.example' }), 'public').toBe(true)
+  expect(peekHubReachability({ SLAYZONE_HUB_PUBLIC_ADDRESS: '  ' }), 'blank public').toBe(false)
+  expect(
+    peekHubReachability({ SLAYZONE_HUB_LISTEN_ADDRESS: 'not an address' }),
     'a malformed listen address falls back to loopback, as getServerHost does'
-  )
+  ).toBe(false)
 })
 
 test('B13: the verdict is in the settings boot returns', () => {
@@ -310,8 +298,8 @@ test('B13: the verdict is in the settings boot returns', () => {
     supervised: false,
     devSqlEnabled: false
   })
-  assert(s.reachable === true, 'loopback + public address is reachable')
-  assert(s.publicAddress === 'hub.example.com', 'public address returned trimmed')
+  expect(s.reachable, 'loopback + public address is reachable').toBe(true)
+  expect(s.publicAddress, 'public address returned trimmed').toBe('hub.example.com')
 })
 
 console.log('\nhub boot rules: B1 — reachable ⇒ login required')
@@ -523,9 +511,10 @@ for (const missing of Object.keys(SSO_FULL)) {
     const env: NodeJS.ProcessEnv = { ...SSO_ON, ...SSO_FULL }
     delete env[missing]
     const msg = refusal({ env })
-    assert(msg !== null && msg.includes(missing), `names ${missing}: ${msg}`)
+    expect(msg, `names ${missing}: ${msg}`).not.toBeNull()
+    expect(msg, `names ${missing}: ${msg}`).toContain(missing)
     for (const other of Object.keys(SSO_FULL).filter((k) => k !== missing)) {
-      assert(!msg.includes(other), `does not blame ${other}: ${msg}`)
+      expect(msg, `does not blame ${other}: ${msg}`).not.toContain(other)
     }
   })
 }
@@ -555,9 +544,10 @@ test('B7: a client secret refuses boot (certificate only), without echoing it', 
   const msg = refusal({
     env: { ...SSO_ON, ...SSO_FULL, SLAYZONE_HUB_SSO_CLIENT_SECRET: 'very-secret-value' }
   })
-  assert(msg !== null && msg.includes('SLAYZONE_HUB_SSO_CLIENT_SECRET is not used'), `${msg}`)
-  assert(msg.includes('SLAYZONE_HUB_SSO_CERT_PATH'), `points at the certificate: ${msg}`)
-  assert(!msg.includes('very-secret-value'), `secret not echoed: ${msg}`)
+  expect(msg, `${msg}`).not.toBeNull()
+  expect(msg, `${msg}`).toContain('SLAYZONE_HUB_SSO_CLIENT_SECRET is not used')
+  expect(msg, `points at the certificate: ${msg}`).toContain('SLAYZONE_HUB_SSO_CERT_PATH')
+  expect(msg, `secret not echoed: ${msg}`).not.toContain('very-secret-value')
 })
 
 test('B7: SSO on with everything set boots; Entra sign-in is active, MFA required by default', () => {
@@ -567,10 +557,11 @@ test('B7: SSO on with everything set boots; Entra sign-in is active, MFA require
     supervised: false,
     devSqlEnabled: false
   })
-  assert(s.ssoActive, 'ssoActive')
-  assert(s.sso.tenantId === TENANT, 'tenant read')
-  assert(s.sso.certPath === '/run/sso/cert.pem' && s.sso.keyPath === '/run/sso/key.pem', 'paths')
-  assert(s.sso.requireMfa === true, 'MFA required unless switched off')
+  expect(s.ssoActive, 'ssoActive').toBeTruthy()
+  expect(s.sso.tenantId, 'tenant read').toBe(TENANT)
+  expect(s.sso.certPath, 'paths').toBe('/run/sso/cert.pem')
+  expect(s.sso.keyPath, 'paths').toBe('/run/sso/key.pem')
+  expect(s.sso.requireMfa, 'MFA required unless switched off').toBe(true)
 })
 
 test('B7: SLAYZONE_HUB_SSO_REQUIRE_MFA=0 turns the MFA check off; anything but 0|1 is B4', () => {
@@ -580,7 +571,7 @@ test('B7: SLAYZONE_HUB_SSO_REQUIRE_MFA=0 turns the MFA check off; anything but 0
     supervised: false,
     devSqlEnabled: false
   })
-  assert(s.sso.requireMfa === false, 'off')
+  expect(s.sso.requireMfa, 'off').toBe(false)
   let rule: string | null = null
   try {
     assertHubBootRules({
@@ -592,7 +583,7 @@ test('B7: SLAYZONE_HUB_SSO_REQUIRE_MFA=0 turns the MFA check off; anything but 0
   } catch (e) {
     rule = bootRefusalRule(e)
   }
-  assert(rule === 'B4', `B4, got ${rule}`)
+  expect(rule, `B4, got ${rule}`).toBe('B4')
 })
 
 test('B7 only applies when login is required: SSO on, login off, nothing set → boots, SSO inert', () => {
@@ -603,7 +594,7 @@ test('B7 only applies when login is required: SSO on, login off, nothing set →
     supervised: false,
     devSqlEnabled: false
   })
-  assert(!s.ssoActive, 'not active without login')
+  expect(s.ssoActive, 'not active without login').toBeFalsy()
 })
 
 test('the defaults: Entra sign-in is not active', () => {
@@ -613,7 +604,7 @@ test('the defaults: Entra sign-in is not active', () => {
     supervised: false,
     devSqlEnabled: false
   })
-  assert(!s.ssoActive, 'off')
+  expect(s.ssoActive, 'off').toBeFalsy()
 })
 
 console.log('\nhub boot rules: B7 — the certificate loads (assertSsoCredential)')
@@ -628,7 +619,8 @@ test('SSO off: nothing is loaded', () => {
     called = true
     return 'cred'
   })
-  assert(out === null && !called, 'no load')
+  expect(out, 'no load').toBeNull()
+  expect(called, 'no load').toBeFalsy()
 })
 
 test('SSO on: the loader gets both paths; ids come back lowercased with the credential', () => {
@@ -637,15 +629,12 @@ test('SSO on: the loader gets both paths; ids come back lowercased with the cred
     seen = paths
     return 'cred'
   })
-  assert(seen !== null, 'loaded')
-  assert(
-    JSON.stringify(seen) ===
-      JSON.stringify({ certPath: '/run/sso/cert.pem', keyPath: '/run/sso/key.pem' }),
-    `paths: ${JSON.stringify(seen)}`
-  )
-  assert(out?.credential === 'cred', 'credential')
-  assert(out.clientId === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', `lowercased: ${out.clientId}`)
-  assert(out.tenantId === TENANT && out.requireMfa === true, 'tenant + mfa')
+  expect(seen, 'loaded').not.toBeNull()
+  expect(seen, 'paths').toEqual({ certPath: '/run/sso/cert.pem', keyPath: '/run/sso/key.pem' })
+  expect(out?.credential, 'credential').toBe('cred')
+  expect(out?.clientId, `lowercased: ${out?.clientId}`).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+  expect(out?.tenantId, 'tenant + mfa').toBe(TENANT)
+  expect(out?.requireMfa, 'tenant + mfa').toBe(true)
 })
 
 test('SSO on: a credential that does not load is a B7 refusal naming the variables', () => {
@@ -657,10 +646,10 @@ test('SSO on: a credential that does not load is a B7 refusal naming the variabl
   } catch (e) {
     err = e
   }
-  assert(bootRefusalRule(err) === 'B7', `B7, got ${String(err)}`)
+  expect(bootRefusalRule(err), `B7, got ${String(err)}`).toBe('B7')
   const msg = (err as Error).message
-  assert(msg.includes('SLAYZONE_HUB_SSO_CERT_PATH / SLAYZONE_HUB_SSO_KEY_PATH'), msg)
-  assert(msg.includes('/run/sso/key.pem (ENOENT)'), msg)
+  expect(msg, msg).toContain('SLAYZONE_HUB_SSO_CERT_PATH / SLAYZONE_HUB_SSO_KEY_PATH')
+  expect(msg, msg).toContain('/run/sso/key.pem (ENOENT)')
 })
 
 console.log('\nhub boot rules: the Normain profile')
@@ -680,10 +669,14 @@ test('login on, password off, SSO on, processes + integrations off, public host:
     supervised: false,
     devSqlEnabled: false
   })
-  assert(s.switches.requireLogin && !s.switches.enablePassword && s.switches.enableSso, 'login')
-  assert(!s.switches.enableProcesses && !s.switches.enableIntegrations, 'nothing runs on the hub')
-  assert(s.reachable, 'reachable')
-  assert(s.ssoActive && s.sso.requireMfa, 'Entra sign-in on, MFA required')
+  expect(s.switches.requireLogin, 'login').toBeTruthy()
+  expect(s.switches.enablePassword, 'login').toBeFalsy()
+  expect(s.switches.enableSso, 'login').toBeTruthy()
+  expect(s.switches.enableProcesses, 'nothing runs on the hub').toBeFalsy()
+  expect(s.switches.enableIntegrations, 'nothing runs on the hub').toBeFalsy()
+  expect(s.reachable, 'reachable').toBeTruthy()
+  expect(s.ssoActive, 'Entra sign-in on, MFA required').toBeTruthy()
+  expect(s.sso.requireMfa, 'Entra sign-in on, MFA required').toBeTruthy()
 })
 
 console.log('\nhub boot rules: B11 — login ⇒ the auth database loads')
@@ -696,7 +689,8 @@ test('B11: login required and no auth instance refuses boot (fail closed)', () =
   } catch (e) {
     msg = e instanceof Error ? e.message : String(e)
   }
-  assert(msg.includes('SLAYZONE_HUB_REQUIRE_LOGIN=1') && /failed to initialize/.test(msg), msg)
+  expect(msg, msg).toContain('SLAYZONE_HUB_REQUIRE_LOGIN=1')
+  expect(msg, msg).toMatch(/failed to initialize/)
 })
 
 test('B11: login required and auth loaded boots', () => {
@@ -716,7 +710,7 @@ test('B11 is keyed on the switch, not on being started by the desktop app', () =
   } catch {
     threw = true
   }
-  assert(threw, 'login on ⇒ required, regardless of who started the hub')
+  expect(threw, 'login on ⇒ required, regardless of who started the hub').toBe(true)
   assertAuthLoaded(false, null)
 })
 
@@ -755,7 +749,7 @@ test('every refusal carries its rule number', () => {
   ]
   for (const [rule, input] of cases) {
     const got = refusedRule(input)
-    assert(got === rule, `${rule}: expected that rule, got ${got}`)
+    expect(got, `${rule}: expected that rule, got ${got}`).toBe(rule)
   }
   let b11: string | null = null
   try {
@@ -763,12 +757,12 @@ test('every refusal carries its rule number', () => {
   } catch (e) {
     b11 = bootRefusalRule(e)
   }
-  assert(b11 === 'B11', `B11: got ${b11}`)
+  expect(b11, `B11: got ${b11}`).toBe('B11')
 })
 
 test('an error that is not a boot rule has no rule', () => {
-  assert(bootRefusalRule(new Error('EADDRINUSE')) === null, 'a plain error')
-  assert(bootRefusalRule('boom') === null, 'a non-error')
+  expect(bootRefusalRule(new Error('EADDRINUSE')), 'a plain error').toBeNull()
+  expect(bootRefusalRule('boom'), 'a non-error').toBeNull()
 })
 
 console.log('\nB16: session retention period (T-23)')
@@ -803,9 +797,8 @@ test('B16: anything that is not a non-negative whole number refuses boot, naming
       'SLAYZONE_HUB_SESSION_RETENTION_DAYS',
       `'${v}'`
     )
-    assert(
-      refusedRule({ env: { SLAYZONE_HUB_SESSION_RETENTION_DAYS: v } }) === 'B16',
-      `'${v}' is B16`
+    expect(refusedRule({ env: { SLAYZONE_HUB_SESSION_RETENTION_DAYS: v } }), `'${v}' is B16`).toBe(
+      'B16'
     )
   }
 })
@@ -824,12 +817,12 @@ const kept = (over: Partial<Parameters<typeof assertKeptAuthSecret>[0]>) =>
   })
 
 test('B17: the same secret in env boots and reports the kept file', () => {
-  assert(kept({}) === 'kept', 'same value → kept')
+  expect(kept({}), 'same value → kept').toBe('kept')
 })
 
 test('B17: nothing to compare boots — no kept secret, or not reachable', () => {
-  assert(kept({ kept: undefined }) === 'none', 'no kept secret')
-  assert(kept({ reachable: false, envSecret: 'other' }) === 'none', 'loopback: never compared')
+  expect(kept({ kept: undefined }), 'no kept secret').toBe('none')
+  expect(kept({ reachable: false, envSecret: 'other' }), 'loopback: never compared').toBe('none')
 })
 
 test('B17: a different secret refuses boot, naming the file and both ways out, never a value', () => {
@@ -839,13 +832,13 @@ test('B17: a different secret refuses boot, naming the file and both ways out, n
   } catch (e) {
     err = e
   }
-  assert(bootRefusalRule(err) === 'B17', `B17, got ${String(err)}`)
+  expect(bootRefusalRule(err), `B17, got ${String(err)}`).toBe('B17')
   const message = err instanceof Error ? err.message : ''
   for (const needle of ['SLAYZONE_HUB_AUTH_SECRET', KEPT_PATH, 'delete the file']) {
-    assert(message.includes(needle), `mentions ${needle}: ${message}`)
+    expect(message, `mentions ${needle}: ${message}`).toContain(needle)
   }
-  assert(!message.includes(KEPT), 'the kept secret is not in the message')
-  assert(!message.includes('a-different-env-secret'), 'the env secret is not in the message')
+  expect(message, 'the kept secret is not in the message').not.toContain(KEPT)
+  expect(message, 'the env secret is not in the message').not.toContain('a-different-env-secret')
 })
 
 test('B17: compares the raw value — a trailing newline is a different secret', () => {
@@ -855,8 +848,5 @@ test('B17: compares the raw value — a trailing newline is a different secret',
   } catch (e) {
     rule = bootRefusalRule(e)
   }
-  assert(rule === 'B17', `B17, got ${rule}`)
+  expect(rule, `B17, got ${rule}`).toBe('B17')
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

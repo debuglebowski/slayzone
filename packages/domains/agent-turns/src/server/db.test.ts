@@ -1,13 +1,8 @@
 /**
  * agent-turns db unit tests (worktree-scoped, v119+)
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/server/db.test.ts
  */
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   insertTurn,
   deleteTurn,
@@ -46,7 +41,7 @@ function mk(over: Partial<Parameters<typeof insertTurn>[1]> = {}) {
   }
 }
 
-await describe('insertTurn / getTurn', () => {
+describe('insertTurn / getTurn', () => {
   test('inserts row with worktree_path and nullable task_id', async () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     const t = mk()
@@ -65,7 +60,7 @@ await describe('insertTurn / getTurn', () => {
   })
 })
 
-await describe('deleteTurn', () => {
+describe('deleteTurn', () => {
   test('removes row', async () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     const t = mk()
@@ -75,7 +70,7 @@ await describe('deleteTurn', () => {
   })
 })
 
-await describe('getLatestTurnForWorktree', () => {
+describe('getLatestTurnForWorktree', () => {
   test('null when no rows', async () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     expect(await getLatestTurnForWorktree(h.slayDb, wt)).toBeNull()
@@ -94,7 +89,7 @@ await describe('getLatestTurnForWorktree', () => {
   })
 })
 
-await describe('listTurnsForWorktree — paired with prev_snapshot_sha', () => {
+describe('listTurnsForWorktree — paired with prev_snapshot_sha', () => {
   test('rows oldest first w/ prev computed', async () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     await insertTurn(h.slayDb, mk({ created_at: 100, snapshot_sha: 's1' }))
@@ -129,7 +124,7 @@ await describe('listTurnsForWorktree — paired with prev_snapshot_sha', () => {
   })
 })
 
-await describe('findTurnsToPrune — per worktree', () => {
+describe('findTurnsToPrune — per worktree', () => {
   test('returns oldest excess only for the queried worktree', async () => {
     h.db.prepare('DELETE FROM agent_turns').run()
     const aIds: string[] = []
@@ -148,4 +143,4 @@ await describe('findTurnsToPrune — per worktree', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

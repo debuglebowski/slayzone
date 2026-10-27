@@ -8,13 +8,9 @@
  *
  * Run with the electron+loader runner (better-sqlite3 native ABI via the harness DB).
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  describe,
-  expect,
-  test
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { getComputer, registerComputer } from '@slayzone/computers/server'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
@@ -49,7 +45,7 @@ registerHubComputersRoute(app, {
 })
 const r = await mountRestApp(app)
 
-await describe('PATCH /api/hub/computers', () => {
+describe('PATCH /api/hub/computers', () => {
   test('400 without { id, revoked }', async () => {
     expect((await r.request('PATCH', '/api/hub/computers', { id: 'c-1' })).status).toBe(400)
     expect((await r.request('PATCH', '/api/hub/computers', { revoked: true })).status).toBe(400)
@@ -103,5 +99,7 @@ await describe('PATCH /api/hub/computers', () => {
   })
 })
 
-await r.close()
-h.cleanup()
+afterAll(async () => {
+  await r.close()
+  h.cleanup()
+})

@@ -1,7 +1,7 @@
 /**
  * worktrees tRPC router contract tests.
- * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/routers/worktrees.test.ts
  *
  * Two halves:
@@ -12,12 +12,12 @@
  *     are thin wrappers over already-tested ops; here we run them end-to-end over
  *     REAL git repos to lock the channel→proc + input-shape contract.
  *
- * Ordering matters: the top-level `test()` calls run SEQUENTIALLY in file order
- * and SHARE the git repo state built up across them (branches, commits, merges).
- * Do NOT reorder. Do NOT call h.cleanup() — it would close the DB before the
- * deferred async tests run.
+ * Ordering matters: the tests run SEQUENTIALLY in file order and SHARE the git
+ * repo state built up across them (branches, commits, merges). Repo-state steps
+ * between describes live in the next describe's beforeAll. Do NOT reorder.
  */
-import { createTestHarness, test, expect, describe } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, beforeAll } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { worktreesRouter } from './worktrees.js'
 import {
   getGitWatcher,
@@ -55,7 +55,7 @@ const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
 // ═══════════════════════════════════════════════════════════════════════════
 const stubCtx = { db: {} as never, dataRoot: '' }
 
-await describe('worktrees watcher subscriptions', () => {
+describe('worktrees watcher subscriptions', () => {
   test('onDiffChanged forwards each emit, stops after unsubscribe', async () => {
     const watcher = getGitWatcher()
     const caller = worktreesRouter.createCaller(stubCtx)
@@ -125,23 +125,28 @@ function git(cmd: string, cwd = repoPath): string {
 
 await caller.init({ path: repoPath })
 
-await describe('init', () => {
+describe('init', () => {
   test('repo was initialized', () => {
     expect(fs.existsSync(path.join(repoPath, '.git'))).toBe(true)
   })
 })
 
-// Create initial commit so HEAD exists
-fs.writeFileSync(path.join(repoPath, 'README.md'), '# Test')
-git('git add -A')
-git('git commit -m "initial"')
-// Tests below check out `main`; `caller.init` follows the machine's
-// init.defaultBranch, which is `master` on CI runners.
-git('git branch -M main')
-
 // --- isGitRepo ---
 
-await describe('isGitRepo', () => {
+describe('isGitRepo', () => {
+  // Repo-state steps between describes run in a beforeAll of the NEXT describe:
+  // vitest runs top-level code at collection (before every test), so this keeps
+  // each step after the tests above it, as the old inline runner did.
+  beforeAll(() => {
+    // Create initial commit so HEAD exists
+    fs.writeFileSync(path.join(repoPath, 'README.md'), '# Test')
+    git('git add -A')
+    git('git commit -m "initial"')
+    // Tests below check out `main`; `caller.init` follows the machine's
+    // init.defaultBranch, which is `master` on CI runners.
+    git('git branch -M main')
+  })
+
   test('returns true for git repo', async () => {
     expect(await caller.isGitRepo({ path: repoPath })).toBe(true)
   })
@@ -155,7 +160,7 @@ await describe('isGitRepo', () => {
 
 // --- getCurrentBranch ---
 
-await describe('getCurrentBranch', () => {
+describe('getCurrentBranch', () => {
   test('returns current branch name', async () => {
     const branch = await caller.getCurrentBranch({ path: repoPath })
     expect(branch).toBeTruthy()
@@ -164,7 +169,7 @@ await describe('getCurrentBranch', () => {
 
 // --- hasUncommittedChanges ---
 
-await describe('hasUncommittedChanges', () => {
+describe('hasUncommittedChanges', () => {
   test('returns false when clean', async () => {
     expect(await caller.hasUncommittedChanges({ path: repoPath })).toBe(false)
   })
@@ -178,7 +183,7 @@ await describe('hasUncommittedChanges', () => {
 
 // --- detectWorktrees ---
 
-await describe('detectWorktrees', () => {
+describe('detectWorktrees', () => {
   test('detects main worktree', async () => {
     const worktrees = (await caller.detectWorktrees({ repoPath })) as {
       path: string
@@ -193,7 +198,7 @@ await describe('detectWorktrees', () => {
 
 // --- createWorktree (direct op) + removeWorktree (proc) ---
 
-await describe('createWorktree', () => {
+describe('createWorktree', () => {
   test('creates worktree with new branch', async () => {
     const wtPath = path.join(root, 'wt-1')
     await createWorktree(repoPath, wtPath, 'feature-1')
@@ -220,7 +225,7 @@ await describe('createWorktree', () => {
 
 // --- .slay/worktree-setup.sh (direct op runWorktreeSetupScriptSync) ---
 
-await describe('worktree setup script', () => {
+describe('worktree setup script', () => {
   test('runs .slay/worktree-setup.sh with env vars', async () => {
     fs.mkdirSync(path.join(repoPath, '.slay'), { recursive: true })
     fs.writeFileSync(
@@ -258,7 +263,7 @@ await describe('worktree setup script', () => {
   })
 })
 
-await describe('removeWorktree', () => {
+describe('removeWorktree', () => {
   test('removes worktree', async () => {
     const wtPath = path.join(root, 'wt-1')
     await caller.removeWorktree({ repoPath, worktreePath: wtPath })
@@ -269,7 +274,7 @@ await describe('removeWorktree', () => {
 // --- resolveSubmoduleInitBehavior (direct op — no router proc) ---
 // Op is async over SlayzoneDb, so drive it with h.slayDb (NOT raw h.db).
 
-await describe('resolveSubmoduleInitBehavior', () => {
+describe('resolveSubmoduleInitBehavior', () => {
   test('defaults to auto when nothing set', async () => {
     expect(await resolveSubmoduleInitBehavior(h.slayDb)).toBe('auto')
   })
@@ -304,7 +309,7 @@ await describe('resolveSubmoduleInitBehavior', () => {
 
 // --- initSubmodules (direct op initSubmodulesSync) ---
 
-await describe('initSubmodules', () => {
+describe('initSubmodules', () => {
   test('returns no-gitmodules when .gitmodules absent', () => {
     const wtPath = path.join(root, 'wt-nosubmod')
     fs.mkdirSync(wtPath)
@@ -345,12 +350,14 @@ await describe('initSubmodules', () => {
 
 // --- Staging operations ---
 
-// Create a feature branch for staging tests
-git('git checkout -b staging-test')
-fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'staged content')
-fs.writeFileSync(path.join(repoPath, 'unstaged.txt'), 'unstaged content')
+describe('stageFile', () => {
+  beforeAll(() => {
+    // Create a feature branch for staging tests
+    git('git checkout -b staging-test')
+    fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'staged content')
+    fs.writeFileSync(path.join(repoPath, 'unstaged.txt'), 'unstaged content')
+  })
 
-await describe('stageFile', () => {
   test('stages a file', async () => {
     await caller.stageFile({ path: repoPath, filePath: 'staged.txt' })
     const status = git('git status --porcelain')
@@ -358,7 +365,7 @@ await describe('stageFile', () => {
   })
 })
 
-await describe('unstageFile', () => {
+describe('unstageFile', () => {
   test('unstages a file', async () => {
     await caller.unstageFile({ path: repoPath, filePath: 'staged.txt' })
     const status = git('git status --porcelain')
@@ -366,7 +373,7 @@ await describe('unstageFile', () => {
   })
 })
 
-await describe('stageAll', () => {
+describe('stageAll', () => {
   test('stages all files', async () => {
     await caller.stageAll({ path: repoPath })
     const status = git('git status --porcelain')
@@ -376,7 +383,7 @@ await describe('stageAll', () => {
   })
 })
 
-await describe('unstageAll', () => {
+describe('unstageAll', () => {
   test('unstages all files', async () => {
     await caller.unstageAll({ path: repoPath })
     const status = git('git status --porcelain')
@@ -384,7 +391,7 @@ await describe('unstageAll', () => {
   })
 })
 
-await describe('discardFile', () => {
+describe('discardFile', () => {
   test('discards changes to tracked file', async () => {
     // Stage + commit a file first, then modify it
     git('git add staged.txt unstaged.txt')
@@ -398,7 +405,7 @@ await describe('discardFile', () => {
 
 // --- Diff operations ---
 
-await describe('getWorkingDiff', () => {
+describe('getWorkingDiff', () => {
   test('returns diff snapshot', async () => {
     // Make a change
     fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'diff test')
@@ -430,7 +437,7 @@ await describe('getWorkingDiff', () => {
   })
 })
 
-await describe('getUntrackedFileDiff', () => {
+describe('getUntrackedFileDiff', () => {
   test('returns diff for untracked file', async () => {
     fs.writeFileSync(path.join(repoPath, 'new-untracked.txt'), 'hello')
     const diff = (await caller.getUntrackedFileDiff({
@@ -471,7 +478,7 @@ await describe('getUntrackedFileDiff', () => {
 
 // --- Commit ---
 
-await describe('commitFiles', () => {
+describe('commitFiles', () => {
   test('creates a commit', async () => {
     fs.writeFileSync(path.join(repoPath, 'commit-test.txt'), 'commit me')
     git('git add commit-test.txt')
@@ -483,21 +490,26 @@ await describe('commitFiles', () => {
 
 // --- Merge operations ---
 
-await describe('isMergeInProgress', () => {
+describe('isMergeInProgress', () => {
   test('returns false when no merge', async () => {
     expect(await caller.isMergeInProgress({ path: repoPath })).toBe(false)
   })
 })
 
-// Set up branches for merge test
-const mainBranch = git('git branch --show-current')
-git('git checkout -b merge-source')
-fs.writeFileSync(path.join(repoPath, 'merge-file.txt'), 'source content')
-git('git add merge-file.txt')
-git('git commit -m "source branch commit"')
-git(`git checkout ${mainBranch}`)
+// Set in the beforeAll below (the branch checked out once the tests above ran).
+let mainBranch = ''
 
-await describe('mergeIntoParent', () => {
+describe('mergeIntoParent', () => {
+  beforeAll(() => {
+    // Set up branches for merge test
+    mainBranch = git('git branch --show-current')
+    git('git checkout -b merge-source')
+    fs.writeFileSync(path.join(repoPath, 'merge-file.txt'), 'source content')
+    git('git add merge-file.txt')
+    git('git commit -m "source branch commit"')
+    git(`git checkout ${mainBranch}`)
+  })
+
   test('merges clean branch', async () => {
     const result = (await caller.mergeIntoParent({
       projectPath: repoPath,
@@ -516,19 +528,21 @@ await describe('mergeIntoParent', () => {
   })
 })
 
-// Set up conflict scenario
-git('git checkout -b conflict-a')
-fs.writeFileSync(path.join(repoPath, 'conflict.txt'), 'version A')
-git('git add conflict.txt')
-git('git commit -m "conflict A"')
-git(`git checkout ${mainBranch}`)
-git('git checkout -b conflict-b')
-fs.writeFileSync(path.join(repoPath, 'conflict.txt'), 'version B')
-git('git add conflict.txt')
-git('git commit -m "conflict B"')
-git('git checkout conflict-a')
+describe('mergeIntoParent (conflict)', () => {
+  beforeAll(() => {
+    // Set up conflict scenario
+    git('git checkout -b conflict-a')
+    fs.writeFileSync(path.join(repoPath, 'conflict.txt'), 'version A')
+    git('git add conflict.txt')
+    git('git commit -m "conflict A"')
+    git(`git checkout ${mainBranch}`)
+    git('git checkout -b conflict-b')
+    fs.writeFileSync(path.join(repoPath, 'conflict.txt'), 'version B')
+    git('git add conflict.txt')
+    git('git commit -m "conflict B"')
+    git('git checkout conflict-a')
+  })
 
-await describe('mergeIntoParent (conflict)', () => {
   test('detects merge conflicts', async () => {
     const result = (await caller.mergeIntoParent({
       projectPath: repoPath,
@@ -544,14 +558,14 @@ await describe('mergeIntoParent (conflict)', () => {
   })
 })
 
-await describe('getConflictedFiles', () => {
+describe('getConflictedFiles', () => {
   test('lists conflicted files', async () => {
     const files = (await caller.getConflictedFiles({ path: repoPath })) as string[]
     expect(files).toContain('conflict.txt')
   })
 })
 
-await describe('getConflictContent', () => {
+describe('getConflictContent', () => {
   test('returns base/ours/theirs/merged', async () => {
     const content = (await caller.getConflictContent({
       repoPath,
@@ -570,7 +584,7 @@ await describe('getConflictContent', () => {
   })
 })
 
-await describe('writeResolvedFile', () => {
+describe('writeResolvedFile', () => {
   test('writes resolved content', async () => {
     await caller.writeResolvedFile({
       repoPath,
@@ -582,7 +596,7 @@ await describe('writeResolvedFile', () => {
   })
 })
 
-await describe('abortMerge', () => {
+describe('abortMerge', () => {
   test('aborts merge in progress', async () => {
     await caller.abortMerge({ path: repoPath })
     expect(await caller.isMergeInProgress({ path: repoPath })).toBe(false)
@@ -591,7 +605,7 @@ await describe('abortMerge', () => {
 
 // --- mergeWithAI (logic only, no AI call) ---
 
-await describe('mergeWithAI', () => {
+describe('mergeWithAI', () => {
   test('returns success on clean merge', async () => {
     // Create a branch that merges cleanly
     git(`git checkout ${mainBranch}`)
@@ -649,7 +663,7 @@ await describe('mergeWithAI', () => {
 
 // --- getWorkingDiff with fromSha/toSha (Turns range mode) ---
 
-await describe('getWorkingDiff range mode', () => {
+describe('getWorkingDiff range mode', () => {
   test('diff between two arbitrary SHAs returns scoped patch + file list', async () => {
     const sha1 = git('git rev-parse HEAD')
     fs.writeFileSync(path.join(repoPath, 'range-a.txt'), 'first turn change')
@@ -704,7 +718,7 @@ await describe('getWorkingDiff range mode', () => {
 // analyzeConflict picks up `_mock` automatically. Drive return values via _mock.
 // ═══════════════════════════════════════════════════════════════════════════
 
-await describe('analyzeConflict', () => {
+describe('analyzeConflict', () => {
   test('parses SUMMARY + ---RESOLUTION--- correctly', async () => {
     _mock.runAiCommand = async () =>
       'SUMMARY: Branch A added a header, branch B changed the footer. They conflict in the middle section.\n---RESOLUTION---\nresolved line 1\nresolved line 2'
@@ -839,7 +853,7 @@ fs.writeFileSync(path.join(cfRepo, 'app.log'), 'log line')
 fs.mkdirSync(path.join(cfRepo, 'build'), { recursive: true })
 fs.writeFileSync(path.join(cfRepo, 'build', 'output.js'), 'output')
 
-await describe('getIgnoredFileTree', () => {
+describe('getIgnoredFileTree', () => {
   test('returns top-level nodes', async () => {
     const tree = await getIgnoredFileTree(cfRepo)
     expect(tree.length).toBe(3) // build/, dist/, app.log
@@ -907,7 +921,7 @@ await describe('getIgnoredFileTree', () => {
   })
 })
 
-await describe('copyIgnoredFiles', () => {
+describe('copyIgnoredFiles', () => {
   test('copies selected directory to worktree', async () => {
     const wtPath = path.join(cfRoot, 'wt-copy-1')
     await createWorktree(cfRepo, wtPath, 'copy-test-1')
@@ -1067,7 +1081,7 @@ await describe('copyIgnoredFiles', () => {
 
 // --- resolveCopyBehavior (router proc — uses ctx.db = h.slayDb) ---
 
-await describe('resolveCopyBehavior', () => {
+describe('resolveCopyBehavior', () => {
   test('returns ask by default', async () => {
     const result = await caller.resolveCopyBehavior({})
     expect(result.behavior).toBe('ask')
@@ -1130,7 +1144,7 @@ await describe('resolveCopyBehavior', () => {
 
 // --- getIgnoredFileTree + copyIgnoredFiles via router procs ---
 
-await describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
+describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
   test('getIgnoredFileTree proc', async () => {
     const tree = (await caller.getIgnoredFileTree({ repoPath: cfRepo })) as {
       name: string
@@ -1163,7 +1177,5 @@ await describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
   })
 })
 
-// NOTE: intentionally NO h.cleanup() — closing the DB here would break any
-// still-deferred async test (sequential queue). The harness tmp dirs are
-// OS-temp scratch; the process exits right after.
-console.log('\nDone')
+// NOTE: intentionally NO h.cleanup() — the harness tmp dirs are OS-temp scratch;
+// the worker process exits right after.

@@ -7,12 +7,10 @@
  * an unchecked gate is one that quietly stops working after some future refactor
  * moves the env read around.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/dev-sql.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
-import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { handleDevSql, isDevSqlEnabled, awaitUsableComputer, DEV_SQL_PATH } from './dev-sql.js'
 
 const h = await createTestHarness()

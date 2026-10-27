@@ -22,13 +22,9 @@
  * exactly why that decision is a pure exported function rather than reachable
  * through a request (same reasoning as the sibling `hub/users.ts` suite).
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { decodeJoinToken } from '@slayzone/computers/server'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
@@ -85,7 +81,7 @@ function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['rest
   return mountRestApp(app)
 }
 
-await describe('POST /api/computers/join-token', () => {
+describe('POST /api/computers/join-token', () => {
   test('computer ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
     const rest = await mount(boundComputers)
     try {
@@ -234,7 +230,7 @@ await describe('POST /api/computers/join-token', () => {
 
 // T-20 (O-5): on a hub with login an admin mints FOR a named, enabled user, for at most
 // 1 hour. Each refusal is a 400 with a stable code, and nothing is minted.
-await describe('who the token is for, and for how long (T-20)', () => {
+describe('who the token is for, and for how long (T-20)', () => {
   const admin = loginHub({ userId: 'u-admin', role: 'admin', scopes: ['full'] })
   const refused = async (
     restAuth: RestApiDeps['restAuth'] | undefined,
@@ -307,7 +303,7 @@ await describe('who the token is for, and for how long (T-20)', () => {
   })
 })
 
-await describe('audit (T-03)', () => {
+describe('audit (T-03)', () => {
   test('a refusal writes authz.denied; a mint is written as the verified caller', async () => {
     const audit: Array<Record<string, unknown>> = []
     setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
@@ -387,7 +383,7 @@ await describe('audit (T-03)', () => {
  * reverse proxy silently erases. Loopback is authoritative ONLY when there is no
  * auth to check at all.
  */
-await describe('joinTokenAuthDecision', () => {
+describe('joinTokenAuthDecision', () => {
   test('auth NOT required (supervised): loopback mints, off-box is forbidden', () => {
     expect(
       joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: true })
@@ -448,7 +444,7 @@ await describe('joinTokenAuthDecision', () => {
 
 // Exported so the peer classification is asserted directly — the harness binds
 // 127.0.0.1, so no request it can make is ever off-box.
-await describe('isLoopbackAddress', () => {
+describe('isLoopbackAddress', () => {
   test('accepts every loopback form node reports', () => {
     expect(isLoopbackAddress('127.0.0.1')).toBe(true)
     expect(isLoopbackAddress('127.0.0.53')).toBe(true)
@@ -464,4 +460,6 @@ await describe('isLoopbackAddress', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => {
+  h.cleanup()
+})

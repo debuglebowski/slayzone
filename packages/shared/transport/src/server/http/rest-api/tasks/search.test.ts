@@ -1,14 +1,10 @@
 /**
  * REST: GET /api/tasks/search contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/search.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/search.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerSearchTasksRoute } from './search.js'
 
@@ -42,7 +38,7 @@ const rest = await mountRestApp(app)
 
 type SearchResponse = { ok: boolean; data: { id: string; title: string }[] }
 
-await describe('GET /api/tasks/search', () => {
+describe('GET /api/tasks/search', () => {
   test('happy: case-insensitive title + description match, deleted/temp excluded', async () => {
     const res = await rest.request<SearchResponse>('GET', '/api/tasks/search?q=login')
     expect(res.status).toBe(200)
@@ -69,5 +65,7 @@ await describe('GET /api/tasks/search', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

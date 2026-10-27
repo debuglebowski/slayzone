@@ -15,13 +15,11 @@
  * `setOnHostKillHandler` is exported from `@slayzone/terminal/server` and needs no
  * Electron; the only reason this lived on the host is that the `db` handle did.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/host-kill.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { wireHostKillStamp } from './host-kill.js'
 
 const h = await createTestHarness()

@@ -5,7 +5,7 @@
  * its loading overlay on missed did-navigate/dom-ready.
  */
 import { EventEmitter } from 'node:events'
-import { test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
 import { appLevelRouter } from './app.js'
 import { setAppDeps, type AppDeps } from '../app-deps.js'
 

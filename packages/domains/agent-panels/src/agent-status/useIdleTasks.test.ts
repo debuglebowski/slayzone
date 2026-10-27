@@ -1,7 +1,7 @@
 /**
  * Idle task selection tests.
- * Run with: npx tsx packages/apps/app/src/renderer/src/components/agent-status/useIdleTasks.test.ts
  */
+import { expect, test } from 'vitest'
 import { buildIdleTasks, buildActiveSessionTaskIds } from './useIdleTasks'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
@@ -12,36 +12,6 @@ interface AgentSessionRow {
   mode: string
   lastOutputTime: number
   state: TerminalState
-}
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    },
-    toEqual(expected: T) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    }
-  }
 }
 
 function makeTask(id: string, projectId: string, title: string): Task {
@@ -313,6 +283,3 @@ test('buildActiveSessionTaskIds: empty input → empty set', () => {
   const set = buildActiveSessionTaskIds([], [])
   expect(set.size).toBe(0)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

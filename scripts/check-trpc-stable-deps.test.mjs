@@ -3,8 +3,9 @@
  * useMutation() result object bare in a hook dep array — by `*Mutation` name and by
  * binding, one-line and multi-line — and stay quiet on the stable forms.
  *
- * Run with: npx tsx scripts/check-trpc-stable-deps.test.mjs
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
+import { test, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,21 +13,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), 'check-trpc-stable-deps.sh')
-
-let passed = 0
-let failed = 0
-
-function test(name, fn) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
 
 /** Runs the guard over one fixture file; returns { status, hits: ['<line>:<text>'] }. */
 function check(source, name = 'Fixture.tsx') {
@@ -47,17 +33,14 @@ function check(source, name = 'Fixture.tsx') {
 
 function flags(source, lines) {
   const r = check(source)
-  if (r.status !== 1) throw new Error(`expected exit 1, got ${r.status}\n${r.out}`)
+  expect(r.status, r.out).toBe(1)
   const got = r.hits.map((h) => Number(h.split(':')[0]))
-  if (JSON.stringify(got) !== JSON.stringify(lines))
-    throw new Error(
-      `expected hits on lines ${JSON.stringify(lines)}, got ${JSON.stringify(got)}\n${r.out}`
-    )
+  expect(got, r.out).toEqual(lines)
 }
 
 function passes(source) {
   const r = check(source)
-  if (r.status !== 0) throw new Error(`expected exit 0, got ${r.status}\n${r.out}`)
+  expect(r.status, r.out).toBe(0)
 }
 
 const TANSTACK = `import { useMutation } from '@tanstack/react-query'\n`
@@ -217,6 +200,3 @@ test('a line both passes catch is reported once', () => {
     [4]
   )
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

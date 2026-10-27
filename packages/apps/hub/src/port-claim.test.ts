@@ -9,37 +9,15 @@
  * value that still answers /health.
  *
  * Pure Node (real ephemeral HTTP servers, an in-memory fake db) — no native
- * deps, runs under plain `npx tsx`.
+ * deps.
  *
- * Run with: npx tsx packages/apps/hub/src/port-claim.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/hub/src/port-claim.test.ts
  */
 import http from 'node:http'
 import net from 'node:net'
+import { expect, test } from 'vitest'
 import { claimServerPort } from './port-claim.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => Promise<void>): Promise<void> {
-  return fn()
-    .then(() => {
-      console.log(`  ✓ ${name}`)
-      passed++
-    })
-    .catch((e) => {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${e instanceof Error ? e.message : e}`)
-      failed++
-    })
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (actual !== expected)
-    throw new Error(`${msg}: expected ${String(expected)}, got ${String(actual)}`)
-}
 
 /** In-memory fake covering only what claimServerPort needs. */
 function fakeDb(initial?: string): {
@@ -89,49 +67,39 @@ function findDeadPort(): Promise<number> {
   })
 }
 
-async function main(): Promise<void> {
-  console.log('\nclaimServerPort (non-clobber guard)')
-  console.log('─'.repeat(40))
+test('no existing value ⇒ writes freely', async () => {
+  const db = fakeDb(undefined)
+  const logs: string[] = []
+  await claimServerPort(db, '127.0.0.1', 4001, (l) => logs.push(l))
+  expect(db.written.length, 'one write').toBe(1)
+  expect(db.written[0], 'wrote the new port').toBe('4001')
+})
 
-  await test('no existing value ⇒ writes freely', async () => {
-    const db = fakeDb(undefined)
+test('existing value === actualPort ⇒ writes (no-op value, still fine)', async () => {
+  const db = fakeDb('4001')
+  await claimServerPort(db, '127.0.0.1', 4001, () => {})
+  expect(db.written[0], 'rewrote same value').toBe('4001')
+})
+
+test('existing value points at a DEAD port ⇒ safe to overwrite', async () => {
+  const deadPort = await findDeadPort()
+  const db = fakeDb(String(deadPort))
+  await claimServerPort(db, '127.0.0.1', 4002, () => {})
+  expect(db.written[0], 'overwrote — old value was not alive').toBe('4002')
+})
+
+test('existing value points at a LIVE sidecar ⇒ refuses to clobber', async () => {
+  const alive = await startFakeAlive()
+  try {
+    const db = fakeDb(String(alive.port))
     const logs: string[] = []
-    await claimServerPort(db, '127.0.0.1', 4001, (l) => logs.push(l))
-    assertEq(db.written.length, 1, 'one write')
-    assertEq(db.written[0], '4001', 'wrote the new port')
-  })
-
-  await test('existing value === actualPort ⇒ writes (no-op value, still fine)', async () => {
-    const db = fakeDb('4001')
-    await claimServerPort(db, '127.0.0.1', 4001, () => {})
-    assertEq(db.written[0], '4001', 'rewrote same value')
-  })
-
-  await test('existing value points at a DEAD port ⇒ safe to overwrite', async () => {
-    const deadPort = await findDeadPort()
-    const db = fakeDb(String(deadPort))
-    await claimServerPort(db, '127.0.0.1', 4002, () => {})
-    assertEq(db.written[0], '4002', 'overwrote — old value was not alive')
-  })
-
-  await test('existing value points at a LIVE sidecar ⇒ refuses to clobber', async () => {
-    const alive = await startFakeAlive()
-    try {
-      const db = fakeDb(String(alive.port))
-      const logs: string[] = []
-      await claimServerPort(db, '127.0.0.1', 4003, (l) => logs.push(l))
-      assertEq(db.written.length, 0, 'did NOT write — a live sidecar already owns the key')
-      assert(
-        logs.some((l) => l.includes('refus') || l.includes('alive')),
-        'logged a loud reason for refusing'
-      )
-    } finally {
-      await alive.close()
-    }
-  })
-
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+    await claimServerPort(db, '127.0.0.1', 4003, (l) => logs.push(l))
+    expect(db.written.length, 'did NOT write — a live sidecar already owns the key').toBe(0)
+    expect(
+      logs.some((l) => l.includes('refus') || l.includes('alive')),
+      'logged a loud reason for refusing'
+    ).toBe(true)
+  } finally {
+    await alive.close()
+  }
+})

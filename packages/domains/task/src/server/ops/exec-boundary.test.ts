@@ -11,7 +11,8 @@
  */
 import { tmpdir } from 'node:os'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import {
   cleanupTaskFull,
   configureTaskRuntimeAdapters,

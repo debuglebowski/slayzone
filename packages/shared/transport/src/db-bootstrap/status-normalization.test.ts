@@ -1,44 +1,13 @@
 /**
  * Startup status normalization tests
- * Run with: npx tsx packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects/shared'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
 import { normalizeProjectStatusData } from './status-normalization.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (error) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    },
-    toBeNull() {
-      if (actual !== null) throw new Error(`Expected null, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: unknown) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    }
-  }
-}
 
 function createDb(): Database.Database {
   const db = new Database(':memory:')
@@ -87,144 +56,141 @@ function hasProjectColumn(db: Database.Database, columnName: string): boolean {
   return columns.some((column) => column.name === columnName)
 }
 
-console.log('\nnormalizeProjectStatusData')
+describe('normalizeProjectStatusData', () => {
+  test('normalizes stale columns JSON and remaps unknown task statuses', () => {
+    const db = createDb()
+    try {
+      const projectId = crypto.randomUUID()
+      const customColumns: ColumnConfig[] = [
+        { id: 'doing', label: 'Doing', color: 'blue', position: 4, category: 'started' },
+        { id: 'queued', label: 'Queued', color: 'gray', position: 1, category: 'unstarted' },
+        { id: 'done_custom', label: 'Done', color: 'green', position: 7, category: 'completed' }
+      ]
+      insertProject(db, projectId, JSON.stringify(customColumns))
+      insertTask(db, 'task-known', projectId, 'doing')
+      insertTask(db, 'task-unknown', projectId, 'not_a_real_status')
 
-test('normalizes stale columns JSON and remaps unknown task statuses', () => {
-  const db = createDb()
-  try {
-    const projectId = crypto.randomUUID()
-    const customColumns: ColumnConfig[] = [
-      { id: 'doing', label: 'Doing', color: 'blue', position: 4, category: 'started' },
-      { id: 'queued', label: 'Queued', color: 'gray', position: 1, category: 'unstarted' },
-      { id: 'done_custom', label: 'Done', color: 'green', position: 7, category: 'completed' }
-    ]
-    insertProject(db, projectId, JSON.stringify(customColumns))
-    insertTask(db, 'task-known', projectId, 'doing')
-    insertTask(db, 'task-unknown', projectId, 'not_a_real_status')
+      normalizeProjectStatusData(db)
 
-    normalizeProjectStatusData(db)
+      const projectRow = db
+        .prepare('SELECT columns_config FROM projects WHERE id = ?')
+        .get(projectId) as { columns_config: string | null }
+      const normalizedColumns = JSON.parse(projectRow.columns_config || '[]') as ColumnConfig[]
+      expect(normalizedColumns).toEqual([
+        { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
+        { id: 'done_custom', label: 'Done', color: 'green', position: 2, category: 'completed' }
+      ])
 
-    const projectRow = db
-      .prepare('SELECT columns_config FROM projects WHERE id = ?')
-      .get(projectId) as { columns_config: string | null }
-    const normalizedColumns = JSON.parse(projectRow.columns_config || '[]') as ColumnConfig[]
-    expect(normalizedColumns).toEqual([
-      { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
-      { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
-      { id: 'done_custom', label: 'Done', color: 'green', position: 2, category: 'completed' }
-    ])
+      const statuses = db
+        .prepare('SELECT id, status FROM tasks WHERE project_id = ? ORDER BY id')
+        .all(projectId) as Array<{ id: string; status: string }>
+      expect(statuses).toEqual([
+        { id: 'task-known', status: 'doing' },
+        { id: 'task-unknown', status: 'queued' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
 
-    const statuses = db
-      .prepare('SELECT id, status FROM tasks WHERE project_id = ? ORDER BY id')
-      .all(projectId) as Array<{ id: string; status: string }>
-    expect(statuses).toEqual([
-      { id: 'task-known', status: 'doing' },
-      { id: 'task-unknown', status: 'queued' }
-    ])
-  } finally {
-    db.close()
-  }
+  test('replaces invalid columns JSON with defaults and remaps unknown statuses', () => {
+    const db = createDb()
+    try {
+      const projectId = crypto.randomUUID()
+      insertProject(db, projectId, '{"invalid":true}')
+      insertTask(db, 'task-invalid-columns', projectId, 'custom_unknown')
+
+      normalizeProjectStatusData(db)
+
+      const projectRow = db
+        .prepare('SELECT columns_config FROM projects WHERE id = ?')
+        .get(projectId) as { columns_config: string | null }
+      expect(projectRow.columns_config).toEqual(JSON.stringify(DEFAULT_COLUMNS))
+
+      const taskRow = db
+        .prepare('SELECT status FROM tasks WHERE id = ?')
+        .get('task-invalid-columns') as { status: string }
+      expect(taskRow.status).toBe('inbox')
+    } finally {
+      db.close()
+    }
+  })
+
+  test('keeps null columns_config as null while still remapping unknown statuses', () => {
+    const db = createDb()
+    try {
+      const projectId = crypto.randomUUID()
+      insertProject(db, projectId, null)
+      insertTask(db, 'task-null-columns', projectId, 'ghost_status')
+
+      normalizeProjectStatusData(db)
+
+      const projectRow = db
+        .prepare('SELECT columns_config FROM projects WHERE id = ?')
+        .get(projectId) as { columns_config: string | null }
+      expect(projectRow.columns_config).toBeNull()
+
+      const taskRow = db
+        .prepare('SELECT status FROM tasks WHERE id = ?')
+        .get('task-null-columns') as { status: string }
+      expect(taskRow.status).toBe('inbox')
+    } finally {
+      db.close()
+    }
+  })
+
+  test('no-ops when projects.columns_config is missing', () => {
+    const db = createDb()
+    try {
+      const projectId = crypto.randomUUID()
+      insertProject(db, projectId, null)
+      insertTask(db, 'task-missing-column', projectId, 'ghost_status')
+
+      db.exec('ALTER TABLE projects DROP COLUMN columns_config')
+      normalizeProjectStatusData(db)
+
+      const taskRow = db
+        .prepare('SELECT status FROM tasks WHERE id = ?')
+        .get('task-missing-column') as { status: string }
+      expect(taskRow.status).toBe('ghost_status')
+    } finally {
+      db.close()
+    }
+  })
+
+  test('repairs drifted schema where user_version=42 but columns_config is missing', () => {
+    // v42 claimed to have added projects.columns_config but the column is absent —
+    // the drift v45 exists to repair. Boot from there and go all the way to latest.
+    const db = dbAtVersion(44)
+    try {
+      db.exec('ALTER TABLE projects DROP COLUMN columns_config')
+      expect(hasProjectColumn(db, 'columns_config')).toBe(false)
+
+      db.pragma('user_version = 42')
+      runMigrations(db)
+
+      expect(hasProjectColumn(db, 'columns_config')).toBe(true)
+      expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
+    } finally {
+      db.close()
+    }
+  })
+
+  test('handles drift where user_version=41 but columns_config already exists', () => {
+    // The mirror drift: the column landed but user_version never advanced, so v42
+    // re-runs. Its PRAGMA guard must make that a no-op rather than a failed boot.
+    const db = dbAtVersion(42)
+    try {
+      expect(hasProjectColumn(db, 'columns_config')).toBe(true)
+
+      db.pragma('user_version = 41')
+      runMigrations(db)
+
+      expect(hasProjectColumn(db, 'columns_config')).toBe(true)
+      expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
+    } finally {
+      db.close()
+    }
+  })
 })
-
-test('replaces invalid columns JSON with defaults and remaps unknown statuses', () => {
-  const db = createDb()
-  try {
-    const projectId = crypto.randomUUID()
-    insertProject(db, projectId, '{"invalid":true}')
-    insertTask(db, 'task-invalid-columns', projectId, 'custom_unknown')
-
-    normalizeProjectStatusData(db)
-
-    const projectRow = db
-      .prepare('SELECT columns_config FROM projects WHERE id = ?')
-      .get(projectId) as { columns_config: string | null }
-    expect(projectRow.columns_config).toEqual(JSON.stringify(DEFAULT_COLUMNS))
-
-    const taskRow = db
-      .prepare('SELECT status FROM tasks WHERE id = ?')
-      .get('task-invalid-columns') as { status: string }
-    expect(taskRow.status).toBe('inbox')
-  } finally {
-    db.close()
-  }
-})
-
-test('keeps null columns_config as null while still remapping unknown statuses', () => {
-  const db = createDb()
-  try {
-    const projectId = crypto.randomUUID()
-    insertProject(db, projectId, null)
-    insertTask(db, 'task-null-columns', projectId, 'ghost_status')
-
-    normalizeProjectStatusData(db)
-
-    const projectRow = db
-      .prepare('SELECT columns_config FROM projects WHERE id = ?')
-      .get(projectId) as { columns_config: string | null }
-    expect(projectRow.columns_config).toBeNull()
-
-    const taskRow = db
-      .prepare('SELECT status FROM tasks WHERE id = ?')
-      .get('task-null-columns') as { status: string }
-    expect(taskRow.status).toBe('inbox')
-  } finally {
-    db.close()
-  }
-})
-
-test('no-ops when projects.columns_config is missing', () => {
-  const db = createDb()
-  try {
-    const projectId = crypto.randomUUID()
-    insertProject(db, projectId, null)
-    insertTask(db, 'task-missing-column', projectId, 'ghost_status')
-
-    db.exec('ALTER TABLE projects DROP COLUMN columns_config')
-    normalizeProjectStatusData(db)
-
-    const taskRow = db
-      .prepare('SELECT status FROM tasks WHERE id = ?')
-      .get('task-missing-column') as { status: string }
-    expect(taskRow.status).toBe('ghost_status')
-  } finally {
-    db.close()
-  }
-})
-
-test('repairs drifted schema where user_version=42 but columns_config is missing', () => {
-  // v42 claimed to have added projects.columns_config but the column is absent —
-  // the drift v45 exists to repair. Boot from there and go all the way to latest.
-  const db = dbAtVersion(44)
-  try {
-    db.exec('ALTER TABLE projects DROP COLUMN columns_config')
-    expect(hasProjectColumn(db, 'columns_config')).toBe(false)
-
-    db.pragma('user_version = 42')
-    runMigrations(db)
-
-    expect(hasProjectColumn(db, 'columns_config')).toBe(true)
-    expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
-  } finally {
-    db.close()
-  }
-})
-
-test('handles drift where user_version=41 but columns_config already exists', () => {
-  // The mirror drift: the column landed but user_version never advanced, so v42
-  // re-runs. Its PRAGMA guard must make that a no-op rather than a failed boot.
-  const db = dbAtVersion(42)
-  try {
-    expect(hasProjectColumn(db, 'columns_config')).toBe(true)
-
-    db.pragma('user_version = 41')
-    runMigrations(db)
-
-    expect(hasProjectColumn(db, 'columns_config')).toBe(true)
-    expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
-  } finally {
-    db.close()
-  }
-})
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

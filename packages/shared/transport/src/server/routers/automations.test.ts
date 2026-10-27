@@ -5,10 +5,11 @@
  * (domains/automations/src/electron/handlers.test.ts). The onChanged subscription
  * is exercised by the existing chat/agent-turns subscription tests' idiom and is
  * not re-covered here (the handler test did not cover it).
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { automationsRouter } from './automations.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 

@@ -8,9 +8,10 @@
  * hub holds no certificate), and must reflect the wired deps + the stored
  * `hub_label` k/v when present.
  *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { setAppDeps, setHubDescribeDeps, setAuthGate, type AppDeps } from '../app-deps.js'
 import { hubRouter } from './hub.js'
 import { appRouter } from '../router.js'

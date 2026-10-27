@@ -1,42 +1,13 @@
 /**
  * Tests for PTY exit strategy decision logic.
- * Run with: npx tsx packages/domains/terminal/src/main/pty-exit-strategy.test.ts
  */
+import { describe, expect, test } from 'vitest'
 import {
   shouldShellFallback,
   buildRecoveryMessage,
   decideRecoveryAdoption,
   shouldArmHubStartupDeadline
 } from './pty-exit-strategy.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
-
-function describe(name: string, fn: () => void) {
-  console.log(`\n${name}`)
-  fn()
-}
 
 const base = {
   exitCode: 1,
@@ -186,6 +157,3 @@ describe('shouldArmHubStartupDeadline', () => {
     expect(shouldArmHubStartupDeadline({})).toBe(true)
   })
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

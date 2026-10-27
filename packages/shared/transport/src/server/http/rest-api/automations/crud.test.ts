@@ -1,14 +1,11 @@
 /**
  * REST: /api/automations CRUD contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerAutomationsCrudRoutes } from './crud.js'
 
@@ -43,7 +40,12 @@ type Many = { ok: boolean; data: Automation[] }
 
 let createdId = ''
 
-await describe('/api/automations CRUD', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})
+
+describe('/api/automations CRUD', () => {
   test('POST: creates automation (project by name) with parsed JSON shape + notifies', async () => {
     notifyCount = 0
     const res = await rest.request<One>('POST', '/api/automations', {
@@ -148,6 +150,3 @@ await describe('/api/automations CRUD', () => {
     expect(res.status).toBe(404)
   })
 })
-
-await rest.close()
-h.cleanup()

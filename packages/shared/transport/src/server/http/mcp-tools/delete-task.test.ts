@@ -1,8 +1,9 @@
 /**
  * MCP: delete_task tool tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/delete-task.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/delete-task.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../test-utils/event-spy.js'
 import {
@@ -42,7 +43,7 @@ function seedTask(): string {
   return id
 }
 
-await describe('mcp delete_task', () => {
+describe('mcp delete_task', () => {
   test('register: tool registered', () => {
     expect(stub.has('delete_task')).toBe(true)
     expect(stub.get('delete_task')!.description.length).toBeGreaterThan(0)
@@ -120,4 +121,4 @@ await describe('mcp delete_task', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

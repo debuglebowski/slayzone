@@ -11,20 +11,16 @@
  * before, and an unrelated error keeps its shape.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/switch-refusals.test.ts
  */
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import superjson from 'superjson'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   appRouter,
@@ -159,13 +155,13 @@ function expectRefused(
   expect(res.status).toBe(403)
   expect(res.error?.data.code).toBe('FORBIDDEN')
   expect(res.error?.data.appCode).toBe(appCode)
-  expect(res.error?.message.includes(`${variable}=0`)).toBe(true)
+  expect(res.error?.message).toContain(`${variable}=0`)
 }
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
 process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS = '0'
 
-await describe('Normain hub: processes + integrations switched off', () => {
+describe('Normain hub: processes + integrations switched off', () => {
   test('boot: the persisted process row is not loaded (no restart, no pid sweep)', async () => {
     await initProcessManager(h.slayDb)
     expect(listAllProcesses()).toHaveLength(0)
@@ -296,7 +292,7 @@ await describe('Normain hub: processes + integrations switched off', () => {
   })
 })
 
-await describe('defaults (switches unset): unchanged', () => {
+describe('defaults (switches unset): unchanged', () => {
   test('processes.create works and an unrelated error keeps its shape', async () => {
     delete process.env.SLAYZONE_HUB_ENABLE_PROCESSES
     delete process.env.SLAYZONE_HUB_ENABLE_INTEGRATIONS
@@ -332,5 +328,7 @@ await describe('defaults (switches unset): unchanged', () => {
   })
 })
 
-setProcessBackend(null)
-setSecurityLogSink()
+afterAll(() => {
+  setProcessBackend(null)
+  setSecurityLogSink()
+})

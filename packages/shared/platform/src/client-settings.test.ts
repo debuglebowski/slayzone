@@ -11,12 +11,13 @@
  *     atomic per write, but the read-modify-write around it is not, and several
  *     subsystems write here.
  *
- * Run with: npx tsx --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/platform/src/client-settings.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/client-settings.test.ts
  */
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { test, expect } from '../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
 import { readClientSettings, updateClientSettings, clientSettingsPath } from './client-settings.js'
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-'))

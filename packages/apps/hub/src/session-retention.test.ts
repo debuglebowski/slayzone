@@ -15,18 +15,19 @@
  *   - one audit line per sweep, with counts, cutoff and duration and no content;
  *   - deleted content is gone from the database file and its WAL (byte search).
  *
- * Native ABI: better-sqlite3 built for Electron, so this runs under the Electron strict
- * loader like ownership-backfill.test.ts.
+ * Native ABI: better-sqlite3 built for Electron, so this runs under Electron's node
+ * like ownership-backfill.test.ts.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/session-retention.test.ts
  */
 import { mkdtempSync, readFileSync, rmSync, statSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
+import { afterAll, assert, expect, test } from 'vitest'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { getCurrentConversationId, getTaskOp, listTaskSessions } from '@slayzone/task/server'
@@ -46,30 +47,6 @@ import {
   type RetentionTimers,
   type SweepReport
 } from './session-retention.js'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-function assertEq(actual: unknown, expected: unknown, msg: string): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-  }
-}
 
 const DAY = 24 * 60 * 60 * 1000
 const HOUR = 60 * 60 * 1000
@@ -258,9 +235,7 @@ process.on('unhandledRejection', () => {
   unhandled++
 })
 
-console.log('session retention')
-
-await test('91 days old is swept and 89 days old is kept, per table', async () => {
+test('91 days old is swept and 89 days old is kept, per table', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 91 * DAY, 89 * DAY)
   const handle = startSessionRetention({ db, env: ON, timers: fakeTimers().timers })
@@ -270,49 +245,45 @@ await test('91 days old is swept and 89 days old is kept, per table', async () =
   const seqs = (
     raw.prepare('SELECT seq FROM chat_events ORDER BY seq').all() as { seq: number }[]
   ).map((r) => r.seq)
-  assertEq(seqs, [3, 4], 'chat_events: the 91-day events went, the 89-day ones stayed')
-  assertEq(
-    raw.prepare('SELECT id FROM agent_prompts ORDER BY id').all(),
-    [{ id: 'pr-new' }],
-    'agent_prompts'
-  )
-  assertEq(
-    raw.prepare('SELECT id FROM chat_queue ORDER BY id').all(),
-    [{ id: 'q-new' }],
-    'chat_queue'
-  )
-  assertEq(
+  expect(seqs, 'chat_events: the 91-day events went, the 89-day ones stayed').toEqual([3, 4])
+  expect(raw.prepare('SELECT id FROM agent_prompts ORDER BY id').all(), 'agent_prompts').toEqual([
+    { id: 'pr-new' }
+  ])
+  expect(raw.prepare('SELECT id FROM chat_queue ORDER BY id').all(), 'chat_queue').toEqual([
+    { id: 'q-new' }
+  ])
+  expect(
     raw.prepare('SELECT id, snapshot_sha, prompt_preview FROM agent_turns ORDER BY id').all(),
-    [
-      { id: 'turn-new', snapshot_sha: 'sha-new', prompt_preview: 'KEEP-turn-preview' },
-      { id: 'turn-old', snapshot_sha: 'sha-old', prompt_preview: '' }
-    ],
     'agent_turns: both rows (and their snapshot) stay, the old preview is blanked'
-  )
-  assertEq(
+  ).toEqual([
+    { id: 'turn-new', snapshot_sha: 'sha-new', prompt_preview: 'KEEP-turn-preview' },
+    { id: 'turn-old', snapshot_sha: 'sha-old', prompt_preview: '' }
+  ])
+  expect(
     { deleted: report.deleted, redacted: report.redacted, failed: report.failed },
-    {
-      deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 },
-      redacted: { agent_turns: 1 },
-      failed: []
-    },
     'report counts'
-  )
+  ).toEqual({
+    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 },
+    redacted: { agent_turns: 1 },
+    failed: []
+  })
   handle.stop()
 })
 
-await test('the boundary is the period itself: 90 days plus an hour goes, minus an hour stays', async () => {
+test('the boundary is the period itself: 90 days plus an hour goes, minus an hour stays', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 90 * DAY + HOUR, 90 * DAY - HOUR)
   const report = await sweepSessionContent(db, { days: 90 })
-  assertEq(
+  expect(
     { deleted: report.deleted, redacted: report.redacted },
-    { deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 }, redacted: { agent_turns: 1 } },
     'only the rows past the cutoff, on the TEXT and the ms clocks alike'
-  )
+  ).toEqual({
+    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1 },
+    redacted: { agent_turns: 1 }
+  })
 })
 
-await test('nothing else changes; no dangling keys; the task still opens', async () => {
+test('nothing else changes; no dangling keys; the task still opens', async () => {
   const { raw, db } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
@@ -322,41 +293,36 @@ await test('nothing else changes; no dangling keys; the task still opens', async
 
   const after = snapshotOthers(raw)
   for (const table of Object.keys(before)) {
-    assert(before[table] === after[table], `${table} is unchanged`)
+    expect(before[table], `${table} is unchanged`).toBe(after[table])
   }
-  assertEq(raw.pragma('foreign_key_check'), [], 'no row points at a missing parent')
+  expect(raw.pragma('foreign_key_check'), 'no row points at a missing parent').toEqual([])
 
   const task = await getTaskOp(db, 't1')
   assert(task, 'the task loads')
-  assertEq(task.description, 'NOTE-KEEP task notes', 'its notes are intact')
+  expect(task.description, 'its notes are intact').toBe('NOTE-KEEP task notes')
   const sessions = await listTaskSessions(db, 't1', 'claude-code')
-  assertEq(
+  expect(
     sessions.map((s) => [s.conversationId, s.messageCount, s.firstPrompt, s.isCurrent]),
-    [
-      ['conv-live', 1, 'KEEP-prompt', true],
-      ['conv-old', 0, null, false]
-    ],
     'both sessions still listed; the old one has no messages left'
-  )
-  assertEq(
+  ).toEqual([
+    ['conv-live', 1, 'KEEP-prompt', true],
+    ['conv-old', 0, null, false]
+  ])
+  expect(
     (await listPromptsForTask(db, 't1', 'claude-code')).map((p) => p.text),
-    ['KEEP-prompt'],
     'the message history holds the recent prompt'
-  )
-  assertEq(
+  ).toEqual(['KEEP-prompt'])
+  expect(
     (await loadChatEvents(db, 'tab1')).map((e) => e.seq),
-    [3, 4],
     'the chat history loads what is left'
-  )
-  assertEq(currentBefore, 'conv-live', 'resume target before')
-  assertEq(
-    await getCurrentConversationId(db, 't1', 'claude-code'),
-    'conv-live',
-    'resume target after'
+  ).toEqual([3, 4])
+  expect(currentBefore, 'resume target before').toBe('conv-live')
+  expect(await getCurrentConversationId(db, 't1', 'claude-code'), 'resume target after').toBe(
+    'conv-live'
   )
 })
 
-await test('a live session keeps working: its task, its resume target, its chat seq', async () => {
+test('a live session keeps working: its task, its resume target, its chat seq', async () => {
   const { raw, db } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
@@ -365,41 +331,38 @@ await test('a live session keeps working: its task, its resume target, its chat 
 
   // The live agent's ledger row — started 150 days ago, never ended, bound to its
   // task — is the task's resume binding, and the sweep does not touch it.
-  assertEq(
+  expect(
     raw.prepare('SELECT status, ended_at, task_id FROM agent_sessions WHERE id = ?').get('s-live'),
-    { status: 'bound', ended_at: null, task_id: 't1' },
     'the live session row is as it was'
-  )
-  assertEq(await getNextSeqForTab(db, 'tab1'), nextBefore, 'next chat seq is unchanged')
+  ).toEqual({ status: 'bound', ended_at: null, task_id: 't1' })
+  expect(await getNextSeqForTab(db, 'tab1'), 'next chat seq is unchanged').toEqual(nextBefore)
   await persistChatEvent(db, 'tab1', nextBefore, { type: 'text', text: 'after' } as never)
-  assertEq(
+  expect(
     (await loadChatEvents(db, 'tab1')).map((e) => e.seq),
-    [3, 4, 5],
     'the live tab keeps appending in order'
-  )
+  ).toEqual([3, 4, 5])
 })
 
-await test('0 and unset (the desktop default): nothing deleted, no timer', async () => {
+test('0 and unset (the desktop default): nothing deleted, no timer', async () => {
   for (const env of [{}, { SLAYZONE_HUB_SESSION_RETENTION_DAYS: '0' }]) {
     const { raw, db } = newDb()
     seed(raw, Date.now(), 400 * DAY, 300 * DAY)
     const fake = fakeTimers()
     const lines = sweepLines().length
     const handle = startSessionRetention({ db, env, timers: fake.timers })
-    assertEq(handle.days, 0, `${JSON.stringify(env)}: off`)
-    assertEq(fake.scheduled.length, 0, `${JSON.stringify(env)}: no timer`)
-    assertEq(await handle.runNow(), null, `${JSON.stringify(env)}: runNow does nothing`)
-    assertEq(raw.pragma('secure_delete', { simple: true }), 0, 'connection left as it was')
-    assertEq(
+    expect(handle.days, `${JSON.stringify(env)}: off`).toBe(0)
+    expect(fake.scheduled.length, `${JSON.stringify(env)}: no timer`).toBe(0)
+    expect(await handle.runNow(), `${JSON.stringify(env)}: runNow does nothing`).toBe(null)
+    expect(raw.pragma('secure_delete', { simple: true }), 'connection left as it was').toBe(0)
+    expect(
       raw.prepare('SELECT count(*) AS n FROM chat_events').get(),
-      { n: 5 },
       `${JSON.stringify(env)}: every chat event kept`
-    )
-    assertEq(sweepLines().length, lines, 'no audit line')
+    ).toEqual({ n: 5 })
+    expect(sweepLines().length, 'no audit line').toEqual(lines)
   }
 })
 
-await test('a malformed period is never treated as a period', async () => {
+test('a malformed period is never treated as a period', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 400 * DAY, 300 * DAY)
   const fake = fakeTimers()
@@ -408,31 +371,34 @@ await test('a malformed period is never treated as a period', async () => {
     env: { SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90d' },
     timers: fake.timers
   })
-  assertEq([handle.days, fake.scheduled.length], [0, 0], 'off, no timer (B16 refused it at boot)')
-  assertEq(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), { n: 2 }, 'kept')
+  expect([handle.days, fake.scheduled.length], 'off, no timer (B16 refused it at boot)').toEqual([
+    0, 0
+  ])
+  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'kept').toEqual({ n: 2 })
 })
 
-await test('boot sweep, then the daily tick; timers unref’d; stop clears them', async () => {
+test('boot sweep, then the daily tick; timers unref’d; stop clears them', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 91 * DAY, 89 * DAY)
   const fake = fakeTimers()
   const handle = startSessionRetention({ db, env: ON, timers: fake.timers })
-  assertEq(handle.days, 90, 'on')
-  assertEq(raw.pragma('secure_delete', { simple: true }), 1, 'secure_delete on from the start')
-  assertEq(
+  expect(handle.days, 'on').toBe(90)
+  expect(raw.pragma('secure_delete', { simple: true }), 'secure_delete on from the start').toBe(1)
+  expect(
     fake.scheduled.map((t) => [t.kind, t.ms, t.unrefs]),
-    [
-      ['timeout', BOOT_SWEEP_DELAY_MS, 1],
-      ['interval', SWEEP_INTERVAL_MS, 1]
-    ],
     'one boot timeout, one daily interval, both unref’d'
-  )
-  assertEq(SWEEP_INTERVAL_MS, DAY, 'daily')
+  ).toEqual([
+    ['timeout', BOOT_SWEEP_DELAY_MS, 1],
+    ['interval', SWEEP_INTERVAL_MS, 1]
+  ])
+  expect(SWEEP_INTERVAL_MS, 'daily').toEqual(DAY)
 
   const lines = sweepLines().length
   fake.scheduled[0].fn()
   await until(() => sweepLines().length === lines + 1, 'the boot sweep')
-  assertEq(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), { n: 1 }, 'boot sweep ran')
+  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'boot sweep ran').toEqual({
+    n: 1
+  })
 
   raw
     .prepare(
@@ -441,35 +407,33 @@ await test('boot sweep, then the daily tick; timers unref’d; stop clears them'
     .run(Date.now() - 100 * DAY)
   fake.scheduled[1].fn()
   await until(() => sweepLines().length === lines + 2, 'the daily sweep')
-  assertEq(
-    raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(),
-    { n: 1 },
-    'daily sweep ran'
-  )
+  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'daily sweep ran').toEqual({
+    n: 1
+  })
 
   handle.stop()
-  assert(
+  expect(
     fake.scheduled.every((t) => t.cleared),
     'stop cleared both timers'
-  )
-  assertEq(await handle.runNow(), null, 'nothing runs after stop')
+  ).toBe(true)
+  expect(await handle.runNow(), 'nothing runs after stop').toBe(null)
 })
 
-await test('never two sweeps at once', async () => {
+test('never two sweeps at once', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 91 * DAY, 89 * DAY)
   const handle = startSessionRetention({ db, env: ON, timers: fakeTimers().timers })
   const lines = sweepLines().length
   const first = handle.runNow()
   const second = handle.runNow()
-  assertEq(await second, null, 'the overlapping tick is skipped')
-  assert(await first, 'the first sweep completes')
-  assertEq(sweepLines().length, lines + 1, 'one sweep, one audit line')
-  assert(await handle.runNow(), 'the next tick runs again')
+  expect(await second, 'the overlapping tick is skipped').toBe(null)
+  expect(await first, 'the first sweep completes').toBeTruthy()
+  expect(sweepLines().length, 'one sweep, one audit line').toEqual(lines + 1)
+  expect(await handle.runNow(), 'the next tick runs again').toBeTruthy()
   handle.stop()
 })
 
-await test('statements stay bounded by the batch size, yielding in between', async () => {
+test('statements stay bounded by the batch size, yielding in between', async () => {
   const { raw, db } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
@@ -496,12 +460,12 @@ await test('statements stay bounded by the batch size, yielding in between', asy
       return true
     }
   })
-  assertEq(changes, [5, 5, 2], 'twelve rows in three statements of at most five')
-  assertEq(report.deleted.agent_prompts, 12, 'all of them')
-  assert(pauses >= 2, `yielded between batches (${pauses})`)
+  expect(changes, 'twelve rows in three statements of at most five').toEqual([5, 5, 2])
+  expect(report.deleted.agent_prompts, 'all of them').toBe(12)
+  expect(pauses, `yielded between batches (${pauses})`).toBeGreaterThanOrEqual(2)
 })
 
-await test('a failing table is logged and audited; the others run; the next tick retries', async () => {
+test('a failing table is logged and audited; the others run; the next tick retries', async () => {
   const { raw, db } = newDb()
   seed(raw, Date.now(), 91 * DAY, 89 * DAY)
   const broken: SlayzoneDb = {
@@ -515,20 +479,22 @@ await test('a failing table is logged and audited; the others run; the next tick
   const handle = startSessionRetention({ db: broken, env: ON, timers: fakeTimers().timers })
   const report = await handle.runNow()
   assert(report, 'the sweep still reports')
-  assertEq(report.failed, ['chat_queue'], 'only chat_queue failed')
-  assertEq(report.deleted.agent_prompts, 1, 'the other tables were swept')
-  assertEq(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), { n: 2 }, 'queue not swept')
+  expect(report.failed, 'only chat_queue failed').toEqual(['chat_queue'])
+  expect(report.deleted.agent_prompts, 'the other tables were swept').toBe(1)
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), 'queue not swept').toEqual({
+    n: 2
+  })
   const line = sweepLines()[lines]
-  assertEq([line.outcome, line.level], ['failure', 'error'], 'audited as a failure')
+  expect([line.outcome, line.level], 'audited as a failure').toEqual(['failure', 'error'])
   handle.stop()
 
   const retry = startSessionRetention({ db, env: ON, timers: fakeTimers().timers })
   const again = await retry.runNow()
-  assertEq(again?.deleted.chat_queue, 1, 'the next tick sweeps it')
+  expect(again?.deleted.chat_queue, 'the next tick sweeps it').toBe(1)
   retry.stop()
 })
 
-await test('a sweep that cannot run at all never rejects or crashes the hub', async () => {
+test('a sweep that cannot run at all never rejects or crashes the hub', async () => {
   const { db } = newDb()
   const dead: SlayzoneDb = {
     ...db,
@@ -542,14 +508,14 @@ await test('a sweep that cannot run at all never rejects or crashes the hub', as
   const handle = startSessionRetention({ db: dead, env: ON, timers: fake.timers })
   fake.scheduled[0].fn()
   await until(() => sweepLines().length === lines + 1, 'the failure line')
-  assertEq(sweepLines()[lines].outcome, 'failure', 'audited')
-  assertEq(await handle.runNow(), null, 'runNow resolves null')
+  expect(sweepLines()[lines].outcome, 'audited').toBe('failure')
+  expect(await handle.runNow(), 'runNow resolves null').toBe(null)
   await new Promise((r) => setImmediate(r))
-  assertEq(unhandled, before, 'no unhandled rejection')
+  expect(unhandled, 'no unhandled rejection').toEqual(before)
   handle.stop()
 })
 
-await test('one audit line per sweep: counts, cutoff and duration, no content', async () => {
+test('one audit line per sweep: counts, cutoff and duration, no content', async () => {
   const { raw, db } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
@@ -557,7 +523,7 @@ await test('one audit line per sweep: counts, cutoff and duration, no content', 
   const start = audit.length
   const report = (await handle.runNow()) as SweepReport
   const lines = audit.slice(start)
-  assertEq(lines.length, 1, 'exactly one line')
+  expect(lines.length, 'exactly one line').toBe(1)
   const line = JSON.parse(lines[0]) as {
     event: string
     outcome: string
@@ -565,33 +531,28 @@ await test('one audit line per sweep: counts, cutoff and duration, no content', 
     targetKind: string
     detail: Record<string, unknown>
   }
-  assertEq(
-    [line.event, line.outcome, line.actor, line.targetKind],
-    ['hub.retention.sweep', 'success', null, 'hub'],
-    'envelope'
-  )
-  assertEq(
-    line.detail.deleted,
-    [
-      { table: 'chat_events', rows: 3 },
-      { table: 'agent_prompts', rows: 1 },
-      { table: 'chat_queue', rows: 1 }
-    ],
-    'per-table counts, agent_prompts included'
-  )
-  assertEq(
-    line.detail.redacted,
-    [{ table: 'agent_turns', column: 'prompt_preview', rows: 1 }],
-    'redaction count'
-  )
-  assertEq(line.detail.days, 90, 'period')
-  assertEq(line.detail.cutoff, report.cutoff, 'cutoff')
-  assert(
-    Math.abs(Date.parse(report.cutoff) - (Date.now() - 90 * DAY)) < 60_000,
+  expect([line.event, line.outcome, line.actor, line.targetKind], 'envelope').toEqual([
+    'hub.retention.sweep',
+    'success',
+    null,
+    'hub'
+  ])
+  expect(line.detail.deleted, 'per-table counts, agent_prompts included').toEqual([
+    { table: 'chat_events', rows: 3 },
+    { table: 'agent_prompts', rows: 1 },
+    { table: 'chat_queue', rows: 1 }
+  ])
+  expect(line.detail.redacted, 'redaction count').toEqual([
+    { table: 'agent_turns', column: 'prompt_preview', rows: 1 }
+  ])
+  expect(line.detail.days, 'period').toBe(90)
+  expect(line.detail.cutoff, 'cutoff').toEqual(report.cutoff)
+  expect(
+    Math.abs(Date.parse(report.cutoff) - (Date.now() - 90 * DAY)),
     'cutoff is 90 days back'
-  )
-  assert(typeof line.detail.durationMs === 'number', 'duration')
-  assert(!/GONE-|KEEP-/.test(lines[0]), 'no content in the line')
+  ).toBeLessThan(60_000)
+  expect(typeof line.detail.durationMs, 'duration').toBe('number')
+  expect(lines[0], 'no content in the line').not.toMatch(/GONE-|KEEP-/)
   handle.stop()
 })
 
@@ -628,7 +589,7 @@ function seedBulk(raw: Database.Database, now: number): void {
   }
 }
 
-await test('deleted content is gone from the file and the WAL (byte search)', async () => {
+test('deleted content is gone from the file and the WAL (byte search)', async () => {
   const { raw, db, file } = newDb()
   const now = Date.now()
   // As at boot: the schedule starts (secure_delete on) before content is written.
@@ -636,27 +597,33 @@ await test('deleted content is gone from the file and the WAL (byte search)', as
   seed(raw, now, 91 * DAY, 89 * DAY)
   seedBulk(raw, now)
   raw.pragma('wal_checkpoint(TRUNCATE)')
-  assert(onDisk(file, 'GONE-') > 0, 'the old content is on disk before the sweep')
+  expect(onDisk(file, 'GONE-'), 'the old content is on disk before the sweep').toBeGreaterThan(0)
 
   const report = (await handle.runNow()) as SweepReport
-  assertEq(report.checkpoint, 'truncated', 'WAL checkpointed and truncated')
-  assertEq(onDisk(file, 'GONE-'), 0, 'no byte of swept content left in the file or the WAL')
-  assert(onDisk(file, 'KEEP-bulk-1-') > 0, 'kept content is still found (the search works)')
-  assertEq(existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0, 0, 'WAL is empty')
+  expect(report.checkpoint, 'WAL checkpointed and truncated').toBe('truncated')
+  expect(onDisk(file, 'GONE-'), 'no byte of swept content left in the file or the WAL').toBe(0)
+  expect(
+    onDisk(file, 'KEEP-bulk-1-'),
+    'kept content is still found (the search works)'
+  ).toBeGreaterThan(0)
+  expect(existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0, 'WAL is empty').toBe(0)
   handle.stop()
 })
 
-await test('control: a plain delete leaves the content in the file', async () => {
+test('control: a plain delete leaves the content in the file', async () => {
   const { raw, file } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
   seedBulk(raw, now)
   raw.prepare(`DELETE FROM agent_prompts WHERE text LIKE 'GONE-%'`).run()
   raw.pragma('wal_checkpoint(TRUNCATE)')
-  assert(onDisk(file, 'GONE-bulk-0-') > 0, 'without secure_delete the deleted text is still there')
+  expect(
+    onDisk(file, 'GONE-bulk-0-'),
+    'without secure_delete the deleted text is still there'
+  ).toBeGreaterThan(0)
 })
 
-for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true })
-setSecurityLogSink()
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+afterAll(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true })
+  setSecurityLogSink()
+})

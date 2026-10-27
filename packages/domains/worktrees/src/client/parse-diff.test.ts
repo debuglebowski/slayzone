@@ -1,42 +1,8 @@
 /**
  * Tests for parse-diff.ts
- * Run with: npx tsx packages/domains/worktrees/src/client/parse-diff.test.ts
  */
+import { expect, test } from 'vitest'
 import { parseUnifiedDiff, computeInlineHighlights, ensureInlineHighlights } from './parse-diff'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: unknown) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected))
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toHaveLength(n: number) {
-      if (!Array.isArray(actual) || actual.length !== n)
-        throw new Error(
-          `Expected length ${n}, got ${Array.isArray(actual) ? actual.length : 'non-array'}`
-        )
-    }
-  }
-}
 
 // ── parseUnifiedDiff ─────────────────────────────────────────────────
 
@@ -384,6 +350,3 @@ test('no highlights when add/delete lines are too different', () => {
 })
 
 // ── Summary ──────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

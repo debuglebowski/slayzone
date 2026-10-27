@@ -3,11 +3,12 @@
  * `createCaller` against a seeded tmp dir. Ports the coverage from the legacy
  * file-editor IPC-handler test (domains/file-editor/src/electron/handlers.test.ts).
  * showInFinder/watch (Electron AppDeps + subscription) were not covered there.
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
+ * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { fileEditorRouter } from './file-editor.js'
 
 const h = await createTestHarness()

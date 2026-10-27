@@ -4,14 +4,10 @@
  * GONE: an app quit awaits it, and must not exit under a live hub or computer.
  *
  * Against real child processes: what is pinned is the OS-level outcome.
- *
- * Run with: npx tsx packages/apps/app/src/main/child-reaper.test.ts
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { expect, test } from '../../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
 import { createChildReaper } from './child-reaper'
-
-console.log('\ncreateChildReaper')
 
 /** A long-lived child; with `ignoreSigterm`, only SIGKILL ends it. */
 function spawnChild(opts: { ignoreSigterm?: boolean } = {}): Promise<ChildProcess> {
@@ -35,7 +31,7 @@ test('kill: SIGTERM, then SIGKILL after the grace; resolves only once the proces
   await reaper.kill(proc, 200)
   expect(gone(proc)).toBe(true)
   expect(proc.signalCode).toBe('SIGKILL')
-  expect(Date.now() - started >= 150).toBe(true)
+  expect(Date.now() - started).toBeGreaterThanOrEqual(150)
 })
 
 test('kill: a process that exits on SIGTERM is not waited on for the grace', async () => {
@@ -45,7 +41,7 @@ test('kill: a process that exits on SIGTERM is not waited on for the grace', asy
   const started = Date.now()
   await reaper.kill(proc, 5_000)
   expect(proc.signalCode).toBe('SIGTERM')
-  expect(Date.now() - started < 2_000).toBe(true)
+  expect(Date.now() - started).toBeLessThan(2_000)
 })
 
 test('kill: a second caller joins the kill under way instead of resolving early', async () => {
@@ -70,7 +66,7 @@ test('kill: a second caller with another grace joins the first kill, whose grace
   expect(reaper.kill(proc, 60_000)).toBe(first)
   await first
   expect(proc.signalCode).toBe('SIGKILL')
-  expect(Date.now() - started < 5_000).toBe(true)
+  expect(Date.now() - started).toBeLessThan(5_000)
 })
 
 test('kill: an already-exited process resolves at once', async () => {
@@ -82,7 +78,7 @@ test('kill: an already-exited process resolves at once', async () => {
   })
   const started = Date.now()
   await reaper.kill(proc, 5_000)
-  expect(Date.now() - started < 500).toBe(true)
+  expect(Date.now() - started).toBeLessThan(500)
 })
 
 test('kill: a process that never started (failed spawn) cannot hang the caller', async () => {
@@ -93,7 +89,7 @@ test('kill: a process that never started (failed spawn) cannot hang the caller',
   reaper.track(proc)
   const started = Date.now()
   await reaper.kill(proc, 5_000)
-  expect(Date.now() - started < 500).toBe(true)
+  expect(Date.now() - started).toBeLessThan(500)
 })
 
 test('killAll: reaps every tracked process still alive, including ones already being killed', async () => {
@@ -119,7 +115,7 @@ test('killAll: a process that exited on its own is no longer tracked', async () 
   })
   const started = Date.now()
   await reaper.killAll(5_000)
-  expect(Date.now() - started < 500).toBe(true)
+  expect(Date.now() - started).toBeLessThan(500)
 })
 
 test('killAll: with nothing tracked, resolves at once', async () => {

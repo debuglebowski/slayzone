@@ -1,8 +1,9 @@
 /**
  * MCP: create_task tool tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { captureMcpServer } from '../../../../../test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../test-utils/event-spy.js'
 import {
@@ -32,7 +33,7 @@ registerCreateTaskTool(stub.server as never, {
   }
 })
 
-await describe('mcp create_task', () => {
+describe('mcp create_task', () => {
   test('register: tool registered with description + schema', () => {
     expect(stub.has('create_task')).toBe(true)
     const tool = stub.get('create_task')!
@@ -90,4 +91,4 @@ await describe('mcp create_task', () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

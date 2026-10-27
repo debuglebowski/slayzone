@@ -1,11 +1,13 @@
 /**
  * CLI automations command tests
- * Run with: ELECTRON_RUN_AS_NODE=1 electron --import tsx/esm packages/apps/cli/test/automations.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/automations.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter } from './test-harness.js'
 
 const h = await createTestHarness()
+afterAll(() => h.cleanup())
 const db = createSlayDbAdapter(h.db)
 
 const projectId = crypto.randomUUID()
@@ -155,6 +157,3 @@ describe('automation_runs', () => {
     expect(runs[0].duration_ms).toBe(42)
   })
 })
-
-h.cleanup()
-console.log('\nDone')

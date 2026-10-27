@@ -17,12 +17,12 @@
  * (`migrations.ts` runMigrations), so a second caller is a no-op and a crash
  * mid-migration cannot half-apply. Case 2 pins that.
  *
- * Native ABI (better-sqlite3) → Electron strict loader, same as the other hub
+ * Native ABI (better-sqlite3) → Electron's node, same as the other hub
  * DB tests.
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/supervised-bootstrap.test.ts
  */
 import {
@@ -36,7 +36,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { expect, test } from 'vitest'
 import { LATEST_MIGRATION_VERSION } from '@slayzone/transport/db-bootstrap'
 import { openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
 
@@ -79,7 +79,7 @@ const hasTable = async (
   (await db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [name])) !==
   undefined
 
-await test('supervised hub bootstraps an empty store to the latest schema', async () => {
+test('supervised hub bootstraps an empty store to the latest schema', async () => {
   await withEmptyStore(async () => {
     const db = await openServerDatabase()
     try {
@@ -92,7 +92,7 @@ await test('supervised hub bootstraps an empty store to the latest schema', asyn
   })
 })
 
-await test('a second open is a no-op — no re-migration, no error', async () => {
+test('a second open is a no-op — no re-migration, no error', async () => {
   await withEmptyStore(async (dir) => {
     const first = await openServerDatabase()
     const after = await userVersion(first)
@@ -110,7 +110,7 @@ await test('a second open is a no-op — no re-migration, no error', async () =>
     // re-open must not mint a second one. Guards against a backup-per-boot leak
     // now that the hub — not the host — owns that step.
     const backups = readdirSync(dir).filter((f) => f.includes('.migration.'))
-    expect(backups.length <= 1).toBe(true)
+    expect(backups.length).toBeLessThanOrEqual(1)
   })
 })
 
@@ -159,7 +159,7 @@ for (const [dev, legacyName, newName] of [
   [false, 'slayzone.sqlite', 'slayzone.data.sqlite'],
   [true, 'slayzone.dev.sqlite', 'slayzone.dev.data.sqlite']
 ] as const) {
-  await test(`a beta store named ${legacyName} is adopted as ${newName} with its data`, async () => {
+  test(`a beta store named ${legacyName} is adopted as ${newName} with its data`, async () => {
     await withDevFlag(dev, () =>
       withEmptyStore(async (dir) => {
         await makeLegacyStore(dir, legacyName, newName)
@@ -180,7 +180,7 @@ for (const [dev, legacyName, newName] of [
   })
 }
 
-await test('a store that already has the new name is left alone (no second database)', async () => {
+test('a store that already has the new name is left alone (no second database)', async () => {
   await withEmptyStore(async (dir) => {
     const first = await openServerDatabase()
     await first.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('marker', 'current')")
@@ -196,7 +196,7 @@ await test('a store that already has the new name is left alone (no second datab
   })
 })
 
-await test('the diagnostics DB keeps its own name (not slayzone.data.diagnostics.sqlite)', async () => {
+test('the diagnostics DB keeps its own name (not slayzone.data.diagnostics.sqlite)', async () => {
   for (const [dev, expected] of [
     [false, 'slayzone.diagnostics.sqlite'],
     [true, 'slayzone.dev.diagnostics.sqlite']
@@ -206,7 +206,7 @@ await test('the diagnostics DB keeps its own name (not slayzone.data.diagnostics
         const diag = openServerDiagnosticsDatabase()
         await diag.close()
         const files = readdirSync(dir)
-        expect(files.includes(expected)).toBe(true)
+        expect(files).toContain(expected)
         expect(files.some((f) => f.includes('.data.diagnostics'))).toBe(false)
       })
     )

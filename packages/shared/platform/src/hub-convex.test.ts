@@ -4,8 +4,10 @@
  * between a client-sent `convexUrl` and the hub's outbound POST.
  * Pure Node → runs under plain `npx tsx`.
  *
- * Run with: npx tsx packages/shared/platform/src/hub-convex.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/hub-convex.test.ts
  */
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { convexAddressFromUrl, convexOriginOf, hubConvexOrigin } from './hub-convex'
 import {
   HubSwitchedOffError,
@@ -16,17 +18,6 @@ import { HUB_CONVEX_ADDRESS_ENV, HUB_PROCESS_ENV } from './hub-switches'
 import { ENV_MANIFEST } from './env-manifest'
 import { setSecurityLogSink } from './security-log'
 
-let passed = 0
-let failed = 0
-function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    passed++
-    console.log(`  ✓ ${name}`)
-  } else {
-    failed++
-    console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ''}`)
-  }
-}
 function caught(fn: () => unknown): unknown {
   try {
     fn()
@@ -40,35 +31,83 @@ const ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
 const env = (addr?: string): NodeJS.ProcessEnv => (addr === undefined ? {} : { [ENV]: addr })
 
 // --- the variable ---
-check('env name', HUB_CONVEX_ADDRESS_ENV === ENV)
-check('a parent spawning a hub clears it', HUB_PROCESS_ENV.includes(ENV))
-check('infra: never inherited by a terminal', ENV_MANIFEST[ENV] === 'infra')
+test('env name', () => {
+  expect(HUB_CONVEX_ADDRESS_ENV).toBe(ENV)
+})
+
+test('a parent spawning a hub clears it', () => {
+  expect(HUB_PROCESS_ENV).toContain(ENV)
+})
+
+test('infra: never inherited by a terminal', () => {
+  expect(ENV_MANIFEST[ENV]).toBe('infra')
+})
 
 // --- hubConvexOrigin: address → origin under the scheme rule ---
-check('unset → null', hubConvexOrigin(env()) === null)
-check('blank → null', hubConvexOrigin(env('  ')) === null)
-check(
-  'cloud host → https',
-  hubConvexOrigin(env('happy-animal-123.convex.cloud')) === 'https://happy-animal-123.convex.cloud'
-)
-check('trimmed', hubConvexOrigin(env(' x.convex.cloud ')) === 'https://x.convex.cloud')
-check('loopback → http', hubConvexOrigin(env('127.0.0.1:3210')) === 'http://127.0.0.1:3210')
-check('localhost → http', hubConvexOrigin(env('localhost:3210')) === 'http://localhost:3210')
-check('[::1] → http', hubConvexOrigin(env('[::1]:3210')) === 'http://[::1]:3210')
-check('explicit port kept', hubConvexOrigin(env('convex.corp:8443')) === 'https://convex.corp:8443')
-check('a full URL is refused, not guessed', hubConvexOrigin(env('https://x.convex.cloud')) === null)
-check('a path is refused', hubConvexOrigin(env('x.convex.cloud/api')) === null)
-check('userinfo is refused', hubConvexOrigin(env('a@x.convex.cloud')) === null)
+test('unset → null', () => {
+  expect(hubConvexOrigin(env())).toBeNull()
+})
+
+test('blank → null', () => {
+  expect(hubConvexOrigin(env('  '))).toBeNull()
+})
+
+test('cloud host → https', () => {
+  expect(hubConvexOrigin(env('happy-animal-123.convex.cloud'))).toBe('https://happy-animal-123.convex.cloud')
+})
+
+test('trimmed', () => {
+  expect(hubConvexOrigin(env(' x.convex.cloud '))).toBe('https://x.convex.cloud')
+})
+
+test('loopback → http', () => {
+  expect(hubConvexOrigin(env('127.0.0.1:3210'))).toBe('http://127.0.0.1:3210')
+})
+
+test('localhost → http', () => {
+  expect(hubConvexOrigin(env('localhost:3210'))).toBe('http://localhost:3210')
+})
+
+test('[::1] → http', () => {
+  expect(hubConvexOrigin(env('[::1]:3210'))).toBe('http://[::1]:3210')
+})
+
+test('explicit port kept', () => {
+  expect(hubConvexOrigin(env('convex.corp:8443'))).toBe('https://convex.corp:8443')
+})
+
+test('a full URL is refused, not guessed', () => {
+  expect(hubConvexOrigin(env('https://x.convex.cloud'))).toBeNull()
+})
+
+test('a path is refused', () => {
+  expect(hubConvexOrigin(env('x.convex.cloud/api'))).toBeNull()
+})
+
+test('userinfo is refused', () => {
+  expect(hubConvexOrigin(env('a@x.convex.cloud'))).toBeNull()
+})
 
 // --- convexOriginOf: what a client sent ---
-check('client https', convexOriginOf('https://x.convex.cloud/') === 'https://x.convex.cloud')
-check(
-  'client path dropped',
-  convexOriginOf('https://x.convex.cloud/a?b#c') === 'https://x.convex.cloud'
-)
-check('client non-http scheme', convexOriginOf('file:///etc/passwd') === null)
-check('client garbage', convexOriginOf('not a url') === null)
-check('client non-string', convexOriginOf({ href: 'https://x' }) === null)
+test('client https', () => {
+  expect(convexOriginOf('https://x.convex.cloud/')).toBe('https://x.convex.cloud')
+})
+
+test('client path dropped', () => {
+  expect(convexOriginOf('https://x.convex.cloud/a?b#c')).toBe('https://x.convex.cloud')
+})
+
+test('client non-http scheme', () => {
+  expect(convexOriginOf('file:///etc/passwd')).toBeNull()
+})
+
+test('client garbage', () => {
+  expect(convexOriginOf('not a url')).toBeNull()
+})
+
+test('client non-string', () => {
+  expect(convexOriginOf({ href: 'https://x' })).toBeNull()
+})
 
 // --- convexAddressFromUrl: the desktop app's VITE_CONVEX_URL → the hub's address ---
 for (const url of [
@@ -80,97 +119,149 @@ for (const url of [
   'https://example.invalid'
 ]) {
   const addr = convexAddressFromUrl(url)
-  check(
-    `desktop round trip: ${JSON.stringify(url)} → ${addr} → same origin the renderer sends`,
-    addr !== undefined && hubConvexOrigin(env(addr)) === convexOriginOf(url)
-  )
+  test(`desktop round trip: ${JSON.stringify(url)} → ${addr} → same origin the renderer sends`, () => {
+    expect(addr).not.toBeUndefined()
+    expect(hubConvexOrigin(env(addr))).toBe(convexOriginOf(url))
+  })
 }
-check('desktop: unset → none', convexAddressFromUrl(undefined) === undefined)
-check('desktop: blank → none', convexAddressFromUrl('') === undefined)
-check('desktop: not a URL → none', convexAddressFromUrl('x.convex.cloud') === undefined)
-check(
-  'desktop: plain http to a non-loopback host does not round-trip → none',
-  convexAddressFromUrl('http://convex.lan:3210') === undefined
-)
+test('desktop: unset → none', () => {
+  expect(convexAddressFromUrl(undefined)).toBeUndefined()
+})
+
+test('desktop: blank → none', () => {
+  expect(convexAddressFromUrl('')).toBeUndefined()
+})
+
+test('desktop: not a URL → none', () => {
+  expect(convexAddressFromUrl('x.convex.cloud')).toBeUndefined()
+})
+
+test('desktop: plain http to a non-loopback host does not round-trip → none', () => {
+  expect(convexAddressFromUrl('http://convex.lan:3210')).toBeUndefined()
+})
 
 // --- assertHubConvexSignInUrl ---
-const lines: Array<Record<string, unknown> & { detail: Record<string, unknown> }> = []
-setSecurityLogSink((line) => lines.push(JSON.parse(line)))
-const refusal = { op: 'sign_in', detail: { provider: 'github' } }
-const own = env('happy-animal-123.convex.cloud')
+// Each scenario makes its call in a beforeAll and records what it saw, so the audit-line
+// counts are read at the moment the old inline checks read them, not after later calls.
+describe('assertHubConvexSignInUrl', () => {
+  const lines: Array<Record<string, unknown> & { detail: Record<string, unknown> }> = []
+  beforeAll(() => setSecurityLogSink((line) => lines.push(JSON.parse(line))))
+  afterAll(() => setSecurityLogSink())
+  const refusal = { op: 'sign_in', detail: { provider: 'github' } }
+  const own = env('happy-animal-123.convex.cloud')
 
-{
-  const r = assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, own)
-  check(
-    'same deployment: returns the hub’s own origin',
-    r === 'https://happy-animal-123.convex.cloud'
-  )
-  check('same deployment: no audit line', lines.length === 0)
-  check(
-    'same deployment, trailing slash: accepted',
-    assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud/', refusal, own) ===
-      'https://happy-animal-123.convex.cloud'
-  )
-}
+  describe('same deployment', () => {
+    let r: string | undefined
+    let linesAfter = -1
+    beforeAll(() => {
+      r = assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, own)
+      linesAfter = lines.length
+    })
 
-for (const [label, clientUrl] of [
-  ['another host', 'https://evil.example.com'],
-  ['an internal address', 'http://169.254.169.254'],
-  ['loopback', 'http://127.0.0.1:3100'],
-  ['same host, http', 'http://happy-animal-123.convex.cloud'],
-  ['same host, other port', 'https://happy-animal-123.convex.cloud:8443'],
-  ['no URL', undefined],
-  ['not a string', 42]
-] as const) {
-  const before = lines.length
-  const err = caught(() => assertHubConvexSignInUrl(clientUrl, refusal, own))
-  check(
-    `mismatch (${label}): HUB_CONVEX_MISMATCH`,
-    err instanceof HubSwitchedOffError &&
-      err.code === 'HUB_CONVEX_MISMATCH' &&
-      isHubSwitchedOffError(err)
-  )
-  check(`mismatch (${label}): names the variable`, (err as Error).message.includes(ENV))
-  check(`mismatch (${label}): exactly one audit line`, lines.length === before + 1)
-  const line = lines[before]
-  check(
-    `mismatch (${label}): integration.connect denied, op + provider + code`,
-    line?.event === 'integration.connect' &&
-      line.outcome === 'denied' &&
-      line.detail.op === 'sign_in' &&
-      line.detail.provider === 'github' &&
-      line.detail.code === 'HUB_CONVEX_MISMATCH' &&
-      line.detail.variable === ENV
-  )
-  check(
-    `mismatch (${label}): the requested origin is recorded`,
-    line?.detail.requestedOrigin === convexOriginOf(clientUrl),
-    JSON.stringify(line?.detail)
-  )
-}
+    test('same deployment: returns the hub’s own origin', () => {
+      expect(r).toBe('https://happy-animal-123.convex.cloud')
+    })
 
-for (const [label, hubEnv] of [
-  ['unset', env()],
-  ['malformed', env('https://happy-animal-123.convex.cloud')]
-] as const) {
-  const before = lines.length
-  const err = caught(() =>
-    assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, hubEnv)
-  )
-  check(
-    `no deployment (${label}): HUB_CONVEX_NOT_CONFIGURED`,
-    err instanceof HubSwitchedOffError &&
-      err.code === 'HUB_CONVEX_NOT_CONFIGURED' &&
-      err.variable === ENV
-  )
-  check(`no deployment (${label}): exactly one audit line`, lines.length === before + 1)
-  check(
-    `no deployment (${label}): integration.connect denied`,
-    lines[before]?.event === 'integration.connect' &&
-      lines[before]?.outcome === 'denied' &&
-      lines[before]?.detail.code === 'HUB_CONVEX_NOT_CONFIGURED'
-  )
-}
+    test('same deployment: no audit line', () => {
+      expect(linesAfter).toBe(0)
+    })
 
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)
+    test('same deployment, trailing slash: accepted', () => {
+      expect(
+        assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud/', refusal, own)
+      ).toBe('https://happy-animal-123.convex.cloud')
+    })
+  })
+
+  for (const [label, clientUrl] of [
+    ['another host', 'https://evil.example.com'],
+    ['an internal address', 'http://169.254.169.254'],
+    ['loopback', 'http://127.0.0.1:3100'],
+    ['same host, http', 'http://happy-animal-123.convex.cloud'],
+    ['same host, other port', 'https://happy-animal-123.convex.cloud:8443'],
+    ['no URL', undefined],
+    ['not a string', 42]
+  ] as const) {
+    describe(`mismatch (${label})`, () => {
+      let before = -1
+      let after = -1
+      let err: unknown
+      let line: (typeof lines)[number] | undefined
+      beforeAll(() => {
+        before = lines.length
+        err = caught(() => assertHubConvexSignInUrl(clientUrl, refusal, own))
+        after = lines.length
+        line = lines[before]
+      })
+
+      test(`mismatch (${label}): HUB_CONVEX_MISMATCH`, () => {
+        expect(err).toBeInstanceOf(HubSwitchedOffError)
+        expect(err).toMatchObject({ code: 'HUB_CONVEX_MISMATCH' })
+        expect(isHubSwitchedOffError(err)).toBe(true)
+      })
+
+      test(`mismatch (${label}): names the variable`, () => {
+        expect((err as Error).message).toContain(ENV)
+      })
+
+      test(`mismatch (${label}): exactly one audit line`, () => {
+        expect(after).toBe(before + 1)
+      })
+
+      test(`mismatch (${label}): integration.connect denied, op + provider + code`, () => {
+        expect(line).toMatchObject({
+          event: 'integration.connect',
+          outcome: 'denied',
+          detail: {
+            op: 'sign_in',
+            provider: 'github',
+            code: 'HUB_CONVEX_MISMATCH',
+            variable: ENV
+          }
+        })
+      })
+
+      test(`mismatch (${label}): the requested origin is recorded`, () => {
+        expect(line?.detail.requestedOrigin, JSON.stringify(line?.detail)).toBe(
+          convexOriginOf(clientUrl)
+        )
+      })
+    })
+  }
+
+  for (const [label, hubEnv] of [
+    ['unset', env()],
+    ['malformed', env('https://happy-animal-123.convex.cloud')]
+  ] as const) {
+    describe(`no deployment (${label})`, () => {
+      let before = -1
+      let after = -1
+      let err: unknown
+      beforeAll(() => {
+        before = lines.length
+        err = caught(() =>
+          assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud', refusal, hubEnv)
+        )
+        after = lines.length
+      })
+
+      test(`no deployment (${label}): HUB_CONVEX_NOT_CONFIGURED`, () => {
+        expect(err).toBeInstanceOf(HubSwitchedOffError)
+        expect(err).toMatchObject({ code: 'HUB_CONVEX_NOT_CONFIGURED', variable: ENV })
+      })
+
+      test(`no deployment (${label}): exactly one audit line`, () => {
+        expect(after).toBe(before + 1)
+      })
+
+      test(`no deployment (${label}): integration.connect denied`, () => {
+        expect(lines[before]).toMatchObject({
+          event: 'integration.connect',
+          outcome: 'denied',
+          detail: { code: 'HUB_CONVEX_NOT_CONFIGURED' }
+        })
+      })
+    })
+  }
+})
+

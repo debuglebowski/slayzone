@@ -19,9 +19,9 @@
  * Isolation as in hub-boot.test.ts: throwaway SLAYZONE_ROOT, SLAYZONE_/ELECTRON_ env
  * scrubbed, port :0. better-sqlite3 needs Electron's ABI, hence the strict loader.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   packages/apps/hub/src/optional-natives-boot.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, beforeAll, expect, test } from 'vitest'
 import { spawn, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
@@ -43,23 +43,6 @@ const HUB_DIR = join(__dirname, '..')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
 
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
-
 function newestMtime(dir: string): number {
   let newest = 0
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -79,9 +62,14 @@ function ensureBuilt(): void {
   execFileSync('node', ['build.mjs'], { cwd: HUB_DIR, stdio: 'inherit' })
 }
 
+// vitest injects these into the test process (TEST=true flips better-auth's isTest()
+// → its origin/CSRF check off); a spawned bin must not inherit them.
+const VITEST_INJECTED = /^(VITEST(_.*)?|TEST|MODE|DEV|PROD|SSR|BASE_URL)$/
+
 function scrubbedEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
+    if (VITEST_INJECTED.test(k)) continue
     if (v == null || /^(SLAYZONE_|ELECTRON_)/.test(k) || k === 'NODE_PATH' || k === 'NODE_OPTIONS')
       continue
     out[k] = v
@@ -139,8 +127,10 @@ async function bootWithoutNatives(processes: '0' | '1'): Promise<{
     const start = Date.now()
     let port = 0
     while (!port) {
-      assert(proc.exitCode === null, `hub exited during boot:\n${logs.join('\n')}`)
-      assert(Date.now() - start < 30_000, `hub did not listen within 30s:\n${logs.join('\n')}`)
+      expect(proc.exitCode, `hub exited during boot:\n${logs.join('\n')}`).toBeNull()
+      expect(Date.now() - start, `hub did not listen within 30s:\n${logs.join('\n')}`).toBeLessThan(
+        30_000
+      )
       const m = logs.join('\n').match(/listening on http:\/\/127\.0\.0\.1:(\d+)/)
       if (m) port = Number(m[1])
       else await new Promise((r) => setTimeout(r, 150))
@@ -148,7 +138,7 @@ async function bootWithoutNatives(processes: '0' | '1'): Promise<{
     const res = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(5_000)
     })
-    assert(res.ok, `/health ${res.status}`)
+    expect(res.ok, `/health ${res.status}`).toBeTruthy()
     const health = (await res.json()) as { ok?: boolean; switches?: { enableProcesses?: boolean } }
     const requested = readFileSync(log, 'utf8').split('\n').filter(Boolean)
     return { health, requested }
@@ -165,27 +155,22 @@ async function bootWithoutNatives(processes: '0' | '1'): Promise<{
   }
 }
 
-console.log('\nthe built hub without its optional natives (node-pty, bufferutil, utf-8-validate)\n')
-ensureBuilt()
+beforeAll(() => ensureBuilt())
 
-try {
-  await test('processes off: boots, /health ok, node-pty never requested', async () => {
-    const { health, requested } = await bootWithoutNatives('0')
-    assert(health.ok === true, `/health ok: ${JSON.stringify(health)}`)
-    assert(health.switches?.enableProcesses === false, 'processes reported off')
-    assert(!requested.includes('node-pty'), `node-pty requested: ${requested.join(', ')}`)
-  })
-
-  await test('processes on: still boots, node-pty not requested at boot', async () => {
-    const { health, requested } = await bootWithoutNatives('1')
-    assert(health.ok === true, `/health ok: ${JSON.stringify(health)}`)
-    assert(health.switches?.enableProcesses === true, 'processes reported on')
-    assert(!requested.includes('node-pty'), `node-pty requested: ${requested.join(', ')}`)
-  })
-} finally {
+afterAll(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true })
-}
+})
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
-process.exit(0)
+test('processes off: boots, /health ok, node-pty never requested', async () => {
+  const { health, requested } = await bootWithoutNatives('0')
+  expect(health.ok, `/health ok: ${JSON.stringify(health)}`).toBe(true)
+  expect(health.switches?.enableProcesses, 'processes reported off').toBe(false)
+  expect(requested, `node-pty requested: ${requested.join(', ')}`).not.toContain('node-pty')
+})
+
+test('processes on: still boots, node-pty not requested at boot', async () => {
+  const { health, requested } = await bootWithoutNatives('1')
+  expect(health.ok, `/health ok: ${JSON.stringify(health)}`).toBe(true)
+  expect(health.switches?.enableProcesses, 'processes reported on').toBe(true)
+  expect(requested, `node-pty requested: ${requested.join(', ')}`).not.toContain('node-pty')
+})

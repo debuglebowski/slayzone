@@ -4,14 +4,15 @@
  * gets in, ownerless and missing rows are refused, the hub-wide exceptions hold, and
  * a hub without login (the desktop app's) allows everything without a query.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/shared/transport/src/server/access.test.ts
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createTestHarness, describe, expect, test } from '../../../test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../test-utils/ipc-harness.js'
 import {
   RESOURCE_KINDS,
   canAccess,
@@ -139,7 +140,7 @@ const OF_A: Record<ResourceKind, string> = {
   pathTree: aWorktree
 }
 
-await describe('every kind: the owner, and nobody else', () => {
+describe('every kind: the owner, and nobody else', () => {
   test('the fixture covers every resource kind', () => {
     expect(Object.keys(OF_A).sort()).toEqual([...RESOURCE_KINDS].sort())
   })
@@ -153,7 +154,7 @@ await describe('every kind: the owner, and nobody else', () => {
   }
 })
 
-await describe('a hub without login (the desktop app): everything, as before', () => {
+describe('a hub without login (the desktop app): everything, as before', () => {
   for (const kind of RESOURCE_KINDS) {
     test(`${kind}: allowed with or without a principal, missing or not`, async () => {
       expect(await can(null, kind, OF_A[kind], false)).toBe(true)
@@ -180,7 +181,7 @@ await describe('a hub without login (the desktop app): everything, as before', (
   })
 })
 
-await describe('missing and ownerless: refused to everyone on a hub with login', () => {
+describe('missing and ownerless: refused to everyone on a hub with login', () => {
   const refused: [ResourceKind, string, string][] = [
     ['project', 'nope', 'missing'],
     ['project', 'pU', 'unowned project (not backfilled)'],
@@ -207,7 +208,7 @@ await describe('missing and ownerless: refused to everyone on a hub with login',
   }
 })
 
-await describe('how each kind finds its owner', () => {
+describe('how each kind finds its owner', () => {
   test('session: the agent-session row decides; else the legacy taskId:tabId key', async () => {
     expect(await can(A, 'session', 'tA:tabA')).toBe(true)
     expect(await can(B, 'session', 'tA:tabA')).toBe(false)
@@ -334,7 +335,7 @@ await describe('how each kind finds its owner', () => {
   })
 })
 
-await describe('scopes: many decisions for one request or one stream', () => {
+describe('scopes: many decisions for one request or one stream', () => {
   test('filter keeps the allowed rows and drops ownerless ones', async () => {
     const scope = createAccessScope(db, req(A))
     const rows = [{ p: 'pA' }, { p: 'pB' }, { p: null }, { p: 'pA2' }]
@@ -370,5 +371,7 @@ await describe('scopes: many decisions for one request or one stream', () => {
   })
 })
 
-h.cleanup()
-rmSync(base, { recursive: true, force: true })
+afterAll(() => {
+  h.cleanup()
+  rmSync(base, { recursive: true, force: true })
+})

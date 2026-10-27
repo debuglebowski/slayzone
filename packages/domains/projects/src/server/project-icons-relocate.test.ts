@@ -3,17 +3,11 @@
  * icons dir once the file has been copied there. The migrated DB still carries the
  * OLD absolute path (legacy userData / flat ~/.slayzone/storage), so icons only
  * rendered while that legacy dir existed.
- *
- * Run with: tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/projects/src/server/project-icons-relocate.test.ts
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { relocateProjectIcons } from './project-store.js'
 
 const h = await createTestHarness()
@@ -34,7 +28,7 @@ function row(id: string): { icon_image_path: string | null; updated_at: string }
   }
 }
 
-await describe('relocateProjectIcons', async () => {
+describe('relocateProjectIcons', () => {
   test('rewrites legacy path to the hub icons dir when the file was copied', async () => {
     writeFileSync(path.join(iconsDir, 'a.png'), 'x')
     addProject('a', '/Users/u/Library/Application Support/slayzone/project-icons/a.png')
@@ -86,4 +80,4 @@ await describe('relocateProjectIcons', async () => {
   })
 })
 
-h.cleanup()
+afterAll(() => h.cleanup())

@@ -23,15 +23,13 @@
  *    everyone's data, and the relaunch semantics do not even apply to a server the
  *    client does not run.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/backup.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, expect, test } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { buildBackupOps } from './backup.js'
 
 const h = await createTestHarness()
@@ -279,8 +277,9 @@ test('startAuto arms the timer when auto backup is enabled, and not when disable
   await o.setSettings({ autoEnabled: false })
 })
 
-// NO trailing `fs.rmSync(dataRoot)` here. The harness's `test()` queues async
-// bodies and returns immediately, so a cleanup at module scope runs while the
-// first test is still mid-flight — it deleted the backups dir underneath it, and
-// only that test failed (later ones re-created the dir via mkdirSync), which is a
-// confusing way to learn this. The OS reaps the temp dir.
+// Cleanup runs in afterAll, after every test has settled. (Under the old harness a
+// module-scope rmSync ran while the first test was still mid-flight and deleted the
+// backups dir underneath it — vitest's hooks don't have that race.)
+afterAll(() => {
+  fs.rmSync(dataRoot, { recursive: true, force: true })
+})

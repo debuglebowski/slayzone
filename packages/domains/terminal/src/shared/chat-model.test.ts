@@ -1,7 +1,7 @@
 /**
  * chat-model unit tests
- * Run with: pnpm tsx packages/domains/terminal/src/shared/chat-model.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   chatModelToFlags,
   isChatModel,
@@ -9,32 +9,6 @@ import {
   DEFAULT_CHAT_MODEL,
   normalizeAccountModel
 } from './chat-model.js'
-
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}\n    ${e}`)
-    failed++
-  }
-}
-function expect<T>(v: T) {
-  return {
-    toBe(e: T) {
-      if (v !== e) throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(v)}`)
-    },
-    toEqual(e: unknown) {
-      if (JSON.stringify(v) !== JSON.stringify(e))
-        throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(v)}`)
-    }
-  }
-}
-
-console.log('\nchat-model\n')
 
 test('opus emits --model opus', () => {
   expect(chatModelToFlags('opus')).toEqual(['--model', 'opus'])
@@ -103,6 +77,3 @@ test('normalizeAccountModel: unknown / null / empty → fallback opus', () => {
   expect(normalizeAccountModel('gpt-5')).toBe(DEFAULT_CHAT_MODEL)
   expect(normalizeAccountModel('unknown-future-model')).toBe(DEFAULT_CHAT_MODEL)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

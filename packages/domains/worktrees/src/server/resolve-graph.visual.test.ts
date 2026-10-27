@@ -2,14 +2,16 @@
  * Visual test suite for commit graph rendering.
  * Generates ASCII art + SVG images for each topology, outputs an HTML report.
  *
- * Run with: npx tsx packages/domains/worktrees/src/main/resolve-graph.visual.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
  * Output:   packages/domains/worktrees/graph-visual-report.html
  */
+import { describe, expect, test } from 'vitest'
 import type { ResolvedCommit, DagCommit } from '../shared/types'
 import { resolveCommitGraph } from './git-worktree'
 import { computeDagLayout, computeCollapsedDag } from '../client/CommitGraph'
 import type { DagLayout, LayoutNode, LayoutEdge, CollapsedDag } from '../client/CommitGraph'
-import { writeFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -1282,56 +1284,65 @@ interface RenderResult {
 
 const results: RenderResult[] = []
 
-for (const tc of cases) {
-  let commits: ResolvedCommit[]
-  let baseBranch: string
+// Each topology is its own test: one that throws while resolving/laying out/rendering
+// names itself instead of aborting the whole report.
+describe('commit graph visual cases', () => {
+  for (const tc of cases) {
+    test(tc.name, () => {
+      let commits: ResolvedCommit[]
+      let baseBranch: string
 
-  if ('rawCommits' in tc) {
-    const g = resolveCommitGraph(tc.rawCommits, tc.baseBranch, tc.requestedBranches)
-    commits = g.commits
-    baseBranch = g.baseBranch
-  } else {
-    commits = tc.commits
-    baseBranch = tc.baseBranch
+      if ('rawCommits' in tc) {
+        const g = resolveCommitGraph(tc.rawCommits, tc.baseBranch, tc.requestedBranches)
+        commits = g.commits
+        baseBranch = g.baseBranch
+      } else {
+        commits = tc.commits
+        baseBranch = tc.baseBranch
+      }
+
+      const layout = computeDagLayout(commits, baseBranch)
+      const ascii = renderAscii(layout)
+      const svg = renderSvg(layout)
+
+      let collapsedAscii: AsciiResult | undefined
+      let collapsedSvg: string | undefined
+
+      if (tc.collapsed) {
+        const collapsed = computeCollapsedDag(
+          layout,
+          baseBranch,
+          tc.collapsed.includeTags,
+          tc.collapsed.breakOnMerges,
+          tc.collapsed.recentRowThreshold
+        )
+        collapsedAscii = renderAscii(collapsed)
+        collapsedSvg = renderSvg(collapsed)
+      }
+
+      results.push({
+        name: tc.name,
+        description: tc.description,
+        ascii,
+        svg,
+        collapsedAscii,
+        collapsedSvg
+      })
+
+      // Every topology renders to a non-empty ASCII graph (the report is useless otherwise).
+      expect(ascii.lines.length).toBeGreaterThan(0)
+
+      // Console output
+      console.log(`\n━━ ${tc.name} ━━`)
+      console.log(`   ${tc.description}`)
+      for (const line of ascii.lines) console.log(`   ${line}`)
+      if (collapsedAscii) {
+        console.log(`   ── collapsed ──`)
+        for (const line of collapsedAscii.lines) console.log(`   ${line}`)
+      }
+    })
   }
-
-  const layout = computeDagLayout(commits, baseBranch)
-  const ascii = renderAscii(layout)
-  const svg = renderSvg(layout)
-
-  let collapsedAscii: AsciiResult | undefined
-  let collapsedSvg: string | undefined
-
-  if (tc.collapsed) {
-    const collapsed = computeCollapsedDag(
-      layout,
-      baseBranch,
-      tc.collapsed.includeTags,
-      tc.collapsed.breakOnMerges,
-      tc.collapsed.recentRowThreshold
-    )
-    collapsedAscii = renderAscii(collapsed)
-    collapsedSvg = renderSvg(collapsed)
-  }
-
-  results.push({
-    name: tc.name,
-    description: tc.description,
-    ascii,
-    svg,
-    collapsedAscii,
-    collapsedSvg
-  })
-
-  // Console output
-  console.log(`\n━━ ${tc.name} ━━`)
-  console.log(`   ${tc.description}`)
-  for (const line of ascii.lines) console.log(`   ${line}`)
-  if (collapsedAscii) {
-    console.log(`   ── collapsed ──`)
-    for (const line of collapsedAscii.lines) console.log(`   ${line}`)
-  }
-}
+})
 
 // ─── HTML report ────────────────────────────────────────────────
 
@@ -1476,12 +1487,17 @@ ${sections}
 </html>`
 }
 
-const html = generateHtml(results)
-const outPath = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../..',
-  'graph-visual-report.html'
-)
-writeFileSync(outPath, html, 'utf-8')
-console.log(`\n✓ Report written to ${outPath}`)
-console.log(`  Open with: open "${outPath}"`)
+// Declared after the per-case tests, so it runs once all of them have filled `results`.
+test('writes the HTML report', () => {
+  const html = generateHtml(results)
+  const outPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../..',
+    'graph-visual-report.html'
+  )
+  writeFileSync(outPath, html, 'utf-8')
+  expect(readFileSync(outPath, 'utf-8')).toBe(html)
+  expect(results).toHaveLength(cases.length)
+  console.log(`\n✓ Report written to ${outPath}`)
+  console.log(`  Open with: open "${outPath}"`)
+})

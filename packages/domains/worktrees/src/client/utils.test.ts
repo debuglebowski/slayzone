@@ -1,37 +1,13 @@
 /**
  * Tests for utils.ts
- * Run with: npx tsx packages/domains/worktrees/src/client/utils.test.ts
  */
+import { expect, test } from 'vitest'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   joinWorktreePath,
   resolveWorktreeBasePathTemplate,
   slugify
 } from './utils'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 test('basic title case', () => {
   expect(slugify('Fix Login Bug')).toBe('fix-login-bug')
@@ -169,6 +145,3 @@ test('joins worktree path with posix separator', () => {
 test('joins worktree path with windows separator', () => {
   expect(joinWorktreePath('C:\\tmp\\wt', 'feature-1')).toBe('C:\\tmp\\wt\\feature-1')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

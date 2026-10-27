@@ -12,23 +12,10 @@
  *
  * Run: pnpm exec tsx packages/domains/terminal/src/server/agent-tree.test.ts
  */
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { applyAgentHook, createAgentTree, resolveState, subagentIdOf } from './agent-tree'
 import type { AgentTree } from './agent-tree'
-
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    passed++
-    console.log(`  ✓ ${name}`)
-  } catch (err) {
-    failed++
-    console.log(`  ✗ ${name}`)
-    console.log(`    ${(err as Error).message}`)
-  }
-}
 
 const SUB = 'a283110c20b8651d8'
 const SUB2 = 'a9c6c3878eac7195d'
@@ -48,7 +35,7 @@ const sub = (
   toolName?: string
 ): ReturnType<typeof applyAgentHook> => applyAgentHook(tree, { hookEvent, toolName, subagentId })
 
-console.log('agent-tree: state ladder')
+// --- agent-tree: state ladder ---
 
 test('subagentIdOf discriminates main-loop from subagent payloads', () => {
   assert.equal(subagentIdOf({ tool_name: 'Bash' }), undefined)
@@ -183,6 +170,3 @@ test('SessionEnd clears the turn and reports remaining helpers', () => {
   sub(t, 'PreToolUse', SUB, 'Bash')
   assert.equal(main(t, 'SessionEnd'), 'background')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

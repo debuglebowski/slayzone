@@ -1,15 +1,15 @@
 /**
  * CLI hub plumbing tests — resolveHubTarget precedence, cli-hub-target.json perms,
  * Authorization header injection, legacy fallback.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/hub.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/hub.test.ts
  */
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
 import { captureAll, captureAllAsync } from './test-harness.js'
 import {
   getHubConfigPath,
@@ -94,7 +94,7 @@ async function deadPort(): Promise<number> {
 
 // --- tests ------------------------------------------------------------------
 
-await describe('normalizeHubUrl', () => {
+describe('normalizeHubUrl', () => {
   test('strips trailing slashes', () => {
     expect(normalizeHubUrl('http://example.com:8080///')).toBe('http://example.com:8080')
   })
@@ -117,7 +117,7 @@ await describe('normalizeHubUrl', () => {
   })
 })
 
-await describe('resolveHubTarget precedence', () => {
+describe('resolveHubTarget precedence', () => {
   test('returns null when no env and no file (legacy)', () => {
     setEnv({ SLAYZONE_ROOT: freshStateDir() })
     expect(resolveHubTarget()).toBeNull()
@@ -245,7 +245,7 @@ await describe('resolveHubTarget precedence', () => {
   })
 })
 
-await describe('writeHubConfig / removeHubConfig', () => {
+describe('writeHubConfig / removeHubConfig', () => {
   test('writes cli-hub-target.json with 0600 perms', () => {
     setEnv({ SLAYZONE_ROOT: freshStateDir() })
     const p = writeHubConfig('http://example.com:1', 'tok')
@@ -276,7 +276,7 @@ await describe('writeHubConfig / removeHubConfig', () => {
   })
 })
 
-await describe('api Authorization header', () => {
+describe('api Authorization header', () => {
   test('attaches Bearer token when hub token configured', async () => {
     const srv = await startServer()
     try {
@@ -323,7 +323,7 @@ await describe('api Authorization header', () => {
   })
 })
 
-await describe('notifyApp via hub', () => {
+describe('notifyApp via hub', () => {
   test('posts /api/notify to hub with Bearer token', async () => {
     const srv = await startServer()
     try {
@@ -356,11 +356,12 @@ await describe('notifyApp via hub', () => {
 
 // --- teardown ---------------------------------------------------------------
 
-for (const k of ENV_KEYS) {
-  if (savedEnv[k] === undefined) delete process.env[k]
-  else process.env[k] = savedEnv[k]
-}
-for (const dir of tmpDirs) {
-  fs.rmSync(dir, { recursive: true, force: true })
-}
-console.log('\nDone')
+afterAll(() => {
+  for (const k of ENV_KEYS) {
+    if (savedEnv[k] === undefined) delete process.env[k]
+    else process.env[k] = savedEnv[k]
+  }
+  for (const dir of tmpDirs) {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

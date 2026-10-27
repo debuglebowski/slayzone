@@ -1,31 +1,14 @@
 /**
  * Root-cause classifier tests for the xterm focus-steal diagnostic.
- * Pure logic only (no DOM) — run with:
- *   pnpm tsx packages/domains/terminal/src/client/focus-loss-diag.test.ts
+ * Pure logic only (no DOM).
  */
+import { describe, expect, test } from 'vitest'
 import {
   classifyFocusLoss,
   isElementUnfocusable,
   type BlurContext,
   type FocusBlocker
 } from './focus-loss-diag.js'
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    throw e
-  }
-}
-function expect<T>(v: T) {
-  return {
-    toBe(e: T): void {
-      if (v !== e) throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(v)}`)
-    }
-  }
-}
 
 const NO_BLOCKER: FocusBlocker = {
   disabled: false,
@@ -56,178 +39,179 @@ function ctx(over: Partial<BlurContext> = {}): BlurContext {
   }
 }
 
-console.log('classifyFocusLoss')
+describe('classifyFocusLoss', () => {
+  test('detached textarea → dom-teardown', () => {
+    expect(classifyFocusLoss(ctx({ textareaConnected: false }))).toBe('dom-teardown')
+  })
 
-test('detached textarea → dom-teardown', () => {
-  expect(classifyFocusLoss(ctx({ textareaConnected: false }))).toBe('dom-teardown')
-})
+  test('teardown wins even when an ancestor also reads hidden', () => {
+    // During unmount both can be true; teardown is the more fundamental cause.
+    expect(
+      classifyFocusLoss(
+        ctx({
+          textareaConnected: false,
+          hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 3 }
+        })
+      )
+    ).toBe('dom-teardown')
+  })
 
-test('teardown wins even when an ancestor also reads hidden', () => {
-  // During unmount both can be true; teardown is the more fundamental cause.
-  expect(
-    classifyFocusLoss(
-      ctx({
-        textareaConnected: false,
-        hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 3 }
-      })
+  test('display:none ancestor → ancestor-display-none (the tab-hide class)', () => {
+    expect(
+      classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 5 } }))
+    ).toBe('ancestor-display-none')
+  })
+
+  test('visibility:hidden ancestor → ancestor-visibility-hidden', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({ hiddenAncestor: { tag: 'DIV', reason: 'visibility:hidden', depth: 2 } })
+      )
+    ).toBe('ancestor-visibility-hidden')
+  })
+
+  test('hidden attribute ancestor → ancestor-hidden-attr', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({ hiddenAncestor: { tag: 'SECTION', reason: 'hidden-attr', depth: 1 } })
+      )
+    ).toBe('ancestor-hidden-attr')
+  })
+
+  test('aria-hidden ancestor → ancestor-aria-hidden', () => {
+    expect(
+      classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'DIV', reason: 'aria-hidden', depth: 4 } }))
+    ).toBe('ancestor-aria-hidden')
+  })
+
+  test('hidden ancestor wins over a programmatic-looking stack', () => {
+    // A tab-hide IS the cause; the commit stack is just how it happened.
+    expect(
+      classifyFocusLoss(
+        ctx({
+          hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 5 },
+          blurStack: 'at commitMutationEffects\nat Terminal'
+        })
+      )
+    ).toBe('ancestor-display-none')
+  })
+
+  test('connected + visible + inert element → element-unfocusable', () => {
+    expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true } }))).toBe(
+      'element-unfocusable'
     )
-  ).toBe('dom-teardown')
-})
+  })
 
-test('display:none ancestor → ancestor-display-none (the tab-hide class)', () => {
-  expect(
-    classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 5 } }))
-  ).toBe('ancestor-display-none')
-})
-
-test('visibility:hidden ancestor → ancestor-visibility-hidden', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({ hiddenAncestor: { tag: 'DIV', reason: 'visibility:hidden', depth: 2 } })
+  test('connected + visible + disabled element → element-unfocusable', () => {
+    expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, disabled: true } }))).toBe(
+      'element-unfocusable'
     )
-  ).toBe('ancestor-visibility-hidden')
-})
+  })
 
-test('hidden attribute ancestor → ancestor-hidden-attr', () => {
-  expect(
-    classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'SECTION', reason: 'hidden-attr', depth: 1 } }))
-  ).toBe('ancestor-hidden-attr')
-})
+  test('connected + visible + ancestor [inert] → element-unfocusable', () => {
+    expect(
+      classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inertAncestor: { tag: 'DIV' } } }))
+    ).toBe('element-unfocusable')
+  })
 
-test('aria-hidden ancestor → ancestor-aria-hidden', () => {
-  expect(
-    classifyFocusLoss(ctx({ hiddenAncestor: { tag: 'DIV', reason: 'aria-hidden', depth: 4 } }))
-  ).toBe('ancestor-aria-hidden')
-})
+  test('readOnly / tabIndex<0 alone are NOT blockers (still focusable)', () => {
+    expect(isElementUnfocusable({ ...NO_BLOCKER, readOnly: true, tabIndex: -1 })).toBe(false)
+    expect(
+      classifyFocusLoss(
+        ctx({ focusBlocker: { ...NO_BLOCKER, readOnly: true, tabIndex: -1 }, blurStack: 'native' })
+      )
+    ).toBe('unattributed')
+  })
 
-test('hidden ancestor wins over a programmatic-looking stack', () => {
-  // A tab-hide IS the cause; the commit stack is just how it happened.
-  expect(
-    classifyFocusLoss(
-      ctx({
-        hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 5 },
-        blurStack: 'at commitMutationEffects\nat Terminal'
-      })
+  test('hidden ancestor wins over an inert element (tab-hide grouping stays clean)', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({
+          hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 3 },
+          focusBlocker: { ...NO_BLOCKER, inert: true }
+        })
+      )
+    ).toBe('ancestor-display-none')
+  })
+
+  test('element-unfocusable wins over a programmatic-looking stack', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({ focusBlocker: { ...NO_BLOCKER, inert: true }, blurStack: 'at HTMLElement.blur' })
+      )
+    ).toBe('element-unfocusable')
+  })
+
+  test('connected + visible + app frames in stack → programmatic-blur', () => {
+    expect(classifyFocusLoss(ctx({ blurStack: 'at HTMLElement.blur\nat focusElsewhere' }))).toBe(
+      'programmatic-blur'
     )
-  ).toBe('ancestor-display-none')
-})
+  })
 
-test('connected + visible + inert element → element-unfocusable', () => {
-  expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true } }))).toBe(
-    'element-unfocusable'
-  )
-})
-
-test('connected + visible + disabled element → element-unfocusable', () => {
-  expect(classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, disabled: true } }))).toBe(
-    'element-unfocusable'
-  )
-})
-
-test('connected + visible + ancestor [inert] → element-unfocusable', () => {
-  expect(
-    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inertAncestor: { tag: 'DIV' } } }))
-  ).toBe('element-unfocusable')
-})
-
-test('readOnly / tabIndex<0 alone are NOT blockers (still focusable)', () => {
-  expect(isElementUnfocusable({ ...NO_BLOCKER, readOnly: true, tabIndex: -1 })).toBe(false)
-  expect(
-    classifyFocusLoss(
-      ctx({ focusBlocker: { ...NO_BLOCKER, readOnly: true, tabIndex: -1 }, blurStack: 'native' })
+  test('connected + visible + Terminal frame → programmatic-blur', () => {
+    expect(classifyFocusLoss(ctx({ blurStack: 'at onSomething (Terminal.tsx:42)' }))).toBe(
+      'programmatic-blur'
     )
-  ).toBe('unattributed')
-})
+  })
 
-test('hidden ancestor wins over an inert element (tab-hide grouping stays clean)', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({
-        hiddenAncestor: { tag: 'DIV', reason: 'display:none', depth: 3 },
-        focusBlocker: { ...NO_BLOCKER, inert: true }
-      })
+  test('connected + visible + no app frames → unattributed', () => {
+    expect(classifyFocusLoss(ctx({ blurStack: 'at dispatchEvent\nat <anonymous>' }))).toBe(
+      'unattributed'
     )
-  ).toBe('ancestor-display-none')
-})
+  })
 
-test('element-unfocusable wins over a programmatic-looking stack', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({ focusBlocker: { ...NO_BLOCKER, inert: true }, blurStack: 'at HTMLElement.blur' })
-    )
-  ).toBe('element-unfocusable')
-})
+  // Regression: the focusout handler ALWAYS lives in Terminal.tsx, so a native
+  // click-blur captures a single `onFocusOut (Terminal.tsx)` frame. The old regex
+  // matched "Terminal" on that frame and mislabelled every such blur programmatic.
+  test('native click-blur (only the onFocusOut handler frame) is NOT programmatic', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({
+          blurStack:
+            '    at HTMLDivElement.onFocusOut (http://localhost:5173/@fs/x/Terminal.tsx?t=1:1004:16)'
+        })
+      )
+    ).toBe('unattributed')
+  })
 
-test('connected + visible + app frames in stack → programmatic-blur', () => {
-  expect(classifyFocusLoss(ctx({ blurStack: 'at HTMLElement.blur\nat focusElsewhere' }))).toBe(
-    'programmatic-blur'
-  )
-})
+  test('recent pointerdown + focus on body → click-to-nonfocusable', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({
+          sincePointerMs: 1,
+          lastPointerTarget: 'DIV#tree-status-group',
+          blurStack:
+            '    at HTMLDivElement.onFocusOut (http://localhost:5173/x/Terminal.tsx:1004:16)'
+        })
+      )
+    ).toBe('click-to-nonfocusable')
+  })
 
-test('connected + visible + Terminal frame → programmatic-blur', () => {
-  expect(classifyFocusLoss(ctx({ blurStack: 'at onSomething (Terminal.tsx:42)' }))).toBe(
-    'programmatic-blur'
-  )
-})
+  test('stale pointerdown (outside the click window) is NOT click-to-nonfocusable', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({
+          sincePointerMs: 5000,
+          blurStack: '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)'
+        })
+      )
+    ).toBe('unattributed')
+  })
 
-test('connected + visible + no app frames → unattributed', () => {
-  expect(classifyFocusLoss(ctx({ blurStack: 'at dispatchEvent\nat <anonymous>' }))).toBe(
-    'unattributed'
-  )
-})
+  test('element-unfocusable wins over a recent click', () => {
+    expect(
+      classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true }, sincePointerMs: 1 }))
+    ).toBe('element-unfocusable')
+  })
 
-// Regression: the focusout handler ALWAYS lives in Terminal.tsx, so a native
-// click-blur captures a single `onFocusOut (Terminal.tsx)` frame. The old regex
-// matched "Terminal" on that frame and mislabelled every such blur programmatic.
-test('native click-blur (only the onFocusOut handler frame) is NOT programmatic', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({
-        blurStack:
-          '    at HTMLDivElement.onFocusOut (http://localhost:5173/@fs/x/Terminal.tsx?t=1:1004:16)'
-      })
-    )
-  ).toBe('unattributed')
+  test('real programmatic blur() above the handler frame → programmatic-blur', () => {
+    expect(
+      classifyFocusLoss(
+        ctx({
+          blurStack:
+            '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)\n    at HTMLTextAreaElement.blur\n    at stealFocus (other.ts:9)'
+        })
+      )
+    ).toBe('programmatic-blur')
+  })
 })
-
-test('recent pointerdown + focus on body → click-to-nonfocusable', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({
-        sincePointerMs: 1,
-        lastPointerTarget: 'DIV#tree-status-group',
-        blurStack: '    at HTMLDivElement.onFocusOut (http://localhost:5173/x/Terminal.tsx:1004:16)'
-      })
-    )
-  ).toBe('click-to-nonfocusable')
-})
-
-test('stale pointerdown (outside the click window) is NOT click-to-nonfocusable', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({
-        sincePointerMs: 5000,
-        blurStack: '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)'
-      })
-    )
-  ).toBe('unattributed')
-})
-
-test('element-unfocusable wins over a recent click', () => {
-  expect(
-    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true }, sincePointerMs: 1 }))
-  ).toBe('element-unfocusable')
-})
-
-test('real programmatic blur() above the handler frame → programmatic-blur', () => {
-  expect(
-    classifyFocusLoss(
-      ctx({
-        blurStack:
-          '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)\n    at HTMLTextAreaElement.blur\n    at stealFocus (other.ts:9)'
-      })
-    )
-  ).toBe('programmatic-blur')
-})
-
-console.log('all classifyFocusLoss tests passed')

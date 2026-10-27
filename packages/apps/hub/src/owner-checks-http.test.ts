@@ -21,14 +21,15 @@
  * The hub without login is `owner-checks-http-login-off.test.ts`; the exhaustiveness
  * of the policy is `transport/src/server/http-owner-policy.test.ts`.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *   --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/owner-checks-http.test.ts
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import Database from 'better-sqlite3'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   MCP_OWNER_POLICY,
@@ -61,22 +62,6 @@ import {
   type Owned
 } from './owner-checks-harness.js'
 
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 interface AuditLine {
@@ -291,477 +276,486 @@ function mcpArgsFor(
 
 // ── the test ──────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  console.log('\nT-18 owner checks: REST, MCP and hooks for two users on a real hub with login\n')
-  const hub = await bootInProcessHub({ login: true })
-  const a = await signedInUser(hub, 'a@example.com')
-  const b = await signedInUser(hub, 'b@example.com')
-  const admin = { userId: hub.adminUserId!, token: hub.adminToken! }
-  const A = ownedBy('A_SECRET', a.userId, hub.root)
-  const B = ownedBy('B_OWN', b.userId, hub.root)
-  seedOwned(hub.dbPath, A)
-  seedOwned(hub.dbPath, B)
-  seedShared(hub.dbPath, A, B)
-  // Real artifact files: `<ROOT>/artifacts/<taskId>/<artifactId>.txt` (title has no ext).
-  for (const o of [A, B]) {
-    mkdirSync(join(hub.root, 'artifacts', o.task), { recursive: true })
-    writeFileSync(join(hub.root, 'artifacts', o.task, `${o.artifact}.txt`), `${o.mark}_FILE_BYTES`)
-  }
-  const raw = new Database(hub.dbPath)
-  const db = createSlayzoneDbAdapter(raw)
-  // The harness's second task (`<mark>_task_hibernated`) shares the `<mark>_task` prefix,
-  // which a CLI prefix lookup would rightly call ambiguous: not needed here.
-  raw
-    .prepare(`DELETE FROM terminal_tabs WHERE task_id LIKE '%\\_task\\_hibernated' ESCAPE '\\'`)
-    .run()
-  raw.prepare(`DELETE FROM tasks WHERE id LIKE '%\\_task\\_hibernated' ESCAPE '\\'`).run()
-  // Several MCP tools take a task id that must be a uuid (zod), checked before the gate.
-  const uuidTask = (o: Owned, id: string): Owned => {
-    raw
-      .prepare(`INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)`)
-      .run(id, o.project, `${o.mark}_MCP_TASK`)
-    return { ...o, task: id }
-  }
-  const mcpA = uuidTask(A, '0a0a0a0a-0000-4000-8000-00000000000a')
-  const mcpB = uuidTask(B, '0b0b0b0b-0000-4000-8000-00000000000b')
-  raw
-    .prepare(
-      `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
-       VALUES (?, ?, 'linux', '1', '{}', 0, ?)`
-    )
-    .run('comp-a', 'a', a.userId)
-  raw
-    .prepare(
-      `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
-       VALUES (?, ?, 'linux', '1', '{}', 0, ?)`
-    )
-    .run('comp-b', 'b', b.userId)
-  raw
-    .prepare(
-      `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
-       VALUES (?, ?, 'linux', '1', '{}', 0, NULL)`
-    )
-    .run('comp-unowned', 'u')
-
+describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub with login', () => {
+  let hub: InProcessHub
+  let a: { userId: string; token: string }
+  let b: { userId: string; token: string }
+  let admin: { userId: string; token: string }
+  let A: Owned
+  let B: Owned
+  let raw: Database.Database
+  let db: RestApiDeps['db']
+  let mcpA: Owned
+  let mcpB: Owned
   const counts = { restIds: 0, mcpIds: 0 }
-  try {
-    // ── REST: every id the policy names ──
-    await test('REST: B and the admin get 404 + one audit line on every id A owns; A passes the gate', async () => {
-      const failures: string[] = []
-      for (const [key, rule] of Object.entries(REST_OWNER_POLICY)) {
-        for (const ref of rule.ids ?? []) {
-          counts.restIds++
-          for (const [who, token, userId] of [
-            ['B', b.token, b.userId],
-            ['admin', admin.token, admin.userId]
-          ] as const) {
-            const before = lines.length
-            const req = requestFor(key, rule, ref, A, B)
-            const r = await rest(hub, token, req)
-            const d = denials(before)
-            if (who === 'B' && REST_ADMIN_POLICY[key] === 'admin') {
-              // An `admin` route refuses B by role (403 ADMIN_ONLY) before any id is
-              // read; the admin, next, by owner (T-106).
-              if (
-                r.status !== 403 ||
-                d[0]?.detail.reason !== 'not_admin' ||
-                r.text.includes(A.mark)
-              )
-                failures.push(`B ${key} ${ref.at}: ${r.status} ${r.text.slice(0, 120)}`)
-              continue
-            }
-            // The admin owns no companion either: its refusal may come at another id.
-            const ok =
-              r.status === 404 &&
-              (r.body as { error?: string })?.error === 'Not found' &&
-              d.length === 1 &&
-              d[0]!.detail.reason === 'not_owner' &&
-              (who === 'admin' || d[0]!.detail.at === ref.at) &&
-              d[0]!.actor === userId &&
-              !r.text.includes(A.mark)
-            if (!ok)
-              failures.push(
-                `${who} ${key} ${ref.at}: ${r.status} ${r.text.slice(0, 120)} (${d.length} denials)`
-              )
-          }
+
+  beforeAll(async () => {
+    hub = await bootInProcessHub({ login: true })
+    a = await signedInUser(hub, 'a@example.com')
+    b = await signedInUser(hub, 'b@example.com')
+    admin = { userId: hub.adminUserId!, token: hub.adminToken! }
+    A = ownedBy('A_SECRET', a.userId, hub.root)
+    B = ownedBy('B_OWN', b.userId, hub.root)
+    seedOwned(hub.dbPath, A)
+    seedOwned(hub.dbPath, B)
+    seedShared(hub.dbPath, A, B)
+    // Real artifact files: `<ROOT>/artifacts/<taskId>/<artifactId>.txt` (title has no ext).
+    for (const o of [A, B]) {
+      mkdirSync(join(hub.root, 'artifacts', o.task), { recursive: true })
+      writeFileSync(
+        join(hub.root, 'artifacts', o.task, `${o.artifact}.txt`),
+        `${o.mark}_FILE_BYTES`
+      )
+    }
+    raw = new Database(hub.dbPath)
+    db = createSlayzoneDbAdapter(raw)
+    // The harness's second task (`<mark>_task_hibernated`) shares the `<mark>_task` prefix,
+    // which a CLI prefix lookup would rightly call ambiguous: not needed here.
+    raw
+      .prepare(`DELETE FROM terminal_tabs WHERE task_id LIKE '%\\_task\\_hibernated' ESCAPE '\\'`)
+      .run()
+    raw.prepare(`DELETE FROM tasks WHERE id LIKE '%\\_task\\_hibernated' ESCAPE '\\'`).run()
+    // Several MCP tools take a task id that must be a uuid (zod), checked before the gate.
+    const uuidTask = (o: Owned, id: string): Owned => {
+      raw
+        .prepare(`INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)`)
+        .run(id, o.project, `${o.mark}_MCP_TASK`)
+      return { ...o, task: id }
+    }
+    mcpA = uuidTask(A, '0a0a0a0a-0000-4000-8000-00000000000a')
+    mcpB = uuidTask(B, '0b0b0b0b-0000-4000-8000-00000000000b')
+    raw
+      .prepare(
+        `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+         VALUES (?, ?, 'linux', '1', '{}', 0, ?)`
+      )
+      .run('comp-a', 'a', a.userId)
+    raw
+      .prepare(
+        `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+         VALUES (?, ?, 'linux', '1', '{}', 0, ?)`
+      )
+      .run('comp-b', 'b', b.userId)
+    raw
+      .prepare(
+        `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+         VALUES (?, ?, 'linux', '1', '{}', 0, NULL)`
+      )
+      .run('comp-unowned', 'u')
+  })
+
+  afterAll(async () => {
+    raw?.close()
+    await hub?.stop()
+    console.log(`\n  REST id cases: ${counts.restIds} · MCP id cases: ${counts.mcpIds}`)
+  })
+
+  // ── REST: every id the policy names ──
+  test('REST: B and the admin get 404 + one audit line on every id A owns; A passes the gate', async () => {
+    const failures: string[] = []
+    for (const [key, rule] of Object.entries(REST_OWNER_POLICY)) {
+      for (const ref of rule.ids ?? []) {
+        counts.restIds++
+        for (const [who, token, userId] of [
+          ['B', b.token, b.userId],
+          ['admin', admin.token, admin.userId]
+        ] as const) {
           const before = lines.length
-          const passes = await guardPasses(db, key, a.userId, requestFor(key, rule, ref, A, A))
-          if (!passes || denials(before).length !== 0) failures.push(`A ${key} ${ref.at}: refused`)
-        }
-      }
-      assert(failures.length === 0, `\n      ${failures.join('\n      ')}`)
-      assert(counts.restIds > 100, `${counts.restIds} REST id cases`)
-    })
-
-    await test('REST: an id prefix or a project name only ever reaches the caller’s rows', async () => {
-      // A's id prefix: someone else's → 404, never "ambiguous" with A's ids in it.
-      const prefix = await rest(hub, b.token, get(`/api/tasks/${A.task.slice(0, 6)}`))
-      assert(prefix.status === 404 && !prefix.text.includes(A.mark), `prefix: ${prefix.text}`)
-      // A prefix matching BOTH users' tasks (`%` matches any) resolves among B's only.
-      const any = await rest(hub, b.token, get('/api/tasks/%25/progress'))
-      assert(!any.text.includes(A.mark), `wildcard prefix leaked: ${any.text}`)
-      // A project name substring of A's project: 404, and no "Available:" list of names.
-      const byName = await rest(hub, b.token, get('/api/tags', { project: 'SECRET' }))
-      assert(byName.status === 404 && !byName.text.includes(A.mark), `name: ${byName.text}`)
-      const miss = await rest(hub, b.token, get('/api/templates', { project: 'no-such-project' }))
-      assert(miss.status === 404 && !miss.text.includes(A.mark), `miss: ${miss.text}`)
-      // B's own name and prefix still work.
-      const own = await rest(hub, b.token, get('/api/tags', { project: 'B_OWN' }))
-      assert(own.status === 200 && shows(own.body, 'B_OWN_TAG'), `own: ${own.text}`)
-      const ownPrefix = await rest(hub, b.token, get(`/api/tasks/${B.task.slice(0, 7)}`))
-      assert(
-        ownPrefix.status === 200 && shows(ownPrefix.body, B.task),
-        `own prefix: ${ownPrefix.text}`
-      )
-    })
-
-    // ── REST: lists ──
-    await test('REST: B’s and the admin’s lists hold none of A’s rows; A’s hold them', async () => {
-      const lists: Req[] = [
-        get('/api/projects'),
-        get('/api/tasks'),
-        get('/api/tasks', { limit: '1' }),
-        get('/api/tasks/search', { q: 'task' }),
-        get('/api/artifacts/search', { allTasks: '1', q: '_' })
-      ]
-      for (const req of lists) {
-        const label = `${req.path}?${new URLSearchParams(req.query)}`
-        const ra = await rest(hub, a.token, req)
-        assert(
-          ra.status === 200 && shows(ra.body, A.mark),
-          `A sees own rows on ${label}: ${ra.text.slice(0, 200)}`
-        )
-        const rb = await rest(hub, b.token, req)
-        assert(
-          rb.status === 200 && !shows(rb.body, A.mark),
-          `B sees A on ${label}: ${rb.text.slice(0, 200)}`
-        )
-        assert(shows(rb.body, B.mark), `B sees own rows on ${label}: ${rb.text.slice(0, 200)}`)
-        const rad = await rest(hub, admin.token, req)
-        assert(
-          !shows(rad.body, A.mark) && !shows(rad.body, B.mark),
-          `admin sees content on ${label}`
-        )
-      }
-      const search = (
-        await rest(hub, b.token, get('/api/artifacts/search', { allTasks: '1', q: '_' }))
-      ).body as { data: { scannedCount: number } }
-      assert(search.data.scannedCount === 1, `B scanned ${search.data.scannedCount} artifacts`)
-    })
-
-    await test('REST: a cross-project blocker (A’s task blocks B’s) is cut from B’s task', async () => {
-      const dep = raw
-        .prepare(
-          'SELECT COUNT(*) AS n FROM task_dependencies WHERE task_id = ? AND blocks_task_id = ?'
-        )
-        .get(A.task, B.task) as { n: number }
-      assert(dep.n === 1, 'the dependency exists')
-      for (const path of [
-        `/api/tasks/${B.task}`,
-        `/api/tasks/${B.task}/blockers`,
-        `/api/tasks/${B.task}/blocked`
-      ]) {
-        const r = await rest(hub, b.token, get(path))
-        assert(r.status === 200 && !r.text.includes(A.mark), `${path}: ${r.text.slice(0, 200)}`)
-      }
-      const blocking = await rest(hub, a.token, get(`/api/tasks/${A.task}/blocking`))
-      assert(
-        blocking.status === 200 && !blocking.text.includes(B.mark),
-        `A's blocking: ${blocking.text}`
-      )
-    })
-
-    await test('REST: the pty and process lists are cut to the caller’s sessions and tasks', async () => {
-      const scope = createAccessScope(db, httpAccessRequest(b.userId))
-      const ptys = (await REST_OWNER_POLICY['GET /api/pty']!.output!(
-        [{ sessionId: A.session }, { sessionId: B.session }, { sessionId: `${A.task}:${A.tab}` }],
-        scope
-      )) as unknown[]
-      assert(
-        JSON.stringify(ptys) === JSON.stringify([{ sessionId: B.session }]),
-        JSON.stringify(ptys)
-      )
-      const procs = (await REST_OWNER_POLICY['GET /api/processes']!.output!(
-        [
-          { id: 'p1', taskId: A.task },
-          { id: 'p2', taskId: B.task },
-          { id: 'p3', projectId: A.project },
-          { id: 'p4' }
-        ],
-        scope
-      )) as { id: string }[]
-      assert(procs.map((p) => p.id).join() === 'p2', JSON.stringify(procs))
-    })
-
-    // ── artifact files ──
-    await test('REST: B cannot fetch A’s artifact file by id, prefix, crafted id or version', async () => {
-      const own = await rest(hub, a.token, get(`/api/artifacts/${A.artifact}/content`))
-      assert(
-        own.status === 200 && own.text === 'A_SECRET_FILE_BYTES',
-        `A reads own file: ${own.status}`
-      )
-      const crafted = [
-        A.artifact,
-        A.artifact.slice(0, 5),
-        `../${A.task}/${A.artifact}`,
-        `..%2F..%2Fartifacts%2F${A.task}%2F${A.artifact}`,
-        `${B.artifact}/../${A.artifact}`
-      ]
-      for (const id of crafted) {
-        for (const path of [
-          `/api/artifacts/${encodeURIComponent(id)}/content`,
-          `/api/artifacts/${encodeURIComponent(id)}/versions/content?ref=1`
-        ]) {
-          const r = await fetch(`http://127.0.0.1:${hub.port}${path}`, {
-            headers: { authorization: `Bearer ${b.token}` }
-          })
-          const text = await r.text()
-          assert(
-            !text.includes('A_SECRET_FILE_BYTES') && !text.includes(A.mark),
-            `${path}: ${text}`
-          )
-          assert(r.status === 404 || r.status === 400, `${path}: ${r.status}`)
-        }
-      }
-      const ownB = await rest(hub, b.token, get(`/api/artifacts/${B.artifact}/content`))
-      assert(ownB.text === 'B_OWN_FILE_BYTES', 'B reads own file')
-    })
-
-    await test('REST: an export cannot be written into A’s artifact dir or the hub’s state', async () => {
-      for (const outputPath of [
-        join(hub.root, 'artifacts', A.task, 'planted.html'),
-        join(A.path, 'planted.html'),
-        join(hub.root, 'slayzone.data.sqlite')
-      ]) {
-        const before = lines.length
-        const r = await rest(hub, b.token, {
-          method: 'POST',
-          path: '/api/artifacts/:id/export/html',
-          params: { id: B.artifact },
-          query: {},
-          body: { outputPath }
-        })
-        assert(
-          r.status === 404 && denials(before).length === 1,
-          `${outputPath}: ${r.status} ${r.text}`
-        )
-      }
-    })
-
-    // ── MCP ──
-    await test('MCP: B and the admin get "Not found" + one audit line on every id A owns; A passes', async () => {
-      const callB = await mcpClient(hub, b.token)
-      const callAdmin = await mcpClient(hub, admin.token)
-      const failures: string[] = []
-      for (const [name, rule] of Object.entries(MCP_OWNER_POLICY)) {
-        for (const ref of rule.ids ?? []) {
-          counts.mcpIds++
-          for (const [who, call, userId] of [
-            ['B', callB, b.userId],
-            ['admin', callAdmin, admin.userId]
-          ] as const) {
-            const before = lines.length
-            const r = await call(name, mcpArgsFor(name, ref, mcpA, mcpB))
-            const d = denials(before)
-            const ok =
-              r.isError === true &&
-              r.content[0]?.text === 'Not found' &&
-              d.length === 1 &&
-              d[0]!.actor === userId &&
-              (who === 'admin' || d[0]!.detail.at === ref.at)
-            if (!ok)
-              failures.push(`${who} ${name} ${ref.at}: ${JSON.stringify(r)} (${d.length} denials)`)
+          const req = requestFor(key, rule, ref, A, B)
+          const r = await rest(hub, token, req)
+          const d = denials(before)
+          if (who === 'B' && REST_ADMIN_POLICY[key] === 'admin') {
+            // An `admin` route refuses B by role (403 ADMIN_ONLY) before any id is
+            // read; the admin, next, by owner (T-106).
+            if (r.status !== 403 || d[0]?.detail.reason !== 'not_admin' || r.text.includes(A.mark))
+              failures.push(`B ${key} ${ref.at}: ${r.status} ${r.text.slice(0, 120)}`)
+            continue
           }
-          // A, through the gate alone (the tools mutate).
-          const ran: string[] = []
-          let handler: ((...x: unknown[]) => Promise<unknown>) | undefined
-          withMcpOwnerGate(
-            {
-              tool: (_n: string, ...rest: unknown[]) =>
-                void (handler = rest[rest.length - 1] as never)
-            } as never,
-            db
-          ).tool(name, 'd', {}, async () => {
-            ran.push(name)
-            return { content: [] }
-          })
-          await handler!(mcpArgsFor(name, ref, mcpA, mcpA), {
-            authInfo: mcpAuthInfo({ userId: a.userId, role: 'user', scopes: ['full'] })
-          })
-          if (ran.length !== 1) failures.push(`A ${name} ${ref.at}: refused`)
+          // The admin owns no companion either: its refusal may come at another id.
+          const ok =
+            r.status === 404 &&
+            (r.body as { error?: string })?.error === 'Not found' &&
+            d.length === 1 &&
+            d[0]!.detail.reason === 'not_owner' &&
+            (who === 'admin' || d[0]!.detail.at === ref.at) &&
+            d[0]!.actor === userId &&
+            !r.text.includes(A.mark)
+          if (!ok)
+            failures.push(
+              `${who} ${key} ${ref.at}: ${r.status} ${r.text.slice(0, 120)} (${d.length} denials)`
+            )
         }
-      }
-      assert(failures.length === 0, `\n      ${failures.join('\n      ')}`)
-      // B's own call reaches the tool: B's task id is answered.
-      const own = await callB('get_current_task_id', { task_id: B.task })
-      assert(!own.isError && shows(own, B.task), `B's own: ${JSON.stringify(own)}`)
-    })
-
-    // ── hooks ──
-    const hookEvents: { taskId?: string; actor: string | null | undefined }[] = []
-    const lifecycle = new EventEmitter()
-    lifecycle.on('event', (e: { taskId?: string }) =>
-      hookEvents.push({ taskId: e.taskId, actor: currentSecurityContext()?.actor })
-    )
-    const transitions: string[] = []
-    const bridge: TerminalStateBridge = {
-      findSession: (taskId) => `pty-${taskId}`,
-      transition: (sid) => {
-        transitions.push(sid)
-        return true
-      },
-      markActive: (sid) => {
-        transitions.push(sid)
-        return true
+        const before = lines.length
+        const passes = await guardPasses(db, key, a.userId, requestFor(key, rule, ref, A, A))
+        if (!passes || denials(before).length !== 0) failures.push(`A ${key} ${ref.at}: refused`)
       }
     }
-    const deps = {
+    expect(failures).toEqual([])
+    // REST id cases
+    expect(counts.restIds).toBeGreaterThan(100)
+  })
+
+  test('REST: an id prefix or a project name only ever reaches the caller’s rows', async () => {
+    // A's id prefix: someone else's → 404, never "ambiguous" with A's ids in it.
+    const prefix = await rest(hub, b.token, get(`/api/tasks/${A.task.slice(0, 6)}`))
+    expect(prefix.status, `prefix: ${prefix.text}`).toBe(404)
+    expect(prefix.text).not.toContain(A.mark)
+    // A prefix matching BOTH users' tasks (`%` matches any) resolves among B's only.
+    const any = await rest(hub, b.token, get('/api/tasks/%25/progress'))
+    // wildcard prefix must not leak
+    expect(any.text).not.toContain(A.mark)
+    // A project name substring of A's project: 404, and no "Available:" list of names.
+    const byName = await rest(hub, b.token, get('/api/tags', { project: 'SECRET' }))
+    expect(byName.status, `name: ${byName.text}`).toBe(404)
+    expect(byName.text).not.toContain(A.mark)
+    const miss = await rest(hub, b.token, get('/api/templates', { project: 'no-such-project' }))
+    expect(miss.status, `miss: ${miss.text}`).toBe(404)
+    expect(miss.text).not.toContain(A.mark)
+    // B's own name and prefix still work.
+    const own = await rest(hub, b.token, get('/api/tags', { project: 'B_OWN' }))
+    expect(own.status, `own: ${own.text}`).toBe(200)
+    expect(JSON.stringify(own.body ?? null)).toContain('B_OWN_TAG')
+    const ownPrefix = await rest(hub, b.token, get(`/api/tasks/${B.task.slice(0, 7)}`))
+    expect(ownPrefix.status, `own prefix: ${ownPrefix.text}`).toBe(200)
+    expect(JSON.stringify(ownPrefix.body ?? null)).toContain(B.task)
+  })
+
+  // ── REST: lists ──
+  test('REST: B’s and the admin’s lists hold none of A’s rows; A’s hold them', async () => {
+    const lists: Req[] = [
+      get('/api/projects'),
+      get('/api/tasks'),
+      get('/api/tasks', { limit: '1' }),
+      get('/api/tasks/search', { q: 'task' }),
+      get('/api/artifacts/search', { allTasks: '1', q: '_' })
+    ]
+    for (const req of lists) {
+      const label = `${req.path}?${new URLSearchParams(req.query)}`
+      const ra = await rest(hub, a.token, req)
+      expect(ra.status, `A on ${label}`).toBe(200)
+      expect(shows(ra.body, A.mark), `A sees own rows on ${label}: ${ra.text.slice(0, 200)}`).toBe(
+        true
+      )
+      const rb = await rest(hub, b.token, req)
+      expect(rb.status, `B on ${label}`).toBe(200)
+      expect(shows(rb.body, A.mark), `B sees A on ${label}: ${rb.text.slice(0, 200)}`).toBe(false)
+      expect(shows(rb.body, B.mark), `B sees own rows on ${label}: ${rb.text.slice(0, 200)}`).toBe(
+        true
+      )
+      const rad = await rest(hub, admin.token, req)
+      expect(shows(rad.body, A.mark), `admin sees A content on ${label}`).toBe(false)
+      expect(shows(rad.body, B.mark), `admin sees B content on ${label}`).toBe(false)
+    }
+    const search = (
+      await rest(hub, b.token, get('/api/artifacts/search', { allTasks: '1', q: '_' }))
+    ).body as { data: { scannedCount: number } }
+    // B scanned exactly its own artifact
+    expect(search.data.scannedCount).toBe(1)
+  })
+
+  test('REST: a cross-project blocker (A’s task blocks B’s) is cut from B’s task', async () => {
+    const dep = raw
+      .prepare(
+        'SELECT COUNT(*) AS n FROM task_dependencies WHERE task_id = ? AND blocks_task_id = ?'
+      )
+      .get(A.task, B.task) as { n: number }
+    // the dependency exists
+    expect(dep.n).toBe(1)
+    for (const path of [
+      `/api/tasks/${B.task}`,
+      `/api/tasks/${B.task}/blockers`,
+      `/api/tasks/${B.task}/blocked`
+    ]) {
+      const r = await rest(hub, b.token, get(path))
+      expect(r.status, `${path}: ${r.text.slice(0, 200)}`).toBe(200)
+      expect(r.text, path).not.toContain(A.mark)
+    }
+    const blocking = await rest(hub, a.token, get(`/api/tasks/${A.task}/blocking`))
+    expect(blocking.status, `A's blocking: ${blocking.text}`).toBe(200)
+    expect(blocking.text).not.toContain(B.mark)
+  })
+
+  test('REST: the pty and process lists are cut to the caller’s sessions and tasks', async () => {
+    const scope = createAccessScope(db, httpAccessRequest(b.userId))
+    const ptys = (await REST_OWNER_POLICY['GET /api/pty']!.output!(
+      [{ sessionId: A.session }, { sessionId: B.session }, { sessionId: `${A.task}:${A.tab}` }],
+      scope
+    )) as unknown[]
+    expect(ptys).toEqual([{ sessionId: B.session }])
+    const procs = (await REST_OWNER_POLICY['GET /api/processes']!.output!(
+      [
+        { id: 'p1', taskId: A.task },
+        { id: 'p2', taskId: B.task },
+        { id: 'p3', projectId: A.project },
+        { id: 'p4' }
+      ],
+      scope
+    )) as { id: string }[]
+    expect(procs.map((p) => p.id)).toEqual(['p2'])
+  })
+
+  // ── artifact files ──
+  test('REST: B cannot fetch A’s artifact file by id, prefix, crafted id or version', async () => {
+    const own = await rest(hub, a.token, get(`/api/artifacts/${A.artifact}/content`))
+    // A reads own file
+    expect(own.status).toBe(200)
+    expect(own.text).toBe('A_SECRET_FILE_BYTES')
+    const crafted = [
+      A.artifact,
+      A.artifact.slice(0, 5),
+      `../${A.task}/${A.artifact}`,
+      `..%2F..%2Fartifacts%2F${A.task}%2F${A.artifact}`,
+      `${B.artifact}/../${A.artifact}`
+    ]
+    for (const id of crafted) {
+      for (const path of [
+        `/api/artifacts/${encodeURIComponent(id)}/content`,
+        `/api/artifacts/${encodeURIComponent(id)}/versions/content?ref=1`
+      ]) {
+        const r = await fetch(`http://127.0.0.1:${hub.port}${path}`, {
+          headers: { authorization: `Bearer ${b.token}` }
+        })
+        const text = await r.text()
+        expect(text, path).not.toContain('A_SECRET_FILE_BYTES')
+        expect(text, path).not.toContain(A.mark)
+        expect([404, 400], `${path}: ${r.status}`).toContain(r.status)
+      }
+    }
+    const ownB = await rest(hub, b.token, get(`/api/artifacts/${B.artifact}/content`))
+    // B reads own file
+    expect(ownB.text).toBe('B_OWN_FILE_BYTES')
+  })
+
+  test('REST: an export cannot be written into A’s artifact dir or the hub’s state', async () => {
+    for (const outputPath of [
+      join(hub.root, 'artifacts', A.task, 'planted.html'),
+      join(A.path, 'planted.html'),
+      join(hub.root, 'slayzone.data.sqlite')
+    ]) {
+      const before = lines.length
+      const r = await rest(hub, b.token, {
+        method: 'POST',
+        path: '/api/artifacts/:id/export/html',
+        params: { id: B.artifact },
+        query: {},
+        body: { outputPath }
+      })
+      expect(r.status, `${outputPath}: ${r.status} ${r.text}`).toBe(404)
+      expect(denials(before), outputPath).toHaveLength(1)
+    }
+  })
+
+  // ── MCP ──
+  test('MCP: B and the admin get "Not found" + one audit line on every id A owns; A passes', async () => {
+    const callB = await mcpClient(hub, b.token)
+    const callAdmin = await mcpClient(hub, admin.token)
+    const failures: string[] = []
+    for (const [name, rule] of Object.entries(MCP_OWNER_POLICY)) {
+      for (const ref of rule.ids ?? []) {
+        counts.mcpIds++
+        for (const [who, call, userId] of [
+          ['B', callB, b.userId],
+          ['admin', callAdmin, admin.userId]
+        ] as const) {
+          const before = lines.length
+          const r = await call(name, mcpArgsFor(name, ref, mcpA, mcpB))
+          const d = denials(before)
+          const ok =
+            r.isError === true &&
+            r.content[0]?.text === 'Not found' &&
+            d.length === 1 &&
+            d[0]!.actor === userId &&
+            (who === 'admin' || d[0]!.detail.at === ref.at)
+          if (!ok)
+            failures.push(`${who} ${name} ${ref.at}: ${JSON.stringify(r)} (${d.length} denials)`)
+        }
+        // A, through the gate alone (the tools mutate).
+        const ran: string[] = []
+        let handler: ((...x: unknown[]) => Promise<unknown>) | undefined
+        withMcpOwnerGate(
+          {
+            tool: (_n: string, ...rest: unknown[]) =>
+              void (handler = rest[rest.length - 1] as never)
+          } as never,
+          db
+        ).tool(name, 'd', {}, async () => {
+          ran.push(name)
+          return { content: [] }
+        })
+        await handler!(mcpArgsFor(name, ref, mcpA, mcpA), {
+          authInfo: mcpAuthInfo({ userId: a.userId, role: 'user', scopes: ['full'] })
+        })
+        if (ran.length !== 1) failures.push(`A ${name} ${ref.at}: refused`)
+      }
+    }
+    expect(failures).toEqual([])
+    // B's own call reaches the tool: B's task id is answered.
+    const own = await callB('get_current_task_id', { task_id: B.task })
+    expect(own.isError, `B's own: ${JSON.stringify(own)}`).toBeFalsy()
+    expect(JSON.stringify(own)).toContain(B.task)
+  })
+
+  // ── hooks ──
+  const hookEvents: { taskId?: string; actor: string | null | undefined }[] = []
+  const lifecycle = new EventEmitter()
+  lifecycle.on('event', (e: { taskId?: string }) =>
+    hookEvents.push({ taskId: e.taskId, actor: currentSecurityContext()?.actor })
+  )
+  const transitions: string[] = []
+  const bridge: TerminalStateBridge = {
+    findSession: (taskId) => `pty-${taskId}`,
+    transition: (sid) => {
+      transitions.push(sid)
+      return true
+    },
+    markActive: (sid) => {
+      transitions.push(sid)
+      return true
+    }
+  }
+  const deps = (): RestApiDeps =>
+    ({
       db,
       notifyRenderer: () => {},
       agentLifecycle: lifecycle
-    } as unknown as RestApiDeps
-    const prompt = (o: Owned | null, mark: string, extra: Record<string, unknown> = {}) => ({
-      agentId: 'claude-code',
-      ctx: { v: 1, agentId: 'claude-code', ...(o ? { taskId: o.task } : {}), ...extra },
-      raw: { hook_event_name: 'UserPromptSubmit', prompt: mark, session_id: `conv-${mark}` }
-    })
-    const promptsFor = (taskId: string): number =>
-      (
-        raw.prepare('SELECT COUNT(*) AS n FROM agent_prompts WHERE task_id = ?').get(taskId) as {
-          n: number
-        }
-      ).n
-    const turnMarked = (mark: string): boolean =>
-      !!raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(`conv-${mark}`)
-
-    await test('hooks: B’s computer cannot change A’s task, and a session id attributes nothing; audited', async () => {
-      const aPrompts = promptsFor(A.task)
-      const bPrompts = promptsFor(B.task)
-      const cases: [string, unknown][] = [
-        ['A task', prompt(A, 'H1')],
-        // An agent booted by an older build named itself by session id; that names no
-        // task any more, so it cannot be used to reach A's.
-        ['A session (older agent)', prompt(null, 'H2', { slaySessionId: A.session })],
-        ['nothing to attribute', prompt(null, 'H4')]
-      ]
-      for (const [label, payload] of cases) {
-        const before = lines.length
-        hookEvents.length = 0
-        transitions.length = 0
-        const r = await relayAgentHook('comp-b', payload, deps, bridge)
-        await sleep(50)
-        assert(r === 'denied', `${label}: ${r}`)
-        assert(hookEvents.length === 0 && transitions.length === 0, `${label}: processed`)
-        const d = denials(before)
-        assert(
-          d.length === 1 && d[0]!.targetKind === 'computer' && d[0]!.targetId === 'comp-b',
-          `${label}: ${JSON.stringify(d)}`
-        )
-        assert(d[0]!.actor === b.userId, `${label}: reported as B`)
+    }) as unknown as RestApiDeps
+  const prompt = (o: Owned | null, mark: string, extra: Record<string, unknown> = {}) => ({
+    agentId: 'claude-code',
+    ctx: { v: 1, agentId: 'claude-code', ...(o ? { taskId: o.task } : {}), ...extra },
+    raw: { hook_event_name: 'UserPromptSubmit', prompt: mark, session_id: `conv-${mark}` }
+  })
+  const promptsFor = (taskId: string): number =>
+    (
+      raw.prepare('SELECT COUNT(*) AS n FROM agent_prompts WHERE task_id = ?').get(taskId) as {
+        n: number
       }
-      assert(
-        promptsFor(A.task) === aPrompts && promptsFor(B.task) === bPrompts,
-        'no prompt captured'
-      )
-      for (const m of ['H1', 'H2', 'H4']) assert(!turnMarked(m), `${m} marked a turn`)
-    })
+    ).n
+  const turnMarked = (mark: string): boolean =>
+    !!raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(`conv-${mark}`)
 
-    await test('hooks: an unowned computer reports for nobody', async () => {
+  test('hooks: B’s computer cannot change A’s task, and a session id attributes nothing; audited', async () => {
+    const aPrompts = promptsFor(A.task)
+    const bPrompts = promptsFor(B.task)
+    const cases: [string, unknown][] = [
+      ['A task', prompt(A, 'H1')],
+      // An agent booted by an older build named itself by session id; that names no
+      // task any more, so it cannot be used to reach A's.
+      ['A session (older agent)', prompt(null, 'H2', { slaySessionId: A.session })],
+      ['nothing to attribute', prompt(null, 'H4')]
+    ]
+    for (const [label, payload] of cases) {
       const before = lines.length
-      const r = await relayAgentHook('comp-unowned', prompt(A, 'H5'), deps, bridge)
-      assert(r === 'denied' && denials(before).length === 1, `unowned: ${r}`)
-    })
-
-    await test('hooks: A’s computer reporting for A’s task is processed, as A', async () => {
       hookEvents.length = 0
       transitions.length = 0
-      const aPrompts = promptsFor(A.task)
-      const before = lines.length
-      const r = await relayAgentHook('comp-a', prompt(A, 'H6'), deps, bridge)
-      await sleep(100)
-      assert(r === 'ok', `A's own: ${r}`)
-      assert(hookEvents.length === 1 && hookEvents[0]!.taskId === A.task, 'lifecycle event')
-      assert(hookEvents[0]!.actor === a.userId, `attributed to A: ${hookEvents[0]!.actor}`)
-      assert(transitions.length === 1, 'state machine driven')
-      assert(promptsFor(A.task) === aPrompts + 1, 'prompt captured')
-      assert(denials(before).length === 0, 'nothing refused')
-    })
+      const r = await relayAgentHook('comp-b', payload, deps(), bridge)
+      await sleep(50)
+      expect(r, label).toBe('denied')
+      // not processed
+      expect(hookEvents, label).toEqual([])
+      expect(transitions, label).toEqual([])
+      const d = denials(before)
+      expect(d, label).toHaveLength(1)
+      expect(d[0]!.targetKind, label).toBe('computer')
+      expect(d[0]!.targetId, label).toBe('comp-b')
+      // reported as B
+      expect(d[0]!.actor, label).toBe(b.userId)
+    }
+    // no prompt captured
+    expect(promptsFor(A.task)).toBe(aPrompts)
+    expect(promptsFor(B.task)).toBe(bPrompts)
+    for (const m of ['H1', 'H2', 'H4']) expect(turnMarked(m), `${m} marked a turn`).toBe(false)
+  })
 
-    await test('hooks: POST /api/agent-hook is reported as the caller', async () => {
-      const post = (token: string, payload: unknown) =>
-        rest(hub, token, {
-          method: 'POST',
-          path: '/api/agent-hook',
-          params: {},
-          query: {},
-          body: payload as never
-        })
-      const aPrompts = promptsFor(A.task)
-      const before = lines.length
-      const byB = await post(b.token, prompt(A, 'H7'))
-      assert(byB.status === 404 && denials(before).length === 1, `B: ${byB.status} ${byB.text}`)
-      const byAdmin = await post(admin.token, prompt(A, 'H8'))
-      assert(byAdmin.status === 404, `admin: ${byAdmin.status}`)
-      const byA = await post(a.token, prompt(A, 'H9'))
-      await sleep(100)
-      assert(byA.status === 200, `A: ${byA.status} ${byA.text}`)
-      assert(promptsFor(A.task) === aPrompts + 1, 'only A’s own prompt was captured')
-    })
+  test('hooks: an unowned computer reports for nobody', async () => {
+    const before = lines.length
+    const r = await relayAgentHook('comp-unowned', prompt(A, 'H5'), deps(), bridge)
+    expect(r).toBe('denied')
+    expect(denials(before)).toHaveLength(1)
+  })
 
-    // ── attribution of REST refresh pings ──
-    await test('REST: a refresh ping reaches its caller’s stream only (attributed)', async () => {
-      const ca = hubClient(hub, a.token)
-      const cb = hubClient(hub, b.token)
-      const got: Record<string, number> = { A: 0, B: 0 }
-      const subs = await Promise.all(
-        (
-          [
-            ['A', ca],
-            ['B', cb]
-          ] as const
-        ).map(
-          ([who, c]) =>
-            new Promise<{ unsubscribe: () => void }>((resolve, reject) => {
-              const s = procedureAt(c.client, 'notify.onTasksChanged').subscribe(undefined, {
-                onStarted: () => resolve(s),
-                onData: () => got[who]!++,
-                onError: reject
-              })
-            })
-        )
-      )
-      await rest(hub, b.token, {
+  test('hooks: A’s computer reporting for A’s task is processed, as A', async () => {
+    hookEvents.length = 0
+    transitions.length = 0
+    const aPrompts = promptsFor(A.task)
+    const before = lines.length
+    const r = await relayAgentHook('comp-a', prompt(A, 'H6'), deps(), bridge)
+    await sleep(100)
+    expect(r).toBe('ok')
+    // lifecycle event, attributed to A
+    expect(hookEvents).toEqual([{ taskId: A.task, actor: a.userId }])
+    // state machine driven
+    expect(transitions).toHaveLength(1)
+    // prompt captured
+    expect(promptsFor(A.task)).toBe(aPrompts + 1)
+    // nothing refused
+    expect(denials(before)).toEqual([])
+  })
+
+  test('hooks: POST /api/agent-hook is reported as the caller', async () => {
+    const post = (token: string, payload: unknown) =>
+      rest(hub, token, {
         method: 'POST',
-        path: '/api/notify',
+        path: '/api/agent-hook',
         params: {},
         query: {},
-        body: {}
+        body: payload as never
       })
-      await rest(hub, b.token, {
-        method: 'PATCH',
-        path: '/api/tasks/:id',
-        params: { id: B.task },
-        query: {},
-        body: { title: 'renamed by B' }
-      })
-      await sleep(400)
-      for (const s of subs) s.unsubscribe()
-      ca.close()
-      cb.close()
-      assert(got.B! >= 1, `B got ${got.B}`)
-      assert(got.A === 0, `A got ${got.A} of B's pings`)
+    const aPrompts = promptsFor(A.task)
+    const before = lines.length
+    const byB = await post(b.token, prompt(A, 'H7'))
+    expect(byB.status, `B: ${byB.text}`).toBe(404)
+    expect(denials(before)).toHaveLength(1)
+    const byAdmin = await post(admin.token, prompt(A, 'H8'))
+    expect(byAdmin.status, 'admin').toBe(404)
+    const byA = await post(a.token, prompt(A, 'H9'))
+    await sleep(100)
+    expect(byA.status, `A: ${byA.text}`).toBe(200)
+    // only A’s own prompt was captured
+    expect(promptsFor(A.task)).toBe(aPrompts + 1)
+  })
+
+  // ── attribution of REST refresh pings ──
+  test('REST: a refresh ping reaches its caller’s stream only (attributed)', async () => {
+    const ca = hubClient(hub, a.token)
+    const cb = hubClient(hub, b.token)
+    const got: Record<string, number> = { A: 0, B: 0 }
+    const subs = await Promise.all(
+      (
+        [
+          ['A', ca],
+          ['B', cb]
+        ] as const
+      ).map(
+        ([who, c]) =>
+          new Promise<{ unsubscribe: () => void }>((resolve, reject) => {
+            const s = procedureAt(c.client, 'notify.onTasksChanged').subscribe(undefined, {
+              onStarted: () => resolve(s),
+              onData: () => got[who]!++,
+              onError: reject
+            })
+          })
+      )
+    )
+    await rest(hub, b.token, {
+      method: 'POST',
+      path: '/api/notify',
+      params: {},
+      query: {},
+      body: {}
     })
-  } finally {
-    raw.close()
-    await hub.stop()
-  }
-
-  console.log(`\n  REST id cases: ${counts.restIds} · MCP id cases: ${counts.mcpIds}`)
-  console.log(`\n${passed} passed, ${failed} failed`)
-  process.exit(failed > 0 ? 1 : 0)
-}
-
-void main().catch((e: unknown) => {
-  console.error(e)
-  process.exit(1)
+    await rest(hub, b.token, {
+      method: 'PATCH',
+      path: '/api/tasks/:id',
+      params: { id: B.task },
+      query: {},
+      body: { title: 'renamed by B' }
+    })
+    await sleep(400)
+    for (const s of subs) s.unsubscribe()
+    ca.close()
+    cb.close()
+    expect(got.B).toBeGreaterThanOrEqual(1)
+    // A gets none of B's pings
+    expect(got.A).toBe(0)
+  })
 })

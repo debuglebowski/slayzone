@@ -9,19 +9,16 @@
  * invalid sequence with U+FFFD, so the fixtures below deliberately carry bytes
  * that are NOT valid utf-8 (0xff 0xfe) plus embedded NULs and CRLF.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/artifacts/content.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/artifacts/content.test.ts
  */
+import { describe, test, expect, afterAll } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import express from 'express'
 import { getStorageDir } from '@slayzone/platform'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 
 // The artifact store roots its on-disk files at `<storage dir>/artifacts` — point
@@ -113,7 +110,13 @@ function fileOnDisk(artifact: ArtifactRow): Buffer {
 
 let binaryArtifact: ArtifactRow
 
-await describe('POST /api/artifacts — streamed body (query params) create', () => {
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+  fs.rmSync(tmpRoot, { recursive: true, force: true })
+})
+
+describe('POST /api/artifacts — streamed body (query params) create', () => {
   test('creates from a raw streamed body, bytes byte-exact on disk', async () => {
     notifyCount = 0
     const res = await raw(
@@ -197,7 +200,7 @@ await describe('POST /api/artifacts — streamed body (query params) create', ()
   })
 })
 
-await describe('GET /api/artifacts/:id/content', () => {
+describe('GET /api/artifacts/:id/content', () => {
   test('streams binary bytes unchanged', async () => {
     const res = await raw('GET', `/api/artifacts/${binaryArtifact.id}/content`)
     expect(res.status).toBe(200)
@@ -262,7 +265,7 @@ await describe('GET /api/artifacts/:id/content', () => {
   })
 })
 
-await describe('POST /api/tasks/:id/artifacts — streamed upload (unchanged)', () => {
+describe('POST /api/tasks/:id/artifacts — streamed upload (unchanged)', () => {
   test('binary body round-trips byte-exact', async () => {
     const res = await raw(
       'POST',
@@ -280,7 +283,3 @@ await describe('POST /api/tasks/:id/artifacts — streamed upload (unchanged)', 
     expect(res.status).toBe(404)
   })
 })
-
-await rest.close()
-h.cleanup()
-fs.rmSync(tmpRoot, { recursive: true, force: true })

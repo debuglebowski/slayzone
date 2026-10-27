@@ -11,15 +11,13 @@
  * Real wire: the desktop's `capabilityBridgeRouter` over a loopback WebSocket, a fake
  * view registry behind it, the hub's `createHostBridge` on the other end.
  *
- * Run with:
- *   npx tsx --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/host-bridge.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
-import { describe, expect, test } from '../../../shared/test-utils/ipc-harness.js'
 
 const { capabilityBridgeRouter, setAppDeps, setMenuEvents, setPowerResumeEvents } = await import(
   '@slayzone/transport/server'
@@ -102,7 +100,7 @@ const hubBrowser = bridge.appDeps.browser
 const cached = (viewId: string): Snap | undefined =>
   (hubBrowser.getAllStateSnapshots() as Snap[]).find((s) => s.viewId === viewId)
 
-await describe('desktop bridge: browser replay cache', () => {
+describe('desktop bridge: browser replay cache', () => {
   test('primes from the desktop on connect', async () => {
     await until(() => cached('bv-1') !== undefined, 'the prime')
     await until(() => browserEvents.listenerCount('event') > 0, 'the events subscription')
@@ -185,6 +183,8 @@ await describe('desktop bridge: browser replay cache', () => {
   })
 })
 
-bridge.dispose()
-wssHandler.broadcastReconnectNotification()
-wss.close()
+afterAll(() => {
+  bridge.dispose()
+  wssHandler.broadcastReconnectNotification()
+  wss.close()
+})

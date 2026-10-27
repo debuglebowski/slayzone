@@ -6,12 +6,13 @@
  * handlers.skills-status / handlers.skills-merging / handlers-marketplace-sync)
  * — coverage now lives here as the renderer cuts over to tRPC.
  *
- * Run with electron + experimental-loader (see test-utils/run-all.sh):
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ * Run with vitest (packages/shared/test-utils/vitest.harness.config.ts, see run-all.sh):
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/shared/transport/src/server/routers/ai-config.test.ts
  */
-import { createTestHarness, test, expect, describe } from '../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, beforeAll } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { skillSlugFromContextPath } from '@slayzone/ai-config/shared'
 import { aiConfigRouter } from './ai-config.js'
@@ -19,8 +20,8 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 
-// The harness `expect` only ships a sync `toThrow()`. Router mutations/queries
-// are async (the ops resolve Promises), so rejections need a manual await-guard.
+// Router mutations/queries are async (the ops resolve Promises); rejections are
+// checked with this await-guard (ported from the old sync-only harness `expect`).
 const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
   try {
     await fn()
@@ -34,7 +35,7 @@ const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
 // 0. skillSlugFromContextPath — pure shared util (was handlers.skills-merging)
 // ===========================================================================
 
-await describe('skillSlugFromContextPath', () => {
+describe('skillSlugFromContextPath', () => {
   test('slug/SKILL.md → slug', () => {
     expect(skillSlugFromContextPath('.claude/skills/my-skill/SKILL.md')).toBe('my-skill')
   })
@@ -101,7 +102,7 @@ h.db
 let libraryItemId: string
 let projectItemId: string
 
-await describe('createItem', () => {
+describe('createItem', () => {
   test('creates library item', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -182,7 +183,7 @@ await describe('createItem', () => {
   })
 })
 
-await describe('getItem', () => {
+describe('getItem', () => {
   test('returns item by id', async () => {
     const item = (await caller.getItem({ id: libraryItemId })) as { id: string }
     expect(item.id).toBe(libraryItemId)
@@ -193,7 +194,7 @@ await describe('getItem', () => {
   })
 })
 
-await describe('listItems', () => {
+describe('listItems', () => {
   test('filters by scope', async () => {
     const items = (await caller.listItems({ scope: 'library' })) as { scope: string }[]
     for (const item of items) expect(item.scope).toBe('library')
@@ -216,7 +217,7 @@ await describe('listItems', () => {
   })
 })
 
-await describe('updateItem', () => {
+describe('updateItem', () => {
   test('updates content', async () => {
     const item = (await caller.updateItem({
       id: libraryItemId,
@@ -258,7 +259,7 @@ await describe('updateItem', () => {
   })
 })
 
-await describe('deleteItem', () => {
+describe('deleteItem', () => {
   test('deletes existing', async () => {
     expect(await caller.deleteItem({ id: libraryItemId })).toBe(true)
     expect(await caller.getItem({ id: libraryItemId })).toBeNull()
@@ -274,23 +275,31 @@ await describe('deleteItem', () => {
 // ===========================================================================
 
 const selProjectId = crypto.randomUUID()
-h.db
-  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
-  .run(selProjectId, 'PSel', '#000', '/tmp/test-proj')
-const selItem = (await caller.createItem({
-  type: 'skill',
-  scope: 'library',
-  slug: 'sel-test',
-  content: 'x'
-})) as { id: string }
-const selItem2 = (await caller.createItem({
-  type: 'skill',
-  scope: 'library',
-  slug: 'sel-test-2',
-  content: 'y'
-})) as { id: string }
+let selItem: { id: string }
+let selItem2: { id: string }
 
-await describe('setProjectSelection', () => {
+describe('setProjectSelection', () => {
+  // Seeding between describes runs in a beforeAll of the NEXT describe: vitest
+  // runs top-level code at collection (before every test), and these rows must
+  // land after the tests above them, as with the old inline runner.
+  beforeAll(async () => {
+    h.db
+      .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+      .run(selProjectId, 'PSel', '#000', '/tmp/test-proj')
+    selItem = (await caller.createItem({
+      type: 'skill',
+      scope: 'library',
+      slug: 'sel-test',
+      content: 'x'
+    })) as { id: string }
+    selItem2 = (await caller.createItem({
+      type: 'skill',
+      scope: 'library',
+      slug: 'sel-test-2',
+      content: 'y'
+    })) as { id: string }
+  })
+
   test('creates selection and canonicalizes legacy claude skill paths', async () => {
     await caller.setProjectSelection({
       projectId: selProjectId,
@@ -347,14 +356,14 @@ await describe('setProjectSelection', () => {
   })
 })
 
-await describe('listProjectSelections', () => {
+describe('listProjectSelections', () => {
   test('returns empty for unknown project', async () => {
     const sels = (await caller.listProjectSelections({ projectId: 'nonexistent' })) as unknown[]
     expect(sels).toHaveLength(0)
   })
 })
 
-await describe('removeProjectSelection', () => {
+describe('removeProjectSelection', () => {
   test('removes by project+item (all providers)', async () => {
     const result = await caller.removeProjectSelection({
       projectId: selProjectId,
@@ -383,7 +392,7 @@ await describe('removeProjectSelection', () => {
   })
 })
 
-await describe('listProviders', () => {
+describe('listProviders', () => {
   test('returns seeded providers', async () => {
     const providers = await caller.listProviders()
     expect(providers.length).toBeGreaterThan(0)
@@ -395,7 +404,7 @@ await describe('listProviders', () => {
   })
 })
 
-await describe('toggleProvider', () => {
+describe('toggleProvider', () => {
   // Handler test toggled provider-claude, but the current op refuses to disable
   // the default terminal-mode provider (claude). Exercise the enable/disable
   // round-trip on a non-default provider (cursor) instead — same contract — and
@@ -422,7 +431,7 @@ await describe('toggleProvider', () => {
   })
 })
 
-await describe('getProjectProviders', () => {
+describe('getProjectProviders', () => {
   test('returns default providers (falls back to computer)', async () => {
     const providers = (await caller.getProjectProviders({ projectId: selProjectId })) as string[]
     expect(providers).toContain('claude')
@@ -439,7 +448,7 @@ await describe('getProjectProviders', () => {
   })
 })
 
-await describe('setProjectProviders', () => {
+describe('setProjectProviders', () => {
   test('persists configured project providers', async () => {
     await caller.setProjectProviders({ projectId: selProjectId, providers: ['claude', 'codex'] })
     const providers = (await caller.getProjectProviders({ projectId: selProjectId })) as string[]
@@ -454,9 +463,6 @@ await describe('setProjectProviders', () => {
 
 const root = h.tmpDir()
 const ctxProjectId = crypto.randomUUID()
-h.db
-  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
-  .run(ctxProjectId, 'Ctx', '#000', root)
 
 const createProjectFixture = (name: string): { projectId: string; projectPath: string } => {
   const id = crypto.randomUUID()
@@ -468,10 +474,18 @@ const createProjectFixture = (name: string): { projectId: string; projectPath: s
   return { projectId: id, projectPath }
 }
 
-// Ensure claude is enabled (router toggles above flipped it back on, but be safe)
-h.db.prepare("UPDATE ai_config_sources SET enabled = 1 WHERE kind = 'claude'")?.run()
+describe('discoverContextFiles', () => {
+  // Seeding between describes runs in a beforeAll of the NEXT describe: vitest
+  // runs top-level code at collection (before every test), and these rows must
+  // land after the tests above them, as with the old inline runner.
+  beforeAll(() => {
+    h.db
+      .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+      .run(ctxProjectId, 'Ctx', '#000', root)
+    // Ensure claude is enabled (router toggles above flipped it back on, but be safe)
+    h.db.prepare("UPDATE ai_config_sources SET enabled = 1 WHERE kind = 'claude'")?.run()
+  })
 
-await describe('discoverContextFiles', () => {
   test('finds CLAUDE.md when present', async () => {
     fs.writeFileSync(path.join(root, 'CLAUDE.md'), '# rules')
     const entries = (await caller.discoverContextFiles({ projectPath: root })) as {
@@ -484,7 +498,7 @@ await describe('discoverContextFiles', () => {
   })
 })
 
-await describe('getContextTree', () => {
+describe('getContextTree', () => {
   test('marks disk-only skill files as unmanaged', async () => {
     const fixture = createProjectFixture('context-tree-unmanaged-skill')
     const diskOnlyPath = path.join(fixture.projectPath, '.agents/skills/disk-only-skill/SKILL.md')
@@ -537,7 +551,7 @@ await describe('getContextTree', () => {
   })
 })
 
-await describe('readContextFile', () => {
+describe('readContextFile', () => {
   test('reads file content', async () => {
     const content = await caller.readContextFile({
       filePath: path.join(root, 'CLAUDE.md'),
@@ -553,7 +567,7 @@ await describe('readContextFile', () => {
   })
 })
 
-await describe('writeContextFile', () => {
+describe('writeContextFile', () => {
   test('writes file', async () => {
     await caller.writeContextFile({
       filePath: path.join(root, 'CLAUDE.md'),
@@ -564,7 +578,7 @@ await describe('writeContextFile', () => {
   })
 })
 
-await describe('createComputerFile', () => {
+describe('createComputerFile', () => {
   // Handler test hardcoded /tmp/mock-home (assumes HOME=/tmp/mock-home) and
   // passed provider 'gemini', but asserted the `.agents/skills` path. In the
   // current provider registry gemini has NO skillsDir (the op throws "does not
@@ -599,7 +613,7 @@ await describe('createComputerFile', () => {
   })
 })
 
-await describe('listItems: runtime skill-validation derivation', () => {
+describe('listItems: runtime skill-validation derivation', () => {
   test('returns derived validation without mutating stored metadata on read', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -780,7 +794,7 @@ await describe('listItems: runtime skill-validation derivation', () => {
   })
 })
 
-await describe('getItem: raw storage', () => {
+describe('getItem: raw storage', () => {
   test('returns raw skill documents from storage', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -807,7 +821,7 @@ await describe('getItem: raw storage', () => {
   })
 })
 
-await describe('updateItem: skill validation', () => {
+describe('updateItem: skill validation', () => {
   test('marks managed skills invalid when they are updated without frontmatter', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -865,7 +879,7 @@ await describe('updateItem: skill validation', () => {
   })
 })
 
-await describe('loadLibraryItem', () => {
+describe('loadLibraryItem', () => {
   test('writes skill to provider dir with manual path', async () => {
     // slug 'deploy-lib' (handler test used 'deploy'): one shared harness DB means
     // library slugs must stay unique across the merged suites — the items suite
@@ -1119,7 +1133,7 @@ await describe('loadLibraryItem', () => {
   })
 })
 
-await describe('syncLinkedFile', () => {
+describe('syncLinkedFile', () => {
   test('re-syncs item content to disk', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -1336,7 +1350,7 @@ await describe('syncLinkedFile', () => {
   })
 })
 
-await describe('unlinkFile', () => {
+describe('unlinkFile', () => {
   test('removes selection from DB', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -1359,7 +1373,7 @@ await describe('unlinkFile', () => {
   })
 })
 
-await describe('renameContextFile', () => {
+describe('renameContextFile', () => {
   test('renames file and updates selection target_path', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -1382,7 +1396,7 @@ await describe('renameContextFile', () => {
   })
 })
 
-await describe('deleteContextFile', () => {
+describe('deleteContextFile', () => {
   test('deletes file and removes selection', async () => {
     const item = (await caller.createItem({
       type: 'skill',
@@ -1403,14 +1417,14 @@ await describe('deleteContextFile', () => {
   })
 })
 
-await describe('getLibraryInstructions', () => {
+describe('getLibraryInstructions', () => {
   test('returns empty string when none exist', async () => {
     const content = await caller.getLibraryInstructions()
     expect(content).toBe('')
   })
 })
 
-await describe('saveLibraryInstructions', () => {
+describe('saveLibraryInstructions', () => {
   test('creates then upserts', async () => {
     await caller.saveLibraryInstructions({ content: '# Library rules v1' })
     expect(await caller.getLibraryInstructions()).toBe('# Library rules v1')
@@ -1419,7 +1433,7 @@ await describe('saveLibraryInstructions', () => {
   })
 })
 
-await describe('saveRootInstructions', () => {
+describe('saveRootInstructions', () => {
   test('writes to provider dirs and returns synced status', async () => {
     const result = (await caller.saveRootInstructions({
       projectId: ctxProjectId,
@@ -1436,7 +1450,7 @@ await describe('saveRootInstructions', () => {
   })
 })
 
-await describe('getRootInstructions', () => {
+describe('getRootInstructions', () => {
   // Contract divergence vs the stale handler test: getRootInstructions returns
   // the LINKED LIBRARY VARIANT content (via recomputeInstructionsResult), NOT the
   // project root_instructions item that saveRootInstructions persists. The handler
@@ -1484,7 +1498,7 @@ await describe('getRootInstructions', () => {
   })
 })
 
-await describe('needsSync', () => {
+describe('needsSync', () => {
   test('returns false when all synced', async () => {
     const result = await caller.needsSync({ projectId: ctxProjectId, projectPath: root })
     expect(result).toBe(false)
@@ -1541,7 +1555,7 @@ await describe('needsSync', () => {
   })
 })
 
-await describe('checkSyncStatus', () => {
+describe('checkSyncStatus', () => {
   test('detects external edits as conflicts', async () => {
     const conflicts = (await caller.checkSyncStatus({
       projectId: ctxProjectId,
@@ -1554,7 +1568,7 @@ await describe('checkSyncStatus', () => {
   })
 })
 
-await describe('discoverMcpConfigs', () => {
+describe('discoverMcpConfigs', () => {
   test('returns entries for supported providers (codex disabled)', async () => {
     const results = (await caller.discoverMcpConfigs({ projectPath: root })) as {
       provider: string
@@ -1588,7 +1602,7 @@ await describe('discoverMcpConfigs', () => {
   })
 })
 
-await describe('writeMcpServer', () => {
+describe('writeMcpServer', () => {
   test('writes server config to provider file', async () => {
     await caller.writeMcpServer({
       projectPath: root,
@@ -1621,7 +1635,7 @@ await describe('writeMcpServer', () => {
   })
 })
 
-await describe('removeMcpServer', () => {
+describe('removeMcpServer', () => {
   test('removes server from config', async () => {
     await caller.removeMcpServer({
       projectPath: root,
@@ -1634,7 +1648,7 @@ await describe('removeMcpServer', () => {
   })
 })
 
-await describe('getProjectSkillsStatus (context suite)', () => {
+describe('getProjectSkillsStatus (context suite)', () => {
   test('returns status for loaded skills', async () => {
     await caller.saveRootInstructions({
       projectId: ctxProjectId,
@@ -1803,7 +1817,7 @@ await describe('getProjectSkillsStatus (context suite)', () => {
   })
 })
 
-await describe('syncAll', () => {
+describe('syncAll', () => {
   test('writes all pending files', async () => {
     const result = (await caller.syncAll({ projectId: ctxProjectId, projectPath: root })) as {
       written: { path: string; provider: string }[]
@@ -2158,24 +2172,31 @@ await describe('syncAll', () => {
 
 const ssProjectId = crypto.randomUUID()
 const ssProjectPath = h.tmpDir()
-h.db
-  .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
-  .run(ssProjectId, 'TestProj', '#000', ssProjectPath)
+let ssLibrarySkill: { id: string; scope: string; project_id: string | null }
 
-const ssLibrarySkill = (await caller.createItem({
-  type: 'skill',
-  scope: 'library',
-  slug: 'status-test',
-  content: '---\nname: status-test\ndescription: test skill\n---\nbody'
-})) as { id: string; scope: string; project_id: string | null }
+describe('getProjectSkillsStatus (skills-status suite)', () => {
+  // Seeding between describes runs in a beforeAll of the NEXT describe: vitest
+  // runs top-level code at collection (before every test), and these rows must
+  // land after the tests above them, as with the old inline runner.
+  beforeAll(async () => {
+    h.db
+      .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+      .run(ssProjectId, 'TestProj', '#000', ssProjectPath)
 
-await caller.setProjectSelection({
-  projectId: ssProjectId,
-  itemId: ssLibrarySkill.id,
-  targetPath: '.claude/skills/status-test/SKILL.md'
-})
+    ssLibrarySkill = (await caller.createItem({
+      type: 'skill',
+      scope: 'library',
+      slug: 'status-test',
+      content: '---\nname: status-test\ndescription: test skill\n---\nbody'
+    })) as { id: string; scope: string; project_id: string | null }
 
-await describe('getProjectSkillsStatus (skills-status suite)', () => {
+    await caller.setProjectSelection({
+      projectId: ssProjectId,
+      itemId: ssLibrarySkill.id,
+      targetPath: '.claude/skills/status-test/SKILL.md'
+    })
+  })
+
   test('returns linked library skill with correct item fields', async () => {
     const results = (await caller.getProjectSkillsStatus({
       projectId: ssProjectId,
@@ -2236,7 +2257,7 @@ await describe('getProjectSkillsStatus (skills-status suite)', () => {
   })
 })
 
-await describe('getContextTree discovers on-disk skills', () => {
+describe('getContextTree discovers on-disk skills', () => {
   test('discovers unmanaged skill files in .claude/skills/', async () => {
     const skillDir = path.join(ssProjectPath, '.claude', 'skills', 'disk-only', 'SKILL.md')
     fs.mkdirSync(path.dirname(skillDir), { recursive: true })
@@ -2333,9 +2354,16 @@ type AiConfigItem = {
   project_id: string | null
 }
 
-const p2 = seedReconcileProject()
+let p2: { projectId: string; projectPath: string }
 
-await describe('reconcile: item creation', () => {
+describe('reconcile: item creation', () => {
+  // Seeding between describes runs in a beforeAll of the NEXT describe: vitest
+  // runs top-level code at collection (before every test), and these rows must
+  // land after the tests above them, as with the old inline runner.
+  beforeAll(() => {
+    p2 = seedReconcileProject()
+  })
+
   test('creates DB item with scope=project for disk-only skill', async () => {
     writeSkillFile(p2.projectPath, 'claude', 'new-skill')
     const count = (await caller.reconcileProjectSkills({
@@ -2426,9 +2454,13 @@ await describe('reconcile: item creation', () => {
   })
 })
 
-const p3 = seedReconcileProject()
+let p3: { projectId: string; projectPath: string }
 
-await describe('reconcile: selections', () => {
+describe('reconcile: selections', () => {
+  beforeAll(() => {
+    p3 = seedReconcileProject()
+  })
+
   test('claude file gets selection with canonical target_path', async () => {
     writeSkillFile(p3.projectPath, 'claude', 'sel-test')
     await caller.reconcileProjectSkills({ projectId: p3.projectId, projectPath: p3.projectPath })
@@ -2512,9 +2544,13 @@ await describe('reconcile: selections', () => {
   })
 })
 
-const p4 = seedReconcileProject()
+let p4: { projectId: string; projectPath: string }
 
-await describe('reconcile: dedup + idempotency', () => {
+describe('reconcile: dedup + idempotency', () => {
+  beforeAll(() => {
+    p4 = seedReconcileProject()
+  })
+
   test('second call with same files returns 0', async () => {
     writeSkillFile(p4.projectPath, 'claude', 'idem-test')
     await caller.reconcileProjectSkills({ projectId: p4.projectId, projectPath: p4.projectPath })
@@ -2627,9 +2663,13 @@ await describe('reconcile: dedup + idempotency', () => {
   })
 })
 
-const p5 = seedReconcileProject()
+let p5: { projectId: string; projectPath: string }
 
-await describe('reconcile: slug normalization', () => {
+describe('reconcile: slug normalization', () => {
+  beforeAll(() => {
+    p5 = seedReconcileProject()
+  })
+
   test('uppercase dir name normalized to lowercase', async () => {
     writeSkillFile(p5.projectPath, 'claude', 'My-Skill')
     await caller.reconcileProjectSkills({ projectId: p5.projectId, projectPath: p5.projectPath })
@@ -2687,9 +2727,13 @@ await describe('reconcile: slug normalization', () => {
   })
 })
 
-const p6 = seedReconcileProject()
+let p6: { projectId: string; projectPath: string }
 
-await describe('reconcile: edge cases', () => {
+describe('reconcile: edge cases', () => {
+  beforeAll(() => {
+    p6 = seedReconcileProject()
+  })
+
   test('no skill directories on disk → returns 0', async () => {
     const count = (await caller.reconcileProjectSkills({
       projectId: p6.projectId,
@@ -2751,9 +2795,13 @@ await describe('reconcile: edge cases', () => {
   })
 })
 
-const p7 = seedReconcileProject()
+let p7: { projectId: string; projectPath: string }
 
-await describe('reconcile: file lifecycle (delete / edit)', () => {
+describe('reconcile: file lifecycle (delete / edit)', () => {
+  beforeAll(() => {
+    p7 = seedReconcileProject()
+  })
+
   test('file deleted → getProjectSkillsStatus reports stale/missing_file', async () => {
     const content = '---\nname: will-delete\ndescription: d\n---\nbody'
     writeSkillFile(p7.projectPath, 'claude', 'will-delete', content)
@@ -2842,14 +2890,19 @@ type ListEntry = {
   has_update: boolean
 }
 
-const mkt1 = seedReconcileProject(['claude'])
-const entry1 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt1: { projectId: string; projectPath: string }
+let entry1: { id: string; slug: string }
 
-await describe('marketplace: library and project installs are independent', () => {
+describe('marketplace: library and project installs are independent', () => {
+  beforeAll(() => {
+    mkt1 = seedReconcileProject(['claude'])
+    entry1 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('install to library creates library item', async () => {
     const item = (await caller.marketplace.installSkill({
       entryId: entry1.id,
@@ -2912,14 +2965,19 @@ await describe('marketplace: library and project installs are independent', () =
   })
 })
 
-const mkt2 = seedReconcileProject(['claude'])
-const entry2 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt2: { projectId: string; projectPath: string }
+let entry2: { id: string; slug: string }
 
-await describe('marketplace: install is idempotent per scope', () => {
+describe('marketplace: install is idempotent per scope', () => {
+  beforeAll(() => {
+    mkt2 = seedReconcileProject(['claude'])
+    entry2 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('double library install returns same item', async () => {
     const first = (await caller.marketplace.installSkill({
       entryId: entry2.id,
@@ -2947,14 +3005,19 @@ await describe('marketplace: install is idempotent per scope', () => {
   })
 })
 
-const mkt3 = seedReconcileProject(['claude'])
-const entry3 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt3: { projectId: string; projectPath: string }
+let entry3: { id: string; slug: string }
 
-await describe('marketplace: uninstall via delete-item', () => {
+describe('marketplace: uninstall via delete-item', () => {
+  beforeAll(() => {
+    mkt3 = seedReconcileProject(['claude'])
+    entry3 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('delete-item cascades to project selections', async () => {
     const item = (await caller.marketplace.installSkill({
       entryId: entry3.id,
@@ -2982,14 +3045,19 @@ await describe('marketplace: uninstall via delete-item', () => {
   })
 })
 
-const mkt4 = seedReconcileProject(['claude', 'cursor'])
-const entry4 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt4: { projectId: string; projectPath: string }
+let entry4: { id: string; slug: string }
 
-await describe('marketplace: project install + sync writes files', () => {
+describe('marketplace: project install + sync writes files', () => {
+  beforeAll(() => {
+    mkt4 = seedReconcileProject(['claude', 'cursor'])
+    entry4 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('sync-linked-file writes to all enabled providers', async () => {
     const item = (await caller.marketplace.installSkill({
       entryId: entry4.id,
@@ -3012,14 +3080,19 @@ await describe('marketplace: project install + sync writes files', () => {
   })
 })
 
-const mkt5 = seedReconcileProject(['claude'])
-const entry5 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt5: { projectId: string; projectPath: string }
+let entry5: { id: string; slug: string }
 
-await describe('marketplace: list-entries without projectId', () => {
+describe('marketplace: list-entries without projectId', () => {
+  beforeAll(() => {
+    mkt5 = seedReconcileProject(['claude'])
+    entry5 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('project-only install not visible without projectId', async () => {
     await caller.marketplace.installSkill({
       entryId: entry5.id,
@@ -3042,14 +3115,19 @@ await describe('marketplace: list-entries without projectId', () => {
   })
 })
 
-const mkt6 = seedReconcileProject(['claude'])
-const entry6 = h.db
-  .prepare(
-    `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
-  )
-  .get() as { id: string; slug: string }
+let mkt6: { projectId: string; projectPath: string }
+let entry6: { id: string; slug: string }
 
-await describe('marketplace: slug conflict returns existing item', () => {
+describe('marketplace: slug conflict returns existing item', () => {
+  beforeAll(() => {
+    mkt6 = seedReconcileProject(['claude'])
+    entry6 = h.db
+      .prepare(
+        `SELECT id, slug FROM skill_registry_entries WHERE registry_id = 'builtin-slayzone' LIMIT 1`
+      )
+      .get() as { id: string; slug: string }
+  })
+
   test('project install with pre-existing slug returns existing item', async () => {
     const existingId = crypto.randomUUID()
     h.db
@@ -3094,9 +3172,13 @@ await describe('marketplace: slug conflict returns existing item', () => {
   })
 })
 
-const mkt7 = seedReconcileProject(['claude'])
+let mkt7: { projectId: string; projectPath: string }
 
-await describe('marketplace: orphan marketplace metadata scrub', () => {
+describe('marketplace: orphan marketplace metadata scrub', () => {
+  beforeAll(() => {
+    mkt7 = seedReconcileProject(['claude'])
+  })
+
   test('item pointing at removed builtin entry loses marketplace badge on refresh', async () => {
     const itemId = crypto.randomUUID()
     const orphanMeta = {
@@ -3166,5 +3248,3 @@ await describe('marketplace: orphan marketplace metadata scrub', () => {
     expect(meta.marketplace?.entryId).toBe(entry.id)
   })
 })
-
-console.log('\nDone')

@@ -1,9 +1,8 @@
 /**
  * buildTopLevelEntries / entriesToRefs — pure, no electron / better-sqlite3.
- * Run with: npx tsx .../sidebar/views/projectGrouping.test.ts
  */
 import type { Project, ProjectGroup } from '@slayzone/projects/shared'
-import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
+import { describe, expect, test } from 'vitest'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping.js'
 
 function proj(id: string, sortOrder: number, groupId: string | null = null): Project {
@@ -13,7 +12,7 @@ function group(id: string, sortOrder: number): ProjectGroup {
   return { id, name: '', sort_order: sortOrder, collapsed: 0 } as ProjectGroup
 }
 
-await describe('buildTopLevelEntries', async () => {
+describe('buildTopLevelEntries', () => {
   test('ungrouped only → ordered by sort_order', () => {
     const entries = buildTopLevelEntries([proj('b', 1), proj('a', 0), proj('c', 2)], [])
     expect(entries.map((e) => e.id)).toEqual(['a', 'b', 'c'])
@@ -42,7 +41,7 @@ await describe('buildTopLevelEntries', async () => {
   })
 })
 
-await describe('entriesToRefs', async () => {
+describe('entriesToRefs', () => {
   test('flattens to {kind,id}', () => {
     const entries = buildTopLevelEntries([proj('a', 0)], [group('g', 1)])
     expect(entriesToRefs(entries)).toEqual([

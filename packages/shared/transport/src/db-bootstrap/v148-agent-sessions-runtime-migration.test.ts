@@ -4,9 +4,11 @@
  * B write lifecycle (recordSessionSpawn → confirm → bind) on the REAL migrated
  * schema. See plans/agent-sessions.md.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
  */
 import Database from 'better-sqlite3'
+import { describe, expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { migrations } from './index'
 import {
@@ -16,34 +18,6 @@ import {
   markSessionFirstTurn,
   getCurrentConversationId
 } from '@slayzone/task/server'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => Promise<void> | void): Promise<void> | void {
-  const done = (): void => {
-    console.log(`  ✓ ${name}`)
-    passed++
-  }
-  const fail = (error: unknown): void => {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${error instanceof Error ? error.message : String(error)}`)
-    failed++
-  }
-  try {
-    const r = fn()
-    if (r instanceof Promise) return r.then(done).catch(fail)
-    done()
-  } catch (error) {
-    fail(error)
-  }
-}
-
-function expectEqual(actual: unknown, expected: unknown): void {
-  const a = JSON.stringify(actual)
-  const e = JSON.stringify(expected)
-  if (a !== e) throw new Error(`Expected ${e}, got ${a}`)
-}
 
 /** Build a DB migrated through v148 (all real migrations). */
 function dbUpTo(maxVersion: number): Database.Database {
@@ -86,23 +60,21 @@ function adapter(raw: Database.Database): SlayzoneDb {
   } as unknown as SlayzoneDb
 }
 
-async function run(): Promise<void> {
-  console.log('\nv148 agent-session runtime-entity migration')
-
-  await test('adds tab_id + ended_at columns to agent_sessions', () => {
+describe('v148 agent-session runtime-entity migration', () => {
+  test('adds tab_id + ended_at columns to agent_sessions', () => {
     const db = dbAt148()
     try {
       const cols = (
         db.prepare(`PRAGMA table_info(agent_sessions)`).all() as Array<{ name: string }>
       ).map((c) => c.name)
-      if (!cols.includes('tab_id')) throw new Error('tab_id column missing')
-      if (!cols.includes('ended_at')) throw new Error('ended_at column missing')
+      expect(cols).toContain('tab_id')
+      expect(cols).toContain('ended_at')
     } finally {
       db.close()
     }
   })
 
-  await test('B lifecycle round-trips on the real migrated schema', async () => {
+  test('B lifecycle round-trips on the real migrated schema', async () => {
     const raw = dbAtLatest()
     try {
       raw
@@ -125,24 +97,24 @@ async function run(): Promise<void> {
         usedResume: false,
         status: 'bound'
       })
-      expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), null) // pending
+      expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe(null) // pending
       const origin = await confirmSessionConversation(db, {
         sessionId: 'RT1',
         observedConversationId: 'RT1'
       })
-      expectEqual(origin, 'slay-spawned-fresh')
+      expect(origin).toBe('slay-spawned-fresh')
       // Confirm proves the process started, not that it wrote anything: claude
       // creates its transcript at the first turn, so a turnless fresh spawn is
       // not yet a resume target (v158).
-      expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), null)
+      expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe(null)
       await markSessionFirstTurn(db, 'RT1')
-      expectEqual(await getCurrentConversationId(db, 't1', 'claude-code'), 'RT1')
+      expect(await getCurrentConversationId(db, 't1', 'claude-code')).toBe('RT1')
     } finally {
       raw.close()
     }
   })
 
-  await test('pooled session (no task) binds to a task and becomes honored', async () => {
+  test('pooled session (no task) binds to a task and becomes honored', async () => {
     const raw = dbAtLatest()
     try {
       raw
@@ -166,21 +138,16 @@ async function run(): Promise<void> {
         status: 'pooled'
       })
       await confirmSessionConversation(db, { sessionId: 'POOLX', observedConversationId: 'POOLX' })
-      expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), null) // unbound
+      expect(await getCurrentConversationId(db, 't9', 'claude-code')).toBe(null) // unbound
       const bound = await bindSessionToTask(db, { sessionId: 'POOLX', taskId: 't9', tabId: 't9' })
-      expectEqual(bound, true)
+      expect(bound).toBe(true)
       // Adoption transfers ownership, not resumability — a warm agent that never
       // took a turn has no transcript to resume (v158).
-      expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), null)
+      expect(await getCurrentConversationId(db, 't9', 'claude-code')).toBe(null)
       await markSessionFirstTurn(db, 'POOLX')
-      expectEqual(await getCurrentConversationId(db, 't9', 'claude-code'), 'POOLX')
+      expect(await getCurrentConversationId(db, 't9', 'claude-code')).toBe('POOLX')
     } finally {
       raw.close()
     }
   })
-
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exitCode = 1
-}
-
-void run()
+})

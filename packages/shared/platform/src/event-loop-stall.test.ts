@@ -11,22 +11,13 @@
  *                                  be taken mid-freeze — the child-process
  *                                  snapshot names what the thread is waiting on
  *
- * Run with: npx tsx packages/shared/platform/src/event-loop-stall.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/platform/src/event-loop-stall.test.ts
  */
+import { beforeAll, describe, expect, test } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { type EventLoopStall, startEventLoopStallDetector } from './event-loop-stall'
 
-let passed = 0
-let failed = 0
-function check(name: string, cond: boolean, detail = ''): void {
-  if (cond) {
-    passed++
-    console.log(`  ✓ ${name}`)
-  } else {
-    failed++
-    console.log(`  ✗ ${name}${detail ? `\n    ${detail}` : ''}`)
-  }
-}
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 function busyFreezeForTest(ms: number): void {
@@ -66,80 +57,102 @@ const stackText = (s: EventLoopStall): string =>
 const childText = (s: EventLoopStall): string =>
   s.children.flatMap((x) => x.processes.map((p) => p.command)).join(' | ')
 
-async function main(): Promise<void> {
-  // --- nothing frozen → nothing reported ---
-  {
-    const stalls = await observe(() => undefined)
-    check('an idle event loop reports no stall', stalls.length === 0, JSON.stringify(stalls))
-  }
+// --- nothing frozen → nothing reported ---
+describe('nothing frozen → nothing reported', () => {
+  let stalls: EventLoopStall[] = []
+  beforeAll(async () => {
+    stalls = await observe(() => undefined)
+  })
 
-  // --- busy JavaScript ---
-  {
-    const stalls = await observe(() => busyFreezeForTest(1500))
-    const s = stalls[0]
-    check('a busy freeze is reported once', stalls.length === 1, `count=${stalls.length}`)
-    check(
-      'its duration covers the freeze',
-      !!s && s.durationMs >= 1300 && s.durationMs < 3000,
-      `durationMs=${s?.durationMs}`
-    )
-    check(
-      'a stack sample names the spinning function',
-      !!s && stackText(s).includes('busyFreezeForTest'),
-      s ? stackText(s) : 'no stall'
-    )
-    // Not ~100%: on a saturated machine the OS deschedules even a spinning thread
-    // (that is what `machineCpuBusyPct` shows). The signal is the CONTRAST with a
-    // waiting thread below, which burns almost nothing.
-    check(
-      'the main thread burned CPU for a large share of it (busy, not waiting)',
-      !!s && s.mainThreadCpuMs !== null && s.mainThreadCpuMs >= 0.3 * s.durationMs,
-      `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`
-    )
-    check(
-      'machine CPU and GC time are reported as numbers',
-      !!s &&
-        typeof s.gcMs === 'number' &&
-        (s.machineCpuBusyPct === null || (s.machineCpuBusyPct >= 0 && s.machineCpuBusyPct <= 100)),
-      `gcMs=${s?.gcMs} machineCpuBusyPct=${s?.machineCpuBusyPct}`
-    )
-  }
+  test('an idle event loop reports no stall', () => {
+    expect(stalls.length, JSON.stringify(stalls)).toBe(0)
+  })
+})
 
-  // --- many short blocking calls (the suspected git pattern) ---
-  {
-    const stalls = await observe(manyBlockingCallsForTest)
-    const s = stalls[0]
-    check(
-      'a freeze made of blocking calls is reported',
-      stalls.length === 1,
-      `count=${stalls.length}`
-    )
-    check(
-      'a stack sample names the caller between the calls',
-      !!s && stackText(s).includes('manyBlockingCallsForTest'),
-      s ? stackText(s) : 'no stall'
-    )
-    check(
-      'the main thread mostly WAITED (almost no CPU), unlike a busy freeze',
-      !!s && s.mainThreadCpuMs !== null && s.mainThreadCpuMs < 0.15 * s.durationMs,
-      `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`
-    )
-  }
+// --- busy JavaScript ---
+describe('busy JavaScript', () => {
+  let stalls: EventLoopStall[] = []
+  let s: EventLoopStall | undefined
+  beforeAll(async () => {
+    stalls = await observe(() => busyFreezeForTest(1500))
+    s = stalls[0]
+  })
 
-  // --- one long blocking call ---
-  {
-    const stalls = await observe(oneLongBlockingCallForTest)
-    const s = stalls[0]
-    check('a single long blocking call is reported', stalls.length === 1, `count=${stalls.length}`)
-    check(
-      'the child-process snapshot names what the thread was waiting on',
-      !!s && childText(s).includes('sleep 1.6'),
-      s ? `children: ${childText(s)}` : 'no stall'
-    )
-  }
+  test('a busy freeze is reported once', () => {
+    expect(stalls.length, `count=${stalls.length}`).toBe(1)
+  })
 
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
-}
+  test('its duration covers the freeze', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(s!.durationMs).toBeGreaterThanOrEqual(1300)
+    expect(s!.durationMs).toBeLessThan(3000)
+  })
 
-void main()
+  test('a stack sample names the spinning function', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(stackText(s!)).toContain('busyFreezeForTest')
+  })
+  // Not ~100%: on a saturated machine the OS deschedules even a spinning thread
+  // (that is what `machineCpuBusyPct` shows). The signal is the CONTRAST with a
+  // waiting thread below, which burns almost nothing.
+  test('the main thread burned CPU for a large share of it (busy, not waiting)', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(s!.mainThreadCpuMs, 'mainThreadCpuMs').not.toBeNull()
+    expect(s!.mainThreadCpuMs!, `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`).toBeGreaterThanOrEqual(0.3 * s!.durationMs)
+  })
+
+  test('machine CPU and GC time are reported as numbers', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(typeof s!.gcMs, 'gcMs').toBe('number')
+    const pct = s!.machineCpuBusyPct
+    if (pct !== null) {
+      expect(pct, 'machineCpuBusyPct').toBeGreaterThanOrEqual(0)
+      expect(pct, 'machineCpuBusyPct').toBeLessThanOrEqual(100)
+    }
+  })
+})
+
+// --- many short blocking calls (the suspected git pattern) ---
+describe('many short blocking calls (the suspected git pattern)', () => {
+  let stalls: EventLoopStall[] = []
+  let s: EventLoopStall | undefined
+  beforeAll(async () => {
+    stalls = await observe(manyBlockingCallsForTest)
+    s = stalls[0]
+  })
+
+  test('a freeze made of blocking calls is reported', () => {
+    expect(stalls.length, `count=${stalls.length}`).toBe(1)
+  })
+
+  test('a stack sample names the caller between the calls', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(stackText(s!)).toContain('manyBlockingCallsForTest')
+  })
+
+  test('the main thread mostly WAITED (almost no CPU), unlike a busy freeze', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(s!.mainThreadCpuMs, 'mainThreadCpuMs').not.toBeNull()
+    expect(s!.mainThreadCpuMs!, `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`).toBeLessThan(0.15 * s!.durationMs)
+  })
+})
+
+// --- one long blocking call ---
+describe('one long blocking call', () => {
+  let stalls: EventLoopStall[] = []
+  let s: EventLoopStall | undefined
+  beforeAll(async () => {
+    stalls = await observe(oneLongBlockingCallForTest)
+    s = stalls[0]
+  })
+
+  test('a single long blocking call is reported', () => {
+    expect(stalls.length, `count=${stalls.length}`).toBe(1)
+  })
+
+  test('the child-process snapshot names what the thread was waiting on', () => {
+    expect(s, 'no stall').toBeDefined()
+    expect(childText(s!)).toContain('sleep 1.6')
+  })
+})
+

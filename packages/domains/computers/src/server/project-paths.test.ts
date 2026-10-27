@@ -6,10 +6,9 @@
  * here is that recording is WHOLESALE (a project a computer dropped must vanish, not
  * linger for reverse lookup to trust) and that the legacy `projects.path` column
  * still answers during the upgrade window, when no computer has reported yet.
- *
- * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
-import { createTestHarness, test, expect } from '../../../../shared/test-utils/ipc-harness.js'
+import { afterAll, expect, test } from 'vitest'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { recordComputerProjectPaths, resolveProjectByPath } from './project-paths.js'
 
 const h = await createTestHarness()
@@ -109,7 +108,6 @@ test('a report naming an unknown project neither fails nor becomes visible', asy
   expect(kept.filter((l) => l.computerId === 'r4').length).toBe(1)
   // The orphan is not reachable by reverse lookup either.
   expect(await resolveProjectByPath(db, '/srv/ghost/inside')).toBeNull()
-  // Cleanup rides the LAST test: `test()` is fire-and-forget, so a top-level
-  // `h.cleanup()` closes the database before any async body has run.
-  h.cleanup()
 })
+
+afterAll(() => h.cleanup())

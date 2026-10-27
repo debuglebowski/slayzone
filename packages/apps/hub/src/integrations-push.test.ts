@@ -18,14 +18,12 @@
  * The push functions are injected so this test can observe them without standing
  * up Linear/GitHub; production passes the real ones by default.
  *
- * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
- *     packages/apps/hub/src/integrations-push.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
-import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { wireIntegrationPush } from './integrations-push.js'
 
 const h = await createTestHarness()

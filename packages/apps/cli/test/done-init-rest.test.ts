@@ -13,7 +13,7 @@
  * direct-imported CLI actions here the REST routes' transitive ESM imports would
  * trigger an unbreakable require(esm) cycle. (Same rationale as tasks-rest.test.ts.)
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/done-init-rest.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/done-init-rest.test.ts
  *
  * Pre-req: pnpm --filter @slayzone/cli build  (or rely on existing dist/slay.js)
  */
@@ -23,12 +23,8 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import {
-  test,
-  expect,
-  describe,
-  createSlayzoneDbAdapter
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/ops/shared.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
@@ -40,9 +36,11 @@ import { registerNotifyRoute } from '../../../shared/transport/src/server/http/r
 import { ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
-if (!fs.existsSync(SLAY_BIN)) {
+// Without the bundle there is nothing to spawn: every suite below is skipped (the old
+// runner's `process.exit(0)` SKIP, kept). CI builds the CLI before the unit tests.
+const HAS_SLAY_BIN = fs.existsSync(SLAY_BIN)
+if (!HAS_SLAY_BIN) {
   console.error(`SKIP: dist/slay.js not built. Run \`pnpm --filter @slayzone/cli build\` first.`)
-  process.exit(0)
 }
 
 // The HUB's install root: it holds the database. `SLAYZONE_DEV=1` below picks the
@@ -170,7 +168,7 @@ function seedTask(title: string, pid = projectId, id = crypto.randomUUID()): str
 const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-no-db-done-init-'))
 const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
 
-await describe('slay tasks done works without a local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('slay tasks done works without a local database', () => {
   test('sanity: this root really has no database file', () => {
     expect(fs.existsSync(path.join(noDbRoot, 'storage', 'slayzone.dev.data.sqlite'))).toBe(false)
   })
@@ -221,7 +219,7 @@ await describe('slay tasks done works without a local database', () => {
   })
 })
 
-await describe('slay init works without a local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('slay init works without a local database', () => {
   test('init skills --project installs the hub-side skill records', async () => {
     notifyCount = 0
     const r = await runCli(['init', 'skills', '--project', 'DONEINIT'], { env: noDbEnv })
@@ -405,8 +403,10 @@ await describe('slay init works without a local database', () => {
   })
 })
 
-await rest.close()
-db.close()
-fs.rmSync(hubRoot, { recursive: true, force: true })
-fs.rmSync(noDbRoot, { recursive: true, force: true })
-fs.rmSync(projectDir, { recursive: true, force: true })
+afterAll(async () => {
+  await rest.close()
+  db.close()
+  fs.rmSync(hubRoot, { recursive: true, force: true })
+  fs.rmSync(noDbRoot, { recursive: true, force: true })
+  fs.rmSync(projectDir, { recursive: true, force: true })
+})

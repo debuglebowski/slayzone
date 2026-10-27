@@ -1,14 +1,9 @@
 /**
  * REST: POST /api/projects/:id/skills contract tests (`slay init` / `slay init skills`).
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/projects/skills.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { BUILTIN_SKILLS } from '@slayzone/ai-config/shared'
 import { registerProjectSkillsRoute } from './skills.js'
@@ -51,7 +46,7 @@ function post(ref: string): Promise<{ status: number; body: SkillsBody }> {
   return rest.request<SkillsBody>('POST', `/api/projects/${encodeURIComponent(ref)}/skills`, {})
 }
 
-await describe('POST /api/projects/:id/skills', () => {
+describe('POST /api/projects/:id/skills', () => {
   test('happy: first run installs every builtin skill as project-scoped rows', async () => {
     notifyCount = 0
     const res = await post(projectId)
@@ -183,5 +178,7 @@ await describe('POST /api/projects/:id/skills', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

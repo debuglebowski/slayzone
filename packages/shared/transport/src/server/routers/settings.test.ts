@@ -7,7 +7,8 @@
  * and were not covered by the handler test — out of scope here.
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
-import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
+import { test, expect } from 'vitest'
+import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
 import { SettingsService } from '@slayzone/settings/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { settingsRouter } from './settings.js'

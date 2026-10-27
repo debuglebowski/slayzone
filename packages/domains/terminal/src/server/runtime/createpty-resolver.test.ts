@@ -5,8 +5,8 @@
  * This is the end-to-end guard for the restart-clobber regression (resolver
  * registered + createPty consults it before the fresh-vs-resume branch). Uses a
  * fake adopted pty + stub db — no real shell spawns.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import { expect, test } from 'vitest'
 import type { PtySessionWindow } from '../pty-host'
 import type { IPty } from 'node-pty'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
@@ -19,25 +19,6 @@ import {
   setReinstallHooks
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect(cond: boolean, msg: string): void {
-  if (!cond) throw new Error(msg)
-}
 
 interface FakePty {
   pid: number
@@ -101,7 +82,7 @@ function installAdoptBackend(fake: unknown): void {
   } as unknown as PtyBackend)
 }
 
-await test('null renderer hint + ledger id → RESUME (no fresh mint)', async () => {
+test('null renderer hint + ledger id → RESUME (no fresh mint)', async () => {
   setConversationResolver(async () => 'REAL-LEDGER-ID')
   const fake = makeFakePty()
   installAdoptBackend(fake)
@@ -120,14 +101,14 @@ await test('null renderer hint + ledger id → RESUME (no fresh mint)', async ()
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
-  expect(cmd.includes('--resume'), `expected resume template, got: ${cmd}`)
-  expect(cmd.includes('REAL-LEDGER-ID'), `expected ledger id in command, got: ${cmd}`)
-  expect(!cmd.includes('--session-id'), `must NOT fresh-spawn when ledger id known: ${cmd}`)
+  expect(cmd, `expected resume template, got: ${cmd}`).toContain('--resume')
+  expect(cmd, `expected ledger id in command, got: ${cmd}`).toContain('REAL-LEDGER-ID')
+  expect(cmd, `must NOT fresh-spawn when ledger id known: ${cmd}`).not.toContain('--session-id')
   killPty(sid)
   setConversationResolver(null)
 })
 
-await test('null hint + no ledger id → fresh mint (--session-id), not resume', async () => {
+test('null hint + no ledger id → fresh mint (--session-id), not resume', async () => {
   setConversationResolver(async () => null)
   const fake = makeFakePty()
   installAdoptBackend(fake)
@@ -146,8 +127,8 @@ await test('null hint + no ledger id → fresh mint (--session-id), not resume',
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
-  expect(cmd.includes('--session-id'), `expected fresh --session-id, got: ${cmd}`)
-  expect(!cmd.includes('--resume'), `must NOT resume when nothing known: ${cmd}`)
+  expect(cmd, `expected fresh --session-id, got: ${cmd}`).toContain('--session-id')
+  expect(cmd, `must NOT resume when nothing known: ${cmd}`).not.toContain('--resume')
   killPty(sid)
   setConversationResolver(null)
 })
@@ -184,47 +165,50 @@ async function spawnWithResolver(
   return cmd
 }
 
-await test('retry: resolver null THEN real → resumes (boot-race fix)', async () => {
+test('retry: resolver null THEN real → resumes (boot-race fix)', async () => {
   let calls = 0
   const cmd = await spawnWithResolver('retryA:retryA', async () => {
     calls++
     return calls === 1 ? null : 'RETRIED-REAL'
   })
-  expect(calls >= 2, `resolver must be retried after a transient null (calls=${calls})`)
-  expect(cmd.includes('--resume'), `must resume after retry, got: ${cmd}`)
-  expect(cmd.includes('RETRIED-REAL'), `must resume the retried id, got: ${cmd}`)
-  expect(!cmd.includes('--session-id'), `must NOT fresh-mint when retry finds a real id: ${cmd}`)
+  expect(
+    calls,
+    `resolver must be retried after a transient null (calls=${calls})`
+  ).toBeGreaterThanOrEqual(2)
+  expect(cmd, `must resume after retry, got: ${cmd}`).toContain('--resume')
+  expect(cmd, `must resume the retried id, got: ${cmd}`).toContain('RETRIED-REAL')
+  expect(cmd, `must NOT fresh-mint when retry finds a real id: ${cmd}`).not.toContain(
+    '--session-id'
+  )
 })
 
-await test('retry: resolver THROWS then real → resumes (db-not-ready)', async () => {
+test('retry: resolver THROWS then real → resumes (db-not-ready)', async () => {
   let calls = 0
   const cmd = await spawnWithResolver('retryB:retryB', async () => {
     calls++
     if (calls === 1) throw new Error('db worker not ready')
     return 'AFTER-THROW'
   })
-  expect(
-    cmd.includes('--resume') && cmd.includes('AFTER-THROW'),
-    `must resume after a thrown first attempt: ${cmd}`
-  )
+  expect(cmd, `must resume after a thrown first attempt: ${cmd}`).toContain('--resume')
+  expect(cmd, `must resume after a thrown first attempt: ${cmd}`).toContain('AFTER-THROW')
 })
 
-await test('retry is bounded: resolver ALWAYS null → fresh mint, no hang', async () => {
+test('retry is bounded: resolver ALWAYS null → fresh mint, no hang', async () => {
   let calls = 0
   const cmd = await spawnWithResolver('retryC:retryC', async () => {
     calls++
     return null
   })
-  expect(calls === 3, `retry must be bounded to 3 attempts (calls=${calls})`)
-  expect(cmd.includes('--session-id'), `genuinely-no-convo task must fresh-spawn: ${cmd}`)
-  expect(!cmd.includes('--resume'), `must not resume when nothing is ever found: ${cmd}`)
+  expect(calls, `retry must be bounded to 3 attempts (calls=${calls})`).toBe(3)
+  expect(cmd, `genuinely-no-convo task must fresh-spawn: ${cmd}`).toContain('--session-id')
+  expect(cmd, `must not resume when nothing is ever found: ${cmd}`).not.toContain('--resume')
 })
 
 // A pre-warmed agent is claimed only by a task created this instant (single-use
 // reserved id, fresh start), so the ledger cannot know a conversation for it —
 // and the agent's own id is adopted regardless. Consulting the resolver there
 // only burns the null-retry sleeps (~300ms) on every warm Cmd+Shift+N.
-await test('preWarmedAgent adoption never consults the resolver (no retry sleep)', async () => {
+test('preWarmedAgent adoption never consults the resolver (no retry sleep)', async () => {
   let calls = 0
   setConversationResolver(async () => {
     calls++
@@ -254,8 +238,10 @@ await test('preWarmedAgent adoption never consults the resolver (no retry sleep)
     }
   })
   const elapsed = Date.now() - started
-  expect(calls === 0, `warm adoption must not consult the resolver (calls=${calls})`)
-  expect(elapsed < 250, `warm adoption must not sleep on resolver retries (${elapsed}ms)`)
+  expect(calls, `warm adoption must not consult the resolver (calls=${calls})`).toBe(0)
+  expect(elapsed, `warm adoption must not sleep on resolver retries (${elapsed}ms)`).toBeLessThan(
+    250
+  )
   killPty(sid)
   setConversationResolver(null)
 })
@@ -311,7 +297,7 @@ function makeAsyncDb(): SlayzoneDb {
   } as unknown as SlayzoneDb
 }
 
-await test('real-db resolver drives resume from the ledger (renderer hint absent)', async () => {
+test('real-db resolver drives resume from the ledger (renderer hint absent)', async () => {
   const adb = makeAsyncDb()
   // Seed a honored ledger row for rt1 (a real conversation).
   await adb.run(
@@ -352,11 +338,9 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
-  expect(
-    cmd.includes('--resume') && cmd.includes('REAL-LEDGER-ID'),
-    `real resolver must resume the ledger id: ${cmd}`
-  )
-  expect(!cmd.includes('--session-id'), `must NOT fresh-spawn over the ledger id: ${cmd}`)
+  expect(cmd, `real resolver must resume the ledger id: ${cmd}`).toContain('--resume')
+  expect(cmd, `real resolver must resume the ledger id: ${cmd}`).toContain('REAL-LEDGER-ID')
+  expect(cmd, `must NOT fresh-spawn over the ledger id: ${cmd}`).not.toContain('--session-id')
   killPty(sid)
   setConversationResolver(null)
   setDatabase(stubDb)
@@ -367,7 +351,7 @@ await test('real-db resolver drives resume from the ledger (renderer hint absent
 // time so a stale cross-release-channel copy can't outlive a boot. Non-hook modes skip
 // it, and a throwing repair must NEVER block the spawn.
 
-await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
+test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
   let calls = 0
   setReinstallHooks(async () => {
     calls++
@@ -389,13 +373,13 @@ await test('hook-driven spawn (claude-code) fires reinstallHooks', async () => {
     defaultFlags: '--allow-dangerously-skip-permissions',
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
-  expect(calls === 1, `reinstallHooks must fire once for a hook-driven spawn (calls=${calls})`)
+  expect(calls, `reinstallHooks must fire once for a hook-driven spawn (calls=${calls})`).toBe(1)
   killPty(sid)
   setConversationResolver(null)
   setReinstallHooks(null)
 })
 
-await test('user-defined provider wrapping claude-code fires reinstallHooks', async () => {
+test('user-defined provider wrapping claude-code fires reinstallHooks', async () => {
   // Its own mode id is not hook-driven; the agent it declares (`type`) is, and it
   // posts through the same shared notify.sh — so it must be healed too.
   let calls = 0
@@ -419,15 +403,15 @@ await test('user-defined provider wrapping claude-code fires reinstallHooks', as
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   expect(
-    calls === 1,
+    calls,
     `reinstallHooks must fire for a provider wrapping claude-code (calls=${calls})`
-  )
+  ).toBe(1)
   killPty(sid)
   setConversationResolver(null)
   setReinstallHooks(null)
 })
 
-await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => {
+test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => {
   let calls = 0
   setReinstallHooks(async () => {
     calls++
@@ -445,12 +429,12 @@ await test('non-hook mode (terminal) does NOT fire reinstallHooks', async () => 
     conversationId: undefined,
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
-  expect(calls === 0, `plain terminal must not touch notify.sh (calls=${calls})`)
+  expect(calls, `plain terminal must not touch notify.sh (calls=${calls})`).toBe(0)
   killPty(sid)
   setReinstallHooks(null)
 })
 
-await test('a throwing reinstallHooks never blocks the spawn', async () => {
+test('a throwing reinstallHooks never blocks the spawn', async () => {
   setReinstallHooks(async () => {
     throw new Error('installer blew up')
   })
@@ -473,11 +457,8 @@ await test('a throwing reinstallHooks never blocks the spawn', async () => {
     adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
   })
   const cmd = fake.written.join('')
-  expect(cmd.includes('claude'), `spawn must still complete despite a failing repair: ${cmd}`)
+  expect(cmd, `spawn must still complete despite a failing repair: ${cmd}`).toContain('claude')
   killPty(sid)
   setConversationResolver(null)
   setReinstallHooks(null)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-process.exit(failed > 0 ? 1 : 0)

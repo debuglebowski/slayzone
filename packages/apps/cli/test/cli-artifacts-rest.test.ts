@@ -23,7 +23,7 @@
  * the whole point of the cutover — these commands used to `openDb()` the hub's
  * SQLite file and die on "Database not found" against a hub on another machine.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/apps/cli/test/cli-artifacts-rest.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/cli/test/cli-artifacts-rest.test.ts
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -31,12 +31,8 @@ import * as os from 'node:os'
 import { spawn } from 'node:child_process'
 import express from 'express'
 import Database from 'better-sqlite3'
-import {
-  test,
-  expect,
-  describe,
-  createSlayzoneDbAdapter
-} from '../../../shared/test-utils/ipc-harness.js'
+import { afterAll, describe, expect, test } from 'vitest'
+import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
@@ -60,9 +56,11 @@ function storageDirFor(root: string): string {
 }
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
-if (!fs.existsSync(SLAY_BIN)) {
+// Without the bundle there is nothing to spawn: every suite below is skipped (the old
+// runner's `process.exit(0)` SKIP, kept). CI builds the CLI before the unit tests.
+const HAS_SLAY_BIN = fs.existsSync(SLAY_BIN)
+if (!HAS_SLAY_BIN) {
   console.error(`SKIP: dist/slay.js not built. Run \`pnpm --filter @slayzone/cli build\` first.`)
-  process.exit(0)
 }
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cli-artifacts-'))
@@ -152,7 +150,7 @@ const short = (id: string) => id.slice(0, 8)
 // download-capability + no-server assertions address by prefix.
 let artifactId = ''
 
-await describe('CLI artifact metadata commands → REST', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI artifact metadata commands → REST', () => {
   let folderId = ''
   let childFolderId = ''
 
@@ -397,7 +395,7 @@ const BINARY = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x00, 0x01, 0x7f, 0x80
 ])
 
-await describe('CLI artifact content is binary-safe end to end', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end', () => {
   let pngId = ''
 
   test('upload sends a binary file byte-exact through REST', async () => {
@@ -543,7 +541,7 @@ await describe('CLI artifact content is binary-safe end to end', () => {
   })
 })
 
-await describe('CLI artifact create options route through REST', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI artifact create options route through REST', () => {
   test('--folder places the artifact in that folder', async () => {
     const mk = await runCli([
       'tasks',
@@ -639,7 +637,7 @@ await describe('CLI artifact create options route through REST', () => {
  * another machine (where that file does not exist) died on openDb()'s
  * "Database not found" process.exit(1). The hub still has the DB; this CLI does not.
  */
-await describe('CLI artifact commands work without a local database', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI artifact commands work without a local database', () => {
   const noDbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-artifacts-no-db-'))
   const noDbEnv = { SLAYZONE_ROOT: noDbRoot }
   let remoteId = ''
@@ -757,7 +755,7 @@ await describe('CLI artifact commands work without a local database', () => {
   })
 })
 
-await describe('CLI artifact metadata — no-server path', () => {
+describe.skipIf(!HAS_SLAY_BIN)('CLI artifact metadata — no-server path', () => {
   test('mkdir exits 1 with helpful stderr when REST unreachable', async () => {
     const r = await runCli(['tasks', 'artifacts', 'mkdir', 'Nope', '--task', short(taskId)], {
       envOverrides: { SLAYZONE_HUB_ADDRESS: '127.0.0.1:1' }
@@ -775,6 +773,8 @@ await describe('CLI artifact metadata — no-server path', () => {
   })
 })
 
-await rest.close()
-db.close()
-fs.rmSync(tmpDir, { recursive: true, force: true })
+afterAll(async () => {
+  await rest.close()
+  db.close()
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+})

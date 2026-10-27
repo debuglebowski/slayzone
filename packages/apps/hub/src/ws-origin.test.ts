@@ -4,33 +4,15 @@
  * This decision had NO test before it was extracted from `startServer` — it was a
  * closure you could not reach without booting two listeners. Everything below is
  * the coverage that absence was hiding, in the same shape `rest-auth.test.ts`
- * uses (hand-rolled harness, pure function, no boot).
+ * uses (pure function, no boot).
  *
  * Run with:
- *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
- *     --experimental-loader ./packages/shared/test-utils/loader.ts \
+ *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/ws-origin.test.ts
  */
+import { expect, test } from 'vitest'
 import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    passed += 1
-    console.log(`  ✓ ${name}`)
-  } catch (err) {
-    failed += 1
-    console.log(`  ✗ ${name}`)
-    console.log(`    ${err instanceof Error ? err.message : String(err)}`)
-  }
-}
-
-function assertEq<T>(actual: T, expected: T, msg: string): void {
-  if (actual !== expected) throw new Error(`${msg}: expected ${expected}, got ${actual}`)
-}
 
 /** The three deployment shapes, named once so each case reads as a scenario. */
 /** The desktop app's hub: login off, so by rule B1 it is reachable only from this machine. */
@@ -41,9 +23,6 @@ const STANDALONE_LOOPBACK = { requireLogin: true, loopbackBind: true } as const
  *  (a same-box reverse proxy) — the server computes `loopbackBind` false for both. */
 const INTERNET_FACING = { requireLogin: true, loopbackBind: false } as const
 
-console.log('\n/trpc WebSocket origin guard')
-console.log('─'.repeat(52))
-
 // ── non-browser callers ───────────────────────────────────────────────────────
 test('an ABSENT Origin is accepted everywhere (non-browser clients)', () => {
   // Browsers always send Origin on a WS handshake, so no-Origin means Electron
@@ -51,11 +30,10 @@ test('an ABSENT Origin is accepted everywhere (non-browser clients)', () => {
   // deputies and are bearer-gated afterwards. Rejecting them would break every
   // native client on an enforcing hub.
   for (const shape of [DESKTOP_APP, STANDALONE_LOOPBACK, INTERNET_FACING]) {
-    assertEq(
+    expect(
       wsOriginDecision({ origin: undefined, ...shape }),
-      'accept',
       `no Origin accepted (loopbackBind=${shape.loopbackBind})`
-    )
+    ).toBe('accept')
   }
 })
 
@@ -64,13 +42,12 @@ test('Origin: null is accepted LOCALLY but rejected on an internet-facing hub', 
   // `null` is what file:// serializes to — and what ANY sandboxed iframe sends.
   // Any website can embed `<iframe sandbox>` without allow-same-origin, so
   // blanket-accepting it meant "accept every website" on a reachable hub.
-  assertEq(wsOriginDecision({ origin: 'null', ...DESKTOP_APP }), 'accept', 'packaged Electron')
-  assertEq(wsOriginDecision({ origin: 'null', ...STANDALONE_LOOPBACK }), 'accept', 'local dev')
-  assertEq(
+  expect(wsOriginDecision({ origin: 'null', ...DESKTOP_APP }), 'packaged Electron').toBe('accept')
+  expect(wsOriginDecision({ origin: 'null', ...STANDALONE_LOOPBACK }), 'local dev').toBe('accept')
+  expect(
     wsOriginDecision({ origin: 'null', ...INTERNET_FACING }),
-    'reject',
     'a sandboxed iframe on any website must not open /trpc'
-  )
+  ).toBe('reject')
 })
 
 test('first-party renderer protocols follow the same rule as null', () => {
@@ -80,13 +57,12 @@ test('first-party renderer protocols follow the same rule as null', () => {
     'devtools://devtools',
     'file:///Applications/SlayZone.app/index.html'
   ]) {
-    assertEq(wsOriginDecision({ origin, ...DESKTOP_APP }), 'accept', `${origin} local`)
-    assertEq(
+    expect(wsOriginDecision({ origin, ...DESKTOP_APP }), `${origin} local`).toBe('accept')
+    expect(
       wsOriginDecision({ origin, ...STANDALONE_LOOPBACK }),
-      'accept',
       `${origin} standalone loopback (the Chromium fork's own backend)`
-    )
-    assertEq(wsOriginDecision({ origin, ...INTERNET_FACING }), 'reject', `${origin} exposed`)
+    ).toBe('accept')
+    expect(wsOriginDecision({ origin, ...INTERNET_FACING }), `${origin} exposed`).toBe('reject')
   }
 })
 
@@ -101,11 +77,10 @@ test('localhost origins are accepted whenever the hub binds loopback', () => {
     'http://127.0.0.1:8765',
     'http://[::1]:8765'
   ]) {
-    assertEq(
+    expect(
       wsOriginDecision({ origin, ...STANDALONE_LOOPBACK }),
-      'accept',
       `${origin} on a loopback-bound standalone hub`
-    )
+    ).toBe('accept')
   }
 })
 
@@ -113,42 +88,38 @@ test('localhost is REJECTED once the hub binds off-box', () => {
   // A hub on 0.0.0.0 has no business trusting a localhost origin: the only way a
   // browser sends one is if the attacker controls a page on the victim's own
   // machine, which is exactly the DNS-rebind shape this guard exists for.
-  assertEq(
+  expect(
     wsOriginDecision({ origin: 'http://localhost:51735', ...INTERNET_FACING }),
-    'reject',
     'localhost origin on an exposed hub'
-  )
+  ).toBe('reject')
 })
 
 // ── foreign origins ───────────────────────────────────────────────────────────
 test('a foreign website is rejected in every deployment shape', () => {
   for (const shape of [DESKTOP_APP, STANDALONE_LOOPBACK, INTERNET_FACING]) {
-    assertEq(
+    expect(
       wsOriginDecision({ origin: 'https://evil.example', ...shape }),
-      'reject',
       `evil.example (loopbackBind=${shape.loopbackBind})`
-    )
+    ).toBe('reject')
   }
 })
 
 test('an unparseable Origin fails CLOSED', () => {
   for (const origin of ['not a url', '://', 'http://', ' ']) {
-    assertEq(
+    expect(
       wsOriginDecision({ origin, ...STANDALONE_LOOPBACK }),
-      'reject',
       `unparseable ${JSON.stringify(origin)}`
-    )
+    ).toBe('reject')
   }
 })
 
 // ── the configured public origin ─────────────────────────────────────────────
 test('an explicitly allowed origin is accepted on an internet-facing hub', () => {
   const allowedOrigins = ['https://hub.example.com']
-  assertEq(
+  expect(
     wsOriginDecision({ origin: 'https://hub.example.com', ...INTERNET_FACING, allowedOrigins }),
-    'accept',
     'the hub own public origin'
-  )
+  ).toBe('accept')
 })
 
 test('allowlisting compares the FULL origin — no suffix, port or scheme confusion', () => {
@@ -164,11 +135,10 @@ test('allowlisting compares the FULL origin — no suffix, port or scheme confus
     // Subdomain.
     'https://api.hub.example.com'
   ]) {
-    assertEq(
+    expect(
       wsOriginDecision({ origin, ...INTERNET_FACING, allowedOrigins }),
-      'reject',
       `lookalike rejected: ${origin}`
-    )
+    ).toBe('reject')
   }
 })
 
@@ -178,57 +148,51 @@ test('the public origin is DERIVED from the address a reachable hub must already
   // so deriving the browser origin from it means a web-serving hub needs no new
   // configuration and the two values cannot drift. The scheme follows the HOST
   // (rule A1): a front end serves TLS for anything that is not loopback.
-  assertEq(
+  expect(
     resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com' }).join(','),
-    'https://hub.example.com',
     'public host ⇒ https'
-  )
-  assertEq(
+  ).toBe('https://hub.example.com')
+  expect(
     resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'box.local:8765' }).join(','),
-    'https://box.local:8765',
     'any non-loopback host ⇒ https, port preserved'
-  )
-  assertEq(
+  ).toBe('https://box.local:8765')
+  expect(
     resolveAllowedWebOrigins({ SLAYZONE_HUB_PUBLIC_ADDRESS: 'localhost:8443' }).join(','),
-    'http://localhost:8443',
     'a loopback public address (same-box proxy under test) ⇒ http'
-  )
+  ).toBe('http://localhost:8443')
   // The retired SLAYZONE_MODE must not change the answer in either direction.
-  assertEq(
+  expect(
     resolveAllowedWebOrigins({
       SLAYZONE_MODE: 'local',
       SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com'
     }).join(','),
-    'https://hub.example.com',
     'a leftover SLAYZONE_MODE=local does not downgrade the scheme'
-  )
+  ).toBe('https://hub.example.com')
 })
 
 test('a login-off hub trusts local-client origins; turning login on closes them to a reachable hub', () => {
-  assertEq(
+  expect(
     wsOriginDecision({ origin: 'null', requireLogin: false, loopbackBind: false }),
-    'accept',
     'login off ⇒ (by B1) reachable only from this machine ⇒ first-party clients'
-  )
-  assertEq(
+  ).toBe('accept')
+  expect(
     wsOriginDecision({ origin: 'null', requireLogin: true, loopbackBind: false }),
-    'reject',
     'login on and reachable ⇒ a sandboxed iframe must not open /trpc'
-  )
+  ).toBe('reject')
 })
 
 test('the env override adds origins and drops junk defensively', () => {
   const origins = resolveAllowedWebOrigins({
     SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://a.example, ,https://b.example/some/path,nonsense,'
   })
-  assertEq(origins.length, 2, `two usable origins, got ${JSON.stringify(origins)}`)
-  assertEq(origins[0], 'https://a.example', 'first entry')
+  expect(origins.length, `two usable origins, got ${JSON.stringify(origins)}`).toBe(2)
+  expect(origins[0], 'first entry').toBe('https://a.example')
   // A trailing path is normalized away — a browser only ever sends the origin.
-  assertEq(origins[1], 'https://b.example', 'path stripped to bare origin')
+  expect(origins[1], 'path stripped to bare origin').toBe('https://b.example')
 })
 
 test('no configuration at all yields an EMPTY allowlist (never a wildcard)', () => {
-  assertEq(resolveAllowedWebOrigins({}).length, 0, 'nothing configured ⇒ nothing extra allowed')
+  expect(resolveAllowedWebOrigins({}).length, 'nothing configured ⇒ nothing extra allowed').toBe(0)
 })
 
 // ── the web-session cookie (T-13) ─────────────────────────────────────────────
@@ -238,7 +202,7 @@ const PUBLIC = { loopbackBind: false, allowedOrigins: [HUB_ORIGIN], host: 'hub.n
 const LOCAL = { loopbackBind: true, allowedOrigins: [], host: '127.0.0.1:8765' }
 
 test('a reachable hub: only its own public origin authenticates by cookie', () => {
-  assertEq(cookieOriginDecision({ origin: HUB_ORIGIN, ...PUBLIC }), 'accept', 'own origin')
+  expect(cookieOriginDecision({ origin: HUB_ORIGIN, ...PUBLIC }), 'own origin').toBe('accept')
   for (const origin of [
     'https://evil.example',
     'https://hub.normain.com.evil.example',
@@ -248,51 +212,46 @@ test('a reachable hub: only its own public origin authenticates by cookie', () =
     'file://',
     'chrome://slayzone'
   ]) {
-    assertEq(cookieOriginDecision({ origin, ...PUBLIC }), 'reject', `${origin} refused`)
+    expect(cookieOriginDecision({ origin, ...PUBLIC }), `${origin} refused`).toBe('reject')
   }
 })
 
 test('a MISSING Origin never authenticates by cookie (unlike wsOriginDecision)', () => {
   for (const shape of [PUBLIC, LOCAL]) {
-    assertEq(cookieOriginDecision({ origin: undefined, ...shape }), 'reject', 'no Origin')
-    assertEq(cookieOriginDecision({ origin: '', ...shape }), 'reject', 'blank Origin')
+    expect(cookieOriginDecision({ origin: undefined, ...shape }), 'no Origin').toBe('reject')
+    expect(cookieOriginDecision({ origin: '', ...shape }), 'blank Origin').toBe('reject')
   }
-  assertEq(
+  expect(
     wsOriginDecision({ origin: undefined, requireLogin: true, loopbackBind: false }),
-    'accept',
     'the socket itself still opens for a native client — it just gets no cookie principal'
-  )
+  ).toBe('accept')
 })
 
 test('a repeated or unparseable Origin is refused', () => {
-  assertEq(cookieOriginDecision({ origin: [HUB_ORIGIN, HUB_ORIGIN], ...PUBLIC }), 'reject', 'array')
-  assertEq(cookieOriginDecision({ origin: 'not a url', ...LOCAL }), 'reject', 'junk')
+  expect(cookieOriginDecision({ origin: [HUB_ORIGIN, HUB_ORIGIN], ...PUBLIC }), 'array').toBe(
+    'reject'
+  )
+  expect(cookieOriginDecision({ origin: 'not a url', ...LOCAL }), 'junk').toBe('reject')
 })
 
 test('a local hub: same origin as the request Host only — not another localhost port', () => {
-  assertEq(cookieOriginDecision({ origin: 'http://127.0.0.1:8765', ...LOCAL }), 'accept', 'same')
-  assertEq(
+  expect(cookieOriginDecision({ origin: 'http://127.0.0.1:8765', ...LOCAL }), 'same').toBe('accept')
+  expect(
     cookieOriginDecision({ origin: 'http://localhost:8765', ...LOCAL, host: 'LOCALHOST:8765' }),
-    'accept',
     'Host compared case-insensitively'
-  )
+  ).toBe('accept')
   for (const origin of ['http://127.0.0.1:3000', 'http://localhost:8765', 'null', 'file://']) {
-    assertEq(cookieOriginDecision({ origin, ...LOCAL }), 'reject', `${origin} refused`)
+    expect(cookieOriginDecision({ origin, ...LOCAL }), `${origin} refused`).toBe('reject')
   }
-  assertEq(
+  expect(
     cookieOriginDecision({ origin: 'http://127.0.0.1:8765', ...LOCAL, host: undefined }),
-    'reject',
     'no Host, no same-origin claim'
-  )
+  ).toBe('reject')
 })
 
 test('a non-local hub never matches on Host (a rebinding or proxied name)', () => {
-  assertEq(
+  expect(
     cookieOriginDecision({ origin: 'https://other.example', ...PUBLIC, host: 'other.example' }),
-    'reject',
     'Host is attacker-influenced; only the configured origins count off-box'
-  )
+  ).toBe('reject')
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

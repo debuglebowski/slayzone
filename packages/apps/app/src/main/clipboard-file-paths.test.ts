@@ -6,35 +6,13 @@
  * CF_HDROP), so one cross-platform path replaces the old macOS plist hack. These
  * tests drive the logic against an in-memory clipboard port; the shapes mirror what
  * a real Electron 44 clipboard returned for a Finder copy and a plain-text copy.
- *
- * Run with: npx tsx packages/apps/app/src/main/clipboard-file-paths.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createFilePathClipboard, type ClipboardPort } from './clipboard-file-paths'
-
-let passed = 0
-let failed = 0
-
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function eq<T>(actual: T, expected: T, label?: string): void {
-  const a = JSON.stringify(actual)
-  const b = JSON.stringify(expected)
-  if (a !== b) throw new Error(`${label ? `${label}: ` : ''}expected ${b}, got ${a}`)
-}
 
 /** An in-memory clipboard holding one entry of MIME type → text. */
 function fakeClipboard(initial: Record<string, string> = {}): ClipboardPort & {
@@ -72,82 +50,78 @@ writeFileSync(fileA, '')
 writeFileSync(fileB, '')
 const uriList = [fileA, fileB].map((p) => pathToFileURL(p).href).join('\r\n')
 
-async function main(): Promise<void> {
-  console.log('clipboard-file-paths')
-
-  await test('write puts native file refs (uri-list) and the paths as text', async () => {
+describe('clipboard-file-paths', () => {
+  test('write puts native file refs (uri-list) and the paths as text', async () => {
     const cb = fakeClipboard()
     await createFilePathClipboard(cb).writeFilePaths([fileA, fileB])
-    eq(cb.entry['text/uri-list'], uriList, 'uri-list')
-    eq(cb.entry['text/plain'], `${fileA}\n${fileB}`, 'text')
+    expect(cb.entry['text/uri-list'], 'uri-list').toEqual(uriList)
+    expect(cb.entry['text/plain'], 'text').toEqual(`${fileA}\n${fileB}`)
   })
 
-  await test('write of no paths clears the clipboard', async () => {
+  test('write of no paths clears the clipboard', async () => {
     const cb = fakeClipboard({ 'text/plain': 'x' })
     await createFilePathClipboard(cb).writeFilePaths([])
-    eq(cb.entry, {})
+    expect(cb.entry).toEqual({})
   })
 
-  await test('write → read round-trips paths with spaces and #', async () => {
+  test('write → read round-trips paths with spaces and #', async () => {
     const cb = fakeClipboard()
     const fc = createFilePathClipboard(cb)
     await fc.writeFilePaths([fileA, fileB])
-    eq(await fc.readFilePaths(), [fileA, fileB])
-    eq(await fc.hasFilePaths(), true)
+    expect(await fc.readFilePaths()).toEqual([fileA, fileB])
+    expect(await fc.hasFilePaths()).toEqual(true)
   })
 
-  await test('reads a Finder-style copy (uri-list only, no text)', async () => {
+  test('reads a Finder-style copy (uri-list only, no text)', async () => {
     const cb = fakeClipboard({
       'text/uri-list': uriList,
       'electron application/osclipboard;format="NSFilenamesPboardType"': '<plist/>'
     })
     const fc = createFilePathClipboard(cb)
-    eq(await fc.readFilePaths(), [fileA, fileB])
-    eq(await fc.hasFilePaths(), true)
+    expect(await fc.readFilePaths()).toEqual([fileA, fileB])
+    expect(await fc.hasFilePaths()).toEqual(true)
   })
 
-  await test('uri-list comment lines and blank lines are ignored', async () => {
+  test('uri-list comment lines and blank lines are ignored', async () => {
     const cb = fakeClipboard({
       'text/uri-list': `# comment\r\n\r\n${pathToFileURL(fileA).href}\r\n`
     })
-    eq(await createFilePathClipboard(cb).readFilePaths(), [fileA])
+    expect(await createFilePathClipboard(cb).readFilePaths()).toEqual([fileA])
   })
 
-  await test('plain text of existing absolute paths reads as files', async () => {
+  test('plain text of existing absolute paths reads as files', async () => {
     const cb = fakeClipboard({ 'text/plain': `${fileA}\n${fileB}\n` })
     const fc = createFilePathClipboard(cb)
-    eq(await fc.readFilePaths(), [fileA, fileB])
-    eq(await fc.hasFilePaths(), true)
+    expect(await fc.readFilePaths()).toEqual([fileA, fileB])
+    expect(await fc.hasFilePaths()).toEqual(true)
   })
 
-  await test('plain text file:// URLs read as files', async () => {
+  test('plain text file:// URLs read as files', async () => {
     const cb = fakeClipboard({ 'text/plain': pathToFileURL(fileA).href })
-    eq(await createFilePathClipboard(cb).readFilePaths(), [fileA])
+    expect(await createFilePathClipboard(cb).readFilePaths()).toEqual([fileA])
   })
 
-  await test('plain text that is not a path is not files', async () => {
+  test('plain text that is not a path is not files', async () => {
     const cb = fakeClipboard({ 'text/plain': 'hello world' })
     const fc = createFilePathClipboard(cb)
-    eq(await fc.readFilePaths(), [])
-    eq(await fc.hasFilePaths(), false)
+    expect(await fc.readFilePaths()).toEqual([])
+    expect(await fc.hasFilePaths()).toEqual(false)
   })
 
-  await test('text naming a missing absolute path is not files', async () => {
+  test('text naming a missing absolute path is not files', async () => {
     const cb = fakeClipboard({ 'text/plain': join(dir, 'missing.txt') })
     const fc = createFilePathClipboard(cb)
-    eq(await fc.readFilePaths(), [])
-    eq(await fc.hasFilePaths(), false)
+    expect(await fc.readFilePaths()).toEqual([])
+    expect(await fc.hasFilePaths()).toEqual(false)
   })
 
-  await test('empty clipboard reads as no files', async () => {
+  test('empty clipboard reads as no files', async () => {
     const fc = createFilePathClipboard(fakeClipboard())
-    eq(await fc.readFilePaths(), [])
-    eq(await fc.hasFilePaths(), false)
+    expect(await fc.readFilePaths()).toEqual([])
+    expect(await fc.hasFilePaths()).toEqual(false)
   })
 
-  rmSync(dir, { recursive: true, force: true })
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
-}
-
-void main()
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

@@ -1,14 +1,9 @@
 /**
  * REST: GET /api/projects/resolve-by-path contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --experimental-loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/projects/resolve-by-path.test.ts
  */
+import { afterAll, describe, expect, test } from 'vitest'
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { registerProjectsResolveByPathRoute } from './resolve-by-path.js'
 
@@ -33,7 +28,7 @@ const rest = await mountRestApp(app)
 
 type ResolveResponse = { ok: boolean; data: { id: string; name: string; path: string } }
 
-await describe('GET /api/projects/resolve-by-path', () => {
+describe('GET /api/projects/resolve-by-path', () => {
   test('happy: exact path match', async () => {
     const res = await rest.request<ResolveResponse>(
       'GET',
@@ -75,5 +70,7 @@ await describe('GET /api/projects/resolve-by-path', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

@@ -1,7 +1,7 @@
 /**
  * Tests for CopyFilesDialog.utils.ts
- * Run with: npx tsx packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
  */
+import { expect, test } from 'vitest'
 import type { IgnoredFileNode } from '../shared/types'
 import {
   filterTreeByGlobs,
@@ -10,35 +10,6 @@ import {
   removeSubtree,
   globToRegex
 } from './CopyFilesDialog.utils'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e instanceof Error ? (e.stack ?? e.message) : e}`)
-    failed++
-  }
-}
-
-function expect(actual: unknown) {
-  return {
-    toBe(expected: unknown) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: unknown) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    }
-  }
-}
 
 function file(name: string, parent: string, size = 10): IgnoredFileNode {
   return {
@@ -191,6 +162,3 @@ test('removeSubtree — removes node and all descendants from set', () => {
 })
 
 // --- summary ---------------------------------------------------------------
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

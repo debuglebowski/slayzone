@@ -1,36 +1,18 @@
 /**
  * Build-identity tests (Phase 1 of plans/sidecar-staleness.md).
  *
- * Pure — no DB, no native deps — so it runs under plain `npx tsx`.
+ * Pure — no DB, no native deps.
  *  - getServerBuildInfo() falls back cleanly when the esbuild `define`s are
  *    absent (i.e. running the TS source directly, as here / in dev).
  *  - GET /health advertises the running build (commit / builtAt / buildId) so a
  *    stale sidecar is detectable by comparing against dist/sidecar-build.json.
  *
- * Run with: npx tsx packages/apps/hub/src/build-info.test.ts
+ * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import { expect, test } from 'vitest'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getServerBuildInfo } from './build-info.js'
 import { handleHealth, type HealthState } from './health.js'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? e.message : e}`)
-    failed++
-  }
-}
-
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 /** Capture what handleHealth writes without a real socket. */
 function fakeHealthResponse(): {
@@ -92,40 +74,37 @@ console.log('─'.repeat(40))
 
 test('getServerBuildInfo() returns strings for commit/builtAt/buildId', () => {
   const info = getServerBuildInfo()
-  assert(typeof info.commit === 'string' && info.commit.length > 0, 'commit is a non-empty string')
-  assert(
-    typeof info.builtAt === 'string' && info.builtAt.length > 0,
-    'builtAt is a non-empty string'
-  )
-  assert(
-    typeof info.buildId === 'string' && info.buildId.length > 0,
-    'buildId is a non-empty string'
-  )
+  expect(typeof info.commit, 'commit is a non-empty string').toBe('string')
+  expect(info.commit.length, 'commit is a non-empty string').toBeGreaterThan(0)
+  expect(typeof info.builtAt, 'builtAt is a non-empty string').toBe('string')
+  expect(info.builtAt.length, 'builtAt is a non-empty string').toBeGreaterThan(0)
+  expect(typeof info.buildId, 'buildId is a non-empty string').toBe('string')
+  expect(info.buildId.length, 'buildId is a non-empty string').toBeGreaterThan(0)
 })
 
 test('getServerBuildInfo() falls back to dev sentinels when defines absent', () => {
   const info = getServerBuildInfo()
   // Running TS source directly: no esbuild `define` substitution → sentinels.
-  assert(info.commit === 'dev', `commit sentinel, got ${info.commit}`)
-  assert(info.builtAt === 'unknown', `builtAt sentinel, got ${info.builtAt}`)
-  assert(info.buildId === 'dev@unknown', `buildId composed from parts, got ${info.buildId}`)
+  expect(info.commit, `commit sentinel, got ${info.commit}`).toBe('dev')
+  expect(info.builtAt, `builtAt sentinel, got ${info.builtAt}`).toBe('unknown')
+  expect(info.buildId, `buildId composed from parts, got ${info.buildId}`).toBe('dev@unknown')
 })
 
 test('GET /health (ready) advertises the running build identity', () => {
   const state = healthState({ ready: true })
   const { req, res, read } = fakeHealthResponse()
   const handled = handleHealth(state, req, res)
-  assert(handled, 'handleHealth handled the /health request')
+  expect(handled, 'handleHealth handled the /health request').toBeTruthy()
   const { status, body } = read()
-  assert(status === 200, `200 when ready, got ${status}`)
+  expect(status, `200 when ready, got ${status}`).toBe(200)
   const b = body as Record<string, unknown>
-  assert(b.ok === true, 'ok:true')
-  assert(typeof b.commit === 'string', 'body carries commit')
-  assert(typeof b.builtAt === 'string', 'body carries builtAt')
-  assert(typeof b.buildId === 'string', 'body carries buildId')
+  expect(b.ok, 'ok:true').toBe(true)
+  expect(typeof b.commit, 'body carries commit').toBe('string')
+  expect(typeof b.builtAt, 'body carries builtAt').toBe('string')
+  expect(typeof b.buildId, 'body carries buildId').toBe('string')
   // Existing fields preserved.
-  assert(b.port === 1234, 'port preserved')
-  assert(b.dbPath === '/tmp/x.sqlite', 'dbPath preserved')
+  expect(b.port, 'port preserved').toBe(1234)
+  expect(b.dbPath, 'dbPath preserved').toBe('/tmp/x.sqlite')
 })
 
 test('GET /health (not ready) still 503s without build fields', () => {
@@ -133,9 +112,6 @@ test('GET /health (not ready) still 503s without build fields', () => {
   const { req, res, read } = fakeHealthResponse()
   handleHealth(state, req, res)
   const { status, body } = read()
-  assert(status === 503, `503 when starting, got ${status}`)
-  assert((body as Record<string, unknown>).ok === false, 'ok:false while starting')
+  expect(status, `503 when starting, got ${status}`).toBe(503)
+  expect((body as Record<string, unknown>).ok, 'ok:false while starting').toBe(false)
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

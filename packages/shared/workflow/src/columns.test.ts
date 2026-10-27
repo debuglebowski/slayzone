@@ -1,15 +1,7 @@
+import { describe, test, expect } from 'vitest'
 import { getSharedStatusColumns } from './columns'
 import { DEFAULT_COLUMNS, type ColumnConfig } from './types'
 
-let failures = 0
-function assert(cond: boolean, msg: string): void {
-  if (cond) {
-    console.log('  ok:', msg)
-  } else {
-    console.error('  FAIL:', msg)
-    failures += 1
-  }
-}
 const ids = (columns: ColumnConfig[]): string => columns.map((c) => c.id).join(',')
 
 const custom: ColumnConfig[] = [
@@ -27,40 +19,48 @@ const invalid: ColumnConfig[] = [
 ]
 const defaultIds = ids(DEFAULT_COLUMNS)
 
-// --- one project: all of its statuses ---
-assert(ids(getSharedStatusColumns([custom])) === 'todo,doing,done', 'one project → its columns')
-assert(ids(getSharedStatusColumns([null])) === defaultIds, 'one unconfigured project → defaults')
+describe('one project: all of its statuses', () => {
+  test('one project → its columns', () => {
+    expect(ids(getSharedStatusColumns([custom]))).toBe('todo,doing,done')
+  })
 
-// --- several projects: only statuses every one of them has ---
-assert(
-  ids(getSharedStatusColumns([null, undefined])) === defaultIds,
-  'two unconfigured projects → defaults'
-)
-assert(
-  ids(getSharedStatusColumns([null, custom])) === 'todo,done',
-  'defaults + custom → the ids both have'
-)
-assert(
-  ids(getSharedStatusColumns([custom, null])) === 'todo,done',
-  'custom + defaults → same ids, in the first project’s order'
-)
-assert(
-  getSharedStatusColumns([custom, null]).find((c) => c.id === 'done')?.label === 'Shipped',
-  'labels come from the first project'
-)
-assert(getSharedStatusColumns([null, disjoint]).length === 0, 'no overlap → nothing shared')
+  test('one unconfigured project → defaults', () => {
+    expect(ids(getSharedStatusColumns([null]))).toBe(defaultIds)
+  })
+})
 
-// --- same resolution as the backend: an invalid config means the defaults ---
-assert(
-  ids(getSharedStatusColumns([invalid, null])) === defaultIds,
-  'invalid config counts as the defaults'
-)
+describe('several projects: only statuses every one of them has', () => {
+  test('two unconfigured projects → defaults', () => {
+    expect(ids(getSharedStatusColumns([null, undefined]))).toBe(defaultIds)
+  })
 
-// --- nothing selected ---
-assert(getSharedStatusColumns([]).length === 0, 'no projects → nothing shared')
+  test('defaults + custom → the ids both have', () => {
+    expect(ids(getSharedStatusColumns([null, custom]))).toBe('todo,done')
+  })
 
-if (failures > 0) {
-  console.error(`${failures} failure(s)`)
-  process.exit(1)
-}
-console.log('All getSharedStatusColumns tests passed')
+  test('custom + defaults → same ids, in the first project’s order', () => {
+    expect(ids(getSharedStatusColumns([custom, null]))).toBe('todo,done')
+  })
+
+  test('labels come from the first project', () => {
+    expect(getSharedStatusColumns([custom, null]).find((c) => c.id === 'done')?.label).toBe(
+      'Shipped'
+    )
+  })
+
+  test('no overlap → nothing shared', () => {
+    expect(getSharedStatusColumns([null, disjoint])).toHaveLength(0)
+  })
+})
+
+describe('same resolution as the backend: an invalid config means the defaults', () => {
+  test('invalid config counts as the defaults', () => {
+    expect(ids(getSharedStatusColumns([invalid, null]))).toBe(defaultIds)
+  })
+})
+
+describe('nothing selected', () => {
+  test('no projects → nothing shared', () => {
+    expect(getSharedStatusColumns([])).toHaveLength(0)
+  })
+})

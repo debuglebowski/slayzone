@@ -6,38 +6,17 @@
  * `window` so it is a no-op here. We exercise the actions via the non-hook
  * `getState()` API (no React / DOM needed).
  */
+import { beforeEach, expect, test } from 'vitest'
 import { useTerminalStateStore } from './useTerminalStateStore'
 
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  // Reset state between tests for isolation (actions are preserved by merge).
+// Reset state between tests for isolation (actions are preserved by merge).
+beforeEach(() => {
   useTerminalStateStore.setState({ byId: {}, hibernated: {}, lastPushedAt: {} })
-  try {
-    fn()
-    console.log(`✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`✗ ${name}`)
-    console.error(`  ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected) {
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-      }
-    }
-  }
-}
+})
 
 const s = () => useTerminalStateStore.getState()
 
-console.log('\nuseTerminalStateStore — applyStateChange / applyExit / applyHibernated\n')
+// --- useTerminalStateStore — applyStateChange / applyExit / applyHibernated ---
 
 test('applyStateChange sets state; getSessionState defaults to starting', () => {
   expect(s().getSessionState('a:a')).toBe('starting')
@@ -84,7 +63,7 @@ test('clearSession forgets the session entirely', () => {
   expect<true | undefined>(s().hibernated['g:g']).toBe(undefined)
 })
 
-console.log('\nuseTerminalStateStore — reconcile (self-heal)\n')
+// --- useTerminalStateStore — reconcile (self-heal) ---
 
 test('reconcile adopts a dropped state-change (local running, backend idle)', () => {
   s().applyStateChange('a:a', 'running')
@@ -129,7 +108,7 @@ test('reconcile: respawn-orphan dropped-idle converges (the original bug)', () =
   expect(s().getSessionState('task:task')).toBe('idle')
 })
 
-console.log('\nuseTerminalStateStore — reconcile hibernation (cross-window self-heal)\n')
+// --- useTerminalStateStore — reconcile hibernation (cross-window self-heal) ---
 
 test('reconcile adopts DB hibernated for a stale-idle session (cross-window bug)', () => {
   // The bug: a session that hibernated while another window owned it never got
@@ -167,7 +146,7 @@ test('reconcile keeps hibernated during DB-write lag (absent from list AND set)'
   expect(s().getSessionState('lag:lag')).toBe('hibernated')
 })
 
-console.log('\nuseTerminalStateStore — reconcile dispatch-freshness guard (flicker fix)\n')
+// --- useTerminalStateStore — reconcile dispatch-freshness guard (flicker fix) ---
 
 test('reconcile skips a stomp when the push landed after the fetch was dispatched (stale snapshot)', () => {
   // Models: hook flips a:a to 'running', a stale in-flight reconcile (dispatched
@@ -198,6 +177,3 @@ test('reconcile without dispatchedAt keeps legacy always-stomp behavior', () => 
   s().reconcile([{ sessionId: 'd:d', state: 'idle' }])
   expect(s().getSessionState('d:d')).toBe('idle')
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exitCode = 1

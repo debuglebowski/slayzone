@@ -9,13 +9,10 @@
  * projects) and a `SlayzoneDb` adapter whose `namedTxn` dispatches through the
  * REAL production txn registry — a missing/renamed `chat-queue:*` registration
  * fails here, not just in production.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm <file>
  */
+import { describe, expect, test } from 'vitest'
 import {
   createTestHarness,
-  describe,
-  test,
-  expect,
   type TestHarness
 } from '../../../../../shared/test-utils/ipc-harness.js'
 import { createDbChatQueueData } from './chat-queue-data'
@@ -37,7 +34,7 @@ function seedTabs(h: TestHarness, ...tabIds: string[]): void {
   for (const id of tabIds) insertTab.run(id)
 }
 
-await describe('chat-queue data seam', () => {
+describe('chat-queue data seam', () => {
   test('push assigns FIFO positions and pop drains in push order', async () => {
     const h = await createTestHarness()
     try {

@@ -2,6 +2,7 @@
  * Pure parser tests for bg-shell-helpers.
  * Run: pnpm dlx tsx packages/domains/terminal/src/shared/bg-shell-helpers.test.ts
  */
+import { expect, test } from 'vitest'
 import type { ToolCallEvent, ToolResultEvent } from './agent-events'
 import {
   extractBgShellSpawn,
@@ -10,41 +11,6 @@ import {
   extractKillShellCall,
   extractBashOutputResult
 } from './bg-shell-helpers'
-
-let passed = 0
-let failed = 0
-
-function test(name: string, fn: () => void) {
-  try {
-    fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.log(`  ✗ ${name}`)
-    console.error(`    ${e}`)
-    failed++
-  }
-}
-
-function expect<T>(actual: T) {
-  return {
-    toBe(expected: T) {
-      if (actual !== expected)
-        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
-    },
-    toEqual(expected: unknown) {
-      const a = JSON.stringify(actual)
-      const b = JSON.stringify(expected)
-      if (a !== b) throw new Error(`Expected ${b}, got ${a}`)
-    },
-    toBeNull() {
-      if (actual !== null) throw new Error(`Expected null, got ${JSON.stringify(actual)}`)
-    },
-    toBeTruthy() {
-      if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
 
 const call = (id: string, name: string, input: unknown): ToolCallEvent => ({
   kind: 'tool-call',
@@ -65,8 +31,6 @@ const result = (
   rawContent,
   structured
 })
-
-console.log('\nbg-shell-helpers tests\n')
 
 test('extractBgShellSpawn — flagged Bash → spawn signal', () => {
   const sig = extractBgShellSpawn(
@@ -164,6 +128,3 @@ test('extractBashOutputResult — is_error infers failed', () => {
   const sig = extractBashOutputResult(result('t1', 'broken', null, true))
   expect(sig.status).toBe('failed')
 })
-
-console.log(`\n${passed} passed, ${failed} failed\n`)
-if (failed > 0) process.exit(1)

@@ -1,27 +1,5 @@
+import { expect, test } from 'vitest'
 import { shouldHonorDetectedError } from './session-error-gate'
-
-let passed = 0
-let failed = 0
-function test(name: string, fn: () => void): void {
-  try {
-    fn()
-    passed++
-    console.log(`  ✓ ${name}`)
-  } catch (err) {
-    failed++
-    console.log(`  ✗ ${name}\n    ${(err as Error).message}`)
-  }
-}
-function expect(actual: unknown): { toBe: (e: unknown) => void } {
-  return {
-    toBe: (e: unknown) => {
-      if (actual !== e)
-        throw new Error(`expected ${JSON.stringify(e)}, got ${JSON.stringify(actual)}`)
-    }
-  }
-}
-
-console.log('shouldHonorDetectedError')
 
 // SESSION_NOT_FOUND is a stale-resume signal ONLY valid during the startup window.
 test('SESSION_NOT_FOUND honored while startup window open', () => {
@@ -42,6 +20,3 @@ test('other error code honored after window closes', () => {
 test('other error code honored while window open', () => {
   expect(shouldHonorDetectedError('SOME_OTHER_ERROR', true)).toBe(true)
 })
-
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)

@@ -1,14 +1,10 @@
 /**
  * REST: POST /api/tasks contract tests.
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/shared/transport/src/server/http/rest-api/tasks/create.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/server/http/rest-api/tasks/create.test.ts
  */
 import express from 'express'
-import {
-  createTestHarness,
-  test,
-  expect,
-  describe
-} from '../../../../../../test-utils/ipc-harness.js'
+import { describe, test, expect, afterAll } from 'vitest'
+import { createTestHarness } from '../../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../../test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../../../../test-utils/event-spy.js'
 import {
@@ -70,7 +66,7 @@ registerCreateTaskRoute(app, {
 })
 const rest = await mountRestApp(app)
 
-await describe('POST /api/tasks', () => {
+describe('POST /api/tasks', () => {
   test('happy: 200 + task payload + DB row inserted', async () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:created')
@@ -143,7 +139,7 @@ await describe('POST /api/tasks', () => {
  * SQLite file for happens here now (project ref, status alias, template ref,
  * external-id dedupe), so `tasks create` works against a hub on another machine.
  */
-await describe('POST /api/tasks — project reference', () => {
+describe('POST /api/tasks — project reference', () => {
   test('`project` accepts a case-insensitive NAME substring', async () => {
     const res = await rest.request<{
       ok: boolean
@@ -211,7 +207,7 @@ await describe('POST /api/tasks — project reference', () => {
   })
 })
 
-await describe('POST /api/tasks — status alias resolved hub-side', () => {
+describe('POST /api/tasks — status alias resolved hub-side', () => {
   test('a LABEL resolves against the project columns', async () => {
     const res = await rest.request<{ ok: boolean; data: { status: string } }>(
       'POST',
@@ -253,7 +249,7 @@ await describe('POST /api/tasks — status alias resolved hub-side', () => {
   })
 })
 
-await describe('POST /api/tasks — template reference resolved hub-side', () => {
+describe('POST /api/tasks — template reference resolved hub-side', () => {
   test('`template` by NAME applies the template defaults', async () => {
     const res = await rest.request<{
       ok: boolean
@@ -298,7 +294,7 @@ await describe('POST /api/tasks — template reference resolved hub-side', () =>
   })
 })
 
-await describe('POST /api/tasks — external id written with the insert', () => {
+describe('POST /api/tasks — external id written with the insert', () => {
   test('externalId + externalProvider land on the row the insert created', async () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:created')
@@ -416,7 +412,7 @@ await describe('POST /api/tasks — external id written with the insert', () => 
   })
 })
 
-await describe('POST /api/tasks — priority wording', () => {
+describe('POST /api/tasks — priority wording', () => {
   test('400 with the CLI wording for an out-of-range priority', async () => {
     const res = await rest.request<{ ok: boolean; error: string }>('POST', '/api/tasks', {
       project: 'P',
@@ -428,5 +424,7 @@ await describe('POST /api/tasks — priority wording', () => {
   })
 })
 
-await rest.close()
-h.cleanup()
+afterAll(async () => {
+  await rest.close()
+  h.cleanup()
+})

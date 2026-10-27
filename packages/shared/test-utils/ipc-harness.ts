@@ -198,47 +198,9 @@ export async function createTestHarness(): Promise<TestHarness> {
   }
 }
 
-// Minimal test computer — chains async tests sequentially, runs sync tests immediately
-let _testQueue: Promise<void> = Promise.resolve()
-let _hasAsync = false
-
-export function test(name: string, fn: () => void | Promise<void>) {
-  if (_hasAsync) {
-    // Once async mode is entered, queue everything to preserve ordering
-    _testQueue = _testQueue.then(async () => {
-      try {
-        await fn()
-        console.log(`  \u2713 ${name}`)
-      } catch (e) {
-        console.log(`  \u2717 ${name}`)
-        console.error(`    ${e}`)
-        process.exitCode = 1
-      }
-    })
-  } else {
-    try {
-      const result = fn()
-      if (result instanceof Promise) {
-        _hasAsync = true
-        _testQueue = result.then(
-          () => console.log(`  \u2713 ${name}`),
-          (e) => {
-            console.log(`  \u2717 ${name}`)
-            console.error(`    ${e}`)
-            process.exitCode = 1
-          }
-        )
-      } else {
-        console.log(`  \u2713 ${name}`)
-      }
-    } catch (e) {
-      console.log(`  \u2717 ${name}`)
-      console.error(`    ${e}`)
-      process.exitCode = 1
-    }
-  }
-}
-
+// Minimal assertion helper for the live third-party API suites
+// (integrations/src/electron/handlers.integration.*.test.ts), which run as plain
+// scripts under run_test_no_loader. Every other suite uses vitest's `expect`.
 export function expect(actual: unknown) {
   return {
     toBe(expected: unknown) {
@@ -310,11 +272,4 @@ export function expect(actual: unknown) {
       }
     }
   }
-}
-
-export async function describe(name: string, fn: () => void) {
-  console.log(`\n${name}`)
-  _hasAsync = false
-  fn()
-  if (_hasAsync) await _testQueue
 }

@@ -17,7 +17,8 @@
  * (`hub-health.ts`'s `fetchAuthRequired` + `main.tsx`) reads to decide whether to show
  * `LoginScreen`.
  *
- * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm \
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/hub/src/web-assets-served.test.ts
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
@@ -26,29 +27,13 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { afterAll, assert, expect, test } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const HUB_DIR = join(__dirname, '..')
 const HUB_BIN = join(HUB_DIR, 'dist', 'bin.cjs')
 const ELECTRON_BIN = require('electron') as unknown as string
-
-let passed = 0
-let failed = 0
-async function test(name: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn()
-    console.log(`  ✓ ${name}`)
-    passed++
-  } catch (e) {
-    console.error(`  ✗ ${name}`)
-    console.error(`    ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
-    failed++
-  }
-}
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(`assertion failed: ${msg}`)
-}
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -155,7 +140,7 @@ async function spawnAndWait(
   )
   const m = listen.match(/http:\/\/(127\.0\.0\.1):(\d+)/)
   assert(m, `hub listening line parseable: ${listen}`)
-  const port = Number(m![2])
+  const port = Number(m[2])
   await poll(
     async () => {
       const r = await fetch(`http://127.0.0.1:${port}/health`, {
@@ -169,56 +154,47 @@ async function spawnAndWait(
   return Object.assign(hub, { port })
 }
 
-async function main(): Promise<void> {
-  console.log('\nweb shell served by every hub (login off / login required / desktop app)\n')
-  ensureBuilt()
-  ensureWebShell()
+ensureBuilt()
+ensureWebShell()
 
-  const cases: Array<{ name: string; env: Record<string, string>; authRequired: boolean }> = [
-    { name: 'default (login off)', env: {}, authRequired: false },
-    { name: 'login required', env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1' }, authRequired: true },
-    {
-      name: 'started by the desktop app',
-      env: { SLAYZONE_SUPERVISED: '1', SLAYZONE_HUB_REQUIRE_LOGIN: '0' },
-      authRequired: false
-    }
-  ]
-  const roots: string[] = []
-  const hubs: Array<Proc & { port: number }> = []
-
-  try {
-    for (const c of cases) {
-      const root = mkdtempSync(join(tmpdir(), 'slz-web-served-'))
-      roots.push(root)
-      const hub = await spawnAndWait(root, c.env)
-      hubs.push(hub)
-
-      await test(`${c.name}: serves the web shell body`, async () => {
-        const res = await fetch(`http://127.0.0.1:${hub.port}/`)
-        const body = await res.text()
-        assert(
-          body.includes('<div id="root">'),
-          `must serve the web shell body, got: ${body.slice(0, 200)}`
-        )
-      })
-
-      await test(`${c.name}: /health reports authRequired:${c.authRequired}`, async () => {
-        const res = await fetch(`http://127.0.0.1:${hub.port}/health`)
-        const body = (await res.json()) as { authRequired?: unknown }
-        // The exact bit the web shell's hub-health.ts reads to skip LoginScreen.
-        assert(
-          body.authRequired === c.authRequired,
-          `expected authRequired:${c.authRequired}, got ${JSON.stringify(body)}`
-        )
-      })
-    }
-  } finally {
-    for (const h of hubs) await h.stop()
-    for (const r of roots) rmSync(r, { recursive: true, force: true })
+const cases: Array<{ name: string; env: Record<string, string>; authRequired: boolean }> = [
+  { name: 'default (login off)', env: {}, authRequired: false },
+  { name: 'login required', env: { SLAYZONE_HUB_REQUIRE_LOGIN: '1' }, authRequired: true },
+  {
+    name: 'started by the desktop app',
+    env: { SLAYZONE_SUPERVISED: '1', SLAYZONE_HUB_REQUIRE_LOGIN: '0' },
+    authRequired: false
   }
+]
+const roots: string[] = []
+const hubs: Array<Proc & { port: number }> = []
 
-  console.log(`\n${passed} passed, ${failed} failed\n`)
-  if (failed > 0) process.exit(1)
+afterAll(async () => {
+  for (const h of hubs) await h.stop()
+  for (const r of roots) rmSync(r, { recursive: true, force: true })
+})
+
+for (const c of cases) {
+  const root = mkdtempSync(join(tmpdir(), 'slz-web-served-'))
+  roots.push(root)
+  const hub = await spawnAndWait(root, c.env)
+  hubs.push(hub)
+
+  test(`${c.name}: serves the web shell body`, async () => {
+    const res = await fetch(`http://127.0.0.1:${hub.port}/`)
+    const body = await res.text()
+    expect(body, `must serve the web shell body, got: ${body.slice(0, 200)}`).toContain(
+      '<div id="root">'
+    )
+  })
+
+  test(`${c.name}: /health reports authRequired:${c.authRequired}`, async () => {
+    const res = await fetch(`http://127.0.0.1:${hub.port}/health`)
+    const body = (await res.json()) as { authRequired?: unknown }
+    // The exact bit the web shell's hub-health.ts reads to skip LoginScreen.
+    expect(
+      body.authRequired,
+      `expected authRequired:${c.authRequired}, got ${JSON.stringify(body)}`
+    ).toBe(c.authRequired)
+  })
 }
-
-void main()
