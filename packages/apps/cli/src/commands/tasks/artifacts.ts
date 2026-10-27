@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import fs from 'fs'
 import path from 'path'
 import { Readable } from 'node:stream'
@@ -840,7 +840,7 @@ pdf/png/html require the SlayZone app to be running.
         }
 
         const output = fs.createWriteStream(outputPath)
-        const archive = archiver('zip', { zlib: { level: 9 } })
+        const archive = new ZipArchive({ zlib: { level: 9 } })
         archive.pipe(output)
 
         for (const artifact of artifacts) {

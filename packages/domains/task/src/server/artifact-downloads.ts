@@ -7,7 +7,7 @@ import {
   copyFileSync,
   createWriteStream
 } from 'fs'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { containedPath } from '@slayzone/platform/safe-path'
 import {
@@ -275,7 +275,7 @@ export async function downloadAllArtifactsAsZip(
   if (result.canceled || !result.filePath) return false
 
   const output = createWriteStream(result.filePath)
-  const archive = archiver('zip', { zlib: { level: 9 } })
+  const archive = new ZipArchive({ zlib: { level: 9 } })
   archive.pipe(output)
 
   for (const artifact of allArtifacts) {

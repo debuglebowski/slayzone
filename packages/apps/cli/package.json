@@ -10,12 +10,12 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "commander": "^15.0.0"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
-    "@types/archiver": "^7.0.0",
+    "@types/archiver": "^8.0.0",
     "@types/node": "^24.19.0",
     "esbuild": "^0.25.0"
   }
