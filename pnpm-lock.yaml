@@ -24,7 +24,7 @@ patchedDependencies:
     hash: 15c38651399e4d63a73a1292fcbfff833ecb404aeb7c2381cad84e4e83089591
     path: patches/electron-chrome-extensions@4.9.0.patch
   node-pty@1.1.0:
-    hash: 72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6
+    hash: ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3
     path: patches/node-pty@1.1.0.patch
   posix@4.2.0:
     hash: 804705bb712bef4c375046af1f0be81ebf77c27a9a4c5f9816a3da1289b29ebd
@@ -114,7 +114,7 @@ importers:
         version: 5.2.1
       node-pty:
         specifier: ^1.1.0
-        version: 1.1.0(patch_hash=72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6)
+        version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       ws:
         specifier: ^8.21.3
         version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -475,7 +475,7 @@ importers:
         version: link:../../shared/platform
       node-pty:
         specifier: ^1.1.0
-        version: 1.1.0(patch_hash=72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6)
+        version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -566,7 +566,7 @@ importers:
         version: 4.1.0
       node-pty:
         specifier: ^1.1.0
-        version: 1.1.0(patch_hash=72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6)
+        version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       superjson:
         specifier: ^2.2.1
         version: 2.2.6
@@ -1990,7 +1990,7 @@ importers:
         version: 0.562.0(react@19.3.1)
       node-pty:
         specifier: ^1.1.0
-        version: 1.1.0(patch_hash=72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6)
+        version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -19240,7 +19240,7 @@ snapshots:
 
   node-mock-http@1.0.4: {}
 
-  node-pty@1.1.0(patch_hash=72ff4bffda0008d786216cdd0b37e360400864f0e39a8172b5be570beeb785a6):
+  node-pty@1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3):
     dependencies:
       node-addon-api: 7.1.1
 
