@@ -140,6 +140,8 @@ export interface GhPullRequest {
   state: 'OPEN' | 'CLOSED' | 'MERGED'
   headRefName: string
   baseRefName: string
+  /** Head branch lives in another repo (a fork) — its name alone doesn't identify it. */
+  isCrossRepository: boolean
   isDraft: boolean
   author: string
   createdAt: string

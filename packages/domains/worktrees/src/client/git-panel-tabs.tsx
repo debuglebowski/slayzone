@@ -7,13 +7,15 @@ export function GitPanelTabBar({
   activeTab,
   isTabVisible,
   setActiveTab,
-  task
+  task,
+  taskPrNumber
 }: {
   tabOrder: GitTabId[]
   activeTab: GitTabId
   isTabVisible: (id: GitTabId) => boolean
   setActiveTab: (tab: GitTabId) => void
   task?: Task | null
+  taskPrNumber?: string | null
 }) {
   const gitGeneralShortcut = useShortcutDisplay('panel-git')
   const gitDiffShortcut = useShortcutDisplay('panel-git-diff')
@@ -82,10 +84,8 @@ export function GitPanelTabBar({
                 {task ? (
                   <>
                     Pull request
-                    {task.pr_url && (
-                      <span className="text-muted-foreground ml-1">
-                        #{task.pr_url.match(/\/pull\/(\d+)/)?.[1]}
-                      </span>
+                    {taskPrNumber && (
+                      <span className="text-muted-foreground ml-1">#{taskPrNumber}</span>
                     )}
                   </>
                 ) : (

@@ -10,9 +10,10 @@ import type {
 } from '../shared/types'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { execAsync, execGit } from './exec-async'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 const GH_PR_JSON_FIELDS =
-  'number,title,body,url,state,headRefName,baseRefName,isDraft,author,createdAt,reviewDecision,statusCheckRollup'
+  'number,title,body,url,state,headRefName,baseRefName,isCrossRepository,isDraft,author,createdAt,reviewDecision,statusCheckRollup'
 
 // Cache resolved gh path
 let ghPath: string | null | undefined
@@ -53,10 +54,18 @@ export interface GhExecutor {
  * meaningful identity. Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`
  * (T-06): that hub has no `gh` identity of its own, so no computer = no `gh`.
  */
+/** This machine has no `gh` on its login-shell PATH. */
+export class GhNotFoundError extends Error {
+  constructor() {
+    super('gh CLI not found')
+    this.name = 'GhNotFoundError'
+  }
+}
+
 export const runGhLocally: GhExecutor = async (args, opts) => {
   assertHubLocalExecEnabled({ op: 'gh' })
   const gh = await resolveGhPath()
-  if (!gh) throw new Error('gh CLI not found')
+  if (!gh) throw new GhNotFoundError()
 
   return execAsync(gh, args, { ...opts, source: 'gh' })
 }
@@ -87,6 +96,7 @@ interface RawGhPr {
   state: string
   headRefName: string
   baseRefName: string
+  isCrossRepository?: boolean
   isDraft: boolean
   author: { login: string }
   createdAt: string
@@ -117,6 +127,7 @@ function parseGhPr(pr: RawGhPr): GhPullRequest {
     state: pr.state as GhPullRequest['state'],
     headRefName: pr.headRefName,
     baseRefName: pr.baseRefName,
+    isCrossRepository: pr.isCrossRepository ?? false,
     isDraft: pr.isDraft,
     author: pr.author.login,
     createdAt: pr.createdAt,
@@ -125,9 +136,21 @@ function parseGhPr(pr: RawGhPr): GhPullRequest {
   }
 }
 
-export async function checkGhInstalled(): Promise<boolean> {
-  const path = await resolveGhPath()
-  return path !== null
+/**
+ * Whether `gh` exists on the machine that would run it for `repoPath` — through the
+ * same executor every other gh call takes, so a checkout on a computer is answered by
+ * that computer, not by the hub. A computer without gh reports a spawn failure
+ * (status null); this machine without gh throws {@link GhNotFoundError}. A refused
+ * local exec (processes off, no computer) still propagates.
+ */
+export async function checkGhInstalled(repoPath: string): Promise<boolean> {
+  try {
+    const result = await spawnGh(['--version'], { cwd: repoPath })
+    return result.status === 0
+  } catch (err) {
+    if (err instanceof GhNotFoundError) return false
+    throw err
+  }
 }
 
 export async function hasGithubRemote(repoPath: string): Promise<boolean> {
@@ -185,6 +208,53 @@ export async function getPrByUrl(repoPath: string, url: string): Promise<GhPullR
 
   if (result.status !== 0) return null
   return parseGhPr(JSON.parse(result.stdout))
+}
+
+/**
+ * gh's answers that mean "this checkout has no PR" — as opposed to "gh couldn't
+ * find out" (auth, network, rate limit), which must throw so the client keeps the
+ * last PR it showed instead of blinking it away.
+ */
+const NO_PR_FOR_CHECKOUT = [
+  /no pull requests found/i,
+  // Detached HEAD / not on a branch.
+  /could not determine current branch/i,
+  /not on any branch/i,
+  // Not a GitHub repo at all.
+  /no git remotes found/i,
+  /none of the git remotes .* point to a known GitHub host/i
+]
+
+/**
+ * The PR for whatever branch is checked out at `checkoutPath`, resolved by gh itself
+ * (`gh pr view` with no argument). gh derives the head from the branch's push
+ * target (`@{push}`), so a PR opened from a fork resolves to `owner:branch`
+ * rather than matching any same-named branch, and when one branch has several PRs
+ * it prefers the open one. A manually linked `pr_url` always overrides this.
+ *
+ * `branch` is not passed to gh (that would lose the fork resolution above); it
+ * keys the client cache so a branch switch can never be served the old PR.
+ *
+ * Null = no PR. Throws when gh failed for any other reason.
+ */
+export async function getPrForCheckout(
+  checkoutPath: string,
+  _branch: string
+): Promise<GhPullRequest | null> {
+  const result = await spawnGh(['pr', 'view', '--json', GH_PR_JSON_FIELDS], { cwd: checkoutPath })
+  if (result.status === 0) return parseGhPr(JSON.parse(result.stdout))
+  const stderr = result.stderr?.trim() ?? ''
+  if (NO_PR_FOR_CHECKOUT.some((re) => re.test(stderr))) return null
+  // Logged on its own event so a gh release that rewords a "no PR" answer shows up
+  // here (one line to add above) rather than as a PR that silently never appears.
+  recordDiagnosticEvent({
+    level: 'warn',
+    source: 'gh',
+    event: 'gh.pr_for_checkout_unrecognized',
+    message: stderr || `gh pr view exited ${result.status ?? 'without starting'}`,
+    payload: { cwd: checkoutPath, exitCode: result.status }
+  })
+  throw new Error(`gh pr view failed: ${stderr || `exit ${result.status ?? 'spawn failure'}`}`)
 }
 
 export async function createPr(input: CreatePrInput): Promise<CreatePrResult> {

@@ -269,7 +269,7 @@ await describe('processes off, zero computers: every hub-local call refuses (exe
   test('gh: the local executor and the default seam', async () => {
     await expectRefused('runGhLocally', () => worktrees.runGhLocally(['auth'], { cwd: OUTSIDE }))
     await expectRefused('listOpenPrs', () => worktrees.listOpenPrs(OUTSIDE))
-    await expectRefused('checkGhInstalled', () => worktrees.checkGhInstalled())
+    await expectRefused('checkGhInstalled', () => worktrees.checkGhInstalled(OUTSIDE))
   })
   test('merge-ai', async () => {
     await expectRefused('runAiCommand', () => runAiCommand('claude-code', 'x'))
@@ -323,7 +323,8 @@ await describe('processes off, zero computers: the wire shape (tRPC)', () => {
     // Swallows a git error into `false` — the router gate refuses before that.
     ['worktrees.isGitRepo', { path: OUTSIDE }],
     ['worktrees.getConflictContent', { repoPath: OUTSIDE, filePath: 'secret.txt' }],
-    ['worktrees.checkGhInstalled', undefined],
+    // Routed like every gh call: no computer → the local executor → refused deep down.
+    ['worktrees.checkGhInstalled', { repoPath: OUTSIDE }],
     // A routed `gh` call: no computer → the local executor → refused deep down.
     ['worktrees.listOpenPrs', { repoPath: OUTSIDE }],
     ['workspace.listDir', { path: OUTSIDE }],

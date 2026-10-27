@@ -21,6 +21,7 @@ const PRS: GhPullRequest[] = [
     state: 'OPEN',
     headRefName: 'a',
     baseRefName: 'main',
+    isCrossRepository: false,
     isDraft: false,
     author: 'ann',
     createdAt: new Date().toISOString(),
@@ -41,12 +42,16 @@ vi.mock('@slayzone/transport/client', () => ({
       get: { queryOptions: (input: { key: string }) => ({ k: 'filter', key: input.key }) },
       set: { mutationOptions: () => ({}) }
     },
-    worktrees: { listOpenPrs: { queryOptions: () => ({ k: 'prs' }) } }
+    worktrees: {
+      listOpenPrs: { queryOptions: () => ({ k: 'prs' }) },
+      detectWorktrees: { queryOptions: () => ({ k: 'worktrees' }) }
+    }
   })
 }))
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (o: { k: string; key?: string }) => {
     if (o.k === 'prs') return { data: PRS, isPending: false, error: null }
+    if (o.k === 'worktrees') return { data: [] }
     filterKeys.push(o.key ?? '')
     return filterQuery
   },

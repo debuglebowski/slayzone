@@ -5,6 +5,7 @@ import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'luci
 import { cn, PulseGrid } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { GhPullRequest } from '../shared/types'
+import { mapPrsToTasks } from './pr-task-map'
 
 interface ProjectPrTabProps {
   projectPath: string | null
@@ -38,7 +39,11 @@ function usePrFilterState(projectId: string | null) {
   // Seed the editable filter state from the persisted value once it loads. Runs while
   // rendering whenever its inputs change (null = not yet synced, so the first render
   // syncs too), so no commit shows the unseeded filter.
-  const seedInput = { key, isSuccess: filterQuery.isSuccess, data: filterQuery.data }
+  const seedInput = {
+    key,
+    isSuccess: filterQuery.isSuccess,
+    data: filterQuery.data
+  }
   const [seededFor, setSeededFor] = useState<typeof seedInput | null>(null)
   if (
     seededFor === null ||
@@ -100,11 +105,21 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
       : String(prsQuery.error)
     : null
 
+  // Worktree → checked-out branch, so a PR with no manual link still finds its task.
+  const worktreesQuery = useQuery(
+    trpc.worktrees.detectWorktrees.queryOptions(
+      { repoPath: projectPath ?? '' },
+      { enabled: visible && !!projectPath }
+    )
+  )
+
+  const worktrees = worktreesQuery.data
+
   // Build map of PR URL → task
-  const prTaskMap = new Map<string, Task>()
-  for (const task of tasks) {
-    if (task.pr_url) prTaskMap.set(task.pr_url, task)
-  }
+  const prTaskMap = useMemo(
+    () => mapPrsToTasks(prs, tasks, worktrees ?? []),
+    [prs, tasks, worktrees]
+  )
 
   // Unique authors for filter
   const authors = useMemo(() => {
@@ -195,7 +210,9 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
         <select
           value={filter.filterReview}
           onChange={(e) =>
-            updateFilter({ filterReview: e.target.value as PrFilterState['filterReview'] })
+            updateFilter({
+              filterReview: e.target.value as PrFilterState['filterReview']
+            })
           }
           className="h-6 px-2 text-[11px] rounded border bg-transparent text-foreground"
         >

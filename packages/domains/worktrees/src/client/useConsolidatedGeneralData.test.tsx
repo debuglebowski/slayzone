@@ -58,7 +58,7 @@ const task = {
 const queryResults: Record<string, unknown> = {
   getCurrentBranch: 'feature',
   getWorktreeMetadata: null,
-  listOpenPrs: [],
+  getPrForCheckout: null,
   'settings.get': null,
   resolveCopyBehavior: { behavior: 'none' }
 }

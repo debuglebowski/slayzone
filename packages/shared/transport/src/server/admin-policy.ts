@@ -735,6 +735,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'worktrees.getMergeBase': 'user',
   'worktrees.getMergeContext': 'user',
   'worktrees.getPrByUrl': 'user',
+  'worktrees.getPrForCheckout': 'user',
   'worktrees.getPrComments': 'user',
   'worktrees.getPrDiff': 'user',
   'worktrees.getRebaseProgress': 'user',

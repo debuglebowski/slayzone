@@ -29,6 +29,8 @@ export function PullRequestTab({
   const {
     ghInstalled,
     pr,
+    autoDetected,
+    refreshBranchPr,
     loading,
     createOpen,
     setCreateOpen,
@@ -63,6 +65,34 @@ export function PullRequestTab({
           brew install gh && gh auth login
         </code>
       </div>
+    )
+  }
+
+  const linkDialog = (
+    <LinkPrDialog
+      open={linkOpen}
+      onOpenChange={setLinkOpen}
+      projectPath={projectPath}
+      onLink={handleLinkPr}
+      error={error}
+    />
+  )
+
+  // No link, but gh resolved the branch's PR — show it; linking another overrides.
+  if (autoDetected && pr) {
+    return (
+      <>
+        <LinkedPrView
+          pr={pr}
+          projectPath={projectPath}
+          visible={visible}
+          onLinkOther={() => setLinkOpen(true)}
+          onRefreshPr={async () => {
+            await refreshBranchPr()
+          }}
+        />
+        {linkDialog}
+      </>
     )
   }
 
@@ -126,13 +156,7 @@ export function PullRequestTab({
         projectPath={projectPath}
         onCreated={handleCreated}
       />
-      <LinkPrDialog
-        open={linkOpen}
-        onOpenChange={setLinkOpen}
-        projectPath={projectPath}
-        onLink={handleLinkPr}
-        error={error}
-      />
+      {linkDialog}
     </div>
   )
 }

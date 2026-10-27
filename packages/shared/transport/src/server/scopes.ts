@@ -804,6 +804,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'worktrees.getMergeBase': 'never',
   'worktrees.getMergeContext': 'never',
   'worktrees.getPrByUrl': 'never',
+  'worktrees.getPrForCheckout': 'never',
   'worktrees.getPrComments': 'never',
   'worktrees.getPrDiff': 'never',
   'worktrees.getRebaseProgress': 'never',

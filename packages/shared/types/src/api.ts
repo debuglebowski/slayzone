@@ -1312,10 +1312,11 @@ export interface _LegacyElectronAPI {
       mode?: 'all' | 'custom'
     ) => Promise<void>
     // GitHub CLI (gh)
-    checkGhInstalled: () => Promise<boolean>
+    checkGhInstalled: (repoPath: string) => Promise<boolean>
     hasGithubRemote: (repoPath: string) => Promise<boolean>
     listOpenPrs: (repoPath: string) => Promise<GhPullRequest[]>
     getPrByUrl: (repoPath: string, url: string) => Promise<GhPullRequest | null>
+    getPrForCheckout: (repoPath: string, branch: string) => Promise<GhPullRequest | null>
     createPr: (input: CreatePrInput) => Promise<CreatePrResult>
     getPrComments: (repoPath: string, prNumber: number) => Promise<GhPrTimelineEvent[]>
     addPrComment: (repoPath: string, prNumber: number, body: string) => Promise<void>

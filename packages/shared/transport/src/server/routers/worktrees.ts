@@ -77,6 +77,7 @@ import {
   hasGithubRemote,
   listOpenPrs,
   getPrByUrl,
+  getPrForCheckout,
   createPr,
   getPrComments,
   addPrComment,
@@ -419,7 +420,11 @@ export const worktreesRouter = router({
     .query(({ input }) => getStashDiff(input.repoPath, input.index)),
 
   // GitHub CLI
-  checkGhInstalled: hubLocalProcedure.query(() => checkGhInstalled()),
+  // Routed like every gh call: answered by the machine that would run gh for this
+  // checkout (a computer), not the hub — so not hub-local-gated here.
+  checkGhInstalled: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => checkGhInstalled(input.repoPath)),
   hasGithubRemote: hubLocalProcedure
     .input(obj({ repoPath: s }))
     .query(({ input }) => hasGithubRemote(input.repoPath)),
@@ -429,6 +434,9 @@ export const worktreesRouter = router({
   getPrByUrl: publicProcedure
     .input(obj({ repoPath: s, url: s }))
     .query(({ input }) => getPrByUrl(input.repoPath, input.url)),
+  getPrForCheckout: publicProcedure
+    .input(obj({ repoPath: s, branch: s }))
+    .query(({ input }) => getPrForCheckout(input.repoPath, input.branch)),
   createPr: hubLocalProcedure
     .input(z.unknown() as unknown as z.ZodType<CreatePrInput>)
     .mutation(({ input }) => createPr(input)),

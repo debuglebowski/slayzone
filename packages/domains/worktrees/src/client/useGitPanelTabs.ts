@@ -9,6 +9,7 @@ import {
   type GitTabId
 } from '@slayzone/task/shared'
 import type { UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
+import { useBranchPr } from './useBranchPr'
 
 export function useGitPanelTabs(
   ref: ForwardedRef<UnifiedGitPanelHandle>,
@@ -16,12 +17,14 @@ export function useGitPanelTabs(
     task,
     defaultTab,
     onTabChange,
-    projectPath
+    projectPath,
+    visible
   }: {
     task?: Task | null
     defaultTab: GitTabId
     onTabChange?: (tab: GitTabId) => void
     projectPath: string | null
+    visible: boolean
   }
 ) {
   const trpc = useTRPC()
@@ -64,6 +67,13 @@ export function useGitPanelTabs(
     )
   )
   const hasGithubRemote = projectPath ? (hasGithubRemoteQuery.data ?? false) : false
+  // A task's PR = its manual link, else the one gh resolves for its branch.
+  const { pr: branchPr } = useBranchPr({ task, projectPath, enabled: visible && hasGithubRemote })
+  const taskPrNumber = task?.pr_url
+    ? (task.pr_url.match(/\/pull\/(\d+)/)?.[1] ?? null)
+    : branchPr
+      ? String(branchPr.number)
+      : null
 
   // Single predicate used by both render + auto-switch fallback.
   // Conflicts tab bypasses the user toggle — always shown when merge/rebase conflicts are live.
@@ -72,10 +82,10 @@ export function useGitPanelTabs(
       if (id === 'conflicts') return hasConflicts
       if (!isGitTabEnabled(tabVisibility, id)) return false
       if (id === 'worktrees') return showWorktrees
-      if (id === 'pr') return hasGithubRemote && (!task || !!task.pr_url)
+      if (id === 'pr') return hasGithubRemote && (!task || !!task.pr_url || !!branchPr)
       return true
     },
-    [hasConflicts, tabVisibility, showWorktrees, hasGithubRemote, task]
+    [hasConflicts, tabVisibility, showWorktrees, hasGithubRemote, task, branchPr]
   )
 
   // Re-fetch tab settings when the legacy `sz:settings-changed` broadcast fires.
@@ -118,6 +128,7 @@ export function useGitPanelTabs(
     hasConflicts,
     isRebase,
     hasGithubRemote,
-    showWorktrees
+    showWorktrees,
+    taskPrNumber
   }
 }

@@ -79,6 +79,7 @@ export {
   hasGithubRemote,
   listOpenPrs,
   getPrByUrl,
+  getPrForCheckout,
   createPr,
   getPrComments,
   addPrComment,

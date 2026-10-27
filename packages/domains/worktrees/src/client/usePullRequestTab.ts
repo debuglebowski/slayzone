@@ -4,6 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import { useStablePoll } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { GhPullRequest } from '../shared/types'
+import { useBranchPr } from './useBranchPr'
 
 export function usePullRequestTab({
   task,
@@ -28,6 +29,14 @@ export function usePullRequestTab({
 
   const [error, setError] = useState<string | null>(null)
 
+  // No manual link → the PR gh resolves for the task's branch. A manual link
+  // (Link / Create) overrides it; unlinking falls back to it again.
+  const branchPr = useBranchPr({ task, projectPath, enabled: visible && !!ghInstalled })
+
+  // gh is asked of the machine that runs it for this checkout (a computer, if any).
+  // ('' only when projectPath is null too — the effect bails before using it.)
+  const ghCheckPath = branchPr.checkoutPath ?? projectPath ?? ''
+
   // Check gh + fetch PR if linked
   useEffect(() => {
     if (!visible || !projectPath) return
@@ -35,7 +44,7 @@ export function usePullRequestTab({
     ;(async () => {
       try {
         const installed = await queryClient.fetchQuery(
-          trpc.worktrees.checkGhInstalled.queryOptions()
+          trpc.worktrees.checkGhInstalled.queryOptions({ repoPath: ghCheckPath })
         )
         if (cancelled) return
         setGhInstalled(installed)
@@ -58,7 +67,7 @@ export function usePullRequestTab({
     return () => {
       cancelled = true
     }
-  }, [visible, projectPath, task.pr_url, queryClient, trpc])
+  }, [visible, projectPath, ghCheckPath, task.pr_url, queryClient, trpc])
 
   const lastPrHashRef = useRef<string>('')
 
@@ -128,10 +137,14 @@ export function usePullRequestTab({
     [task.id, projectPath, onUpdateTask, onTaskUpdated, queryClient, trpc]
   )
 
+  const autoDetected = !task.pr_url && !!branchPr.pr
+
   return {
     ghInstalled,
-    pr,
-    loading,
+    pr: task.pr_url ? pr : branchPr.pr,
+    autoDetected,
+    refreshBranchPr: branchPr.refetch,
+    loading: loading || branchPr.loading,
     createOpen,
     setCreateOpen,
     linkOpen,

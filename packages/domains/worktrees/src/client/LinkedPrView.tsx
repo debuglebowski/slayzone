@@ -1,6 +1,7 @@
 import {
   ExternalLink,
   Unlink,
+  Link2,
   ChevronDown,
   ChevronRight,
   GitMerge,
@@ -43,12 +44,16 @@ export function LinkedPrView({
   projectPath,
   visible,
   onUnlink,
+  onLinkOther,
   onRefreshPr
 }: {
   pr: GhPullRequest
   projectPath: string
   visible: boolean
-  onUnlink: () => void
+  /** Manually linked PR: offer to drop the link. */
+  onUnlink?: () => void
+  /** PR resolved from the branch (nothing linked): offer to link a different one instead. */
+  onLinkOther?: () => void
   onRefreshPr: () => Promise<void>
 }) {
   const trpc = useTRPC()
@@ -167,19 +172,38 @@ export function LinkedPrView({
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Open in browser</TooltipContent>
               </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconButton
-                    aria-label="Unlink PR"
-                    variant="ghost"
-                    className="h-6 w-6"
-                    onClick={() => setUnlinkOpen(true)}
-                  >
-                    <Unlink className="h-3 w-3" />
-                  </IconButton>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Unlink PR</TooltipContent>
-              </Tooltip>
+              {onUnlink && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton
+                      aria-label="Unlink PR"
+                      variant="ghost"
+                      className="h-6 w-6"
+                      onClick={() => setUnlinkOpen(true)}
+                    >
+                      <Unlink className="h-3 w-3" />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Unlink PR</TooltipContent>
+                </Tooltip>
+              )}
+              {onLinkOther && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton
+                      aria-label="Link a different PR"
+                      variant="ghost"
+                      className="h-6 w-6"
+                      onClick={onLinkOther}
+                    >
+                      <Link2 className="h-3 w-3" />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Detected from branch — link a different PR
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
           {/* Meta row: author · branches */}
@@ -190,6 +214,12 @@ export function LinkedPrView({
             <span className="font-mono">{pr.headRefName}</span>
             <span>→</span>
             <span className="font-mono">{pr.baseRefName}</span>
+            {onLinkOther && (
+              <>
+                <span className="mx-0.5">·</span>
+                <span>detected from branch</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -270,7 +300,7 @@ export function LinkedPrView({
             <AlertDialogAction
               onClick={() => {
                 setUnlinkOpen(false)
-                onUnlink()
+                onUnlink?.()
               }}
             >
               Unlink
