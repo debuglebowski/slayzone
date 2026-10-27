@@ -30,7 +30,7 @@ function killStale(pattern: string, label: string): void {
       // pattern, and a broken pattern is exactly how the sidecar reaper below
       // rotted unnoticed.
       console.log(
-        `[global-setup] Left ${spared} non-test ${label} process(es) alone (no PLAYWRIGHT marker)`
+        `[global-setup] Left ${spared} ${label} process(es) alone (dev app, or a concurrent run's live app)`
       )
     }
     for (const pid of pids) {

@@ -23,6 +23,26 @@ import { readFileSync } from 'node:fs'
 /** Marker every Playwright-launched process (and its children) carries. */
 const E2E_MARKER = /(?:^|\s)PLAYWRIGHT=/
 
+/**
+ * Env var naming the Playwright worker that launched the app (`fixtures/electron.ts`);
+ * the hub and computer inherit it. Parallel agents start e2e runs while others are
+ * mid-test, so a marker match alone SIGTERM'd a LIVE run's app — Electron quits on
+ * SIGTERM, and that run lost its main window mid-test. Only an orphan whose owner
+ * is gone is a leftover.
+ */
+export const E2E_OWNER_ENV = 'SLAYZONE_E2E_OWNER_PID'
+const E2E_OWNER = new RegExp(`(?:^|\\s)${E2E_OWNER_ENV}=(\\d+)`)
+
+/** `kill -0`: ESRCH means gone; EPERM means alive but not ours. */
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 export type StaleCandidate = { pid: number; command: string }
 
 /** Parse `pgrep -af <pattern>` output ("<pid> <full command line>" per line). */
@@ -64,7 +84,8 @@ export function readProcessEnviron(pid: number): string {
 export function selectTestRunPids(
   candidates: readonly StaleCandidate[],
   readEnviron: (pid: number) => string,
-  exclude: readonly number[]
+  exclude: readonly number[],
+  isOwnerAlive: (pid: number) => boolean = isPidAlive
 ): number[] {
   const skip = new Set(exclude)
   const pids: number[] = []
@@ -76,7 +97,11 @@ export function selectTestRunPids(
     } catch {
       continue // fail closed: unknown provenance is never killed
     }
-    if (E2E_MARKER.test(environ)) pids.push(pid)
+    if (!E2E_MARKER.test(environ)) continue
+    // No owner = launched before owners were recorded: a leftover by definition.
+    const owner = E2E_OWNER.exec(environ)
+    if (owner && isOwnerAlive(Number(owner[1]))) continue // a concurrent run's live app
+    pids.push(pid)
   }
   return pids
 }

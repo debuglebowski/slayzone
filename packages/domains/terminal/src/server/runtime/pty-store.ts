@@ -13,7 +13,7 @@ import {
   interruptPty,
   prioritizePty,
   ackEnsureAlive,
-  hasPty,
+  hasLivePty,
   getBuffer,
   clearBuffer,
   getBufferSince,
@@ -375,11 +375,9 @@ export function createPtyOps(db: SlayzoneDb) {
   const ptyPrioritize = (sessionId: string) => prioritizePty(sessionId)
   const ptyAckEnsureAlive = (reqId: number, result: 'ok' | 'already-alive' | 'error') =>
     ackEnsureAlive(reqId, result)
-  // Registered, including an exited session's ~100ms drain window (`hasPty`).
-  // Switching this to `hasLivePty` correlated with the app closing its own main
-  // window in e2e (core/116: 4 of 4 runs vs 0 of 2) for reasons not yet found, so
-  // the renderer keeps the old answer; REST write/submit/start/wait use hasLivePty.
-  const ptyExists = (sessionId: string) => hasPty(sessionId)
+  // Live, not merely registered: an exited session lingers ~100ms to drain its
+  // output, and every caller of `exists` is deciding whether to write or respawn.
+  const ptyExists = (sessionId: string) => hasLivePty(sessionId)
   const ptyGetBuffer = (sessionId: string) => getBuffer(sessionId)
   const ptyClearBuffer = (sessionId: string) => clearBuffer(sessionId)
   const ptyGetBufferSince = (sessionId: string, afterSeq: number) =>

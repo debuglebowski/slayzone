@@ -12,6 +12,7 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
+import { E2E_OWNER_ENV } from './stale-processes'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -360,6 +361,9 @@ async function launchElectronWithRetry(args: {
         env: {
           ...launchEnv,
           PLAYWRIGHT: '1',
+          // This worker owns the app (and the hub + computer, which inherit it): a
+          // concurrent run's global setup reaps it only once this pid is gone.
+          [E2E_OWNER_ENV]: String(process.pid),
           // Single on-disk anchor: the app's own state derives at
           // <ROOT>/dev/hub (getSupervisedRoot — see supervisedHubRoot) and the
           // agent-hook home stays at the un-scoped <ROOT> (getSlayzoneHomeDir).

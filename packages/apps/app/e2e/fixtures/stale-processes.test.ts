@@ -83,3 +83,35 @@ test('does not match PLAYWRIGHT as a substring of another variable', () => {
     []
   )
 })
+
+// --- concurrent runs --------------------------------------------------------
+// Every e2e invocation runs this reaper. Parallel agents start runs while others
+// are mid-test, and a marker match alone SIGTERM'd those LIVE runs' apps: Electron
+// quits on SIGTERM, so the other run's main window closed mid-test ("Main window
+// LOST … process still running") — the failure rotated across specs per run.
+
+const owned = (owner: number) => `${e2eEnv} SLAYZONE_E2E_OWNER_PID=${owner}`
+
+test('does NOT select a process whose owning run is still alive', () => {
+  const candidates = parsePgrepOutput(`4250 Electron ${COMPUTER}`)
+  expect(
+    selectTestRunPids(candidates, reader({ 4250: owned(777) }), [], (pid) => pid === 777),
+    'live run kept'
+  ).toEqual([])
+})
+
+test('selects a process whose owning run has died', () => {
+  const candidates = parsePgrepOutput(`4251 Electron ${COMPUTER}`)
+  expect(
+    selectTestRunPids(candidates, reader({ 4251: owned(778) }), [], () => false),
+    'orphan of a dead run reaped'
+  ).toEqual([4251])
+})
+
+test('a marker without an owner (pre-owner build) is still reaped', () => {
+  const candidates = parsePgrepOutput(`4252 Electron ${COMPUTER}`)
+  expect(
+    selectTestRunPids(candidates, reader({ 4252: e2eEnv }), [], () => true),
+    'legacy orphan'
+  ).toEqual([4252])
+})
