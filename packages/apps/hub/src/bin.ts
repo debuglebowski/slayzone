@@ -1,3 +1,5 @@
+// First import: NODE_ENV defaults to production before any library reads it.
+import './default-node-env.js'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { securityEvent } from '@slayzone/platform/security-log'

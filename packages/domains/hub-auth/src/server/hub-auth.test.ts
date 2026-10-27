@@ -150,6 +150,29 @@ describe('sign-in (in-process auth.api)', () => {
   })
 })
 
+describe('CSRF origin check', () => {
+  /**
+   * better-auth turns its origin check off when it thinks it runs a test (`TEST` set,
+   * or `NODE_ENV=test`), so a hub started with either in its env would take
+   * cross-site cookie requests. The hub pins it on.
+   */
+  it('stays on with TEST set in the env', async () => {
+    const prevTest = process.env.TEST
+    process.env.TEST = 'true'
+    try {
+      const testModeAuth = await createHubAuth({
+        dbPath: join(tmpDir, 'origin-check.sqlite'),
+        baseURL: 'http://127.0.0.1:9999',
+        secret: 'hub-auth-test-secret-at-least-32-chars-long'
+      })
+      expect((await testModeAuth.$context).skipOriginCheck).toBe(false)
+    } finally {
+      if (prevTest === undefined) delete process.env.TEST
+      else process.env.TEST = prevTest
+    }
+  })
+})
+
 describe('bearer-token verification', () => {
   let token: string
 

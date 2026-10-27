@@ -325,6 +325,8 @@ run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 run_harness packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
+# The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).
+run_harness packages/apps/app/src/main/packaged-node-env.test.ts
 run_harness packages/apps/app/src/main/storage-migration.test.ts
 run_harness packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -953,6 +955,8 @@ run_harness packages/shared/transport/src/server/http/rest-api/hub/computers.tes
 run_harness packages/apps/hub/src/flood-limits.test.ts
 # better-auth /api/auth/* body cap: declared length ≤ 64 KiB (413), chunked refused (411).
 run_harness packages/apps/hub/src/auth-body-limit.test.ts
+# The hub defaults an unset NODE_ENV to production in its first import.
+run_harness packages/apps/hub/src/default-node-env.test.ts
 
 # Web shell sign-in and sign-out through Entra (T-13): the session routes over real
 # hub-auth + app DB, and the shell's cookie-only session (hub-auth's web sign-in runs in

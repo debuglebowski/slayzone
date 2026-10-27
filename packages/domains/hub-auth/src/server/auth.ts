@@ -168,9 +168,12 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // ends (`adoptClientAddress`); an in-process `auth.api.*` call carries none, so
     // records none (better-auth's dev/test fallback is 127.0.0.1). `trustedProxyHeaders:
     // false` pins that X-Forwarded-Host/-Proto never move the base URL (env rule 5).
+    // `disableOriginCheck: false` pins the CSRF origin check on: left unset, better-auth
+    // turns it off whenever it thinks it runs a test (`TEST` set, or `NODE_ENV=test`).
     advanced: {
       ipAddress: { ipAddressHeaders: [CLIENT_ADDRESS_HEADER] },
-      trustedProxyHeaders: false
+      trustedProxyHeaders: false,
+      disableOriginCheck: false
     },
     // Security audit lines on stdout (T-03): sign-in, sign-out, sessions, password
     // change. See ./audit.ts.

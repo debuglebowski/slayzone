@@ -514,13 +514,15 @@ describe('through a trusted front end', () => {
 })
 
 // --- the same headers from a peer the hub does not trust ------------------
-// No NODE_ENV: the limiter must not need it (T-26).
+// NODE_ENV=development, not unset (the hub defaults an unset one to production): the
+// limiter must not need production (T-26).
 describe('the same headers from a peer the hub does not trust', () => {
   let direct: Hub
   beforeAll(async () => {
     direct = await bootHub({
       ...REACHABLE,
-      SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24'
+      SLAYZONE_HUB_TRUSTED_PROXIES: '10.93.4.0/24',
+      NODE_ENV: 'development'
     })
     hubs.push(direct)
   })
