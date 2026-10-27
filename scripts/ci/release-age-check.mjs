@@ -31,12 +31,18 @@ const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\/]/g, '\\$&')
 const exemptRe = exempt.map((p) => new RegExp(`^${p.split('*').map(escapeRe).join('.*')}$`))
 const isExempt = (name) => exemptRe.some((re) => re.test(name))
 
-/** `name@version` keys of the lockfile's `packages:` section (registry packages only). */
+/**
+ * `name@version` keys of every `packages:` section in the lockfile (registry packages
+ * only). Since pnpm 11 the lockfile holds two YAML documents — pnpm's own install,
+ * then the project — each with its own `packages:` section.
+ */
 function lockedVersions(text) {
-  const section = text.split(/^packages:\s*$/m)[1]?.split(/^\S/m)[0] ?? ''
   const out = new Set()
-  for (const [, key] of section.matchAll(/^ {2}'?((?:@[^/\s]+\/)?[^@\s']+@\d[^:'\s(]*)'?:/gm))
-    out.add(key)
+  for (const part of text.split(/^packages:\s*$/m).slice(1)) {
+    const section = part.split(/^\S/m)[0]
+    for (const [, key] of section.matchAll(/^ {2}'?((?:@[^/\s]+\/)?[^@\s']+@\d[^:'\s(]*)'?:/gm))
+      out.add(key)
+  }
   return out
 }
 
