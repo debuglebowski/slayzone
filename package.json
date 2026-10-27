@@ -85,7 +85,7 @@
     "@biomejs/biome": "2.5.14",
     "@convex-dev/auth": "^0.0.95",
     "@slayzone/tsgo": "workspace:*",
-    "@types/node": "^22.19.7",
+    "@types/node": "^24.19.0",
     "changelogen": "^0.6.2",
     "convex": "^1.46.0",
     "eslint": "^9.39.5",

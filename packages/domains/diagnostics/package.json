@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^22.19.1"
+    "@types/node": "^24.19.0"
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*"

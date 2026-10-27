@@ -47,7 +47,7 @@
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^22.19.1",
+    "@types/node": "^24.19.0",
     "@types/ws": "^8.5.13",
     "esbuild": "^0.25.0",
     "vitest": "^4.1.11"

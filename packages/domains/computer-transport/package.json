@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@slayzone/test-utils": "workspace:*",
-    "@types/node": "^22.19.1",
+    "@types/node": "^24.19.0",
     "@types/ws": "^8.5.13",
     "vitest": "^4.1.11"
   }
