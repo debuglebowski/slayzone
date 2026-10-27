@@ -58,17 +58,37 @@ export function useStablePoll<T = unknown>(
     let delay = baseDelay
     let prev: T | null = null
     let firstTick = true
+    // One tick at a time, one timer chain: a refetch() while a tick runs only marks
+    // `rerun` (coalesced), and that tick starts the next one when it settles. Starting
+    // a second tick instead overlapped fetches and left both ticks re-arming timers —
+    // a second chain for good, multiplying the poll rate per mid-tick refetch.
+    let running = false
+    let rerun = false
+
+    const settle = (): void => {
+      if (rerun) {
+        rerun = false
+        delay = baseDelay
+        void tick()
+        return
+      }
+      timeout = setTimeout(tick, delay)
+    }
 
     const tick = async (): Promise<void> => {
+      timeout = null
+      running = true
       let result: T | null = null
       try {
         result = await fetchRef.current()
       } catch {
+        running = false
         if (cancelled) return
         delay = baseDelay
-        timeout = setTimeout(tick, delay)
+        settle()
         return
       }
+      running = false
       if (cancelled) return
       if (!firstTick && result === prev) {
         delay = Math.min(delay * 2, maxDelay)
@@ -77,11 +97,15 @@ export function useStablePoll<T = unknown>(
       }
       prev = result
       firstTick = false
-      timeout = setTimeout(tick, delay)
+      settle()
     }
 
     refetchRef.current = (): void => {
       if (cancelled) return
+      if (running) {
+        rerun = true
+        return
+      }
       if (timeout) {
         clearTimeout(timeout)
         timeout = null

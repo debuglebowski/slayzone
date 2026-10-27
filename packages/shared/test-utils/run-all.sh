@@ -768,6 +768,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/server/branch-queries.test.ts \
   packages/domains/worktrees/src/server/git-watcher.test.ts \
   packages/domains/worktrees/src/server/untracked-diffs.test.ts \
+  packages/shared/ui/src/use-stable-poll.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \

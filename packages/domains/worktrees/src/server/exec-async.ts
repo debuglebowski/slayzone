@@ -83,6 +83,11 @@ export function execAsync(
     const startedAt = Date.now()
     const child = hubSpawn(command, args, {
       cwd: opts.cwd,
+      // No opportunistic index writes from reads: plain `git status` rewrites
+      // `.git/index` on every run while a tracked file is newer than the index, and
+      // the panel's fs watcher sees that write → re-reads → rewrites → a refresh loop.
+      // Commands that need the lock (add, commit, …) still take it.
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
       stdio: ['pipe', 'pipe', 'pipe']
     })
     const stdout: string[] = []

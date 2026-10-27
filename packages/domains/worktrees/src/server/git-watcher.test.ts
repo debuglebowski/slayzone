@@ -10,11 +10,14 @@
  *   packages/domains/worktrees/src/server/git-watcher.test.ts
  */
 import { execSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createGitWatcher, type GitWatcher } from './git-watcher'
+
+vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
+const { getStatusSummary, getWorkingDiff } = await import('./git-worktree')
 
 type Event = { worktreePath: string; refsChanged: boolean }
 
@@ -106,4 +109,23 @@ describe('GitWatcher', () => {
     const got = await eventsAfter(() => git('add -A', join(repo, 'nested', 'wt')))
     expect(got).toEqual([])
   })
+
+  // The panel re-reads on every event; a read that writes `.git/index` would emit
+  // again → re-read → … A tracked file newer than the index (still being written, or a
+  // future mtime) makes plain `git status` rewrite the index on EVERY run — seen live
+  // as `git status` every 200ms for a minute.
+  it("the panel's own reads don't keep retriggering the watcher", async () => {
+    const future = new Date(Date.now() + 3600_000)
+    utimesSync(join(repo, 'a.txt'), future, future)
+    await watch()
+    const read = () => {
+      void getStatusSummary(repo)
+      void getWorkingDiff(repo, { contextLines: '3' })
+    }
+    // `git diff` may refresh the stale stat info once (one event, then settled)…
+    await eventsAfter(read)
+    // …but re-reading must not write again — that's the loop.
+    expect(await eventsAfter(read)).toEqual([])
+    expect(await eventsAfter(read)).toEqual([])
+  }, 15_000)
 })
