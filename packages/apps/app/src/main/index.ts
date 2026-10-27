@@ -565,7 +565,7 @@ import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handler
 import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
-import { attachPdfViewerLinkBridge } from './pdf-viewer-link-bridge'
+import { attachDocumentLinkBridges } from './document-link-bridge'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -1613,7 +1613,7 @@ function createMainWindow(): void {
   // Floating global agent panel: register main window with state machine adapter
   attachFloatingGlobalAgentPanel(mainWindow)
   attachTaskWindows(mainWindow)
-  attachPdfViewerLinkBridge(mainWindow.webContents)
+  attachDocumentLinkBridges(mainWindow.webContents)
 
   mainWindow.on('closed', () => {
     mainWindow = null

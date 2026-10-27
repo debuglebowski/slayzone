@@ -13,6 +13,7 @@ import {
   RichTextEditor,
   resolveReadOnlyLinkClickTarget,
   usePdfViewerLinks,
+  useHtmlPreviewLinks,
   type LinkOpenTarget
 } from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -169,7 +170,7 @@ export function ArtifactContentEditor({
   searchMatchCase: boolean
   searchRegex: boolean
   onSearchMatchCountChange: (count: number) => void
-  /** ⌘-clicked links (PDF): open in the task's in-app browser. */
+  /** ⌘-clicked links (markdown, PDF, HTML): open in the task's in-app browser. */
   onOpenUrl?: (url: string) => void
 }) {
   const trpc = useTRPC()
@@ -521,6 +522,7 @@ export function ArtifactContentEditor({
             getFilePath={getFilePath}
             zoom={zoom}
             htmlTheme={htmlTheme}
+            onOpenLink={handleOpenLink}
           />
         </div>
       )
@@ -554,6 +556,7 @@ export function ArtifactContentEditor({
               getFilePath={getFilePath}
               zoom={zoom}
               htmlTheme={htmlTheme}
+              onOpenLink={handleOpenLink}
             />
           </div>
         </div>
@@ -624,7 +627,8 @@ function ArtifactPreview({
   contentVersion,
   getFilePath,
   zoom,
-  htmlTheme
+  htmlTheme,
+  onOpenLink
 }: {
   renderMode: RenderMode
   content: string
@@ -633,6 +637,7 @@ function ArtifactPreview({
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
   htmlTheme: HtmlArtifactTheme
+  onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
     return (
@@ -648,6 +653,7 @@ function ArtifactPreview({
         getFilePath={getFilePath}
         zoom={zoom}
         htmlTheme={htmlTheme}
+        onOpenLink={onOpenLink}
       />
     )
   if (renderMode === 'svg-preview')
@@ -684,15 +690,21 @@ function HtmlPreviewFrame({
   contentVersion,
   getFilePath,
   zoom,
-  htmlTheme
+  htmlTheme,
+  onOpenLink
 }: {
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
   htmlTheme: HtmlArtifactTheme
+  onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   const [src, setSrc] = useState<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  // Links: the sandbox drops popups and a bare click would navigate the preview
+  // itself — main's bridge relays them here instead (html-preview-links.ts).
+  useHtmlPreviewLinks(iframeRef, onOpenLink)
   // `null` while in flight or resolved; a string once the path could not be
   // resolved. Previously there was no error branch at all: `getFilePath` had no
   // `.catch` and no null handling, so a rejection OR a null path left `src` null
@@ -752,6 +764,7 @@ function HtmlPreviewFrame({
   return (
     <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-white">
       <iframe
+        ref={iframeRef}
         src={src}
         sandbox="allow-scripts"
         className="absolute top-0 left-0 border-0"

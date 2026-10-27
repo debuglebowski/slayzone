@@ -19,6 +19,7 @@ export {
   resolveReadOnlyLinkClickTarget
 } from './milkdown-link-click'
 export { usePdfViewerLinks } from './use-pdf-viewer-links'
+export { useHtmlPreviewLinks } from './use-html-preview-links'
 export { mermaidRenderPlugin } from './milkdown-mermaid-render'
 export {
   remarkFrontmatterPlugin,

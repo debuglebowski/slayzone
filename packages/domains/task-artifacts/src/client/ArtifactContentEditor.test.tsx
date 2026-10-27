@@ -39,7 +39,8 @@ vi.mock('@slayzone/settings/client', () => ({ useTheme: () => theme }))
 vi.mock('@slayzone/editor', () => ({
   RichTextEditor: () => null,
   resolveReadOnlyLinkClickTarget: () => null,
-  usePdfViewerLinks: () => undefined
+  usePdfViewerLinks: () => undefined,
+  useHtmlPreviewLinks: () => undefined
 }))
 vi.mock('@slayzone/markdown/client', () => ({
   Markdown: () => null,

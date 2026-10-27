@@ -68,8 +68,22 @@ test.describe('HTML artifact preview executes scripts', () => {
   let projectAbbrev: string
   let taskId: string
 
-  test.beforeAll(async ({ mainWindow }) => {
+  test.beforeAll(async ({ electronApp, mainWindow }) => {
     await resetApp(mainWindow)
+    // Capture shell.openExternal so link clicks are observable without
+    // launching a real browser.
+    await electronApp.evaluate(({ shell }) => {
+      const g = globalThis as Record<string, unknown>
+      g.__htmlLinkCalls = [] as string[]
+      g.__htmlLinkOriginal = shell.openExternal.bind(shell)
+      Object.defineProperty(shell, 'openExternal', {
+        configurable: true,
+        writable: true,
+        value: async (url: string) => {
+          ;(g.__htmlLinkCalls as string[]).push(url)
+        }
+      })
+    })
     const s = seed(mainWindow)
     const p = await s.createProject({
       name: 'HTML Preview Test',
@@ -88,6 +102,21 @@ test.describe('HTML artifact preview executes scripts', () => {
     await expect(
       mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
     ).toBeVisible({ timeout: 5_000 })
+  })
+
+  test.afterAll(async ({ electronApp }) => {
+    await electronApp.evaluate(({ shell }) => {
+      const g = globalThis as Record<string, unknown>
+      if (g.__htmlLinkOriginal) {
+        Object.defineProperty(shell, 'openExternal', {
+          configurable: true,
+          writable: true,
+          value: g.__htmlLinkOriginal
+        })
+      }
+      delete g.__htmlLinkCalls
+      delete g.__htmlLinkOriginal
+    })
   })
 
   test('inline <script> in .html artifact runs and DOM mutations work', async ({ mainWindow }) => {
@@ -188,5 +217,105 @@ test.describe('HTML artifact preview executes scripts', () => {
     // what we really care about; assert that parent access is blocked.
     await expect(frame.locator('#origin')).toHaveText(/slz-file:\/\//, { timeout: 5_000 })
     await expect(frame.locator('#parent')).toHaveText('BLOCKED', { timeout: 3_000 })
+  })
+
+  test.describe('links', () => {
+    const linkCalls = (electronApp: import('@playwright/test').ElectronApplication) =>
+      electronApp.evaluate(() => [
+        ...((globalThis as Record<string, unknown>).__htmlLinkCalls as string[])
+      ])
+    const clearLinkCalls = (electronApp: import('@playwright/test').ElectronApplication) =>
+      electronApp.evaluate(() => {
+        ;(globalThis as Record<string, unknown>).__htmlLinkCalls = []
+      })
+
+    async function openLinkArtifact(page: Page, title: string, extraScript = '') {
+      const html = `<!DOCTYPE html><html><body>
+        <a id="self" href="https://example.com/self">self</a>
+        <a id="blank" href="https://example.com/blank" target="_blank">blank</a>
+        <a id="hash" href="#section">hash</a>
+        <a id="handled" href="https://example.com/handled">handled</a>
+        <div id="section">section</div>
+        <script>
+          document.getElementById('handled').addEventListener('click', (e) => e.preventDefault());
+          ${extraScript}
+        </script>
+      </body></html>`
+      const s = seed(page)
+      await s.createArtifact({ taskId, title, content: html })
+      await s.refreshData()
+      await openArtifactsPanel(page)
+      await artifactRow(page, title).click()
+      await waitForPreviewLoaded(page)
+      // Main injects the bridge asynchronously on dom-ready; a click before it
+      // lands takes the sandbox's default path.
+      await expect
+        .poll(() =>
+          previewFrame(page)
+            .locator('body')
+            .evaluate(
+              () => (window as unknown as Record<string, unknown>).__slzHtmlPreviewLinkBridge
+            )
+            .catch(() => undefined)
+        )
+        .toBe(true)
+    }
+
+    test('bare click on http link opens externally, preview stays put', async ({
+      electronApp,
+      mainWindow
+    }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-self.html')
+      const frame = previewFrame(mainWindow)
+      await frame.locator('#self').click()
+      await expect.poll(() => linkCalls(electronApp)).toEqual(['https://example.com/self'])
+      // The iframe did not navigate away from the artifact.
+      await expect(frame.locator('#section')).toHaveText('section')
+    })
+
+    test('target=_blank link opens externally', async ({ electronApp, mainWindow }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-blank.html')
+      await previewFrame(mainWindow).locator('#blank').click()
+      await expect.poll(() => linkCalls(electronApp)).toEqual(['https://example.com/blank'])
+    })
+
+    test('hash links and page-handled links are left to the page', async ({
+      electronApp,
+      mainWindow
+    }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-local.html')
+      const frame = previewFrame(mainWindow)
+      await frame.locator('#hash').click()
+      await frame.locator('#handled').click()
+      await mainWindow.waitForTimeout(300)
+      expect(await linkCalls(electronApp)).toEqual([])
+      await expect(frame.locator('#section')).toHaveText('section')
+    })
+
+    test('a script-forged link message without a user gesture is ignored', async ({
+      electronApp,
+      mainWindow
+    }) => {
+      await clearLinkCalls(electronApp)
+      // Fires long after any real click's transient activation (~5s) expired.
+      await openLinkArtifact(
+        mainWindow,
+        'link-forged.html',
+        `setTimeout(() => {
+          window.top.postMessage({ type: 'slayzone:html-preview-link',
+            url: 'https://example.com/forged', metaKey: false, ctrlKey: false,
+            shiftKey: false }, '*');
+          document.getElementById('section').textContent = 'forged';
+        }, 6000);`
+      )
+      // Hands off until it fired: every Playwright evaluate/poll runs with a user
+      // gesture — the exact thing the renderer gates on. The page's timer has none.
+      await mainWindow.waitForTimeout(7_000)
+      await expect(previewFrame(mainWindow).locator('#section')).toHaveText('forged')
+      expect(await linkCalls(electronApp)).toEqual([])
+    })
   })
 })
