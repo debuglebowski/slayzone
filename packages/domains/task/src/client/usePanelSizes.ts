@@ -57,6 +57,10 @@ export interface ResolvedLayout {
   maxPx: Record<string, number>
   /** width of the flexible gap between the left and right clusters (0 if no right cluster) */
   gapPx: number
+  /** displayed ÷ base width per stretched panel (absent = 1, not stretched).
+   *  Drag handlers divide by it so overrides store the BASE size, not the
+   *  stretched one (else a stretched width persists and overflows later). */
+  stretch: Record<string, number>
   /** true when panels + handles exceed the container (→ horizontal scroll) */
   overflow: boolean
   /** left-anchored panel ids, in order */
@@ -72,6 +76,8 @@ export interface ResolvedLayout {
  *   whose share clamps to its min/max is pinned and the rest re-divide the remainder
  *   (a single pass silently over/underfills when an fr panel clamps).
  * - Right-anchored panels pack to the right; `gapPx` is the leftover between clusters.
+ * - No right cluster and leftover after fr → every left panel grows proportionally
+ *   to its width (water-filled against max) so the container is always filled.
  *   When statics overflow the container, `gapPx` is 0 and `overflow` is true.
  */
 export function resolveLayout(
@@ -176,13 +182,44 @@ export function resolveLayout(
     frSum += widths[p.key]
   }
 
+  // Stretch: nothing absorbed the leftover (no fr, or fr clamped at max) and no
+  // right cluster owns it → grow every left panel proportionally to its width,
+  // locking any that hit their max and re-dividing the rest.
+  const stretch: Record<string, number> = {}
+  let leftover = W - staticSum - frSum - handlesPx
+  if (rightKeys.length === 0 && leftover > 0.5) {
+    const pre = { ...widths }
+    let growable = leftKeys.filter((k) => widths[k] > 0)
+    while (growable.length > 0 && leftover > 0.5) {
+      const base = growable.reduce((sum, k) => sum + widths[k], 0)
+      const factor = (base + leftover) / base
+      const capped = growable.filter((k) => maxPx[k] != null && widths[k] * factor > maxPx[k])
+      if (capped.length === 0) {
+        for (const k of growable) widths[k] *= factor
+        leftover = 0
+        break
+      }
+      for (const k of capped) {
+        leftover -= maxPx[k] - widths[k]
+        widths[k] = maxPx[k]
+      }
+      growable = growable.filter((k) => !capped.includes(k))
+    }
+    for (const k of leftKeys) {
+      if (pre[k] > 0 && widths[k] - pre[k] > 0.01) stretch[k] = widths[k] / pre[k]
+    }
+    staticSum = 0
+    frSum = 0
+    for (const k of leftKeys) staticSum += widths[k]
+  }
+
   const usedExclGap = staticSum + frSum + handlesPx
   // Leftover beyond panels + handles → the anchor push between the clusters
   // (can be 0; the boundary handle already separates them).
   const gapPx = rightKeys.length > 0 ? Math.max(0, W - usedExclGap) : 0
   const overflow = usedExclGap > W + 0.5
 
-  return { widths, minPx, maxPx, gapPx, overflow, leftKeys, rightKeys }
+  return { widths, minPx, maxPx, gapPx, stretch, overflow, leftKeys, rightKeys }
 }
 
 /**
@@ -245,6 +282,11 @@ export function resolvePanels(
     layout: effectiveLayout(id, config, overrides)
   }))
   return resolveLayout(panels, containerWidth)
+}
+
+/** A dragged (displayed) width → the base width to store, undoing any stretch. */
+export function unstretchPx(resolved: ResolvedLayout, key: string, px: number): number {
+  return px / (resolved.stretch[key] ?? 1)
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   planPanelStrip,
   effectiveLayout,
   applyBoundaryResize,
+  unstretchPx,
   normalizeOverrides
 } from './usePanelSizes'
 import type { ResolvedLayout } from './usePanelSizes'
@@ -45,7 +46,14 @@ describe('resolveLayout', () => {
   })
 
   it('pct is percent of the whole container', () => {
-    const r = resolveLayout([{ key: 'a', layout: L({ unit: 'pct', value: 50 }) }], 1000)
+    // fr neighbour absorbs the leftover (a lone static would stretch)
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'pct', value: 50 }) },
+        { key: 'b', layout: L({ unit: 'fr', value: 1 }) }
+      ],
+      1000
+    )
     expect(r.widths.a).toBe(500)
   })
 
@@ -131,6 +139,79 @@ describe('resolveLayout', () => {
     expect(r.widths.a).toBe(800)
     expect(r.gapPx).toBe(0)
   })
+
+  it('no fr panel: statics stretch proportionally to fill the container', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'px', value: 200 }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    // 1000 for panels, 200:300 kept → 400/600, factor 2
+    expect(r.widths.a).toBeCloseTo(400)
+    expect(r.widths.b).toBeCloseTo(600)
+    expect(r.stretch.a).toBeCloseTo(2)
+    expect(r.stretch.b).toBeCloseTo(2)
+  })
+
+  it('single static panel fills the container', () => {
+    const r = resolveLayout([{ key: 's', layout: L({ unit: 'px', value: 440 }) }], 2400)
+    expect(r.widths.s).toBeCloseTo(2400)
+  })
+
+  it('stretch respects max; the rest goes to the others', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'px', value: 200, max: { unit: 'px', value: 250 } }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    expect(r.widths.a).toBeCloseTo(250)
+    expect(r.widths.b).toBeCloseTo(750)
+  })
+
+  it('fr panel present: statics keep their size (fr absorbs the leftover)', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'fr', value: 1 }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    expect(r.widths.b).toBe(300)
+    expect(r.stretch.b ?? 1).toBe(1)
+  })
+
+  it('fr clamped at its max: statics stretch into the leftover', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'fr', value: 1, max: { unit: 'px', value: 300 } }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    expect(r.widths.a).toBeCloseTo(300)
+    expect(r.widths.b).toBeCloseTo(700)
+  })
+
+  it('no stretch with a right cluster (the anchor gap owns the leftover)', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'px', value: 200, align: 'left' }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300, align: 'right' }) }
+      ],
+      1000
+    )
+    expect(r.widths.a).toBe(200)
+    expect(r.widths.b).toBe(300)
+  })
+
+  it('no stretch on overflow', () => {
+    const r = resolveLayout([{ key: 'a', layout: L({ unit: 'px', value: 1200 }) }], 1000)
+    expect(r.widths.a).toBe(1200)
+  })
 })
 
 describe('resolvePanels + effectiveLayout', () => {
@@ -164,6 +245,32 @@ describe('resolvePanels + effectiveLayout', () => {
     const r = resolvePanels(['terminal', 'settings'], null, {}, 1016)
     expect(r.widths.settings).toBe(440)
     expect(r.widths.terminal).toBeCloseTo(1016 - 440 - 16)
+  })
+})
+
+describe('unstretchPx', () => {
+  it('stretched panel: dragged px maps back to the base size', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'px', value: 200 }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    // displayed 450/550 (factor 2) → stored 225/275, same 1000 total once re-stretched
+    expect(unstretchPx(r, 'a', 450)).toBeCloseTo(225)
+    expect(unstretchPx(r, 'b', 550)).toBeCloseTo(275)
+  })
+
+  it('unstretched panel: identity', () => {
+    const r = resolveLayout(
+      [
+        { key: 'a', layout: L({ unit: 'fr', value: 1 }) },
+        { key: 'b', layout: L({ unit: 'px', value: 300 }) }
+      ],
+      1016
+    )
+    expect(unstretchPx(r, 'b', 320)).toBe(320)
   })
 })
 
@@ -231,6 +338,7 @@ describe('planPanelStrip', () => {
     minPx: {},
     maxPx: {},
     gapPx,
+    stretch: {},
     overflow: false,
     leftKeys,
     rightKeys

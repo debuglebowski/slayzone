@@ -32,7 +32,8 @@ import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import {
   useGlobalPanelSizes,
   applyBoundaryResize,
-  effectiveLayout
+  effectiveLayout,
+  unstretchPx
 } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { getViewConfig } from '@slayzone/tasks/hooks'
@@ -413,8 +414,8 @@ export function HomeDetail({
                               rightL,
                               HOME_PANEL_SIZE_KEY[leftId],
                               sizeKey,
-                              lw,
-                              rw,
+                              unstretchPx(homeResolved, HOME_PANEL_SIZE_KEY[leftId], lw),
+                              unstretchPx(homeResolved, sizeKey, rw),
                               homeContainerWidth
                             )
                           )

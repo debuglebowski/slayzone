@@ -219,6 +219,27 @@ test.describe('Panel layout config', () => {
       .toBeLessThan(20)
   })
 
+  test('no stretch panel → fixed-width panels stretch to the right edge', async ({
+    mainWindow
+  }) => {
+    await applyLayout(mainWindow, {
+      terminal: { unit: 'px', value: 300, align: 'left' },
+      settings: { unit: 'px', value: 300, align: 'left' }
+    })
+    // Settings (last panel) ends at the container's right edge — no empty area.
+    await expect
+      .poll(async () => {
+        const c = await container(mainWindow).boundingBox()
+        const sb = await settings(mainWindow).boundingBox()
+        if (!c || !sb) return 999
+        return Math.abs(sb.x + sb.width - (c.x + c.width))
+      })
+      .toBeLessThan(20)
+    // Equal bases → equal stretched widths.
+    const w = await settings(mainWindow).evaluate((el) => parseInt((el as HTMLElement).style.width))
+    expect(w).toBeGreaterThan(300)
+  })
+
   test('panels overflow → container scrolls horizontally', async ({ mainWindow }) => {
     await applyLayout(mainWindow, { settings: { unit: 'px', value: 5000, align: 'left' } })
     await expect
