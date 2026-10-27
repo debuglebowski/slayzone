@@ -11,7 +11,7 @@ import { useTerminalStateStore } from './useTerminalStateStore'
 
 // Reset state between tests for isolation (actions are preserved by merge).
 beforeEach(() => {
-  useTerminalStateStore.setState({ byId: {}, hibernated: {}, lastPushedAt: {} })
+  useTerminalStateStore.setState({ byId: {}, hibernated: {}, lastPushedAt: {}, jobsById: {} })
 })
 
 const s = () => useTerminalStateStore.getState()
@@ -176,4 +176,51 @@ test('reconcile without dispatchedAt keeps legacy always-stomp behavior', () => 
   s().applyStateChange('d:d', 'running')
   s().reconcile([{ sessionId: 'd:d', state: 'idle' }])
   expect(s().getSessionState('d:d')).toBe('idle')
+})
+
+// --- useTerminalStateStore — background jobs ---
+
+const jobs = (sid: string): number => s().jobsById[sid] ?? 0
+
+test('applyBackgroundJobs adopts the count; 0 removes the entry', () => {
+  s().applyBackgroundJobs('j:j', 2)
+  expect(jobs('j:j')).toBe(2)
+  s().applyBackgroundJobs('j:j', 0)
+  expect('j:j' in s().jobsById).toBe(false)
+})
+
+test('a background job does not touch the state', () => {
+  s().applyStateChange('j:j', 'idle')
+  s().applyBackgroundJobs('j:j', 1)
+  expect(s().getSessionState('j:j')).toBe('idle')
+})
+
+test('exit drops the count (the jobs died with the pty)', () => {
+  s().applyBackgroundJobs('j:j', 1)
+  s().applyExit('j:j')
+  expect(jobs('j:j')).toBe(0)
+})
+
+test('hydrate fills the count from the session list', () => {
+  s().hydrate([{ sessionId: 'h:h', state: 'idle', backgroundJobs: 3 }])
+  expect(jobs('h:h')).toBe(3)
+})
+
+test('reconcile adopts listed counts and clears unlisted ones', () => {
+  s().applyBackgroundJobs('a:a', 1)
+  s().applyBackgroundJobs('b:b', 1)
+  s().reconcile([
+    { sessionId: 'a:a', state: 'idle' },
+    { sessionId: 'c:c', state: 'idle', backgroundJobs: 2 }
+  ])
+  expect(jobs('a:a')).toBe(0)
+  expect(jobs('b:b')).toBe(0)
+  expect(jobs('c:c')).toBe(2)
+})
+
+test('reconcile keeps a count pushed after the fetch was dispatched', () => {
+  const dispatchedAt = Date.now() - 1000
+  s().applyBackgroundJobs('f:f', 1)
+  s().reconcile([{ sessionId: 'f:f', state: 'idle' }], undefined, dispatchedAt)
+  expect(jobs('f:f')).toBe(1)
 })

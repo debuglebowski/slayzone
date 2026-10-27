@@ -16,12 +16,16 @@ export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
 // helper's tool call from overwriting "the main agent is waiting for your answer".
 export {
   applyAgentHook,
+  applyBackgroundJobHook,
+  dropBackgroundJobs,
   createAgentTree,
   resolveState,
   subagentIdOf,
   CLAUDE_BLOCKING_TOOLS,
   type AgentTree,
-  type AgentHookSignal
+  type AgentHookSignal,
+  type BackgroundJob,
+  type BackgroundJobKind
 } from './agent-tree'
 export {
   encodeClaudeProjectDir,
@@ -67,6 +71,7 @@ export {
   getPtyBackend,
   setPtyBackend,
   localPtyBackend,
+  type BackgroundJobQuery,
   type PtyBackend,
   type PtyExit,
   type PtyHandle,
@@ -131,6 +136,8 @@ export {
   markSessionActiveFromHook,
   noteSessionConversationId,
   setSessionAwaitingInput,
+  setSessionBackgroundJobs,
+  probeSessionBackgroundJobs,
   killPtysByTaskId,
   broadcastRespawnRequest,
   onGlobalStateChange,

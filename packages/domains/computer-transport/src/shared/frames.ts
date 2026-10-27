@@ -324,6 +324,8 @@ export const HubToComputerMethods = {
   ptyList: 'pty.list',
   /** Move a session still waiting for an agent-start slot to the front (tab revealed). */
   ptyPrioritize: 'pty.prioritize',
+  /** Which of claude's background jobs still have a live process under a session. */
+  ptyBackgroundJobs: 'pty.backgroundJobs',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -506,6 +508,36 @@ export const ptyPrioritizeResultSchema = z.object({
   queued: z.boolean()
 })
 export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
+
+/**
+ * Which of a claude session's background jobs (`Bash` run_in_background /
+ * auto-backgrounded, `Monitor`) still have a live process. Claude fires no hook
+ * when a job exits on its own, so the hub asks the computer that owns the process
+ * tree. `kind` picks how a job is recognised (see computer/background-jobs.ts).
+ */
+export const ptyBackgroundJobsParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  jobs: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        kind: z.enum(['shell', 'monitor']),
+        command: z.string().nullable()
+      })
+    )
+    .max(256)
+})
+export type PtyBackgroundJobsParams = z.infer<typeof ptyBackgroundJobsParamsSchema>
+
+/** `supported: false` — the computer can't inspect processes on its platform;
+ *  the hub then treats every job as finished rather than show one forever.
+ *  `alive` is empty for a session the computer no longer holds. */
+export const ptyBackgroundJobsResultSchema = z.object({
+  ok: z.literal(true),
+  supported: z.boolean(),
+  alive: z.array(z.string())
+})
+export type PtyBackgroundJobsResult = z.infer<typeof ptyBackgroundJobsResultSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),

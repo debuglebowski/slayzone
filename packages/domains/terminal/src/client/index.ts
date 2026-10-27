@@ -7,6 +7,7 @@ export { PtyProvider, usePty } from './PtyContext'
 export {
   useSessionState,
   useSessionStateRaw,
+  useSessionBackgroundJobs,
   useTaskTerminalState,
   useActiveTaskIds,
   useTerminalStateStore

@@ -434,6 +434,7 @@ const HIB_OK = {
   resumeEligible: true,
   hasConversationId: true,
   awaitingUser: false,
+  backgroundJobs: 0,
   state: 'idle' as TerminalState,
   lastUserInteractionAt: 0,
   now: 60_000,
@@ -466,6 +467,12 @@ test('hibernate: no captured conversation id → false', () => {
 
 test('hibernate: agent awaiting user (hook) → false', () => {
   expect(shouldHibernate({ ...HIB_OK, awaitingUser: true })).toBe(false)
+})
+
+test('hibernate: claude background job still running → false', () => {
+  // Hibernating kills the pty — and with it the dev server / watcher the agent
+  // left running in the background.
+  expect(shouldHibernate({ ...HIB_OK, backgroundJobs: 1 })).toBe(false)
 })
 
 test('hibernate: recent user interaction (within window) → false', () => {

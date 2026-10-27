@@ -27,6 +27,8 @@
 
 import {
   HubToComputerMethods,
+  ptyBackgroundJobsParamsSchema,
+  type PtyBackgroundJobsResult,
   ptyGetBufferSinceParamsSchema,
   ptyKillParamsSchema,
   type PtyListResult,
@@ -46,6 +48,7 @@ import {
 import * as pty from 'node-pty'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
+import { probeBackgroundJobs } from '../background-jobs'
 import { spawnCwd } from '../config'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '../ring-buffer'
@@ -547,6 +550,19 @@ export function createPtyHandlers(
     return { ok: true, queued: item ? admission.prioritize(item.ticket) : false }
   }
 
+  /** Which of claude's background jobs still run under this session's process
+   *  (claude fires no hook when one exits — see background-jobs.ts). A session
+   *  this computer no longer holds has none. */
+  async function backgroundJobs(rawParams: unknown): Promise<PtyBackgroundJobsResult> {
+    const params = ptyBackgroundJobsParamsSchema.parse(rawParams)
+    const pid = sessions.get(params.sessionId)?.proc.pid
+    if (pid === undefined) return { ok: true, supported: true, alive: [] }
+    const alive = await probeBackgroundJobs(pid, params.jobs)
+    return alive === null
+      ? { ok: true, supported: false, alive: [] }
+      : { ok: true, supported: true, alive }
+  }
+
   function dropQueued(reason: string): void {
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
@@ -773,6 +789,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,
+    [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,

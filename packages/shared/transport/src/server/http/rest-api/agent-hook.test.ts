@@ -15,6 +15,9 @@ const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) =>
 const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
 const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
 const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => void>()
+const noteBackgroundJobsSpy = vi.fn<(sessionId: string, count: number) => void>()
+const probeBackgroundJobsSpy =
+  vi.fn<(sessionId: string, jobs: Array<{ id: string }>) => Promise<string[] | null>>()
 // The warm pool's view of a task id: a warm agent that booted with it and has not
 // been adopted yet. Defaults to none — every agent is an ordinary one.
 const unadoptedWarmAgentSpy = vi.fn<
@@ -40,6 +43,8 @@ vi.mock('@slayzone/terminal/server', async () => {
     createAgentTree: agentTree.createAgentTree,
     resolveState: agentTree.resolveState,
     subagentIdOf: agentTree.subagentIdOf,
+    applyBackgroundJobHook: agentTree.applyBackgroundJobHook,
+    dropBackgroundJobs: agentTree.dropBackgroundJobs,
     CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS,
     unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
   }
@@ -121,7 +126,9 @@ function startServer(deps?: {
       markActive: (sessionId) => markActiveSpy(sessionId),
       noteConversationId: (sessionId, conversationId) =>
         noteConversationIdSpy(sessionId, conversationId),
-      noteAwaitingInput: (sessionId, awaiting) => noteAwaitingInputSpy(sessionId, awaiting)
+      noteAwaitingInput: (sessionId, awaiting) => noteAwaitingInputSpy(sessionId, awaiting),
+      noteBackgroundJobs: (sessionId, count) => noteBackgroundJobsSpy(sessionId, count),
+      probeBackgroundJobs: (sessionId, jobs) => probeBackgroundJobsSpy(sessionId, [...jobs])
     }
   })
   return new Promise((resolve) => {
@@ -175,6 +182,8 @@ describe('POST /api/agent-hook', () => {
     markActiveSpy.mockReset()
     noteConversationIdSpy.mockReset()
     noteAwaitingInputSpy.mockReset()
+    noteBackgroundJobsSpy.mockReset()
+    probeBackgroundJobsSpy.mockReset()
     recordConversationSpy.mockReset()
     confirmSessionConversationSpy.mockReset()
     findPendingSpawnSpy.mockReset()
@@ -346,6 +355,133 @@ describe('POST /api/agent-hook', () => {
     } finally {
       await srv.close()
     }
+  })
+
+  describe('claude background jobs (no hook fires when one exits → liveness probe)', () => {
+    const bgPost = (taskId: string, id: string) => ({
+      agentId: 'claude-code',
+      hookEvent: 'PostToolUse',
+      taskId,
+      raw: {
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm dev', run_in_background: true },
+        tool_response: { stdout: '', backgroundTaskId: id }
+      }
+    })
+
+    test('a started job is counted, probed, and cleared once its process is gone', async () => {
+      findSessionSpy.mockReturnValue('task-bg')
+      probeBackgroundJobsSpy.mockResolvedValueOnce(['job1']).mockResolvedValueOnce([])
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg', 'job1'))
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 1)
+
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(probeBackgroundJobsSpy).toHaveBeenCalledWith('task-bg', [
+          { id: 'job1', kind: 'shell', command: 'pnpm dev' }
+        ])
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 1)
+
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 0)
+
+        // Nothing left to watch → polling stops.
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(probeBackgroundJobsSpy).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg')
+        await srv.close()
+      }
+    })
+
+    test('"can\'t tell" (null) clears every job rather than showing one forever', async () => {
+      findSessionSpy.mockReturnValue('task-bg-null')
+      probeBackgroundJobsSpy.mockResolvedValue(null)
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg-null', 'j'))
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-null', 0)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg-null')
+        await srv.close()
+      }
+    })
+
+    test('a failed probe (lost connection) keeps the job and asks again', async () => {
+      findSessionSpy.mockReturnValue('task-bg-err')
+      probeBackgroundJobsSpy.mockRejectedValueOnce(new Error('disposed')).mockResolvedValue([])
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg-err', 'j'))
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-err', 1)
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-err', 0)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg-err')
+        await srv.close()
+      }
+    })
+
+    test('TaskStop clears the job at once', async () => {
+      findSessionSpy.mockReturnValue('task-bg-stop')
+      probeBackgroundJobsSpy.mockResolvedValue(['j'])
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-stop', 'j'))
+        await postJson(srv.port, {
+          agentId: 'claude-code',
+          hookEvent: 'PostToolUse',
+          taskId: 'task-bg-stop',
+          raw: {
+            tool_name: 'TaskStop',
+            tool_input: { task_id: 'j' },
+            tool_response: { task_id: 'j' }
+          }
+        })
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-stop', 0)
+      } finally {
+        evictAgentTree('task-bg-stop')
+        await srv.close()
+      }
+    })
+
+    test('SessionEnd resets the published count with the tree', async () => {
+      findSessionSpy.mockReturnValue('task-bg-end')
+      probeBackgroundJobsSpy.mockResolvedValue(['j'])
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-end', 'j'))
+        await postJson(srv.port, {
+          agentId: 'claude-code',
+          hookEvent: 'SessionEnd',
+          taskId: 'task-bg-end'
+        })
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-end', 0)
+      } finally {
+        await srv.close()
+      }
+    })
+
+    test('the TerminalState is untouched by a background job', async () => {
+      findSessionSpy.mockReturnValue('task-bg-state')
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-state', 'j'))
+        expect(transitionSpy).not.toHaveBeenCalled()
+      } finally {
+        evictAgentTree('task-bg-state')
+        await srv.close()
+      }
+    })
   })
 
   test('claude-code Stop → awaitingInput false (completed turn is hibernatable)', async () => {

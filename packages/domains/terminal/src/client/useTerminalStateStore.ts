@@ -39,6 +39,8 @@ function taskIdFromSessionId(sessionId: string): string {
 interface SessionInfoLite {
   sessionId: string
   state: TerminalState
+  /** Claude background jobs still running; absent = none. */
+  backgroundJobs?: number
 }
 
 export interface TerminalStateStore {
@@ -53,11 +55,17 @@ export interface TerminalStateStore {
    *  applied to that sid. Lets `reconcile` tell a fresher push apart from a
    *  `sessionList` snapshot dispatched before the push landed — see `reconcile`. */
   lastPushedAt: Record<string, number>
+  /** sessionId -> count of claude background jobs (Bash run_in_background /
+   *  Monitor) still running. Absent = none. A separate fact from `byId`: a
+   *  running dev server doesn't change the agent's state. */
+  jobsById: Record<string, number>
 
   /** pty:state-change → adopt newState (swallow the kill's 'dead' while hibernated). */
   applyStateChange: (sessionId: string, newState: TerminalState) => void
   /** pty:exit → 'dead' (preserve 'hibernated'). */
   applyExit: (sessionId: string) => void
+  /** pty:background-jobs → adopt the count. */
+  applyBackgroundJobs: (sessionId: string, count: number) => void
   /** pty:hibernated → synthesize 'hibernated'. */
   applyHibernated: (sessionId: string) => void
   /** resetTaskState/cleanupTask → forget a session entirely. */
@@ -89,6 +97,7 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
     byId: {},
     hibernated: {},
     lastPushedAt: {},
+    jobsById: {},
 
     applyStateChange: (sessionId, newState) =>
       set((s) => {
@@ -107,9 +116,29 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
     applyExit: (sessionId) =>
       set((s) => {
         const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
-        if (s.hibernated[sessionId]) return { lastPushedAt } // keep 'hibernated', not 'dead'
-        if (s.byId[sessionId] === 'dead') return { lastPushedAt }
-        return { byId: { ...s.byId, [sessionId]: 'dead' }, lastPushedAt }
+        // A dead pty took its background jobs with it.
+        const { [sessionId]: _j, ...jobsById } = s.jobsById
+        const jobs = sessionId in s.jobsById ? { jobsById } : {}
+        if (s.hibernated[sessionId]) return { lastPushedAt, ...jobs } // keep 'hibernated', not 'dead'
+        if (s.byId[sessionId] === 'dead') return { lastPushedAt, ...jobs }
+        return {
+          byId: { ...s.byId, [sessionId]: 'dead' },
+          lastPushedAt,
+          ...jobs
+        }
+      }),
+
+    applyBackgroundJobs: (sessionId, count) =>
+      set((s) => {
+        const lastPushedAt = { ...s.lastPushedAt, [sessionId]: Date.now() }
+        if ((s.jobsById[sessionId] ?? 0) === count) return { lastPushedAt }
+        if (count > 0)
+          return {
+            jobsById: { ...s.jobsById, [sessionId]: count },
+            lastPushedAt
+          }
+        const { [sessionId]: _j, ...jobsById } = s.jobsById
+        return { jobsById, lastPushedAt }
       }),
 
     applyHibernated: (sessionId) =>
@@ -124,20 +153,26 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
         const { [sessionId]: _b, ...byId } = s.byId
         const { [sessionId]: _h, ...hibernated } = s.hibernated
         const { [sessionId]: _p, ...lastPushedAt } = s.lastPushedAt
-        return { byId, hibernated, lastPushedAt }
+        const { [sessionId]: _j, ...jobsById } = s.jobsById
+        return { byId, hibernated, lastPushedAt, jobsById }
       }),
 
     hydrate: (sessions) =>
       set((s) => {
         const byId = { ...s.byId }
+        const jobsById = { ...s.jobsById }
         let changed = false
-        for (const { sessionId, state } of sessions) {
+        for (const { sessionId, state, backgroundJobs } of sessions) {
           if (byId[sessionId] === undefined) {
             byId[sessionId] = state
             changed = true
           }
+          if (backgroundJobs && jobsById[sessionId] === undefined) {
+            jobsById[sessionId] = backgroundJobs
+            changed = true
+          }
         }
-        return changed ? { byId } : {}
+        return changed ? { byId, jobsById } : {}
       }),
 
     reconcile: (sessions, hibernatedIds, dispatchedAt) =>
@@ -211,7 +246,20 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
           }
         }
 
-        return changed ? { byId, hibernated } : {}
+        // Pass 3 — background-job counts: the list is authoritative for every
+        // sid it doesn't contradict a fresher push for (absent = none).
+        const jobsById = { ...s.jobsById }
+        const listedJobs = new Map(sessions.map((x) => [x.sessionId, x.backgroundJobs ?? 0]))
+        for (const sid of new Set([...Object.keys(jobsById), ...listedJobs.keys()])) {
+          if (isStale(sid)) continue
+          const want = listedJobs.get(sid) ?? 0
+          if ((jobsById[sid] ?? 0) === want) continue
+          if (want > 0) jobsById[sid] = want
+          else delete jobsById[sid]
+          changed = true
+        }
+
+        return changed ? { byId, hibernated, jobsById } : {}
       }),
 
     getSessionState: (sessionId) => get().byId[sessionId] ?? 'starting'
@@ -233,6 +281,11 @@ export function useSessionState(sessionId: string): TerminalState {
  *  without a live terminal, vs a styled dot once a session exists. */
 export function useSessionStateRaw(sessionId: string): TerminalState | undefined {
   return useTerminalStateStore((s) => s.byId[sessionId])
+}
+
+/** Claude background jobs still running in a session (0 = none). */
+export function useSessionBackgroundJobs(sessionId: string): number {
+  return useTerminalStateStore((s) => s.jobsById[sessionId] ?? 0)
 }
 
 /** Task-level state — the task's MAIN session is `${taskId}:${taskId}`. */
@@ -297,13 +350,24 @@ async function pullReconcile(): Promise<void> {
     const clients = listHubClients()
     const perHub = await Promise.all(
       (clients.length > 0 ? clients.map((c) => c.client) : [getTrpcClient()]).map((c) =>
-        c.pty.sessionList.query().catch(() => [] as Array<{ sessionId: string; state: string }>)
+        c.pty.sessionList.query().catch(
+          () =>
+            [] as Array<{
+              sessionId: string
+              state: string
+              backgroundJobs?: number
+            }>
+        )
       )
     )
     const sessions = perHub.flat()
     const hibernatedIds: string[] = []
     useTerminalStateStore.getState().reconcile(
-      sessions.map((s) => ({ sessionId: s.sessionId, state: s.state as TerminalState })),
+      sessions.map((s) => ({
+        sessionId: s.sessionId,
+        state: s.state as TerminalState,
+        backgroundJobs: s.backgroundJobs
+      })),
       hibernatedIds,
       dispatchedAt
     )
@@ -344,6 +408,12 @@ export function useWireTerminalStateStore(): void {
   )
 
   useSubscription(
+    trpc.pty.onBackgroundJobs.subscriptionOptions(undefined, {
+      onData: ({ sessionId, count }) => store().applyBackgroundJobs(sessionId, count)
+    })
+  )
+
+  useSubscription(
     trpc.pty.onHibernated.subscriptionOptions(undefined, {
       onData: ({ sessionId }) => store().applyHibernated(sessionId)
     })
@@ -357,7 +427,13 @@ export function useWireTerminalStateStore(): void {
     trpcClient.pty.sessionList
       .query()
       .then((sessions) =>
-        st().hydrate(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
+        st().hydrate(
+          sessions.map((s) => ({
+            sessionId: s.sessionId,
+            state: s.state,
+            backgroundJobs: s.backgroundJobs
+          }))
+        )
       )
       .catch(() => {
         // Seed only: the store already defaults every session to "unknown", and

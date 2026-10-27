@@ -1,7 +1,7 @@
 import type { SessionInfo, TerminalState } from '../shared/types'
 
 interface MergeInputs {
-  ptys: ReadonlyArray<{ sessionId: string; state: TerminalState }>
+  ptys: ReadonlyArray<{ sessionId: string; state: TerminalState; backgroundJobs?: number }>
   chats: ReadonlyArray<{ sessionId: string; state: TerminalState }>
 }
 
@@ -21,7 +21,12 @@ export function mergeSessions({ ptys, chats }: MergeInputs): SessionInfo[] {
   const seen = new Set<string>()
 
   for (const p of ptys) {
-    out.push({ sessionId: p.sessionId, state: p.state, kind: 'pty' })
+    out.push({
+      sessionId: p.sessionId,
+      state: p.state,
+      kind: 'pty',
+      ...(p.backgroundJobs ? { backgroundJobs: p.backgroundJobs } : {})
+    })
     seen.add(p.sessionId)
   }
 

@@ -64,6 +64,25 @@ export interface AgentTree {
    *  same id (verified 400/400 in live diagnostics), so entries are added and
    *  removed by identity — a missed event can't corrupt a counter. */
   subagents: Set<string>
+  /** Background jobs claude started (`Bash` run_in_background or auto-backgrounded
+   *  on timeout, `Monitor`), keyed by claude's task id. Deliberately NOT part of
+   *  {@link resolveState}: a long-lived dev server must not hold the session out
+   *  of 'idle' — the turn ending still has to fire the amber "your turn" cue. It
+   *  is a separate fact (sidebar indicator + idle-close guard). Claude fires NO
+   *  hook when a job exits on its own, so the hook route prunes this against the
+   *  computer's process table ({@link dropBackgroundJobs}). */
+  backgroundJobs: Map<string, BackgroundJob>
+}
+
+export type BackgroundJobKind = 'shell' | 'monitor'
+
+export interface BackgroundJob {
+  /** claude's task id (`bg7siv1aw`) — what `TaskStop` and the output file name use. */
+  id: string
+  /** `shell`: Bash; its stdout is `<…>/tasks/<id>.output`. `monitor`: Monitor;
+   *  stdout is a pipe, so only its command line identifies it. */
+  kind: BackgroundJobKind
+  command: string | null
 }
 
 /** One hook, reduced to only what the tree cares about. */
@@ -78,7 +97,12 @@ export interface AgentHookSignal {
 }
 
 export function createAgentTree(): AgentTree {
-  return { mainWorking: false, awaitingUser: false, subagents: new Set() }
+  return {
+    mainWorking: false,
+    awaitingUser: false,
+    subagents: new Set(),
+    backgroundJobs: new Map()
+  }
 }
 
 /** Extract the subagent id from a raw claude hook payload (`agent_id`). Returns
@@ -171,4 +195,60 @@ export function applyAgentHook(tree: AgentTree, sig: AgentHookSignal): TerminalS
       // SessionStart / PreCompact / unknown: alive, but no state opinion.
       return null
   }
+}
+
+/** Tools that stop a background job by id. `KillShell` is the pre-`TaskStop` name. */
+const BACKGROUND_JOB_STOP_TOOLS: ReadonlySet<string> = new Set(['TaskStop', 'KillShell'])
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+/**
+ * Fold one hook into the tree's background-job set. Returns whether the set
+ * changed. Main loop and subagents alike (a subagent's job outlives nothing
+ * special — it is the same claude process's child).
+ *
+ * Only `PostToolUse` carries the job id (claude assigns it when the tool returns):
+ *   Bash    → `tool_response.backgroundTaskId` (explicit run_in_background AND a
+ *             foreground command auto-backgrounded on timeout)
+ *   Monitor → `tool_response.taskId`
+ *   TaskStop / KillShell → `tool_response.task_id` / `tool_input.task_id|shell_id`
+ */
+export function applyBackgroundJobHook(tree: AgentTree, hookEvent: string, raw: unknown): boolean {
+  if (hookEvent !== 'PostToolUse' || !raw || typeof raw !== 'object') return false
+  const r = raw as {
+    tool_name?: unknown
+    tool_input?: Record<string, unknown>
+    tool_response?: Record<string, unknown>
+  }
+  const tool = str(r.tool_name)
+  const input = r.tool_input && typeof r.tool_input === 'object' ? r.tool_input : {}
+  const response = r.tool_response && typeof r.tool_response === 'object' ? r.tool_response : {}
+
+  if (tool && BACKGROUND_JOB_STOP_TOOLS.has(tool)) {
+    const id = str(response.task_id) ?? str(input.task_id) ?? str(input.shell_id)
+    return id !== null && tree.backgroundJobs.delete(id)
+  }
+
+  let job: BackgroundJob | null = null
+  if (tool === 'Bash') {
+    const id = str(response.backgroundTaskId)
+    if (id) job = { id, kind: 'shell', command: str(input.command) }
+  } else if (tool === 'Monitor') {
+    const id = str(response.taskId)
+    if (id) job = { id, kind: 'monitor', command: str(input.command) }
+  }
+  if (!job || tree.backgroundJobs.has(job.id)) return false
+  tree.backgroundJobs.set(job.id, job)
+  return true
+}
+
+/** Forget jobs whose process is gone. Returns whether any were tracked. Takes
+ *  the dead ids, not the alive ones: a liveness probe only speaks for the jobs it
+ *  was asked about, never for one started while it was in flight. */
+export function dropBackgroundJobs(tree: AgentTree, deadIds: Iterable<string>): boolean {
+  let changed = false
+  for (const id of deadIds) changed = tree.backgroundJobs.delete(id) || changed
+  return changed
 }

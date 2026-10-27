@@ -24,7 +24,7 @@ import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
 import { AlarmClockOff, GitMerge } from 'lucide-react'
-import { useTaskTerminalState } from '@slayzone/terminal'
+import { useSessionBackgroundJobs, useTaskTerminalState } from '@slayzone/terminal'
 import type { CardProperties } from './FilterState'
 
 function formatTimeLeft(until: string): string {
@@ -83,6 +83,7 @@ export function KanbanCard({
 
   // Terminal state from the reactive store (main session = taskId:taskId).
   const terminalState = useTaskTerminalState(task.id)
+  const backgroundJobs = useSessionBackgroundJobs(`${task.id}:${task.id}`)
 
   useEffect(() => {
     if (
@@ -188,8 +189,10 @@ export function KanbanCard({
                     const isDone = isCompletedStatus(task.status, columns)
                     const showProgress = progress > 0 && !isDone
                     if (!stateStyle && !showProgress) return null
+                    const jobs = terminalOn ? backgroundJobs : 0
                     const tooltipText = [
                       stateStyle?.label,
+                      jobs > 0 ? `${jobs} background job${jobs === 1 ? '' : 's'}` : null,
                       showProgress ? `${Math.round(progress)}%` : null
                     ]
                       .filter(Boolean)
@@ -209,6 +212,7 @@ export function KanbanCard({
                             state={stateForBlob}
                             progress={progress}
                             isDone={isDone}
+                            backgroundJobs={jobs}
                             alwaysShow
                             noTooltip
                             size={10}

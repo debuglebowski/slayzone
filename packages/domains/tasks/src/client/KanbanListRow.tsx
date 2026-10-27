@@ -18,7 +18,7 @@ import {
   PriorityIcon
 } from '@slayzone/ui'
 import { AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
-import { useSessionState } from '@slayzone/terminal'
+import { useSessionBackgroundJobs, useSessionState } from '@slayzone/terminal'
 import { formatSnoozeTimeLeft } from './KanbanListView.utils'
 
 function PriorityBar({ priority }: { priority: number }): React.JSX.Element {
@@ -38,12 +38,13 @@ function PriorityBar({ priority }: { priority: number }): React.JSX.Element {
 
 function TerminalDot({ taskId }: { taskId: string }): React.JSX.Element | null {
   const terminalState = useSessionState(`${taskId}:${taskId}`)
+  const backgroundJobs = useSessionBackgroundJobs(`${taskId}:${taskId}`)
 
   if (terminalState === 'starting') return null
   const style = getTerminalStateStyle(terminalState)
   if (!style) return null
 
-  return <TerminalProgressDot state={terminalState} />
+  return <TerminalProgressDot state={terminalState} backgroundJobs={backgroundJobs} />
 }
 
 // ── Sortable list row ──

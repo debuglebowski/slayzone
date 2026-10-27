@@ -14,7 +14,14 @@
  */
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { applyAgentHook, createAgentTree, resolveState, subagentIdOf } from './agent-tree'
+import {
+  applyAgentHook,
+  applyBackgroundJobHook,
+  createAgentTree,
+  resolveState,
+  dropBackgroundJobs,
+  subagentIdOf
+} from './agent-tree'
 import type { AgentTree } from './agent-tree'
 
 const SUB = 'a283110c20b8651d8'
@@ -169,4 +176,132 @@ test('SessionEnd clears the turn and reports remaining helpers', () => {
   assert.equal(main(t, 'SessionEnd'), 'idle')
   sub(t, 'PreToolUse', SUB, 'Bash')
   assert.equal(main(t, 'SessionEnd'), 'background')
+})
+
+// --- agent-tree: background jobs (Bash run_in_background / Monitor) ---
+
+// Payload shapes copied from live claude 2.1.311 hooks (dev-hub diagnostics).
+const bgBashPost = (id: string, command = 'sleep 300') => ({
+  hook_event_name: 'PostToolUse',
+  tool_name: 'Bash',
+  tool_input: { command, run_in_background: true },
+  tool_response: {
+    stdout: '',
+    stderr: '',
+    interrupted: false,
+    backgroundTaskId: id
+  }
+})
+const monitorPost = (id: string, command = 'tail -f log') => ({
+  hook_event_name: 'PostToolUse',
+  tool_name: 'Monitor',
+  tool_input: { command, description: 'x', timeout_ms: 60000 },
+  tool_response: { taskId: id, timeoutMs: 60000, persistent: false }
+})
+const taskStopPost = (id: string) => ({
+  hook_event_name: 'PostToolUse',
+  tool_name: 'TaskStop',
+  tool_input: { task_id: id },
+  tool_response: {
+    message: 'Successfully stopped task',
+    task_id: id,
+    task_type: 'local_bash'
+  }
+})
+
+test('explicit run_in_background Bash registers a shell job', () => {
+  const t = createAgentTree()
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('bg7siv1aw')), true)
+  assert.deepEqual(
+    [...t.backgroundJobs.values()],
+    [{ id: 'bg7siv1aw', kind: 'shell', command: 'sleep 300' }]
+  )
+})
+
+test('a foreground Bash auto-backgrounded on timeout registers too', () => {
+  const t = createAgentTree()
+  const raw = bgBashPost('b9hnjq8y3', 'grep -r x .')
+  delete (raw.tool_input as { run_in_background?: boolean }).run_in_background
+  ;(raw.tool_response as Record<string, unknown>).timedOutAfterMs = 120000
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', raw), true)
+  assert.equal(t.backgroundJobs.get('b9hnjq8y3')?.kind, 'shell')
+})
+
+test('Monitor registers a monitor job with its command', () => {
+  const t = createAgentTree()
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', monitorPost('b9pbuzi0i')), true)
+  assert.deepEqual(t.backgroundJobs.get('b9pbuzi0i'), {
+    id: 'b9pbuzi0i',
+    kind: 'monitor',
+    command: 'tail -f log'
+  })
+})
+
+test('a plain foreground Bash / PreToolUse / other tools register nothing', () => {
+  const t = createAgentTree()
+  const fg = {
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+    tool_response: { stdout: '' }
+  }
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', fg), false)
+  assert.equal(applyBackgroundJobHook(t, 'PreToolUse', bgBashPost('x1')), false)
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', { tool_name: 'Read' }), false)
+  assert.equal(applyBackgroundJobHook(t, 'Stop', undefined), false)
+  assert.equal(t.backgroundJobs.size, 0)
+})
+
+test('TaskStop removes the job by id; unknown id is a no-op', () => {
+  const t = createAgentTree()
+  applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('a1'))
+  applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('a2'))
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', taskStopPost('nope')), false)
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', taskStopPost('a1')), true)
+  assert.deepEqual([...t.backgroundJobs.keys()], ['a2'])
+})
+
+test('legacy KillShell (shell_id) removes the job', () => {
+  const t = createAgentTree()
+  applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('a1'))
+  const kill = {
+    tool_name: 'KillShell',
+    tool_input: { shell_id: 'a1' },
+    tool_response: {}
+  }
+  assert.equal(applyBackgroundJobHook(t, 'PostToolUse', kill), true)
+  assert.equal(t.backgroundJobs.size, 0)
+})
+
+test('a subagent-launched background job is tracked like a main-loop one', () => {
+  const t = createAgentTree()
+  assert.equal(
+    applyBackgroundJobHook(t, 'PostToolUse', {
+      ...bgBashPost('s1'),
+      agent_id: SUB
+    }),
+    true
+  )
+  assert.equal(t.backgroundJobs.size, 1)
+})
+
+test('background jobs never change the TerminalState ladder', () => {
+  // A long-lived dev server must not hold the session in 'background': the turn
+  // ending has to reach 'idle' so the amber "your turn" cue still fires.
+  const t = createAgentTree()
+  main(t, 'UserPromptSubmit')
+  applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('dev'))
+  assert.equal(main(t, 'Stop'), 'idle')
+  assert.equal(resolveState(t), 'idle')
+})
+
+test('dropBackgroundJobs removes exactly the given ids', () => {
+  // The probe result only speaks for the ids it was asked about: a job started
+  // while the probe was in flight must survive it.
+  const t = createAgentTree()
+  applyBackgroundJobHook(t, 'PostToolUse', bgBashPost('a1'))
+  applyBackgroundJobHook(t, 'PostToolUse', monitorPost('m1'))
+  assert.equal(dropBackgroundJobs(t, []), false)
+  assert.equal(dropBackgroundJobs(t, ['not-tracked']), false)
+  assert.equal(dropBackgroundJobs(t, ['a1']), true)
+  assert.deepEqual([...t.backgroundJobs.keys()], ['m1'])
 })

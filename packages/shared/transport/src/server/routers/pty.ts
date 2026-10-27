@@ -189,6 +189,15 @@ export const ptyRouter = router({
       return () => ev.off('state-change', handler)
     })
   ),
+  /** Claude background-job count per session (Bash run_in_background / Monitor). */
+  onBackgroundJobs: publicProcedure.subscription(() =>
+    observable<{ sessionId: string; count: number }>((emit) => {
+      const handler = (sessionId: string, count: number): void => emit.next({ sessionId, count })
+      const ev = getPtyDeps().events
+      ev.on('background-jobs', handler)
+      return () => ev.off('background-jobs', handler)
+    })
+  ),
   onTitleChange: publicProcedure.subscription(() =>
     observable<{ sessionId: string; title: string }>((emit) => {
       const handler = (sessionId: string, title: string): void => emit.next({ sessionId, title })

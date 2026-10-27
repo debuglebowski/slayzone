@@ -220,8 +220,9 @@ export function shouldFlipToIdle(
  * ALL guards must pass, so anything unknown/unresumable simply isn't a candidate.
  *
  * Two-axis model:
- *   - AGENT axis: `state === 'idle'` (not working) and `!awaitingUser` (not
- *     blocked mid-interaction) — both hook-driven, authoritative.
+ *   - AGENT axis: `state === 'idle'` (not working), `!awaitingUser` (not
+ *     blocked mid-interaction) and no background job left running — all
+ *     hook-driven, authoritative.
  *   - USER axis: `now - lastUserInteractionAt >= idleMs` — the renderer reports
  *     real DOM interaction; a typed draft = recent keydown = fresh clock, so no
  *     separate draft heuristic is needed.
@@ -236,6 +237,9 @@ export function shouldHibernate(opts: {
   resumeEligible: boolean
   hasConversationId: boolean
   awaitingUser: boolean
+  /** Background jobs (Bash run_in_background / Monitor) the agent left running.
+   *  Hibernating kills the pty and every one of them with it. */
+  backgroundJobs: number
   state: TerminalState
   /** Timestamp of the last genuine user interaction (renderer DOM events). */
   lastUserInteractionAt: number
@@ -249,6 +253,7 @@ export function shouldHibernate(opts: {
     opts.resumeEligible &&
     opts.hasConversationId &&
     !opts.awaitingUser &&
+    opts.backgroundJobs === 0 &&
     opts.state === 'idle' &&
     opts.now - opts.lastUserInteractionAt >= opts.idleMs
   )

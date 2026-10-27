@@ -183,6 +183,24 @@ export interface PtyBackend {
    * and fire-and-forget — a session that already started is unaffected.
    */
   prioritize?(sessionId: string): void
+  /**
+   * Which of claude's background jobs still have a live process under this
+   * session (claude fires no hook when one exits on its own). Resolves `null`
+   * when nothing can tell — no owner for the session, a platform that can't
+   * inspect processes, a computer that predates the request — and the caller
+   * then treats every job as finished. Rejects on a transient failure (lost
+   * connection): the caller keeps what it had and asks again.
+   *
+   * Optional: only the routing backend can answer; agents never run hub-local.
+   */
+  probeBackgroundJobs?(sessionId: string, jobs: BackgroundJobQuery[]): Promise<string[] | null>
+}
+
+/** One claude background job as the hook route knows it — see `agent-tree.ts`. */
+export interface BackgroundJobQuery {
+  id: string
+  kind: 'shell' | 'monitor'
+  command: string | null
 }
 
 /**

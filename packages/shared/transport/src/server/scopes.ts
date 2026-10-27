@@ -645,6 +645,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.modesRestoreDefaults': 'never',
   'pty.modesTest': 'never',
   'pty.modesUpdate': 'never',
+  'pty.onBackgroundJobs': 'agent',
   'pty.onData': 'agent',
   'pty.onDevServerDetected': 'agent',
   'pty.onEnsureAlive': 'agent',

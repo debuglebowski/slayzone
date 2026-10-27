@@ -5,6 +5,8 @@ import { mapEventType } from '@slayzone/terminal/shared'
 import {
   isHookDrivenMode,
   applyAgentHook,
+  applyBackgroundJobHook,
+  dropBackgroundJobs,
   createAgentTree,
   subagentIdOf,
   unadoptedWarmAgent,
@@ -64,6 +66,66 @@ const agentTrees = new Map<string, AgentTree>()
  */
 export function evictAgentTree(sessionId: string): void {
   agentTrees.delete(sessionId)
+  stopBackgroundJobPoll(sessionId)
+}
+
+/**
+ * Background-job liveness polls — one per session with claude background jobs
+ * in flight (`AgentTree.backgroundJobs`).
+ *
+ * Claude reports a job's START (`PostToolUse` → its id) and an explicit
+ * `TaskStop`, but fires NO hook when a job exits on its own — verified: a
+ * `sleep 300` finishing mid-turn produced nothing. So while a session has jobs,
+ * the route asks the process owner (`bridge.probeBackgroundJobs` → the computer)
+ * which are still alive, every {@link BACKGROUND_JOB_POLL_MS}. Self-terminating:
+ * the chain stops once the set is empty, and on eviction (pty exit/SessionEnd).
+ */
+const BACKGROUND_JOB_POLL_MS = 3_000
+const backgroundJobPolls = new Map<string, ReturnType<typeof setTimeout>>()
+
+function stopBackgroundJobPoll(sessionId: string): void {
+  const timer = backgroundJobPolls.get(sessionId)
+  if (timer) clearTimeout(timer)
+  backgroundJobPolls.delete(sessionId)
+}
+
+/** Publish the session's job count and (re)arm or stop its poll to match. */
+function syncBackgroundJobs(sessionId: string, bridge: TerminalStateBridge): void {
+  const count = agentTrees.get(sessionId)?.backgroundJobs.size ?? 0
+  bridge.noteBackgroundJobs?.(sessionId, count)
+  if (count === 0) {
+    stopBackgroundJobPoll(sessionId)
+    return
+  }
+  if (backgroundJobPolls.has(sessionId)) return
+  const timer = setTimeout(() => {
+    backgroundJobPolls.delete(sessionId)
+    void pollBackgroundJobs(sessionId, bridge)
+  }, BACKGROUND_JOB_POLL_MS)
+  timer.unref?.()
+  backgroundJobPolls.set(sessionId, timer)
+}
+
+async function pollBackgroundJobs(sessionId: string, bridge: TerminalStateBridge): Promise<void> {
+  const tree = agentTrees.get(sessionId)
+  if (!tree || !bridge.probeBackgroundJobs) return
+  const asked = [...tree.backgroundJobs.values()]
+  let alive: string[] | null
+  try {
+    alive = await bridge.probeBackgroundJobs(sessionId, asked)
+  } catch {
+    // Transient (lost connection): keep what we have and ask again. A computer
+    // that is gone for good ends in pty exit → eviction, which stops the chain.
+    alive = asked.map((j) => j.id)
+  }
+  // Evicted / replaced while the probe was in flight: that tree is not ours.
+  if (agentTrees.get(sessionId) !== tree) return
+  const aliveSet = new Set(alive ?? [])
+  dropBackgroundJobs(
+    tree,
+    asked.filter((j) => !aliveSet.has(j.id)).map((j) => j.id)
+  )
+  syncBackgroundJobs(sessionId, bridge)
 }
 
 function treeFor(sessionId: string): AgentTree {
@@ -187,11 +249,13 @@ const CONVERSATION_ID_CAPTURE_EVENT: Record<string, string> = {
 const firstTurnMarked = new Set<string>()
 
 /**
- * E2E reset: drop every agent tree and first-turn mark. The e2e reset wipes the DB
- * in-process (no side-car restart), so without this a reused session id inherits a
- * stale tree and a reused conversation id skips its first-turn write.
+ * E2E reset: drop every agent tree, poll and first-turn mark. The e2e reset wipes
+ * the DB in-process (no side-car restart), so without this a reused session id
+ * inherits a stale tree and a reused conversation id skips its first-turn write.
  */
 export function resetAgentHookStateForTest(): void {
+  for (const timer of backgroundJobPolls.values()) clearTimeout(timer)
+  backgroundJobPolls.clear()
   agentTrees.clear()
   firstTurnMarked.clear()
 }
@@ -757,6 +821,21 @@ export async function processAgentHook(
         // the fail-safe doesn't flip running→idle mid-turn.
         bridge.markActive(sessionId)
       }
+
+      // Claude background jobs: a separate fact from the state above (see
+      // agent-tree.ts). Only tracked when something can probe their liveness —
+      // a count nothing could ever clear would stick forever.
+      if (
+        hook.agentId === 'claude-code' &&
+        bridge.probeBackgroundJobs &&
+        hook.hookEvent === 'PostToolUse' &&
+        applyBackgroundJobHook(treeFor(sessionId), hook.hookEvent, hook.raw)
+      ) {
+        syncBackgroundJobs(sessionId, bridge)
+      }
+      // SessionEnd evicted the tree (and its jobs) above; the PTY may live on
+      // (`/clear`), so its published count must not outlive the tree.
+      if (hook.hookEvent === 'SessionEnd') bridge.noteBackgroundJobs?.(sessionId, 0)
 
       // Feed the idle-close gate the authoritative "blocked on user" signal —
       // distinguishes a paused-mid-interaction agent (don't hibernate) from a

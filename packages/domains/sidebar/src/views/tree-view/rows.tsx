@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, GitBranch, Pin, Power, X } from 'lucide-reac
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { DraggableSyntheticListeners } from '@dnd-kit/core'
-import { useSessionStateRaw } from '@slayzone/terminal'
+import { useSessionBackgroundJobs, useSessionStateRaw } from '@slayzone/terminal'
 import {
   cn,
   TerminalProgressDot,
@@ -151,6 +151,7 @@ function TaskRowView({
   const isOpenTab = ctx.openTabTaskIds.has(task.id)
   const isSelected = ctx.selectedTaskIds.has(task.id)
   const termState = useSessionStateRaw(`${task.id}:${task.id}`)
+  const backgroundJobs = useSessionBackgroundJobs(`${task.id}:${task.id}`)
   const progress = ctx.taskProgress?.get(task.id)
   const isDone = ctx.doneTaskIds?.has(task.id) ?? false
   const cols = ctx.columnsByProjectId?.get(task.project_id) ?? null
@@ -247,6 +248,7 @@ function TaskRowView({
           isDone={isDone}
           needsAttention={Boolean(task.needs_attention)}
           pauseOverridesAttention
+          backgroundJobs={backgroundJobs}
           alwaysShow
           tooltipSide="right"
           size={8}

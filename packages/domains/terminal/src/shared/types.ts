@@ -366,6 +366,8 @@ export interface PtyInfo {
   createdAt: number
   mode: TerminalMode
   state: TerminalState
+  /** Claude background jobs (Bash run_in_background / Monitor) still running. */
+  backgroundJobs: number
 }
 
 /**
@@ -378,6 +380,8 @@ export interface SessionInfo {
   sessionId: string
   state: TerminalState
   kind: 'pty' | 'chat'
+  /** Claude background jobs still running; absent = none. */
+  backgroundJobs?: number
 }
 
 /** Snapshot of one live chat session (transport: streaming JSON to subprocess). */

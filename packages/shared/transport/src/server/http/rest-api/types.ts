@@ -57,6 +57,18 @@ export interface TerminalStateBridge {
    *  gate never hibernates an agent paused mid-interaction (which reports the
    *  same 'idle' state as a completed turn). Optional for test stubs. */
   noteAwaitingInput?: (sessionId: string, awaiting: boolean) => void
+  /** Publish how many claude background jobs (Bash run_in_background / Monitor)
+   *  are still running — sidebar indicator + idle-close guard. Optional for test
+   *  stubs. */
+  noteBackgroundJobs?: (sessionId: string, count: number) => void
+  /** Which of `jobs` still have a live process (claude fires no hook when one
+   *  exits). `null` = can't tell → treat all as finished; reject = transient →
+   *  ask again. Absent → background jobs are not tracked at all (an indicator
+   *  nothing could ever clear is worse than none). */
+  probeBackgroundJobs?: (
+    sessionId: string,
+    jobs: ReadonlyArray<{ id: string; kind: 'shell' | 'monitor'; command: string | null }>
+  ) => Promise<string[] | null>
 }
 
 /** Structural completion-event bus the task ops emit on (Electron host passes

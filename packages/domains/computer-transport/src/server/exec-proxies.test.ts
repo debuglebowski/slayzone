@@ -724,7 +724,9 @@ describe('createRoutingPtyBackend', () => {
     const handle = backend.spawn(
       ptySpec({ startupTimeoutMs: 10_000, admission: 'background' })
     ) as PtyHandle
-    expect(requireCall(gateway, 'pty.spawn').params).toMatchObject({ admission: 'background' })
+    expect(requireCall(gateway, 'pty.spawn').params).toMatchObject({
+      admission: 'background'
+    })
 
     // Still waiting for its slot on the computer: the reveal is forwarded.
     backend.prioritize?.('sess-1')
@@ -739,6 +741,61 @@ describe('createRoutingPtyBackend', () => {
     backend.prioritize?.('sess-1')
     await settle()
     expect(gateway.requestsOf('pty.prioritize')).toHaveLength(1)
+  })
+
+  it('probeBackgroundJobs asks the computer that owns the session', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    gateway.onMethod('pty.backgroundJobs', () => ({
+      ok: true,
+      supported: true,
+      alive: ['j1']
+    }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (s) => s.computerId ?? null
+    })
+    const jobs = [
+      { id: 'j1', kind: 'shell' as const, command: 'pnpm dev' },
+      { id: 'j2', kind: 'monitor' as const, command: 'tail -f x' }
+    ]
+    // No session yet: nobody can tell.
+    await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).resolves.toBeNull()
+
+    await (backend.spawn(ptySpec()) as PtyHandle).whenSpawned
+    await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).resolves.toEqual(['j1'])
+    expect(requireCall(gateway, 'pty.backgroundJobs').params).toEqual({
+      sessionId: 'sess-1',
+      jobs
+    })
+  })
+
+  it('probeBackgroundJobs: unsupported platform / old computer → null; lost link → rejects', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 7 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (s) => s.computerId ?? null
+    })
+    await (backend.spawn(ptySpec()) as PtyHandle).whenSpawned
+    const jobs = [{ id: 'j1', kind: 'shell' as const, command: null }]
+
+    gateway.onMethod('pty.backgroundJobs', () => ({
+      ok: true,
+      supported: false,
+      alive: []
+    }))
+    await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).resolves.toBeNull()
+
+    gateway.onMethod('pty.backgroundJobs', () => {
+      throw new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented')
+    })
+    await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).resolves.toBeNull()
+
+    gateway.onMethod('pty.backgroundJobs', () => {
+      throw new RpcDisposedError('gone')
+    })
+    await expect(backend.probeBackgroundJobs?.('sess-1', jobs)).rejects.toThrow()
   })
 
   it('a spawn without admission never asks the computer to prioritize', async () => {

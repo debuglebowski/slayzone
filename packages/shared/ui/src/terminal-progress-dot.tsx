@@ -23,6 +23,12 @@ export interface TerminalProgressDotProps {
    * can show real state. Default: false (attention overrides every state).
    */
   pauseOverridesAttention?: boolean
+  /**
+   * Background jobs the agent left running (Bash run_in_background / Monitor).
+   * On a still dot (idle, attention, …) a slow spinning ring orbits it — work in
+   * flight, nothing needs you. Spinner states already say that, so they get none.
+   */
+  backgroundJobs?: number
   size?: number
   /** Larger footprint while running / loading. Default: same as `size`. */
   activeSize?: number
@@ -38,6 +44,7 @@ export function TerminalProgressDot({
   noTooltip = false,
   needsAttention = false,
   pauseOverridesAttention = false,
+  backgroundJobs = 0,
   size = 14,
   activeSize = size,
   className
@@ -64,6 +71,8 @@ export function TerminalProgressDot({
   const isStarting = !attentionWins && state === 'starting'
   // Hibernated (idle-closed) sessions show a pause icon instead of a dot.
   const isHibernated = !attentionWins && state === 'hibernated'
+  const showJobsOrbit =
+    backgroundJobs > 0 && showState && !isRunning && !isBackground && !isStarting && !isHibernated
 
   // Wrapper footprint is the constant max of size/activeSize, so the row layout
   // never shifts when a terminal goes active. The indicator renders at `size`
@@ -76,7 +85,12 @@ export function TerminalProgressDot({
   // pixel-perfect concentric.
   const renderSize = isRunning || isBackground ? activeSize : size
   const footprint = Math.max(size, activeSize)
-  const innerSize = Math.round((renderSize * 0.85) / 2) * 2
+  // With the jobs orbit (1.5px ring hugging the footprint) the dot must leave a
+  // ≥1px gap inside it, or the ring reads as the dot's own border.
+  const innerSize = Math.min(
+    Math.round((renderSize * 0.85) / 2) * 2,
+    showJobsOrbit ? Math.floor((footprint - 5) / 2) * 2 : Infinity
+  )
   // Progress ring is sized off `size`, not `renderSize`, so its radius stays
   // fixed regardless of terminal state.
   const ringSize = size + 6
@@ -94,6 +108,16 @@ export function TerminalProgressDot({
           strokeWidth={1.5}
           className="absolute"
           style={{ left: ringInset, top: ringInset }}
+        />
+      )}
+      {showJobsOrbit && (
+        <span
+          data-testid="background-jobs-orbit"
+          aria-hidden
+          className={cn(
+            'absolute inset-0 rounded-full border-[1.5px] border-transparent border-t-current animate-spin [animation-duration:1.5s]',
+            stateStyle?.textColor ?? 'text-muted-foreground'
+          )}
         />
       )}
       {showState &&
@@ -145,6 +169,9 @@ export function TerminalProgressDot({
 
   const tooltipText = [
     showState ? stateLabel : null,
+    backgroundJobs > 0
+      ? `${backgroundJobs} background job${backgroundJobs === 1 ? '' : 's'}`
+      : null,
     showProgress ? `${Math.round(progress!)}%` : null
   ]
     .filter(Boolean)

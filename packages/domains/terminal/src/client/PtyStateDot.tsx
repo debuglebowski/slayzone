@@ -1,6 +1,10 @@
 import { TerminalProgressDot, type TerminalProgressDotProps } from '@slayzone/ui'
 import type { TerminalState } from '../shared/types'
-import { useSessionState, useSessionStateRaw } from './useTerminalStateStore'
+import {
+  useSessionBackgroundJobs,
+  useSessionState,
+  useSessionStateRaw
+} from './useTerminalStateStore'
 
 /** Per-session terminal state. Backed by the reactive store (single source of
  *  truth); name/signature kept so existing callers are unchanged. */
@@ -12,7 +16,8 @@ export function useTerminalState(sessionId: string): TerminalState {
 // not "starting" — the starting spinner must only mean an agent really is starting.
 export function PtyStateDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {
   const state = useSessionStateRaw(sessionId)
-  return <TerminalProgressDot state={state} alwaysShow />
+  const backgroundJobs = useSessionBackgroundJobs(sessionId)
+  return <TerminalProgressDot state={state} backgroundJobs={backgroundJobs} alwaysShow />
 }
 
 export interface PtyProgressDotProps extends Omit<TerminalProgressDotProps, 'state'> {
@@ -24,5 +29,6 @@ export function PtyProgressDot({
   ...rest
 }: PtyProgressDotProps): React.JSX.Element | null {
   const state = useSessionStateRaw(sessionId)
-  return <TerminalProgressDot state={state} {...rest} />
+  const backgroundJobs = useSessionBackgroundJobs(sessionId)
+  return <TerminalProgressDot state={state} backgroundJobs={backgroundJobs} {...rest} />
 }

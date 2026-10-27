@@ -49,6 +49,7 @@ import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/proces
 import type { LocalWorkspaceFs, WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type {
+  BackgroundJobQuery,
   ChatBackend,
   ChatProcHandle,
   ChatSpawnSpec,
@@ -86,6 +87,7 @@ import {
   ptySpawnResultSchema,
   ptyWarmAdoptResultSchema,
   ptyWarmListResultSchema,
+  ptyBackgroundJobsResultSchema,
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema
 } from '../shared/frames'
@@ -1012,6 +1014,28 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     prioritize(sessionId: string) {
       for (const entry of sessions.values()) {
         if (entry.sessionId === sessionId && !entry.disposed) entry.prioritize?.()
+      }
+    },
+
+    async probeBackgroundJobs(sessionId: string, jobs: BackgroundJobQuery[]) {
+      let computerId: string | null = null
+      for (const entry of sessions.values()) {
+        if (entry.sessionId === sessionId && !entry.disposed) computerId = entry.computerId
+      }
+      if (computerId === null) return null
+      try {
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyBackgroundJobs, {
+          sessionId,
+          jobs
+        })
+        const parsed = ptyBackgroundJobsResultSchema.parse(res)
+        return parsed.supported ? parsed.alive : null
+      } catch (err) {
+        // A computer that predates the request can never answer: same as "can't tell".
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
+          return null
+        }
+        throw err
       }
     },
 

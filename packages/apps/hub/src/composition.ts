@@ -89,6 +89,8 @@ import {
   markSessionActiveFromHook,
   noteSessionConversationId,
   setSessionAwaitingInput,
+  setSessionBackgroundJobs,
+  probeSessionBackgroundJobs,
   configurePtyHost,
   onTaskReachedTerminal,
   runtimeOnTaskReachedTerminal,
@@ -1199,7 +1201,16 @@ export function composeServer(opts: {
     transition: transitionStateFromHook,
     markActive: markSessionActiveFromHook,
     noteConversationId: noteSessionConversationId,
-    noteAwaitingInput: setSessionAwaitingInput
+    noteAwaitingInput: setSessionAwaitingInput,
+    noteBackgroundJobs: setSessionBackgroundJobs,
+    probeBackgroundJobs: (
+      sessionId: string,
+      jobs: ReadonlyArray<{
+        id: string
+        kind: 'shell' | 'monitor'
+        command: string | null
+      }>
+    ) => probeSessionBackgroundJobs(sessionId, [...jobs])
   }
 
   // Drop the session's agent-tree (subagent-liveness tracker) so a killed PTY

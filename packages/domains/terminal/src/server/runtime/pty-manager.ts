@@ -30,6 +30,7 @@ import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 import {
   getPtyBackend,
   NodePtyUnavailableError,
+  type BackgroundJobQuery,
   type PtyExit,
   type PtyHandle,
   type PtySpawnAdmission,
@@ -118,6 +119,9 @@ export type PtyEventMap = {
   // incoming session's fresh state (too late the other way, once `exit`
   // finally arrives).
   replacing: [sessionId: string]
+  /** Count of claude background jobs (Bash run_in_background / Monitor) still
+   *  running under the session — a separate fact from `state` (see agent-tree.ts). */
+  'background-jobs': [sessionId: string, count: number]
   prompt: [sessionId: string, prompt: unknown]
   'session-detected': [sessionId: string, conversationId: string]
   'dev-server-detected': [sessionId: string, url: string]
@@ -333,6 +337,10 @@ interface PtySession {
   // can't distinguish them. NOT sourced from output detectPrompt — that fuzzy
   // signal (e.g. any line ending in '?') gave sticky false positives.
   awaitingUser?: boolean
+  // Claude background jobs (Bash run_in_background / Monitor) still running,
+  // per the agent-hook route. Sidebar indicator + blocks hibernation (the kill
+  // would take the jobs down with it).
+  backgroundJobs?: number
   // Armed cancellable timer between hibernate-warn and the kill.
   hibernateTimer?: NodeJS.Timeout
   // Set the instant the process's exit is finalized. The session then lingers
@@ -901,6 +909,7 @@ function isHibernateEligible(session: PtySession): boolean {
     resumeEligible: isResumeEligibleMode(session.mode),
     hasConversationId: !!session.conversationId,
     awaitingUser: !!session.awaitingUser,
+    backgroundJobs: session.backgroundJobs ?? 0,
     state: session.state,
     lastUserInteractionAt: session.lastUserInteractionAt,
     now: Date.now(),
@@ -1033,6 +1042,26 @@ export function setSessionAwaitingInput(sessionId: string, awaiting: boolean): v
   if (!session) return
   session.awaitingUser = awaiting
   if (awaiting) cancelHibernateCountdown(session)
+}
+
+/** Claude background-job count from the agent-hook route (it alone knows the
+ *  job set). Broadcast as its own event; a running job also aborts a pending
+ *  hibernate countdown. */
+export function setSessionBackgroundJobs(sessionId: string, count: number): void {
+  const session = sessions.get(sessionId)
+  if (!session || (session.backgroundJobs ?? 0) === count) return
+  session.backgroundJobs = count
+  if (count > 0) cancelHibernateCountdown(session)
+  ptyEvents.emit('background-jobs', sessionId, count)
+}
+
+/** Ask whoever owns the session's process which of `jobs` are still alive —
+ *  see `PtyBackend.probeBackgroundJobs` for the null/reject contract. */
+export function probeSessionBackgroundJobs(
+  sessionId: string,
+  jobs: BackgroundJobQuery[]
+): Promise<string[] | null> {
+  return getPtyBackend().probeBackgroundJobs?.(sessionId, jobs) ?? Promise.resolve(null)
 }
 
 // Start the inactivity checker interval
@@ -3210,7 +3239,8 @@ export async function listPtys(): Promise<PtyInfo[]> {
       lastOutputTime: session.lastOutputTime,
       createdAt: session.createdAt,
       mode: session.mode,
-      state: session.state
+      state: session.state,
+      backgroundJobs: session.backgroundJobs ?? 0
     })
   }
   return ptyEnricher ? await ptyEnricher(raw) : raw
