@@ -111,7 +111,7 @@ describe('useConsolidatedGeneralData — action handlers', () => {
       ['rebaseOnto', { path: '/wt', ontoBranch: 'main' }],
       ['mergeFrom', { path: '/wt', branch: 'main' }],
       ['mergeIntoParent', { projectPath: '/repo', parentBranch: 'main', sourceBranch: 'feature' }],
-      ['push', { path: '/wt', branch: 'feature' }],
+      ['push', { path: '/wt' }],
       ['pull', { path: '/wt' }]
     ])
     expect(toast.mock.calls.map((c) => c[0])).toEqual([
@@ -360,5 +360,43 @@ describe('useConsolidatedGeneralData — repo check failure', () => {
     const { result } = await setupIsGitRepo(() => Promise.resolve(false))
     expect(result.current.isGitRepo).toBe(false)
     expect(result.current.gitError).toBeNull()
+  })
+})
+
+// A task with a custom working directory (base_dir) runs in a checkout other than the
+// project's, often on another branch. Its header branch, upstream ahead/behind and
+// Push target must be THAT checkout's branch — the project's branch made Push run
+// `git push -u origin main` from the custom checkout.
+describe('useConsolidatedGeneralData — custom working directory', () => {
+  it('reports and syncs the checkout branch, not the project branch', async () => {
+    const client = new QueryClient()
+    const fetched: Array<[string, unknown]> = []
+    vi.spyOn(client, 'fetchQuery').mockImplementation((async (o: { queryKey: unknown[] }) => {
+      const [key, input] = o.queryKey as [string, { path?: string }]
+      fetched.push([key, input])
+      if (key === 'isGitRepo') return true
+      if (key === 'getCurrentBranch') return input.path === '/bd' ? 'feat' : 'main'
+      return queryResults[key] ?? null
+    }) as never)
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const bdTask = {
+      ...task,
+      worktree_path: null,
+      worktree_parent_branch: null,
+      base_dir: '/bd'
+    } as unknown as Task
+    const { result } = renderHook(
+      () => useConsolidatedGeneralData(bdTask, '/repo', true, 5000, async () => bdTask),
+      { wrapper }
+    )
+    await act(async () => {})
+    await act(async () => {})
+    expect(result.current.activeBranch).toBe('feat')
+    expect(result.current.worktreeBranch).toBe(null)
+    expect(result.current.currentBranch).toBe('main')
+    const aheadBehind = fetched.filter(([k]) => k === 'getAheadBehindUpstream').map(([, i]) => i)
+    expect(aheadBehind.at(-1)).toEqual({ path: '/bd', branch: 'feat' })
   })
 })

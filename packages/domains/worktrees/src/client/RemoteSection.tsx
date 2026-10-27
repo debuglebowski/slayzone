@@ -26,11 +26,10 @@ interface RemoteSectionProps {
   remoteUrl?: string
   upstreamAB: AheadBehind | null
   targetPath: string
-  branch: string | null
   onSyncDone: () => void
 }
 
-export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: RemoteSectionProps) {
+export function RemoteSection({ upstreamAB, targetPath, onSyncDone }: RemoteSectionProps) {
   const trpc = useTRPC()
   const pushMutation = useMutation(trpc.worktrees.push.mutationOptions())
   const pullMutation = useMutation(trpc.worktrees.pull.mutationOptions())
@@ -45,11 +44,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
       setPushMenuOpen(false)
       setForcePushConfirmOpen(false)
       try {
-        const result = await pushMutation.mutateAsync({
-          path: targetPath,
-          branch: branch ?? undefined,
-          force
-        })
+        const result = await pushMutation.mutateAsync({ path: targetPath, force })
         if (!result.success) {
           toast(result.error ?? 'Push failed')
         } else {
@@ -62,7 +57,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
         setPushing(false)
       }
     },
-    [targetPath, branch, onSyncDone]
+    [targetPath, onSyncDone]
   )
 
   const handlePull = useCallback(async () => {

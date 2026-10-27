@@ -106,7 +106,7 @@ export function GeneralTabContent({
   if (data.isGitRepo === false)
     return <NotGitRepoFallback onInit={data.handleInitGit} initializing={data.initializing} />
 
-  const activeBranch = data.hasWorktree ? data.worktreeBranch : data.currentBranch
+  const activeBranch = data.activeBranch
 
   return (
     <div className="h-full flex flex-col">
@@ -207,7 +207,6 @@ export function GeneralTabContent({
                   remoteUrl={data.remoteUrl ?? undefined}
                   upstreamAB={data.upstreamAB}
                   targetPath={data.targetPath}
-                  branch={activeBranch}
                   onSyncDone={() => {
                     data.fetchGitData()
                     branchGraph.refresh()

@@ -1278,7 +1278,7 @@ export interface _LegacyElectronAPI {
     getRemoteUrl: (path: string) => Promise<string | null>
     getAheadBehindUpstream: (path: string, branch: string) => Promise<AheadBehind | null>
     fetch: (path: string) => Promise<void>
-    push: (path: string, branch?: string, force?: boolean) => Promise<GitSyncResult>
+    push: (path: string, force?: boolean) => Promise<GitSyncResult>
     pull: (path: string) => Promise<GitSyncResult>
     // Branch tab
     getDefaultBranch: (path: string) => Promise<string>

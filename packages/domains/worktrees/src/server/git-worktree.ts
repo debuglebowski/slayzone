@@ -1349,15 +1349,29 @@ export async function gitFetch(repoPath: string): Promise<void> {
   await execGit(['fetch'], { cwd: repoPath })
 }
 
-export async function gitPush(
-  repoPath: string,
-  branch?: string,
-  force?: boolean
-): Promise<GitSyncResult> {
+/**
+ * Push the branch checked out at `repoPath`. Which branch is decided here, from git —
+ * never from a name the client sends: a stale or wrong name pushed another branch
+ * (`git push -u origin main` from a checkout on a feature branch). With an upstream,
+ * a plain push honors it; without one, HEAD is published to origin under its own
+ * name and tracked.
+ */
+export async function gitPush(repoPath: string, force?: boolean): Promise<GitSyncResult> {
   try {
+    const head = (await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })).trim()
+    if (head === 'HEAD') {
+      return { success: false, error: 'Not on a branch (detached HEAD) — nothing to push' }
+    }
+    const hasUpstream = await execGit(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+      { cwd: repoPath }
+    ).then(
+      () => true,
+      () => false
+    )
     const args = ['push']
     if (force) args.push('--force-with-lease')
-    if (branch) args.push('-u', 'origin', branch)
+    if (!hasUpstream) args.push('-u', 'origin', 'HEAD')
     await execGit(args, { cwd: repoPath })
     return { success: true }
   } catch (err) {

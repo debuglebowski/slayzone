@@ -40,8 +40,12 @@ export interface ConsolidatedGeneralData {
   isGitRepo: boolean | null
   /** The repo check itself failed (e.g. git could not be started); null otherwise. */
   gitError: string | null
+  /** The project checkout's branch (what a new worktree branches from). */
   currentBranch: string | null
   worktreeBranch: string | null
+  /** The branch the task works on: its own checkout's (worktree or custom working
+   *  directory), else the project's. Drives the header, upstream sync and Push. */
+  activeBranch: string | null
   statusSummary: StatusSummary | null
   remoteUrl: string | null
   upstreamAB: AheadBehind | null
@@ -121,13 +125,16 @@ export function useConsolidatedGeneralData(
   const { mutateAsync: pullBranch } = useMutation(trpc.worktrees.pull.mutationOptions())
   const hasWorktree = !!task.worktree_path
   const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
+  // The task's own checkout (worktree or custom working directory), when it isn't
+  // the project's — its branch is then independent of the project's.
+  const ownCheckout = targetPath && targetPath !== projectPath ? targetPath : null
   const parentBranch = task.worktree_parent_branch
 
   // General state
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
   const [gitError, setGitError] = useState<string | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
-  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null)
+  const [checkoutBranch, setCheckoutBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [upstreamAB, setUpstreamAB] = useState<AheadBehind | null>(null)
@@ -194,15 +201,22 @@ export function useConsolidatedGeneralData(
         return hash
       }
 
-      const [branch, remote] = await Promise.all([
+      const [branch, remote, ownBranch] = await Promise.all([
         queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
-        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }))
+        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath })),
+        // Read here rather than from state, so the first poll already syncs the
+        // checkout's branch instead of waiting for the next one.
+        ownCheckout
+          ? queryClient.fetchQuery(
+              trpc.worktrees.getCurrentBranch.queryOptions({ path: ownCheckout })
+            )
+          : Promise.resolve(null)
       ])
 
       let status: StatusSummary | null = null
       let uab: AheadBehind | null = null
       if (targetPath) {
-        const activeBranch = hasWorktree ? worktreeBranch : branch
+        const activeBranch = ownCheckout ? ownBranch : branch
         ;[status, uab] = await Promise.all([
           queryClient.fetchQuery(
             trpc.worktrees.getStatusSummary.queryOptions({ repoPath: targetPath })
@@ -234,7 +248,7 @@ export function useConsolidatedGeneralData(
     } catch {
       return null
     }
-  }, [projectPath, targetPath, hasWorktree, worktreeBranch, queryClient, trpc])
+  }, [projectPath, targetPath, ownCheckout, queryClient, trpc])
 
   // Fetch branch comparison data
   const fetchBranchData = useCallback(async () => {
@@ -300,27 +314,29 @@ export function useConsolidatedGeneralData(
     }
   }, [targetPath, projectPath, parentBranch, queryClient, trpc])
 
-  // Worktree branch. Each reactive fetch below drops its response once its inputs
-  // have changed, so a late answer for previous inputs can't replace current data.
-  // No linked worktree → no worktree branch: cleared while rendering (it is only read
-  // while a worktree is linked), which also clears an answer that landed before the
-  // previous fetch was cancelled.
-  if (!task.worktree_path && worktreeBranch !== null) setWorktreeBranch(null)
+  // Own-checkout branch (worktree or custom working directory). Each reactive fetch
+  // below drops its response once its inputs have changed, so a late answer for
+  // previous inputs can't replace current data. No own checkout → no checkout branch:
+  // cleared while rendering (it is only read while there is one), which also clears
+  // an answer that landed before the previous fetch was cancelled.
+  if (!ownCheckout && checkoutBranch !== null) setCheckoutBranch(null)
   useEffect(() => {
-    if (!task.worktree_path) return
+    if (!ownCheckout) return
     let cancelled = false
     queryClient
-      .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path }))
+      .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: ownCheckout }))
       .then((branch) => {
-        if (!cancelled) setWorktreeBranch(branch)
+        if (!cancelled) setCheckoutBranch(branch)
       })
       .catch(() => {
-        if (!cancelled) setWorktreeBranch(null)
+        if (!cancelled) setCheckoutBranch(null)
       })
     return () => {
       cancelled = true
     }
-  }, [task.worktree_path, queryClient, trpc])
+  }, [ownCheckout, queryClient, trpc])
+  const worktreeBranch = hasWorktree ? checkoutBranch : null
+  const activeBranch = ownCheckout ? checkoutBranch : currentBranch
 
   useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: pollIntervalMs })
   useStablePoll(fetchBranchData, {
@@ -684,7 +700,7 @@ export function useConsolidatedGeneralData(
           } else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
           else toast(result.error ?? 'Merge failed')
         } else if (action === 'push') {
-          const result = await pushBranch({ path: targetPath, branch: taskBranch })
+          const result = await pushBranch({ path: targetPath })
           toast(result.success ? 'Pushed' : (result.error ?? 'Push failed'))
         } else if (action === 'pull') {
           const result = await pullBranch({ path: targetPath })
@@ -760,6 +776,7 @@ export function useConsolidatedGeneralData(
     gitError,
     currentBranch,
     worktreeBranch,
+    activeBranch,
     statusSummary,
     remoteUrl,
     upstreamAB,

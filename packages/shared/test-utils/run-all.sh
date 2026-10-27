@@ -757,6 +757,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/worktrees/src/server/gh-pr-for-checkout.test.ts \
+  packages/domains/worktrees/src/server/git-push.test.ts \
   packages/domains/worktrees/src/client/pr-task-map.test.ts \
   packages/domains/worktrees/src/server/login-shell-path.test.ts \
   packages/domains/worktrees/src/server/spawn-failure.test.ts \

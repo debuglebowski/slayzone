@@ -393,7 +393,6 @@ export function ProjectGeneralTab({
                   remoteUrl={remoteUrl}
                   upstreamAB={upstreamAB}
                   targetPath={projectPath}
-                  branch={currentBranch}
                   onSyncDone={() => {
                     fetchGitData()
                     branchGraph.refresh()

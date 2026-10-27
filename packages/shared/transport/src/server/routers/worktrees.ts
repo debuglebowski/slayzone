@@ -288,8 +288,9 @@ export const worktreesRouter = router({
     .query(({ input }) => getAheadBehindUpstream(input.path, input.branch)),
   fetch: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitFetch(input.path)),
   push: hubLocalProcedure
-    .input(obj({ path: s, branch: s.optional(), force: z.boolean().optional() }))
-    .mutation(({ input }) => gitPush(input.path, input.branch, input.force)),
+    // No branch input: the server pushes what is checked out at `path` (see gitPush).
+    .input(obj({ path: s, force: z.boolean().optional() }))
+    .mutation(({ input }) => gitPush(input.path, input.force)),
   pull: hubLocalProcedure.input(obj({ path: s })).mutation(({ input }) => gitPull(input.path)),
 
   // Branch tab
