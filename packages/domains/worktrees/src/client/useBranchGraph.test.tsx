@@ -37,10 +37,14 @@ vi.mock('@slayzone/transport/client', () => {
           const d = deferred<Dag>()
           dagCalls.push({ path: input.path, d })
           return d.promise
-        })
+        }),
+        onDiffChanged: { subscriptionOptions: () => ({}) },
+        onDiffWatchFailed: { subscriptionOptions: () => ({}) }
       },
       settings: { get: q(async () => null) }
-    })
+    }),
+    useTRPCClient: () => ({}),
+    useSubscription: () => undefined
   }
 })
 vi.mock('@tanstack/react-query', () => ({
@@ -49,6 +53,9 @@ vi.mock('@tanstack/react-query', () => ({
 }))
 
 const { useBranchGraph } = await import('./useBranchGraph')
+const { _setGitDiffStoreTransport, _resetStore, notifyDiffChanged } = await import(
+  './git-diff-store'
+)
 
 let latest: ReturnType<typeof useBranchGraph>
 /** `loading` as of every commit. */
@@ -81,8 +88,17 @@ const hashes = () => latest.dagGraph?.commits.map((c) => c.hash) ?? null
 beforeEach(() => {
   dagCalls = []
   committed = []
+  _setGitDiffStoreTransport({
+    getWorkingDiff: () => new Promise(() => {}),
+    watchStart: async () => {},
+    watchStop: async () => {}
+  })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  _resetStore()
+  _setGitDiffStoreTransport(null)
+})
 
 describe('useBranchGraph', () => {
   it('shows loading until the first fetch for the path lands', async () => {
@@ -146,5 +162,23 @@ describe('useBranchGraph', () => {
     expect(committed.length).toBeGreaterThan(0)
     expect(committed.every((loading) => !loading)).toBe(true)
     expect(hashes()).toEqual(['c1'])
+  })
+
+  it('a git change in the repo re-reads the graph at once (no waiting for the poll)', async () => {
+    render(<Tab mode="visible" />)
+    await flush()
+    await land(0, dag('c1'))
+    expect(dagCalls).toHaveLength(1)
+
+    // A plain file edit doesn't move a ref: no re-read.
+    await act(async () => notifyDiffChanged('/repo', false))
+    await flush()
+    expect(dagCalls).toHaveLength(1)
+
+    await act(async () => notifyDiffChanged('/repo', true))
+    await flush()
+    expect(dagCalls).toHaveLength(2)
+    await land(1, dag('c2', 'c1'))
+    expect(hashes()).toEqual(['c2', 'c1'])
   })
 })

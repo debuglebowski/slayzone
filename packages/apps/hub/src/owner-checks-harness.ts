@@ -544,7 +544,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onResizeNeeded': (o) => getPtyDeps().events.emit('resize-needed', o.session),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
   'worktrees.onDiffChanged': (o) =>
-    getGitWatcher().emit('git:diff-changed', { worktreePath: o.path }),
+    getGitWatcher().emit('git:diff-changed', { worktreePath: o.path, refsChanged: true }),
   'worktrees.onDiffWatchFailed': (o) =>
     getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path }),
   // An `admin` subscription (T-106): a void signal, attributed to who caused it.

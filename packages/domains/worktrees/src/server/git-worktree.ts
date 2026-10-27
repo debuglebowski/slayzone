@@ -953,17 +953,47 @@ export async function unstageAll(repoPath: string): Promise<void> {
 
 export async function getUntrackedFileDiff(repoPath: string, filePath: string): Promise<string> {
   if (!filePath) return ''
-  try {
-    const devNull = platform() === 'win32' ? 'NUL' : '/dev/null'
-    return await execGit(['diff', '--no-index', '--no-ext-diff', '--', devNull, filePath], {
-      cwd: repoPath
-    })
-  } catch (err: unknown) {
-    // git diff --no-index exits with code 1 when files differ — expected
-    const e = err as { stdout?: string }
-    if (e.stdout) return e.stdout
-    throw err
+  const devNull = platform() === 'win32' ? 'NUL' : '/dev/null'
+  // Exit 1 = the files differ: the normal answer for a new file, logged as such.
+  const result = await execAsync(
+    'git',
+    ['diff', '--no-index', '--no-ext-diff', '--', devNull, filePath],
+    { cwd: repoPath, okExitCodes: [0, 1] }
+  )
+  // Exit 1 with no patch is git's "could not access" (file gone meanwhile) — an error.
+  if (result.status === 0 || result.stdout) return result.stdout
+  throw new Error(
+    result.stderr.trim() || `git command failed: git diff --no-index -- ${devNull} ${filePath}`
+  )
+}
+
+/** Concurrent gits for one untracked-diff batch — a fresh dir of 500 files must not
+ *  start 500 processes at once. */
+const UNTRACKED_DIFF_CONCURRENCY = 8
+
+/**
+ * Patches for a batch of untracked files, keyed by path. A file that can't be read
+ * (deleted meanwhile, unreadable) is left out rather than failing the batch.
+ */
+export async function getUntrackedFileDiffs(
+  repoPath: string,
+  filePaths: string[]
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {}
+  const queue = filePaths.filter(Boolean)
+  const worker = async (): Promise<void> => {
+    for (let filePath = queue.shift(); filePath !== undefined; filePath = queue.shift()) {
+      try {
+        result[filePath] = await getUntrackedFileDiff(repoPath, filePath)
+      } catch {
+        // left out — see doc
+      }
+    }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(UNTRACKED_DIFF_CONCURRENCY, queue.length) }, worker)
+  )
+  return result
 }
 
 export async function getFileDiff(
@@ -1406,52 +1436,89 @@ export async function getDefaultBranch(
   }
 }
 
+/** `%(upstream:track,nobracket)` → ahead/behind vs upstream; null when the upstream is
+ *  gone (matches getAheadBehindUpstream, whose rev-list fails then). */
+function parseUpstreamTrack(track: string): AheadBehind | null {
+  if (track === 'gone') return null
+  const ahead = /ahead (\d+)/.exec(track)
+  const behind = /behind (\d+)/.exec(track)
+  return { ahead: ahead ? Number(ahead[1]) : 0, behind: behind ? Number(behind[1]) : 0 }
+}
+
 export async function listBranchesDetailed(repoPath: string): Promise<BranchListResult> {
   try {
-    const format =
-      '%(refname:short)%00%(objectname:short)%00%(objectname)%00%(subject)%00%(authorname)%00%(committerdate:relative)%00%(upstream:short)'
-    const [output, currentBranch] = await Promise.all([
-      execGit(['for-each-ref', '--sort=-committerdate', `--format=${format}`, 'refs/heads/'], {
-        cwd: repoPath
-      }),
+    const fields =
+      '%(refname:short)%00%(objectname:short)%00%(objectname)%00%(subject)%00%(authorname)%00%(committerdate:relative)%00%(upstream:short)%00%(upstream:track,nobracket)'
+    const listRefs = (extra: string): Promise<string> =>
+      execGit(
+        ['for-each-ref', '--sort=-committerdate', `--format=${fields}${extra}`, 'refs/heads/'],
+        {
+          cwd: repoPath
+        }
+      )
+    const [defaultBranch, currentBranch] = await Promise.all([
+      getDefaultBranch(repoPath),
       getCurrentBranch(repoPath)
     ])
 
-    const lines = output.trim().split('\n').filter(Boolean)
-    const branches: BranchDetail[] = []
+    // One process for every branch's ahead/behind vs default (`%(ahead-behind:)`, git
+    // ≥ 2.41). Older git (or a default branch with no local ref) → per-branch rev-list,
+    // the first 10 branches only, as before.
+    let output: string
+    let batchedDefault = true
+    try {
+      output = await listRefs(`%00%(ahead-behind:${defaultBranch})`)
+    } catch {
+      batchedDefault = false
+      output = await listRefs('')
+    }
 
-    // Parse all branches first
-    const parsed = lines.map((line) => {
-      const [name, shortHash, hash, message, author, relativeDate, upstream] = line.split('\0')
-      return { name, shortHash, hash, message, author, relativeDate, upstream: upstream || null }
-    })
-
-    // Resolve default branch using already-parsed names (avoids redundant spawn in fallback)
-    const defaultBranch = await getDefaultBranch(
-      repoPath,
-      parsed.map((b) => b.name)
-    )
-
-    // Batch ahead/behind computations (cap at 10 to limit spawned processes)
-    const toCompute = parsed.slice(0, 10)
-    const results = await Promise.all(
-      toCompute.map(async (b) => {
-        const [abUpstream, abDefault] = await Promise.all([
-          b.upstream
-            ? getAheadBehindUpstream(repoPath, b.name).catch(() => null)
-            : Promise.resolve(null),
-          b.name !== defaultBranch
-            ? getAheadBehind(repoPath, b.name, defaultBranch).catch(() => ({ ahead: 0, behind: 0 }))
-            : Promise.resolve(null)
-        ])
-        return { abUpstream, abDefault }
+    const parsed = output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name, shortHash, hash, message, author, relativeDate, upstream, track, ab] =
+          line.split('\0')
+        return {
+          name,
+          shortHash,
+          hash,
+          message,
+          author,
+          relativeDate,
+          upstream: upstream || null,
+          track: track ?? '',
+          ab: ab ?? ''
+        }
       })
-    )
 
-    for (let i = 0; i < parsed.length; i++) {
-      const b = parsed[i]
-      const ab = i < results.length ? results[i] : { abUpstream: null, abDefault: null }
-      branches.push({
+    const fallbackDefault = batchedDefault
+      ? []
+      : await Promise.all(
+          parsed
+            .slice(0, 10)
+            .map((b) =>
+              b.name !== defaultBranch
+                ? getAheadBehind(repoPath, b.name, defaultBranch).catch(() => ({
+                    ahead: 0,
+                    behind: 0
+                  }))
+                : Promise.resolve(null)
+            )
+        )
+
+    const branches: BranchDetail[] = parsed.map((b, i) => {
+      let aheadBehindDefault: AheadBehind | null = null
+      if (b.name !== defaultBranch) {
+        if (batchedDefault) {
+          const [ahead, behind] = b.ab.split(' ').map(Number)
+          aheadBehindDefault = { ahead: ahead || 0, behind: behind || 0 }
+        } else {
+          aheadBehindDefault = fallbackDefault[i] ?? null
+        }
+      }
+      return {
         name: b.name,
         lastCommit: {
           hash: b.hash,
@@ -1461,12 +1528,12 @@ export async function listBranchesDetailed(repoPath: string): Promise<BranchList
           relativeDate: b.relativeDate
         },
         upstream: b.upstream,
-        aheadBehindUpstream: ab.abUpstream,
-        aheadBehindDefault: ab.abDefault,
+        aheadBehindUpstream: b.upstream ? parseUpstreamTrack(b.track) : null,
+        aheadBehindDefault,
         isDefault: b.name === defaultBranch,
         isCurrent: b.name === currentBranch
-      })
-    }
+      }
+    })
 
     return { branches, defaultBranch }
   } catch {
@@ -1681,56 +1748,38 @@ export async function resolveChildBranches(
   repoPath: string,
   baseBranch: string
 ): Promise<ResolvedBranches> {
+  // Constant process count whatever the branch count (a per-branch merge-base fan-out
+  // spawned ~200 gits per poll on a busy repo and starved every other git call).
+  // A "child" is an unmerged local branch sharing history with baseBranch, i.e. one
+  // that contains a root commit of baseBranch.
   try {
-    const [allBranches, mergedOutput] = await Promise.all([
-      listBranches(repoPath),
+    const [rootsOutput, mergedOutput] = await Promise.all([
+      execGit(['rev-list', '--max-parents=0', baseBranch], { cwd: repoPath }),
       execGit(['branch', '--merged', baseBranch, '--no-color'], { cwd: repoPath })
     ])
-
-    const mergedBranches = new Set(
-      mergedOutput
-        .split('\n')
-        .map((l) => l.replace(/^[*+]?\s+/, '').trim())
-        .filter(Boolean)
+    const roots = rootsOutput.split('\n').filter(Boolean)
+    const childrenOutput = await execGit(
+      [
+        'for-each-ref',
+        `--no-merged=${baseBranch}`,
+        ...roots.map((r) => `--contains=${r}`),
+        '--format=%(refname:short)',
+        'refs/heads/'
+      ],
+      { cwd: repoPath }
     )
 
-    const otherBranches = allBranches.filter((b) => b !== baseBranch)
-
-    // For each non-merged branch, check if baseBranch is its nearest ancestor
-    // Use merge-base --is-ancestor to check if baseBranch is in branch's history
-    const children: string[] = []
-    const results = await Promise.all(
-      otherBranches
-        .filter((b) => !mergedBranches.has(b))
-        .map(async (branch) => {
-          try {
-            // merge-base returns the common ancestor
-            const base = await execGit(['merge-base', baseBranch, branch], { cwd: repoPath })
-            // Check if the merge-base is the tip of baseBranch (meaning branch forked from baseBranch)
-            // or somewhere in baseBranch's history (meaning branch forked from an ancestor of baseBranch)
-            const baseTip = await execGit(['rev-parse', baseBranch], { cwd: repoPath })
-            // A branch is a "child" if its merge-base with baseBranch is on baseBranch
-            // (i.e., baseBranch contains the fork point)
-            const isAncestor = await execGit(
-              ['merge-base', '--is-ancestor', base.trim(), baseTip.trim()],
-              { cwd: repoPath }
-            )
-              .then(() => true)
-              .catch(() => false)
-            return { branch, isChild: isAncestor }
-          } catch {
-            return { branch, isChild: false }
-          }
-        })
-    )
-
-    for (const { branch, isChild } of results) {
-      if (isChild) children.push(branch)
-    }
+    const mergedBranches = mergedOutput
+      .split('\n')
+      .map((l) => l.replace(/^[*+]?\s+/, '').trim())
+      .filter(Boolean)
 
     return {
-      children,
-      merged: [...mergedBranches].filter((b) => b !== baseBranch)
+      children: childrenOutput
+        .split('\n')
+        .filter(Boolean)
+        .filter((b) => b !== baseBranch),
+      merged: mergedBranches.filter((b) => b !== baseBranch)
     }
   } catch {
     return { children: [], merged: [] }

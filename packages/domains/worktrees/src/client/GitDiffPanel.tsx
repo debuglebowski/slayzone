@@ -470,13 +470,21 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
         </div>
       )}
 
-      {targetPath && error && (
+      {/* No diff to show yet → the error takes the panel. With a diff on screen, a failed
+          refresh or commit is a banner above it — the last good diff stays visible. */}
+      {targetPath && error && !snapshot && (
         <div className="flex-1 flex items-center justify-center p-4">
           <p className="text-xs text-destructive">{error}</p>
         </div>
       )}
+      {targetPath && error && snapshot && (
+        <div className="shrink-0 border-b px-3 py-1.5">
+          <p className="text-xs text-destructive">{error}</p>
+        </div>
+      )}
 
-      {targetPath && !error && !loading && snapshot && !hasAnyChanges && (
+      {/* Not gated on `loading`: every poll/watch refresh sets it, which blinked this. */}
+      {targetPath && snapshot && !hasAnyChanges && (
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 className="size-10 opacity-30" />
@@ -489,7 +497,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
       )}
 
       {/* Main content: horizontal split */}
-      {targetPath && !error && snapshot && hasAnyChanges && (
+      {targetPath && snapshot && hasAnyChanges && (
         <div ref={splitContainerRef} className="flex-1 min-h-0 flex">
           {/* Left: file lists + commit.
               Always shown in non-continuous-flow mode — the right pane needs a

@@ -100,6 +100,11 @@ interface StoreEntry {
   contextLines: GitDiffContextLines
   /** Monotonically-incrementing fetch id; lets us drop stale responses after cancel. */
   fetchSeq: number
+  /** A fetch is running. Fetches never overlap: a request made meanwhile sets `dirty`. */
+  inFlight: boolean
+  /** Something changed after the running fetch read git — read again once it settles
+   *  (its answer predates the change; joining it would show the old state). */
+  dirty: boolean
 }
 
 /**
@@ -115,10 +120,20 @@ interface StoreEntry {
 interface PathWatcherState {
   /** Entries currently subscribed to this path (any params). Used for fanning out change events. */
   entries: Set<StoreEntry>
+  /** Non-diff readers of this path (`subscribeGitPathChanges`) — share the watcher, get
+   *  the same change events. Watcher refcount = entries + listeners. */
+  listeners: Set<(change: GitPathChange) => void>
   /** Is the main-process watcher live? `false` if watchStart failed / unavailable. */
   watcherActive: boolean
   /** Pending watchStart promise — guard against racing subscribe/unsubscribe. */
   startPromise: Promise<void> | null
+}
+
+/** What changed under a watched path. */
+export interface GitPathChange {
+  /** A ref moved (commit, checkout, fetch, branch create/delete). True when unknown
+   *  (watcher failed, or an older hub that doesn't say). */
+  refsChanged: boolean
 }
 
 const pathWatchers = new Map<string, PathWatcherState>()
@@ -228,6 +243,12 @@ function updateState(entry: StoreEntry, patch: Partial<GitDiffState>): void {
 
 async function runFetch(entry: StoreEntry): Promise<void> {
   if (!transport) return
+  if (entry.inFlight) {
+    entry.dirty = true
+    return
+  }
+  entry.inFlight = true
+  entry.dirty = false
   const seq = ++entry.fetchSeq
   updateState(entry, { loading: true })
   try {
@@ -249,11 +270,14 @@ async function runFetch(entry: StoreEntry): Promise<void> {
     }
   } catch (err) {
     if (entries.get(entry.key) !== entry || entry.fetchSeq !== seq) return
+    // Keep the last good snapshot: one failed refresh must not blank the diff.
     updateState(entry, {
-      snapshot: null,
       loading: false,
       error: err instanceof Error ? err.message : String(err)
     })
+  } finally {
+    entry.inFlight = false
+    if (entry.dirty && entries.get(entry.key) === entry) void runFetch(entry)
   }
 }
 
@@ -304,12 +328,13 @@ function ensureTimer(entry: StoreEntry): void {
  * different context levels, whitespace on/off) need a refresh. We don't
  * narrow to specific keys because they share the underlying git HEAD / index.
  */
-function handleDiffChanged(worktreePath: string): void {
+function handleDiffChanged(worktreePath: string, change: GitPathChange): void {
   const state = pathWatchers.get(worktreePath)
   if (!state) return
   for (const entry of state.entries) {
     void runFetch(entry)
   }
+  for (const listener of state.listeners) listener(change)
 }
 
 /**
@@ -317,8 +342,10 @@ function handleDiffChanged(worktreePath: string): void {
  * into the store. Only re-fetches when an entry for that exact path exists, so
  * unrelated worktrees ignore the event — same gate as the old IPC listener.
  */
-export function notifyDiffChanged(changedPath: string): void {
-  if (pathWatchers.has(changedPath)) handleDiffChanged(changedPath)
+export function notifyDiffChanged(changedPath: string, refsChanged?: boolean): void {
+  if (pathWatchers.has(changedPath)) {
+    handleDiffChanged(changedPath, { refsChanged: refsChanged ?? true })
+  }
 }
 
 /**
@@ -332,6 +359,7 @@ export function notifyDiffWatchFailed(failedPath: string): void {
   state.watcherActive = false
   retimeAllForPath(failedPath)
   for (const e of state.entries) void runFetch(e)
+  for (const listener of state.listeners) listener({ refsChanged: true })
 }
 
 /**
@@ -344,21 +372,28 @@ function retimeAllForPath(worktreePath: string): void {
   for (const entry of state.entries) ensureTimer(entry)
 }
 
-function acquirePathWatcher(targetPath: string, entry: StoreEntry): void {
+function pathRefCount(state: PathWatcherState): number {
+  return state.entries.size + state.listeners.size
+}
+
+/** Join the path's watcher (creating it + starting the main-process watch on first use). */
+function acquirePath(targetPath: string, join: (state: PathWatcherState) => void): void {
   let state = pathWatchers.get(targetPath)
   if (!state) {
     state = {
       entries: new Set(),
+      listeners: new Set(),
       watcherActive: false,
       startPromise: null
     }
     pathWatchers.set(targetPath, state)
   }
-  state.entries.add(entry)
-  if (state.entries.size > 1) return // already kicked off
+  const before = pathRefCount(state)
+  join(state)
+  if (before > 0 || pathRefCount(state) === 0) return // already kicked off
 
   // The fs-watcher broadcast listeners are registered by useSubscription in the
-  // hook (one per mounted hook) and routed via notifyDiffChanged /
+  // hooks (one per mounted hook) and routed via notifyDiffChanged /
   // notifyDiffWatchFailed. Here we only manage the refcounted watch start/stop.
   if (!transport) {
     // Transport not wired yet (SSR / tests without injection) → poll-only.
@@ -383,11 +418,12 @@ function acquirePathWatcher(targetPath: string, entry: StoreEntry): void {
   )
 }
 
-function releasePathWatcher(targetPath: string, entry: StoreEntry): void {
+/** Leave the path's watcher; the last one out stops the main-process watch. */
+function releasePath(targetPath: string, leave: (state: PathWatcherState) => void): void {
   const state = pathWatchers.get(targetPath)
   if (!state) return
-  state.entries.delete(entry)
-  if (state.entries.size > 0) return
+  leave(state)
+  if (pathRefCount(state) > 0) return
   // Last subscriber — tear down the main-process watcher refcount.
   if (state.watcherActive && transport) {
     // Best-effort — we don't await.
@@ -406,6 +442,31 @@ function releasePathWatcher(targetPath: string, entry: StoreEntry): void {
   }
   state.watcherActive = false
   pathWatchers.delete(targetPath)
+}
+
+function acquirePathWatcher(targetPath: string, entry: StoreEntry): void {
+  acquirePath(targetPath, (state) => state.entries.add(entry))
+}
+
+function releasePathWatcher(targetPath: string, entry: StoreEntry): void {
+  releasePath(targetPath, (state) => state.entries.delete(entry))
+}
+
+/**
+ * Be told whenever git state under `targetPath` changes (fs watcher event, or the
+ * watcher failing — then the caller's own poll is the only signal, so refresh now).
+ * Shares the diff store's refcounted watcher, so a panel that reads git without the
+ * diff (status counts, branch graph) still refreshes on change instead of waiting
+ * for its backed-off poll.
+ */
+export function subscribeGitPathChanges(
+  targetPath: string,
+  onChange: (change: GitPathChange) => void
+): () => void {
+  // A fresh wrapper per subscription: the same callback subscribed twice counts twice.
+  const listener = (change: GitPathChange): void => onChange(change)
+  acquirePath(targetPath, (state) => state.listeners.add(listener))
+  return () => releasePath(targetPath, (state) => state.listeners.delete(listener))
 }
 
 interface SubscribeArgs {
@@ -440,7 +501,9 @@ function subscribeEntry(args: SubscribeArgs, listener: () => void): () => void {
       fromSha: args.fromSha,
       toSha: args.toSha,
       contextLines: args.contextLines,
-      fetchSeq: 0
+      fetchSeq: 0,
+      inFlight: false,
+      dirty: false
     }
     entries.set(key, entry)
   }
@@ -496,22 +559,17 @@ export interface UseGitDiffSnapshotResult extends GitDiffState {
 const EMPTY_STATE: GitDiffState = { snapshot: null, loading: false, error: null }
 
 /**
- * React hook. Subscribes to the shared git-diff store for the given target.
- *
- * `visible=false` or `targetPath=null` → no subscription held, no poll.
+ * Wires the module-level store to tRPC (first mount wins) and routes the fs-watcher
+ * broadcasts into it. Every hook reading the store calls this.
  */
-export function useGitDiffSnapshot(
-  targetPath: string | null,
-  params: GitDiffStoreParams & { visible: boolean }
-): UseGitDiffSnapshotResult {
+function useGitStoreTransport(): void {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
 
-  // Wire the module-level store to tRPC on first mount. Guarded on `transport
-  // === null` so a test that pre-injects a fake transport (or a later mount)
-  // isn't clobbered — the client/queryClient are app-singletons, so the first
-  // real wire-up stays valid for the app's lifetime.
+  // Guarded on `transport === null` so a test that pre-injects a fake transport (or a
+  // later mount) isn't clobbered — the client/queryClient are app-singletons, so the
+  // first real wire-up stays valid for the app's lifetime.
   useEffect(() => {
     if (transport) return
     _setGitDiffStoreTransport({
@@ -532,7 +590,7 @@ export function useGitDiffSnapshot(
   // path entry exists, so events for unrelated worktrees are dropped cheaply.
   useSubscription(
     trpc.worktrees.onDiffChanged.subscriptionOptions(undefined, {
-      onData: ({ worktreePath }) => notifyDiffChanged(worktreePath)
+      onData: ({ worktreePath, refsChanged }) => notifyDiffChanged(worktreePath, refsChanged)
     })
   )
   useSubscription(
@@ -540,6 +598,44 @@ export function useGitDiffSnapshot(
       onData: ({ worktreePath }) => notifyDiffWatchFailed(worktreePath)
     })
   )
+}
+
+/**
+ * Calls `onChange` whenever git state under `targetPath` changes (see
+ * `subscribeGitPathChanges`); `refsOnly` → only when a ref moved (a commit graph
+ * doesn't care about file edits). `enabled=false` or no path → no watcher held.
+ * `onChange` is read through a ref, so an unstable callback doesn't resubscribe.
+ */
+export function useGitPathChanges(
+  targetPath: string | null,
+  enabled: boolean,
+  onChange: () => void,
+  opts: { refsOnly?: boolean } = {}
+): void {
+  useGitStoreTransport()
+  const onChangeRef = useRef(onChange)
+  useEffect(() => {
+    onChangeRef.current = onChange
+  })
+  const refsOnly = opts.refsOnly ?? false
+  useEffect(() => {
+    if (!enabled || !targetPath) return
+    return subscribeGitPathChanges(targetPath, (change) => {
+      if (!refsOnly || change.refsChanged) onChangeRef.current()
+    })
+  }, [targetPath, enabled, refsOnly])
+}
+
+/**
+ * React hook. Subscribes to the shared git-diff store for the given target.
+ *
+ * `visible=false` or `targetPath=null` → no subscription held, no poll.
+ */
+export function useGitDiffSnapshot(
+  targetPath: string | null,
+  params: GitDiffStoreParams & { visible: boolean }
+): UseGitDiffSnapshotResult {
+  useGitStoreTransport()
 
   const contextLines: GitDiffContextLines = params.contextLines ?? 'all'
   const active = params.visible && !!targetPath

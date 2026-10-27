@@ -4,6 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import { toast, useDepsChanged, useStablePoll } from '@slayzone/ui'
 import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { DEFAULT_CONFIG, FETCH_LIMIT } from './branches-tab.constants'
+import { useGitPathChanges } from './git-diff-store'
 import type { CommitGraphPersistence, BranchGraphState } from './branches-tab.types'
 
 export function useBranchGraph(
@@ -89,8 +90,9 @@ export function useBranchGraph(
   const fetchData = useCallback(async () => {
     if (!projectPath) return null
     try {
+      // staleTime:0 — a poll / git change must read git, not a cached answer.
       const branch = await queryClient.fetchQuery(
-        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, { staleTime: 0 })
       )
       const baseBranch = config.baseBranch || defaultBaseBranch || branch || 'main'
 
@@ -98,19 +100,25 @@ export function useBranchGraph(
 
       if (config.showBranches) {
         const result = await queryClient.fetchQuery(
-          trpc.worktrees.resolveChildBranches.queryOptions({ path: projectPath, baseBranch })
+          trpc.worktrees.resolveChildBranches.queryOptions(
+            { path: projectPath, baseBranch },
+            { staleTime: 0 }
+          )
         )
         for (const child of result.children) branchSet.add(child)
         for (const merged of result.merged) branchSet.add(merged)
       }
 
       const graph = await queryClient.fetchQuery(
-        trpc.worktrees.getResolvedCommitDag.queryOptions({
-          path: projectPath,
-          limit: FETCH_LIMIT,
-          branches: [...branchSet],
-          baseBranch
-        })
+        trpc.worktrees.getResolvedCommitDag.queryOptions(
+          {
+            path: projectPath,
+            limit: FETCH_LIMIT,
+            branches: [...branchSet],
+            baseBranch
+          },
+          { staleTime: 0 }
+        )
       )
       // Hash excludes `relativeDate` — that string updates over time
       // ("3 minutes ago") even when the commit hash is unchanged, which would
@@ -153,7 +161,10 @@ export function useBranchGraph(
     initialLoad.current = false
   }, [projectPath])
 
-  useStablePoll(fetchData, { enabled: visible && !!projectPath, baseDelayMs: 10_000 })
+  const poll = useStablePoll(fetchData, { enabled: visible && !!projectPath, baseDelayMs: 10_000 })
+  // A commit / branch move (fs watcher) re-reads now; the poll is only the safety net.
+  // Ref moves only — a file edit doesn't change the graph.
+  useGitPathChanges(projectPath, visible, poll.refetch, { refsOnly: true })
 
   const handleFetch = useCallback(async () => {
     if (!projectPath) return

@@ -20,7 +20,8 @@ import {
   _resetStore,
   _pathWatcherStats,
   _setGitDiffStoreTransport,
-  notifyDiffChanged
+  notifyDiffChanged,
+  subscribeGitPathChanges
 } from './git-diff-store'
 import type { GitDiffSnapshot } from '../shared/types'
 
@@ -339,5 +340,99 @@ describe('git-diff-store refcount + sharing', () => {
     expect((gitStub.getWorkingDiff.mock.calls[0] as unknown[])[0]).toBe('/tmp/repo-b')
 
     h.unmount()
+  })
+})
+
+describe('git-diff-store — freshness', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  it('a change during an in-flight fetch re-fetches once it settles (never concurrent)', async () => {
+    const first = deferred<GitDiffSnapshot>()
+    const second = deferred<GitDiffSnapshot>()
+    let inFlight = 0
+    let maxInFlight = 0
+    const queue = [first, second]
+    gitStub.getWorkingDiff.mockImplementation(() => {
+      const d = queue.shift() ?? deferred<GitDiffSnapshot>()
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      return d.promise.finally(() => inFlight--)
+    })
+
+    const h = mount('/tmp/repo', { pollIntervalMs: 60_000 })
+    await flushMicrotasks()
+    expect(gitStub.getWorkingDiff).toHaveBeenCalledTimes(1)
+
+    // The file changes while the first read is still running: its answer predates the
+    // change, so the store must read again afterwards.
+    act(() => gitStub._emitDiffChanged('/tmp/repo'))
+    act(() => gitStub._emitDiffChanged('/tmp/repo'))
+    await flushMicrotasks()
+    expect(maxInFlight).toBe(1)
+
+    await act(async () => first.resolve(makeSnapshot('before-change')))
+    await flushMicrotasks()
+    expect(h.result.current.snapshot?.unstagedPatch).toBe('before-change')
+    // Coalesced: two events during one fetch → ONE follow-up.
+    expect(gitStub.getWorkingDiff).toHaveBeenCalledTimes(2)
+
+    await act(async () => second.resolve(makeSnapshot('after-change')))
+    await flushMicrotasks()
+    expect(h.result.current.snapshot?.unstagedPatch).toBe('after-change')
+    expect(maxInFlight).toBe(1)
+    h.unmount()
+  })
+
+  it('a failed refresh keeps the last good snapshot on screen', async () => {
+    gitStub.getWorkingDiff.mockResolvedValueOnce(makeSnapshot('good'))
+    const h = mount('/tmp/repo', { pollIntervalMs: 1_000 })
+    await flushMicrotasks()
+    expect(h.result.current.snapshot?.unstagedPatch).toBe('good')
+
+    gitStub.getWorkingDiff.mockRejectedValueOnce(new Error('transient'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(h.result.current.error).toBe('transient')
+    expect(h.result.current.snapshot?.unstagedPatch).toBe('good')
+    h.unmount()
+  })
+})
+
+describe('subscribeGitPathChanges', () => {
+  it('shares the refcounted watcher and fans out change events', async () => {
+    gitStub.watchStart.mockResolvedValue(undefined)
+    const onChange = vi.fn()
+    const off = subscribeGitPathChanges('/tmp/repo', onChange)
+    const h = mount('/tmp/repo')
+    await flushMicrotasks()
+    expect(gitStub.watchStart).toHaveBeenCalledTimes(1)
+
+    act(() => gitStub._emitDiffChanged('/tmp/repo'))
+    act(() => gitStub._emitDiffChanged('/tmp/other'))
+    expect(onChange).toHaveBeenCalledTimes(1)
+
+    h.unmount()
+    expect(gitStub.watchStop).not.toHaveBeenCalled()
+    off()
+    await flushMicrotasks()
+    expect(gitStub.watchStop).toHaveBeenCalledWith('/tmp/repo')
+    expect(_pathWatcherStats().paths).toBe(0)
+  })
+
+  it('a path-change subscriber alone still starts the watcher', async () => {
+    gitStub.watchStart.mockResolvedValue(undefined)
+    const off = subscribeGitPathChanges('/tmp/repo', () => {})
+    await flushMicrotasks()
+    expect(gitStub.watchStart).toHaveBeenCalledWith('/tmp/repo')
+    off()
+    await flushMicrotasks()
+    expect(gitStub.watchStop).toHaveBeenCalledWith('/tmp/repo')
   })
 })

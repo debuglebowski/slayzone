@@ -762,6 +762,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/client/pr-task-map.test.ts \
   packages/domains/worktrees/src/server/login-shell-path.test.ts \
   packages/domains/worktrees/src/server/spawn-failure.test.ts \
+  packages/domains/worktrees/src/server/branch-queries.test.ts \
+  packages/domains/worktrees/src/server/git-watcher.test.ts \
+  packages/domains/worktrees/src/server/untracked-diffs.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \

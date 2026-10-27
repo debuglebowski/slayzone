@@ -160,22 +160,32 @@ export function useGitDiffData(
       })
     }
 
+    // All new files in ONE call (server caps concurrent gits), not one RPC + git each.
     const added = curr.filter((f) => !prevSet.has(f))
-    for (const filePath of added) {
-      queryClient
-        .fetchQuery(
-          trpc.worktrees.getUntrackedFileDiff.queryOptions({ repoPath: targetPath, filePath })
-        )
-        .then((patch) => {
+    if (added.length === 0) return
+    queryClient
+      .fetchQuery(
+        trpc.worktrees.getUntrackedFileDiffs.queryOptions({
+          repoPath: targetPath,
+          filePaths: added
+        })
+      )
+      .then((patches) => {
+        const parsedByPath: Array<[string, FileDiffType]> = []
+        for (const [filePath, patch] of Object.entries(patches)) {
           const parsed = parseUnifiedDiff(patch)
-          if (parsed.length > 0) {
-            setUntrackedDiffs((old) => new Map(old).set(filePath, parsed[0]))
-          }
+          if (parsed.length > 0) parsedByPath.push([filePath, parsed[0]])
+        }
+        if (parsedByPath.length === 0) return
+        setUntrackedDiffs((old) => {
+          const next = new Map(old)
+          for (const [filePath, diff] of parsedByPath) next.set(filePath, diff)
+          return next
         })
-        .catch(() => {
-          // ignore — file may be binary or inaccessible
-        })
-    }
+      })
+      .catch(() => {
+        // ignore — a file left out is binary or inaccessible; the rest just show no preview
+      })
   }, [snapshot, targetPath, queryClient, trpc])
 
   const hasAnyChanges =

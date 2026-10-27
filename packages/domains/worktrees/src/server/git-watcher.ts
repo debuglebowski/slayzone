@@ -14,6 +14,12 @@
  *     dist, build, coverage, .e2e-userdata, .git/objects, .git/logs). The first
  *     path segment is checked against a Set — cheap and covers 99% of write
  *     noise during git operations.
+ *   - Excludes nested checkouts (a dir holding its own `.git`, e.g. agent worktrees
+ *     under `.claude/worktrees/`) — their edits are another repo's diff — except
+ *     submodules, whose changes do show in this repo's diff. Likewise the other
+ *     worktrees' private state under `.git/worktrees/`.
+ *   - Each emission says whether a ref moved (`refsChanged`: HEAD, refs/, packed-refs)
+ *     — the commit graph refreshes on that alone, not on every file edit.
  *   - Refcounts watchers by worktreePath. Last unsubscribe closes the watcher.
  *   - On ENOSPC (Linux inotify exhaustion) or any watcher error, the watcher
  *     detaches cleanly — renderer falls back to its poll timer.
@@ -42,8 +48,14 @@ const EXCLUDED_TOP_DIRS = new Set([
 // `.git/objects` and `.git/logs` are noisy; we explicitly exclude them below.
 const EXCLUDED_GIT_SUBDIRS = new Set(['objects', 'logs'])
 
+export interface GitDiffChangedPayload {
+  worktreePath: string
+  /** A ref moved in this debounce window (commit, checkout, fetch, branch create/delete). */
+  refsChanged: boolean
+}
+
 export interface GitWatcherEvents {
-  'git:diff-changed': (payload: { worktreePath: string }) => void
+  'git:diff-changed': (payload: GitDiffChangedPayload) => void
   /**
    * Emitted when a watcher tears down due to an error (ENOSPC, worktree
    * deletion, platform quirk). Renderer listens and tightens its poll
@@ -69,6 +81,12 @@ interface WatchEntry {
   watchers: fs.FSWatcher[]
   debounceTimer: NodeJS.Timeout | null
   closed: boolean
+  /** Some event in the pending debounce window moved a ref. */
+  refsChanged: boolean
+  /** Worktree-relative dir → holds its own `.git` (nested checkout). */
+  nestedCheckoutCache: Map<string, boolean>
+  /** Worktree-relative submodule paths (from `.gitmodules`) — never excluded as nested. */
+  submodulePaths: Set<string>
 }
 
 let enospcWarned = false
@@ -85,6 +103,26 @@ function isExcludedPath(relPath: string): boolean {
     if (EXCLUDED_TOP_DIRS.has(p)) return true
   }
   return false
+}
+
+/** Submodule paths declared in `<worktree>/.gitmodules` (normalized to `/`). */
+function readSubmodulePaths(worktreePath: string): Set<string> {
+  try {
+    const content = fs.readFileSync(path.join(worktreePath, '.gitmodules'), 'utf-8')
+    const paths = new Set<string>()
+    for (const m of content.matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)) {
+      paths.add(m[1].replace(/\\/g, '/').replace(/\/+$/, ''))
+    }
+    return paths
+  } catch {
+    return new Set()
+  }
+}
+
+/** A gitdir-relative path that moves a ref. */
+function isRefPath(relPath: string): boolean {
+  const p = relPath.replace(/\\/g, '/').replace(/\.lock$/, '')
+  return p === 'HEAD' || p === 'packed-refs' || p.startsWith('refs/')
 }
 
 /**
@@ -117,13 +155,43 @@ export function createGitWatcher(): GitWatcher {
   const entries = new Map<string, WatchEntry>()
   const emitter = new EventEmitter() as GitWatcher
 
-  function scheduleEmit(entry: WatchEntry): void {
+  function scheduleEmit(entry: WatchEntry, refsChanged = false): void {
+    if (refsChanged) entry.refsChanged = true
     if (entry.debounceTimer) return
     entry.debounceTimer = setTimeout(() => {
       entry.debounceTimer = null
       if (entry.closed) return
-      emitter.emit('git:diff-changed', { worktreePath: entry.worktreePath })
+      const payload: GitDiffChangedPayload = {
+        worktreePath: entry.worktreePath,
+        refsChanged: entry.refsChanged
+      }
+      entry.refsChanged = false
+      emitter.emit('git:diff-changed', payload)
     }, DEBOUNCE_MS)
+  }
+
+  /**
+   * Is a worktree-relative path inside a nested checkout (a dir below the root that
+   * holds its own `.git`, not a declared submodule)? One stat per dir, cached; a
+   * `.git` appearing/disappearing re-evaluates its dir.
+   */
+  function inNestedCheckout(entry: WatchEntry, relPath: string): boolean {
+    const parts = relPath.split(/[\\/]/)
+    if (parts[parts.length - 1] === '.git') {
+      entry.nestedCheckoutCache.delete(parts.slice(0, -1).join('/'))
+    }
+    // Directories strictly below the root (the root's own `.git` is this repo).
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join('/')
+      if (entry.submodulePaths.has(dir)) continue
+      let nested = entry.nestedCheckoutCache.get(dir)
+      if (nested === undefined) {
+        nested = fs.existsSync(path.join(entry.worktreePath, dir, '.git'))
+        entry.nestedCheckoutCache.set(dir, nested)
+      }
+      if (nested) return true
+    }
+    return false
   }
 
   function teardown(entry: WatchEntry): void {
@@ -157,20 +225,27 @@ export function createGitWatcher(): GitWatcher {
         if (entry.closed) return
         if (!filename) {
           // Filename is unavailable on some platforms for coalesced events —
-          // still treat as a change signal.
-          scheduleEmit(entry)
+          // still treat as a change signal (and possibly a ref move).
+          scheduleEmit(entry, true)
           return
         }
         const rel: string = typeof filename === 'string' ? filename : String(filename)
-        if (!isGitDir) {
+        const gitInRoot = !isGitDir && /^\.git[\\/]/.test(rel)
+        if (!isGitDir && !gitInRoot) {
           // Working tree watcher — filter noise.
           if (isExcludedPath(rel)) return
+          if (rel === '.gitmodules') entry.submodulePaths = readSubmodulePaths(entry.worktreePath)
+          if (inNestedCheckout(entry, rel)) return
+          scheduleEmit(entry)
         } else {
-          // .git watcher — ignore objects/logs subtrees.
-          const parts = rel.split(/[\\/]/)
-          if (EXCLUDED_GIT_SUBDIRS.has(parts[0])) return
+          // gitdir event (own watcher, or the main checkout's `.git/` seen by the
+          // recursive worktree watch) — ignore objects/logs subtrees, and other
+          // worktrees' private state (their index/HEAD; their branch moves land in refs/).
+          const gitRel = gitInRoot ? rel.slice(5) : rel
+          const parts = gitRel.split(/[\\/]/)
+          if (EXCLUDED_GIT_SUBDIRS.has(parts[0]) || parts[0] === 'worktrees') return
+          scheduleEmit(entry, isRefPath(gitRel))
         }
-        scheduleEmit(entry)
       })
 
       watcher.on('error', (err: NodeJS.ErrnoException) => {
@@ -224,7 +299,10 @@ export function createGitWatcher(): GitWatcher {
       refCount: 1,
       watchers: [],
       debounceTimer: null,
-      closed: false
+      closed: false,
+      refsChanged: false,
+      nestedCheckoutCache: new Map(),
+      submodulePaths: readSubmodulePaths(worktreePath)
     }
     entries.set(worktreePath, entry)
 
@@ -232,9 +310,10 @@ export function createGitWatcher(): GitWatcher {
     openWatcher(entry, worktreePath, false)
 
     // Watch the resolved gitdir. On linked worktrees this is outside the
-    // worktree tree so the above recursive watch doesn't see it.
+    // worktree tree so the above recursive watch doesn't see it. The main
+    // checkout's `<root>/.git` is inside it — already seen, no second watcher.
     const gitdir = resolveGitDir(worktreePath)
-    if (gitdir) {
+    if (gitdir && path.resolve(gitdir) !== path.resolve(worktreePath, '.git')) {
       openWatcher(entry, gitdir, true)
     }
 

@@ -17,10 +17,17 @@ vi.mock('./git-diff-store', () => ({
   })
 }))
 vi.mock('@slayzone/transport/client', () => ({
-  useTRPC: () => ({ worktrees: { getUntrackedFileDiff: { queryOptions: () => ({}) } } })
+  useTRPC: () => ({
+    worktrees: {
+      getUntrackedFileDiffs: {
+        queryOptions: (input: unknown) => ({ queryKey: ['getUntrackedFileDiffs', input] })
+      }
+    }
+  })
 }))
+const fetchQuery = vi.fn()
 vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ fetchQuery: vi.fn().mockResolvedValue('') })
+  useQueryClient: () => ({ fetchQuery })
 }))
 
 const { useGitDiffData } = await import('./useGitDiffData')
@@ -34,7 +41,10 @@ const snap = (files: string[]) => ({
   stagedPatch: ''
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  fetchQuery.mockReset()
+})
 
 describe('useGitDiffData', () => {
   it('refreshRef always holds the current refresh', () => {
@@ -83,5 +93,35 @@ describe('useGitDiffData', () => {
     expect(onSnapshotChange).toHaveBeenCalledTimes(1)
     expect(result.current.unstagedEntries.map((e) => e.path)).toEqual(['a.ts'])
     expect(result.current.hasAnyChanges).toBe(true)
+  })
+
+  it('reads the new untracked files in ONE batched call, not one per file', async () => {
+    const patch = (f: string) =>
+      `diff --git a/${f} b/${f}\nnew file mode 100644\n--- /dev/null\n+++ b/${f}\n@@ -0,0 +1 @@\n+x\n`
+    fetchQuery.mockImplementation(async (o: { queryKey: [string, { filePaths: string[] }] }) =>
+      Object.fromEntries(o.queryKey[1].filePaths.map((f) => [f, patch(f)]))
+    )
+    snapshotState.snapshot = { ...snap([]), untrackedFiles: ['u1.txt', 'u2.txt', 'u3.txt'] }
+    const { result } = renderHook(() =>
+      useGitDiffData('/repo', {
+        visible: true,
+        ignoreWhitespace: false,
+        contextLines: 'all',
+        pollIntervalMs: 5000,
+        fromSha: undefined,
+        toSha: undefined,
+        onSnapshotChange: () => {}
+      })
+    )
+    await vi.waitFor(() =>
+      expect(
+        result.current.getDiffForEntry({ path: 'u2.txt', status: '?', source: 'unstaged' })
+      ).toBeDefined()
+    )
+    expect(fetchQuery).toHaveBeenCalledTimes(1)
+    expect(fetchQuery.mock.calls[0][0].queryKey[1]).toEqual({
+      repoPath: '/repo',
+      filePaths: ['u1.txt', 'u2.txt', 'u3.txt']
+    })
   })
 })

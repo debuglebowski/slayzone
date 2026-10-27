@@ -24,6 +24,7 @@ import {
   unstageAll,
   getFileDiff,
   getUntrackedFileDiff,
+  getUntrackedFileDiffs,
   isRebaseInProgress,
   getRebaseProgress,
   abortRebase,
@@ -95,6 +96,7 @@ import type {
   MergePrInput,
   EditPrCommentInput
 } from '@slayzone/worktrees/shared'
+import type { GitDiffChangedPayload } from '@slayzone/worktrees/server'
 import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 import { getAppDeps, getWorkspaceDeps } from '../app-deps'
 
@@ -227,6 +229,9 @@ export const worktreesRouter = router({
   getUntrackedFileDiff: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s }))
     .query(({ input }) => getUntrackedFileDiff(input.repoPath, input.filePath)),
+  getUntrackedFileDiffs: hubLocalProcedure
+    .input(obj({ repoPath: s, filePaths: z.array(s) }))
+    .query(({ input }) => getUntrackedFileDiffs(input.repoPath, input.filePaths)),
   getConflictContent: hubLocalProcedure
     .input(obj({ repoPath: s, filePath: s }))
     .query(({ input }) => getConflictContent(input.repoPath, input.filePath)),
@@ -464,8 +469,8 @@ export const worktreesRouter = router({
   // Mirrors the `git:diff-changed` / `git:diff-watch-failed` IPC broadcasts; the
   // watcher is a singleton EventEmitter, so `.off` in teardown prevents leaks.
   onDiffChanged: publicProcedure.subscription(() =>
-    observable<{ worktreePath: string }>((emit) => {
-      const handler = (payload: { worktreePath: string }): void => emit.next(payload)
+    observable<GitDiffChangedPayload>((emit) => {
+      const handler = (payload: GitDiffChangedPayload): void => emit.next(payload)
       const watcher = getGitWatcher()
       watcher.on('git:diff-changed', handler)
       return () => watcher.off('git:diff-changed', handler)

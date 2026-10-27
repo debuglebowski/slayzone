@@ -30,6 +30,7 @@ export {
   unstageAll,
   getFileDiff,
   getUntrackedFileDiff,
+  getUntrackedFileDiffs,
   isRebaseInProgress,
   getRebaseProgress,
   abortRebase,
@@ -106,6 +107,7 @@ export {
   __resetForTests as resetWorktreeColorsForTest
 } from './color-registry'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
+export type { GitDiffChangedPayload } from './git-watcher'
 export { worktreesEvents, type WorktreesEventMap } from './events'
 // Composite orchestrations + behavior resolvers shared with the IPC handlers.
 export {

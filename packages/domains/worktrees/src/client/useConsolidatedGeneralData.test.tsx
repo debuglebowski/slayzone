@@ -11,14 +11,18 @@ import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 
 const toast = vi.fn()
 // The pollers run once on mount (no timers): enough to load the task branch.
+// `refetch` runs the latest fetch again (what a git change triggers).
 vi.mock('@slayzone/ui', async () => {
-  const { useEffect } = await import('react')
+  const { useEffect, useRef } = await import('react')
   return {
     toast: (m: string) => toast(m),
     useStablePoll: (fn: () => Promise<unknown>, o: { enabled: boolean }) => {
+      const fnRef = useRef(fn)
+      fnRef.current = fn
       useEffect(() => {
         if (o.enabled) void fn()
       }, [])
+      return { refetch: () => void fnRef.current() }
     }
   }
 })
@@ -33,6 +37,7 @@ const procs = new Proxy(
   {
     get: (_t, name: string) => ({
       queryOptions: (input: unknown, opts?: object) => ({ ...opts, queryKey: [name, input] }),
+      subscriptionOptions: () => ({}),
       mutationOptions: () => ({
         mutationFn: async (input: unknown) => {
           calls.push([name, input])
@@ -43,9 +48,21 @@ const procs = new Proxy(
   }
 )
 const trpc = { worktrees: procs, settings: procs }
-vi.mock('@slayzone/transport/client', () => ({ useTRPC: () => trpc }))
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPC: () => trpc,
+  useTRPCClient: () => ({
+    worktrees: {
+      watchStart: { mutate: async () => {} },
+      watchStop: { mutate: async () => {} }
+    }
+  }),
+  useSubscription: () => undefined
+}))
 
 const { useConsolidatedGeneralData } = await import('./useConsolidatedGeneralData')
+const { _setGitDiffStoreTransport, _resetStore, notifyDiffChanged } = await import(
+  './git-diff-store'
+)
 
 const task = {
   id: 'task-0001',
@@ -236,10 +253,12 @@ describe('useConsolidatedGeneralData — out-of-date responses', () => {
       task: wtTask({ worktree_path: '/wt1', pr_url: 'https://x/pr/2' }),
       projectPath: '/repo'
     })
-    // A useQuery result reaches React on react-query's next-macrotask notify.
+    // A useQuery result reaches React on react-query's macrotask notify; wait two, so
+    // an extra queued macrotask (e.g. another module's timer) doesn't race it.
     const answer = (url: string, pr: unknown) =>
       act(async () => {
         take('getPrByUrl', { repoPath: '/repo', url }).resolve(pr)
+        await new Promise((r) => setTimeout(r, 0))
         await new Promise((r) => setTimeout(r, 0))
       })
     const pr2 = { number: 2 }
@@ -411,5 +430,107 @@ describe('useConsolidatedGeneralData — custom working directory', () => {
     expect(result.current.currentBranch).toBe('main')
     const aheadBehind = fetched.filter(([k]) => k === 'getAheadBehindUpstream').map(([, i]) => i)
     expect(aheadBehind.at(-1)).toEqual({ path: '/bd', branch: 'feat' })
+  })
+})
+
+// The tab's numbers (status counts, ahead/behind, branch) must follow the repo: polled
+// reads bypass the react-query cache, and a git change refreshes at once instead of
+// waiting out a poll that backs off to 60s when nothing changes.
+describe('useConsolidatedGeneralData — freshness', () => {
+  afterEach(() => {
+    _resetStore()
+    _setGitDiffStoreTransport(null)
+  })
+
+  function setupFetched(
+    answer: (key: string) => Promise<unknown> = async (k) =>
+      queryResults[k] ?? (k === 'isGitRepo' ? true : null)
+  ) {
+    const client = new QueryClient()
+    const fetched: Array<{ key: string; input: unknown; staleTime?: number }> = []
+    vi.spyOn(client, 'fetchQuery').mockImplementation(((o: {
+      queryKey: unknown[]
+      staleTime?: number
+    }) => {
+      const key = String(o.queryKey[0])
+      fetched.push({ key, input: o.queryKey[1], staleTime: o.staleTime })
+      return answer(key)
+    }) as never)
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const hook = renderHook(
+      () => useConsolidatedGeneralData(task, '/repo', true, 5000, async () => task),
+      { wrapper }
+    )
+    return { ...hook, fetched }
+  }
+
+  it('polled reads skip the react-query cache', async () => {
+    const { fetched } = setupFetched()
+    await act(async () => {})
+    await act(async () => {})
+    for (const key of ['getStatusSummary', 'getAheadBehindUpstream', 'getResolvedForkGraph']) {
+      const reads = fetched.filter((f) => f.key === key)
+      expect(reads.length, key).toBeGreaterThan(0)
+      for (const r of reads) expect(r.staleTime, key).toBe(0)
+    }
+  })
+
+  it('reads status without waiting for the repo check', async () => {
+    let answerRepo!: (v: boolean) => void
+    const { fetched } = setupFetched((key) =>
+      key === 'isGitRepo'
+        ? new Promise((r) => {
+            answerRepo = r
+          })
+        : Promise.resolve(queryResults[key] ?? null)
+    )
+    await act(async () => {})
+    expect(fetched.some((f) => f.key === 'getStatusSummary')).toBe(true)
+    await act(async () => answerRepo(true))
+  })
+
+  it('a git change under the task checkout refreshes at once', async () => {
+    _setGitDiffStoreTransport({
+      getWorkingDiff: () => new Promise(() => {}),
+      watchStart: async () => {},
+      watchStop: async () => {}
+    })
+    const { fetched } = setupFetched()
+    await act(async () => {})
+    await act(async () => {})
+    const before = fetched.filter((f) => f.key === 'getStatusSummary').length
+    await act(async () => notifyDiffChanged('/wt'))
+    await act(async () => {})
+    expect(fetched.filter((f) => f.key === 'getStatusSummary').length).toBe(before + 1)
+  })
+
+  it('while the project is not a repo, only the repo check runs; `git init` reads the rest', async () => {
+    _setGitDiffStoreTransport({
+      getWorkingDiff: () => new Promise(() => {}),
+      watchStart: async () => {},
+      watchStop: async () => {}
+    })
+    let isRepo = false
+    const { fetched, result } = setupFetched(async (k) =>
+      k === 'isGitRepo' ? isRepo : (queryResults[k] ?? null)
+    )
+    await act(async () => {})
+    await act(async () => {})
+    expect(result.current.isGitRepo).toBe(false)
+    const statusReads = () => fetched.filter((f) => f.key === 'getStatusSummary').length
+    const before = statusReads()
+
+    await act(async () => notifyDiffChanged('/wt'))
+    await act(async () => {})
+    expect(statusReads()).toBe(before)
+
+    isRepo = true
+    await act(async () => notifyDiffChanged('/wt'))
+    await act(async () => {})
+    await act(async () => {})
+    expect(result.current.isGitRepo).toBe(true)
+    expect(statusReads()).toBe(before + 1)
   })
 })

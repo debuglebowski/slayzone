@@ -17,6 +17,13 @@ import {
 } from './utils'
 import { toast, useStablePoll } from '@slayzone/ui'
 import { useBranchPr } from './useBranchPr'
+import { useGitPathChanges } from './git-diff-store'
+
+/** Polled reads must hit git: the store's poll + fs watcher decide WHEN to read, so a
+ *  cached answer (global staleTime 5s) would show the pre-change state — and with the
+ *  poll backed off to 60s on an unchanged hash, keep showing it. */
+const FRESH = { staleTime: 0 } as const
+const NOT_A_REPO_HASH = JSON.stringify({ isRepo: false })
 
 export interface DetectedWorktreeItem {
   path: string
@@ -174,24 +181,59 @@ export function useConsolidatedGeneralData(
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      let isRepo: boolean
-      try {
-        isRepo = await queryClient.fetchQuery(
-          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+      // Everything that doesn't depend on another answer goes out at once (one round
+      // trip, not three): the repo check, both branches, the remote and the status.
+      // Not a repo → the other answers are discarded; while the last poll said "not a
+      // repo", only the check runs.
+      const knownNotRepo = lastGitHashRef.current === NOT_A_REPO_HASH
+      const repoCheck = queryClient
+        .fetchQuery(trpc.worktrees.isGitRepo.queryOptions({ path: projectPath }, FRESH))
+        .then(
+          (isRepo) => ({ isRepo, error: null }),
+          (err: unknown) => ({
+            isRepo: false,
+            error: err instanceof Error ? err.message : String(err)
+          })
         )
-      } catch (err) {
+      const readAll = () =>
+        Promise.all([
+          queryClient.fetchQuery(
+            trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, FRESH)
+          ),
+          queryClient.fetchQuery(
+            trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }, FRESH)
+          ),
+          // Read here rather than from state, so the first poll already syncs the
+          // checkout's branch instead of waiting for the next one.
+          ownCheckout
+            ? queryClient.fetchQuery(
+                trpc.worktrees.getCurrentBranch.queryOptions({ path: ownCheckout }, FRESH)
+              )
+            : Promise.resolve(null),
+          targetPath
+            ? queryClient.fetchQuery(
+                trpc.worktrees.getStatusSummary.queryOptions({ repoPath: targetPath }, FRESH)
+              )
+            : Promise.resolve(null)
+        ])
+      // Settled together but checked first: a failed/negative repo check wins over
+      // whatever the other reads did.
+      const [check, parallelReads] = await Promise.all([
+        repoCheck,
+        knownNotRepo ? null : readAll().catch(() => null)
+      ])
+      if (check.error !== null) {
         // The check itself failed (git could not be started) — not the same as "not a
         // repo", which would offer `git init` on a healthy repo.
-        const message = err instanceof Error ? err.message : String(err)
-        const hash = JSON.stringify({ gitError: message })
+        const hash = JSON.stringify({ gitError: check.error })
         if (hash !== lastGitHashRef.current) {
           lastGitHashRef.current = hash
-          setGitError(message)
+          setGitError(check.error)
         }
         return hash
       }
-      if (!isRepo) {
-        const hash = JSON.stringify({ isRepo: false })
+      if (!check.isRepo) {
+        const hash = NOT_A_REPO_HASH
         if (hash !== lastGitHashRef.current) {
           lastGitHashRef.current = hash
           setGitError(null)
@@ -199,36 +241,20 @@ export function useConsolidatedGeneralData(
         }
         return hash
       }
+      // Became a repo since the last poll (`git init`): read the rest now.
+      const settledReads = knownNotRepo ? await readAll().catch(() => null) : parallelReads
+      if (!settledReads) return null
+      const [branch, remote, ownBranch, status] = settledReads
 
-      const [branch, remote, ownBranch] = await Promise.all([
-        queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
-        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath })),
-        // Read here rather than from state, so the first poll already syncs the
-        // checkout's branch instead of waiting for the next one.
-        ownCheckout
-          ? queryClient.fetchQuery(
-              trpc.worktrees.getCurrentBranch.queryOptions({ path: ownCheckout })
-            )
-          : Promise.resolve(null)
-      ])
-
-      let status: StatusSummary | null = null
       let uab: AheadBehind | null = null
-      if (targetPath) {
-        const activeBranch = ownCheckout ? ownBranch : branch
-        ;[status, uab] = await Promise.all([
-          queryClient.fetchQuery(
-            trpc.worktrees.getStatusSummary.queryOptions({ repoPath: targetPath })
-          ),
-          activeBranch
-            ? queryClient.fetchQuery(
-                trpc.worktrees.getAheadBehindUpstream.queryOptions({
-                  path: targetPath,
-                  branch: activeBranch
-                })
-              )
-            : Promise.resolve(null)
-        ])
+      const activeBranch = ownCheckout ? ownBranch : branch
+      if (targetPath && activeBranch) {
+        uab = await queryClient.fetchQuery(
+          trpc.worktrees.getAheadBehindUpstream.queryOptions(
+            { path: targetPath, branch: activeBranch },
+            FRESH
+          )
+        )
       }
 
       const hash = JSON.stringify({ isRepo: true, branch, remote, status, uab })
@@ -254,7 +280,7 @@ export function useConsolidatedGeneralData(
     if (!targetPath || !parentBranch) return null
     try {
       const branch = await queryClient.fetchQuery(
-        trpc.worktrees.getCurrentBranch.queryOptions({ path: targetPath })
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: targetPath }, FRESH)
       )
       if (!branch) {
         const hash = JSON.stringify({ branch: null })
@@ -267,18 +293,21 @@ export function useConsolidatedGeneralData(
 
       const repoPath = projectPath || targetPath
       const result = await queryClient.fetchQuery(
-        trpc.worktrees.getResolvedForkGraph.queryOptions({
-          targetPath,
-          repoPath,
-          activeBranch: branch,
-          compareBranch: parentBranch,
-          activeBranchLabel: branch,
-          compareBranchLabel: parentBranch
-        })
+        trpc.worktrees.getResolvedForkGraph.queryOptions(
+          {
+            targetPath,
+            repoPath,
+            activeBranch: branch,
+            compareBranch: parentBranch,
+            activeBranchLabel: branch,
+            compareBranchLabel: parentBranch
+          },
+          FRESH
+        )
       )
       const stats = result?.forkPoint
         ? await queryClient.fetchQuery(
-            trpc.worktrees.getDiffStats.queryOptions({ path: targetPath, ref: parentBranch })
+            trpc.worktrees.getDiffStats.queryOptions({ path: targetPath, ref: parentBranch }, FRESH)
           )
         : null
 
@@ -337,11 +366,23 @@ export function useConsolidatedGeneralData(
   const worktreeBranch = hasWorktree ? checkoutBranch : null
   const activeBranch = ownCheckout ? checkoutBranch : currentBranch
 
-  useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: pollIntervalMs })
-  useStablePoll(fetchBranchData, {
+  const gitPoll = useStablePoll(fetchGitData, {
+    enabled: visible && !!projectPath,
+    baseDelayMs: pollIntervalMs
+  })
+  const branchPoll = useStablePoll(fetchBranchData, {
     enabled: visible && !!targetPath && !!parentBranch,
     baseDelayMs: pollIntervalMs
   })
+  // A git change (fs watcher) refreshes now, instead of after a poll that backs off to
+  // 60s while nothing changes. The project checkout is watched too when it isn't the
+  // task's: its branch is the header's parent branch.
+  const refreshOnChange = (): void => {
+    gitPoll.refetch()
+    branchPoll.refetch()
+  }
+  useGitPathChanges(targetPath, visible, refreshOnChange)
+  useGitPathChanges(projectPath !== targetPath ? projectPath : null, visible, refreshOnChange)
 
   // External handle: drops the polling return value to fit the documented
   // `() => Promise<void>` contract.

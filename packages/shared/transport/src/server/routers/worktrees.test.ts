@@ -476,6 +476,22 @@ describe('getUntrackedFileDiff', () => {
   })
 })
 
+describe('getUntrackedFileDiffs', () => {
+  test('returns each untracked file’s diff keyed by path, skipping unreadable ones', async () => {
+    fs.writeFileSync(path.join(repoPath, 'batch-a.txt'), 'alpha')
+    fs.writeFileSync(path.join(repoPath, 'batch-b.txt'), 'beta')
+    const diffs = (await caller.getUntrackedFileDiffs({
+      repoPath,
+      filePaths: ['batch-a.txt', 'batch-b.txt', 'batch-missing.txt']
+    })) as Record<string, string>
+    expect(Object.keys(diffs).sort()).toEqual(['batch-a.txt', 'batch-b.txt'])
+    expect(diffs['batch-a.txt'].includes('alpha')).toBe(true)
+    expect(diffs['batch-b.txt'].includes('beta')).toBe(true)
+    fs.unlinkSync(path.join(repoPath, 'batch-a.txt'))
+    fs.unlinkSync(path.join(repoPath, 'batch-b.txt'))
+  })
+})
+
 // --- Commit ---
 
 describe('commitFiles', () => {

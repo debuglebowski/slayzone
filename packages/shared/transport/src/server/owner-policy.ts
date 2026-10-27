@@ -1194,6 +1194,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.unstageAll': checked(path('path')),
   'worktrees.getFileDiff': checked(path('repoPath')),
   'worktrees.getUntrackedFileDiff': checked(path('repoPath')),
+  'worktrees.getUntrackedFileDiffs': checked(path('repoPath')),
   'worktrees.getConflictContent': checked(path('repoPath')),
   'worktrees.writeResolvedFile': checked(path('repoPath')),
   'worktrees.commitFiles': checked(path('repoPath')),

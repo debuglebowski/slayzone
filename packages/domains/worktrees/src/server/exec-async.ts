@@ -68,7 +68,14 @@ export interface ExecResult {
 export function execAsync(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeout?: number; source?: DiagnosticSource } = {}
+  opts: {
+    cwd?: string
+    timeout?: number
+    source?: DiagnosticSource
+    /** Exit codes that are a normal answer, logged as a command — not a failure (e.g.
+     *  `git diff --no-index` exits 1 when the files differ). Default `[0]`. */
+    okExitCodes?: readonly number[]
+  } = {}
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     const label = `${command} ${args.join(' ')}`
@@ -95,19 +102,20 @@ export function execAsync(
       const durationMs = Date.now() - startedAt
       const stdoutStr = stdout.join('')
       const stderrStr = stderr.join('')
+      const ok = code !== null && (opts.okExitCodes ?? [0]).includes(code)
 
       recordDiagnosticEvent({
-        level: code === 0 ? 'info' : 'error',
+        level: ok ? 'info' : 'error',
         source,
-        event: code === 0 ? `${source}.command` : `${source}.command_failed`,
-        message: code === 0 ? label : stderrStr.trim() || `command failed: ${label}`,
+        event: ok ? `${source}.command` : `${source}.command_failed`,
+        message: ok ? label : stderrStr.trim() || `command failed: ${label}`,
         payload: {
           command: label,
           cwd: opts.cwd,
           durationMs,
-          success: code === 0,
+          success: ok,
           exitCode: code,
-          ...(code !== 0 && { stderr: trimOutput(stderrStr), stdout: trimOutput(stdoutStr) })
+          ...(!ok && { stderr: trimOutput(stderrStr), stdout: trimOutput(stdoutStr) })
         }
       })
 
