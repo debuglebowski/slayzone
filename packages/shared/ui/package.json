@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./utils": "./src/utils.ts",
-    "./secure-context": "./src/secure-context.ts"
+    "./secure-context": "./src/secure-context.ts",
+    "./is-modal-dialog-open": "./src/is-modal-dialog-open.ts"
   },
   "scripts": {
     "test": "vitest run",

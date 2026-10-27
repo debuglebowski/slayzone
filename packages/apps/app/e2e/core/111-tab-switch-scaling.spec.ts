@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { MODAL_DIALOG_SELECTOR } from '@slayzone/ui/is-modal-dialog-open'
 import { test, expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 
 // Switching task tabs must cost the same with 3 tabs open as with 30. Every open tab
@@ -269,28 +270,37 @@ test.describe('Tab switch cost does not scale with open tabs', () => {
     expect(perSwitch('TaskSettingsPanel'), summary).toBeLessThanOrEqual(1)
   })
 
-  test('a keystroke checks for an open modal at most once', async ({ mainWindow }) => {
-    // Every guarded keydown handler used to run its own full-document `querySelector`
-    // for an open modal — 2 per open tab, each ~1ms on a large DOM.
+  test('a keystroke checks for an open modal exactly once', async ({ mainWindow }) => {
+    // Every guarded keydown handler used to run its own full-document query for an
+    // open modal — 2 per open tab, each ~1ms on a large DOM. Counted by the guard's own
+    // selector, under either query API, so a selector or API change cannot zero it out.
     test.setTimeout(120_000)
     await openTaskById(mainWindow, taskIds[0])
     await openAllInBackground(mainWindow, taskIds)
-    const modalQueries = await mainWindow.evaluate(() => {
-      const original = Document.prototype.querySelector
+    const modalQueries = await mainWindow.evaluate((modalSelector) => {
+      const proto = Document.prototype
+      const { querySelector, querySelectorAll } = proto
       let n = 0
-      Document.prototype.querySelector = function (this: Document, selectors: string) {
-        if (selectors.includes('aria-modal')) n++
-        return original.call(this, selectors)
-      } as typeof Document.prototype.querySelector
+      proto.querySelector = function (this: Document, selectors: string) {
+        if (selectors === modalSelector) n++
+        return querySelector.call(this, selectors)
+      } as typeof proto.querySelector
+      proto.querySelectorAll = function (this: Document, selectors: string) {
+        if (selectors === modalSelector) n++
+        return querySelectorAll.call(this, selectors)
+      } as typeof proto.querySelectorAll
       try {
         document.body.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'F19', code: 'F19', bubbles: true, cancelable: true })
         )
       } finally {
-        Document.prototype.querySelector = original
+        proto.querySelector = querySelector
+        proto.querySelectorAll = querySelectorAll
       }
       return n
-    })
-    expect(modalQueries).toBeLessThanOrEqual(1)
+    }, MODAL_DIALOG_SELECTOR)
+    // Exactly one: the shortcut dispatcher checks every keystroke, all later handlers
+    // reuse its answer. Zero would mean the probe no longer sees the guard's query.
+    expect(modalQueries).toBe(1)
   })
 })
