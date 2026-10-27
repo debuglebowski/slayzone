@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useLayoutEffect } from 'react'
 import { useHubId } from '@slayzone/transport/client'
 import { TaskDetailPage, type TaskDetailPageProps } from './TaskDetailPage'
 import { taskDetailCache } from './taskDetailCache'
@@ -22,5 +22,9 @@ export const TaskDetailDataLoader = React.memo(function TaskDetailDataLoader(
   const data = taskDetailCache.useData('taskDetail', props.taskId, hubId)
   // The page (and its own terminal) is up: the terminal-first pane is done.
   useEffect(() => clearTerminalFirst(props.taskId), [props.taskId])
+  // Per-task "detail page committed" mark — read by the e2e perf scenarios.
+  useLayoutEffect(() => {
+    performance.mark(`sz:taskDetail:${props.taskId}:mount`)
+  }, [props.taskId])
   return <TaskDetailPage {...props} initialData={data} />
 })

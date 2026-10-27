@@ -134,43 +134,16 @@ async function fetchTaskDetailUncapped(
     parentTask = await trpc.task.get.query({ id: loadedTask.parent_id })
   }
 
-  // Resolve panel visibility
-  const panelVisibility: PanelVisibility = {
-    ...DEFAULT_PANEL_VISIBILITY,
-    ...(loadedTask.panel_visibility ?? {}),
-    ...(loadedTask.is_temporary ? { settings: false } : {})
-  }
-
-  // Resolve panel size overrides (per-task, size-only; defaults come from the
-  // global layout config at resolve time — do NOT seed defaults here, or they'd
-  // masquerade as per-task overrides).
-  const panelSizes: PanelSizes = normalizeOverrides(loadedTask.panel_sizes)
-
-  // Resolve browser tabs. Fallback URLs come from sibling tasks in the SAME
-  // project only — browser state must never leak across projects.
-  let browserTabs: BrowserTabsState
-  if (loadedTask.browser_tabs) {
-    browserTabs = loadedTask.browser_tabs
-  } else {
-    const projectTasks = await trpc.task.getByProject
-      .query({ projectId: loadedTask.project_id })
-      .catch(() => [] as Task[])
-    let firstUrl = 'about:blank'
-    for (const t of projectTasks) {
-      if (t.id === loadedTask.id) continue
-      const url = t.browser_tabs?.tabs?.find((tab) => tab.url && tab.url !== 'about:blank')?.url
-      if (url) {
-        firstUrl = url
-        break
-      }
-    }
-    browserTabs = {
-      tabs: [
-        { id: 'default', url: firstUrl, title: firstUrl === 'about:blank' ? 'New Tab' : firstUrl }
-      ],
-      activeTabId: 'default'
-    }
-  }
+  // Browser tabs. Fallback URLs come from sibling tasks in the SAME project
+  // only — browser state must never leak across projects.
+  const browserTabs = loadedTask.browser_tabs
+    ? loadedTask.browser_tabs
+    : resolveBrowserTabs(
+        loadedTask,
+        await trpc.task.getByProject
+          .query({ projectId: loadedTask.project_id })
+          .catch(() => [] as Task[])
+      )
 
   return {
     task: loadedTask,
@@ -181,9 +154,88 @@ async function fetchTaskDetailUncapped(
     subTasks: loadedSubTasks,
     parentTask,
     projectPathMissing,
-    panelVisibility,
-    panelSizes,
+    panelVisibility: resolvePanelVisibility(loadedTask),
+    // Per-task, size-only overrides; defaults come from the global layout config
+    // at resolve time — do NOT seed defaults here, or they'd masquerade as
+    // per-task overrides.
+    panelSizes: normalizeOverrides(loadedTask.panel_sizes),
     browserTabs
+  }
+}
+
+function resolvePanelVisibility(task: Task): PanelVisibility {
+  return {
+    ...DEFAULT_PANEL_VISIBILITY,
+    ...(task.panel_visibility ?? {}),
+    ...(task.is_temporary ? { settings: false } : {})
+  }
+}
+
+/**
+ * The task's saved browser tabs, else one tab on the first real URL found among
+ * `projectTasks` — which the caller must restrict to the task's own project.
+ */
+function resolveBrowserTabs(task: Task, projectTasks: readonly Task[]): BrowserTabsState {
+  if (task.browser_tabs) return task.browser_tabs
+  let firstUrl = 'about:blank'
+  for (const t of projectTasks) {
+    if (t.id === task.id || t.archived_at) continue
+    const url = t.browser_tabs?.tabs?.find((tab) => tab.url && tab.url !== 'about:blank')?.url
+    if (url) {
+      firstUrl = url
+      break
+    }
+  }
+  return {
+    tabs: [
+      { id: 'default', url: firstUrl, title: firstUrl === 'about:blank' ? 'New Tab' : firstUrl }
+    ],
+    activeTabId: 'default'
+  }
+}
+
+export interface TaskDetailSnapshotInput {
+  /** Every task the caller holds (any project, any hub) — filtered here. */
+  tasks: readonly Task[]
+  projects: readonly Project[]
+  /** Every tag the caller holds — filtered to the task's project here. */
+  tags: readonly Tag[]
+  taskTagIds: readonly string[]
+  /**
+   * The caller's latest answer for this task's project, or `false` when it has
+   * none — the same "not known to be missing" `fetchTaskDetail` uses for an
+   * unreachable computer. TaskDetailPage re-probes on mount either way.
+   */
+  projectPathMissing: boolean
+}
+
+/**
+ * `fetchTaskDetail`'s result, built from board state the renderer already holds
+ * (same rows: `task.loadBoardData` selects what `task.get` does). Feed it to
+ * `taskDetailCache.prime` so opening a known task renders at once instead of
+ * suspending on five hub round-trips. Returns null when `taskId` is not in `tasks`.
+ *
+ * `taskTags` is left out on purpose: without it the tab's tag query fetches
+ * fresh (it never refetches once seeded), while `taskTagIds` fills the gap.
+ */
+export function buildTaskDetailSnapshot(
+  taskId: string,
+  input: TaskDetailSnapshotInput
+): TaskDetailData | null {
+  const task = input.tasks.find((t) => t.id === taskId)
+  if (!task) return null
+  const projectTasks = input.tasks.filter((t) => t.project_id === task.project_id)
+  return {
+    task,
+    project: input.projects.find((p) => p.id === task.project_id) ?? null,
+    tags: input.tags.filter((t) => t.project_id === task.project_id),
+    taskTagIds: [...input.taskTagIds],
+    subTasks: projectTasks.filter((t) => t.parent_id === task.id && !t.archived_at),
+    parentTask: task.parent_id ? (projectTasks.find((t) => t.id === task.parent_id) ?? null) : null,
+    projectPathMissing: input.projectPathMissing,
+    panelVisibility: resolvePanelVisibility(task),
+    panelSizes: normalizeOverrides(task.panel_sizes),
+    browserTabs: resolveBrowserTabs(task, projectTasks)
   }
 }
 

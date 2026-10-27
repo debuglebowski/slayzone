@@ -40,6 +40,18 @@ export interface SuspenseCache<F extends Fetchers> {
    */
   prefetch<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): Promise<void>
 
+  /**
+   * Seed a resolved entry from data the caller already holds, so the first
+   * useData returns synchronously instead of suspending on a fetch. Never
+   * clobbers: an existing entry (in flight or settled) came from the fetcher,
+   * which is the source of truth, so it wins over a client-side snapshot.
+   */
+  prime<K extends keyof F & string>(
+    key: K,
+    args: FetcherArgs<F[K]>,
+    value: FetcherReturn<F[K]>
+  ): void
+
   /** Invalidate a specific cache entry. Triggers re-render → re-suspend. */
   invalidate<K extends keyof F & string>(key: K, ...args: FetcherArgs<F[K]>): void
 
@@ -137,6 +149,13 @@ export function createSuspenseCache<F extends Fetchers>(fetchers: F): SuspenseCa
         () => undefined,
         () => undefined
       )
+    },
+
+    prime(key, args, value) {
+      const k = cacheKey(key, args)
+      if (cache.has(k)) return
+      cache.set(k, { promise: Promise.resolve(value), value, settled: true })
+      notify(k)
     },
 
     invalidate(key, ...args) {

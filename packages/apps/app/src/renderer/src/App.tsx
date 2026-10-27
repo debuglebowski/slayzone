@@ -45,6 +45,7 @@ import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 // Same module TabPanes' task fallback comes from (eager either way).
 import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
+import { buildTaskDetailSnapshot, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext } from '@slayzone/projects'
 import {
@@ -595,6 +596,22 @@ function App(): React.JSX.Element {
         return
       }
       if (taskProject) recordTaskOpen(taskProject.id)
+      // Seed the new tab's detail data from board state we already hold, so it
+      // renders on the first commit instead of suspending on hub round-trips.
+      // Keyed by hub exactly as the tab's TaskDetailDataLoader reads it (its
+      // pane's HubScope). The path answer is only ours for the selected project.
+      const snapshot = buildTaskDetailSnapshot(taskId, {
+        tasks,
+        projects,
+        tags,
+        taskTagIds: taskTags.get(taskId) ?? [],
+        projectPathMissing:
+          (taskProject?.id === selectedProjectId && selectedProjectPathMissing) || false
+      })
+      if (snapshot) {
+        const hubId = hubIdByTask.get(taskId) ?? defaultHubId
+        taskDetailCache.prime('taskDetail', [taskId, hubId], snapshot)
+      }
       fn(taskId)
     }
   )

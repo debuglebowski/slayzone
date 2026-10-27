@@ -73,7 +73,9 @@ vi.mock('@slayzone/transport/client', () => ({
     id === 'remote-b' ? { id, url: '', client: remoteHubClientMock, wsClient: {} } : null
 }))
 
-const { fetchTaskDetail, TASK_DETAIL_FETCH_TIMEOUT_MS } = await import('./taskDetailCache')
+const { fetchTaskDetail, buildTaskDetailSnapshot, TASK_DETAIL_FETCH_TIMEOUT_MS } = await import(
+  './taskDetailCache'
+)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -280,5 +282,63 @@ describe('fetchTaskDetail — hang timeout', () => {
   it('does not wait the full timeout when the fetch settles quickly', async () => {
     const result = await fetchTaskDetail('task-1')
     expect(result!.task.id).toBe('task-1')
+  })
+})
+
+// The snapshot primes the same cache slot fetchTaskDetail fills, so for the same
+// data the two must agree field for field — anything else renders a different
+// page depending on how the tab was opened.
+describe('buildTaskDetailSnapshot', () => {
+  const browser = (url: string) => ({ tabs: [{ id: 't', url, title: url }], activeTabId: 't' })
+  const parent = makeTask({ id: 'parent', title: 'Parent' })
+  const task = makeTask({
+    parent_id: 'parent',
+    panel_visibility: { browser: true },
+    panel_sizes: { terminal: 400 }
+  })
+  const sub = makeTask({ id: 'sub', parent_id: 'task-1' })
+  const archivedSub = makeTask({ id: 'sub-arch', parent_id: 'task-1', archived_at: '2026-01-01' })
+  const sibling = makeTask({ id: 'sibling', browser_tabs: browser('http://same.project') })
+  const foreign = makeTask({
+    id: 'foreign',
+    project_id: 'proj-2',
+    browser_tabs: browser('http://other.project')
+  })
+  const tags = [makeTag({ project_id: 'proj-1' }), makeTag({ id: 'tag-2', project_id: 'proj-2' })]
+
+  it('matches fetchTaskDetail for the same data', async () => {
+    trpcClientMock.task.get.query.mockImplementation(({ id }: { id: string }) =>
+      Promise.resolve(id === 'parent' ? parent : task)
+    )
+    trpcClientMock.task.getSubTasks.query.mockResolvedValue([sub])
+    trpcClientMock.task.getByProject.query.mockResolvedValue([parent, task, sub, sibling])
+    trpcClientMock.tags.list.query.mockResolvedValue(tags)
+    trpcClientMock.tags.getForTask.query.mockResolvedValue([tags[0]])
+
+    const fetched = await fetchTaskDetail('task-1')
+    const snapshot = buildTaskDetailSnapshot('task-1', {
+      // Foreign-project task first: its URL must not leak into the fallback.
+      tasks: [foreign, parent, task, sub, archivedSub, sibling] as never[],
+      projects: [makeProject(), makeProject({ id: 'proj-2' })] as never[],
+      tags: tags as never[],
+      taskTagIds: ['tag-1'],
+      projectPathMissing: false
+    })
+
+    const { taskTags: _fetchedOnly, ...comparable } = fetched!
+    expect(snapshot).toEqual(comparable)
+    expect(snapshot!.browserTabs.tabs[0].url).toBe('http://same.project')
+  })
+
+  it('returns null for a task the caller does not hold', () => {
+    expect(
+      buildTaskDetailSnapshot('missing', {
+        tasks: [],
+        projects: [],
+        tags: [],
+        taskTagIds: [],
+        projectPathMissing: false
+      })
+    ).toBeNull()
   })
 })
