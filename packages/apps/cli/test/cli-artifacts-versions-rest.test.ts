@@ -466,14 +466,13 @@ await describe('artifacts versions * with NO local database', () => {
     const tilde = await runCli(['tasks', 'artifacts', 'versions', 'read', short(binId), 'HEAD~1'])
     expect(tilde.exitCode).toBe(0)
 
-    // A bare `-1` is eaten by commander as an unknown OPTION before any action
-    // runs — a pre-existing gap between the `--help` text and the parser, present
-    // on the sqlite version too (the `.command('read <artifactId> <version>')`
-    // declaration is unchanged). `--` reaches the resolver, and HEAD~1 is the same
-    // ref by another spelling, so the two must agree byte for byte.
+    // A bare `-1` reaches the resolver as the `-N` the `--help` text promises
+    // (commander ≥14 parses unescaped negative numbers as command-arguments), and
+    // so does `-1` after `--`. HEAD~1 is the same ref by another spelling, so all
+    // three must agree byte for byte.
     const bare = await runCli(['tasks', 'artifacts', 'versions', 'read', short(binId), '-1'])
-    expect(bare.exitCode).toBe(1)
-    expect(bare.stderr.includes("unknown option '-1'")).toBe(true)
+    expect(bare.exitCode).toBe(0)
+    expect(bare.stdoutBytes.toString('hex')).toBe(tilde.stdoutBytes.toString('hex'))
 
     const relative = await runCli([
       'tasks',

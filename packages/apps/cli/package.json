@@ -11,7 +11,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
     "archiver": "^7.0.1",
-    "commander": "^13.0.0"
+    "commander": "^15.0.0"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
