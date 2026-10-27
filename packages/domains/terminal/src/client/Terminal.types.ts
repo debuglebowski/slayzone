@@ -7,7 +7,6 @@ export interface TerminalProps {
   conversationId?: string | null
   existingConversationId?: string | null
   supportsSessionId?: boolean
-  initialPrompt?: string | null
   providerFlags?: string | null
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   isActive?: boolean

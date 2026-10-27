@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 // Pins PtyProvider's event-stream fan-out: each pty.* subscription routes its
-// payload to the per-session subscribers, keeps the per-session metadata, and
-// tracks each session's pending prompt for getPendingPrompt.
+// payload to the per-session subscribers and keeps the per-session metadata.
 import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
@@ -13,7 +12,6 @@ const getBuffer = vi.fn()
 const procs = [
   'onData',
   'onExit',
-  'onStateChange',
   'onPrompt',
   'onSessionDetected',
   'onDevServerDetected',
@@ -105,26 +103,19 @@ describe('PtyProvider event streams', () => {
     expect(ctx().getLastSeq('s1')).toBe(2)
   })
 
-  it('tracks pending prompts and clears them when the agent leaves the alive set', async () => {
+  it('delivers prompts to known sessions only', async () => {
     const { ctx } = mount()
     const promptCb = vi.fn()
+    const unknownCb = vi.fn()
     ctx().subscribe('s1', vi.fn()) // creates the session state
     ctx().subscribePrompt('s1', promptCb)
+    ctx().subscribePrompt('nobody', unknownCb) // no session state
 
     const prompt = { type: 'permission', text: 'ok?' }
     await emit('onPrompt', { sessionId: 's1', prompt })
-    expect(promptCb).toHaveBeenCalledWith(prompt)
-    expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
-
     await emit('onPrompt', { sessionId: 'nobody', prompt })
-    expect(ctx().getPendingPrompt('nobody')).toBeUndefined()
-    expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
-
-    await emit('onStateChange', { sessionId: 's1', newState: 'idle', oldState: 'running' })
-    expect(ctx().getPendingPrompt('s1')).toEqual(prompt)
-
-    await emit('onStateChange', { sessionId: 's1', newState: 'dead', oldState: 'running' })
-    expect(ctx().getPendingPrompt('s1')).toBeUndefined()
+    expect(promptCb.mock.calls).toEqual([[prompt]])
+    expect(unknownCb).not.toHaveBeenCalled()
   })
 
   it('fires exit subscribers, captures crash output, then frees the session', async () => {

@@ -22,10 +22,7 @@ import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalS
 // Per-task state - no buffer (backend is source of truth)
 export interface PtyState {
   lastSeq: number // Last sequence number received for ordering
-  exitCode?: number
   crashOutput?: string
-  pendingPrompt?: PromptInfo
-  quickRunPrompt?: string
 }
 
 type DataCallback = (data: string, seq: number) => void
@@ -38,8 +35,6 @@ type SessionDetectedCallback = (sessionId: string) => void
 type DevServerCallback = (url: string) => void
 type TitleChangeCallback = (title: string) => void
 
-const ALIVE_STATES: Set<TerminalState> = new Set(['running', 'idle'])
-
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
@@ -49,17 +44,10 @@ interface PtyContextValue {
   subscribeDevServer: (sessionId: string, cb: DevServerCallback) => () => void
   subscribeTitle: (sessionId: string, cb: TitleChangeCallback) => () => void
   getLastSeq: (sessionId: string) => number
-  getExitCode: (sessionId: string) => number | undefined
   getCrashOutput: (sessionId: string) => string | undefined
   getState: (sessionId: string) => TerminalState
-  getPendingPrompt: (sessionId: string) => PromptInfo | undefined
-  clearPendingPrompt: (sessionId: string) => void
   resetTaskState: (sessionId: string) => void
   cleanupTask: (sessionId: string) => void // Free all memory for a task
-  // Quick run prompt
-  setQuickRunPrompt: (sessionId: string, prompt: string) => void
-  getQuickRunPrompt: (sessionId: string) => string | undefined
-  clearQuickRunPrompt: (sessionId: string) => void
 }
 
 const PtyContext = createContext<PtyContextValue | null>(null)
@@ -145,8 +133,6 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
       const state = statesRef.current.get(sessionId)
 
       if (state) {
-        state.exitCode = exitCode ?? undefined
-
         // Capture crash output before the 100ms backend cleanup window closes
         // Only capture if process exited non-zero (likely a crash)
         if (exitCode !== 0) {
@@ -181,38 +167,9 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   )
   useSubscription(trpc.pty.onExit.subscriptionOptions(undefined, { onData: handleExit }))
 
-  // Terminal STATE lives in the reactive store (which has its own
-  // onStateChange handler). PtyContext keeps only the pending-prompt side
-  // effect: clear it when the agent leaves the alive set (dead/error).
-  const handleStateChange = useStableCallback(
-    ({
-      sessionId,
-      newState,
-      oldState
-    }: {
-      sessionId: string
-      newState: string
-      oldState: string
-    }) => {
-      if (
-        ALIVE_STATES.has(oldState as TerminalState) &&
-        !ALIVE_STATES.has(newState as TerminalState)
-      ) {
-        const state = statesRef.current.get(sessionId)
-        if (state) state.pendingPrompt = undefined
-      }
-    }
-  )
-  useSubscription(
-    trpc.pty.onStateChange.subscriptionOptions(undefined, { onData: handleStateChange })
-  )
-
   const handlePrompt = useStableCallback(
     ({ sessionId, prompt }: { sessionId: string; prompt: unknown }) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return // Ignore prompts for unknown tasks
-
-      state.pendingPrompt = prompt as PromptInfo
+      if (!statesRef.current.has(sessionId)) return // Ignore prompts for unknown tasks
 
       const subs = promptSubsRef.current.get(sessionId)
       if (subs) {
@@ -409,25 +366,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     return statesRef.current.get(sessionId)?.lastSeq ?? -1
   }, [])
 
-  const getExitCode = useCallback((sessionId: string): number | undefined => {
-    return statesRef.current.get(sessionId)?.exitCode
-  }, [])
-
   const getCrashOutput = useCallback((sessionId: string): string | undefined => {
     return statesRef.current.get(sessionId)?.crashOutput
   }, [])
 
   const getState = useCallback((sessionId: string): TerminalState => {
     return useTerminalStateStore.getState().getSessionState(sessionId)
-  }, [])
-
-  const getPendingPrompt = useCallback((sessionId: string): PromptInfo | undefined => {
-    return statesRef.current.get(sessionId)?.pendingPrompt
-  }, [])
-
-  const clearPendingPrompt = useCallback((sessionId: string): void => {
-    const state = statesRef.current.get(sessionId)
-    if (state) state.pendingPrompt = undefined
   }, [])
 
   // Full reset for mode switches - removes all state so fresh state is created
@@ -449,26 +393,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     titleSubsRef.current.delete(sessionId)
   }, [])
 
-  // Quick run prompt - for auto-sending prompt when task opens
-  const setQuickRunPrompt = useCallback(
-    (sessionId: string, prompt: string): void => {
-      const state = getOrCreateState(sessionId)
-      state.quickRunPrompt = prompt
-    },
-    [getOrCreateState]
-  )
-
-  const getQuickRunPrompt = useCallback((sessionId: string): string | undefined => {
-    return statesRef.current.get(sessionId)?.quickRunPrompt
-  }, [])
-
-  const clearQuickRunPrompt = useCallback((sessionId: string): void => {
-    const state = statesRef.current.get(sessionId)
-    if (state) {
-      state.quickRunPrompt = undefined
-    }
-  }, [])
-
   const value = useMemo<PtyContextValue>(
     () => ({
       subscribe,
@@ -479,16 +403,10 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       subscribeDevServer,
       subscribeTitle,
       getLastSeq,
-      getExitCode,
       getCrashOutput,
       getState,
-      getPendingPrompt,
-      clearPendingPrompt,
       resetTaskState,
-      cleanupTask,
-      setQuickRunPrompt,
-      getQuickRunPrompt,
-      clearQuickRunPrompt
+      cleanupTask
     }),
     [
       subscribe,
@@ -499,16 +417,10 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       subscribeDevServer,
       subscribeTitle,
       getLastSeq,
-      getExitCode,
       getCrashOutput,
       getState,
-      getPendingPrompt,
-      clearPendingPrompt,
       resetTaskState,
-      cleanupTask,
-      setQuickRunPrompt,
-      getQuickRunPrompt,
-      clearQuickRunPrompt
+      cleanupTask
     ]
   )
 

@@ -19,6 +19,6 @@ Centralized management for AI configuration:
 
 ## Client (`client/`)
 
-- `ContextManagerSettings` - Settings-embedded context manager
+- `ContextManagerPage` / `ContextManagerShell` - Full-page Context Manager
 - `ContextItemEditor` - Inline editor for skills/commands
 - `ContextFilesPanel` - Context file discovery and editing

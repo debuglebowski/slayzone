@@ -50,7 +50,6 @@ interface TerminalContainerProps {
    *  no gate (preserves behavior for non-gated callers). */
   conversationHydrated?: boolean
   supportsSessionId?: boolean
-  initialPrompt?: string | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   /** Owning task is temporary — disables terminal auto-start (regular-task-only). */
@@ -95,7 +94,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       existingConversationId,
       conversationHydrated,
       supportsSessionId,
-      initialPrompt,
       providerFlags,
       executionContext,
       isTemporary,
@@ -430,7 +428,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           // Gate only the main tab; splits/extra panes spawn fresh by design.
           conversationHydrated: tab.isMain ? conversationHydrated : true,
           supportsSessionId: tab.isMain ? supportsSessionId : undefined,
-          initialPrompt: tab.isMain ? initialPrompt : undefined,
           providerFlags: tab.isMain ? providerFlags : undefined,
           executionContext,
           isTemporary,
@@ -466,7 +463,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       existingConversationId,
       conversationHydrated,
       supportsSessionId,
-      initialPrompt,
       providerFlags,
       executionContext,
       isTemporary,

@@ -18,11 +18,6 @@ interface ContextManagerViewState {
   computerSelectedPath: string | null
   computerSplitWidth: number
 
-  // Project context tree
-  projectSelectedPath: string | null
-  projectExpandedFolders: string[]
-  projectSplitWidth: number
-
   // Skill editor panel (null = 50% of available)
   skillEditorWidth: number | null
 
@@ -52,9 +47,6 @@ interface ContextManagerViewState {
   setSkillViewMode: (scope: string, mode: 'list' | 'graph') => void
   setComputerSelectedPath: (path: string | null) => void
   setComputerSplitWidth: (width: number) => void
-  setProjectSelectedPath: (path: string | null) => void
-  setProjectExpandedFolders: (folders: string[]) => void
-  setProjectSplitWidth: (width: number) => void
   setSkillEditorWidth: (width: number | null) => void
   setShowBlobs: (show: boolean) => void
   setShowLineCount: (show: boolean) => void
@@ -69,9 +61,6 @@ interface PersistedState {
   skillViewMode: Record<string, 'list' | 'graph'>
   computerSelectedPath: string | null
   computerSplitWidth: number
-  projectSelectedPath: string | null
-  projectExpandedFolders: string[]
-  projectSplitWidth: number
   skillEditorWidth: number | null
   showBlobs: boolean
   showLineCount: boolean
@@ -84,9 +73,6 @@ const DEFAULTS: PersistedState = {
   skillViewMode: {},
   computerSelectedPath: null,
   computerSplitWidth: 350,
-  projectSelectedPath: null,
-  projectExpandedFolders: [],
-  projectSplitWidth: 350,
   skillEditorWidth: null,
   showBlobs: true,
   showLineCount: true,
@@ -131,9 +117,6 @@ export const useContextManagerStore = create<ContextManagerViewState>()(
       set((s) => ({ skillViewMode: { ...s.skillViewMode, [scope]: mode } })),
     setComputerSelectedPath: (path) => set({ computerSelectedPath: path }),
     setComputerSplitWidth: (width) => set({ computerSplitWidth: width }),
-    setProjectSelectedPath: (path) => set({ projectSelectedPath: path }),
-    setProjectExpandedFolders: (folders) => set({ projectExpandedFolders: folders }),
-    setProjectSplitWidth: (width) => set({ projectSplitWidth: width }),
     setSkillEditorWidth: (width) => set({ skillEditorWidth: width }),
     setShowBlobs: (show) => set({ showBlobs: show }),
     setShowLineCount: (show) => set({ showLineCount: show }),
@@ -185,9 +168,6 @@ function pickPersisted(state: ContextManagerViewState): PersistedState {
     skillViewMode: state.skillViewMode,
     computerSelectedPath: state.computerSelectedPath,
     computerSplitWidth: state.computerSplitWidth,
-    projectSelectedPath: state.projectSelectedPath,
-    projectExpandedFolders: state.projectExpandedFolders,
-    projectSplitWidth: state.projectSplitWidth,
     skillEditorWidth: state.skillEditorWidth,
     showBlobs: state.showBlobs,
     showLineCount: state.showLineCount,

@@ -39,7 +39,6 @@ interface PaneProps {
   /** True once the conversation id is hydrated; gates the main tab's auto-spawn. */
   conversationHydrated?: boolean
   supportsSessionId?: boolean
-  initialPrompt?: string | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   permissionNotice?: string | null
@@ -201,7 +200,6 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           conversationId={pane.conversationId}
           existingConversationId={pane.existingConversationId}
           supportsSessionId={pane.supportsSessionId}
-          initialPrompt={pane.initialPrompt}
           providerFlags={pane.providerFlags}
           executionContext={pane.executionContext}
           isActive={isActive}

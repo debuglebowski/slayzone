@@ -14,17 +14,11 @@
   "packages/domains/ai-config/src/client/mcp-servers-panel/dialogs/AddProjectMcpDialog.tsx": [
     "AddProjectMcpDialog"
   ],
-  "packages/domains/ai-config/src/client/mcp-sync-handlers.ts": ["useMcpSyncHandlers"],
-  "packages/domains/ai-config/src/client/ProjectContextFilesView.tsx": ["ProjectContextFilesView"],
-  "packages/domains/ai-config/src/client/ProjectContextFlat.tsx": ["ProjectContextFlat"],
-  "packages/domains/ai-config/src/client/ProjectContextTree.tsx": ["ProjectContextTree"],
   "packages/domains/ai-config/src/client/ProjectInstructions.tsx": ["ProjectInstructionsBody"],
   "packages/domains/ai-config/src/client/SkillsSection.tsx": ["SkillsSection"],
   "packages/domains/ai-config/src/client/useContextItemEditorState.ts": [
     "useContextItemEditorState"
   ],
-  "packages/domains/ai-config/src/client/useProjectContextTree.ts": ["useProjectContextTree"],
-  "packages/domains/ai-config/src/client/useSkillItem.ts": ["useSkillItem"],
   "packages/domains/ai-config/src/client/useSkillMarketplace.ts": ["useSkillMarketplace"],
   "packages/domains/automations/src/client/AutomationCard.tsx": ["AutomationCard"],
   "packages/domains/feedback/src/client/FeedbackDialog.tsx": ["FeedbackDialog"],

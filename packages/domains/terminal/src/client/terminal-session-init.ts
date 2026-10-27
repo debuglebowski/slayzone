@@ -110,7 +110,6 @@ export interface TerminalInitContext {
   onOpenFileRef: RefObject<TerminalProps['onOpenFile']>
   conversationIdRef: RefObject<TerminalProps['conversationId']>
   existingConversationIdRef: RefObject<TerminalProps['existingConversationId']>
-  initialPromptRef: RefObject<TerminalProps['initialPrompt']>
   providerFlagsRef: RefObject<TerminalProps['providerFlags']>
   executionContextRef: RefObject<TerminalProps['executionContext']>
   setIsInitializing: Dispatch<SetStateAction<boolean>>
@@ -165,7 +164,6 @@ export async function initTerminalSession(
     onOpenFileRef,
     conversationIdRef,
     existingConversationIdRef,
-    initialPromptRef,
     providerFlagsRef,
     executionContextRef,
     setIsInitializing,
@@ -751,7 +749,6 @@ export async function initTerminalSession(
       }
 
       // Create PTY — plain terminal mode doesn't use conversation IDs
-      // Note: Don't pass initialPrompt - we'll inject it after terminal is ready
       const isAiMode = mode !== 'terminal'
       const effectiveConversationId = isAiMode ? newConversationId : undefined
       const effectiveExistingConversationId = isAiMode
@@ -860,19 +857,6 @@ export async function initTerminalSession(
       focus: () => terminal.focus(),
       clearBuffer: clearBufferWithoutRestart
     })
-    // Inject initial prompt if provided (after a delay for terminal to be ready)
-    if (initialPromptRef.current) {
-      setTimeout(async () => {
-        if (signal.aborted) return // Don't inject if unmounted
-        try {
-          // For plan mode, prefix with /plan
-          const textToInject = initialPromptRef.current!
-          await injectText(textToInject)
-        } catch {
-          // Terminal may have been disposed, ignore
-        }
-      }, 500)
-    }
   } catch (error) {
     if (signal.aborted) return
     const message = error instanceof Error ? error.message : 'Failed to initialize terminal'

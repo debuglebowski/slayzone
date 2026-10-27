@@ -82,7 +82,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     conversationId,
     existingConversationId,
     supportsSessionId = true,
-    initialPrompt,
     providerFlags,
     executionContext,
     isActive = true,
@@ -185,7 +184,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // with new object references (e.g. executionContext from JSON.parse on every loadData).
   const conversationIdRef = useRef(conversationId)
   const existingConversationIdRef = useRef(existingConversationId)
-  const initialPromptRef = useRef(initialPrompt)
   const providerFlagsRef = useRef(providerFlags)
   const executionContextRef = useRef(executionContext)
 
@@ -235,7 +233,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onOpenFileRef.current = onOpenFile
     conversationIdRef.current = conversationId
     existingConversationIdRef.current = existingConversationId
-    initialPromptRef.current = initialPrompt
     providerFlagsRef.current = providerFlags
     executionContextRef.current = executionContext
     forceCompatRef.current = terminalForceCompatibilityRenderer
@@ -455,7 +452,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           onOpenFileRef,
           conversationIdRef,
           existingConversationIdRef,
-          initialPromptRef,
           providerFlagsRef,
           executionContextRef,
           setIsInitializing,

@@ -49,12 +49,9 @@ vi.mock('@slayzone/ui', async () => ({
 
 const { useProjectMcpServers } = await import('./mcp-servers-panel/useProjectMcpServers')
 const { useComputerMcpServers } = await import('./mcp-servers-panel/useComputerMcpServers')
-const { useMcpFlatState } = await import('./useMcpFlatState')
 const { useSkillMarketplace } = await import('./useSkillMarketplace')
 const { useContextManagerStore } = await import('./useContextManagerStore')
-const { useLegacyContextState } = await import('./useLegacyContextState')
 const { useContextItemEditorState } = await import('./useContextItemEditorState')
-const { useSkillItem } = await import('./useSkillItem')
 const { useStaleSkillCount } = await import('./useStaleSkillCount')
 const { useStaleSkillCounts } = await import('./useStaleSkillCounts')
 
@@ -199,33 +196,6 @@ describe('useComputerMcpServers', () => {
   })
 })
 
-describe('useMcpFlatState', () => {
-  it('loads on mount and reloads with loading=true when projectPath changes', async () => {
-    const discover = deferredHandler('aiConfig.discoverMcpConfigs')
-    handlers['settings.get'] = async () => null
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useMcpFlatState({ projectPath: path, enabledProviders: [] }),
-      { initialProps: { path: '/a' } }
-    )
-    expect(result.current.loading).toBe(true)
-    await flush()
-    await act(async () => discover[0].resolve([]))
-    await flush()
-    expect(result.current.loading).toBe(false)
-
-    rerender({ path: '/b' })
-    expect(result.current.loading).toBe(true)
-    await flush()
-    expect(callsTo('aiConfig.discoverMcpConfigs').map((c) => c.input)).toEqual([
-      { projectPath: '/a' },
-      { projectPath: '/b' }
-    ])
-    await act(async () => discover[1].resolve([]))
-    await flush()
-    expect(result.current.loading).toBe(false)
-  })
-})
-
 describe('useSkillMarketplace', () => {
   it('loads registries + entries on mount and reloads entries on search', async () => {
     handlers['aiConfig.marketplace.listRegistries'] = async () => [{ id: 'r1' }]
@@ -352,47 +322,6 @@ describe('useSkillMarketplace external drill-in', () => {
   })
 })
 
-describe('useLegacyContextState', () => {
-  it('loads library skills for the skill section and resets on section change', async () => {
-    const list = deferredHandler('aiConfig.listItems')
-    const { result, rerender } = renderHook(
-      ({ section }: { section: 'skill' | null }) => useLegacyContextState(section),
-      { initialProps: { section: null as 'skill' | null } }
-    )
-    await flush()
-    expect(result.current.section).toBe(null)
-    expect(result.current.loading).toBe(false)
-    expect(callsTo('aiConfig.listItems')).toHaveLength(0)
-
-    act(() => result.current.setEditingId('x'))
-    expect(result.current.editingId).toBe('x')
-
-    rerender({ section: 'skill' })
-    await flush()
-    expect(result.current.section).toBe('skill')
-    expect(result.current.editingId).toBe(null)
-    expect(result.current.loading).toBe(true)
-    expect(callsTo('aiConfig.listItems').map((c) => c.input)).toEqual([
-      { scope: 'library', type: 'skill' }
-    ])
-    await act(async () => list[0].resolve([item({ id: 'a' })]))
-    await flush()
-    expect(result.current.loading).toBe(false)
-    expect(result.current.items.map((i) => i.id)).toEqual(['a'])
-  })
-
-  it('starts loading immediately when mounted on the skill section', async () => {
-    const list = deferredHandler('aiConfig.listItems')
-    const { result } = renderHook(() => useLegacyContextState('skill'))
-    await flush()
-    expect(result.current.loading).toBe(true)
-    expect(callsTo('aiConfig.listItems')).toHaveLength(1)
-    await act(async () => list[0].resolve([]))
-    await flush()
-    expect(result.current.loading).toBe(false)
-  })
-})
-
 describe('useContextItemEditorState', () => {
   const baseProps = {
     onUpdate: async () => {},
@@ -456,32 +385,6 @@ describe('useContextItemEditorState', () => {
     // Manually picked provider that is not stale gets corrected straight away.
     act(() => result.current.setActiveDiffProvider('codex'))
     expect(result.current.activeDiffProvider).toBe(null)
-  })
-})
-
-describe('useSkillItem', () => {
-  it('resets content/slug/slugDirty when the item content or slug changes', () => {
-    const first = item()
-    const props = {
-      providers: {},
-      enabledProviders: [],
-      isLocal: true,
-      projectId: 'p1',
-      projectPath: '/a',
-      onChanged: () => {}
-    }
-    const { result, rerender } = renderHook((p) => useSkillItem(p), {
-      initialProps: { ...props, item: first }
-    })
-    act(() => result.current.setSlug('renamed'))
-    expect(result.current.slugDirty).toBe(true)
-    rerender({ ...props, item: { ...first } })
-    expect(result.current.slug).toBe('renamed')
-    expect(result.current.slugDirty).toBe(true)
-    rerender({ ...props, item: { ...first, slug: 'two' } })
-    expect(result.current.slug).toBe('two')
-    expect(result.current.content).toBe('body')
-    expect(result.current.slugDirty).toBe(false)
   })
 })
 

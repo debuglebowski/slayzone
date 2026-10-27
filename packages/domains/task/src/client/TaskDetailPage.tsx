@@ -459,13 +459,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
 
   // PTY context for buffer management
-  const {
-    resetTaskState,
-    subscribeSessionDetected,
-    subscribeDevServer,
-    getQuickRunPrompt,
-    clearQuickRunPrompt
-  } = usePty()
+  const { resetTaskState, subscribeSessionDetected, subscribeDevServer } = usePty()
 
   // Shortcut display strings (reactive to user customization)
   const panelTerminalShortcut = useShortcutDisplay('panel-terminal')
@@ -1099,16 +1093,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [taskRootEl])
 
   // Cmd+R browser reload is handled globally in App.tsx
-
-  // Clear quick run prompt after it's been passed to Terminal
-  useEffect(() => {
-    if (!task) return
-    // Small delay to ensure Terminal has read the prompt
-    const timer = setTimeout(() => {
-      clearQuickRunPrompt(task.id)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [task?.id, clearQuickRunPrompt])
 
   // Handle terminal mode change
   const handleModeChange = useCallback(
@@ -2929,7 +2913,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           existingConversationId={mainTerminal.existingConversationId}
                           conversationHydrated={mainTerminal.conversationHydrated}
                           supportsSessionId={mainTerminal.supportsSessionId}
-                          initialPrompt={getQuickRunPrompt(task.id)}
                           providerFlags={mainTerminal.providerFlags}
                           executionContext={mainTerminal.executionContext}
                           focusRequestId={terminalFocusRequestId}

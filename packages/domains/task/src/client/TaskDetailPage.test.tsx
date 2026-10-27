@@ -11,9 +11,7 @@ vi.mock('@slayzone/terminal', () => ({
   usePty: () => ({
     resetTaskState: vi.fn(),
     subscribeSessionDetected: () => vi.fn(),
-    subscribeDevServer: () => vi.fn(),
-    getQuickRunPrompt: () => null,
-    clearQuickRunPrompt: vi.fn()
+    subscribeDevServer: () => vi.fn()
   }),
   useTerminalModes: () => ({ modes: [] }),
   useLoopMode: () => ({

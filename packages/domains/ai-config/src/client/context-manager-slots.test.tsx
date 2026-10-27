@@ -2,14 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { TooltipProvider } from '@slayzone/ui'
 
 /**
  * Pins where each context-manager section puts its header actions — and, for skills,
  * its editor side panel and resize handle: into the slots of the shell that renders
- * it. Three shells own slots: ContextManagerShell (the Context Manager page),
- * ProjectContextFlat and LegacyContextManager (the project settings AI-config tab).
- * Two of them can be mounted at once (the page behind the settings dialog).
+ * it (ContextManagerShell, the Context Manager page), also when two shells are
+ * mounted at once.
  */
 
 type Handler = (input: unknown) => unknown
@@ -54,7 +52,6 @@ vi.mock('@slayzone/file-editor/client/workspace-target', () => ({
   WorkspaceTargetProvider: ({ children }: { children?: ReactNode }) => <>{children}</>
 }))
 vi.mock('./SkillGraphCanvas', () => ({ SkillGraphCanvas: () => null }))
-vi.mock('./LibraryItemPicker', () => ({ LibraryItemPicker: () => null }))
 vi.mock('./AddItemPicker', () => ({ AddItemPicker: () => null }))
 vi.mock('./ContextItemEditor', () => ({
   ContextItemEditor: ({ item }: { item: { id: string } }) => (
@@ -63,8 +60,6 @@ vi.mock('./ContextItemEditor', () => ({
 }))
 
 const { ContextManagerShell } = await import('./ContextManagerShell')
-const { LegacyContextManager } = await import('./LegacyContextManager')
-const { ProjectContextFlat } = await import('./ProjectContextFlat')
 const { useContextManagerStore } = await import('./useContextManagerStore')
 
 const SKILL = {
@@ -91,8 +86,7 @@ function defaultHandlers(): Record<string, Handler> {
     'aiConfig.getProjectSkillsStatus': () => [],
     'aiConfig.getProjectProviders': () => [],
     'aiConfig.marketplace.checkUpdates': () => [],
-    'aiConfig.discoverMcpConfigs': () => [],
-    'aiConfig.getContextTree': () => []
+    'aiConfig.discoverMcpConfigs': () => []
   }
 }
 
@@ -240,69 +234,16 @@ describe('Context Manager page (ContextManagerShell)', () => {
   })
 })
 
-describe('project settings AI-config tab', () => {
-  it('ProjectContextFlat → Instructions: "Use library variant" in its header', async () => {
-    const { container, getByTestId } = render(
-      <TooltipProvider>
-        <ProjectContextFlat projectId="p1" projectPath="/p" />
-      </TooltipProvider>
-    )
-    await flush()
-    fireEvent.click(getByTestId('project-context-overview-instructions'))
-    await flush()
-    expect(within(header(container)).getByText('Use library variant')).toBeTruthy()
-  })
-
-  it('LegacyContextManager → MCP: "Custom" in its header', async () => {
-    const { container } = render(<LegacyContextManager initialSection="mcp" />)
-    await flush()
-    expect(within(header(container)).getByText('Custom')).toBeTruthy()
-  })
-
-  it('LegacyContextManager → Instructions: "Use library variant" in its header', async () => {
-    const { container } = render(<LegacyContextManager initialSection="instructions" />)
-    await flush()
-    expect(within(header(container)).getByText('Use library variant')).toBeTruthy()
-  })
-})
-
 describe('two shells mounted at once: each section uses its OWN shell', () => {
-  it('page (MCPs) + settings LegacyContextManager (MCP)', async () => {
+  it('page (MCPs) + a second page (MCPs)', async () => {
     const page = renderPage('library', 'mcps')
     await flush()
-    const settings = render(<LegacyContextManager initialSection="mcp" />, {
-      container: secondRoot()
-    })
-    await flush()
-    expect(within(header(page.container)).getAllByText('Custom')).toHaveLength(1)
-    expect(within(header(settings.container)).getAllByText('Custom')).toHaveLength(1)
-  })
-
-  it('page (library instructions) + settings ProjectContextFlat (instructions)', async () => {
-    const page = renderPage('library', 'instructions')
-    await flush()
-    const settings = render(
-      <TooltipProvider>
-        <ProjectContextFlat projectId="p1" projectPath="/p" />
-      </TooltipProvider>,
+    const second = render(
+      <ContextManagerShell selectedProjectId="p1" projectPath="/p" onBack={() => {}} />,
       { container: secondRoot() }
     )
     await flush()
-    fireEvent.click(settings.getByTestId('project-context-overview-instructions'))
-    await flush()
-    expect(within(header(page.container)).getByText('New Variant')).toBeTruthy()
-    expect(within(header(page.container)).queryByText('Use library variant')).toBeNull()
-    expect(within(header(settings.container)).getByText('Use library variant')).toBeTruthy()
-  })
-
-  it('page (files) + settings LegacyContextManager (instructions)', async () => {
-    const page = renderPage('computer', 'files')
-    await flush()
-    const settings = render(<LegacyContextManager initialSection="instructions" />, {
-      container: secondRoot()
-    })
-    await flush()
-    expect(within(header(page.container)).queryByText('Use library variant')).toBeNull()
-    expect(within(header(settings.container)).getByText('Use library variant')).toBeTruthy()
+    expect(within(header(page.container)).getAllByText('Custom')).toHaveLength(1)
+    expect(within(header(second.container)).getAllByText('Custom')).toHaveLength(1)
   })
 })

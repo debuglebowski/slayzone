@@ -66,14 +66,6 @@ vi.mock('@slayzone/ui', async () => {
     TooltipProvider: Pass,
     TooltipTrigger: Pass,
     TooltipContent: () => null,
-    FileTree: ({ items }: { items: Array<{ relativePath: string }> }) => (
-      <ul>
-        {items.map((i) => (
-          <li key={i.relativePath}>{i.relativePath}</li>
-        ))}
-      </ul>
-    ),
-    fileTreeIndent: () => 0,
     toast: { success: vi.fn(), error: vi.fn() }
   }
 })
@@ -109,7 +101,6 @@ const { AddProjectMcpDialog } = await import('./mcp-servers-panel/dialogs/AddPro
 const { ComputerMcpView } = await import('./ComputerMcpView')
 const { ContextFilesPanel } = await import('./ContextFilesPanel')
 const { ProviderSyncSection } = await import('./ProviderSyncSection')
-const { ProjectContextFilesView } = await import('./ProjectContextFilesView')
 const { ProjectInstructions } = await import('./ProjectInstructions')
 const { AddItemPicker } = await import('./AddItemPicker')
 
@@ -339,36 +330,6 @@ describe('ProviderSyncSection', () => {
     await flush()
     expect(callsTo('aiConfig.listProviders')).toHaveLength(1)
     expect(callsTo('aiConfig.getProjectProviders')).toHaveLength(0)
-  })
-})
-
-describe('ProjectContextFilesView', () => {
-  it('shows the loading state while the first tree load is in flight', async () => {
-    const tree = deferredHandler('aiConfig.getContextTree')
-    const { rerender } = render(<ProjectContextFilesView projectId="p1" projectPath="/a" />)
-    await flush()
-    expect(screen.getByText('Loading files...')).toBeTruthy()
-    await act(async () =>
-      tree[0].resolve([
-        { path: '/a/CLAUDE.md', relativePath: 'CLAUDE.md', exists: true, syncHealth: 'synced' }
-      ])
-    )
-    await flush()
-    expect(screen.getByText('CLAUDE.md')).toBeTruthy()
-    expect(screen.getByText('Refresh').closest('button')?.disabled).toBe(false)
-
-    rerender(<ProjectContextFilesView projectId="p1" projectPath="/b" />)
-    await flush()
-    expect(callsTo('aiConfig.getContextTree').map((c) => c.input)).toEqual([
-      { projectPath: '/a', projectId: 'p1' },
-      { projectPath: '/b', projectId: 'p1' }
-    ])
-    // Entries stay on screen while reloading; Refresh is disabled meanwhile.
-    expect(screen.getByText('CLAUDE.md')).toBeTruthy()
-    expect(screen.getByText('Refresh').closest('button')?.disabled).toBe(true)
-    await act(async () => tree[1].resolve([]))
-    await flush()
-    expect(screen.getByText('No context files found.')).toBeTruthy()
   })
 })
 
