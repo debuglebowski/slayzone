@@ -350,6 +350,8 @@ run_harness packages/domains/projects/src/server/project-icons-relocate.test.ts
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
 # the developer's focus for the rest of that worker's specs (worker-scoped app).
 run_harness packages/apps/app/src/main/present-window.test.ts
+# App windows show the app, never a website: external main-frame loads open in the browser.
+run_harness packages/apps/app/src/main/app-window-navigation-guard.test.ts
 # File-tree copy/paste of files: Electron 44's async clipboard, text/uri-list ⇄ native file refs.
 run_harness packages/apps/app/src/main/clipboard-file-paths.test.ts
 # Remembered dialog folder: Electron 43 opens a dialog without defaultPath in Downloads.

@@ -1,8 +1,9 @@
-import { BrowserWindow, ipcMain, app, screen, webContents } from 'electron'
+import { BrowserWindow, ipcMain, app, screen, shell, webContents } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
 import { attachDocumentLinkBridges } from './document-link-bridge'
+import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 
 interface OwnershipKey {
   taskId: string
@@ -132,6 +133,7 @@ function createSecondaryTaskWindow(taskId: string): BrowserWindow {
       ? `${process.env['ELECTRON_RENDERER_URL']}?${params.toString()}`
       : `file://${join(__dirname, '../renderer/index.html')}?${params.toString()}`
   attachDocumentLinkBridges(win.webContents)
+  attachAppWindowNavigationGuard(win.webContents, (u) => void shell.openExternal(u))
   win.loadURL(url)
   const wcId = win.webContents.id
   taskWindows.set(wcId, { window: win, taskId })

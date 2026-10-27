@@ -566,6 +566,7 @@ import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
 import { attachDocumentLinkBridges } from './document-link-bridge'
+import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 import {
   setProcessManagerWindow,
   createProcess,
@@ -1614,6 +1615,7 @@ function createMainWindow(): void {
   attachFloatingGlobalAgentPanel(mainWindow)
   attachTaskWindows(mainWindow)
   attachDocumentLinkBridges(mainWindow.webContents)
+  attachAppWindowNavigationGuard(mainWindow.webContents, (url) => void shell.openExternal(url))
 
   mainWindow.on('closed', () => {
     mainWindow = null
