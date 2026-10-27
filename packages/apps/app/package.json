@@ -109,7 +109,7 @@
     "date-fns": "^4.4.0",
     "electron": "45.0.0",
     "electron-builder": "~26.17.0",
-    "electron-vite": "^5.0.0",
+    "electron-vite": "^6.0.0",
     "fzf": "^0.5.2",
     "jsdom": "^26.1.0",
     "lucide-react": "^0.562.0",

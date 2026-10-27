@@ -29,3 +29,8 @@ minimumReleaseAgeExclude:
   # advisory 44.5.1 is exposed to. Tarball checksums.json verified against the GitHub
   # release SHASUMS256.txt. Drop once 45.0.0 clears the age gate (2026-11-20).
   - electron@45.0.0
+  # Hand bump (2026-10-27): 5.0.0's ESM shim finds the last import by regex and
+  # js-yaml 5's JSDoc `import … from 'js-yaml'` put the __dirname/require shim inside a
+  # comment → main crashed at boot. 6.0.0 parses the AST. Drop once 6.0.0 clears the
+  # age gate (2026-11-13).
+  - electron-vite@6.0.0
