@@ -904,6 +904,17 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     admitted: Promise<void> | null = null
   ): { entry: PtyEntry; handle: PtyHandle; setPid: (pid: number | null) => void } {
     const key = sessionKey(computerId, sessionId)
+    // Leak diagnostics: a second live entry for the same key silently takes over
+    // its routing (the first's consumers stop receiving data). Should never happen.
+    const displaced = sessions.get(key)
+    if (displaced && !displaced.disposed) {
+      console.warn('[routing-pty] register displaced a live session entry', {
+        computerId,
+        sessionId,
+        displacedLastSeq: displaced.lastSeq,
+        displacedDetached: displaced.detached
+      })
+    }
     const dataEmitter = new BufferingEmitter<string>()
     const exitEmitter = new BufferingEmitter<PtyExitEvent>()
     const entry: PtyEntry = {

@@ -35,6 +35,7 @@ import { correctAtlas } from './webgl-loader'
 import { isParked, unparkToDom } from './renderer-park'
 import { promoteInitSlot } from './terminal-init-scheduler'
 import { noteTerminalMounted } from './open-trace'
+import { checkCachedIdentity, checkTerminalIdentity } from './terminal-identity'
 import { touchTerminalMru } from './terminal-mru'
 import type { ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
@@ -529,6 +530,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         const element = terminalRef.current.element
         if (element && element.parentNode) {
           element.parentNode.removeChild(element)
+          checkCachedIdentity(sessionId, element)
           setTerminal(sessionId, {
             terminal: terminalRef.current,
             fitAddon: fitAddonRef.current,
@@ -735,6 +737,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     touchTerminalMru(sessionId)
     if (promoteInitSlot(sessionId)) return
     ensureRendererRef.current?.({ sync: true })
+  }, [isActive, sessionId])
+
+  // Cross-task leak detector (terminal-identity.ts): on reveal and periodically
+  // while on screen, the pane must hold exactly its own xterm.
+  useEffect(() => {
+    if (!isActive) return
+    const check = (site: string): void =>
+      checkTerminalIdentity(sessionId, containerRef.current, terminalRef.current, site)
+    check('reveal')
+    const id = window.setInterval(() => check('interval'), 10_000)
+    return () => window.clearInterval(id)
   }, [isActive, sessionId])
 
   // Re-fit + re-rasterize on isActive false→true. A task switch is a CSS

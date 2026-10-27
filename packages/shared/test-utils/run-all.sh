@@ -457,6 +457,7 @@ run_test packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
 # passed but were never registered here, so nothing ran them.
 run_test packages/domains/terminal/src/client/scramble-detector.test.ts
 run_test packages/domains/terminal/src/client/paint-throttle.test.ts
+run_test packages/domains/terminal/src/client/terminal-identity.test.ts
 # Terminal — boot renderer economy: WebGL only for on-screen terminals under an MRU
 # budget, parked (no DOM-renderer stylesheet) otherwise; plus the hidden-terminal
 # init queue and the one-round-trip pty.attach (with fallback for older servers).

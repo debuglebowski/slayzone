@@ -26,6 +26,7 @@ import {
   rendererOkReportedSessions,
   fakeDowngradeRegistry
 } from './terminal-webgl-sessions'
+import { checkTerminalIdentity, tagTerminalElement } from './terminal-identity'
 import {
   getTerminal,
   disposeTerminal,
@@ -455,6 +456,7 @@ export async function initTerminalSession(
       } else {
         // Reattach existing terminal (container already has dimensions)
         containerRef.current.appendChild(cached.element)
+        checkTerminalIdentity(sessionId, containerRef.current, cached.terminal, 'reattach')
         onAttachedRef.current?.({ sessionId, focus: () => cached.terminal.focus() })
         cached.terminal.options.theme = resolvedTerminalTheme
         cached.terminal.options.minimumContrastRatio = resolvedTerminalVariant === 'light' ? 4.5 : 1
@@ -615,6 +617,8 @@ export async function initTerminalSession(
     // replaces it a frame from now; off screen, it stays parked until revealed.
     if (webglEligible()) parkBeforeOpen(terminal)
     terminal.open(containerRef.current)
+    tagTerminalElement(terminal, sessionId)
+    checkTerminalIdentity(sessionId, containerRef.current, terminal, 'init')
     ensureRendererRef.current = ensureRenderer
     onAttachedRef.current?.({ sessionId, focus: () => terminal.focus() })
     terminal.clear() // Ensure terminal starts completely fresh

@@ -563,6 +563,18 @@ export function createPtyHandlers(
     // Rekey in place. The process, pid, RingBuffer and seq counter all carry
     // over, so the hub's gap detection continues across the boundary instead of
     // restarting under a stream it is already tracking.
+    // Leak diagnostics: adopting onto a session id that already has a live
+    // process silently orphans that process (it keeps running, its output is
+    // dropped by the identity check in onData). Should never happen — log it.
+    const displaced = sessions.get(params.sessionId)
+    if (displaced) {
+      ctx.log('warm adopt displaced a live session', {
+        warmId: params.warmId,
+        sessionId: params.sessionId,
+        displacedPid: displaced.proc.pid,
+        displacedWarm: !!displaced.warm
+      })
+    }
     sessions.delete(params.warmId)
     session.id = params.sessionId
     delete session.warm
