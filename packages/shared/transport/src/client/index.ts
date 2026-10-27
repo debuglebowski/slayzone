@@ -30,6 +30,7 @@ export {
 } from './FederationProvider'
 export { HubScope, useHubId, type HubScopeProps } from './HubScope'
 export { electronBootstrap } from './electron-bootstrap'
+export { hubAllows } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'
 export {
   useHubOwnershipStore,

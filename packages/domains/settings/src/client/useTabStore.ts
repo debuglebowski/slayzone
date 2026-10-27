@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
-import { getTrpcClient, getHubClient } from '@slayzone/transport/client'
+import {
+  getTrpcClient,
+  getHubClient,
+  hubAllows,
+  type TrpcVanillaClient
+} from '@slayzone/transport/client'
 import type { TaskStatus } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 
@@ -828,6 +833,38 @@ export function computeWarmTabCounts(
   return countsByHub
 }
 
+const WARM_PATH = 'pty.warmSetProjectTabCounts'
+
+/**
+ * Push each hub its slice of {@link computeWarmTabCounts}. A hub this connection may
+ * not drive the warm pool on (a web session, #164: its scope gate refuses the call)
+ * is skipped — warm shells only serve `pty.create`, which that session cannot call.
+ */
+export async function pushWarmTabCounts(
+  countsByHub: Map<string | undefined, Record<string, number>>,
+  defaultClient: TrpcVanillaClient,
+  hubClientOf: (hubId: string) => TrpcVanillaClient | null
+): Promise<void> {
+  const push = async (client: TrpcVanillaClient, counts: Record<string, number>) => {
+    if (!(await hubAllows(client, WARM_PATH))) return
+    await client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {
+      // Warm-pool hint only: a hub that is down just misses this snapshot, and the
+      // next tab change re-pushes the full one.
+    })
+  }
+  // Push every hub that has open tabs; also push an EMPTY snapshot to hubs that had
+  // counts before but no longer do is unnecessary — main is idempotent per-window
+  // and each hub only tracks its own projects.
+  const pushes = [...countsByHub].map(([hubId, counts]) =>
+    push((hubId && hubClientOf(hubId)) || defaultClient, counts)
+  )
+  // No open task tabs at all → clear the default hub's counts (preserves the prior
+  // single-hub behavior of pushing an empty snapshot). Losing it only leaves a stale
+  // warm hint until the next tab change.
+  if (countsByHub.size === 0) pushes.push(push(defaultClient, {}))
+  await Promise.all(pushes)
+}
+
 useTabStore.subscribe(
   (state) => ({ tabs: state.tabs, _taskLookup: state._taskLookup }),
   ({ tabs, _taskLookup }) => {
@@ -840,29 +877,13 @@ useTabStore.subscribe(
       // firing that can land that early is the module-scope hydration push, whose
       // counts are empty (no _taskLookup yet) — safe to drop; the next tab change
       // re-pushes the full snapshot.
+      let defaultClient: TrpcVanillaClient
       try {
-        // Push every hub that has open tabs; also push an EMPTY snapshot to hubs
-        // that had counts before but no longer do is unnecessary — main is
-        // idempotent per-window and each hub only tracks its own projects.
-        const defaultClient = getTrpcClient()
-        for (const [hubId, counts] of countsByHub) {
-          const client = hubId && getHubClient(hubId) ? getHubClient(hubId)!.client : defaultClient
-          client.pty.warmSetProjectTabCounts.mutate({ counts }).catch(() => {
-            // Warm-pool hint only: a hub that is down just misses this
-            // snapshot, and the next tab change re-pushes the full one.
-          })
-        }
-        // No open task tabs at all → clear the default hub's counts (preserves the
-        // prior single-hub behavior of pushing an empty snapshot).
-        if (countsByHub.size === 0) {
-          defaultClient.pty.warmSetProjectTabCounts.mutate({ counts: {} }).catch(() => {
-            // Same as above: losing a clear-snapshot only leaves a stale warm
-            // hint until the next tab change.
-          })
-        }
+        defaultClient = getTrpcClient()
       } catch {
-        /* tRPC client not ready (boot) */
+        return /* tRPC client not ready (boot) */
       }
+      void pushWarmTabCounts(countsByHub, defaultClient, (id) => getHubClient(id)?.client ?? null)
     }, 150)
   },
   { equalityFn: shallow }

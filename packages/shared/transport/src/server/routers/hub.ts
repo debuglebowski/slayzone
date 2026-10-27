@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
 import { SettingsService } from '@slayzone/settings/server'
 import { router, publicProcedure, openProcedure } from '../trpc'
-import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
+import { getAppDeps, getAuthGate, getHubDescribeDepsOrNull } from '../app-deps'
 
 /**
  * Hub router — the client-facing identity surface of a hub (multi-hub
@@ -37,6 +37,10 @@ export const hubRouter = router({
    * certificate of its own (a front end does), and clients verify that front end's
    * certificate the normal way. The former always-null `fingerprint` field is gone;
    * no client ever read it.
+   *
+   * `scopes` are what the scope gate checks for THIS caller (`scopes.ts`): null when
+   * the gate is off (a hub without login) or there is no principal — nothing to check. A client checks them before a call the
+   * scope gate would only refuse (`hubAllows`, #164) — the gate stays the boundary.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -45,7 +49,8 @@ export const hubRouter = router({
       label,
       version: getAppDeps().appGetVersion(),
       authRequired: deps?.getAuthRequired() ?? false,
-      switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS }
+      switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS },
+      scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null
     }
   }),
 

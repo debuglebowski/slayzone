@@ -732,6 +732,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
+  packages/shared/transport/src/client/hubCapabilities.test.ts \
   packages/shared/transport/src/client/trpc.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
@@ -830,6 +831,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/shared/transport/src/server/scopes.test.ts \
+  packages/shared/transport/src/server/routers/settings-admin.test.ts \
   packages/shared/transport/src/server/trpc.test.ts \
   packages/shared/transport/src/server/trpc-transformer.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \

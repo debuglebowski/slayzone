@@ -124,6 +124,26 @@ test('auth gate ON + principal present: gated proc runs', async () => {
   setAuthGate(() => false)
 })
 
+test("hub.describe reports the caller's own scopes; null without a principal (#164)", async () => {
+  // No principal (a hub without login): nothing restricts the caller.
+  expect((await caller.describe()).scopes).toBeNull()
+  // A web session: what the scope gate will check, so a client can skip calls it
+  // would only be refused (the warm-pool push).
+  const web = appRouter.createCaller({
+    db: h.slayDb,
+    principal: { userId: 'u3', role: 'user', orgId: null, scopes: ['read', 'tasks', 'agent'] }
+  } as never).hub
+  // Gate off: the scope gate is inert, so there is nothing to report even for a
+  // scoped principal (a stale web-session cookie on a hub without login).
+  expect((await web.describe()).scopes).toBeNull()
+  setAuthGate(() => true)
+  try {
+    expect((await web.describe()).scopes).toEqual(['read', 'tasks', 'agent'])
+  } finally {
+    setAuthGate(() => false)
+  }
+})
+
 test('auth gate ON + a non-admin account: setLabel is FORBIDDEN, describe still works (T-15)', async () => {
   setAuthGate(() => true)
   try {

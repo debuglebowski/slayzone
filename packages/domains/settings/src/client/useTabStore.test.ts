@@ -7,6 +7,7 @@ import {
   useTabStore,
   parseClosedTab,
   computeWarmTabCounts,
+  pushWarmTabCounts,
   type ClosedTab,
   type TaskLookupTask
 } from './useTabStore.js'
@@ -310,6 +311,47 @@ await test('_loadState rejects malformed arrangement entries', () => {
     `non-string entries dropped, got ${JSON.stringify(s.explodeOrder)}`
   )
   assert(s.explodeMinimized.length === 0, 'non-array falls back to empty')
+})
+
+console.log('pushWarmTabCounts')
+
+/** A hub client whose `hub.describe` reports `scopes`; records every warm push. */
+function fakeHub(scopes: string[] | null) {
+  const pushed: Record<string, number>[] = []
+  const client = {
+    hub: { describe: { query: async () => ({ scopes }) } },
+    pty: {
+      warmSetProjectTabCounts: {
+        mutate: async (input: { counts: Record<string, number> }) => {
+          pushed.push(input.counts)
+        }
+      }
+    }
+  }
+  return { client: client as never, pushed }
+}
+
+// #164: a web session (read+tasks+agent) cannot call this — the scope gate refused
+// every push and logged an `authz.denied` line for it. Skip a hub that would refuse.
+await test('a hub whose credential may not drive the warm pool is not pushed to', async () => {
+  const local = fakeHub(null)
+  const web = fakeHub(['read', 'tasks', 'agent'])
+  const counts = new Map<string | undefined, Record<string, number>>([
+    [undefined, { pA: 1 }],
+    ['h2', { pB: 1 }]
+  ])
+  await pushWarmTabCounts(counts, local.client, (id) => (id === 'h2' ? web.client : null))
+  assert(JSON.stringify(local.pushed) === JSON.stringify([{ pA: 1 }]), 'default hub pushed')
+  assert(web.pushed.length === 0, 'scoped hub skipped')
+})
+
+await test('no open task tabs: the default hub is cleared unless it would refuse', async () => {
+  const full = fakeHub(['full'])
+  await pushWarmTabCounts(new Map(), full.client, () => null)
+  assert(JSON.stringify(full.pushed) === JSON.stringify([{}]), 'cleared')
+  const web = fakeHub(['read', 'tasks', 'agent'])
+  await pushWarmTabCounts(new Map(), web.client, () => null)
+  assert(web.pushed.length === 0, 'scoped default hub skipped')
 })
 
 console.log('Done')

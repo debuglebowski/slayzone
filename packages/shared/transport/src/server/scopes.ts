@@ -133,10 +133,23 @@ export type ProcedureScope = Scope | 'never'
  * `task.testRecordPendingSpawn` is carved out to `never` (a test hook, not part
  * of the CRUD surface it happens to live in).
  *
- * ── granted narrowly (theme) ─────────────────────────────────────────────────
+ * ── granted narrowly (settings) ─────────────────────────────────────────────
  * `settings.getEffectiveTheme` / `getThemeSource` / `onThemeChanged` /
- * `setTheme` → `read`. A browser needs to render the correct light/dark theme;
- * the rest of `settings.*` (an arbitrary KV store of unknown scope) is `never`.
+ * `setTheme` → `read`. A browser needs to render the correct light/dark theme.
+ * `settings.get` / `getAll` → `read` (#164): the renderer keeps its own UI state
+ * there (view state, layout, filters). Since T-16 a `user` key reads the caller's
+ * own row, an `internal` key (integration credentials) is never served, and a
+ * project-keyed hub key is cut by the owner policy — what is left is the caller's
+ * own state plus hub-wide config any full session of that user reads anyway.
+ * `settings.set` → `tasks`, PER KEY: the hub-wide keys include what the hub RUNS
+ * (`test_profiles`, `default_terminal_mode`, worktree copy paths), and this gate is
+ * per procedure, so `settingsWriteProcedure` (routers/settings-admin.ts) refuses a
+ * scoped session every key but its own (`user`) ones, whatever its account's role.
+ *
+ * ── warm pool: `pty.warmSetProjectTabCounts` is `never` ──────────────────────
+ * It makes the hub spawn a warm shell per project, which exists only to make
+ * `pty.create` instant — and no scoped session can call `pty.create`. The client
+ * learns its scopes from `hub.describe` and does not push it (`hubAllows`).
  *
  * ── denied wholesale (infra, danger, or simply out of Phase-1 scope) ───────
  * Every procedure in `app` (native window/browser-panel/floating-agent/webview
@@ -649,12 +662,12 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.validate': 'never',
   'pty.warmSetProjectTabCounts': 'never',
   'pty.write': 'agent',
-  'settings.get': 'never',
-  'settings.getAll': 'never',
+  'settings.get': 'read',
+  'settings.getAll': 'read',
   'settings.getEffectiveTheme': 'read',
   'settings.getThemeSource': 'read',
   'settings.onThemeChanged': 'read',
-  'settings.set': 'never',
+  'settings.set': 'tasks',
   'settings.setTheme': 'read',
   'tags.create': 'tasks',
   'tags.delete': 'tasks',

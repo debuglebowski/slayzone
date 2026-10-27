@@ -68,7 +68,11 @@ describe('SCOPE_POLICY — specific classifications', () => {
     ['app.shell.openExternal', 'opens an arbitrary URL/path on the hub machine'],
     ['computers.mintJoinToken', 'mints a computer enrollment secret'],
     ['computers.setTaskComputer', 'chooses which computer a task runs on'],
-    ['computers.setProjectDefaultComputer', 'chooses where new tasks run by default']
+    ['computers.setProjectDefaultComputer', 'chooses where new tasks run by default'],
+    [
+      'pty.warmSetProjectTabCounts',
+      'makes the hub spawn warm shells for pty.create, which no scoped session can call'
+    ]
   ]
   for (const [path, why] of never) {
     test(`${path} is never — ${why}`, () => {
@@ -98,16 +102,33 @@ describe('SCOPE_POLICY — specific classifications', () => {
   const read: string[] = [
     'computers.list',
     'computers.resolveTaskComputer',
-    'computers.onStatusChange'
+    'computers.onStatusChange',
+    // #164: the renderer reads its own UI state through these. Per user since T-16;
+    // `internal` keys are never served, project keys are cut by the owner policy.
+    'settings.get',
+    'settings.getAll'
   ]
+
   for (const path of read) {
     test(`${path} is read`, () => {
       expect(SCOPE_POLICY[path]).toBe('read')
     })
   }
+  // #164: per key — `settingsWriteProcedure` keeps every non-`user` key from a
+  // scoped session (routers/settings-admin.test.ts).
+  test('settings.set is tasks', () => {
+    expect(SCOPE_POLICY['settings.set']).toBe('tasks')
+  })
 })
 
 describe('isPathAllowed', () => {
+  test('a web session (read+tasks+agent) reads settings but cannot drive the warm pool (#164)', () => {
+    const web = ['read', 'tasks', 'agent'] as const
+    expect(isPathAllowed(web, 'settings.get')).toBe(true)
+    expect(isPathAllowed(web, 'settings.getAll')).toBe(true)
+    expect(isPathAllowed(web, 'pty.warmSetProjectTabCounts')).toBe(false)
+  })
+
   const FULL: readonly Scope[] = ['full']
   const AGENT: readonly Scope[] = ['agent']
   const READ_TASKS: readonly Scope[] = ['read', 'tasks']

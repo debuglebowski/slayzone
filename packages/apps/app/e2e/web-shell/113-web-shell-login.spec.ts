@@ -104,6 +104,8 @@ interface LoginHub {
   port: number
   root: string
   owner: OwnerCreds
+  /** Everything the hub has written to stdout + stderr so far (its security log included). */
+  output: () => string
   stop: () => Promise<void>
 }
 
@@ -132,8 +134,13 @@ async function spawnLoginHub(): Promise<LoginHub> {
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  proc.stdout?.on('data', () => undefined)
-  proc.stderr?.on('data', () => undefined)
+  let output = ''
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
 
   const stop = (): Promise<void> =>
     new Promise<void>((resolve) => {
@@ -160,11 +167,29 @@ async function spawnLoginHub(): Promise<LoginHub> {
   try {
     await waitForHubHealth(port)
     const owner = await readOwner(root)
-    return { port, root, owner, stop }
+    return { port, root, owner, output: () => output, stop }
   } catch (err) {
     await stop()
     throw err
   }
+}
+
+/** The hub's `authz.denied` lines for a scope refusal (security log, one JSON line each). */
+function scopeDenials(output: string): Array<{ targetId?: string; detail?: { setting?: string } }> {
+  return output
+    .split('\n')
+    .filter((line) => line.includes('"authz.denied"'))
+    .map((line) => {
+      try {
+        return JSON.parse(line.slice(line.indexOf('{'))) as {
+          targetId?: string
+          detail?: { reason?: string; setting?: string }
+        }
+      } catch {
+        return null
+      }
+    })
+    .filter((e): e is NonNullable<typeof e> => e?.detail?.reason === 'scope')
 }
 
 test.describe('web shell — real login-required hub, real browser', () => {
@@ -258,5 +283,62 @@ test.describe('web shell — real login-required hub, real browser', () => {
     // A loopback hub with no public address is plain http: not Secure (an https
     // public address makes it Secure — web-sessions.ts `webSessionCookieSecure`).
     expect(sessionCookie?.secure).toBe(false)
+  })
+
+  // #164: the hub refused a web session's `settings.get`, `settings.getAll` and
+  // `pty.warmSetProjectTabCounts` (one `authz.denied` line each), and `settings.set`
+  // too, so its layout never persisted. Now it reads and writes its OWN settings, and
+  // the client no longer pushes warm-pool counts it would only be refused.
+  test('a web session keeps its layout across a reload, and the hub refuses none of its settings or warm-pool calls', async () => {
+    context = await browser.newContext()
+    const page = await context.newPage()
+    await page.goto(`http://127.0.0.1:${hub.port}/`)
+    await page.getByTestId('web-login-email').fill(hub.owner.email)
+    await page.getByTestId('web-login-password').fill(hub.owner.password)
+    await Promise.all([
+      page.waitForEvent('framenavigated'),
+      page.getByTestId('web-login-submit').click()
+    ])
+
+    type TabStore = {
+      getState: () => {
+        isLoaded: boolean
+        treeGroupBy: string
+        setTreeGroupBy: (g: string) => void
+      }
+    }
+    const tabStoreLoaded = () =>
+      page.waitForFunction(
+        () =>
+          (window as unknown as { __slayzone_tabStore?: TabStore }).__slayzone_tabStore?.getState()
+            .isLoaded === true,
+        undefined,
+        { timeout: 30_000 }
+      )
+    await tabStoreLoaded()
+    // A layout change: the tab store saves it as `viewState`, a per-user setting.
+    await page.evaluate(() =>
+      (window as unknown as { __slayzone_tabStore: TabStore }).__slayzone_tabStore
+        .getState()
+        .setTreeGroupBy('priority')
+    )
+    // Past the store's 500 ms save debounce.
+    await page.waitForTimeout(1_500)
+
+    await page.reload()
+    await tabStoreLoaded()
+    const groupBy = await page.evaluate(
+      () =>
+        (window as unknown as { __slayzone_tabStore: TabStore }).__slayzone_tabStore.getState()
+          .treeGroupBy
+    )
+    expect(groupBy).toBe('priority')
+
+    // Past the warm-pool push debounce (150 ms) and its `hub.describe` round trip.
+    await page.waitForTimeout(1_500)
+    const refused = scopeDenials(hub.output())
+      .map((e) => e.targetId)
+      .filter((id) => id?.startsWith('settings.') || id === 'pty.warmSetProjectTabCounts')
+    expect(refused).toEqual([])
   })
 })
