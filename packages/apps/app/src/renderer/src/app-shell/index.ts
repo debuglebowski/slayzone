@@ -5,7 +5,7 @@ export { useLazyMounted } from './useLazyMounted'
 export { AppHeaderActions } from '@slayzone/app-shell/client'
 export { CompactFooter } from './CompactFooter'
 export { SidebarTaskContextMenu } from './SidebarTaskContextMenu'
-export { TabPanes } from './TabPanes'
+export { TabPanes, EXPLODE_DRAG_TYPE, EXPLODE_GRID_PAD } from './TabPanes'
 export { AppTabBar } from './AppTabBar'
 export { ActiveTabSync } from './ActiveTabSync'
 // HomeDetail now lives in the shared @slayzone/home package (one Home shell for
@@ -14,7 +14,11 @@ export { ActiveTabSync } from './ActiveTabSync'
 export { HomeDetail } from '@slayzone/home/client'
 export { AppSidePanels } from './AppSidePanels'
 export { AppDialogs } from './AppDialogs'
-export { useExplodeMode } from '@slayzone/app-shell/client'
+export {
+  useExplodeMode,
+  computeExplodeLayout,
+  ExplodeMinimizedTray
+} from '@slayzone/app-shell/client'
 export { useProjectPathGuard } from './useProjectPathGuard'
 export { useAppUpdates } from './useAppUpdates'
 export { useAuthFailureBanner } from './useAuthFailureBanner'

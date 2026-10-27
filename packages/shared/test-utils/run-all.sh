@@ -200,6 +200,8 @@ run_test packages/domains/task/src/client/card-water-fill.test.ts
 run_test packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_test packages/domains/settings/src/client/useTabStore.test.ts
+# Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
+run_test packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_test packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_test packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_test packages/domains/sidebar/src/views/projectDrop.test.ts

@@ -149,6 +149,13 @@ interface TabState {
   // here rather than in TreeView component state so a remount (renderer reload,
   // wake from sleep) doesn't silently reset every project to collapsed.
   treeOpenProjects: Record<string, boolean>
+  // Explode-mode arrangement. Task ids in the order the user dragged them into,
+  // and the ids parked in the header tray. Persisted for the same reason as
+  // `treeOpenProjects`: a renderer reload or a restart would otherwise silently
+  // throw away a layout the user deliberately built. Reconciled against the open
+  // tabs on read, so stale ids from closed tasks are harmless.
+  explodeOrder: string[]
+  explodeMinimized: string[]
   // Task-detail header layout.
   taskHeaderPanelMode: TaskHeaderPanelMode
   taskHeaderPanelAlign: TaskHeaderAlign
@@ -193,6 +200,7 @@ interface TabState {
   setTreeGroupPinned: (group: boolean) => void
   setTreeShowEmptyGroups: (show: boolean) => void
   setTreeProjectOpen: (projectId: string, open: boolean) => void
+  setExplodeArrangement: (arrangement: { order?: string[]; minimized?: string[] }) => void
   setTaskHeaderPanelMode: (mode: TaskHeaderPanelMode) => void
   setTaskHeaderPanelAlign: (align: TaskHeaderAlign) => void
   setTaskHeaderTitleAlign: (align: TaskHeaderAlign) => void
@@ -247,6 +255,8 @@ interface TabState {
     treeGroupPinned?: boolean
     treeShowEmptyGroups?: boolean
     treeOpenProjects?: Record<string, boolean>
+    explodeOrder?: string[]
+    explodeMinimized?: string[]
     taskHeaderPanelMode?: TaskHeaderPanelMode
     taskHeaderPanelAlign?: TaskHeaderAlign
     taskHeaderTitleAlign?: TaskHeaderAlign
@@ -323,6 +333,8 @@ export const useTabStore = create<TabState>()(
     treeGroupPinned: true,
     treeShowEmptyGroups: false,
     treeOpenProjects: {},
+    explodeOrder: [],
+    explodeMinimized: [],
     taskHeaderPanelMode: 'tabs',
     taskHeaderPanelAlign: 'right',
     taskHeaderTitleAlign: 'left',
@@ -395,6 +407,13 @@ export const useTabStore = create<TabState>()(
 
     setTreeProjectOpen: (projectId, open) =>
       set((s) => ({ treeOpenProjects: { ...s.treeOpenProjects, [projectId]: open } })),
+    // Partial on purpose: a drag changes only the order and a minimize changes only
+    // the tray, so neither has to restate the other and race it.
+    setExplodeArrangement: ({ order, minimized }) =>
+      set((s) => ({
+        explodeOrder: order ?? s.explodeOrder,
+        explodeMinimized: minimized ?? s.explodeMinimized
+      })),
     setTaskHeaderPanelMode: (mode) => set({ taskHeaderPanelMode: mode }),
     setTaskHeaderPanelAlign: (align) => set({ taskHeaderPanelAlign: align }),
     setTaskHeaderTitleAlign: (align) => set({ taskHeaderTitleAlign: align }),
@@ -615,6 +634,14 @@ export const useTabStore = create<TabState>()(
           state.treeOpenProjects && typeof state.treeOpenProjects === 'object'
             ? state.treeOpenProjects
             : {},
+        // Element-level validation: this JSON is on disk and a malformed entry
+        // would flow straight into layout as an undefined task id.
+        explodeOrder: Array.isArray(state.explodeOrder)
+          ? state.explodeOrder.filter((id): id is string => typeof id === 'string')
+          : [],
+        explodeMinimized: Array.isArray(state.explodeMinimized)
+          ? state.explodeMinimized.filter((id): id is string => typeof id === 'string')
+          : [],
         taskHeaderPanelMode: state.taskHeaderPanelMode === 'menu' ? 'menu' : 'tabs',
         taskHeaderPanelAlign: state.taskHeaderPanelAlign === 'left' ? 'left' : 'right',
         taskHeaderTitleAlign: state.taskHeaderTitleAlign === 'right' ? 'right' : 'left',
@@ -717,6 +744,8 @@ useTabStore.subscribe(
     treeGroupPinned: state.treeGroupPinned,
     treeShowEmptyGroups: state.treeShowEmptyGroups,
     treeOpenProjects: state.treeOpenProjects,
+    explodeOrder: state.explodeOrder,
+    explodeMinimized: state.explodeMinimized,
     taskHeaderPanelMode: state.taskHeaderPanelMode,
     taskHeaderPanelAlign: state.taskHeaderPanelAlign,
     taskHeaderTitleAlign: state.taskHeaderTitleAlign,

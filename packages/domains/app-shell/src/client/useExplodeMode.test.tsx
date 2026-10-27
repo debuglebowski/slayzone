@@ -2,13 +2,45 @@
 // Pins useExplodeMode: explode mode turns itself off below two task tabs (and stays off
 // when tabs come back); the focused cell is seeded on entry (kept while still open, else
 // the active task tab from the tab store, else the first task), follows focusin inside the
-// grid, and is cleared whenever explode mode is off.
+// grid, and is cleared whenever explode mode is off. The arrangement (order + tray) is
+// reconciled against the open tabs, a minimized cell never holds focus, and the
+// arrangement actions keep one identity across renders (memoized panes receive them).
+import { useSyncExternalStore } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 
 type Tab = { type: 'home' } | { type: 'task'; taskId: string }
-const store: { tabs: Tab[]; activeTabIndex: number } = { tabs: [], activeTabIndex: 0 }
-vi.mock('@slayzone/settings', () => ({ useTabStore: { getState: () => store } }))
+type Store = {
+  tabs: Tab[]
+  activeTabIndex: number
+  explodeOrder: string[]
+  explodeMinimized: string[]
+  setExplodeArrangement: (a: { order?: string[]; minimized?: string[] }) => void
+}
+// Minimal reactive stand-in for the zustand tab store: selector hook + getState.
+const listeners = new Set<() => void>()
+let store: Store
+const setExplodeArrangement: Store['setExplodeArrangement'] = ({ order, minimized }) => {
+  store = {
+    ...store,
+    explodeOrder: order ?? store.explodeOrder,
+    explodeMinimized: minimized ?? store.explodeMinimized
+  }
+  for (const l of listeners) l()
+}
+vi.mock('@slayzone/settings', () => ({
+  useTabStore: Object.assign(
+    <T,>(sel: (s: Store) => T): T =>
+      useSyncExternalStore(
+        (cb) => {
+          listeners.add(cb)
+          return () => listeners.delete(cb)
+        },
+        () => sel(store)
+      ),
+    { getState: () => store }
+  )
+}))
 
 const { useExplodeMode } = await import('./useExplodeMode')
 
@@ -20,13 +52,18 @@ class FakeResizeObserver {
 let grid: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
-  store.tabs = [
-    { type: 'home' },
-    { type: 'task', taskId: 'a' },
-    { type: 'task', taskId: 'b' },
-    { type: 'task', taskId: 'c' }
-  ]
-  store.activeTabIndex = 2 // 'b'
+  store = {
+    tabs: [
+      { type: 'home' },
+      { type: 'task', taskId: 'a' },
+      { type: 'task', taskId: 'b' },
+      { type: 'task', taskId: 'c' }
+    ],
+    activeTabIndex: 2, // 'b'
+    explodeOrder: [],
+    explodeMinimized: [],
+    setExplodeArrangement
+  }
   grid = document.createElement('div')
   for (const id of ['a', 'b', 'c']) {
     const cell = document.createElement('div')
@@ -110,5 +147,66 @@ describe('useExplodeMode', () => {
     rerender({ ids: ['a', 'b', 'c'] })
     expect(result.current.explodeMode).toBe(false)
     expect(result.current.focusedExplodeTaskId).toBe(null)
+  })
+
+  it('lays out open tasks in the stored order, appending new ones and dropping closed ones', () => {
+    store.explodeOrder = ['c', 'gone', 'a']
+    const { result } = setup(['a', 'b', 'c'])
+    expect(result.current.explodeVisibleTaskIds).toEqual(['c', 'a', 'b'])
+  })
+
+  it('minimize parks a task in the tray, restore puts it back; focus skips it', () => {
+    const { result } = setup(['a', 'b', 'c'])
+    act(() => result.current.setExplodeMode(true))
+    expect(result.current.focusedExplodeTaskId).toBe('b')
+    act(() => result.current.minimizeExplodeTask('b'))
+    expect(result.current.explodeVisibleTaskIds).toEqual(['a', 'c'])
+    expect(result.current.explodeMinimizedTaskIds).toEqual(['b'])
+    // The focused cell left the grid → focus moves to a visible one.
+    expect(result.current.focusedExplodeTaskId).toBe('a')
+    act(() => result.current.restoreExplodeTask('b'))
+    expect(result.current.explodeVisibleTaskIds).toEqual(['a', 'b', 'c'])
+    act(() => {
+      result.current.minimizeExplodeTask('a')
+      result.current.minimizeExplodeTask('c')
+    })
+    expect(result.current.explodeMinimizedTaskIds).toEqual(['a', 'c'])
+    act(() => result.current.restoreAllExplodeTasks())
+    expect(result.current.explodeMinimizedTaskIds).toEqual([])
+  })
+
+  it('seeding skips a minimized active tab', () => {
+    store.explodeMinimized = ['b']
+    const { result } = setup(['a', 'b', 'c'])
+    act(() => result.current.setExplodeMode(true))
+    expect(result.current.focusedExplodeTaskId).toBe('a')
+  })
+
+  it('closing a minimized task drops it from the tray', () => {
+    store.explodeMinimized = ['c']
+    const { result, rerender } = setup(['a', 'b', 'c'])
+    expect(result.current.explodeMinimizedTaskIds).toEqual(['c'])
+    rerender({ ids: ['a', 'b'] })
+    expect(store.explodeMinimized).toEqual([])
+    rerender({ ids: ['a', 'b', 'c'] })
+    expect(result.current.explodeVisibleTaskIds).toEqual(['a', 'b', 'c'])
+  })
+
+  it('swap exchanges exactly two cells and persists the reconciled order', () => {
+    store.explodeOrder = ['a', 'b'] // predates 'c'
+    const { result } = setup(['a', 'b', 'c'])
+    act(() => result.current.swapExplodeTasks('a', 'c'))
+    expect(store.explodeOrder).toEqual(['c', 'b', 'a'])
+    expect(result.current.explodeVisibleTaskIds).toEqual(['c', 'b', 'a'])
+  })
+
+  it('minimize/restore keep one identity across renders (handed to memoized panes)', () => {
+    const { result, rerender } = setup(['a', 'b', 'c'])
+    const { minimizeExplodeTask, restoreExplodeTask, restoreAllExplodeTasks } = result.current
+    act(() => result.current.minimizeExplodeTask('a'))
+    rerender({ ids: ['a', 'b', 'c', 'd'] })
+    expect(result.current.minimizeExplodeTask).toBe(minimizeExplodeTask)
+    expect(result.current.restoreExplodeTask).toBe(restoreExplodeTask)
+    expect(result.current.restoreAllExplodeTasks).toBe(restoreAllExplodeTasks)
   })
 })

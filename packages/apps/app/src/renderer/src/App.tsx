@@ -128,6 +128,10 @@ import {
   AppSidePanels,
   AppDialogs,
   useExplodeMode,
+  computeExplodeLayout,
+  ExplodeMinimizedTray,
+  EXPLODE_DRAG_TYPE,
+  EXPLODE_GRID_PAD,
   useProjectPathGuard,
   useAppUpdates,
   useAuthFailureBanner,
@@ -369,9 +373,22 @@ function App(): React.JSX.Element {
   )
   const activeAgentTaskIds = useActiveSessionTaskIds()
 
-  // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + width
-  const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
-    useExplodeMode(openTaskIds)
+  // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + size,
+  // and the user's arrangement (order + which terminals are parked in the tray).
+  const {
+    explodeMode,
+    setExplodeMode,
+    focusedExplodeTaskId,
+    explodeGridRef,
+    explodeGridWidth,
+    explodeGridHeight,
+    explodeVisibleTaskIds,
+    explodeMinimizedTaskIds,
+    minimizeExplodeTask,
+    restoreExplodeTask,
+    restoreAllExplodeTasks,
+    swapExplodeTasks
+  } = useExplodeMode(openTaskIds)
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction; page views: ActiveTabSync)
   useTabLifecycle({
@@ -636,6 +653,30 @@ function App(): React.JSX.Element {
     () => visibleTabs.filter((t) => t.type === 'task').length,
     [visibleTabs]
   )
+
+  // Explode grid + tray only cover the project-scoped visible tabs (the others are
+  // not rendered in explode mode), so a filtered-out task never claims a cell.
+  const explodeGridTaskIds = useMemo(() => {
+    const visible = new Set(visibleTabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : [])))
+    return {
+      cells: explodeVisibleTaskIds.filter((id) => visible.has(id)),
+      tray: explodeMinimizedTaskIds.filter((id) => visible.has(id))
+    }
+  }, [visibleTabs, explodeVisibleTaskIds, explodeMinimizedTaskIds])
+
+  // Explicit pixel rects per cell (see explodeLayout for why not CSS grid tracks),
+  // laid out inside the grid's padding frame.
+  const explodeRects = useMemo(() => {
+    if (!explodeMode) return new Map()
+    const { cells } = computeExplodeLayout({
+      taskIds: explodeGridTaskIds.cells,
+      width: Math.max(0, explodeGridWidth - EXPLODE_GRID_PAD * 2),
+      height: Math.max(0, explodeGridHeight - EXPLODE_GRID_PAD * 2),
+      gap: 4,
+      minCellWidth: 480
+    })
+    return new Map(cells.map((c) => [c.taskId, c]))
+  }, [explodeMode, explodeGridTaskIds, explodeGridWidth, explodeGridHeight])
 
   // Read settings on mount and whenever settings change
   useEffect(() => {
@@ -1524,6 +1565,14 @@ function App(): React.JSX.Element {
                               {visibleTaskCount} {visibleTaskCount === 1 ? 'task' : 'tasks'}
                             </div>
                           )}
+                          {explodeMode && explodeGridTaskIds.tray.length > 0 && (
+                            <ExplodeMinimizedTray
+                              taskIds={explodeGridTaskIds.tray}
+                              titleFor={(id) => tasksMap.get(id)?.title ?? 'Untitled'}
+                              onRestore={restoreExplodeTask}
+                              onRestoreAll={restoreAllExplodeTasks}
+                            />
+                          )}
                         </>
                       ) : undefined
                     }
@@ -1582,31 +1631,48 @@ function App(): React.JSX.Element {
                       ref={explodeGridRef}
                       className={cn(
                         'flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden relative',
-                        explodeMode ? 'grid gap-1 p-1' : ''
+                        explodeMode ? 'p-1' : ''
                       )}
-                      style={{
-                        ...(explodeMode
-                          ? (() => {
-                              const MIN_CELL_W = 480
-                              const widthCols =
-                                explodeGridWidth > 0
-                                  ? Math.max(1, Math.floor(explodeGridWidth / MIN_CELL_W))
-                                  : Math.ceil(Math.sqrt(visibleTaskCount))
-                              const cols = Math.max(1, Math.min(widthCols, visibleTaskCount))
-                              const rows = Math.ceil(visibleTaskCount / cols)
-                              return {
-                                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                                gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
-                              }
-                            })()
-                          : undefined)
-                      }}
+                      // Drag-to-swap drop side, in the CAPTURE phase on the grid rather
+                      // than per cell: `Terminal.tsx` attaches a `dragover` listener that
+                      // calls stopPropagation() unconditionally (it owns file-drop-to-
+                      // paste-path), so a bubbling handler on the cell never fires over
+                      // terminal content — most of a cell, all of a full-height one.
+                      // Gated on our own mime so file/text drags still reach the terminal.
+                      onDragOverCapture={
+                        explodeMode
+                          ? (e) => {
+                              if (!e.dataTransfer.types.includes(EXPLODE_DRAG_TYPE)) return
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }
+                          : undefined
+                      }
+                      onDropCapture={
+                        explodeMode
+                          ? (e) => {
+                              if (!e.dataTransfer.types.includes(EXPLODE_DRAG_TYPE)) return
+                              const from = e.dataTransfer.getData(EXPLODE_DRAG_TYPE)
+                              // In capture phase `e.target` is still the deepest node (the
+                              // terminal), so walk up to whichever cell owns it.
+                              const cell = (e.target as HTMLElement | null)?.closest?.(
+                                '[data-explode-task-id]'
+                              )
+                              const to = cell?.getAttribute('data-explode-task-id')
+                              e.preventDefault()
+                              e.stopPropagation()
+                              if (from && to && from !== to) swapExplodeTasks(from, to)
+                            }
+                          : undefined
+                      }
                     >
                       <TabPanes
                         tabs={tabs}
                         activeView={activeView}
                         explodeMode={explodeMode}
                         focusedExplodeTaskId={focusedExplodeTaskId}
+                        explodeRects={explodeRects}
+                        onMinimizeExplodeTask={minimizeExplodeTask}
                         toVisibleIndex={toVisibleIndex}
                         hubIdByTask={hubIdByTask}
                         defaultHubId={defaultHubId}

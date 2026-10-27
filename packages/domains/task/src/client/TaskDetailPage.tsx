@@ -2342,9 +2342,44 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 </Popover>
               )
             })()}
-          <span className="text-xs font-medium truncate flex-1">
-            {task.is_temporary ? 'Temporary task' : task.title}
-          </span>
+          {/* Double-click to rename, mirroring the tab bar. Explode mode sets
+              `hideTabs`, so this compact header is the ONLY place the title is
+              shown — without this a task cannot be renamed there. Double-click
+              rather than the full header's single-click: this strip is small and
+              clicking it is how you focus the cell. */}
+          {editingTitle && !task.is_temporary ? (
+            <input
+              ref={titleInputRef}
+              value={titleValue}
+              onChange={(e) => setTitleValue(e.target.value)}
+              onBlur={handleTitleSave}
+              onKeyDown={handleTitleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className="text-xs font-medium flex-1 min-w-0 bg-transparent border-none outline-none ring-1 ring-ring rounded px-1"
+              aria-label="Task title"
+              data-testid="compact-title-input"
+            />
+          ) : (
+            <span
+              className={cn(
+                'text-xs font-medium truncate flex-1',
+                !task.is_temporary && 'cursor-text'
+              )}
+              onDoubleClick={
+                task.is_temporary
+                  ? undefined
+                  : (e) => {
+                      e.stopPropagation()
+                      setEditingTitle(true)
+                    }
+              }
+              title={task.is_temporary ? undefined : 'Double-click to rename'}
+              data-testid="compact-title"
+            >
+              {task.is_temporary ? 'Temporary task' : task.title}
+            </span>
+          )}
           {!task.is_temporary && (
             <Popover open={priorityPopoverOpen} onOpenChange={setPriorityPopoverOpen}>
               <PopoverTrigger asChild>

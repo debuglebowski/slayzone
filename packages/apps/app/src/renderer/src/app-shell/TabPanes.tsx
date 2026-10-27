@@ -18,6 +18,8 @@ import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { mruRank } from '@slayzone/terminal/client/terminal-mru'
 import { cn } from '@slayzone/ui'
+import type { ExplodeCellRect } from '@slayzone/app-shell/client'
+import { GripVertical, Minimize2 } from 'lucide-react'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { TaskDetailDataLoader } from './lazy'
 import { paneHydrator } from './pane-hydration'
@@ -39,6 +41,11 @@ interface TabPanesProps extends TaskPaneHandlers {
   activeView: string
   explodeMode: boolean
   focusedExplodeTaskId: string | null
+  /** Explode-mode cell rect per task id. A task with no rect is minimized (parked
+   *  in the header tray): it stays mounted, hidden and inert. */
+  explodeRects: ReadonlyMap<string, ExplodeCellRect>
+  /** Must be stable (handed to every memoized task pane). */
+  onMinimizeExplodeTask: (taskId: string) => void
   toVisibleIndex: (fullIndex: number) => number
   hubIdByTask: Map<string, string>
   defaultHubId: string
@@ -74,6 +81,8 @@ export const TabPanes = memo(function TabPanes({
   activeView,
   explodeMode,
   focusedExplodeTaskId,
+  explodeRects,
+  onMinimizeExplodeTask,
   toVisibleIndex,
   hubIdByTask,
   defaultHubId,
@@ -134,6 +143,8 @@ export const TabPanes = memo(function TabPanes({
             isViewActive={isViewActive}
             explodeMode={explodeMode}
             isExplodeFocused={explodeMode && focusedExplodeTaskId === tab.taskId}
+            explodeRect={explodeMode ? explodeRects.get(tab.taskId) : undefined}
+            onMinimizeExplodeTask={onMinimizeExplodeTask}
             zenMode={zenMode}
             settingsRevision={settingsRevision}
             terminalFocusRequestId={terminalFocusRequests[tab.taskId] ?? 0}
@@ -151,9 +162,20 @@ interface PaneFrameProps {
   explodeMode: boolean
   isExplodeFocused?: boolean
   explodeTaskId?: string
+  /** Explode-mode cell rect; absent in explode mode = minimized to the tray. */
+  explodeRect?: ExplodeCellRect
+  onMinimizeExplodeTask?: (taskId: string) => void
   hubId: string
   children: ReactNode
 }
+
+/** Custom DnD mime so an explode-cell drag is distinguishable from dragged text
+ *  or files, which terminals and editors must keep handling themselves. The drop
+ *  side lives on the grid (App.tsx), in the capture phase. */
+export const EXPLODE_DRAG_TYPE = 'application/x-slayzone-explode-cell'
+
+/** Explode grid's `p-1` frame: cell rects are laid out inside it. */
+export const EXPLODE_GRID_PAD = 4
 
 /**
  * Inactive tabs hide via `invisible` (visibility:hidden). CSS does not interpolate
@@ -171,6 +193,12 @@ interface PaneFrameProps {
  * resumes where it stopped. (Radix overlays that wait on `animationend` portal
  * out of the pane, so none of them is held here.)
  *
+ * Explode mode: each cell is an explicit pixel rect from `computeExplodeLayout`
+ * (not CSS grid tracks), so the pane tree is identical in both modes and toggling
+ * never remounts a terminal. A minimized cell has no rect: it stays MOUNTED and is
+ * hidden exactly like an inactive tab — unmounting would tear down its xterm and
+ * lose the scrollback the user minimized to keep.
+ *
  * Multi-hub: each tab's content is scoped to the hub that owns it, so ambient
  * useTRPC() (TaskDetailPage/HomeDetail + the hub-keyed taskDetailCache) resolves
  * to the right hub. Single-hub → HubScope(default) is the same client the app is
@@ -181,27 +209,85 @@ function PaneFrame({
   explodeMode,
   isExplodeFocused = false,
   explodeTaskId,
+  explodeRect,
+  onMinimizeExplodeTask,
   hubId,
   children
 }: PaneFrameProps): React.JSX.Element {
+  const hidden = explodeMode ? !explodeRect : !isViewActive
   return (
     <div
-      data-explode-task-id={explodeMode ? explodeTaskId : undefined}
+      data-explode-task-id={explodeMode && explodeRect ? explodeTaskId : undefined}
       className={
-        explodeMode
+        explodeMode && explodeRect
           ? cn(
-              'rounded overflow-hidden border min-h-0 relative',
-              isExplodeFocused ? 'border-primary/60 ring-2 ring-primary/40' : 'border-border'
+              'group absolute rounded overflow-hidden border min-h-0',
+              isExplodeFocused ? 'border-primary/60 ring-2 ring-primary/40 z-10' : 'border-border'
             )
           : `absolute inset-0 ${
-              !isViewActive
+              hidden
                 ? 'invisible [&_*]:transition-none! [&_*]:[animation-play-state:paused]!'
                 : 'z-10'
             }`
       }
-      inert={!explodeMode && !isViewActive ? true : undefined}
+      style={
+        explodeMode && explodeRect
+          ? {
+              left: explodeRect.left + EXPLODE_GRID_PAD,
+              top: explodeRect.top + EXPLODE_GRID_PAD,
+              width: explodeRect.width,
+              height: explodeRect.height
+            }
+          : undefined
+      }
+      inert={hidden ? true : undefined}
     >
+      {explodeMode && explodeRect && explodeTaskId && onMinimizeExplodeTask ? (
+        <ExplodeCellChrome taskId={explodeTaskId} onMinimize={onMinimizeExplodeTask} />
+      ) : null}
       <HubScope hubId={hubId}>{children}</HubScope>
+    </div>
+  )
+}
+
+/**
+ * Hover-revealed explode-cell chrome: drag grip (swap) + minimize. Absolutely
+ * positioned over the content rather than inset above it, so showing it never
+ * resizes the terminal underneath (an xterm reflow on hover would reflow output).
+ */
+function ExplodeCellChrome({
+  taskId,
+  onMinimize
+}: {
+  taskId: string
+  onMinimize: (taskId: string) => void
+}): React.JSX.Element {
+  return (
+    <div className="absolute top-0 right-0 z-20 flex items-center gap-0.5 rounded-bl bg-surface-2/90 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <button
+        type="button"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(EXPLODE_DRAG_TYPE, taskId)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+        title="Drag onto another terminal to swap places"
+        aria-label="Drag to swap position"
+        data-testid="explode-drag-handle"
+        className="cursor-grab p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+      >
+        <GripVertical className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onMinimize(taskId)}
+        title="Minimize to the header tray (keeps running)"
+        aria-label="Minimize terminal"
+        data-testid="explode-minimize"
+        className="p-1 text-muted-foreground hover:text-foreground"
+      >
+        <Minimize2 className="size-3.5" />
+      </button>
     </div>
   )
 }
@@ -234,6 +320,8 @@ interface TaskPaneProps extends TaskPaneHandlers {
   isViewActive: boolean
   explodeMode: boolean
   isExplodeFocused: boolean
+  explodeRect: ExplodeCellRect | undefined
+  onMinimizeExplodeTask: (taskId: string) => void
   zenMode: boolean
   settingsRevision: number
   terminalFocusRequestId: number
@@ -248,6 +336,8 @@ const TaskPane = memo(function TaskPane({
   isViewActive,
   explodeMode,
   isExplodeFocused,
+  explodeRect,
+  onMinimizeExplodeTask,
   zenMode,
   settingsRevision,
   terminalFocusRequestId,
@@ -261,11 +351,14 @@ const TaskPane = memo(function TaskPane({
   onCloseTab,
   onTerminalFocusRequestHandled
 }: TaskPaneProps): React.JSX.Element {
+  // On screen: the active tab, or an explode cell that is not minimized. A minimized
+  // cell is treated exactly like a hidden tab (mounted, inactive) until restored.
+  const onScreen = explodeMode ? explodeRect !== undefined : isViewActive
   const hydrated = usePaneHydrated(
     taskId,
     hubId,
     task?.panel_visibility?.browser === true,
-    explodeMode || isViewActive
+    onScreen
   )
   // A task opened terminal-first keeps showing its terminal until the agent is up.
   const holdForTerminal = useTerminalFirstHolding(taskId)
@@ -275,6 +368,8 @@ const TaskPane = memo(function TaskPane({
       explodeMode={explodeMode}
       isExplodeFocused={isExplodeFocused}
       explodeTaskId={taskId}
+      explodeRect={explodeRect}
+      onMinimizeExplodeTask={onMinimizeExplodeTask}
       hubId={hubId}
     >
       <ErrorBoundary onReset={() => taskDetailCache.invalidate('taskDetail', taskId, hubId)}>
@@ -285,7 +380,7 @@ const TaskPane = memo(function TaskPane({
                 taskId={taskId}
                 task={task}
                 project={project}
-                isActive={explodeMode || isViewActive}
+                isActive={onScreen}
                 hasShortcutFocus={explodeMode ? isExplodeFocused : isViewActive}
                 compact={explodeMode}
                 zenMode={zenMode}
