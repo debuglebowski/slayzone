@@ -23,8 +23,9 @@
     "jose": "^6.2.12"
   },
   "devDependencies": {
-    "@peculiar/x509": "^1.14.2",
+    "@peculiar/x509": "~2.1.0",
     "@types/express": "^5.0.5",
+    "reflect-metadata": "^0.2.2",
     "vitest": "^4.1.11"
   }
 }

@@ -11,6 +11,8 @@
  * carries a valid signed assertion and no secret; key material never reaches a log.
  * Plus the SSO-hub role rules (users.ts) and the credential loader.
  */
+// @peculiar/x509 ≥2 needs a Reflect metadata polyfill loaded before it (tsyringe).
+import 'reflect-metadata'
 import { createHash, generateKeyPairSync, KeyObject, randomBytes, webcrypto } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'

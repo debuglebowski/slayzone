@@ -4,6 +4,8 @@
  * web-sign-in.test.ts) — its own signing key + JWKS, and a token endpoint that checks
  * the hub's client assertion and PKCE, as in entra.test.ts. Plus the hub's certificate.
  */
+// @peculiar/x509 ≥2 needs a Reflect metadata polyfill loaded before it (tsyringe).
+import 'reflect-metadata'
 import { createHash, generateKeyPairSync, KeyObject, randomBytes, webcrypto } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
