@@ -38,7 +38,9 @@ describe('security-log: line shape', () => {
   test('one JSON line with every field, type first, nulls for the unknown', () => {
     const lines = capture(() => securityEvent({ event: 'auth.signin', outcome: 'success' }))
     expect(lines[0]!, 'no newline inside the line').not.toContain('\n')
-    expect(lines[0]!.startsWith('{"type":"security",'), `starts with the type: ${lines[0]}`).toBe(true)
+    expect(lines[0]!.startsWith('{"type":"security",'), `starts with the type: ${lines[0]}`).toBe(
+      true
+    )
     const e = only(lines)
     expect(Object.keys(e), 'field order').toEqual([
       'type',
@@ -93,7 +95,9 @@ describe('security-log: line shape', () => {
     expect(e.targetKind, 'target').toBe('computer')
     expect(e.targetId, 'target').toBe('c1')
     expect(e.route, `route: ${e.route}`).toBe('GET /api/x')
-    expect(JSON.stringify(e.detail), `detail: ${JSON.stringify(e.detail)}`).toBe('{"reason":"R","count":2,"ok":true,"none":null}')
+    expect(JSON.stringify(e.detail), `detail: ${JSON.stringify(e.detail)}`).toBe(
+      '{"reason":"R","count":2,"ok":true,"none":null}'
+    )
   })
 })
 
@@ -300,7 +304,10 @@ describe('security-log: never throws', () => {
     }
     // The default sink installed its guard on first use: an async stdout error must
     // not become an uncaught exception that takes the hub down.
-    expect(process.stdout.listenerCount('error'), 'stdout error listener installed').toBeGreaterThan(0)
+    expect(
+      process.stdout.listenerCount('error'),
+      'stdout error listener installed'
+    ).toBeGreaterThan(0)
     process.stdout.emit('error', Object.assign(new Error('EPIPE'), { code: 'EPIPE' }))
   })
 })
@@ -368,7 +375,7 @@ describe('security-log: acting-user context', () => {
       'integration.connect',
       'hub.retention.sweep'
     ]) {
-      expect((SECURITY_EVENTS as readonly string[]), `${name} reserved`).toContain(name)
+      expect(SECURITY_EVENTS as readonly string[], `${name} reserved`).toContain(name)
     }
   })
 })

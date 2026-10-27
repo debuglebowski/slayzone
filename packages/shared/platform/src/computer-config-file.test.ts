@@ -92,7 +92,9 @@ describe('computer-config-file: loadComputerConfigFile', () => {
     expect(cfg.joinToken, 'joinToken').toBe('jt-1')
     expect(cfg.computerName, 'computerName').toBe('r1')
     expect(cfg.hubUrl, 'hubUrl').toBe('wss://hub/computers')
-    expect(JSON.stringify(cfg.allowedRoots), 'allowedRoots').toBe(JSON.stringify(['/srv/a', '/srv/b']))
+    expect(JSON.stringify(cfg.allowedRoots), 'allowedRoots').toBe(
+      JSON.stringify(['/srv/a', '/srv/b'])
+    )
     expect(cfg, 'unknown key dropped').not.toHaveProperty('extra')
     rmSync(dir, { recursive: true, force: true })
   })
@@ -132,7 +134,9 @@ describe('computer-config-file: loadComputerConfigFile', () => {
     const cfg = loadComputerConfigFile(p)
     expect(cfg.hubUrl, 'the rest of the file still loads').toBe('wss://hub/computers')
     expect(cfg, 'the pin is never coerced').not.toHaveProperty('pinnedCertSha256')
-    expect(JSON.stringify(ignoredComputerConfigKeys(p)), 'pin reported').toBe('["pinnedCertSha256"]')
+    expect(JSON.stringify(ignoredComputerConfigKeys(p)), 'pin reported').toBe(
+      '["pinnedCertSha256"]'
+    )
 
     // The next write drops it from disk (update re-coerces the current file).
     updateComputerConfigFile({ computerName: 'r1' }, p)
@@ -145,9 +149,15 @@ describe('computer-config-file: loadComputerConfigFile', () => {
       join(legacyDir, 'config.json'),
       JSON.stringify({ pinnedCertSha256: 'b'.repeat(64) })
     )
-    expect(JSON.stringify(ignoredComputerConfigKeys(join(legacyDir, 'computer.config.json'))), 'legacy file pin reported').toBe('["pinnedCertSha256"]')
+    expect(
+      JSON.stringify(ignoredComputerConfigKeys(join(legacyDir, 'computer.config.json'))),
+      'legacy file pin reported'
+    ).toBe('["pinnedCertSha256"]')
     const emptyDir = tmp()
-    expect(ignoredComputerConfigKeys(join(emptyDir, 'computer.config.json')).length, 'no file').toBe(0)
+    expect(
+      ignoredComputerConfigKeys(join(emptyDir, 'computer.config.json')).length,
+      'no file'
+    ).toBe(0)
     for (const d of [dir, legacyDir, emptyDir]) rmSync(d, { recursive: true, force: true })
   })
 
@@ -156,7 +166,9 @@ describe('computer-config-file: loadComputerConfigFile', () => {
     const p = join(dir, 'computer.config.json')
     writeFileSync(p, JSON.stringify({ allowedRoots: ['/ok', '', 42, '/also-ok'] }))
     const cfg = loadComputerConfigFile(p)
-    expect(JSON.stringify(cfg.allowedRoots), 'filtered array').toBe(JSON.stringify(['/ok', '/also-ok']))
+    expect(JSON.stringify(cfg.allowedRoots), 'filtered array').toBe(
+      JSON.stringify(['/ok', '/also-ok'])
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -206,11 +218,15 @@ describe('computer-config-file: SLAYZONE_ROOT honored', () => {
     const prev = process.env.SLAYZONE_ROOT
     process.env.SLAYZONE_ROOT = dir
     try {
-      expect(getComputerConfigFilePath(), 'path under root override').toBe(join(dir, 'computer.config.json'))
+      expect(getComputerConfigFilePath(), 'path under root override').toBe(
+        join(dir, 'computer.config.json')
+      )
       saveComputerConfigFile({ computerName: 'r1' })
       const raw = readFileSync(join(dir, 'computer.config.json'), 'utf8')
       expect(raw, 'wrote to the overridden root dir').toMatch(/r1/)
-      expect(loadComputerConfigFile().computerName, 'default-path load reads the override').toBe('r1')
+      expect(loadComputerConfigFile().computerName, 'default-path load reads the override').toBe(
+        'r1'
+      )
     } finally {
       if (prev === undefined) delete process.env.SLAYZONE_ROOT
       else process.env.SLAYZONE_ROOT = prev
@@ -231,7 +247,10 @@ describe('computer-config-file: legacy shared config.json fallback', () => {
     const cfg = loadComputerConfigFile(cfgPath)
     expect(cfg.joinToken, 'joinToken from legacy file').toBe('legacy-jt')
     expect(cfg.hubUrl, 'hubUrl from legacy file').toBe('wss://legacy/computers')
-    expect(existsSync(cfgPath), 'never auto-upgrades — computer.config.json not created by a read').toBe(false)
+    expect(
+      existsSync(cfgPath),
+      'never auto-upgrades — computer.config.json not created by a read'
+    ).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -240,7 +259,9 @@ describe('computer-config-file: legacy shared config.json fallback', () => {
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ computerName: 'from-legacy' }))
     const cfgPath = join(dir, 'computer.config.json')
     saveComputerConfigFile({ computerName: 'from-new' }, cfgPath)
-    expect(loadComputerConfigFile(cfgPath).computerName, 'new file wins once it exists').toBe('from-new')
+    expect(loadComputerConfigFile(cfgPath).computerName, 'new file wins once it exists').toBe(
+      'from-new'
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 })

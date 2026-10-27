@@ -85,7 +85,9 @@ describe('suppressDeviceStatusReplies', () => {
     const term = new Terminal({ allowProposedApi: true })
     suppressDeviceStatusReplies(term)
     expect(await emitted(term, 'hello world\r\n'), 'plain text emits nothing').toBe('')
-    expect(term.buffer.active.getLine(0)?.translateToString(true), 'text rendered').toBe('hello world')
+    expect(term.buffer.active.getLine(0)?.translateToString(true), 'text rendered').toBe(
+      'hello world'
+    )
     term.dispose()
   })
 
@@ -119,7 +121,10 @@ describe('suppressXtVersionReply', () => {
     // Establishes the poison is real and this test measures it.
     const term = new Terminal({ allowProposedApi: true })
     const out = await emitted(term, '\x1b[>0q')
-    expect(out.startsWith('\x1bP>|xterm.js('), `expected DCS version reply, got ${JSON.stringify(out)}`).toBe(true)
+    expect(
+      out.startsWith('\x1bP>|xterm.js('),
+      `expected DCS version reply, got ${JSON.stringify(out)}`
+    ).toBe(true)
     expect(out.endsWith('\x1b\\'), 'ST terminated').toBe(true)
     term.dispose()
   })
@@ -161,7 +166,10 @@ describe('suppressXtVersionReply', () => {
     const subs = suppressXtVersionReply(term)
     expect(await emitted(term, '\x1b[>0q'), 'suppressed while registered').toBe('')
     for (const s of subs) s.dispose()
-    expect((await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('), 'restored after dispose').toBe(true)
+    expect(
+      (await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('),
+      'restored after dispose'
+    ).toBe(true)
     term.dispose()
   })
 })

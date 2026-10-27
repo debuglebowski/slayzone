@@ -18,9 +18,15 @@ const rootDir = resolve(import.meta.dirname, '../../..')
 
 export default function setup(): void {
   for (const pkg of ['hub', 'computer', 'cli']) {
-    execFileSync('node', ['build.mjs'], { cwd: join(rootDir, 'packages/apps', pkg), stdio: 'inherit' })
+    execFileSync('node', ['build.mjs'], {
+      cwd: join(rootDir, 'packages/apps', pkg),
+      stdio: 'inherit'
+    })
   }
   if (!existsSync(join(rootDir, 'packages/apps/hub/dist/web/index.html'))) {
-    execFileSync('pnpm', ['--filter', '@slayzone/web-shell', 'build'], { cwd: rootDir, stdio: 'inherit' })
+    execFileSync('pnpm', ['--filter', '@slayzone/web-shell', 'build'], {
+      cwd: rootDir,
+      stdio: 'inherit'
+    })
   }
 }

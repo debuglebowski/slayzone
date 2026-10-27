@@ -43,14 +43,18 @@ function occupy(port: number): Promise<() => Promise<void>> {
 
 describe('hub port block', () => {
   test('the dynamic range sits inside the block, after the supervised head', async () => {
-    expect(HUB_DYNAMIC_PORT_RANGE.start, 'dynamic starts after block start').toBeGreaterThan(HUB_PORT_BLOCK.start)
+    expect(HUB_DYNAMIC_PORT_RANGE.start, 'dynamic starts after block start').toBeGreaterThan(
+      HUB_PORT_BLOCK.start
+    )
     expect(HUB_DYNAMIC_PORT_RANGE.end, 'both end together').toBe(HUB_PORT_BLOCK.end)
     // Every fixed supervised port must fall in the RESERVED head, never in the
     // range standalone hubs draw from — else a standalone hub could take the
     // port the desktop app expects to bind.
     for (const [env, port] of Object.entries(SIDECAR_FIXED_PORT)) {
       expect(port, `${env} inside block`).toBeGreaterThanOrEqual(HUB_PORT_BLOCK.start)
-      expect(port, `${env} in the reserved head, not the dynamic range`).toBeLessThan(HUB_DYNAMIC_PORT_RANGE.start)
+      expect(port, `${env} in the reserved head, not the dynamic range`).toBeLessThan(
+        HUB_DYNAMIC_PORT_RANGE.start
+      )
     }
   })
 
@@ -58,9 +62,15 @@ describe('hub port block', () => {
     const srv = http.createServer()
     try {
       const port = await bindInHubPortBlock(srv, '127.0.0.1')
-      expect(port, `port ${port} is inside the dynamic range`).toBeGreaterThanOrEqual(HUB_DYNAMIC_PORT_RANGE.start)
-      expect(port, `port ${port} is inside the dynamic range`).toBeLessThanOrEqual(HUB_DYNAMIC_PORT_RANGE.end)
-      expect((srv.address() as AddressInfo).port, 'returned port matches the bound socket').toBe(port)
+      expect(port, `port ${port} is inside the dynamic range`).toBeGreaterThanOrEqual(
+        HUB_DYNAMIC_PORT_RANGE.start
+      )
+      expect(port, `port ${port} is inside the dynamic range`).toBeLessThanOrEqual(
+        HUB_DYNAMIC_PORT_RANGE.end
+      )
+      expect((srv.address() as AddressInfo).port, 'returned port matches the bound socket').toBe(
+        port
+      )
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
     }
@@ -71,7 +81,9 @@ describe('hub port block', () => {
     const srv = http.createServer()
     try {
       const port = await bindInHubPortBlock(srv, '127.0.0.1')
-      expect(port, `skipped the taken port (got ${port})`).toBeGreaterThan(HUB_DYNAMIC_PORT_RANGE.start)
+      expect(port, `skipped the taken port (got ${port})`).toBeGreaterThan(
+        HUB_DYNAMIC_PORT_RANGE.start
+      )
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
       await release()
@@ -106,7 +118,9 @@ describe('hub port block', () => {
         message = e instanceof Error ? e.message : String(e)
       }
       expect(message.length, 'threw rather than resolving').toBeGreaterThan(0)
-      expect(message, `error names the range: ${message}`).toContain(String(HUB_DYNAMIC_PORT_RANGE.start))
+      expect(message, `error names the range: ${message}`).toContain(
+        String(HUB_DYNAMIC_PORT_RANGE.start)
+      )
     } finally {
       await new Promise((r) => srv.close(() => r(undefined)))
       await release()
@@ -126,6 +140,8 @@ describe('hub port block', () => {
       await new Promise((r) => srv.close(() => r(undefined)))
     }
     expect(message.length, 'threw').toBeGreaterThan(0)
-    expect(message, `propagated the real error, not exhaustion: ${message}`).not.toContain('no free port')
+    expect(message, `propagated the real error, not exhaustion: ${message}`).not.toContain(
+      'no free port'
+    )
   })
 })

@@ -226,19 +226,21 @@ test('isHubLoginRequired: garbage → false (does not throw)', () => {
   })
 
   test('process env: every switch, SSO var and address var', () => {
-    expect([
-      ...Object.values(HUB_SWITCH_ENV),
-      'SLAYZONE_HUB_SSO_TENANT_ID',
-      'SLAYZONE_HUB_SSO_CLIENT_ID',
-      'SLAYZONE_HUB_SSO_CERT_PATH',
-      'SLAYZONE_HUB_SSO_KEY_PATH',
-      'SLAYZONE_HUB_SSO_REQUIRE_MFA',
-      // Retired, but a parent still clears it.
-      'SLAYZONE_HUB_SSO_CLIENT_SECRET',
-      'SLAYZONE_HUB_LISTEN_ADDRESS',
-      'SLAYZONE_HUB_PUBLIC_ADDRESS',
-      'SLAYZONE_HUB_AUTH_SECRET'
-    ].every((n) => list.has(n))).toBe(true)
+    expect(
+      [
+        ...Object.values(HUB_SWITCH_ENV),
+        'SLAYZONE_HUB_SSO_TENANT_ID',
+        'SLAYZONE_HUB_SSO_CLIENT_ID',
+        'SLAYZONE_HUB_SSO_CERT_PATH',
+        'SLAYZONE_HUB_SSO_KEY_PATH',
+        'SLAYZONE_HUB_SSO_REQUIRE_MFA',
+        // Retired, but a parent still clears it.
+        'SLAYZONE_HUB_SSO_CLIENT_SECRET',
+        'SLAYZONE_HUB_LISTEN_ADDRESS',
+        'SLAYZONE_HUB_PUBLIC_ADDRESS',
+        'SLAYZONE_HUB_AUTH_SECRET'
+      ].every((n) => list.has(n))
+    ).toBe(true)
   })
 
   test('process env: the retired/dial-side address and the web-origin list', () => {
@@ -264,4 +266,3 @@ test('isHubLoginRequired: garbage → false (does not throw)', () => {
     expect(Object.keys(NOT_HUB_PROCESS_CONFIG).every((k) => k in ENV_MANIFEST)).toBe(true)
   })
 }
-

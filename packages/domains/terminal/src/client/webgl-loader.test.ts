@@ -380,7 +380,10 @@ describe('correctAtlas — shared-atlas sibling repair', () => {
     expect(siblingB.calls.refresh, 'sibling B got a frame').toBe(1)
     // The mutating pane must be painted exactly once even though it appears in
     // the registry — a double refresh would be wasted GPU work every heartbeat.
-    expect(mutating.calls.refresh, `mutating pane painted once, got ${mutating.calls.refresh}`).toBe(1)
+    expect(
+      mutating.calls.refresh,
+      `mutating pane painted once, got ${mutating.calls.refresh}`
+    ).toBe(1)
   })
 
   test('repaints the mutating terminal when it is absent from the registry', () => {

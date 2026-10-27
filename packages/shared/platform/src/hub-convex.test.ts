@@ -53,7 +53,9 @@ test('blank → null', () => {
 })
 
 test('cloud host → https', () => {
-  expect(hubConvexOrigin(env('happy-animal-123.convex.cloud'))).toBe('https://happy-animal-123.convex.cloud')
+  expect(hubConvexOrigin(env('happy-animal-123.convex.cloud'))).toBe(
+    'https://happy-animal-123.convex.cloud'
+  )
 })
 
 test('trimmed', () => {
@@ -167,9 +169,9 @@ describe('assertHubConvexSignInUrl', () => {
     })
 
     test('same deployment, trailing slash: accepted', () => {
-      expect(
-        assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud/', refusal, own)
-      ).toBe('https://happy-animal-123.convex.cloud')
+      expect(assertHubConvexSignInUrl('https://happy-animal-123.convex.cloud/', refusal, own)).toBe(
+        'https://happy-animal-123.convex.cloud'
+      )
     })
   })
 
@@ -264,4 +266,3 @@ describe('assertHubConvexSignInUrl', () => {
     })
   }
 })
-

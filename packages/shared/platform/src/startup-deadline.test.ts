@@ -92,4 +92,3 @@ test('a deadline that fires late after a stall reads waiting output before judgi
   peer.destroy()
   await new Promise<void>((r) => server.close(() => r()))
 })
-

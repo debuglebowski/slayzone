@@ -52,7 +52,9 @@ test('auto: every ASCII char any layout puts on Option is typed, not Meta (#103)
         if (!isPrintableAscii(ev.key)) continue
         // The one ASCII char US itself has on Option is a duplicate of plain `.
         if (usLike && ev.key === US_OPTION_LAYER[code]?.[shift ? 1 : 0]) continue
-        expect(resolveOptionIsMeta('auto', ev, NONE, usLike), `${name} ${code} → ${ev.key}`).toBe(false)
+        expect(resolveOptionIsMeta('auto', ev, NONE, usLike), `${name} ${code} → ${ev.key}`).toBe(
+          false
+        )
       }
     }
   }
@@ -70,7 +72,9 @@ test('auto: US, ABC and US International keep every Option key as Meta', () => {
     for (const code of Object.keys(layout)) {
       for (const shift of [false, true]) {
         const ev = optionKey(layout, code, shift)
-        expect(resolveOptionIsMeta('auto', ev, NONE, usLike), `${name} ${code} → ${ev.key}`).toBe(true)
+        expect(resolveOptionIsMeta('auto', ev, NONE, usLike), `${name} ${code} → ${ev.key}`).toBe(
+          true
+        )
       }
     }
   }
@@ -81,7 +85,9 @@ test('auto: a non-US layout composes every Option key (dead keys and π too)', (
     const layout = LAYOUTS[name]
     for (const code of Object.keys(layout)) {
       const ev = optionKey(layout, code)
-      expect(resolveOptionIsMeta('auto', ev, NONE, false), `${name} ${code} → ${ev.key}`).toBe(false)
+      expect(resolveOptionIsMeta('auto', ev, NONE, false), `${name} ${code} → ${ev.key}`).toBe(
+        false
+      )
     }
   }
   // German ~ is Option+N, a dead key exactly like US Option+N — only the
@@ -97,7 +103,10 @@ test('auto: US-shaped base, layout-specific Option chars are typed (British # an
   expect(resolveOptionIsMeta('auto', optionKey(gb, 'KeyB'), NONE, true), '∫ = US → Meta').toBe(true)
   const eur = LAYOUTS.EurKEY
   expect(resolveOptionIsMeta('auto', optionKey(eur, 'KeyA'), NONE, true), 'EurKEY ä').toBe(false)
-  expect(resolveOptionIsMeta('auto', optionKey(eur, 'KeyC'), NONE, true), 'EurKEY ç = US → Meta').toBe(true)
+  expect(
+    resolveOptionIsMeta('auto', optionKey(eur, 'KeyC'), NONE, true),
+    'EurKEY ç = US → Meta'
+  ).toBe(true)
 })
 
 test('auto: Caps Lock case flip of the US char still counts as US', () => {
@@ -114,8 +123,12 @@ test('auto: keys with no Option layer (arrows, F-keys, keypad) stay Meta', () =>
 
 test('auto: Ctrl or Cmd with Option never composes, so it is Meta', () => {
   const sv = LAYOUTS.SwedishPro
-  expect(resolveOptionIsMeta('auto', { ...optionKey(sv, 'Digit2'), ctrlKey: true }, NONE, false)).toBe(true)
-  expect(resolveOptionIsMeta('auto', { ...optionKey(sv, 'Digit2'), metaKey: true }, NONE, false)).toBe(true)
+  expect(
+    resolveOptionIsMeta('auto', { ...optionKey(sv, 'Digit2'), ctrlKey: true }, NONE, false)
+  ).toBe(true)
+  expect(
+    resolveOptionIsMeta('auto', { ...optionKey(sv, 'Digit2'), metaKey: true }, NONE, false)
+  ).toBe(true)
 })
 
 test('both / none are literal, whatever the layout', () => {
@@ -143,4 +156,3 @@ test('left / right: unknown side (Option pressed before window focus) composes',
   expect(resolveOptionIsMeta('left', ev, NONE, true)).toBe(false)
   expect(resolveOptionIsMeta('right', ev, NONE, true)).toBe(false)
 })
-

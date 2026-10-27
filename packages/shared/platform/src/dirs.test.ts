@@ -34,32 +34,44 @@ describe('dirs: getSupervisedRoot — channel-to-bucket folding', () => {
   test("channel='dev' → the dev bucket", () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
       expect(getSupervisedRoot('hub', 'dev'), 'dev hub').toBe(join('/tmp/root', 'dev', 'hub'))
-      expect(getSupervisedRoot('computer', 'dev'), 'dev computer').toBe(join('/tmp/root', 'dev', 'computer'))
+      expect(getSupervisedRoot('computer', 'dev'), 'dev computer').toBe(
+        join('/tmp/root', 'dev', 'computer')
+      )
     })
   })
 
   test("channel='beta' folds onto the stable bucket — no separate beta bucket", () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-      expect(getSupervisedRoot('hub', 'beta'), 'beta → stable').toBe(join('/tmp/root', 'stable', 'hub'))
+      expect(getSupervisedRoot('hub', 'beta'), 'beta → stable').toBe(
+        join('/tmp/root', 'stable', 'hub')
+      )
     })
   })
 
   test("channel='stable' → the stable bucket", () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-      expect(getSupervisedRoot('hub', 'stable'), 'stable hub').toBe(join('/tmp/root', 'stable', 'hub'))
-      expect(getSupervisedRoot('computer', 'stable'), 'stable computer').toBe(join('/tmp/root', 'stable', 'computer'))
+      expect(getSupervisedRoot('hub', 'stable'), 'stable hub').toBe(
+        join('/tmp/root', 'stable', 'hub')
+      )
+      expect(getSupervisedRoot('computer', 'stable'), 'stable computer').toBe(
+        join('/tmp/root', 'stable', 'computer')
+      )
     })
   })
 
   test("channel='unknown' (release channel never set) folds onto stable — no empty/default bucket", () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-      expect(getSupervisedRoot('hub', 'unknown'), 'unknown → stable').toBe(join('/tmp/root', 'stable', 'hub'))
+      expect(getSupervisedRoot('hub', 'unknown'), 'unknown → stable').toBe(
+        join('/tmp/root', 'stable', 'hub')
+      )
     })
   })
 
   test('any other unrecognized channel value also folds onto stable (fail safe, not fail open to a new bucket)', () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-      expect(getSupervisedRoot('hub', 'nightly'), 'typo channel → stable').toBe(join('/tmp/root', 'stable', 'hub'))
+      expect(getSupervisedRoot('hub', 'nightly'), 'typo channel → stable').toBe(
+        join('/tmp/root', 'stable', 'hub')
+      )
     })
   })
 })
@@ -67,16 +79,22 @@ describe('dirs: getSupervisedRoot — channel-to-bucket folding', () => {
 describe('dirs: getSupervisedRoot — default channel param reads getSlayzoneReleaseChannel()', () => {
   test('no channel arg ⇒ reads SLAYZONE_RELEASE_CHANNEL from env', () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root', SLAYZONE_RELEASE_CHANNEL: 'dev' }, () => {
-      expect(getSupervisedRoot('hub'), 'env dev bucket picked up').toBe(join('/tmp/root', 'dev', 'hub'))
+      expect(getSupervisedRoot('hub'), 'env dev bucket picked up').toBe(
+        join('/tmp/root', 'dev', 'hub')
+      )
     })
     withEnv({ SLAYZONE_ROOT: '/tmp/root', SLAYZONE_RELEASE_CHANNEL: 'stable' }, () => {
-      expect(getSupervisedRoot('hub'), 'env stable bucket picked up').toBe(join('/tmp/root', 'stable', 'hub'))
+      expect(getSupervisedRoot('hub'), 'env stable bucket picked up').toBe(
+        join('/tmp/root', 'stable', 'hub')
+      )
     })
   })
 
   test('SLAYZONE_RELEASE_CHANNEL unset ⇒ getSlayzoneReleaseChannel() defaults to unknown ⇒ stable bucket', () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/root' }, () => {
-      expect(getSupervisedRoot('computer'), 'unset → stable').toBe(join('/tmp/root', 'stable', 'computer'))
+      expect(getSupervisedRoot('computer'), 'unset → stable').toBe(
+        join('/tmp/root', 'stable', 'computer')
+      )
     })
   })
 })
@@ -85,7 +103,9 @@ describe('dirs: getSupervisedRoot — composes under SLAYZONE_ROOT override', ()
   test('resolves under an overridden SLAYZONE_ROOT (E2E/test sandboxing)', () => {
     withEnv({ SLAYZONE_ROOT: '/tmp/sandbox-root' }, () => {
       expect(getSlayzoneHomeDir(), 'home dir under override').toBe('/tmp/sandbox-root')
-      expect(getSupervisedRoot('hub', 'dev'), 'supervised root under override').toBe(join('/tmp/sandbox-root', 'dev', 'hub'))
+      expect(getSupervisedRoot('hub', 'dev'), 'supervised root under override').toBe(
+        join('/tmp/sandbox-root', 'dev', 'hub')
+      )
     })
   })
 

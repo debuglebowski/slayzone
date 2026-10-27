@@ -59,7 +59,10 @@ function entry(
 describe('webgl budget', () => {
   test('pickEvictions: under the cap evicts nothing', () => {
     const es = [entry('a'), entry('b')]
-    expect(pickEvictions(es, 8, () => 0), 'nothing evicted').toHaveLength(0)
+    expect(
+      pickEvictions(es, 8, () => 0),
+      'nothing evicted'
+    ).toHaveLength(0)
   })
 
   test('pickEvictions: evicts least recently used off-screen renderers first', () => {
@@ -71,7 +74,10 @@ describe('webgl budget', () => {
 
   test('pickEvictions: never evicts an on-screen renderer, even over the cap', () => {
     const es = [entry('a', true), entry('b', true), entry('c', true)]
-    expect(pickEvictions(es, 1, () => 0), 'on-screen renderers kept').toHaveLength(0)
+    expect(
+      pickEvictions(es, 1, () => 0),
+      'on-screen renderers kept'
+    ).toHaveLength(0)
   })
 
   test('track / dispose: any dispose untracks through the wrapper', () => {
@@ -126,7 +132,7 @@ describe('webgl budget', () => {
         return [layer, render]
       }
     } as unknown as Element
-    expect(findWebglCanvasIn(root), 'render canvas').toBe((render as unknown))
+    expect(findWebglCanvasIn(root), 'render canvas').toBe(render as unknown)
     expect(selector, `scoped to the screen: ${selector}`).toBe('.xterm-screen > canvas')
     expect(findWebglCanvasIn(null), 'no root').toBe(null)
   })
@@ -224,8 +230,9 @@ describe('parked renderer', () => {
     f.open()
     expect(f.core.domCreated, 'no DOM renderer built').toBe(0)
     expect(isParked(f.terminal), 'isParked').toBe(true)
-    const dims = (f.core.renderer as unknown as { dimensions: { css: { cell: { width: number } } } })
-      .dimensions
+    const dims = (
+      f.core.renderer as unknown as { dimensions: { css: { cell: { width: number } } } }
+    ).dimensions
     expect(dims.css.cell.width, `cell ${dims.css.cell.width}`).toBe(9)
   })
 

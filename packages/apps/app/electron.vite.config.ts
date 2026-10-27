@@ -211,7 +211,9 @@ export default defineConfig(({ mode, command }) => {
         // builds. Scoped to the dep optimizer only — does NOT touch Vite's
         // react-refresh runtime (which must stay dev to keep HMR functional).
         ...(useReactProdInDev
-          ? { rolldownOptions: { transform: { define: { 'process.env.NODE_ENV': '"production"' } } } }
+          ? {
+              rolldownOptions: { transform: { define: { 'process.env.NODE_ENV': '"production"' } } }
+            }
           : {})
       }
     }

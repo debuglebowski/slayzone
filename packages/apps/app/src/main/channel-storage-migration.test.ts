@@ -82,9 +82,7 @@ describe('hub slice: DB + content + backups + loose files, source untouched', ()
   })
   test('most-recent backup copied, older one left behind', () => {
     expect(
-      existsSync(
-        join(r.hubRoot, 'backups', 'slayzone.dev.2026-03-01T00-00-00-000Z.manual.sqlite')
-      )
+      existsSync(join(r.hubRoot, 'backups', 'slayzone.dev.2026-03-01T00-00-00-000Z.manual.sqlite'))
     ).toBe(true)
   })
   test('boot-config.json copied (missed by storage-migration.ts scope)', () => {

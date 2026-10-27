@@ -89,8 +89,7 @@ describe('service-unit: backend detection', () => {
     if (process.platform === 'darwin') expect(detected, 'macOS → launchd').toBe('launchd')
     else if (process.platform === 'win32')
       expect(detected, 'Windows → no user supervisor yet').toBe('none')
-    else
-      expect(['systemd', 'none'], 'linux → systemd or none').toContain(detected)
+    else expect(['systemd', 'none'], 'linux → systemd or none').toContain(detected)
   })
 
   test('systemd requires a reachable USER BUS, not just the binary', () => {
@@ -132,7 +131,9 @@ describe('service-unit: backend detection', () => {
       // Already set ⇒ untouched. The operator's own value always wins; a session bus
       // deliberately pointed elsewhere must not be silently overridden.
       process.env.XDG_RUNTIME_DIR = '/run/user/explicit'
-      expect(userServiceEnv().XDG_RUNTIME_DIR, 'an explicit value is never overridden').toBe('/run/user/explicit')
+      expect(userServiceEnv().XDG_RUNTIME_DIR, 'an explicit value is never overridden').toBe(
+        '/run/user/explicit'
+      )
 
       delete process.env.XDG_RUNTIME_DIR
       const healed = userServiceEnv().XDG_RUNTIME_DIR
@@ -154,8 +155,14 @@ describe('service-unit: backend detection', () => {
     // The old message ("this platform has no user service manager") was true but
     // unactionable, and identical for two very different machines. Each reason must
     // name the fix that applies to IT.
-    expect(explainNoBackend('systemd-no-bus'), 'no user manager ⇒ points at loginctl enable-linger').toMatch(/enable-linger/)
-    expect(explainNoBackend('systemd-missing'), 'no systemd at all ⇒ lingering is not the fix and must not be suggested').not.toMatch(/enable-linger/)
+    expect(
+      explainNoBackend('systemd-no-bus'),
+      'no user manager ⇒ points at loginctl enable-linger'
+    ).toMatch(/enable-linger/)
+    expect(
+      explainNoBackend('systemd-missing'),
+      'no systemd at all ⇒ lingering is not the fix and must not be suggested'
+    ).not.toMatch(/enable-linger/)
     expect(explainNoBackend('windows'), 'windows names the platform').toMatch(/Windows/)
   })
 })
@@ -182,9 +189,14 @@ describe('service-unit: launchd plist content (hub)', () => {
     expect(xml, 'has KeepAlive').toContain('<key>KeepAlive</key>')
     expect(xml, 'conditions KeepAlive on exit status').toContain('<key>SuccessfulExit</key>')
     const afterSuccessfulExit = xml.slice(xml.indexOf('<key>SuccessfulExit</key>'))
-    expect(afterSuccessfulExit.trimStart().startsWith('<key>SuccessfulExit</key>'), 'sanity').toBe(true)
-    expect(afterSuccessfulExit.indexOf('<false/>') < afterSuccessfulExit.indexOf('<key>', 25) ||
-        afterSuccessfulExit.includes('<false/>'), 'SuccessfulExit is false (do not relaunch after a clean exit)').toBeTruthy()
+    expect(afterSuccessfulExit.trimStart().startsWith('<key>SuccessfulExit</key>'), 'sanity').toBe(
+      true
+    )
+    expect(
+      afterSuccessfulExit.indexOf('<false/>') < afterSuccessfulExit.indexOf('<key>', 25) ||
+        afterSuccessfulExit.includes('<false/>'),
+      'SuccessfulExit is false (do not relaunch after a clean exit)'
+    ).toBeTruthy()
     expect(xml, 'starts at load/login').toContain('<key>RunAtLoad</key>')
   })
 
@@ -212,7 +224,9 @@ describe('service-unit: systemd unit content (hub)', () => {
     expect(unit, 'has [Unit]').toContain('[Unit]')
     expect(unit, 'has [Service]').toContain('[Service]')
     expect(unit, 'has [Install] — else `enable` is a no-op').toContain('[Install]')
-    expect(unit, 'absolute ExecStart with args').toContain('ExecStart=/usr/local/bin/node /opt/hub/dist/bin.cjs')
+    expect(unit, 'absolute ExecStart with args').toContain(
+      'ExecStart=/usr/local/bin/node /opt/hub/dist/bin.cjs'
+    )
     expect(unit, 'cwd = hub root').toContain('WorkingDirectory=/Users/x/hubs/staging')
     expect(unit, 'pins SLAYZONE_ROOT').toContain('Environment=SLAYZONE_ROOT=/Users/x/hubs/staging')
     expect(unit, 'enabled for the user session').toContain('WantedBy=default.target')
@@ -233,7 +247,9 @@ describe('service-unit: systemd unit content (hub)', () => {
   test('an explicit port reaches the unit as SLAYZONE_HUB_LISTEN_ADDRESS', () => {
     const unit = renderSystemdUnit({ ...SPEC, port: 51234 })
     expect(unit, 'port present').toContain('51234')
-    expect(unit, 'passed via the address var, not a bare port').toContain('SLAYZONE_HUB_LISTEN_ADDRESS')
+    expect(unit, 'passed via the address var, not a bare port').toContain(
+      'SLAYZONE_HUB_LISTEN_ADDRESS'
+    )
     const plist = renderLaunchdPlist({ ...SPEC, port: 51234 })
     expect(plist, 'same in the plist').toContain('51234')
     expect(plist, 'same in the plist').toContain('SLAYZONE_HUB_LISTEN_ADDRESS')
@@ -259,7 +275,9 @@ describe('service-unit: systemd unit content (hub)', () => {
   // pin its exact output.
   test('an explicit address reaches the unit verbatim (a remote hub binds wider)', () => {
     const unit = renderSystemdUnit({ ...SPEC, address: '0.0.0.0:51234' })
-    expect(unit, `wildcard bind preserved: ${unit}`).toContain('Environment=SLAYZONE_HUB_LISTEN_ADDRESS=0.0.0.0:51234')
+    expect(unit, `wildcard bind preserved: ${unit}`).toContain(
+      'Environment=SLAYZONE_HUB_LISTEN_ADDRESS=0.0.0.0:51234'
+    )
     const plist = renderLaunchdPlist({ ...SPEC, address: '0.0.0.0:51234' })
     expect(plist, 'same in the plist').toContain('0.0.0.0:51234')
   })
@@ -297,11 +315,18 @@ describe('service-unit: systemd unit content (hub)', () => {
 
 describe('service-unit: computer kind', () => {
   test('computer identity is namespaced apart from the hub', () => {
-    expect(launchdLabel('computer', 'builder'), 'launchd label').toBe('com.slayzone.computer.builder')
-    expect(systemdUnitName('computer', 'builder'), 'systemd unit').toBe('slayzone-computer-builder.service')
+    expect(launchdLabel('computer', 'builder'), 'launchd label').toBe(
+      'com.slayzone.computer.builder'
+    )
+    expect(systemdUnitName('computer', 'builder'), 'systemd unit').toBe(
+      'slayzone-computer-builder.service'
+    )
     // Same NAME under the two kinds must never resolve to the same file, or
     // `computer rm dev` would delete a hub named dev.
-    expect(unitPath('computer', 'dev', backend, '/units'), 'a name shared across kinds does not collide').not.toBe(unitPath('hub', 'dev', backend, '/units'))
+    expect(
+      unitPath('computer', 'dev', backend, '/units'),
+      'a name shared across kinds does not collide'
+    ).not.toBe(unitPath('hub', 'dev', backend, '/units'))
   })
 
   test('computer plist/unit identify the computer and use computer log names', () => {
@@ -350,7 +375,9 @@ describe('service-unit: computer kind', () => {
       expect(hubs.length, `one hub, got ${hubs.map((h) => h.name).join(',')}`).toBe(1)
       expect(hubs[0]?.name, 'the hub').toBe('staging')
       const computers = listRegisteredUnits('computer', backend, dir)
-      expect(computers.length, `one computer, got ${computers.map((r) => r.name).join(',')}`).toBe(1)
+      expect(computers.length, `one computer, got ${computers.map((r) => r.name).join(',')}`).toBe(
+        1
+      )
       expect(computers[0]?.name, 'the computer').toBe('builder')
     })
   })
@@ -361,14 +388,18 @@ describe('service-unit: computer kind', () => {
     withTempDir((dir) => {
       writeUnit({ ...SPEC, name: 'computer-x' }, backend, dir)
       expect(listRegisteredUnits('computer', backend, dir).length, 'no computer found').toBe(0)
-      expect(listRegisteredUnits('hub', backend, dir)[0]?.name, 'listed as a hub').toBe('computer-x')
+      expect(listRegisteredUnits('hub', backend, dir)[0]?.name, 'listed as a hub').toBe(
+        'computer-x'
+      )
     })
   })
 
   test('a computer root round-trips through its unit while stopped', () => {
     withTempDir((dir) => {
       writeUnit(COMPUTER_SPEC, backend, dir)
-      expect(readUnitRoot('computer', 'builder', backend, dir), 'root read back').toBe(COMPUTER_SPEC.root)
+      expect(readUnitRoot('computer', 'builder', backend, dir), 'root read back').toBe(
+        COMPUTER_SPEC.root
+      )
       expect(readUnitRoot('hub', 'builder', backend, dir), 'not visible as a hub').toBe(null)
       expect(removeUnit('computer', 'builder', backend, dir), 'removable while stopped').toBe(true)
       expect(readUnitRoot('computer', 'builder', backend, dir), 'gone').toBe(null)
@@ -392,12 +423,17 @@ describe('service-unit: unit paths + name validation', () => {
     expect(() => unitPath('hub', 'a/b', 'systemd', '/units'), 'slash').toThrow('name')
     expect(() => unitPath('hub', '', 'systemd', '/units'), 'empty').toThrow('name')
     // The computer path validates identically — the guard is not hub-specific.
-    expect(() => unitPath('computer', '../../evil', 'systemd', '/units'), 'computer traversal').toThrow('name')
+    expect(
+      () => unitPath('computer', '../../evil', 'systemd', '/units'),
+      'computer traversal'
+    ).toThrow('name')
   })
 
   test('rejects a name carrying unit/plist syntax or whitespace', () => {
     // A newline in the name would inject arbitrary directives into the unit file.
-    expect(() => unitPath('hub', 'a\nRestart=always', 'systemd', '/units'), 'newline').toThrow('name')
+    expect(() => unitPath('hub', 'a\nRestart=always', 'systemd', '/units'), 'newline').toThrow(
+      'name'
+    )
     expect(() => unitPath('hub', 'a b', 'systemd', '/units'), 'space').toThrow('name')
     expect(() => unitPath('hub', 'a<b', 'launchd', '/units'), 'angle bracket').toThrow('name')
   })
@@ -406,7 +442,9 @@ describe('service-unit: unit paths + name validation', () => {
     // The hub error points at the config.json `hubName` key; a computer operator has no
     // such key, so a hub-worded message would misdirect them.
     expect(() => unitPath('hub', 'a b', 'systemd', '/units'), 'hub wording').toThrow('hub name')
-    expect(() => unitPath('computer', 'a b', 'systemd', '/units'), 'computer wording').toThrow('computer name')
+    expect(() => unitPath('computer', 'a b', 'systemd', '/units'), 'computer wording').toThrow(
+      'computer name'
+    )
   })
 
   test('accepts the names a hub actually gets (dirname-derived)', () => {
@@ -485,8 +523,14 @@ describe('service-unit: write / remove / list', () => {
       // A real LaunchAgents / systemd user dir is full of other people's units.
       writeFileSync(join(dir, backend === 'launchd' ? 'com.other.app.plist' : 'other.service'), 'x')
       const listed = listRegisteredUnits('hub', backend, dir)
-      expect(listed.length, `only slayzone hubs listed, got ${listed.map((l) => l.name).join(',')}`).toBe(2)
-      expect(listed.every((l) => l.name === 'staging' || l.name === 'other'), `only slayzone hubs listed, got ${listed.map((l) => l.name).join(',')}`).toBeTruthy()
+      expect(
+        listed.length,
+        `only slayzone hubs listed, got ${listed.map((l) => l.name).join(',')}`
+      ).toBe(2)
+      expect(
+        listed.every((l) => l.name === 'staging' || l.name === 'other'),
+        `only slayzone hubs listed, got ${listed.map((l) => l.name).join(',')}`
+      ).toBeTruthy()
     })
   })
 })
@@ -529,7 +573,10 @@ describe('service-unit: secrets in a unit (a hub other machines reach needs its 
         writeUnit({ ...SPEC, env: { SLAYZONE_HUB_AUTH_SECRET: 'never-in-0644' } }, be, dir)
         expect(readFileSync(path, 'utf8'), 'the unit carries the secret').toContain('never-in-0644')
         expect(statSync(path).mode & 0o777, 'owner-only').toBe(0o600)
-        expect(readFileSync(oldInode, 'utf8'), 'the previous (0644) inode never saw the secret').not.toContain('never-in-0644')
+        expect(
+          readFileSync(oldInode, 'utf8'),
+          'the previous (0644) inode never saw the secret'
+        ).not.toContain('never-in-0644')
       })
     })
 
@@ -576,7 +623,9 @@ describe('service-unit: secrets in a unit (a hub other machines reach needs its 
           dir
         )
         const secrets = readUnitSecrets('hub', 'staging', be, dir)
-        expect(Object.keys(secrets).sort().join(','), 'only the secrets').toBe('SLAYZONE_HUB_AUTH_SECRET,SLAYZONE_HUB_SSO_CLIENT_SECRET')
+        expect(Object.keys(secrets).sort().join(','), 'only the secrets').toBe(
+          'SLAYZONE_HUB_AUTH_SECRET,SLAYZONE_HUB_SSO_CLIENT_SECRET'
+        )
         expect(secrets.SLAYZONE_HUB_AUTH_SECRET, 'auth secret').toBe('abc')
         expect(secrets.SLAYZONE_HUB_SSO_CLIENT_SECRET, 'sso secret').toBe('def')
       })

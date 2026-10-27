@@ -24,15 +24,17 @@ test("another session's xterm in the pane", () => {
 })
 
 test('the only xterm in the pane belongs to another session', () => {
-  expect(
-    findIdentityAnomalies({ ...ok, containerTags: ['b:b'], terminalTag: 'b:b' })
-  ).toEqual(['foreign-xterm-in-container', 'terminal-ref-foreign'])
+  expect(findIdentityAnomalies({ ...ok, containerTags: ['b:b'], terminalTag: 'b:b' })).toEqual([
+    'foreign-xterm-in-container',
+    'terminal-ref-foreign'
+  ])
 })
 
 test('terminal ref detached from its pane', () => {
-  expect(
-    findIdentityAnomalies({ ...ok, containerTags: [], terminalInContainer: false })
-  ).toEqual(['no-xterm-in-container', 'terminal-not-in-container'])
+  expect(findIdentityAnomalies({ ...ok, containerTags: [], terminalInContainer: false })).toEqual([
+    'no-xterm-in-container',
+    'terminal-not-in-container'
+  ])
 })
 
 test('untagged xterm counts as foreign', () => {

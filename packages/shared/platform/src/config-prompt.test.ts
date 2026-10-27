@@ -80,7 +80,9 @@ describe('config-prompt: canPrompt', () => {
   })
 
   test('canPrompt false under SLAYZONE_SUPERVISED / SLAYZONE_NONINTERACTIVE', () => {
-    withEnv({ SLAYZONE_SUPERVISED: '1' }, () => expect(canPrompt(), 'supervised ⇒ false').toBe(false))
+    withEnv({ SLAYZONE_SUPERVISED: '1' }, () =>
+      expect(canPrompt(), 'supervised ⇒ false').toBe(false)
+    )
     withEnv({ SLAYZONE_NONINTERACTIVE: '1' }, () =>
       expect(canPrompt(), 'noninteractive ⇒ false').toBe(false)
     )
@@ -89,8 +91,12 @@ describe('config-prompt: canPrompt', () => {
 
 describe('config-prompt: confirm', () => {
   test('confirm defaults yes on empty [Y/n], no on empty [y/N]', async () => {
-    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: true }), 'empty ⇒ default yes').toBe(true)
-    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: false }), 'empty ⇒ default no').toBe(false)
+    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: true }), 'empty ⇒ default yes').toBe(
+      true
+    )
+    expect(await confirm(fakeIo(['']), 'ok?', { defaultYes: false }), 'empty ⇒ default no').toBe(
+      false
+    )
     expect(await confirm(fakeIo(['y']), 'ok?', { defaultYes: false }), 'y ⇒ yes').toBe(true)
     expect(await confirm(fakeIo(['nope']), 'ok?', { defaultYes: true }), 'nope ⇒ no').toBe(false)
   })
@@ -165,7 +171,9 @@ describe('config-prompt: runInteractiveConfig', () => {
         ]
       })
       expect(res.saved, 'not saved').toBe(false)
-      expect(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'env still seeded').toBe('hub.example.com:8443')
+      expect(process.env.SLAYZONE_HUB_PUBLIC_ADDRESS, 'env still seeded').toBe(
+        'hub.example.com:8443'
+      )
       expect(existsSync(cfgPath), 'config file NOT written').toBe(false)
     } finally {
       if (prevEnv === undefined) delete process.env.SLAYZONE_HUB_PUBLIC_ADDRESS

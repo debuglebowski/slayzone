@@ -120,7 +120,12 @@ describe('hub-config-file: loadHubConfigFile', () => {
     const p = join(dir, 'hub.config.json')
     writeFileSync(
       p,
-      JSON.stringify({ listenAddress: '', publicAddress: 42, requireLogin: 'yes', ssoTenantId: '  ' })
+      JSON.stringify({
+        listenAddress: '',
+        publicAddress: 42,
+        requireLogin: 'yes',
+        ssoTenantId: '  '
+      })
     )
     const cfg = loadHubConfigFile(p)
     expect(cfg.listenAddress, 'empty listenAddress dropped').toBeUndefined()
@@ -233,7 +238,9 @@ describe('hub-config-file: boot problems (B4, B5)', () => {
   test('problems come from the legacy config.json too when hub.config.json is absent', () => {
     const dir = tmp()
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ address: '0.0.0.0:9' }))
-    expect(loadHubConfigProblems(join(dir, 'hub.config.json'))[0]?.key, 'legacy file checked').toBe('address')
+    expect(loadHubConfigProblems(join(dir, 'hub.config.json'))[0]?.key, 'legacy file checked').toBe(
+      'address'
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -363,12 +370,18 @@ describe('hub-config-file: SLAYZONE_ROOT honored', () => {
     const prev = process.env.SLAYZONE_ROOT
     process.env.SLAYZONE_ROOT = dir
     try {
-      expect(getHubConfigFilePath(), 'config path under root override').toBe(join(dir, 'hub.config.json'))
-      expect(getHubStateFilePath(), 'state path under root override').toBe(join(dir, 'hub.state.json'))
+      expect(getHubConfigFilePath(), 'config path under root override').toBe(
+        join(dir, 'hub.config.json')
+      )
+      expect(getHubStateFilePath(), 'state path under root override').toBe(
+        join(dir, 'hub.state.json')
+      )
       saveHubConfigFile({ listenAddress: '127.0.0.1:1234' })
       const raw = readFileSync(join(dir, 'hub.config.json'), 'utf8')
       expect(raw, 'wrote to the overridden root dir').toMatch(/1234/)
-      expect(loadHubConfigFile().listenAddress, 'default-path load reads the override').toBe('127.0.0.1:1234')
+      expect(loadHubConfigFile().listenAddress, 'default-path load reads the override').toBe(
+        '127.0.0.1:1234'
+      )
     } finally {
       if (prev === undefined) delete process.env.SLAYZONE_ROOT
       else process.env.SLAYZONE_ROOT = prev
@@ -389,7 +402,9 @@ describe('hub-config-file: legacy shared config.json fallback', () => {
     const cfg = loadHubConfigFile(cfgPath)
     expect(cfg.listenAddress, 'listenAddress from legacy file').toBe('0.0.0.0:9000')
     expect(cfg.hubName, 'hubName from legacy file').toBe('legacy-hub')
-    expect(existsSync(cfgPath), 'never auto-upgrades — hub.config.json not created by a read').toBe(false)
+    expect(existsSync(cfgPath), 'never auto-upgrades — hub.config.json not created by a read').toBe(
+      false
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -400,7 +415,10 @@ describe('hub-config-file: legacy shared config.json fallback', () => {
     const statePath = join(dir, 'hub.state.json')
     const state = loadHubStateFile(statePath)
     expect(state.computerTransportSecret, 'secret from legacy file').toBe('legacy-secret')
-    expect(existsSync(statePath), 'never auto-upgrades — hub.state.json not created by a read').toBe(false)
+    expect(
+      existsSync(statePath),
+      'never auto-upgrades — hub.state.json not created by a read'
+    ).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -419,7 +437,9 @@ describe('hub-config-file: legacy shared config.json fallback', () => {
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ listenAddress: 'from-legacy:1' }))
     const cfgPath = join(dir, 'hub.config.json')
     saveHubConfigFile({ listenAddress: 'from-new:2' }, cfgPath)
-    expect(loadHubConfigFile(cfgPath).listenAddress, 'new file wins once it exists').toBe('from-new:2')
+    expect(loadHubConfigFile(cfgPath).listenAddress, 'new file wins once it exists').toBe(
+      'from-new:2'
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 })

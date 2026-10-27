@@ -98,7 +98,10 @@ describe('busy JavaScript', () => {
   test('the main thread burned CPU for a large share of it (busy, not waiting)', () => {
     expect(s, 'no stall').toBeDefined()
     expect(s!.mainThreadCpuMs, 'mainThreadCpuMs').not.toBeNull()
-    expect(s!.mainThreadCpuMs!, `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`).toBeGreaterThanOrEqual(0.3 * s!.durationMs)
+    expect(
+      s!.mainThreadCpuMs!,
+      `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`
+    ).toBeGreaterThanOrEqual(0.3 * s!.durationMs)
   })
 
   test('machine CPU and GC time are reported as numbers', () => {
@@ -133,7 +136,10 @@ describe('many short blocking calls (the suspected git pattern)', () => {
   test('the main thread mostly WAITED (almost no CPU), unlike a busy freeze', () => {
     expect(s, 'no stall').toBeDefined()
     expect(s!.mainThreadCpuMs, 'mainThreadCpuMs').not.toBeNull()
-    expect(s!.mainThreadCpuMs!, `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`).toBeLessThan(0.15 * s!.durationMs)
+    expect(
+      s!.mainThreadCpuMs!,
+      `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`
+    ).toBeLessThan(0.15 * s!.durationMs)
   })
 })
 
@@ -155,4 +161,3 @@ describe('one long blocking call', () => {
     expect(childText(s!)).toContain('sleep 1.6')
   })
 })
-

@@ -245,7 +245,9 @@ describe('stripDeviceStatusResponses', () => {
   })
 
   test('preserves bracketed-paste wrappers and pasted content', () => {
-    expect(stripDeviceStatusResponses('\x1b[200~pasted text\x1b[201~')).toBe('\x1b[200~pasted text\x1b[201~')
+    expect(stripDeviceStatusResponses('\x1b[200~pasted text\x1b[201~')).toBe(
+      '\x1b[200~pasted text\x1b[201~'
+    )
   })
 
   test('keeps typed text while dropping an embedded response', () => {

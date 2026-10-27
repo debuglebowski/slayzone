@@ -52,7 +52,9 @@ test('loopback is case-insensitive (LOCALHOST)', () => {
 
 // --- A1: any other host → secure schemes ---
 test('other host: ws family → wss:// + path', () => {
-  expect(hubUrlFromAddr('hub.example.com', 'ws', '/computers')).toBe('wss://hub.example.com/computers')
+  expect(hubUrlFromAddr('hub.example.com', 'ws', '/computers')).toBe(
+    'wss://hub.example.com/computers'
+  )
 })
 
 test('other host: http family → https://', () => {
@@ -240,7 +242,10 @@ test('parse: bracketed ipv6, no port', () => {
 })
 
 test('parse: hostname', () => {
-  expect(parseHubAddress('hub.example.com:8443')).toMatchObject({ host: 'hub.example.com', port: 8443 })
+  expect(parseHubAddress('hub.example.com:8443')).toMatchObject({
+    host: 'hub.example.com',
+    port: 8443
+  })
 })
 
 test('parse: trims surrounding whitespace', () => {
@@ -321,4 +326,3 @@ test('unparseable: garbage → false', () => {
 test('unparseable: empty → false', () => {
   expect(isLoopbackComputerUrl('')).toBeFalsy()
 })
-

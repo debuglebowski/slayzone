@@ -55,15 +55,21 @@ describe('URL_REGEX matching', () => {
   })
 
   test('matches URL with path', () => {
-    expect(matchUrl('see https://github.com/xtermjs/xterm.js/issues/123')).toBe('https://github.com/xtermjs/xterm.js/issues/123')
+    expect(matchUrl('see https://github.com/xtermjs/xterm.js/issues/123')).toBe(
+      'https://github.com/xtermjs/xterm.js/issues/123'
+    )
   })
 
   test('matches URL with query string', () => {
-    expect(matchUrl('go to https://example.com/search?q=test&page=1')).toBe('https://example.com/search?q=test&page=1')
+    expect(matchUrl('go to https://example.com/search?q=test&page=1')).toBe(
+      'https://example.com/search?q=test&page=1'
+    )
   })
 
   test('matches URL with fragment', () => {
-    expect(matchUrl('see https://example.com/docs#section')).toBe('https://example.com/docs#section')
+    expect(matchUrl('see https://example.com/docs#section')).toBe(
+      'https://example.com/docs#section'
+    )
   })
 
   test('matches URL with port', () => {
@@ -122,11 +128,15 @@ describe('URL_REGEX matching', () => {
   })
 
   test('matches URL in Claude Code output', () => {
-    expect(matchUrl('  Created PR: https://github.com/org/repo/pull/42')).toBe('https://github.com/org/repo/pull/42')
+    expect(matchUrl('  Created PR: https://github.com/org/repo/pull/42')).toBe(
+      'https://github.com/org/repo/pull/42'
+    )
   })
 
   test('matches URL in npm output', () => {
-    expect(matchUrl('npm warn deprecated https://registry.npmjs.org/pkg')).toBe('https://registry.npmjs.org/pkg')
+    expect(matchUrl('npm warn deprecated https://registry.npmjs.org/pkg')).toBe(
+      'https://registry.npmjs.org/pkg'
+    )
   })
 
   test('matches HTTPS (uppercase)', () => {
@@ -297,7 +307,9 @@ describe('FILE_REGEX matching', () => {
 
   // Nested paths
   test('matches deeply nested path', () => {
-    expect(matchFile('packages/domains/terminal/src/client/Terminal.tsx')).toBe('packages/domains/terminal/src/client/Terminal.tsx')
+    expect(matchFile('packages/domains/terminal/src/client/Terminal.tsx')).toBe(
+      'packages/domains/terminal/src/client/Terminal.tsx'
+    )
   })
 
   // Real terminal output patterns
@@ -364,7 +376,6 @@ describe('FILE_REGEX matching', () => {
 // WebLinkProvider.provideLinks (soft-continuation)
 // ─────────────────────────────────────
 describe('WebLinkProvider soft-continuation', () => {
-
   function getLinks(term: Terminal, bufferLineNumber: number): Promise<ILink[]> {
     const provider = new WebLinkProvider(term, () => {})
     return new Promise((resolve) => {
@@ -380,7 +391,9 @@ describe('WebLinkProvider soft-continuation', () => {
     ])
     const links = await getLinks(term, 1)
     expect(links.length, 'should find 1 link').toBe(1)
-    expect(links[0].text, 'should assemble full URL').toBe('https://example.com/auth?client_id=abc&response_type=code&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=read+write&state=xyz123')
+    expect(links[0].text, 'should assemble full URL').toBe(
+      'https://example.com/auth?client_id=abc&response_type=code&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=read+write&state=xyz123'
+    )
   })
 
   test('resolves URL from continuation line (middle line)', async () => {
@@ -391,7 +404,9 @@ describe('WebLinkProvider soft-continuation', () => {
     ])
     const links = await getLinks(term, 2)
     expect(links.length, 'should find 1 link').toBe(1)
-    expect(links[0].text, 'should assemble full URL from context').toBe('https://example.com/auth?client_id=abc&response_type=code&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=read+write&state=xyz123')
+    expect(links[0].text, 'should assemble full URL from context').toBe(
+      'https://example.com/auth?client_id=abc&response_type=code&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback&scope=read+write&state=xyz123'
+    )
   })
 
   test('resolves URL from continuation line (last line)', async () => {
@@ -422,7 +437,9 @@ describe('WebLinkProvider soft-continuation', () => {
     const links = await getLinks(term, 1)
     expect(links.length, 'should find 1 link').toBe(1)
     // Should NOT extend through line with internal whitespace
-    expect(links[0].text, 'should not extend through whitespace line').toBe('https://example.com/path?q=')
+    expect(links[0].text, 'should not extend through whitespace line').toBe(
+      'https://example.com/path?q='
+    )
   })
 
   test('does not resolve non-indented continuation line', async () => {
@@ -466,8 +483,14 @@ describe('WebLinkProvider soft-continuation', () => {
     // Test from the first URL line
     const links1 = await getLinks(term, 2)
     expect(links1.length, 'first URL line should have link').toBe(1)
-    expect(links1[0].text.startsWith('https://claude.ai/oauth/authorize'), 'should start with scheme').toBe(true)
-    expect(links1[0].text.endsWith('ziVxJESlTyNu4t-tYKiNqy2Wg'), 'should include last fragment').toBe(true)
+    expect(
+      links1[0].text.startsWith('https://claude.ai/oauth/authorize'),
+      'should start with scheme'
+    ).toBe(true)
+    expect(
+      links1[0].text.endsWith('ziVxJESlTyNu4t-tYKiNqy2Wg'),
+      'should include last fragment'
+    ).toBe(true)
 
     // Test from a middle continuation line
     const links3 = await getLinks(term, 4)
@@ -550,7 +573,6 @@ describe('WebLinkProvider soft-continuation', () => {
 // FileLinkProvider wrapped lines
 // ─────────────────────────────────────
 describe('FileLinkProvider wrapped lines', () => {
-
   function getFileLinksSync(term: Terminal, bufferLineNumber: number): ILink[] {
     const provider = new FileLinkProvider(term, () => {})
     let result: ILink[] = []
@@ -569,7 +591,9 @@ describe('FileLinkProvider wrapped lines', () => {
     ])
     const links = getFileLinksSync(term, 1)
     expect(links.length, 'should find 1 file link on first line').toBe(1)
-    expect(links[0].text, 'full path').toBe('packages/domains/ai-config/src/shared/skill-marketplace-registry.ts')
+    expect(links[0].text, 'full path').toBe(
+      'packages/domains/ai-config/src/shared/skill-marketplace-registry.ts'
+    )
   })
 
   test('detects file path split across wrapped lines (continuation line)', () => {
@@ -579,7 +603,9 @@ describe('FileLinkProvider wrapped lines', () => {
     ])
     const links = getFileLinksSync(term, 2)
     expect(links.length, 'should find 1 file link on continuation line').toBe(1)
-    expect(links[0].text, 'full path').toBe('packages/domains/ai-config/src/shared/skill-marketplace-registry.ts')
+    expect(links[0].text, 'full path').toBe(
+      'packages/domains/ai-config/src/shared/skill-marketplace-registry.ts'
+    )
   })
 
   test('non-wrapped file path still works', () => {
@@ -591,6 +617,8 @@ describe('FileLinkProvider wrapped lines', () => {
     ])
     const links = getFileLinksSync(term, 1)
     expect(links.length, 'should find 1 file link').toBe(1)
-    expect(links[0].text, 'full path').toBe('packages/domains/ai-config/src/shared/skill-marketplace-registry.ts')
+    expect(links[0].text, 'full path').toBe(
+      'packages/domains/ai-config/src/shared/skill-marketplace-registry.ts'
+    )
   })
 })

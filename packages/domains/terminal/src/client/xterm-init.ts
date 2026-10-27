@@ -231,7 +231,10 @@ export function registerTestTerminalLinks(sessionId: string, provider: WebLinkPr
 
 /** Drop the handle only if it is still `provider`'s: an unmount that runs after
  *  another mount of the same session registered must not delete that one. */
-export function unregisterTestTerminalLinks(sessionId: string, provider: WebLinkProvider | null): void {
+export function unregisterTestTerminalLinks(
+  sessionId: string,
+  provider: WebLinkProvider | null
+): void {
   const links = (window as unknown as TestLinksWindow).__slayzone_terminalLinks
   if (links && provider && links[sessionId] === provider) delete links[sessionId]
 }

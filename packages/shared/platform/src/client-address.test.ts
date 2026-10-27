@@ -76,7 +76,9 @@ describe('client address: the trusted list (SLAYZONE_HUB_TRUSTED_PROXIES)', () =
 
   test('IPs and CIDRs, IPv4 and IPv6, whitespace and empty elements ignored', () => {
     const t = trust(' 10.93.4.0/24 ,, 192.0.2.10,2001:db8:feed::/48 , ::1 ')
-    expect(t.entries.join(' '), 'entries, canonical').toBe('10.93.4.0/24 192.0.2.10 2001:db8:feed::/48 ::1')
+    expect(t.entries.join(' '), 'entries, canonical').toBe(
+      '10.93.4.0/24 192.0.2.10 2001:db8:feed::/48 ::1'
+    )
     expect(t.has('10.93.4.5'), 'inside the /24').toBe(true)
     expect(t.has('10.93.4.255'), 'inside the /24').toBe(true)
     expect(t.has('10.93.5.1'), 'outside the /24').toBe(false)
@@ -117,7 +119,10 @@ describe('client address: the trusted list (SLAYZONE_HUB_TRUSTED_PROXIES)', () =
         'message',
         expect.stringContaining(HUB_TRUSTED_PROXIES_ENV)
       )
-      expect(parsed, 'names the entry').toHaveProperty('message', expect.stringContaining(`'${bad}'`))
+      expect(parsed, 'names the entry').toHaveProperty(
+        'message',
+        expect.stringContaining(`'${bad}'`)
+      )
     }
     const two = parseTrustedProxies('x, y')
     expect(two, 'every bad entry at once').toMatchObject({ ok: false, invalid: ['x', 'y'] })
@@ -133,30 +138,46 @@ describe('client address: the trusted list (SLAYZONE_HUB_TRUSTED_PROXIES)', () =
 describe('client address: the resolver', () => {
   test('trust nobody (the default): the peer, whatever X-Forwarded-For says', () => {
     expect(resolveClientAddress(GW, `${CLIENT}`, NO_TRUSTED_PROXIES), 'header ignored').toBe(GW)
-    expect(resolveClientAddress('127.0.0.1', '6.6.6.6', NO_TRUSTED_PROXIES), 'desktop').toBe('127.0.0.1')
-    expect(resolveClientAddress('::1', undefined, NO_TRUSTED_PROXIES), 'v6 loopback peer').toBe('::1')
+    expect(resolveClientAddress('127.0.0.1', '6.6.6.6', NO_TRUSTED_PROXIES), 'desktop').toBe(
+      '127.0.0.1'
+    )
+    expect(resolveClientAddress('::1', undefined, NO_TRUSTED_PROXIES), 'v6 loopback peer').toBe(
+      '::1'
+    )
   })
 
   test('an untrusted peer: the header is ignored even when it names a trusted hop', () => {
-    expect(resolveClientAddress('198.51.100.4', `${CLIENT}`, GATEWAY_SUBNET), 'direct').toBe('198.51.100.4')
-    expect(resolveClientAddress('198.51.100.4', `${CLIENT}, ${GW}`, GATEWAY_SUBNET), 'x').toBe('198.51.100.4')
+    expect(resolveClientAddress('198.51.100.4', `${CLIENT}`, GATEWAY_SUBNET), 'direct').toBe(
+      '198.51.100.4'
+    )
+    expect(resolveClientAddress('198.51.100.4', `${CLIENT}, ${GW}`, GATEWAY_SUBNET), 'x').toBe(
+      '198.51.100.4'
+    )
   })
 
   test('a trusted peer: the client it forwarded, with or without the port it appends', () => {
     expect(resolveClientAddress(GW, CLIENT, GATEWAY_SUBNET), 'bare').toBe(CLIENT)
-    expect(resolveClientAddress(GW, `${CLIENT}:51234`, GATEWAY_SUBNET), 'IP:port (App Gateway)').toBe(CLIENT)
+    expect(
+      resolveClientAddress(GW, `${CLIENT}:51234`, GATEWAY_SUBNET),
+      'IP:port (App Gateway)'
+    ).toBe(CLIENT)
     expect(resolveClientAddress(GW, `${CLIENT}:0`, GATEWAY_SUBNET), 'port 0').toBe(CLIENT)
     expect(resolveClientAddress(GW, `${CLIENT}:65535`, GATEWAY_SUBNET), 'port 65535').toBe(CLIENT)
   })
 
   test('what the client wrote left of the appended entry is never believed', () => {
     // The client sent `X-Forwarded-For: 6.6.6.6, 10.93.4.9`; the gateway appended its peer.
-    expect(resolveClientAddress(GW, `6.6.6.6, 10.93.4.9, ${CLIENT}:4000`, GATEWAY_SUBNET), 'rightmost untrusted wins').toBe(CLIENT)
+    expect(
+      resolveClientAddress(GW, `6.6.6.6, 10.93.4.9, ${CLIENT}:4000`, GATEWAY_SUBNET),
+      'rightmost untrusted wins'
+    ).toBe(CLIENT)
   })
 
   test('trusted hops inside the chain are skipped; all trusted → the leftmost', () => {
     const t = trust('10.93.0.0/16')
-    expect(resolveClientAddress(GW, `198.51.100.1, ${CLIENT}, 10.93.2.2:80`, t), 'skip inner').toBe(CLIENT)
+    expect(resolveClientAddress(GW, `198.51.100.1, ${CLIENT}, 10.93.2.2:80`, t), 'skip inner').toBe(
+      CLIENT
+    )
     expect(resolveClientAddress(GW, '10.93.3.3, 10.93.2.2', t), 'all trusted').toBe('10.93.3.3')
     expect(resolveClientAddress(GW, undefined, t), 'no header: the peer itself').toBe(GW)
     expect(resolveClientAddress(GW, '', t), 'empty header: the peer itself').toBe(GW)
@@ -178,8 +199,14 @@ describe('client address: the resolver', () => {
       'fe80::1%eth0',
       '2001:db8::1:52000'
     ]) {
-      expect(resolveClientAddress(GW, `${CLIENT}, ${garbage}`, t), `rightmost '${garbage}' → peer`).toBe(GW)
-      expect(resolveClientAddress(GW, `6.6.6.6, ${garbage}, 10.93.2.2`, t), `'${garbage}' behind a trusted hop → that hop`).toBe('10.93.2.2')
+      expect(
+        resolveClientAddress(GW, `${CLIENT}, ${garbage}`, t),
+        `rightmost '${garbage}' → peer`
+      ).toBe(GW)
+      expect(
+        resolveClientAddress(GW, `6.6.6.6, ${garbage}, 10.93.2.2`, t),
+        `'${garbage}' behind a trusted hop → that hop`
+      ).toBe('10.93.2.2')
     }
     // Left of the first untrusted hop is never even read.
     expect(resolveClientAddress(GW, `garbage, ${CLIENT}`, t), 'left of the client').toBe(CLIENT)
@@ -188,35 +215,65 @@ describe('client address: the resolver', () => {
   test('IPv6: bare, [v6] and [v6]:port entries, peers and trusted ranges', () => {
     const t = trust('2001:db8:feed::/48')
     const peer = '2001:db8:feed::5'
-    expect(resolveClientAddress(peer, '[2001:db8:cafe::7]:443', t), '[v6]:port').toBe('2001:db8:cafe::7')
+    expect(resolveClientAddress(peer, '[2001:db8:cafe::7]:443', t), '[v6]:port').toBe(
+      '2001:db8:cafe::7'
+    )
     expect(resolveClientAddress(peer, '[2001:db8:cafe::7]', t), '[v6]').toBe('2001:db8:cafe::7')
-    expect(resolveClientAddress(peer, '2001:DB8:CAFE:0:0:0:0:7', t), 'bare, canon').toBe('2001:db8:cafe::7')
-    expect(resolveClientAddress(peer, `${CLIENT}:9`, t), 'v4 client behind a v6 front end').toBe(CLIENT)
-    expect(resolveClientAddress(peer, '[2001:db8:cafe::7]:1, [2001:db8:feed::9]:2', t), 'trusted v6 hop skipped').toBe('2001:db8:cafe::7')
-    expect(resolveClientAddress('2001:db8:cafe::7', CLIENT, t), 'untrusted v6 peer').toBe('2001:db8:cafe::7')
+    expect(resolveClientAddress(peer, '2001:DB8:CAFE:0:0:0:0:7', t), 'bare, canon').toBe(
+      '2001:db8:cafe::7'
+    )
+    expect(resolveClientAddress(peer, `${CLIENT}:9`, t), 'v4 client behind a v6 front end').toBe(
+      CLIENT
+    )
+    expect(
+      resolveClientAddress(peer, '[2001:db8:cafe::7]:1, [2001:db8:feed::9]:2', t),
+      'trusted v6 hop skipped'
+    ).toBe('2001:db8:cafe::7')
+    expect(resolveClientAddress('2001:db8:cafe::7', CLIENT, t), 'untrusted v6 peer').toBe(
+      '2001:db8:cafe::7'
+    )
     // An unbracketed v6 with a port cannot be told from an address: read as the address.
-    expect(resolveClientAddress(peer, '2001:db8::1:4433', t), 'ambiguous v6:port').toBe('2001:db8::1:4433')
+    expect(resolveClientAddress(peer, '2001:db8::1:4433', t), 'ambiguous v6:port').toBe(
+      '2001:db8::1:4433'
+    )
   })
 
   test('IPv4-mapped IPv6: a mapped peer matches IPv4 ranges, mapped entries read as IPv4', () => {
-    expect(resolveClientAddress(`::ffff:${GW}`, CLIENT, GATEWAY_SUBNET), 'mapped peer trusted').toBe(CLIENT)
-    expect(resolveClientAddress(GW, `::ffff:${CLIENT}`, GATEWAY_SUBNET), 'mapped entry → IPv4').toBe(CLIENT)
-    expect(resolveClientAddress('::ffff:198.51.100.2', CLIENT, GATEWAY_SUBNET), 'untrusted mapped peer, canonical').toBe('198.51.100.2')
+    expect(
+      resolveClientAddress(`::ffff:${GW}`, CLIENT, GATEWAY_SUBNET),
+      'mapped peer trusted'
+    ).toBe(CLIENT)
+    expect(
+      resolveClientAddress(GW, `::ffff:${CLIENT}`, GATEWAY_SUBNET),
+      'mapped entry → IPv4'
+    ).toBe(CLIENT)
+    expect(
+      resolveClientAddress('::ffff:198.51.100.2', CLIENT, GATEWAY_SUBNET),
+      'untrusted mapped peer, canonical'
+    ).toBe('198.51.100.2')
   })
 
   test('whitespace, empty elements and several header lines are one ordered list', () => {
     expect(resolveClientAddress(GW, `   ${CLIENT}:1   ,  `, GATEWAY_SUBNET), 'padding').toBe(CLIENT)
     expect(resolveClientAddress(GW, `,,${CLIENT},,`, GATEWAY_SUBNET), 'empty elements').toBe(CLIENT)
-    expect(resolveClientAddress(GW, ['6.6.6.6', `${CLIENT}:2`], GATEWAY_SUBNET), 'two lines').toBe(CLIENT)
+    expect(resolveClientAddress(GW, ['6.6.6.6', `${CLIENT}:2`], GATEWAY_SUBNET), 'two lines').toBe(
+      CLIENT
+    )
     const t = trust('10.93.0.0/16')
-    expect(resolveClientAddress(GW, [CLIENT, '10.93.2.2'], t), 'order kept across lines').toBe(CLIENT)
+    expect(resolveClientAddress(GW, [CLIENT, '10.93.2.2'], t), 'order kept across lines').toBe(
+      CLIENT
+    )
   })
 
   test('no peer → null; a peer that is not an address is returned as is, trusted for nothing', () => {
     expect(resolveClientAddress(undefined, CLIENT, GATEWAY_SUBNET), 'destroyed socket').toBe(null)
     expect(resolveClientAddress('', CLIENT, GATEWAY_SUBNET), 'empty peer').toBe(null)
-    expect(resolveClientAddress('not-an-ip', CLIENT, trust('0.0.0.1/1')), 'non-ip peer').toBe('not-an-ip')
-    expect(resolveClientAddress('fe80::1%en0', CLIENT, GATEWAY_SUBNET), 'zone id dropped').toBe('fe80::1')
+    expect(resolveClientAddress('not-an-ip', CLIENT, trust('0.0.0.1/1')), 'non-ip peer').toBe(
+      'not-an-ip'
+    )
+    expect(resolveClientAddress('fe80::1%en0', CLIENT, GATEWAY_SUBNET), 'zone id dropped').toBe(
+      'fe80::1'
+    )
   })
 })
 
@@ -225,7 +282,10 @@ describe('client address: adopted onto the request', () => {
   function request(
     peer: string | undefined,
     headers: Record<string, string | string[] | undefined> = {}
-  ): { socket: { remoteAddress?: string }; headers: Record<string, string | string[] | undefined> } {
+  ): {
+    socket: { remoteAddress?: string }
+    headers: Record<string, string | string[] | undefined>
+  } {
     return { socket: peer === undefined ? {} : { remoteAddress: peer }, headers }
   }
 

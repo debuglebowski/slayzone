@@ -132,7 +132,6 @@ describe('init scheduler', () => {
     await h.runIdle()
     expect(h.granted.at(-1), 'queue still works').toBe('b')
   })
-
 })
 
 describe('pty attach', () => {

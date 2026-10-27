@@ -19,9 +19,11 @@ import { ENV_MANIFEST, NON_PREFIXED_INFRA, sanitizeSpawnEnv, type EnvScope } fro
 
 describe('manifest shape', () => {
   test('every manifest value is a valid scope', () => {
-    expect(Object.values(ENV_MANIFEST).every((s: EnvScope) =>
-      ['global', 'infra', 'secret', 'identity'].includes(s)
-    )).toBe(true)
+    expect(
+      Object.values(ENV_MANIFEST).every((s: EnvScope) =>
+        ['global', 'infra', 'secret', 'identity'].includes(s)
+      )
+    ).toBe(true)
   })
 
   test('SLAYZONE_HUB_URL is retired (absent from manifest)', () => {
@@ -132,8 +134,14 @@ describe('`_URL` carve-out (CLAUDE.md § Env Var Naming rule 6)', () => {
   // against rule 6 (loopback-only + invariant scheme) or use `_ADDRESS`.
   const URL_SUFFIXED = Object.keys(ENV_MANIFEST).filter((k) => k.endsWith('_URL'))
   test('SLAYZONE_AGENT_HOOK_URL is the ONLY `_URL` manifest key (rule 6 carve-out)', () => {
-    expect(URL_SUFFIXED.length, `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`).toBe(1)
-    expect(URL_SUFFIXED[0], `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`).toBe('SLAYZONE_AGENT_HOOK_URL')
+    expect(
+      URL_SUFFIXED.length,
+      `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`
+    ).toBe(1)
+    expect(
+      URL_SUFFIXED[0],
+      `found: ${JSON.stringify(URL_SUFFIXED)} — a new full-URL var must satisfy CLAUDE.md rule 6 (loopback-only, invariant http scheme) or carry authority as \`_ADDRESS\` instead`
+    ).toBe('SLAYZONE_AGENT_HOOK_URL')
   })
   // Identity-scoped, so it is STRIPPED from the inherited base and re-added per
   // spawn by buildMcpEnv (local) or the computer's overlay (remote). Tagging it

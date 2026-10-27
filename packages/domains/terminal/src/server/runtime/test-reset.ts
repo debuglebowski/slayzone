@@ -3,7 +3,10 @@ import {
   setShuttingDown as setPtyShuttingDown,
   shutdownAllPtys
 } from './pty-manager'
-import { __resetForTests as resetChatTransports, shutdownAll as shutdownChats } from './chat-transport-manager'
+import {
+  __resetForTests as resetChatTransports,
+  shutdownAll as shutdownChats
+} from './chat-transport-manager'
 import { __resetForTests as resetWarmPool } from './warm-process-manager'
 import { clearAllSessionUserInputMarks } from '../user-input-tracker'
 import { beginTerminalShutdown } from './shutdown'

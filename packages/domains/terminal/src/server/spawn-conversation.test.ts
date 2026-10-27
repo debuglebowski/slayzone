@@ -74,7 +74,8 @@ describe('4. Renderer hint wins over ledger (precedence) + resumes', () => {
     expect(d.resolvedExistingId).toBe('HINT')
   })
   test('resume on hint, no mint', () => {
-    expect(d.resuming).toBe(true && d.shouldMintFresh === false)
+    expect(d.resuming).toBe(true)
+    expect(d.shouldMintFresh).toBe(false)
   })
 })
 

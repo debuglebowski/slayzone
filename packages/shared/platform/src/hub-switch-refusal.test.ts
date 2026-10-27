@@ -267,7 +267,9 @@ describe('malformed value fails closed', () => {
   })
 
   test('malformed switch: throws (fail closed)', () => {
-    expect(caught(() => assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn' }))).not.toBeNull()
+    expect(
+      caught(() => assertHubProcessesEnabled('hub.process.spawn', { op: 'spawn' }))
+    ).not.toBeNull()
   })
 })
 
@@ -283,9 +285,11 @@ describe('structural recognition across module copies', () => {
   })
 
   test('isHubSwitchedOffError: unknown code', () => {
-    expect(isHubSwitchedOffError(
-      Object.assign(new Error('x'), { name: 'HubSwitchedOffError', code: 'NOPE' })
-    )).toBeFalsy()
+    expect(
+      isHubSwitchedOffError(
+        Object.assign(new Error('x'), { name: 'HubSwitchedOffError', code: 'NOPE' })
+      )
+    ).toBeFalsy()
   })
 
   test('isHubSwitchedOffError: plain error', () => {
@@ -293,7 +297,8 @@ describe('structural recognition across module copies', () => {
   })
 
   test('isHubSwitchedOffError: non-error', () => {
-    expect(isHubSwitchedOffError({ name: 'HubSwitchedOffError', code: 'HUB_PROCESSES_DISABLED' })).toBeFalsy()
+    expect(
+      isHubSwitchedOffError({ name: 'HubSwitchedOffError', code: 'HUB_PROCESSES_DISABLED' })
+    ).toBeFalsy()
   })
 })
-

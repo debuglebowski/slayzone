@@ -119,10 +119,12 @@ export function handleDevSql(
   }
 
   if (path === DEV_AWAIT_USABLE_COMPUTER_PATH) {
-    void awaitUsableComputer(deps.getGateway?.() ?? null, AWAIT_USABLE_COMPUTER_TIMEOUT_MS).then((usable) => {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, result: { usable } }))
-    })
+    void awaitUsableComputer(deps.getGateway?.() ?? null, AWAIT_USABLE_COMPUTER_TIMEOUT_MS).then(
+      (usable) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, result: { usable } }))
+      }
+    )
     return true
   }
 
