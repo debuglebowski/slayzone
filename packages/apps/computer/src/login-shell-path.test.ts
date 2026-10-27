@@ -81,9 +81,12 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
   // The PR panel: `gh` lives where only the login shell looks (Homebrew).
   it('runs gh from the login-shell PATH once adopted', async () => {
     script(join(shellOnlyBin, 'gh'), ['echo "gh ran: $*"'])
-    process.env.PATH = BARE_GUI_PATH
+    // An empty dir stands in for the bare PATH: the real one has a system gh on
+    // Linux CI (/usr/bin/gh), and running it unauthenticated can outlast the test.
+    const bareBin = join(dir, 'bare-bin')
+    mkdirSync(bareBin)
+    process.env.PATH = bareBin
     const gh = createGhHandlers(ctx())[HubToComputerMethods.ghExec]
-    // Not this gh: none at all (macOS), or a system one (/usr/bin/gh on Linux CI).
     expect(await gh({ args: ['pr', 'list'], cwd: dir })).not.toMatchObject({
       stdout: 'gh ran: pr list\n'
     })
@@ -97,8 +100,10 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
   })
 
   // Git LFS: a repo's hooks call a tool installed alongside git, not by SlayZone.
+  // A stand-in name, not `git-lfs`: a real one on the machine's PATH (/usr/bin on
+  // Linux CI) would pass the hook before the login-shell PATH is adopted.
   it('creates a worktree whose post-checkout hook needs a login-shell tool', async () => {
-    script(join(shellOnlyBin, 'git-lfs'), ['exit 0'])
+    script(join(shellOnlyBin, 'login-shell-lfs'), ['exit 0'])
     const repo = join(dir, 'repo')
     mkdirSync(repo)
     execFileSync('git', ['init', '-q'], { cwd: repo })
@@ -118,14 +123,14 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
       { cwd: repo }
     )
     script(join(repo, '.git', 'hooks', 'post-checkout'), [
-      'command -v git-lfs >/dev/null 2>&1 || { echo >&2 "git-lfs was not found on your path"; exit 2; }'
+      'command -v login-shell-lfs >/dev/null 2>&1 || { echo >&2 "login-shell-lfs was not found on your path"; exit 2; }'
     ])
     const create = createGitHandlers(ctx())[GitMethods.createWorktree]
 
     process.env.PATH = BARE_GUI_PATH
     await expect(
       create({ repoPath: repo, worktreePath: join(dir, 'wt-before'), branch: 'before' })
-    ).rejects.toThrow(/git-lfs was not found/)
+    ).rejects.toThrow(/login-shell-lfs was not found/)
 
     await adoptLoginShellPath({ env: process.env, shell: noisyLoginShell() })
     await expect(
