@@ -30,6 +30,7 @@ import type {
 } from '../shared'
 import { aggregateProviderSyncHealth } from './sync-view-model'
 import { useContextManagerStore } from './useContextManagerStore'
+import { useContextManagerSlots } from './ContextManagerSlots'
 
 interface SkillsSectionProps {
   level: ConfigLevel
@@ -46,6 +47,11 @@ function nextAvailableSlug(base: string, existingSlugs: Set<string>): string {
 
 export function SkillsSection({ level, projectId, projectPath }: SkillsSectionProps) {
   const trpcClient = useTRPCClient()
+  const {
+    headerActions: headerTarget,
+    editorPanel: editorTarget,
+    resizeHandle: handleTarget
+  } = useContextManagerSlots()
   const scope: AiConfigScope = level === 'library' ? 'library' : 'project'
   const isProject = level === 'project' && !!projectId && !!projectPath
 
@@ -292,7 +298,6 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   // Project + Library levels — graph or list view with editor panel.
   // Resize drag — hooks must be unconditional (called before any early return).
   const selectedItem = items.find((i) => i.id === selectedSkillId) ?? null
-  const skillEditorWidth = useContextManagerStore((s) => s.skillEditorWidth)
   const setSkillEditorWidth = useContextManagerStore((s) => s.setSkillEditorWidth)
   const dragging = useRef(false)
 
@@ -316,28 +321,12 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     [setSkillEditorWidth]
   )
 
-  // Apply width to editor panel (null = 50% of available)
-  useEffect(() => {
-    if (level === 'computer') return
-    const editorTarget = document.getElementById('context-manager-editor-panel')
-    if (editorTarget && selectedItem) {
-      editorTarget.style.width = skillEditorWidth ? `${skillEditorWidth}px` : '50%'
-    }
-    return () => {
-      const t = document.getElementById('context-manager-editor-panel')
-      if (t) t.style.width = ''
-    }
-  }, [level, selectedItem, skillEditorWidth])
-
   // Computer level — show computer files filtered to skills
   if (level === 'computer') {
     return <ComputerContextFiles filter="skill" />
   }
 
   const validation = selectedItem ? getSkillValidation(selectedItem) : null
-  const headerTarget = document.getElementById('context-manager-header-actions')
-  const editorTarget = document.getElementById('context-manager-editor-panel')
-  const handleTarget = document.getElementById('context-manager-resize-handle')
 
   return (
     <>

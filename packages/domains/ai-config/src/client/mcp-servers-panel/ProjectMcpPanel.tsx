@@ -1,12 +1,12 @@
 import { createPortal } from 'react-dom'
 import { Pencil, Plus, Star } from 'lucide-react'
 import { Button, cn } from '@slayzone/ui'
+import { useContextManagerSlots } from '../ContextManagerSlots'
 import { CustomServerCard, ServerCard } from './cards/ServerCard'
 import { AddProjectMcpDialog } from './dialogs/AddProjectMcpDialog'
 import { PROVIDER_LABELS } from './mcp-helpers'
 import { SearchInput } from './SearchInput'
 import type { MergedServer } from './types'
-import { useHeaderPortal } from './useHeaderPortal'
 import { useProjectMcpServers } from './useProjectMcpServers'
 
 interface ProjectMcpPanelProps {
@@ -15,7 +15,7 @@ interface ProjectMcpPanelProps {
 }
 
 export function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
-  const headerPortal = useHeaderPortal()
+  const { headerActions: headerPortal } = useContextManagerSlots()
   const {
     loading,
     search,

@@ -12,9 +12,11 @@ import { FileText, Plus, Save, Trash2 } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input, Label, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
+import { useContextManagerSlots } from './ContextManagerSlots'
 
 export function InstructionVariantsView() {
   const trpcClient = useTRPCClient()
+  const { headerActions: headerTarget } = useContextManagerSlots()
   const [variants, setVariants] = useState<AiConfigItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
@@ -134,12 +136,12 @@ export function InstructionVariantsView() {
       className="flex h-full w-full overflow-hidden rounded-lg border bg-surface-3"
     >
       {/* Portal: New Variant button in header */}
-      {document.getElementById('context-manager-header-actions') &&
+      {headerTarget &&
         createPortal(
           <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleCreate}>
             <Plus className="size-3 mr-1" /> New Variant
           </Button>,
-          document.getElementById('context-manager-header-actions')!
+          headerTarget
         )}
 
       {/* Left: variant list */}

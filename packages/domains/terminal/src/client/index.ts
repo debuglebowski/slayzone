@@ -46,11 +46,8 @@ export {
   type TimelineItem,
   type ToolInvocation,
   type ChatTimelineState,
-  type Action,
   type BgShell,
   type BgShellStatus,
-  reducer,
-  initialState,
   isInFlight,
   isAwaitingUserQuestion,
   deriveLoadingLabel

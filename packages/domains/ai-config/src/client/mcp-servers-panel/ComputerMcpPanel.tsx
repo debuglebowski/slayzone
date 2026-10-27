@@ -1,14 +1,14 @@
 import { createPortal } from 'react-dom'
 import { Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import { Button } from '@slayzone/ui'
+import { useContextManagerSlots } from '../ContextManagerSlots'
 import { CustomServerCard, ServerCard } from './cards/ServerCard'
 import { AddComputerMcpDialog } from './dialogs/AddComputerMcpDialog'
 import { SearchInput } from './SearchInput'
 import { useComputerMcpServers } from './useComputerMcpServers'
-import { useHeaderPortal } from './useHeaderPortal'
 
 export function ComputerMcpPanel() {
-  const headerPortal = useHeaderPortal()
+  const { headerActions: headerPortal } = useContextManagerSlots()
   const {
     favorites,
     search,

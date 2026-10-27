@@ -19,7 +19,8 @@ export function useDiagnosticsSync({
   projects: { id: string; name: string }[]
   taskCount: number
   displayTaskCount: number
-  projectPathMissing: boolean
+  /** The SELECTED project's path check: null while it has not answered yet. */
+  projectPathMissing: boolean | null
 }): void {
   useEffect(() => {
     const activeTab = tabs[activeTabIndex]

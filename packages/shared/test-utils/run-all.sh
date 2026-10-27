@@ -749,9 +749,11 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \
   packages/domains/ai-config/src/client/state-sync-hooks.test.tsx \
   packages/domains/ai-config/src/client/state-sync-components.test.tsx \
+  packages/domains/ai-config/src/client/context-manager-slots.test.tsx \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
   packages/domains/settings/src/client/UserSettingsDialog.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \

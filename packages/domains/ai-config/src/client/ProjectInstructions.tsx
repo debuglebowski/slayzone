@@ -28,6 +28,7 @@ import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
 import type { AiConfigItem, CliProvider, SyncHealth, SyncReason } from '../shared'
 import { PROVIDER_PATHS, PROVIDER_LABELS } from '../shared/provider-registry'
 import { WorkspaceTargetProvider } from '@slayzone/file-editor/client/workspace-target'
+import { useContextManagerSlots } from './ContextManagerSlots'
 
 interface ProjectInstructionsProps {
   projectId?: string | null
@@ -99,6 +100,7 @@ export function ProjectInstructions(props: ProjectInstructionsProps) {
 
 function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructionsProps) {
   const trpcClient = useTRPCClient()
+  const { headerActions: headerTarget } = useContextManagerSlots()
   const [providerHealth, setProviderHealth] = useState<
     Partial<
       Record<
@@ -262,9 +264,6 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }
-
-  // Portal target for header actions
-  const headerTarget = document.getElementById('context-manager-header-actions')
 
   const headerActions = (
     <div className="flex items-center gap-3">

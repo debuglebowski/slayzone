@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, FileText, FolderOpen, Server, Settings2, Sparkles, Store } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import { ProviderSyncSection } from './ProviderSyncSection'
@@ -9,6 +9,7 @@ import { ComputerFilesView } from './ComputerFilesView'
 import { SkillMarketplace } from './SkillMarketplace'
 import { useContextManagerStore } from './useContextManagerStore'
 import { useStaleSkillCount } from './useStaleSkillCount'
+import { ContextManagerSlotsProvider } from './ContextManagerSlots'
 import type { ConfigLevel } from '../shared'
 
 export interface ContextManagerShellProps {
@@ -43,6 +44,24 @@ const LEVELS: { id: ConfigLevel; label: string }[] = [
   { id: 'library', label: 'Library' }
 ]
 
+/**
+ * The skill editor side panel. Hidden while empty (`empty:hidden`); SkillsSection
+ * portals the selected skill's editor into it, and resizes it through the store's
+ * `skillEditorWidth` (null = 50% of the available width). Its own component so a
+ * resize drag re-renders only the panel.
+ */
+function SkillEditorPanel({ panelRef }: { panelRef: (el: HTMLDivElement | null) => void }) {
+  const skillEditorWidth = useContextManagerStore((s) => s.skillEditorWidth)
+  return (
+    <div
+      id="context-manager-editor-panel"
+      ref={panelRef}
+      style={{ width: skillEditorWidth ? `${skillEditorWidth}px` : '50%' }}
+      className="shrink-0 empty:hidden rounded-xl border border-border/50 bg-surface-2 overflow-y-auto p-6 flex flex-col"
+    />
+  )
+}
+
 export function ContextManagerShell({
   selectedProjectId,
   projectPath,
@@ -50,6 +69,11 @@ export function ContextManagerShell({
   onBack
 }: ContextManagerShellProps) {
   const hasProject = !!selectedProjectId && !!projectPath
+
+  // This shell's portal slots (see ContextManagerSlots), handed to the section below.
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null)
+  const [editorPanel, setEditorPanel] = useState<HTMLElement | null>(null)
+  const [resizeHandle, setResizeHandle] = useState<HTMLElement | null>(null)
 
   const activeLevel = useContextManagerStore((s) => s.activeLevel)
   const activeSection = useContextManagerStore((s) => s.activeSection)
@@ -226,32 +250,35 @@ export function ContextManagerShell({
       </nav>
 
       {/* Main content */}
-      <div className="flex-1 min-h-0 min-w-0 rounded-xl border border-border/50 bg-surface-2 flex flex-col overflow-hidden p-6">
-        {activeSection === 'marketplace' && !isProviders ? (
-          <div className="flex-1 min-h-0 flex flex-col">{renderContent()}</div>
-        ) : (
-          <>
-            <div className="shrink-0 flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">
-                {isProviders
-                  ? 'Providers'
-                  : `${LEVELS.find((l) => l.id === activeLevel)!.label} — ${LEVEL_SECTIONS[activeLevel].find((s) => s.id === activeSection)?.label ?? activeSection}`}
-              </h2>
-              <div id="context-manager-header-actions" />
-            </div>
-            <div className="flex-1 min-h-0">{renderContent()}</div>
-          </>
-        )}
-      </div>
+      <ContextManagerSlotsProvider
+        headerActions={headerActions}
+        editorPanel={editorPanel}
+        resizeHandle={resizeHandle}
+      >
+        <div className="flex-1 min-h-0 min-w-0 rounded-xl border border-border/50 bg-surface-2 flex flex-col overflow-hidden p-6">
+          {activeSection === 'marketplace' && !isProviders ? (
+            <div className="flex-1 min-h-0 flex flex-col">{renderContent()}</div>
+          ) : (
+            <>
+              <div className="shrink-0 flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">
+                  {isProviders
+                    ? 'Providers'
+                    : `${LEVELS.find((l) => l.id === activeLevel)!.label} — ${LEVEL_SECTIONS[activeLevel].find((s) => s.id === activeSection)?.label ?? activeSection}`}
+                </h2>
+                <div id="context-manager-header-actions" ref={setHeaderActions} />
+              </div>
+              <div className="flex-1 min-h-0">{renderContent()}</div>
+            </>
+          )}
+        </div>
+      </ContextManagerSlotsProvider>
 
       {/* Drag handle — populated via portal from SkillsSection */}
-      <div id="context-manager-resize-handle" className="flex items-center" />
+      <div id="context-manager-resize-handle" ref={setResizeHandle} className="flex items-center" />
 
       {/* Editor panel — populated via portal from SkillsSection */}
-      <div
-        id="context-manager-editor-panel"
-        className="shrink-0 empty:hidden rounded-xl border border-border/50 bg-surface-2 overflow-y-auto p-6 flex flex-col"
-      />
+      <SkillEditorPanel panelRef={setEditorPanel} />
     </div>
   )
 }

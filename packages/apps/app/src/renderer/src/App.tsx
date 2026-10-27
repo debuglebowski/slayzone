@@ -354,6 +354,7 @@ function App(): React.JSX.Element {
   // Project path validation (extracted — validates on select + window focus)
   const {
     projectPathMissing,
+    selectedProjectPathMissing,
     validateProjectPath,
     handleFixProjectPath,
     fixPickerOpen,
@@ -1698,7 +1699,7 @@ function App(): React.JSX.Element {
             projects={projects}
             taskCount={tasks.length}
             displayTaskCount={displayTasks.length}
-            projectPathMissing={projectPathMissing}
+            selectedProjectPathMissing={selectedProjectPathMissing}
           />
           <AppDialogs
             shouldMount={shouldMount}

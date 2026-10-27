@@ -57,7 +57,7 @@
     "lint:deps": "knip --include dependencies,unlisted",
     "lint:biome": "biome lint .",
     "lint:format": "NODE_OPTIONS=--max-old-space-size=8192 biome format .",
-    "lint:eslint": "eslint . --max-warnings=31",
+    "lint:eslint": "eslint . --max-warnings=28",
     "lint:theme": "bash scripts/lint-theme.sh",
     "format": "biome format --write .",
     "check": "biome check --write .",

@@ -3,7 +3,17 @@ import { useTRPCClient } from '@slayzone/transport/client'
 import type { Project } from '@slayzone/projects/shared'
 
 export interface ProjectPathGuardApi {
+  /**
+   * Drives the Home "project path missing" UI: the latest check's answer, whichever
+   * project it was for. While a newly selected project's check is in flight it still
+   * shows the previous answer.
+   */
   projectPathMissing: boolean
+  /**
+   * The SELECTED project's own answer, for diagnostics: `null` until a check of its
+   * current path has answered. Never another project's answer.
+   */
+  selectedProjectPathMissing: boolean | null
   validateProjectPath: (project: Project | undefined) => Promise<void>
   /** Opens the directory picker. The shell renders it; see the note below. */
   handleFixProjectPath: () => Promise<void>
@@ -11,6 +21,20 @@ export interface ProjectPathGuardApi {
   setFixPickerOpen: (open: boolean) => void
   /** Persist a path chosen in the picker and re-validate. */
   applyFixedPath: (path: string) => Promise<void>
+}
+
+/** The latest check's answer, and the project + path it answers for. */
+interface PathCheck {
+  projectId: string | null
+  path: string | null
+  missing: boolean
+}
+
+const NOT_CHECKED: PathCheck = { projectId: null, path: null, missing: false }
+
+/** A project with no path has nothing to probe: its answer is known without one. */
+function noPathCheck(project: Project | undefined): PathCheck {
+  return { projectId: project?.id ?? null, path: null, missing: false }
 }
 
 // Validates that the selected project's path still exists — on selection change
@@ -32,25 +56,43 @@ export function useProjectPathGuard(
   updateProject: (project: Project) => void
 ): ProjectPathGuardApi {
   const trpcClient = useTRPCClient()
-  const [projectPathMissing, setProjectPathMissing] = useState(false)
-  const validateProjectPath = useCallback(
-    async (project: Project | undefined) => {
-      if (!project?.path) {
-        setProjectPathMissing(false)
-        return
-      }
-      const res = await trpcClient.workspace.pathExists.query({
-        projectId: project.id,
-        path: project.path
-      })
-      setProjectPathMissing(res.reachable && !res.exists)
-    },
+  const [check, setCheck] = useState<PathCheck>(NOT_CHECKED)
+
+  const probe = useCallback(
+    (projectId: string, path: string): Promise<void> =>
+      trpcClient.workspace.pathExists.query({ projectId, path }).then((res) => {
+        setCheck({ projectId, path, missing: res.reachable && !res.exists })
+      }),
     [trpcClient]
   )
 
+  const validateProjectPath = useCallback(
+    async (project: Project | undefined) => {
+      if (!project?.path) {
+        setCheck(noPathCheck(project))
+        return
+      }
+      return probe(project.id, project.path)
+    },
+    [probe]
+  )
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId)
+
+  // Re-check on every selection or projects change. A path is probed from the effect
+  // below; a project without one is answered right here while rendering, at those
+  // same moments (React's "adjust state on a prop change" pattern).
+  const [checkedFor, setCheckedFor] = useState({ selectedProjectId, projects })
+  if (checkedFor.selectedProjectId !== selectedProjectId || checkedFor.projects !== projects) {
+    setCheckedFor({ selectedProjectId, projects })
+    if (!selectedProject?.path) setCheck(noPathCheck(selectedProject))
+  }
+
   useEffect(() => {
-    validateProjectPath(projects.find((p) => p.id === selectedProjectId))
-  }, [selectedProjectId, projects, validateProjectPath])
+    const project = projects.find((p) => p.id === selectedProjectId)
+    if (!project?.path) return
+    void probe(project.id, project.path)
+  }, [selectedProjectId, projects, probe])
 
   useEffect(() => {
     const project = projects.find((p) => p.id === selectedProjectId)
@@ -83,8 +125,18 @@ export function useProjectPathGuard(
     [selectedProjectId, projects, updateProject, validateProjectPath, trpcClient]
   )
 
+  // Only an answer about the selected project AND its current path counts as the
+  // selected project's: right after a switch (or a path change) the latest answer is
+  // still the previous one's until the new probe resolves.
+  const selectedProjectPathMissing = !selectedProject?.path
+    ? false
+    : check.projectId === selectedProject.id && check.path === selectedProject.path
+      ? check.missing
+      : null
+
   return {
-    projectPathMissing,
+    projectPathMissing: check.missing,
+    selectedProjectPathMissing,
     validateProjectPath,
     handleFixProjectPath,
     fixPickerOpen,

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ArrowLeft, AlertTriangle, Plus, Sparkles } from 'lucide-react'
 import { Button, cn } from '@slayzone/ui'
 import { ContextItemEditor } from './ContextItemEditor'
@@ -11,6 +12,7 @@ import { ProvidersPanel } from './ContextManagerProvidersPanel'
 import type { ContextManagerSection } from './ContextManagerSettings.types'
 import { formatTimestamp } from './ContextManagerSettings.utils'
 import { useLegacyContextState } from './useLegacyContextState'
+import { ContextManagerSlotsProvider } from './ContextManagerSlots'
 
 function SkillValidationBadge({ status }: { status: 'invalid' | 'warning' }) {
   const invalid = status === 'invalid'
@@ -52,6 +54,8 @@ export function LegacyContextManager({
     handleUpdate,
     handleDelete
   } = useLegacyContextState(initialSection)
+  // The header's action area, handed to the section through context (ContextManagerSlots).
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null)
 
   const librarySkillContent = (() => {
     if (loading) {
@@ -148,7 +152,7 @@ export function LegacyContextManager({
           </span>
 
           <div className="flex items-center gap-2">
-            <div id="context-manager-header-actions" />
+            <div id="context-manager-header-actions" ref={setHeaderActions} />
             {isItemSection && (
               <Button size="sm" onClick={handleCreate} data-testid={`context-new-${section}`}>
                 <Plus className="mr-1 size-3.5" />
@@ -161,22 +165,24 @@ export function LegacyContextManager({
 
       {/* Content area */}
       <div className="min-h-0 flex-1">
-        {section === null ? (
-          <OverviewPanel onNavigate={setSection} version={providerVersion + syncCheckVersion} />
-        ) : section === 'providers' ? (
-          <ProvidersPanel />
-        ) : section === 'instructions' ? (
-          <ProjectInstructions />
-        ) : section === 'mcp' ? (
-          <McpServersPanel mode="computer" />
-        ) : section === 'files' ? (
-          <ComputerContextFiles />
-        ) : isItemSection ? (
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">{librarySkillContent}</div>
-            <SkillHelpCard testId="library-skill-help-card" className="mt-3 shrink-0" />
-          </div>
-        ) : null}
+        <ContextManagerSlotsProvider headerActions={headerActions}>
+          {section === null ? (
+            <OverviewPanel onNavigate={setSection} version={providerVersion + syncCheckVersion} />
+          ) : section === 'providers' ? (
+            <ProvidersPanel />
+          ) : section === 'instructions' ? (
+            <ProjectInstructions />
+          ) : section === 'mcp' ? (
+            <McpServersPanel mode="computer" />
+          ) : section === 'files' ? (
+            <ComputerContextFiles />
+          ) : isItemSection ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">{librarySkillContent}</div>
+              <SkillHelpCard testId="library-skill-help-card" className="mt-3 shrink-0" />
+            </div>
+          ) : null}
+        </ContextManagerSlotsProvider>
       </div>
     </div>
   )

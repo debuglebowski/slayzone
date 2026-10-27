@@ -25,6 +25,7 @@ import { ItemSection } from './ItemSection'
 import { McpFlatSection } from './McpFlatSection'
 import { ProjectInstructions } from './ProjectInstructions'
 import { ProviderChips } from './ProviderChips'
+import { ContextManagerSlotsProvider } from './ContextManagerSlots'
 import { contextEntryToSyncHealth, countSyncHealths } from './sync-view-model'
 
 interface ProjectContextFlatProps {
@@ -277,6 +278,8 @@ export function ProjectContextFlat({
   const [version, setVersion] = useState(0)
   const [syncingMode, setSyncingMode] = useState<'sync' | 'reset' | null>(null)
   const [section, setSection] = useState<ProjectSection | null>(null)
+  // The header's action area, handed to the section through context (ContextManagerSlots).
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null)
 
   const bumpVersion = useCallback(() => setVersion((v) => v + 1), [])
 
@@ -438,7 +441,7 @@ export function ProjectContextFlat({
             {sectionTitles[section]}
           </button>
           <div className="flex items-center gap-2">
-            <div id="context-manager-header-actions" />
+            <div id="context-manager-header-actions" ref={setHeaderActions} />
             {section !== 'instructions' && (
               <span className="text-xs text-muted-foreground">{sectionDescriptions[section]}</span>
             )}
@@ -446,7 +449,11 @@ export function ProjectContextFlat({
         </div>
       )}
 
-      <div className="min-h-0 flex-1">{content}</div>
+      <div className="min-h-0 flex-1">
+        <ContextManagerSlotsProvider headerActions={headerActions}>
+          {content}
+        </ContextManagerSlotsProvider>
+      </div>
     </div>
   )
 }

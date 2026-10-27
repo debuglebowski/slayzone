@@ -13,7 +13,8 @@ interface ActiveTabSyncProps {
   projects: { id: string; name: string }[]
   taskCount: number
   displayTaskCount: number
-  projectPathMissing: boolean
+  /** The selected project's own path check (null while it runs) — for diagnostics. */
+  selectedProjectPathMissing: boolean | null
 }
 
 /**
@@ -29,7 +30,7 @@ export const ActiveTabSync = memo(function ActiveTabSync({
   projects,
   taskCount,
   displayTaskCount,
-  projectPathMissing
+  selectedProjectPathMissing
 }: ActiveTabSyncProps): null {
   const trpcClient = useTRPCClient()
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
@@ -45,7 +46,7 @@ export const ActiveTabSync = memo(function ActiveTabSync({
     projects,
     taskCount,
     displayTaskCount,
-    projectPathMissing
+    projectPathMissing: selectedProjectPathMissing
   })
 
   // Broadcast primary's active task ID so secondary windows in "Follow current tab" mode swap

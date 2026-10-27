@@ -32,9 +32,11 @@ import {
 import type { ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
+import { useContextManagerSlots } from './ContextManagerSlots'
 
 export function ComputerFilesView() {
   const trpcClient = useTRPCClient()
+  const { headerActions: headerTarget } = useContextManagerSlots()
   const [entries, setEntries] = useState<ComputerFileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const selectedPath = useContextManagerStore((s) => s.computerSelectedPath)
@@ -335,7 +337,6 @@ export function ComputerFilesView() {
     return <p className="text-sm text-muted-foreground">Loading...</p>
   }
 
-  const headerTarget = document.getElementById('context-manager-header-actions')
   const isJson = selectedPath?.endsWith('.json')
   const jsonError =
     isJson && content.trim()
