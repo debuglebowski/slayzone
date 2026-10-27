@@ -174,6 +174,24 @@ describe('ComputerCard', () => {
     expect(select().value).toBe('computer-b')
   })
 
+  it('a rejected save rolls the select back to the persisted binding', async () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    setTaskComputerSpy.mockRejectedValueOnce(new Error('computer offline'))
+    const select = (): HTMLSelectElement =>
+      screen.getByTestId('computer-select') as HTMLSelectElement
+    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
+
+    // The handler rethrows (as before); swallow it here so the test sees the UI.
+    const onUnhandled = (e: PromiseRejectionEvent | Error) => {
+      if ('preventDefault' in e) e.preventDefault()
+    }
+    process.on('unhandledRejection', onUnhandled)
+    fireEvent.change(select(), { target: { value: 'computer-a' } })
+    await waitFor(() => expect(setTaskComputerSpy).toHaveBeenCalled())
+    await waitFor(() => expect(select().value).toBe('__inherit__'))
+    process.off('unhandledRejection', onUnhandled)
+  })
+
   it('shows the effective resolved computer', () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
     resolvedComputerId = 'computer-a'

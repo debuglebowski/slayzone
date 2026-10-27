@@ -261,6 +261,9 @@ export function SearchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="overflow-hidden p-0 max-w-2xl !bg-surface-0 !rounded-3xl !border-0 shadow-2xl duration-[60ms]"
+        // The content sits inside the overlay, so the overlay's fade multiplies into it:
+        // match its duration or the 60ms palette open (a40626b75) becomes 150ms.
+        overlayClassName="duration-[60ms]"
         showCloseButton={false}
         onCloseAutoFocus={(e) => {
           const run = pendingFocusRunRef.current

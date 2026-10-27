@@ -62,7 +62,11 @@ export function ComputerCard({
   const handleChange = async (value: string): Promise<void> => {
     const computerId = value === INHERIT_VALUE ? null : value
     setBinding(computerId)
-    await setTaskComputer.mutateAsync({ taskId, computerId })
+    await setTaskComputer.mutateAsync({ taskId, computerId }).catch((err: unknown) => {
+      // The save failed, so the server still holds the persisted binding: show it again.
+      setBinding(taskComputerId)
+      throw err
+    })
     await resolvedQuery.refetch()
   }
 

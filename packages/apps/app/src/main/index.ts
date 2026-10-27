@@ -4635,17 +4635,19 @@ app.on('before-quit', (event) => {
       }
       // app.exit skips will-quit, so reap the children here. The side-car's stop
       // SIGTERMs synchronously (it also exits on its own once this process is
-      // gone); the computer's reap is awaited, bounded, alongside the flush.
+      // gone). Reap the computer (bounded), THEN flush (bounded) — as will-quit
+      // does — so a missed reap's local_computer.quit_reap_failed event is still
+      // in the queue the flush writes, along with the watchdog event above.
       sidecarCleanup?.()
-      // Bounded flush first, so the watchdog event above survives the force-exit.
-      void Promise.all([
-        reapLocalComputerForQuit(),
-        drainDiagnosticsForQuit({
-          stop: stopDiagnostics,
-          closeDb: closeDiagnosticsDatabase,
-          timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
-        })
-      ]).finally(() => app.exit(1))
+      void reapLocalComputerForQuit()
+        .then(() =>
+          drainDiagnosticsForQuit({
+            stop: stopDiagnostics,
+            closeDb: closeDiagnosticsDatabase,
+            timeoutMs: QUIT_DIAGNOSTICS_DRAIN_MS
+          })
+        )
+        .finally(() => app.exit(1))
     }, QUIT_WATCHDOG_MS)
   }
   if (quitDrainComplete) return
