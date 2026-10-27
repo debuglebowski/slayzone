@@ -1798,7 +1798,8 @@ export function composeServer(opts: {
    *     the wiped DB;
    *  2. drop + re-migrate (the `computers` rows survive, so the gateway and the
    *     computer's connection stay up — no re-dial);
-   *  3. seed the e2e baseline, then re-read every cache that holds DB rows or
+   *  3. seed the e2e baseline + re-publish boot-time rows the wipe erased
+   *     (`server_port`), then re-read every cache that holds DB rows or
    *     test seams — the seed is raw SQL, so no settings-changed event fires.
    * Deliberately NOT here: the automation engine (reads the DB per event, and
    * stop/start would double its listeners) and the gateway.
@@ -1810,10 +1811,14 @@ export function composeServer(opts: {
     // Post-onboarding baseline every spec was written against. `manual` startup =
     // the Start gate + no warm pool (a fresh DB defaults to `auto`); specs that
     // exercise another mode set it themselves.
-    for (const [key, value] of [
+    const baseline: Array<[string, string]> = [
       ['onboarding_completed', 'true'],
       [AGENT_STARTUP_SETTING, 'manual']
-    ]) {
+    ]
+    // Boot-time write the wipe erased: the CLI/agents discover this process via
+    // `settings.server_port` (port-claim.ts). A restart re-claimed it at listen.
+    if (boundPort) baseline.push(['server_port', String(boundPort)])
+    for (const [key, value] of baseline) {
       await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
     }
     await settingsService.warmCache(IDLE_CLOSE_KEYS)
