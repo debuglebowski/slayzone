@@ -52,7 +52,9 @@ export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]
  * task can reach a terminal status while its agent session is still live (or
  * while an exit went undetected, leaving `agent_state` stuck at `running` — see
  * `processes` exit-detection fixes), and reopening a finished task's tab on
- * every boot is never the intent of "auto-restore".
+ * every boot is never the intent of "auto-restore". Archived tasks likewise:
+ * they are out of sight, yet their `agent_state` stays `running` and resumed
+ * their agent on every boot.
  */
 export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> {
   const setting = (await db
@@ -66,7 +68,8 @@ export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> 
        LEFT JOIN projects p ON p.id = t.project_id
        WHERE tt.is_main = 1 AND tt.mode != 'terminal'
          AND tt.agent_state = 'running'
-         AND t.deleted_at IS NULL`
+         AND t.deleted_at IS NULL
+         AND t.archived_at IS NULL`
     )
     .all()) as Array<{ task_id: string; status: string; columns_config: string | null }>
   return rows

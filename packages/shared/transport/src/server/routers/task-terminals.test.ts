@@ -114,6 +114,13 @@ test('task-terminals router: listAutoRestoreTasks — running agents only', asyn
   await caller.ensureMain({ taskId: done, mode: 'claude-code' })
   setTab(done, 'running')
 
+  // Archived tasks are out of sight: reopening one as a background tab (and resuming
+  // its agent) on every boot is never what "auto-restore" means.
+  const archived = mkTask('archived')
+  h.db.prepare('UPDATE tasks SET archived_at = ? WHERE id = ?').run(new Date().toISOString(), archived)
+  await caller.ensureMain({ taskId: archived, mode: 'claude-code' })
+  setTab(archived, 'running')
+
   const ids = await caller.listAutoRestoreTasks()
   expect(ids).toContain(active)
   expect(ids).not.toContain(hibernated)
@@ -121,6 +128,7 @@ test('task-terminals router: listAutoRestoreTasks — running agents only', asyn
   expect(ids).not.toContain(plainShell)
   expect(ids).not.toContain(deleted)
   expect(ids).not.toContain(done)
+  expect(ids).not.toContain(archived)
 
   // `manual` startup mode: nothing restores — those agents would only show Start.
   h.db
