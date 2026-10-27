@@ -39,7 +39,7 @@
     "@xterm/addon-unicode-graphemes": "0.5.0-beta.292",
     "@xterm/addon-webgl": "0.20.0-beta.291",
     "@xterm/xterm": "6.1.0-beta.292",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.48.0",
     "node-pty": "^1.1.0",
     "zustand": "^5.0.15"
   },

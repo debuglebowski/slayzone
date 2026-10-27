@@ -218,7 +218,9 @@ test.describe('Artifact downloads', () => {
     expect(ok).toBe(true)
     const html = fs.readFileSync(dest, 'utf-8')
     expect(html).toContain('<pre class="mermaid">')
-    expect(html).toContain("mermaid.initialize({ startOnLoad: true, theme: 'default' })")
+    expect(html).toContain(
+      "mermaid.initialize({ startOnLoad: true, theme: 'default', layout: 'dagre' })"
+    )
     // The inlined bundle is ~3.5 MB; the plain-code fallback is a few hundred bytes.
     expect(html.length).toBeGreaterThan(1_000_000)
   })

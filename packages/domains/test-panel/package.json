@@ -28,6 +28,6 @@
   "devDependencies": {
     "@types/picomatch": "^4.0.2",
     "@types/react": "^19.3.0",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^1.48.0"
   }
 }

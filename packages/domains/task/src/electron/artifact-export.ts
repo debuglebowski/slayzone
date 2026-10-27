@@ -77,6 +77,7 @@ export function buildPdfHtml(content: string, mode: string, title: string): stri
 // The Electron host passes it in: its build copies that one file next to its own output
 // (an electron-vite `?asset` import), so the shipped app carries the 3 MB script, not
 // the whole mermaid package, and resolution never depends on a node_modules layout.
+// `layout: 'dagre'` keeps mermaid 12's ELK default out, matching the in-app MermaidBlock.
 export function buildMermaidPdfHtml(
   content: string,
   title: string,
@@ -96,7 +97,7 @@ export function buildMermaidPdfHtml(
 <pre class="mermaid">${escapeHtml(content)}</pre>
 <script>${mermaidJs}</script>
 <script>
-  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  mermaid.initialize({ startOnLoad: true, theme: 'default', layout: 'dagre' });
   mermaid.run().then(() => {
     document.title = 'MERMAID_READY';
   }).catch(() => {
@@ -123,7 +124,7 @@ export function buildPngHtml(
       const mermaidJs = readFileSync(mermaidScriptPath, 'utf-8')
       mermaidScript = `<script>${mermaidJs}</script>
 <script>
-  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  mermaid.initialize({ startOnLoad: true, theme: 'default', layout: 'dagre' });
   mermaid.run().then(() => { document.title = 'READY'; }).catch(() => { document.title = 'READY'; });
 </script>`
     } catch {

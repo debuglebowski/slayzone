@@ -1,4 +1,5 @@
-import { AlertTriangle, Github, Lock, LogOut, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Lock, LogOut, RefreshCw } from 'lucide-react'
+import { GithubIcon } from './github-icon'
 import {
   Button,
   IconButton,
@@ -110,7 +111,7 @@ export function LeaderboardHeader({
                         void trpcClient.app.shell.openExternal.mutate({ url: githubProfileUrl })
                       }}
                     >
-                      <Github className="size-4" />
+                      <GithubIcon className="size-4" />
                       Open GitHub profile
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => void syncViewerProfile({})}>
@@ -136,7 +137,7 @@ export function LeaderboardHeader({
                 ) : (
                   <>
                     <DropdownMenuItem onClick={() => void runAuthAction('signin')}>
-                      <Github className="size-4" />
+                      <GithubIcon className="size-4" />
                       Sign in with GitHub
                     </DropdownMenuItem>
                     <DropdownMenuItem disabled>

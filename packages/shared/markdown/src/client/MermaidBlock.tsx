@@ -27,12 +27,19 @@ let mermaidTheme: 'dark' | 'default' | null = null
 let mermaidIdCounter = 0
 const svgCache = new Map<string, string>()
 
+// `layout: 'dagre'`: mermaid 12 lays out flowchart/state/class/ER diagrams with ELK by
+// default; dagre keeps them looking as they always have (and as artifact exports render).
 async function getMermaid(theme: 'dark' | 'light'): Promise<Mermaid> {
   const target: 'dark' | 'default' = theme === 'dark' ? 'dark' : 'default'
 
   if (!mermaidInflight) {
     mermaidInflight = import('mermaid').then((mod) => {
-      mod.default.initialize({ startOnLoad: false, theme: target, securityLevel: 'strict' })
+      mod.default.initialize({
+        startOnLoad: false,
+        theme: target,
+        securityLevel: 'strict',
+        layout: 'dagre'
+      })
       mermaidTheme = target
       return mod.default
     })
@@ -42,7 +49,7 @@ async function getMermaid(theme: 'dark' | 'light'): Promise<Mermaid> {
   const m = await mermaidInflight
   if (mermaidTheme !== target) {
     svgCache.clear()
-    m.initialize({ startOnLoad: false, theme: target, securityLevel: 'strict' })
+    m.initialize({ startOnLoad: false, theme: target, securityLevel: 'strict', layout: 'dagre' })
     mermaidTheme = target
   }
   return m

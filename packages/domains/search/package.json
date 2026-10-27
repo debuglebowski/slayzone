@@ -21,7 +21,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "fzf": "^0.5.2",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^1.48.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

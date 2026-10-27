@@ -29,7 +29,7 @@
     "@tanstack/react-query": "^5.103.2",
     "date-fns": "^4.4.0",
     "motion": "^12.43.0",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.48.0",
     "react-hotkeys-hook": "^5.3.3",
     "zustand": "^5.0.15"
   },

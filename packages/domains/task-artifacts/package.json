@@ -29,7 +29,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.103.2",
     "diff": "^9.0.0",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.48.0",
     "zod": "^4.3.5"
   },
   "peerDependencies": {

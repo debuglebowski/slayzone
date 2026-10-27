@@ -24,7 +24,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^1.48.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

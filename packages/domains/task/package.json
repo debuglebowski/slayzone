@@ -55,8 +55,8 @@
     "@types/archiver": "^8.0.0",
     "archiver": "^8.0.0",
     "date-fns": "^4.4.0",
-    "lucide-react": "^0.562.0",
-    "marked": "^15.0.0",
+    "lucide-react": "^1.48.0",
+    "marked": "^18.0.14",
     "react-hook-form": "^7.88.0",
     "zod": "^4.3.5"
   },

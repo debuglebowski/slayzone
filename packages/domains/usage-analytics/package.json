@@ -20,8 +20,8 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.103.2",
-    "lucide-react": "^0.562.0",
-    "recharts": "^2.15.3",
+    "lucide-react": "^1.48.0",
+    "recharts": "^3.10.1",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*"
   },

@@ -185,7 +185,7 @@ export function DailyChart({ data, range }: Props) {
                     const value = entry.value as number
                     return (
                       <div
-                        key={entry.dataKey}
+                        key={String(entry.dataKey)}
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',

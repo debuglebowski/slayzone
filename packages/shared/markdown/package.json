@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@slayzone/ui": "workspace:*",
-    "lucide-react": "^0.562.0",
-    "mermaid": "^11.17.2",
+    "lucide-react": "^1.48.0",
+    "mermaid": "^12.0.0",
     "react-markdown": "^10.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1"

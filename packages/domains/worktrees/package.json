@@ -46,7 +46,7 @@
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-virtual": "^3.14.13",
     "codemirror": "^6.0.1",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^1.48.0"
   },
   "peerDependencies": {
     "react": "^19.3.1"

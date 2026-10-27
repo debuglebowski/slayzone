@@ -26,7 +26,7 @@
     "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.103.2",
     "fzf": "^0.5.2",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.48.0",
     "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {

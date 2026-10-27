@@ -51,7 +51,7 @@ export function TokenBreakdown({ data }: Props) {
           <Tooltip
             cursor={{ fill: 'var(--muted)', opacity: 0.3 }}
             contentStyle={TOOLTIP_STYLE}
-            formatter={(value: number) => [formatTokens(value), undefined]}
+            formatter={(value) => [formatTokens(Number(value)), undefined]}
           />
           <Bar dataKey="tokens" radius={[4, 4, 0, 0]} />
         </BarChart>
