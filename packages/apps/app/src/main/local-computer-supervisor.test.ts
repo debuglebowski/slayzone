@@ -38,6 +38,8 @@ import * as net from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { SUPERVISED_STOP_DEADLINE_MS } from '@slayzone/platform/parent-watch'
+import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child.js'
 import {
   startLocalComputer,
   type LocalComputerExitInfo,
@@ -78,20 +80,34 @@ async function waitFor(cond: () => boolean, timeoutMs: number, msg: string): Pro
 const FAKE_COMPUTER = `'use strict'
 const code = Number(process.env.FAKE_EXIT_CODE || '0')
 const lines = Number(process.env.FAKE_LINES || '0')
+const stayAlive = process.env.FAKE_STAY_ALIVE === '1'
+if (stayAlive) {
+  // A long-lived computer, like the real one: only a signal ends it. SIGTERM is
+  // handled explicitly so the supervisor's graceful-stop path is exercised
+  // rather than its SIGKILL fallback — unless FAKE_IGNORE_SIGTERM asks for a
+  // computer whose stop never finishes (the orphan class: a handle that keeps a
+  // stopping computer's loop alive), which only SIGKILL ends. Installed BEFORE
+  // the token line below, which tests read as "spawned": a SIGTERM that landed
+  // between the two would hit the default action and kill it at once.
+  // FAKE_STOP_MS: a graceful stop that takes this long (disposing ptys, closing
+  // its hub socket) before it exits by itself.
+  process.on('SIGTERM', function () {
+    if (process.env.FAKE_IGNORE_SIGTERM === '1') return
+    const stopMs = Number(process.env.FAKE_STOP_MS || '0')
+    if (stopMs > 0) setTimeout(function () { process.exit(0) }, stopMs)
+    else process.exit(0)
+  })
+}
+// How it ended: a code when it exited by itself, nothing when it was SIGKILLed.
+if (process.env.FAKE_EXIT_FILE) {
+  process.on('exit', function (c) { require('node:fs').writeFileSync(process.env.FAKE_EXIT_FILE, String(c)) })
+}
 // Echoed so a test can see WHICH join token this particular spawn was handed —
 // that is how the re-mint on restart is observed from outside.
 process.stdout.write('fake-computer token=' + (process.env.SLAYZONE_HUB_JOIN_TOKEN || '') + '\\n')
 for (let i = 1; i <= lines; i++) process.stderr.write('computer-line-' + i + '\\n')
 process.stdout.write('fake-computer bye\\n')
-if (process.env.FAKE_STAY_ALIVE === '1') {
-  // A long-lived computer, like the real one: only a signal ends it. SIGTERM is
-  // handled explicitly so the supervisor's graceful-stop path is exercised
-  // rather than its SIGKILL fallback — unless FAKE_IGNORE_SIGTERM asks for a
-  // computer whose stop never finishes (the orphan class: a handle that keeps a
-  // stopping computer's loop alive), which only SIGKILL ends.
-  process.on('SIGTERM', function () {
-    if (process.env.FAKE_IGNORE_SIGTERM !== '1') process.exit(0)
-  })
+if (stayAlive) {
   setInterval(function () {}, 1000)
 } else {
   // Exit on a turn of the loop so the pipes flush first.
@@ -403,7 +419,12 @@ test('stop: during a restart, reaps the computer the restart was replacing', asy
   // SIGTERM grace, and the app was free to exit before the SIGKILL landed.
   const { handle, ctx } = makeHarness(
     { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1' },
-    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 300 },
+    {
+      backoffMs: [10_000],
+      healthyResetMs: 60_000,
+      stopSigtermGraceMs: 300,
+      restartSigtermGraceMs: 300
+    },
     true
   )
   await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
@@ -417,11 +438,91 @@ test('stop: during a restart, reaps the computer the restart was replacing', asy
   assertEq(tokensSeenByChildren(ctx).length, 1, 'no second computer was ever spawned')
 })
 
+// --- quit: a graceful stop is never cut shorter than the computer's own deadline
+// Production timing on purpose (no stopSigtermGraceMs override): what is pinned is
+// how the real grace and the quit's real wait line up with the computer's deadline.
+
+function exitCodeIn(file: string): string | null {
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+}
+
+test('quit: a computer whose stop takes ~4s exits by itself, cleanly — never SIGKILLed early', async () => {
+  // Past the 3s grace this used to be SIGKILLed at, inside the computer's own 5s
+  // deadline: its pty disposal and hub-socket close must get to finish.
+  const exitFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-exit-')), 'exit')
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_STOP_MS: '4000', FAKE_EXIT_FILE: exitFile },
+    { backoffMs: [10_000], healthyResetMs: 60_000 }
+  )
+  try {
+    await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+    const started = Date.now()
+    const result = await reapChildForQuit({
+      stop: () => handle.stop(),
+      timeoutMs: QUIT_CHILD_REAP_MS
+    })
+    assertEq(result, 'stopped', 'the quit saw the computer gone')
+    assert(Date.now() - started >= 3_900, 'it really took its ~4s')
+    assertEq(exitCodeIn(exitFile), '0', 'exit 0, not SIGKILL')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('quit: a stuck computer is still SIGKILLed — after its own deadline, inside the quit’s wait', async () => {
+  const exitFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-exit-')), 'exit')
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1', FAKE_EXIT_FILE: exitFile },
+    { backoffMs: [10_000], healthyResetMs: 60_000 }
+  )
+  try {
+    await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+    const pid = handle.getPid()!
+    const started = Date.now()
+    const result = await reapChildForQuit({
+      stop: () => handle.stop(),
+      timeoutMs: QUIT_CHILD_REAP_MS
+    })
+    const elapsed = Date.now() - started
+    assertEq(result, 'stopped', `the quit saw the computer gone, not a timeout (${elapsed}ms)`)
+    assert(pidGone(pid), 'the stuck computer is gone')
+    assertEq(exitCodeIn(exitFile), null, 'it was SIGKILLed: no exit of its own')
+    assert(elapsed >= SUPERVISED_STOP_DEADLINE_MS, `not before its own deadline (${elapsed}ms)`)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('restart: keeps its short grace — the replacement waits on the outgoing computer', async () => {
+  // The app stays up, so nothing can be orphaned and nothing finishes "after the
+  // app": a slow stop only delays the computer the user is waiting for (it needs the
+  // same computer id). The 3s grace is unchanged. Only the stop is shortened (the
+  // cleanup below).
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_IGNORE_SIGTERM: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 300 }
+  )
+  try {
+    await waitFor(() => tokensSeenByChildren(ctx).length === 1, 15_000, 'computer spawned')
+    const started = Date.now()
+    await handle.restart()
+    const elapsed = Date.now() - started
+    assert(
+      elapsed >= 2_900 && elapsed < SUPERVISED_STOP_DEADLINE_MS,
+      `SIGKILL at 3s (${elapsed}ms)`
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
 // --- parent death: the REAL built computer -----------------------------------
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const COMPUTER_DIR = path.resolve(HERE, '../../..', 'computer')
 const COMPUTER_BIN = path.join(COMPUTER_DIR, 'dist', 'bin.cjs')
+/** The parent watch the computer bundles. Shared with the hub, so it lives outside computer/src. */
+const PLATFORM_SRC = path.resolve(HERE, '../../../..', 'shared/platform/src')
 const SUPERVISOR_MODULE = path.join(HERE, 'local-computer-supervisor.ts')
 /** Must cover the computer's own SUPERVISED_STOP_DEADLINE_MS (5s) plus boot + reap. */
 const REAL_EXIT_BUDGET_MS = 12_000
@@ -447,7 +548,8 @@ function ensureComputerBuilt(): void {
   if (computerBuildChecked) return
   const stale =
     !fs.existsSync(COMPUTER_BIN) ||
-    newestMtime(path.join(COMPUTER_DIR, 'src')) > fs.statSync(COMPUTER_BIN).mtimeMs
+    Math.max(newestMtime(path.join(COMPUTER_DIR, 'src')), newestMtime(PLATFORM_SRC)) >
+      fs.statSync(COMPUTER_BIN).mtimeMs
   if (stale) {
     console.log('  … building the computer bundle (missing or older than its src)')
     execFileSync('node', ['build.mjs'], { cwd: COMPUTER_DIR, stdio: 'inherit' })
@@ -718,7 +820,7 @@ test('parent-death: a SIGKILLed app takes its supervised computer with it, clean
 
 test('parent-death: an app that quits without waiting cannot orphan a computer whose stop hangs', async () => {
   // The reported orphan, end to end: the app SIGTERMs its computer and exits
-  // before the 3s SIGKILL escalation; the computer's stop never lets its loop
+  // before the supervisor's SIGKILL escalation; the computer's stop never lets its loop
   // drain (a leaked handle). Nothing is left to SIGKILL it — it must end itself.
   const run = await startRealComputer({ parent: 'supervisor', supervised: true, leak: true })
   try {

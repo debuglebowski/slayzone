@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
+import { createChildReaper } from './child-reaper'
 
 /**
  * Supervises a co-located @slayzone/computer subprocess (hub/computer split, wave 2B).
@@ -34,7 +36,14 @@ const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /** Production timing defaults. Overridable via `LocalComputerOpts.timing` (tests). */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000] as const
 const HEALTHY_RESET_MS = 60_000
-const STOP_SIGTERM_GRACE_MS = 3_000
+/**
+ * Grace after SIGTERM before a RESTART escalates to SIGKILL. Shorter than a stop's
+ * (SUPERVISED_STOP_SIGKILL_GRACE_MS) on purpose: the app stays up, so the outgoing
+ * child can be neither orphaned nor left to finish "after the app" — a longer grace
+ * would only delay the replacement the user is waiting for, which cannot start
+ * until the outgoing child is gone (it needs the same computer id).
+ */
+const RESTART_SIGTERM_GRACE_MS = 3_000
 
 /**
  * How much of the child's output to keep for the exit report. The computer owns
@@ -50,8 +59,14 @@ export type LocalComputerTiming = {
   backoffMs?: readonly number[]
   /** Continuous-uptime duration that resets the backoff attempt counter. */
   healthyResetMs?: number
-  /** Grace period after SIGTERM before `stop()` escalates to SIGKILL. */
+  /**
+   * Grace after SIGTERM before `stop()` escalates to SIGKILL. Default
+   * SUPERVISED_STOP_SIGKILL_GRACE_MS: past the child's own stop deadline, so a
+   * graceful stop is never cut short.
+   */
   stopSigtermGraceMs?: number
+  /** Grace after SIGTERM before `restart()` escalates to SIGKILL. Default 3s. */
+  restartSigtermGraceMs?: number
 }
 
 /**
@@ -144,13 +159,15 @@ export type LocalComputerHandle = {
    */
   suspendRestarts: () => void
   /**
-   * Reap every computer this supervisor spawned: SIGTERM, then SIGKILL after the
-   * grace period. Resolves only once each is GONE — including one an in-flight
-   * `restart()` was replacing — so a quit that awaits it cannot exit under a live
-   * computer. Idempotent: every call returns the same reap.
+   * Reap every computer this supervisor spawned: SIGTERM, then SIGKILL only after
+   * the computer's own stop deadline (SUPERVISED_STOP_SIGKILL_GRACE_MS), so a
+   * graceful stop is never cut short. Resolves only once each is GONE — including
+   * one an in-flight `restart()` was replacing (that kill, and its shorter grace,
+   * is joined) — so a quit that awaits it cannot exit under a live computer.
+   * Idempotent: every call returns the same reap.
    *
    * Never resolves early, so an app quit must bound its wait (see
-   * lifecycle/quit-local-computer.ts): a process stuck in uninterruptible sleep
+   * lifecycle/quit-reap-child.ts): a process stuck in uninterruptible sleep
    * survives even SIGKILL.
    */
   stop: () => Promise<void>
@@ -159,17 +176,17 @@ export type LocalComputerHandle = {
 export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle {
   const backoffMs = opts.timing?.backoffMs ?? BACKOFF_MS
   const healthyResetMs = opts.timing?.healthyResetMs ?? HEALTHY_RESET_MS
-  const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? STOP_SIGTERM_GRACE_MS
+  const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? SUPERVISED_STOP_SIGKILL_GRACE_MS
+  const restartSigtermGraceMs = opts.timing?.restartSigtermGraceMs ?? RESTART_SIGTERM_GRACE_MS
 
   let child: ChildProcess | null = null
   /**
    * Every computer process not yet exited — `child`, plus one a `restart()` has
-   * detached and is still killing. `stop()` reaps all of them: the detached one is
-   * exactly the computer an un-awaited kill would orphan.
+   * detached and is still killing — and one shared kill per process (restart, stop,
+   * a second stop). `stop()` reaps all of them: the detached one is exactly the
+   * computer an un-awaited kill would orphan.
    */
-  const live = new Set<ChildProcess>()
-  /** One kill per process, shared by every caller (restart, stop, a second stop). */
-  const kills = new WeakMap<ChildProcess, Promise<void>>()
+  const reaper = createChildReaper()
   /** The reap `stop()` started; every later call returns it. */
   let stopping: Promise<void> | null = null
   /** Set when the computer reports its identity is gone. Suppresses restarts, which
@@ -209,38 +226,6 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     }
   }
 
-  /**
-   * SIGTERM, escalating to SIGKILL after the grace period. Resolves when gone.
-   * Memoized per process: a second caller joins the kill already under way rather
-   * than resolving early or restarting the grace period.
-   */
-  const killChild = (proc: ChildProcess): Promise<void> => {
-    const pending = kills.get(proc)
-    if (pending) return pending
-    const kill = new Promise<void>((resolve) => {
-      // Already dead (its `exit` fired but the handler hasn't run yet), or never
-      // started (spawn failed: no pid, `error` instead of `exit`) — no `exit`
-      // event is coming, so waiting for one would hang forever.
-      if (proc.exitCode !== null || proc.signalCode !== null || proc.pid === undefined) {
-        return resolve()
-      }
-      const killTimer = setTimeout(() => {
-        try {
-          proc.kill('SIGKILL')
-        } catch {
-          /* already gone */
-        }
-      }, stopSigtermGraceMs)
-      proc.once('exit', () => {
-        clearTimeout(killTimer)
-        resolve()
-      })
-      proc.kill('SIGTERM')
-    })
-    kills.set(proc, kill)
-    return kill
-  }
-
   /** The scheduling decision, so `onExit` can report it without re-deriving it. */
   type RestartDecision = { restartAttempt: number | null; restartDelayMs: number | null }
   const NO_RESTART: RestartDecision = { restartAttempt: null, restartDelayMs: null }
@@ -274,9 +259,9 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   function spawnChild(): void {
     if (stopped || restartsSuspended) return
     // stdin MUST stay a pipe that nothing writes to or closes: the computer reads
-    // its EOF as "the app died" (computer parent-watch.ts — alongside an EPIPE on
-    // stdout/stderr and a ppid poll) and stops itself, which is what ends it when
-    // the app crashes or is SIGKILLed with no quit path to reap it.
+    // its EOF as "the app died" (@slayzone/platform/parent-watch — alongside an
+    // EPIPE on stdout/stderr and a ppid poll) and stops itself, which is what ends
+    // it when the app crashes or is SIGKILLed with no quit path to reap it.
     const proc = spawn(opts.execPath, [opts.scriptPath], {
       env: {
         ...opts.env,
@@ -287,7 +272,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       stdio: ['pipe', 'pipe', 'pipe']
     })
     child = proc
-    live.add(proc)
+    reaper.track(proc)
     const spawnedAt = Date.now()
     // Scoped to THIS child: a fresh spawn must not inherit the corpse's output.
     const outputTail: string[] = []
@@ -316,9 +301,6 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
 
     proc.on('error', (err) => {
       opts.logger(`[local-computer] spawn error: ${String(err)}`)
-      // A failed spawn never emits `exit`. (A failed kill also lands here; that
-      // process still exits later, and its `exit` handler drops it then.)
-      if (proc.pid === undefined) live.delete(proc)
       if (child === proc) {
         child = null
         if (healthyTimer) clearTimeout(healthyTimer)
@@ -326,7 +308,6 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       }
     })
     proc.on('exit', (code, signal) => {
-      live.delete(proc)
       if (child !== proc) return
       // A computer that needs re-enrolling will NEVER reconnect by restarting: the hub
       // has forgotten its identity, and only an operator enrolling it again fixes
@@ -383,7 +364,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     child = null
     if (proc) {
       opts.logger(`[local-computer] restart requested — stopping pid=${proc.pid}`)
-      await killChild(proc)
+      await reaper.kill(proc, restartSigtermGraceMs)
     } else {
       opts.logger('[local-computer] start requested — no computer was running')
     }
@@ -416,10 +397,10 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       clearTimers()
       child = null
       // Reaps the outgoing computer of a mid-flight restart too (it detached it
-      // from `child`, not from `live`); the `stopped` flag cancels its respawn.
+      // from `child`, not from the reaper); the `stopped` flag cancels its respawn.
       // The restart itself is deliberately NOT awaited: its re-mint can retry for
       // tens of seconds, and quit must not block on that.
-      stopping = Promise.all([...live].map(killChild)).then(() => undefined)
+      stopping = reaper.killAll(stopSigtermGraceMs)
       return stopping
     }
   }

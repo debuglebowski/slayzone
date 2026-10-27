@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { watchParent, type ParentDeathReason } from './parent-watch'
 
 /**
- * Unit tests for the supervised computer's parent-death detection. The real
- * process-level behaviour (a SIGKILLed app takes its computer with it) is proven
- * end to end in packages/apps/app/src/main/local-computer-supervisor.test.ts;
- * these pin each signal in isolation, including the ones a single OS cannot show
- * (Windows never reparents, so only the liveness probe and the pipe see it there).
+ * Unit tests for the parent-death detection of a supervised hub or computer. The
+ * real process-level behaviour (a SIGKILLed app takes its hub and its computer with
+ * it) is proven end to end against each built bundle in
+ * packages/apps/app/src/main/sidecar-server-supervisor.test.ts and
+ * local-computer-supervisor.test.ts; these pin each signal in isolation, including
+ * the ones a single OS cannot show (Windows never reparents, so only the liveness
+ * probe and the pipe see it there).
  */
 
 const APP_PID = 4242
@@ -75,14 +77,15 @@ describe('watchParent — the stdin pipe', () => {
 
   it('never holds the event loop open on stdin', () => {
     const h = harness()
-    // Unreferenced: a computer whose dialer gave up must still exit on its own
-    // (exit code 1 tells the supervisor), not idle forever on a pipe nobody writes.
+    // Unreferenced: a child that is done must still exit on its own (a computer
+    // whose dialer gave up reports it through its exit code), not idle forever on a
+    // pipe nobody writes.
     expect(h.stdin.unref).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('watchParent — the parent poll', () => {
-  it('reports parent death when the computer is reparented (POSIX orphan)', () => {
+  it('reports parent death when the child is reparented (POSIX orphan)', () => {
     const h = harness()
     vi.advanceTimersByTime(1000)
     expect(h.reasons).toEqual([])
@@ -106,7 +109,7 @@ describe('watchParent — the parent poll', () => {
   })
 
   it('treats a POSIX parent of pid 1 at start as already orphaned', () => {
-    // The app died before the computer armed its watch; init/launchd adopted it.
+    // The app died before the child armed its watch; init/launchd adopted it.
     const h = harness({ ppid: 1 })
     expect(h.reasons).toEqual(['parent-reparented'])
   })
@@ -121,8 +124,8 @@ describe('watchParent — the parent poll', () => {
 describe('watchParent — the output pipes', () => {
   it('reports parent death on EPIPE from stdout, and survives it', () => {
     const h = harness()
-    // No listener = an uncaught exception that kills the computer mid-teardown,
-    // before its agent ptys are disposed.
+    // No listener = an uncaught exception that kills the child mid-teardown (a
+    // computer before its agent ptys are disposed, a hub before its stop began).
     expect(() => h.stdout.emit('error', brokenPipe())).not.toThrow()
     expect(h.reasons).toEqual(['parent-output-closed'])
   })

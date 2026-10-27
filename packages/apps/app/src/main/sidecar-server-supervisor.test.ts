@@ -8,7 +8,14 @@
  *  - a 60s healthy streak resets the backoff attempt counter
  *  - a ready child that exits respawns immediately (no backoff, no attempt++)
  *  - boot-timeout kills a child that never reports healthy
+ *  - stop() resolves only once the hub is GONE — every caller, and including a
+ *    hub a restart was replacing — so an app quit that awaits it cannot exit
+ *    under a live hub
  *  - parent-death: the REAL built side-car self-exits when its stdin closes
+ *  - parent-death against the REAL built hub (rebuilt on demand) under a fake app:
+ *    a supervised hub never outlives its app — not when the app is SIGKILLed, not
+ *    when it quits without waiting, not when a client connection keeps the hub's
+ *    stop from finishing — while a standalone hub ignores its parent entirely
  *
  * The supervisor logic is driven against a controllable fake side-car script
  * so backoff timing + permanent failure are deterministic and fast. Timing
@@ -20,13 +27,16 @@
  *   ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm \
  *     packages/apps/app/src/main/sidecar-server-supervisor.test.ts
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import http from 'node:http'
 import * as fs from 'node:fs'
+import * as net from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
+import { SUPERVISED_STOP_DEADLINE_MS } from '@slayzone/platform/parent-watch'
+import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child.js'
 import {
   startSidecarServer,
   type SidecarServerHandle,
@@ -118,6 +128,16 @@ function crash(why) {
   process.stderr.write('fake-sidecar crash attempt=' + attempt + ' why=' + why + '\\n')
   process.exit(1)
 }
+
+// A hub whose stop never finishes (the orphan class: a client connection that keeps
+// the hub's HTTP server from closing), which only SIGKILL ends.
+if (process.env.FAKE_IGNORE_SIGTERM === '1') process.on('SIGTERM', function () {})
+// A hub whose graceful stop takes this long (closing its DB, flushing diagnostics).
+const stopMs = Number(process.env.FAKE_STOP_MS || '0')
+if (stopMs > 0) process.on('SIGTERM', function () { setTimeout(function () { process.exit(0) }, stopMs) })
+// How it ended: a code when it exited by itself, nothing when it was SIGKILLed.
+const exitFile = process.env.FAKE_EXIT_FILE || ''
+if (exitFile) process.on('exit', function (code) { fs.writeFileSync(exitFile, String(code)) })
 
 if (crashAlways) crash('crash-always')
 if (crashFirst > 0 && attempt <= crashFirst) crash('crash-first')
@@ -569,13 +589,704 @@ test('suspendRestarts: a hub that dies during app quit stays down', async () => 
   }
 })
 
-test('parent-death: the real built side-car self-exits when stdin closes', async () => {
-  const here = path.dirname(fileURLToPath(import.meta.url))
-  const binJs = path.resolve(here, '../../..', 'hub/dist/bin.cjs')
-  if (!fs.existsSync(binJs)) {
-    console.log(`  ⊘ skipped — ${binJs} not built (run pnpm build first)`)
+// --- quit: stop() resolves only once the hub is gone --------------------------
+
+/**
+ * True once `pid` no longer runs. A zombie counts as gone: an orphan that exited
+ * but has not been reaped by its new parent yet is not a running hub.
+ */
+function pidGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ESRCH'
+  }
+  try {
+    const stat = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
+    return stat.trim().startsWith('Z')
+  } catch {
+    return true // ps exits non-zero for a pid it cannot find
+  }
+}
+
+test('stop: resolves only once the hub is gone, SIGKILLing one that ignores SIGTERM', async () => {
+  const dir = mkTmp()
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_IGNORE_SIGTERM: '1' },
+    { healthPollIntervalMs: 40, stopSigtermGraceMs: 300 }
+  )
+  try {
+    await handle.waitForReady()
+    const pid = handle.getStatus().pid!
+    const started = Date.now()
+    await handle.stop()
+    assert(pidGone(pid), 'the hub is gone when stop() resolves')
+    assert(Date.now() - started >= 250, 'SIGTERM got its grace period before the SIGKILL')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('stop: a second caller waits for the same reap instead of returning early', async () => {
+  // will-quit and the quit watchdog can both reach stop(). Whichever comes second
+  // must not read "already stopping" as "gone" and let the app exit under a live hub.
+  const dir = mkTmp()
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_IGNORE_SIGTERM: '1' },
+    { healthPollIntervalMs: 40, stopSigtermGraceMs: 300 }
+  )
+  await handle.waitForReady()
+  const pid = handle.getStatus().pid!
+  const first = handle.stop()
+  await handle.stop()
+  assert(pidGone(pid), 'the second stop() resolved only after the hub was gone')
+  await first
+})
+
+test('stop: during a restart, reaps the hub the restart was replacing and spawns none', async () => {
+  const dir = mkTmp()
+  const { handle, ctx } = makeHarness(
+    dir,
+    { FAKE_IGNORE_SIGTERM: '1' },
+    { healthPollIntervalMs: 40, stopSigtermGraceMs: 300, restartSigtermGraceMs: 300 }
+  )
+  await handle.waitForReady()
+  const outgoing = handle.getStatus().pid!
+  const restarting = handle.restart()
+  await handle.stop()
+  assert(pidGone(outgoing), 'the outgoing hub is gone when stop() resolves')
+  await restarting
+  await delay(200)
+  assertEq(handle.getStatus().pid, null, 'the restart spawned no replacement after the stop')
+  assertEq(ctx.spawnTimes.length, 1, 'no second hub was ever spawned')
+})
+
+// --- quit: a graceful stop is never cut shorter than the hub's own deadline ----
+// Production timing on purpose (no stopSigtermGraceMs override): what is pinned is
+// how the real grace and the quit's real wait line up with the hub's own deadline.
+
+test('quit: a hub whose stop takes ~4s exits by itself, cleanly — never SIGKILLed early', async () => {
+  // Past the 3s grace this used to be SIGKILLed at, inside the hub's own 5s deadline:
+  // its DB close and diagnostics flush must get to run.
+  const dir = mkTmp()
+  const exitFile = path.join(dir, 'exit')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_STOP_MS: '4000', FAKE_EXIT_FILE: exitFile },
+    { healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    const started = Date.now()
+    const result = await reapChildForQuit({
+      stop: () => handle.stop(),
+      timeoutMs: QUIT_CHILD_REAP_MS
+    })
+    assertEq(result, 'stopped', 'the quit saw the hub gone')
+    assert(Date.now() - started >= 3_900, 'it really took its ~4s')
+    assertEq(
+      fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8') : null,
+      '0',
+      'exit 0, not SIGKILL'
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('quit: a stuck hub is still SIGKILLed — after its own deadline, inside the quit’s wait', async () => {
+  const dir = mkTmp()
+  const exitFile = path.join(dir, 'exit')
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_IGNORE_SIGTERM: '1', FAKE_EXIT_FILE: exitFile },
+    { healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    const pid = handle.getStatus().pid!
+    const started = Date.now()
+    const result = await reapChildForQuit({
+      stop: () => handle.stop(),
+      timeoutMs: QUIT_CHILD_REAP_MS
+    })
+    const elapsed = Date.now() - started
+    assertEq(result, 'stopped', `the quit saw the hub gone, not a timeout (${elapsed}ms)`)
+    assert(pidGone(pid), 'the stuck hub is gone')
+    assertEq(fs.existsSync(exitFile), false, 'it was SIGKILLed: no exit of its own')
+    assert(elapsed >= SUPERVISED_STOP_DEADLINE_MS, `not before its own deadline (${elapsed}ms)`)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('restart: keeps its short grace — the replacement waits on the outgoing hub', async () => {
+  // The app stays up, so nothing can be orphaned and nothing finishes "after the
+  // app": a slow stop only delays the hub the user is waiting for (it needs the
+  // same port). The 3s grace is unchanged.
+  const dir = mkTmp()
+  // Only the stop is shortened (the cleanup below); the restart keeps production timing.
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_IGNORE_SIGTERM: '1' },
+    { healthPollIntervalMs: 40, stopSigtermGraceMs: 300 }
+  )
+  try {
+    await handle.waitForReady()
+    const started = Date.now()
+    await handle.restart()
+    const elapsed = Date.now() - started
+    assert(
+      elapsed >= 2_900 && elapsed < SUPERVISED_STOP_DEADLINE_MS,
+      `SIGKILL at 3s (${elapsed}ms)`
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
+// --- parent death: the REAL built hub -----------------------------------------
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const HUB_DIR = path.resolve(HERE, '../../..', 'hub')
+const HUB_BIN = path.join(HUB_DIR, 'dist', 'bin.cjs')
+/** The parent watch the hub bundles. Shared with the computer, so it lives outside hub/src. */
+const PLATFORM_SRC = path.resolve(HERE, '../../../..', 'shared/platform/src')
+const SUPERVISOR_MODULE = path.join(HERE, 'sidecar-server-supervisor.ts')
+const QUIT_REAP_MODULE = path.join(HERE, 'lifecycle', 'quit-reap-child.ts')
+/** Must cover the hub's own supervised stop deadline (5s) plus boot + reap. */
+const REAL_EXIT_BUDGET_MS = 12_000
+/**
+ * Written by the hub's bin.ts in the same synchronous run that installs its signal
+ * handlers and its parent watch, so a hub that has printed it is fully up.
+ */
+const HUB_LISTENING = /\[slayzone-server\] listening on http:\/\/127\.0\.0\.1:(\d+)/
+
+function newestMtime(dir: string): number {
+  let newest = 0
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    newest = Math.max(newest, entry.isDirectory() ? newestMtime(full) : fs.statSync(full).mtimeMs)
+  }
+  return newest
+}
+
+/** The supervisor runs dist/bin.cjs, so that is what is tested: (re)built when older than src. */
+let hubBuildChecked = false
+function ensureHubBuilt(): void {
+  if (hubBuildChecked) return
+  const stale =
+    !fs.existsSync(HUB_BIN) ||
+    Math.max(newestMtime(path.join(HUB_DIR, 'src')), newestMtime(PLATFORM_SRC)) >
+      fs.statSync(HUB_BIN).mtimeMs
+  if (stale) {
+    console.log('  … building the hub bundle (missing or older than its src)')
+    execFileSync('node', ['build.mjs'], { cwd: HUB_DIR, stdio: 'inherit' })
+  }
+  hubBuildChecked = true
+}
+
+/**
+ * Preloaded into the real hub (NODE_OPTIONS=--require). Once its app is dead
+ * nothing reads the hub's stdout/stderr, so both are mirrored to a file; and the
+ * exit code is recorded: 0 = a clean stop, anything else = a crash or a forced exit.
+ */
+const HUB_PROBE = `'use strict'
+const fs = require('node:fs')
+for (const stream of [process.stdout, process.stderr]) {
+  const write = stream.write.bind(stream)
+  stream.write = function (chunk, ...rest) {
+    try { fs.appendFileSync(process.env.PROBE_LOG_FILE, chunk) } catch (e) {}
+    return write(chunk, ...rest)
+  }
+}
+process.on('exit', function (code) {
+  try { fs.writeFileSync(process.env.PROBE_EXIT_FILE, String(code)) } catch (e) {}
+})
+// Observes only (does not handle): a crash's stack goes to the dead app's stderr.
+process.on('uncaughtExceptionMonitor', function (err) {
+  try { fs.appendFileSync(process.env.PROBE_LOG_FILE, '[probe] uncaught: ' + (err && err.stack || err) + '\\n') } catch (e) {}
+})
+`
+
+/**
+ * The desktop app, reduced to its supervisor: the REAL `startSidecarServer`, so the
+ * hub is spawned exactly as the app spawns it. On SIGTERM it "quits" one of two ways:
+ *  - FAKE_APP_QUIT=forget (default): the way the app used to — fire-and-forget
+ *    `stop()`, then exit before the supervisor's SIGTERM→SIGKILL escalation lands;
+ *  - FAKE_APP_QUIT=await: the way it does now — the REAL quit reap (bounded wait).
+ */
+const FAKE_APP = `import { startSidecarServer } from '${pathToFileURL(SUPERVISOR_MODULE).href}'
+import { QUIT_CHILD_REAP_MS, reapChildForQuit } from '${pathToFileURL(QUIT_REAP_MODULE).href}'
+const handle = startSidecarServer({
+  execPath: process.execPath,
+  scriptPath: process.env.FAKE_APP_HUB_BIN as string,
+  env: JSON.parse(process.env.FAKE_APP_HUB_ENV as string),
+  dbPath: 'unused',
+  host: '127.0.0.1',
+  logger: (line: string) => process.stdout.write(line + '\\n'),
+  onReady: () => {},
+  onPermanentFailure: () => {}
+})
+process.on('SIGTERM', () => {
+  handle.suspendRestarts()
+  if (process.env.FAKE_APP_QUIT === 'await') {
+    void reapChildForQuit({ stop: () => handle.stop(), timeoutMs: QUIT_CHILD_REAP_MS }).then((r) => {
+      process.stdout.write('[fake-app] quit: ' + r + '\\n')
+      process.exit(0)
+    })
     return
   }
+  void handle.stop()
+  setTimeout(() => process.exit(0), 500)
+})
+setInterval(() => {}, 1 << 30)
+`
+
+/**
+ * A bare parent that spawns the hub with a chosen stdio shape — for the cases the
+ * real supervisor never produces: a standalone hub logging to a file, and a stdin
+ * whose other end someone else holds (FAKE_PARENT_STDIN_PORT: a socket to a server
+ * in the test process), which the parent's death does not close — only the ppid
+ * poll can tell.
+ */
+const FAKE_PARENT = `'use strict'
+const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const net = require('node:net')
+const out = fs.openSync(process.env.FAKE_PARENT_OUT, 'a')
+function start(stdin) {
+  const c = spawn(process.execPath, [process.env.FAKE_APP_HUB_BIN], {
+    env: Object.assign(JSON.parse(process.env.FAKE_APP_HUB_ENV), { ELECTRON_RUN_AS_NODE: '1' }),
+    stdio: [stdin, out, out]
+  })
+  process.stdout.write('[fake-parent] spawned pid=' + c.pid + '\\n')
+}
+const port = Number(process.env.FAKE_PARENT_STDIN_PORT || '0')
+if (port) {
+  const sock = net.connect(port, '127.0.0.1', function () { start(sock) })
+} else {
+  start('pipe')
+}
+setInterval(function () {}, 1 << 30)
+`
+
+/** A server that accepts connections and holds them open: the far end of a hub's stdin. */
+async function startHoldingServer(): Promise<{ port: number; close: () => void }> {
+  const sockets: net.Socket[] = []
+  const server = net.createServer((s) => {
+    s.on('error', () => {})
+    sockets.push(s)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  return {
+    port,
+    close: () => {
+      for (const s of sockets) s.destroy()
+      server.close()
+    }
+  }
+}
+
+/**
+ * A client that stays connected to the hub's `/trpc` WebSocket and never closes —
+ * a `slay` subscription, a federated hub, a web-shell tab. The hub's stop closes its
+ * HTTP server, whose close waits for every connection: this one keeps it waiting
+ * for as long as the client lives, so the stop never finishes.
+ */
+async function holdHubConnection(port: number): Promise<net.Socket> {
+  const socket = net.connect(port, '127.0.0.1')
+  socket.on('error', () => {})
+  let response = ''
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`no WS upgrade from the hub — got: ${response}`)),
+      5_000
+    )
+    socket.on('data', (c: Buffer) => {
+      response += c.toString('latin1')
+      if (response.includes('\r\n\r\n')) {
+        clearTimeout(timer)
+        if (response.startsWith('HTTP/1.1 101')) resolve()
+        else reject(new Error(`hub refused the WS upgrade: ${response}`))
+      }
+    })
+    socket.write(
+      'GET /trpc HTTP/1.1\r\n' +
+        `Host: 127.0.0.1:${port}\r\n` +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+        'Sec-WebSocket-Version: 13\r\n\r\n'
+    )
+  })
+  return socket
+}
+
+/** Every SLAYZONE_ and ELECTRON_ var stripped: a supervised test runner leaks the real root. */
+function scrubbedEnv(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v == null || /^(SLAYZONE_|ELECTRON_)/.test(k) || k === 'NODE_OPTIONS') continue
+    out[k] = v
+  }
+  return out
+}
+
+type RealHubRun = {
+  /** The process the hub believes is its app. */
+  parent: ChildProcess
+  hubPid: number
+  hubPort: number
+  /** The parent's own output so far. */
+  parentOutput: () => string
+  /** The hub's stdout + stderr so far (mirrored by the probe). */
+  log: () => string
+  /** The hub's exit code, once it has exited on its own (null otherwise). */
+  exitCode: () => string | null
+  /** Open a `/trpc` client connection to the hub and hold it until cleanup. */
+  holdConnection: () => Promise<void>
+  /** Close every connection {@link holdConnection} opened. */
+  releaseConnections: () => void
+  cleanup: () => void
+}
+
+async function startRealHub(opts: {
+  parent: 'supervisor' | 'stdin-held-elsewhere' | 'standalone'
+  supervised: boolean
+  /** FAKE_APP_QUIT for a 'supervisor' parent. */
+  quit?: 'forget' | 'await'
+}): Promise<RealHubRun> {
+  ensureHubBuilt()
+  const dir = mkTmp()
+  fs.mkdirSync(path.join(dir, 'home'))
+  fs.mkdirSync(path.join(dir, 'root'))
+  const probe = path.join(dir, 'probe.cjs')
+  fs.writeFileSync(probe, HUB_PROBE)
+  const logFile = path.join(dir, 'hub.log')
+  const exitFile = path.join(dir, 'hub.exit')
+  const stdinHolder = opts.parent === 'stdin-held-elsewhere' ? await startHoldingServer() : null
+  const hubEnv: Record<string, string> = {
+    ...scrubbedEnv(),
+    // Isolated: the hub's DB, logs and state all live in `dir`.
+    HOME: path.join(dir, 'home'),
+    SLAYZONE_ROOT: path.join(dir, 'root'),
+    SLAYZONE_NONINTERACTIVE: '1',
+    // What the supervisor sets for a supervised hub; a bare parent sets it here.
+    ...(opts.parent === 'supervisor'
+      ? {}
+      : {
+          SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+          ...(opts.supervised
+            ? { SLAYZONE_SUPERVISED: '1', SLAYZONE_HUB_REQUIRE_LOGIN: '0' }
+            : { SLAYZONE_HUB_AUTH_SECRET: 'parent-death-test-secret-at-least-32-chars' })
+        }),
+    NODE_OPTIONS: `--require ${probe}`,
+    PROBE_LOG_FILE: logFile,
+    PROBE_EXIT_FILE: exitFile
+  }
+  const parentEnv: Record<string, string> = {
+    ...scrubbedEnv(),
+    ELECTRON_RUN_AS_NODE: '1',
+    FAKE_APP_HUB_BIN: HUB_BIN,
+    FAKE_APP_HUB_ENV: JSON.stringify(hubEnv)
+  }
+  let parent: ChildProcess
+  if (opts.parent === 'supervisor') {
+    const script = path.join(dir, 'fake-app.mts')
+    fs.writeFileSync(script, FAKE_APP)
+    parent = spawn(process.execPath, ['--import', import.meta.resolve('tsx/esm'), script], {
+      env: { ...parentEnv, FAKE_APP_QUIT: opts.quit ?? 'forget' },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+  } else {
+    const script = path.join(dir, 'fake-parent.cjs')
+    fs.writeFileSync(script, FAKE_PARENT)
+    parent = spawn(process.execPath, [script], {
+      env: {
+        ...parentEnv,
+        FAKE_PARENT_OUT: path.join(dir, 'hub.out'),
+        ...(stdinHolder ? { FAKE_PARENT_STDIN_PORT: String(stdinHolder.port) } : {})
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+  }
+  let parentOut = ''
+  parent.stdout?.on('data', (c: Buffer) => (parentOut += c.toString()))
+  parent.stderr?.on('data', (c: Buffer) => (parentOut += c.toString()))
+
+  const read = (file: string): string => {
+    try {
+      return fs.readFileSync(file, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  let hubPid = 0
+  const held: net.Socket[] = []
+  const cleanup = (): void => {
+    for (const pid of [hubPid, parent.pid]) {
+      if (pid && !pidGone(pid)) {
+        try {
+          process.kill(pid, 'SIGKILL')
+        } catch {
+          /* gone */
+        }
+      }
+    }
+    for (const s of held) s.destroy()
+    parent.stdin?.destroy()
+    stdinHolder?.close()
+  }
+  try {
+    await waitFor(
+      () => /spawned pid=\d+/.test(parentOut),
+      20_000,
+      `parent never spawned the hub — output: ${parentOut}`
+    )
+    hubPid = Number(/spawned pid=(\d+)/.exec(parentOut)![1])
+    await waitFor(
+      () => HUB_LISTENING.test(read(logFile)),
+      30_000,
+      `hub never booted — log: ${read(logFile)} ${read(path.join(dir, 'hub.out'))} parent: ${parentOut}`
+    )
+    // Under the supervisor, also wait until it has seen the hub ready, as an app
+    // quit would: until then its `/health` probe may be in flight, and the hub's
+    // stop (its HTTP server close) can wait on that connection past the
+    // supervisor's SIGTERM grace.
+    if (opts.parent === 'supervisor') {
+      await waitFor(
+        () => parentOut.includes('[supervisor] sidecar ready'),
+        20_000,
+        `the supervisor never saw the hub ready — parent: ${parentOut}`
+      )
+    }
+  } catch (err) {
+    cleanup()
+    throw err
+  }
+  const hubPort = Number(HUB_LISTENING.exec(read(logFile))![1])
+  return {
+    parent,
+    hubPid,
+    hubPort,
+    parentOutput: () => parentOut,
+    log: () => read(logFile),
+    exitCode: () => (fs.existsSync(exitFile) ? read(exitFile) : null),
+    holdConnection: async () => {
+      held.push(await holdHubConnection(hubPort))
+    },
+    releaseConnections: () => {
+      for (const s of held.splice(0)) s.destroy()
+    },
+    cleanup
+  }
+}
+
+/** {@link waitFor}, but a timeout carries the hub's log as it is THEN. */
+async function waitForRun(
+  run: RealHubRun,
+  cond: () => boolean,
+  timeoutMs: number,
+  msg: string
+): Promise<void> {
+  await waitFor(cond, timeoutMs, msg).catch((err: unknown) => {
+    throw new Error(`${err instanceof Error ? err.message : String(err)} — log:\n${run.log()}`)
+  })
+}
+
+/** The hub's stop hung, and its own supervised deadline is what ended it. */
+function assertStoppedByItsDeadline(run: RealHubRun): void {
+  assert(run.log().includes('forcing exit'), `the hub forced its own exit — log:\n${run.log()}`)
+  assertEq(run.exitCode(), '1', `a forced exit reports failure — log:\n${run.log()}`)
+}
+
+test('parent-death: a SIGKILLed app takes its supervised hub with it, cleanly', async () => {
+  const run = await startRealHub({ parent: 'supervisor', supervised: true })
+  try {
+    // No false positive while the app lives: longer than one parent poll.
+    await delay(1_500)
+    assert(!pidGone(run.hubPid), 'the hub runs while its app is alive')
+    run.parent.kill('SIGKILL')
+    await waitForRun(
+      run,
+      () => pidGone(run.hubPid),
+      REAL_EXIT_BUDGET_MS,
+      'hub outlived its SIGKILLed app'
+    )
+    // 0, not 1: a clean stop, not a crash on the first write to the dead app's
+    // stdout pipe (nor a forced exit).
+    assertEq(run.exitCode(), '0', `the hub stopped cleanly — log:\n${run.log()}`)
+    assert(
+      /shutting down \(parent-(pipe-closed|output-closed|reparented|exited)\)/.test(run.log()),
+      `the hub said why it stopped — log:\n${run.log()}`
+    )
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: a SIGKILLed app cannot orphan a hub whose stop hangs on a client', async () => {
+  // A client the app's death does not end (a `slay` subscription, a web-shell tab)
+  // keeps the hub's HTTP server — and so its stop — from ever finishing. Nothing
+  // is left to SIGKILL it: it must end itself.
+  const run = await startRealHub({ parent: 'supervisor', supervised: true })
+  try {
+    await run.holdConnection()
+    run.parent.kill('SIGKILL')
+    await waitForRun(
+      run,
+      () => pidGone(run.hubPid),
+      REAL_EXIT_BUDGET_MS,
+      'a stuck hub outlived its SIGKILLed app'
+    )
+    assertStoppedByItsDeadline(run)
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: an app that quits without waiting cannot orphan a hub whose stop hangs', async () => {
+  // The reported orphan, end to end: the app SIGTERMs its hub and exits before the
+  // supervisor's SIGKILL escalation; a held client keeps the hub's stop from finishing.
+  const run = await startRealHub({ parent: 'supervisor', supervised: true, quit: 'forget' })
+  try {
+    await run.holdConnection()
+    run.parent.kill('SIGTERM')
+    await waitForRun(
+      run,
+      () => run.log().includes('shutting down (SIGTERM)'),
+      10_000,
+      "the hub never got the app's SIGTERM"
+    )
+    await waitForRun(
+      run,
+      () => pidGone(run.hubPid),
+      REAL_EXIT_BUDGET_MS,
+      'a stuck hub outlived the app that quit on it'
+    )
+    assertStoppedByItsDeadline(run)
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('quit: an app that awaits the bounded stop exits only once its stuck hub is gone', async () => {
+  // How the app quits now: it waits for the supervisor's stop, so the hub is gone
+  // BEFORE the app exits. A stuck hub ends itself at its own deadline — the
+  // supervisor's SIGKILL waits past it, so it never preempts a stop that could
+  // still finish (or force itself out) in time.
+  const run = await startRealHub({ parent: 'supervisor', supervised: true, quit: 'await' })
+  try {
+    await run.holdConnection()
+    run.parent.kill('SIGTERM')
+    await waitForRun(
+      run,
+      () => run.parentOutput().includes('[fake-app] quit'),
+      15_000,
+      'the app never finished its quit'
+    )
+    assert(
+      run.parentOutput().includes('[fake-app] quit: stopped'),
+      `the quit saw the hub gone — app:\n${run.parentOutput()}`
+    )
+    assert(pidGone(run.hubPid), `the hub was gone by the time the app quit — log:\n${run.log()}`)
+    assertStoppedByItsDeadline(run)
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: a SIGKILLed app is noticed even when stdin is held open elsewhere', async () => {
+  // Only the ppid/liveness poll can see this one: the stdin pipe outlives the app.
+  const run = await startRealHub({ parent: 'stdin-held-elsewhere', supervised: true })
+  try {
+    run.parent.kill('SIGKILL')
+    await waitForRun(
+      run,
+      () => pidGone(run.hubPid),
+      REAL_EXIT_BUDGET_MS,
+      'hub outlived its app with stdin still open'
+    )
+    assert(
+      /shutting down \(parent-(reparented|exited)\)/.test(run.log()),
+      `the parent poll noticed — log:\n${run.log()}`
+    )
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: a standalone hub ignores its parent dying', async () => {
+  // `slay hub`, a launchd/systemd unit, a server: no app owns it, and a closed stdin
+  // or a reparent means nothing. It must keep serving.
+  const run = await startRealHub({ parent: 'standalone', supervised: false })
+  try {
+    run.parent.kill('SIGKILL')
+    await delay(4_000) // several parent polls (1s each)
+    assert(!pidGone(run.hubPid), `a standalone hub stopped — log:\n${run.log()}`)
+    assert(!run.log().includes('shutting down'), 'it never watched its parent')
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('stop: a standalone hub is never cut short by the supervised stop deadline', async () => {
+  // A standalone hub's stop keeps its old meaning: it waits for its clients however
+  // long they take (a graceful drain), then exits cleanly. Only a supervised hub
+  // bounds it — a server has no app whose quit it could outlive.
+  const run = await startRealHub({ parent: 'standalone', supervised: false })
+  try {
+    await run.holdConnection()
+    process.kill(run.hubPid, 'SIGTERM')
+    await waitForRun(
+      run,
+      () => run.log().includes('shutting down (SIGTERM)'),
+      10_000,
+      'the hub never got the SIGTERM'
+    )
+    await delay(6_500) // past the supervised deadline (5s)
+    assert(!pidGone(run.hubPid), `a standalone hub's stop was cut short — log:\n${run.log()}`)
+    assert(!run.log().includes('forcing exit'), 'no forced exit')
+    run.releaseConnections()
+    await waitForRun(run, () => pidGone(run.hubPid), 10_000, 'the drained hub never exited')
+    assertEq(run.exitCode(), '0', `the drained hub exited cleanly — log:\n${run.log()}`)
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('stop: the real supervised hub exits on its own, cleanly, when its app stops it', async () => {
+  // The bounded stop must not change a healthy stop: a SIGTERMed hub exits by itself
+  // (code 0) well inside its own deadline — not by that deadline, nor by a SIGKILL.
+  const run = await startRealHub({ parent: 'supervisor', supervised: true, quit: 'await' })
+  try {
+    const started = Date.now()
+    run.parent.kill('SIGTERM')
+    await waitForRun(
+      run,
+      () => run.parentOutput().includes('[fake-app] quit'),
+      10_000,
+      'the app never finished its quit'
+    )
+    const elapsed = Date.now() - started
+    assertEq(
+      run.exitCode(),
+      '0',
+      `the hub exited by itself, cleanly, ${elapsed}ms after the app's SIGTERM — log:\n${run.log()}\napp:\n${run.parentOutput()}`
+    )
+    assert(elapsed < SUPERVISED_STOP_DEADLINE_MS, `well inside its own deadline (${elapsed}ms)`)
+  } finally {
+    run.cleanup()
+  }
+})
+
+test('parent-death: the real built side-car self-exits when stdin closes', async () => {
+  ensureHubBuilt()
+  const binJs = HUB_BIN
   const dir = mkTmp()
   // Single ROOT for BOTH the seeder and the supervised child: the DB path is
   // DERIVED (`<ROOT>/storage/slayzone.data.sqlite`) and there is no path-pointing env

@@ -1,4 +1,5 @@
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
+import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slayzone-config'
 import { bootRefusalRule } from './boot-rules.js'
@@ -47,6 +48,10 @@ async function maybeInteractiveSetup(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Started by the desktop app (sidecar-server-supervisor.ts), which owns this hub's
+  // env, root and lifetime.
+  const supervised = process.env.SLAYZONE_SUPERVISED === '1'
+
   // Interactive first-run setup (TTY only) — may seed env + write hub.config.json
   // before applyStandaloneHubConfig reads it. No-op when non-interactive / set.
   await maybeInteractiveSetup()
@@ -70,6 +75,22 @@ async function main(): Promise<void> {
     if (shuttingDown) return
     shuttingDown = true
     process.stdout.write(`[slayzone-server] shutting down (${reason})\n`)
+    // Supervised: bounded. A stop that hangs — a client connection the hub's HTTP
+    // server waits on before it closes (a `slay` subscription, a web-shell tab) —
+    // keeps the process alive; once the app is gone nothing else would end it, and
+    // the hub would be orphaned holding the port and the database the next app's
+    // hub needs. While the app lives, its supervisor's SIGKILL comes only after this
+    // deadline (a backstop for a loop too blocked to run it), so the stop gets the
+    // full deadline either way. Unref'd: a clean stop still exits the moment it
+    // completes.
+    if (supervised) {
+      setTimeout(() => {
+        process.stderr.write(
+          `[slayzone-server] still running ${SUPERVISED_STOP_DEADLINE_MS}ms after stop began — forcing exit\n`
+        )
+        process.exit(1)
+      }, SUPERVISED_STOP_DEADLINE_MS).unref()
+    }
     try {
       await handle.stop()
       process.exit(0)
@@ -85,22 +106,12 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'))
 
   // Parent-death detection: when launched by the Electron supervisor, the
-  // side-car self-terminates the instant its parent dies — clean exit OR
-  // kill -9. Standalone runs (SLAYZONE_SUPERVISED unset) skip this so a closed
-  // shell stdin does not kill a manually-run server.
-  if (process.env.SLAYZONE_SUPERVISED === '1') {
-    // (a) stdin pipe: the supervisor holds the write end open. Any parent
-    //     death closes the pipe → 'close'/'end' fires here.
-    process.stdin.on('close', () => void shutdown('parent-pipe-closed'))
-    process.stdin.on('end', () => void shutdown('parent-pipe-closed'))
-    process.stdin.resume()
-    // (b) ppid poll backstop: reparent to init/launchd → ppid becomes 1.
-    const originalPpid = process.ppid
-    setInterval(() => {
-      if (process.ppid === 1 || process.ppid !== originalPpid) {
-        void shutdown('parent-reparented')
-      }
-    }, 2_000).unref()
+  // side-car stops itself once its parent dies — clean exit OR kill -9. See
+  // @slayzone/platform/parent-watch for the signals and why each is needed.
+  // Standalone runs (SLAYZONE_SUPERVISED unset) skip this so a closed shell stdin
+  // does not kill a manually-run server.
+  if (supervised) {
+    watchParent({ onParentDeath: (reason) => void shutdown(reason) })
   }
 }
 

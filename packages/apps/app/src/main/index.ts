@@ -550,7 +550,7 @@ import {
   scanCrashDumps
 } from './lifecycle/sentinel'
 import { drainDiagnosticsForQuit } from './lifecycle/quit-diagnostics'
-import { stopLocalComputerForQuit } from './lifecycle/quit-local-computer'
+import { QUIT_CHILD_REAP_MS, reapChildForQuit } from './lifecycle/quit-reap-child'
 import {
   acquireLockWithSelfHeal,
   lockOutcomeIsAcquired,
@@ -726,11 +726,12 @@ const browserViewManager = new BrowserViewManager()
 let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
 let bridgeCleanup: (() => void) | null = null
-let sidecarCleanup: (() => void) | null = null
+// Side-car (local hub) supervisor. Null in remote mode or before the async spawn
+// runs. Reaped by the quit (see reapSupervisedChildrenForQuit).
 let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHandle | null = null
 // Local-computer supervisor — spawns the co-located computer in local mode. Null
 // in remote mode (no local hub to dial) or before the async spawn runs. Cycled by
-// `app:restart-local-computer`; reaped by the quit (see reapLocalComputerForQuit).
+// `app:restart-local-computer`; reaped by the quit (see reapSupervisedChildrenForQuit).
 let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
@@ -1050,46 +1051,86 @@ const QUIT_DIAGNOSTICS_DRAIN_MS = 2_000
 let willQuitTailStarted = false
 /** Set on the first `before-quit`; never cleared (a started quit always ends the process). */
 let quitRequested = false
-/**
- * Deadline for reaping the local computer on quit (see stopLocalComputerForQuit).
- * Covers the supervisor's 3s SIGTERM grace plus the SIGKILL reap, with headroom.
+/*
+ * Quit worst cases. Every term is a bound, derived where it is defined:
+ *  - will-quit tail: reap the hub and the computer in parallel, ≤ QUIT_CHILD_REAP_MS
+ *    (7s: each child's own 5s stop deadline, its supervisor's SIGKILL at 6s, the
+ *    kill landing by 7s), THEN drain diagnostics, ≤ QUIT_DIAGNOSTICS_DRAIN_MS (2s)
+ *    — 9s in all. A child that stops cleanly ends its reap as soon as it exits.
+ *  - quit that never reaches will-quit: QUIT_WATCHDOG_MS (15s), then the same reap
+ *    and drain — 24s in all.
  */
-const QUIT_LOCAL_COMPUTER_STOP_MS = 5_000
 
 /**
- * Stop the local computer and WAIT for it, bounded — before main exits.
- *
- * Every agent pty is a child of the computer, so a computer that outlives the app
- * keeps them all running, and holds the computer id the next app's computer needs
- * (each takeover kills every agent). Fired and forgotten, the stop lost the race
- * with the process exit, and a computer that did not exit on SIGTERM was orphaned.
- * A deadline miss is recorded: it is the one quit that can still leave a computer
- * behind (until its own parent watch notices the app is gone).
+ * Reap one supervised child and WAIT for it, bounded. A deadline miss is recorded:
+ * it is the one quit that can still leave the child behind (until its own parent
+ * watch notices the app is gone).
  */
-async function reapLocalComputerForQuit(): Promise<void> {
-  const handle = localComputerHandle
-  // Read before the stop, which detaches the child.
-  const pid = handle?.getPid() ?? null
-  const result = await stopLocalComputerForQuit({
+async function reapSupervisedChildForQuit(child: {
+  /** Lower-case, for the console line and the event message: 'local hub'. */
+  label: string
+  /** The diagnostics event a missed reap records. */
+  event: string
+  handle: { stop: () => Promise<void> } | null
+  /** Read before the stop, which detaches the child. */
+  pid: number | null
+}): Promise<void> {
+  const { handle } = child
+  const result = await reapChildForQuit({
     stop: handle ? () => handle.stop() : null,
-    timeoutMs: QUIT_LOCAL_COMPUTER_STOP_MS
+    timeoutMs: QUIT_CHILD_REAP_MS
   })
   if (result !== 'timed-out' && result !== 'failed') return
-  console.error(`[main] local computer not reaped on quit: ${result}`)
+  console.error(`[main] ${child.label} not reaped on quit: ${result}`)
   try {
     recordDiagnosticEvent({
       level: 'warn',
       source: 'main',
-      event: 'local_computer.quit_reap_failed',
+      event: child.event,
       message:
         result === 'timed-out'
-          ? `Local computer still running ${QUIT_LOCAL_COMPUTER_STOP_MS}ms into the quit; the app exited without it.`
-          : 'Stopping the local computer failed during quit; the app exited without it.',
-      payload: { result, pid }
+          ? `${child.label[0].toUpperCase()}${child.label.slice(1)} still running ${QUIT_CHILD_REAP_MS}ms into the quit; the app exited without it.`
+          : `Stopping the ${child.label} failed during quit; the app exited without it.`,
+      payload: { result, pid: child.pid }
     })
   } catch {
     /* diagnostics unavailable — the console error above still records it */
   }
+}
+
+/**
+ * Stop the app's supervised children — the local hub and the local computer — and
+ * WAIT for both, bounded, before main exits.
+ *
+ * Fired and forgotten, a stop lost the race with the process exit: Electron main
+ * was gone before the supervisor's SIGTERM→SIGKILL escalation could land, and a
+ * child that did not exit on SIGTERM was orphaned. A computer that outlives the app
+ * keeps every agent pty (each is its child) running and holds the computer id the
+ * next app's computer needs (each takeover kills every agent); a hub holds the
+ * fixed port and the database the next app's hub needs.
+ *
+ * In parallel, so the quit waits for the slower of the two, not their sum. The
+ * hub is signalled first, as it was when its stop was fired and forgotten: its
+ * stop starts with `beginTerminalShutdown`, which keeps the session exits the
+ * computer's stop causes from being recorded as agents the user stopped.
+ */
+async function reapSupervisedChildrenForQuit(): Promise<void> {
+  const hub = sidecarServerHandle
+  const computer = localComputerHandle
+  await Promise.all([
+    reapSupervisedChildForQuit({
+      label: 'local hub',
+      event: 'sidecar.quit_reap_failed',
+      handle: hub,
+      pid: hub?.getStatus().pid ?? null
+    }),
+    reapSupervisedChildForQuit({
+      label: 'local computer',
+      event: 'local_computer.quit_reap_failed',
+      handle: computer,
+      pid: computer?.getPid() ?? null
+    })
+  ])
 }
 
 type OAuthCallbackPayload = { code?: string; error?: string }
@@ -2687,7 +2728,6 @@ app
             })
             sidecarServerHandle = supervisor
             resolveSidecarHandle(supervisor)
-            sidecarCleanup = () => void supervisor.stop()
             logBoot('sidecar server supervisor started')
           })
           .catch((err) => {
@@ -4633,13 +4673,11 @@ app.on('before-quit', (event) => {
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
-      // app.exit skips will-quit, so reap the children here. The side-car's stop
-      // SIGTERMs synchronously (it also exits on its own once this process is
-      // gone). Reap the computer (bounded), THEN flush (bounded) — as will-quit
-      // does — so a missed reap's local_computer.quit_reap_failed event is still
-      // in the queue the flush writes, along with the watchdog event above.
-      sidecarCleanup?.()
-      void reapLocalComputerForQuit()
+      // app.exit skips will-quit, so reap the children here. Reap the hub and the
+      // computer (bounded), THEN flush (bounded) — as will-quit does — so a missed
+      // reap's *.quit_reap_failed event is still in the queue the flush writes,
+      // along with the watchdog event above.
+      void reapSupervisedChildrenForQuit()
         .then(() =>
           drainDiagnosticsForQuit({
             stop: stopDiagnostics,
@@ -4679,7 +4717,8 @@ app.on('will-quit', (event) => {
     discoveryPoller = null
   }
   bridgeCleanup?.()
-  sidecarCleanup?.()
+  // Signal the hub and the computer now; the tail below waits for both (bounded).
+  const childrenReaped = reapSupervisedChildrenForQuit()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
   // event of the session and proves the chain ran.
   recordDiagnosticEvent({
@@ -4691,11 +4730,11 @@ app.on('will-quit', (event) => {
   stopIdleChecker()
   closeArtifactWatcher()
   closeGitWatcher()
-  // Reap the computer, THEN flush, THEN close: the process must not exit under a
-  // live computer, and a reap that misses its deadline records an event the flush
-  // has to carry. Unawaited, the close overtook the flush and lost the queue's
-  // tail, the canary above included.
-  void reapLocalComputerForQuit()
+  // Reap the hub and the computer, THEN flush, THEN close: the process must not
+  // exit under a live child, and a reap that misses its deadline records an event
+  // the flush has to carry. Unawaited, the close overtook the flush and lost the
+  // queue's tail, the canary above included.
+  void childrenReaped
     .then(() =>
       drainDiagnosticsForQuit({
         stop: stopDiagnostics,

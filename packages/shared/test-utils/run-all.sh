@@ -325,8 +325,10 @@ run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v169-
 run_test_electron_strict_loader packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_test packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
-# Quit WAITS for the local computer's reap (fire-and-forget orphaned it), bounded.
-run_test packages/apps/app/src/main/lifecycle/quit-local-computer.test.ts
+# Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
+run_test packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
+# How both supervisors kill their child: resolves only once it is gone, shared per process.
+run_test packages/apps/app/src/main/child-reaper.test.ts
 run_test packages/apps/app/src/main/storage-migration.test.ts
 run_test packages/apps/app/src/main/storage-migration-hardening.test.ts
 # Channel-scoped migration — flat legacy ~/.slayzone → ~/.slayzone/<channel>/<hub|computer>,
@@ -534,7 +536,9 @@ run_test_electron_strict_loader packages/domains/terminal/src/server/runtime/cre
 
 
 
-# Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE).
+# Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE). Also stop() as quit
+# awaits it, and parent death against the REAL hub bundle (rebuilt on demand): a
+# supervised hub never outlives its app; a standalone one is untouched.
 run_test_electron_strict packages/apps/app/src/main/sidecar-server-supervisor.test.ts
 
 # Local-computer supervisor exit reporting — the computer owns every agent pty, so

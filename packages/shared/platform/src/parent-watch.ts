@@ -1,12 +1,13 @@
 /**
- * Parent-death detection for the computer the desktop app supervises.
+ * Parent-death detection for a process the desktop app supervises: its local hub
+ * (sidecar-server-supervisor.ts) and its local computer (local-computer-supervisor.ts).
  *
- * The app spawns its local computer (local-computer-supervisor.ts) and reaps it on
- * quit. Nothing reaps it when the app dies some other way — a crash, a SIGKILL, a
- * force-quit, or a quit whose process exits before its SIGTERM→SIGKILL escalation
- * lands. The computer is then reparented and lives on: it keeps every agent pty
- * alive with no app to show them, and holds the computer id the next app's
- * computer needs.
+ * The app spawns both and reaps them on quit. Nothing reaps them when the app dies
+ * some other way — a crash, a SIGKILL, a force-quit, or a quit whose process exits
+ * before its SIGTERM→SIGKILL escalation lands. The child is then reparented and
+ * lives on: a computer keeps every agent pty alive with no app to show them and
+ * holds the computer id the next app's computer needs; a hub holds the fixed port
+ * and the database the next app's hub needs.
  *
  * Three signals, because no single one is reliable on every OS:
  *
@@ -17,20 +18,27 @@
  *    of the write end.
  *  - stdout/stderr report EPIPE. The app holds the only read end of both, so a
  *    write failing with a broken pipe means it is gone. Without a listener that
- *    EPIPE is an uncaught exception — the computer would crash mid-teardown,
- *    before disposing its ptys — so it is swallowed for good once seen.
+ *    EPIPE is an uncaught exception — the child would crash on its first log line
+ *    after the app's death, mid-teardown (a computer before disposing its ptys, a
+ *    hub before its stop even began) — so it is swallowed for good once seen.
  *  - a poll of the parent. On POSIX an orphan is reparented (to pid 1 or a
  *    subreaper), so `process.ppid` changes; on every OS the original parent pid
  *    stops existing. A reused pid can only delay this, never fake a death.
  *
- * Nothing here holds the event loop open: a computer whose dialer gives up must
- * still exit on its own (the supervisor reads that exit code), not idle on a pipe.
+ * Nothing here holds the event loop open: a child that is done must still exit on
+ * its own (a computer whose dialer gives up reports that through its exit code),
+ * not idle on a pipe.
  *
- * Only for a computer the app supervises (`SLAYZONE_SUPERVISED=1`, see bin.ts). A
- * standalone computer — `slay computer`, a launchd/systemd unit, a shell — has no
- * parent whose death means anything, and its stdin may be /dev/null or a terminal.
+ * Detection only: what to do about it is the caller's. A child that stops on
+ * parent death must also bound that stop ({@link SUPERVISED_STOP_DEADLINE_MS}) —
+ * once the app is gone, nothing else would end a stop that hangs.
  *
- * @module computer/parent-watch
+ * Only for a SUPERVISED child (`SLAYZONE_SUPERVISED=1`, set by the app). A standalone
+ * hub or computer — `slay hub`, `slay computer`, a launchd/systemd unit, a server, a
+ * shell — has no parent whose death means anything, and its stdin may be /dev/null
+ * or a terminal.
+ *
+ * @module platform/parent-watch
  */
 
 export type ParentDeathReason =
@@ -38,7 +46,7 @@ export type ParentDeathReason =
   | 'parent-pipe-closed'
   /** A write to stdout/stderr failed with EPIPE: the app's read end is gone. */
   | 'parent-output-closed'
-  /** `process.ppid` changed (or is init's): the computer was reparented. */
+  /** `process.ppid` changed (or is init's): the child was reparented. */
   | 'parent-reparented'
   /** The original parent pid no longer exists (Windows never reparents). */
   | 'parent-exited'
@@ -70,6 +78,32 @@ export interface ParentWatch {
 
 /** How often the parent is polled. Cheap (two syscalls); bounds the slowest detection. */
 export const PARENT_POLL_INTERVAL_MS = 1_000
+
+/**
+ * How long a SUPERVISED hub or computer may take, from the start of its stop, to
+ * exit before it forces the exit itself. A stop that hangs — a client connection
+ * that keeps a hub's HTTP server from closing, a handle that keeps a computer's
+ * loop alive (d468275b5) — keeps the process alive; once the app is gone nothing
+ * else would end it, and the child would be orphaned.
+ *
+ * THE single source of the supervised stop timing: the supervisor's SIGKILL on a
+ * stop ({@link SUPERVISED_STOP_SIGKILL_GRACE_MS}) and the app's quit-time wait
+ * (lifecycle/quit-reap-child.ts) are both derived from it, so a graceful stop is
+ * never cut shorter than this.
+ */
+export const SUPERVISED_STOP_DEADLINE_MS = 5_000
+
+/**
+ * How long a supervisor's `stop()` waits after SIGTERM before it SIGKILLs: the
+ * child's own deadline plus a margin, so a stop that finishes — or forces itself
+ * out — inside that deadline is never preempted. The SIGKILL is the backstop for a
+ * child that cannot end itself: its loop too blocked to run the deadline timer, or
+ * stuck in the kernel.
+ *
+ * The margin covers the gap between the supervisor sending SIGTERM and the child's
+ * loop running its handler, which is when the child's deadline starts.
+ */
+export const SUPERVISED_STOP_SIGKILL_GRACE_MS = SUPERVISED_STOP_DEADLINE_MS + 1_000
 
 /** Does `pid` exist? EPERM = it exists but is not ours. */
 export function pidExists(pid: number): boolean {

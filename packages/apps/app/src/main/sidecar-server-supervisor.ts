@@ -4,6 +4,8 @@ import net from 'node:net'
 import { readFileSync, watchFile, unwatchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
+import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
+import { createChildReaper } from './child-reaper'
 
 /**
  * Supervises the @slayzone/hub side-car subprocess.
@@ -23,7 +25,14 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000] as const
 const HEALTHY_RESET_MS = 60_000
 const HEALTH_POLL_INTERVAL_MS = 250
 const HEALTH_BOOT_TIMEOUT_MS = 10_000
-const STOP_SIGTERM_GRACE_MS = 3_000
+/**
+ * Grace after SIGTERM before a RESTART escalates to SIGKILL. Shorter than a stop's
+ * (SUPERVISED_STOP_SIGKILL_GRACE_MS) on purpose: the app stays up, so the outgoing
+ * child can be neither orphaned nor left to finish "after the app" — a longer grace
+ * would only delay the replacement the user is waiting for, which cannot start
+ * until the outgoing child is gone (it needs the same fixed port).
+ */
+const RESTART_SIGTERM_GRACE_MS = 3_000
 const BUILD_WATCH_INTERVAL_MS = 500
 
 /**
@@ -41,8 +50,14 @@ export type SidecarTiming = {
   healthPollIntervalMs?: number
   /** Time a freshly-spawned child has to answer `/health` before it is killed. */
   healthBootTimeoutMs?: number
-  /** Grace period after SIGTERM before `stop()` escalates to SIGKILL. */
+  /**
+   * Grace after SIGTERM before `stop()` escalates to SIGKILL. Default
+   * SUPERVISED_STOP_SIGKILL_GRACE_MS: past the child's own stop deadline, so a
+   * graceful stop is never cut short.
+   */
   stopSigtermGraceMs?: number
+  /** Grace after SIGTERM before `restart()` escalates to SIGKILL. Default 3s. */
+  restartSigtermGraceMs?: number
   /** Poll interval for the on-disk build manifest watcher (hot-restart). */
   buildWatchIntervalMs?: number
 }
@@ -149,6 +164,17 @@ export type SidecarServerHandle = {
    * the next app boot needed.
    */
   suspendRestarts: () => void
+  /**
+   * Reap the hub: SIGTERM, then SIGKILL only after the hub's own stop deadline
+   * (SUPERVISED_STOP_SIGKILL_GRACE_MS), so a graceful stop is never cut short.
+   * Resolves only once it is GONE — including one an in-flight `restart()` is still
+   * killing (that kill, and its shorter grace, is joined) — so a quit that awaits it
+   * cannot exit under a live hub. Idempotent: every call returns the same reap.
+   *
+   * Never resolves early, so an app quit must bound its wait (see
+   * lifecycle/quit-reap-child.ts): a process stuck in uninterruptible sleep
+   * survives even SIGKILL.
+   */
   stop: () => Promise<void>
 }
 
@@ -205,10 +231,18 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
   const healthyResetMs = opts.timing?.healthyResetMs ?? HEALTHY_RESET_MS
   const healthPollIntervalMs = opts.timing?.healthPollIntervalMs ?? HEALTH_POLL_INTERVAL_MS
   const healthBootTimeoutMs = opts.timing?.healthBootTimeoutMs ?? HEALTH_BOOT_TIMEOUT_MS
-  const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? STOP_SIGTERM_GRACE_MS
+  const stopSigtermGraceMs = opts.timing?.stopSigtermGraceMs ?? SUPERVISED_STOP_SIGKILL_GRACE_MS
+  const restartSigtermGraceMs = opts.timing?.restartSigtermGraceMs ?? RESTART_SIGTERM_GRACE_MS
   const buildWatchIntervalMs = opts.timing?.buildWatchIntervalMs ?? BUILD_WATCH_INTERVAL_MS
 
   let child: ChildProcess | null = null
+  /**
+   * Every hub process not yet exited, and one shared kill per process — a restart
+   * and a stop, or two stops, join the same kill instead of one returning early.
+   */
+  const reaper = createChildReaper()
+  /** The reap `stop()` started; every later call returns it. */
+  let stopping: Promise<void> | null = null
   let port: number | null = null
   // Sticky port: probed once on first spawn, reused across respawns so the
   // renderer's fixed WS URL survives a crash + immediate respawn. Only cleared
@@ -339,7 +373,10 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
         const inherited: NodeJS.ProcessEnv = { ...opts.env }
         for (const name of HUB_PROCESS_ENV) delete inherited[name]
 
-        // stdin is 'pipe' so the child detects parent death via stdin close.
+        // stdin MUST stay a pipe that nothing writes to or closes: the hub reads its
+        // EOF as "the app died" (@slayzone/platform/parent-watch — alongside an EPIPE
+        // on stdout/stderr and a ppid poll) and stops itself, bounded, which is what
+        // ends it when the app crashes or is SIGKILLed with no quit path to reap it.
         const childEnv: NodeJS.ProcessEnv = {
           ...inherited,
           ELECTRON_RUN_AS_NODE: '1',
@@ -360,6 +397,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           stdio: ['pipe', 'pipe', 'pipe']
         })
         child = proc
+        reaper.track(proc)
         spawnCount += 1
         opts.logger(`[supervisor] spawned pid=${proc.pid} port=${freePort}`)
 
@@ -441,20 +479,7 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       spawnChild()
       return
     }
-    await new Promise<void>((resolve) => {
-      const killTimer = setTimeout(() => {
-        try {
-          proc.kill('SIGKILL')
-        } catch {
-          /* already gone */
-        }
-      }, stopSigtermGraceMs)
-      proc.once('exit', () => {
-        clearTimeout(killTimer)
-        resolve()
-      })
-      proc.kill('SIGTERM')
-    })
+    await reaper.kill(proc, restartSigtermGraceMs)
   }
 
   spawnChild()
@@ -514,24 +539,16 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       if (backoffTimer) clearTimeout(backoffTimer)
       backoffTimer = null
     },
-    stop: async () => {
-      if (stopped) return
+    stop: () => {
+      if (stopping) return stopping
       if (opts.hotRestartOnBuildChange) unwatchFile(manifestPath)
       stopped = true
       clearTimers()
-      const proc = child
       child = null
-      if (!proc) return
-      await new Promise<void>((resolve) => {
-        const killTimer = setTimeout(() => {
-          proc.kill('SIGKILL')
-        }, stopSigtermGraceMs)
-        proc.once('exit', () => {
-          clearTimeout(killTimer)
-          resolve()
-        })
-        proc.kill('SIGTERM')
-      })
+      // Every hub not yet gone, the one a mid-flight restart is killing included
+      // (that kill is joined, not restarted); the `stopped` flag cancels any respawn.
+      stopping = reaper.killAll(stopSigtermGraceMs)
+      return stopping
     }
   }
 }

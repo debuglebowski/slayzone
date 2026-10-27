@@ -27,19 +27,11 @@ import {
   loadComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { ENV_VARS, ignoredCertPinNotices, loadComputerConfig } from './config'
 import { startComputer } from './main'
-import { watchParent } from './parent-watch'
-
-/**
- * How long a SUPERVISED computer may take, from the start of its stop, to exit
- * before it forces the exit itself. Above the supervisor's SIGTERM grace (3s): with
- * the app alive its SIGKILL comes first; this is what still ends the computer once
- * the app is gone.
- */
-const SUPERVISED_STOP_DEADLINE_MS = 5_000
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -238,10 +230,12 @@ async function main(): Promise<void> {
     log(why)
     // Supervised: bounded. A stop ends by the event loop draining, so a stop that
     // hangs — or completes but leaves a live handle behind (d468275b5: an fs
-    // watch) — keeps the process alive. While the app lives, its supervisor
-    // SIGKILLs after a grace period; once the app is gone nothing would, and the
-    // computer would be orphaned with every agent pty still under it. Unref'd: a
-    // clean stop still exits the moment the loop drains.
+    // watch) — keeps the process alive; once the app is gone nothing else would end
+    // it, and the computer would be orphaned with every agent pty still under it.
+    // While the app lives, its supervisor's SIGKILL on a stop comes only after this
+    // deadline (a backstop for a loop too blocked to run it), so the stop gets the
+    // full deadline either way. Unref'd: a clean stop still exits the moment the
+    // loop drains.
     if (supervised) {
       setTimeout(() => {
         log(`still running ${SUPERVISED_STOP_DEADLINE_MS}ms after stop began — forcing exit`)
@@ -256,8 +250,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => gracefulStop('received SIGTERM, stopping'))
 
   // A supervised computer must never outlive the app that spawned it. See
-  // parent-watch.ts for the signals and why each is needed. Standalone computers
-  // have no such parent and are untouched.
+  // @slayzone/platform/parent-watch for the signals and why each is needed.
+  // Standalone computers have no such parent and are untouched.
   if (supervised) {
     watchParent({
       onParentDeath: (reason) => gracefulStop(`parent app is gone (${reason}), stopping`)
