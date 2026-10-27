@@ -22,6 +22,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await resetApp(mainWindow)
     // Dismiss any startup dialogs (onboarding) that call hideAll
     await mainWindow.keyboard.press('Escape').catch(() => {})
+    // Fixed wait: there may be no dialog at all, so nothing to wait on.
     await mainWindow.waitForTimeout(300)
     await testInvoke(mainWindow, 'browser:show-all')
 
@@ -111,7 +112,8 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    // hideAll simulates what NativeViewLayer does when dialog opens
+    // hideAll simulates what NativeViewLayer does when dialog opens. Fixed waits
+    // below: give a wrongful async view teardown time to happen before asserting.
     await testInvoke(mainWindow, 'browser:hide-all')
     await mainWindow.waitForTimeout(200)
 
@@ -149,6 +151,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
 
     if (await importBtn.isVisible().catch(() => false)) {
       await importBtn.click()
+      // Fixed wait: give a wrongful hide/teardown time to happen.
       await mainWindow.waitForTimeout(100)
 
       // Views should still exist
@@ -163,7 +166,7 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     await getActiveViewId(mainWindow, taskId)
 
-    // hideAll
+    // hideAll (fixed waits: give a wrongful async teardown time to happen)
     await testInvoke(mainWindow, 'browser:hide-all')
     await mainWindow.waitForTimeout(100)
 

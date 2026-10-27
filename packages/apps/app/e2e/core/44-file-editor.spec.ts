@@ -6,6 +6,7 @@ import path from 'path'
 
 test.describe('File editor', () => {
   let projectAbbrev: string
+  let taskId: string
 
   /** The editor panel wrapper (surface panel containing "Files" heading) */
   const editorPanel = (page: import('@playwright/test').Page) =>
@@ -18,6 +19,17 @@ test.describe('File editor', () => {
   /** Editor tab by filename (tab buttons have title=filePath) */
   const editorTab = (page: import('@playwright/test').Page, name: string) =>
     page.locator(`button[title$="${name}"]:visible`).first()
+
+  /** The task's editor state as the debounced save wrote it to the DB */
+  const persistedEditorState = async (page: import('@playwright/test').Page) => {
+    const task = await page.evaluate(
+      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+      taskId
+    )
+    return task?.editor_open_files ?? null
+  }
+  const hasFile = (files: string[] | undefined, name: string) =>
+    (files ?? []).some((f) => f.endsWith(name))
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -42,7 +54,7 @@ test.describe('File editor', () => {
       path: TEST_PROJECT_PATH
     })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
-    await s.createTask({ projectId: p.id, title: 'Editor test task', status: 'todo' })
+    taskId = (await s.createTask({ projectId: p.id, title: 'Editor test task', status: 'todo' })).id
     await s.refreshData()
 
     // Navigate to task
@@ -334,8 +346,13 @@ test.describe('File editor', () => {
     await expect(editorTab(mainWindow, 'hello.ts')).toBeVisible()
     await expect(editorTab(mainWindow, 'second.ts')).toBeVisible()
 
-    // Wait for debounced save to DB (500ms + margin)
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save to land in the DB
+    await expect
+      .poll(async () => {
+        const files = (await persistedEditorState(mainWindow))?.files
+        return hasFile(files, 'hello.ts') && hasFile(files, 'second.ts')
+      })
+      .toBe(true)
 
     // Toggle editor panel off
     await mainWindow.keyboard.press('Meta+e')
@@ -355,8 +372,10 @@ test.describe('File editor', () => {
     await editorTab(mainWindow, 'hello.ts').click()
     await expect(editorTab(mainWindow, 'hello.ts')).toHaveClass(/border/)
 
-    // Wait for debounced save
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save to land in the DB
+    await expect
+      .poll(async () => (await persistedEditorState(mainWindow))?.activeFile ?? '')
+      .toMatch(/hello\.ts$/)
 
     // Toggle editor off/on
     await mainWindow.keyboard.press('Meta+e')
@@ -377,8 +396,10 @@ test.describe('File editor', () => {
     await treeFile(mainWindow, 'temp-persist.ts').click()
     await expect(editorTab(mainWindow, 'temp-persist.ts')).toBeVisible()
 
-    // Wait for debounced save
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save to land in the DB
+    await expect
+      .poll(async () => hasFile((await persistedEditorState(mainWindow))?.files, 'temp-persist.ts'))
+      .toBe(true)
 
     // Toggle editor off
     await mainWindow.keyboard.press('Meta+e')
@@ -407,8 +428,10 @@ test.describe('File editor', () => {
     // Show button should appear (tree is hidden)
     await expect(mainWindow.locator('button[title="Show file tree"]:visible').first()).toBeVisible()
 
-    // Wait for debounced save
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save to land in the DB
+    await expect
+      .poll(async () => (await persistedEditorState(mainWindow))?.treeVisible)
+      .toBe(false)
 
     // Toggle editor off/on
     await mainWindow.keyboard.press('Meta+e')

@@ -81,7 +81,15 @@ test.describe('Browser view bounds (WebContentsView)', () => {
   test('bounds are positive and non-zero when visible', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
-    await mainWindow.waitForTimeout(300)
+    await expect
+      .poll(async () => {
+        const b = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {
+          width: number
+          height: number
+        } | null
+        return !!b && b.width > 0 && b.height > 0
+      })
+      .toBe(true)
 
     const bounds = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {
       x: number
@@ -119,13 +127,21 @@ test.describe('Browser view bounds (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    // hideAll should work
+    // hideAll should work (fixed wait: keep the views hidden for a beat)
     await testInvoke(mainWindow, 'browser:hide-all')
     await mainWindow.waitForTimeout(200)
 
     // showAll restores
     await testInvoke(mainWindow, 'browser:show-all')
-    await mainWindow.waitForTimeout(200)
+    await expect
+      .poll(async () => {
+        const b = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {
+          width: number
+          height: number
+        }
+        return b.width > 0 && b.height > 0
+      })
+      .toBe(true)
 
     // Bounds should still be valid
     const bounds = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {
@@ -142,13 +158,21 @@ test.describe('Browser view bounds (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    // Hide the view
+    // Hide the view (fixed wait: keep it hidden for a beat)
     await testInvoke(mainWindow, 'browser:set-visible', viewId, false)
     await mainWindow.waitForTimeout(100)
 
     // Show again
     await testInvoke(mainWindow, 'browser:set-visible', viewId, true)
-    await mainWindow.waitForTimeout(300)
+    await expect
+      .poll(async () => {
+        const b = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {
+          width: number
+          height: number
+        }
+        return b.width > 0 && b.height > 0
+      })
+      .toBe(true)
 
     // Bounds should be restored
     const bounds = (await testInvoke(mainWindow, 'browser:get-bounds', viewId)) as {

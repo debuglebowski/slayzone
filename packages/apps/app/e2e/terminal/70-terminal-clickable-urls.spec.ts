@@ -308,18 +308,21 @@ test.describe('Terminal clickable URLs', () => {
     // Hold modifier keys BEFORE clicking — page.mouse.click({ modifiers }) doesn't
     // propagate meta/shift into MouseEvent properties in Electron.
     await mainWindow.mouse.move(coords!.x, coords!.y)
+    // Fixed wait: let xterm's link provider resolve the hovered link first.
     await mainWindow.waitForTimeout(100)
     await mainWindow.keyboard.down('Meta')
     await mainWindow.keyboard.down('Shift')
     await mainWindow.mouse.click(coords!.x, coords!.y)
     await mainWindow.keyboard.up('Shift')
     await mainWindow.keyboard.up('Meta')
-    await mainWindow.waitForTimeout(200)
 
-    const calls = await electronApp.evaluate(() => {
-      return (globalThis as Record<string, unknown>).__urlTestCalls as string[]
-    })
-    expect(calls).toContain(testUrl)
+    await expect
+      .poll(() =>
+        electronApp.evaluate(() => {
+          return (globalThis as Record<string, unknown>).__urlTestCalls as string[]
+        })
+      )
+      .toContain(testUrl)
   })
 
   test('OSC 8 hyperlink opens externally on Cmd+Shift+Click (Playwright mouse)', async ({
@@ -406,21 +409,23 @@ test.describe('Terminal clickable URLs', () => {
 
     // Cmd+Shift+Click — OSC 8 links should open externally
     await mainWindow.mouse.move(coords!.x, coords!.y)
+    // Fixed wait: let xterm's link provider resolve the hovered link first.
     await mainWindow.waitForTimeout(100)
     await mainWindow.keyboard.down('Meta')
     await mainWindow.keyboard.down('Shift')
     await mainWindow.mouse.click(coords!.x, coords!.y)
     await mainWindow.keyboard.up('Shift')
     await mainWindow.keyboard.up('Meta')
-    await mainWindow.waitForTimeout(200)
 
-    const calls = await electronApp.evaluate(() => {
-      return (globalThis as Record<string, unknown>).__urlTestCalls as string[]
-    })
-    expect(
-      calls,
-      `OSC 8 Cmd+Shift+Click did not trigger openExternal (line ${coords!.line})`
-    ).toContain(testUrl)
+    await expect
+      .poll(
+        () =>
+          electronApp.evaluate(() => {
+            return (globalThis as Record<string, unknown>).__urlTestCalls as string[]
+          }),
+        { message: `OSC 8 Cmd+Shift+Click did not trigger openExternal (line ${coords!.line})` }
+      )
+      .toContain(testUrl)
   })
 
   // This test opens a browser panel — keep it LAST to avoid breaking subsequent tests

@@ -186,7 +186,7 @@ test.describe('Browser view navigation (WebContentsView)', () => {
       )
       .toContain('/title-Example')
 
-    // Reload — URL should remain the same
+    // Reload — URL should remain the same (fixed wait: a window for it to change)
     await testInvoke(mainWindow, 'browser:reload', viewId)
     await mainWindow.waitForTimeout(500)
     const url = (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string

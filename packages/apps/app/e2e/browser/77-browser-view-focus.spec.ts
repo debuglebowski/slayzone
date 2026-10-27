@@ -39,7 +39,6 @@ test.describe('Browser view focus (WebContentsView)', () => {
     // Click the browser panel placeholder
     const placeholder = mainWindow.locator('[data-browser-panel]').first()
     await placeholder.click({ force: true })
-    await mainWindow.waitForTimeout(200)
 
     // Verify the IPC path exists (focus may not propagate in headless)
     const isFocused = (await testInvoke(mainWindow, 'browser:is-focused', viewId)) as boolean
@@ -67,7 +66,6 @@ test.describe('Browser view focus (WebContentsView)', () => {
 
     // Close any open dialogs
     await mainWindow.keyboard.press('Escape').catch(() => {})
-    await mainWindow.waitForTimeout(200)
 
     // Verify search dialog is not open
     const searchInput = mainWindow.getByPlaceholder(
@@ -131,6 +129,7 @@ test.describe('Browser view focus (WebContentsView)', () => {
 
     // Clear glow by focusing something else
     await focusForAppShortcut(mainWindow)
+    // Fixed wait: let the focus change settle before simulating the focusin.
     await mainWindow.waitForTimeout(200)
 
     // focusedPanel is driven by DOM focusin on elements inside [data-panel-id].

@@ -18,7 +18,7 @@ import {
   openTaskViaSearch,
   getActiveViewId
 } from '../fixtures/browser-view'
-import { getTestUrl } from '../fixtures/test-server'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
 function buildFullPageLinkDataUrl(linkText: string, href: string): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
@@ -340,7 +340,11 @@ test.describe('Browser panel', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
     // Navigate to a real page so webviewReady becomes true
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
-    await mainWindow.waitForTimeout(2000)
+    await expect
+      .poll(async () => (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string, {
+        timeout: 15000
+      })
+      .toContain(TEST_HOST_MATCH)
     const btn = keyboardPassthroughBtn(mainWindow)
     await expect(btn).toBeVisible()
     await expect(btn).toBeEnabled({ timeout: 10000 })

@@ -90,18 +90,18 @@ test.describe('Tag input field responsive overflow', () => {
       const win = BrowserWindow.getAllWindows()[0]
       win.setSize(900, 800)
     })
-    await mainWindow.waitForTimeout(500)
+    await mainWindow.waitForFunction(() => window.innerWidth <= 900)
 
     // Overflow count should be >= what it was before (more tags hidden)
-    const textAfter = await overflowBadge.textContent()
-    const countAfter = parseInt(textAfter!.slice(1))
-    expect(countAfter).toBeGreaterThanOrEqual(countBefore)
+    await expect
+      .poll(async () => parseInt((await overflowBadge.textContent())!.slice(1)))
+      .toBeGreaterThanOrEqual(countBefore)
 
     // Restore window size
     await electronApp.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0]
       win.setSize(1920, 1200)
     })
-    await mainWindow.waitForTimeout(500)
+    await mainWindow.waitForFunction(() => window.innerWidth > 900)
   })
 })

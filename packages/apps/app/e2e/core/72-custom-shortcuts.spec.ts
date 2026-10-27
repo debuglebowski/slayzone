@@ -321,6 +321,7 @@ test.describe
 
       // New shortcut should toggle editor panel
       await mainWindow.keyboard.press('Meta+Shift+y')
+      // Fixed wait: no asserted signal; let the toggle land before the next key.
       await mainWindow.waitForTimeout(500)
 
       // Old shortcut should NOT toggle editor

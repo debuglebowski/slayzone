@@ -94,8 +94,21 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
       )
       .toContain('/title-ext-page')
 
-    // Wait for content script + messaging to complete
-    await mainWindow.waitForTimeout(5000)
+    // Wait for content script + messaging to complete. A timeout falls through
+    // to the diagnostic asserts below, which report what the page shows.
+    await expect
+      .poll(
+        async () =>
+          (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'document.getElementById("slayzone-test-ext")?.dataset.status || "not-found"'
+          )) as string,
+        { timeout: 5000 }
+      )
+      .toBe('connected')
+      .catch(() => {})
 
     // Get full diagnostics from the content script's marker element
     const diag = (await testInvoke(
@@ -195,7 +208,8 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     }
     expect(result.error, `MV3 extension load failed: ${result.error}`).toBeUndefined()
 
-    // Try to start the service worker explicitly and check status
+    // Try to start the service worker explicitly and check status (fixed wait:
+    // give the freshly loaded extension's worker time to register; diagnostic only)
     await mainWindow.waitForTimeout(2000)
     const swInfo = await electronApp.evaluate(async ({ session }) => {
       const ses = session.fromPartition('persist:browser-tabs')
@@ -241,7 +255,20 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
       )
       .toContain('/title-ext-page')
 
-    await mainWindow.waitForTimeout(5000)
+    // A timeout falls through to the diagnostic assert below.
+    await expect
+      .poll(
+        async () =>
+          (await testInvoke(
+            mainWindow,
+            'browser:execute-js',
+            viewId,
+            'document.getElementById("slayzone-test-ext")?.dataset.status || "not-found"'
+          )) as string,
+        { timeout: 5000 }
+      )
+      .toBe('connected')
+      .catch(() => {})
 
     // Check content script injected and messaging worked
     const status = (await testInvoke(

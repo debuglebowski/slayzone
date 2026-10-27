@@ -236,7 +236,13 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await goHome(mainWindow)
     await openTaskViaSearch(mainWindow, 'TS task B')
 
-    await mainWindow.waitForTimeout(800)
+    // viewState persistence is debounced — wait for it to hold both tabs.
+    await expect
+      .poll(async () => {
+        const titles = (await getPersistedViewState(mainWindow))?.tabs.map((t) => t.title) ?? []
+        return titles.includes('TS task A') && titles.includes('TS task B')
+      })
+      .toBe(true)
 
     const before = await getPersistedViewState(mainWindow)
     expect(before).toBeTruthy()
@@ -252,7 +258,8 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
   // ── 5. Tab reorder persists across reload ──────────────────────────────
 
   test('tab reorder persists across reload', async ({ mainWindow }) => {
-    // Ensure A and B are open (carried from test 4)
+    // Ensure A and B are open (carried from test 4). Fixed wait: lets any
+    // post-reload debounced viewState write land before we overwrite it below.
     await mainWindow.waitForTimeout(800)
 
     const before = await getPersistedViewState(mainWindow)
@@ -279,6 +286,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
 
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
+    // Fixed wait: gives a wrongful boot-time rewrite of viewState time to land.
     await mainWindow.waitForTimeout(500)
 
     const after = await getPersistedViewState(mainWindow)

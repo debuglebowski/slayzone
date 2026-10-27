@@ -8,9 +8,22 @@ const homePanelBtn = (page: import('@playwright/test').Page, label: string) =>
     .filter({ has: page.locator(`button:has-text("Kanban")`) })
     .locator(`button:has-text("${label}")`)
 
+/** Project's home panel state as the debounced save wrote it to settings */
+async function persistedHomePanels(
+  page: import('@playwright/test').Page,
+  projectId: string
+): Promise<{ visibility?: Record<string, boolean>; gitTab?: string } | null> {
+  const raw = await page.evaluate(
+    (key) => window.getTrpcVanillaClient().settings.get.query({ key }),
+    `home-panels:${projectId}`
+  )
+  return raw ? JSON.parse(raw) : null
+}
+
 test.describe('Home panel persistence', () => {
   let abbrevA: string
   let abbrevB: string
+  let projectAId: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -25,6 +38,7 @@ test.describe('Home panel persistence', () => {
       color: '#ef4444',
       path: TEST_PROJECT_PATH
     })
+    projectAId = pA.id
     abbrevA = pA.name.slice(0, 2).toUpperCase()
     abbrevB = pB.name.slice(0, 2).toUpperCase()
     await s.createTask({ projectId: pA.id, title: 'HP task A', status: 'todo' })
@@ -44,8 +58,10 @@ test.describe('Home panel persistence', () => {
     await homePanelBtn(mainWindow, 'Git').click()
     await expect(homePanelBtn(mainWindow, 'Git')).toHaveClass(/bg-surface-3/)
 
-    // Wait for debounce save + reload
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save, then reload
+    await expect
+      .poll(async () => (await persistedHomePanels(mainWindow, projectAId))?.visibility?.git)
+      .toBe(true)
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
 
@@ -77,8 +93,10 @@ test.describe('Home panel persistence', () => {
     await expect(diffTab).toBeVisible({ timeout: 5_000 })
     await diffTab.click()
 
-    // Wait for debounce save + reload
-    await mainWindow.waitForTimeout(800)
+    // Wait for the debounced save, then reload
+    await expect
+      .poll(async () => (await persistedHomePanels(mainWindow, projectAId))?.gitTab)
+      .toBe('changes')
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await mainWindow.waitForSelector('#root', { timeout: 10_000 })
 

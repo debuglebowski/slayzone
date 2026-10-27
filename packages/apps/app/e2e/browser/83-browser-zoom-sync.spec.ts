@@ -99,6 +99,7 @@ test.describe('Browser zoom isolation shortcuts', () => {
 
     const placeholder = mainWindow.locator('[data-browser-panel]').first()
     await placeholder.click({ force: true })
+    // Fixed wait: native WCV focus has no renderer-observable signal.
     await mainWindow.waitForTimeout(200)
 
     const initialBrowserZoom = await getBrowserZoom(mainWindow, viewId)

@@ -331,16 +331,15 @@ test.describe('Settings panel card sizing', () => {
     await setCardOpen(artifactsCard(mainWindow), true)
 
     await resizeWindow(electronApp, 1100, 500)
-    await mainWindow.waitForTimeout(300)
+    await mainWindow.waitForFunction(() => window.innerHeight <= 500)
 
     // Sub-tasks card has 6 items — must not clip to header-only
-    expect(await cardHeight(subtasksCard(mainWindow))).toBeGreaterThan(60)
+    await expect.poll(() => cardHeight(subtasksCard(mainWindow))).toBeGreaterThan(60)
 
     // Panel degrades by scrolling, not clipping
-    const scrollable = await settingsPanel(mainWindow).evaluate(
-      (el) => el.scrollHeight > el.clientHeight
-    )
-    expect(scrollable).toBe(true)
+    await expect
+      .poll(() => settingsPanel(mainWindow).evaluate((el) => el.scrollHeight > el.clientHeight))
+      .toBe(true)
 
     await resizeWindow(electronApp, 1920, 1200)
   })
@@ -450,17 +449,16 @@ test.describe('Settings panel card sizing', () => {
     await setCardOpen(artifactsCard(mainWindow), false)
 
     await resizeWindow(electronApp, 1100, 500)
-    await mainWindow.waitForTimeout(350)
+    await mainWindow.waitForFunction(() => window.innerHeight <= 500)
 
     // Neither tall card is squeezed below the 9rem (144px) floor.
-    expect(await cardHeight(descriptionCard(mainWindow))).toBeGreaterThanOrEqual(140)
-    expect(await cardHeight(subtasksCard(mainWindow))).toBeGreaterThanOrEqual(140)
+    await expect.poll(() => cardHeight(descriptionCard(mainWindow))).toBeGreaterThanOrEqual(140)
+    await expect.poll(() => cardHeight(subtasksCard(mainWindow))).toBeGreaterThanOrEqual(140)
 
     // Panel degrades by scrolling rather than clipping.
-    const scrollable = await settingsPanel(mainWindow).evaluate(
-      (el) => el.scrollHeight > el.clientHeight
-    )
-    expect(scrollable).toBe(true)
+    await expect
+      .poll(() => settingsPanel(mainWindow).evaluate((el) => el.scrollHeight > el.clientHeight))
+      .toBe(true)
 
     await resizeWindow(electronApp, 1920, 1200)
   })
@@ -529,15 +527,14 @@ test.describe('Settings panel card sizing', () => {
     await setCardOpen(subtasksCard(mainWindow), false)
     await setCardOpen(artifactsCard(mainWindow), false)
     await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+    // Fixed wait: no signal for "layout settled at full height" to wait on.
     await mainWindow.waitForTimeout(250)
     const tallH = await cardHeight(descriptionCard(mainWindow))
 
     // Shrink the window — the sole open, tall card must track the new available
     // height (proves the ResizeObserver recompute path runs).
     await resizeWindow(electronApp, 1400, 700)
-    await mainWindow.waitForTimeout(400)
-    const shortH = await cardHeight(descriptionCard(mainWindow))
-    expect(shortH).toBeLessThan(tallH - 50)
+    await expect.poll(() => cardHeight(descriptionCard(mainWindow))).toBeLessThan(tallH - 50)
 
     await resizeWindow(electronApp, 1920, 1200)
     await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()

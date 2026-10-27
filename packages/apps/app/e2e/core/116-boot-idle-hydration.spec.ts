@@ -13,11 +13,28 @@
  * Every hidden tab must still end up mounted (and its terminal attached) shortly
  * after boot — hydration only defers, it never skips.
  */
-import type { CDPSession } from '@playwright/test'
+import type { CDPSession, Page } from '@playwright/test'
 import { test, expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { getMainSessionId, waitForPtySession } from '../fixtures/terminal'
 
 const TABS = 40
+
+/** Wait until the debounced viewState write holds a tab for every id. */
+async function waitForPersistedTabs(page: Page, ids: string[]): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const raw = await page.evaluate(() =>
+          window.getTrpcVanillaClient().settings.get.query({ key: 'viewState' })
+        )
+        const tabs: Array<{ taskId?: string }> = raw ? JSON.parse(raw).tabs ?? [] : []
+        const persisted = new Set(tabs.map((t) => t.taskId))
+        return ids.every((id) => persisted.has(id))
+      },
+      { timeout: 10_000 }
+    )
+    .toBe(true)
+}
 const DETAIL = '[data-testid="terminal-mode-trigger"]'
 
 interface BootProbe {
@@ -151,7 +168,7 @@ test.describe('boot idle hydration', () => {
       .toBeGreaterThanOrEqual(TABS)
     for (const id of taskIds) await waitForPtySession(mainWindow, getMainSessionId(id), 30_000)
     // viewState persistence is debounced.
-    await mainWindow.waitForTimeout(1_500)
+    await waitForPersistedTabs(mainWindow, taskIds)
 
     await mainWindow.addInitScript(installBootProbe, {
       total: TABS,
@@ -279,6 +296,7 @@ test.describe('boot idle hydration', () => {
     await expect
       .poll(() => mainWindow.locator(DETAIL).count(), { timeout: 60_000, intervals: [250] })
       .toBeGreaterThanOrEqual(TABS)
+    // Fixed wait: let post-hydration work drain so the warm reveal isn't timed mid-burst.
     await mainWindow.waitForTimeout(1_000)
     const warm = await reveal(taskIds[TABS - 2])
     const summary =
@@ -312,7 +330,7 @@ test.describe('boot idle hydration', () => {
       .poll(() => mainWindow.locator(DETAIL).count(), { timeout: 90_000, intervals: [500] })
       .toBeGreaterThanOrEqual(TABS)
     for (const id of taskIds) await waitForPtySession(mainWindow, getMainSessionId(id), 30_000)
-    await mainWindow.waitForTimeout(1_500)
+    await waitForPersistedTabs(mainWindow, taskIds)
 
     await mainWindow.addInitScript(installBootProbe, { total: TABS, detailSelector: DETAIL })
     const cdp = await mainWindow.context().newCDPSession(mainWindow)
