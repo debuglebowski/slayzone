@@ -322,12 +322,16 @@ jobs:
         shell: bash
         run: node scripts/release/smoke-packaged-app.mjs "packages/apps/app/dist/${{ matrix.smoke_dir }}"
 
+      # $RUNNER_TEMP in shell steps, never `${{ runner.temp }}`: in the linux-x64
+      # container the expression is the HOST path (/home/runner/work/_temp), which is
+      # not mounted there — assets written to it vanish, and upload-artifact (which
+      # maps the expression to /__w/_temp) finds nothing. The env var is mapped.
       - name: Collect release assets
         shell: bash
         run: |
           node scripts/release/collect-release-assets.mjs \
             --input packages/apps/app/dist \
-            --output "${{ runner.temp }}/release-assets/${{ matrix.name }}"
+            --output "$RUNNER_TEMP/release-assets/${{ matrix.name }}"
 
       - name: Upload build assets
         uses: actions/upload-artifact@v5
@@ -347,7 +351,7 @@ jobs:
           TAG="dry-run-${{ needs.resolve.outputs.release_tag }}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Dry Run ${{ needs.resolve.outputs.release_tag }}" --notes "Test build — not a real release" --draft
-          for file in "${{ runner.temp }}/release-assets/${{ matrix.name }}"/*; do
+          for file in "$RUNNER_TEMP/release-assets/${{ matrix.name }}"/*; do
             [ -f "$file" ] && gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --clobber
           done
 
