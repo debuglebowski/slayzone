@@ -749,7 +749,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Settings panel layout tier by its width (see the settings render): wide
   // panels split into columns instead of stretching one column edge to edge.
   const settingsWidth = resolvedWidths.settings ?? 0
-  const settingsCols = settingsWidth >= 1100 ? 3 : settingsWidth >= 640 ? 2 : 1
+  const settingsCols = settingsWidth >= 1440 ? 3 : settingsWidth >= 860 ? 2 : 1
   // Full-height Description is a 1-column mode; multi-column already gives it a column.
   const descFullHeight = settingsCols === 1 && descriptionExpanded
   useSharedCardHeights(settingsCardsGridRef, [
