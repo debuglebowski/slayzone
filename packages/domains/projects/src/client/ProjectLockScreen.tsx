@@ -62,7 +62,7 @@ export function ProjectLockScreen({
     if (hasDuration) overrideDurationLock(project.id, lockedUntil)
     else if (schedule) overrideScheduleLock(project.id)
     onUnlocked(project)
-  }, [project, hasDuration, schedule, onUnlocked])
+  }, [project, lockedUntil, hasDuration, schedule, onUnlocked])
 
   return (
     <div className="flex-1 flex items-center justify-center">
