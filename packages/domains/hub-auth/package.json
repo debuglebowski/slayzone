@@ -26,6 +26,6 @@
     "@peculiar/x509": "~2.1.0",
     "@types/express": "^5.0.5",
     "reflect-metadata": "^0.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   }
 }

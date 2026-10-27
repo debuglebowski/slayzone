@@ -69,6 +69,17 @@ function contentIsAboveOverlay(): boolean {
 const armOutsideListener = (): Promise<void> =>
   act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
 
+/**
+ * A primary-button press as a browser sends it: pointerdown, then click. For button 0
+ * DismissableLayer defers the outside dismiss from pointerdown to the click, so a lone
+ * pointerdown no longer closes the layer. Settle one macrotask for its click handling.
+ */
+async function press(el: Element): Promise<void> {
+  fireEvent.pointerDown(el)
+  fireEvent.click(el)
+  await armOutsideListener()
+}
+
 describe('DialogContent', () => {
   beforeEach(fakeCssAnimations)
   afterEach(() => {
@@ -96,15 +107,15 @@ describe('DialogContent', () => {
     expect(contentIsAboveOverlay()).toBe(true)
   })
 
-  it('dismisses on a pointerdown on the overlay, not on one inside the content', async () => {
+  it('dismisses on a press on the overlay, not on one inside the content', async () => {
     const onOpenChange = vi.fn()
     render(<Edit open onOpenChange={onOpenChange} />)
     await armOutsideListener()
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Save' }))
+    await press(screen.getByRole('button', { name: 'Save' }))
     expect(onOpenChange).not.toHaveBeenCalled()
 
-    fireEvent.pointerDown(overlay())
+    await press(overlay())
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 

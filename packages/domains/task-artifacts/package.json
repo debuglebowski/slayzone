@@ -42,6 +42,6 @@
     "@vitejs/plugin-react": "^5.2.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "better-sqlite3": "^13.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   }
 }

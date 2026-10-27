@@ -17,8 +17,6 @@ minimumReleaseAgeExclude:
   - scheduler
   # Renovate security update: picomatch@4.0.4
   - picomatch@4.0.4
-  # Renovate security update: vitest@4.1.11
-  - vitest@4.1.11
   # Renovate security update: pnpm@10.34.5
   - pnpm@10.34.5
   # Renovate security update: astro@7.3.2
