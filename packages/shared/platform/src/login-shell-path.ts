@@ -59,7 +59,10 @@ export function parseLoginShellPathOutput(stdout: string): string | null {
  */
 export function mergePathLists(primary: string, secondary: string | undefined): string {
   const entries = new Set<string>()
-  for (const entry of [...primary.split(path.delimiter), ...(secondary ?? '').split(path.delimiter)]) {
+  for (const entry of [
+    ...primary.split(path.delimiter),
+    ...(secondary ?? '').split(path.delimiter)
+  ]) {
     if (entry) entries.add(entry)
   }
   return [...entries].join(path.delimiter)

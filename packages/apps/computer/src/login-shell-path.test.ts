@@ -101,7 +101,17 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
     execFileSync('git', ['init', '-q'], { cwd: repo })
     execFileSync(
       'git',
-      ['-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'init'],
+      [
+        '-c',
+        'user.email=t@example.com',
+        '-c',
+        'user.name=T',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init'
+      ],
       { cwd: repo }
     )
     script(join(repo, '.git', 'hooks', 'post-checkout'), [
