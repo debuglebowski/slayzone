@@ -79,6 +79,9 @@
   },
   "devDependencies": {
     "@auth/core": "^0.41.3",
+    "@babel/core": "^7.28.6",
+    "@babel/eslint-parser": "^7.29.9",
+    "@babel/preset-typescript": "^7.29.7",
     "@biomejs/biome": "2.5.14",
     "@convex-dev/auth": "^0.0.95",
     "@slayzone/tsgo": "workspace:*",
@@ -91,8 +94,7 @@
     "png-to-ico": "^3.0.2",
     "sharp": "^0.34.5",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.1"
+    "typescript": "7.1.0-beta"
   },
   "engines": {
     "node": ">=24",

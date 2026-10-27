@@ -20,7 +20,7 @@ import type { Database } from 'better-sqlite3'
  * the domains; the dependency would otherwise be a cycle). Declaration merging
  * is the only way to type the in-domain call sites without that cycle.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- open for domain augmentation
+// Empty on purpose: open for domain augmentation.
 export interface TxnRegistry {}
 
 /**

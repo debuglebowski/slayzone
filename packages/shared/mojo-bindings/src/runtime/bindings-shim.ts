@@ -19,10 +19,7 @@
  * enforces the generic signatures the generated code actually relies on.
  */
 
-/* eslint-disable @typescript-eslint/no-namespace */
-
 export namespace mojo {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   export namespace internal {
     /**
      * Opaque token for a mojom type spec. The generated code only ever passes

@@ -4,7 +4,10 @@
     ".": {
       "entry": ["scripts/*.js"],
       "project": ["scripts/**/*.js"],
-      "ignoreDependencies": ["tsx"]
+      "ignoreDependencies": [
+        "tsx",
+        "@babel/preset-typescript"
+      ]
     },
     "packages/domains/*": {
       "entry": [

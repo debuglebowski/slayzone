@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Run TypeScript 7's `tsc` with our arguments. Resolved from this package, whose
-// `typescript` dependency is 7.x; the workspace root keeps 5.x for the JS compiler API.
+// `typescript` dependency is 7.x (the workspace root pins the same version).
 // `exports` hides bin/, so find the package by its manifest and run its declared bin.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'

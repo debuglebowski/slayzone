@@ -1,13 +1,14 @@
 import { defineConfig } from 'eslint/config'
-import tseslint from 'typescript-eslint'
+import babelParser from '@babel/eslint-parser'
 import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 
 // Biome owns format + ~all lint. ESLint kept ONLY for React Compiler
 // experimental rules from eslint-plugin-react-hooks v7 — biome has no
-// equivalent. typescript-eslint is loaded as a stub (all rules off) so the
-// legacy `// eslint-disable-next-line @typescript-eslint/...` comments
-// scattered across the codebase don't trigger "Definition for rule not
-// found" errors.
+// equivalent — plus the few repo-specific bans below. No rule here needs type
+// information, so TS is parsed by Babel (@babel/preset-typescript picks TS vs
+// TSX from the file extension) instead of typescript-eslint, which needs the
+// TypeScript 5.x JS compiler API. That keeps TypeScript 7 the only
+// `typescript` in the workspace.
 
 const BLOCKING_SPAWN_MESSAGE =
   'Blocking child-process call in hub code: it freezes every hub connection until the child exits. Use the async variant (execFile/spawn). If it truly cannot block the hub (boot-only, CLI-only), add `// eslint-disable-next-line <rule> -- <reason>`.'
@@ -36,10 +37,17 @@ export default defineConfig(
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
-      parser: tseslint.parser
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          babelrc: false,
+          configFile: false,
+          presets: ['@babel/preset-typescript']
+        }
+      }
     },
     plugins: {
-      '@typescript-eslint': tseslint.plugin,
       'react-hooks': eslintPluginReactHooks
     },
     linterOptions: {

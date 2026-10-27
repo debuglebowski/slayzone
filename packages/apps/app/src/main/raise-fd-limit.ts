@@ -89,6 +89,5 @@ export function raiseFdLimitWith(
 }
 
 export function raiseFdLimit(): FdLimitResult {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return raiseFdLimitWith(() => require('posix') as PosixModule)
 }
