@@ -103,6 +103,8 @@ export default defineConfig(({ mode, command }) => {
       build: {
         rolldownOptions: {
           input: {
+            // package.json `main`: sets NODE_ENV, then loads index (see bootstrap.ts).
+            bootstrap: resolve('src/main/bootstrap.ts'),
             index: resolve('src/main/index.ts'),
             // SQLite worker threads — bundled as separate entries so they can be
             // spawned via `new Worker(join(__dirname, 'diag-worker.js'))`. It

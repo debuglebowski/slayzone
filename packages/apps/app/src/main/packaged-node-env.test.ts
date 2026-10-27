@@ -41,8 +41,17 @@ describe('packaged NODE_ENV', () => {
     expect(await nodeEnvAfterLoad(false, undefined)).toBeUndefined()
   })
 
-  it('is applied by the first import of the main entry, before any other module loads', () => {
-    const entry = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
-    expect(entry.match(/^import .+$/m)?.[0]).toBe("import './packaged-node-env'")
+  /**
+   * A static import loads before the importing file runs, so a line in index.ts would
+   * run only after every library index.ts imports from node_modules. The packaged
+   * app's entry is bootstrap.ts instead: it sets NODE_ENV, then loads index.ts.
+   */
+  it('is applied by the packaged entry before any other main-process module loads', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+    expect(pkg.main).toBe('./out/main/bootstrap.js')
+
+    const bootstrap = readFileSync(new URL('./bootstrap.ts', import.meta.url), 'utf8')
+    expect(bootstrap.match(/^import .+$/gm)).toEqual(["import './packaged-node-env'"])
+    expect(bootstrap).toMatch(/^await import\('\.\/index'\)$/m)
   })
 })

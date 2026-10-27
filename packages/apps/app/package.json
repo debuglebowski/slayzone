@@ -4,7 +4,7 @@
   "private": true,
   "repository": "github:debuglebowski/slayzone",
   "type": "module",
-  "main": "./out/main/index.js",
+  "main": "./out/main/bootstrap.js",
   "scripts": {
     "dev": "node dev.mjs",
     "dev:protocol": "SLAYZONE_REGISTER_DEV_PROTOCOL=1 node dev.mjs",

@@ -1,6 +1,3 @@
-// First import: NODE_ENV=production in the packaged app before any library reads it.
-import './packaged-node-env'
-
 // Raise RLIMIT_NOFILE before anything else can spawn a child so every
 // descendant (PTYs, ripgrep, git, renderer helpers) inherits a high soft
 // limit. Best-effort: logs and continues on failure — the per-PTY sh wrapper
