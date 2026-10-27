@@ -446,7 +446,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // independent conditions therefore have to hold before a byte of SQL runs:
     // PLAYWRIGHT=1, a loopback bind (asserted at boot), and a loopback peer
     // (checked inside `handleDevSql`) — plus the gate whenever it is on.
-    if (handleDevSql(db, req, res)) return
+    if (handleDevSql(db, req, res, () => computerGateway)) return
     // Computer transport: `/api/auth/*` goes to the hub-auth express app BEFORE the
     // mcpRest stack, which applies `express.json()` — better-auth needs the raw
     // body. Present whenever hub-auth built (always, barring init failure).

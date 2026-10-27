@@ -13,7 +13,7 @@
  *     packages/apps/hub/src/dev-sql.test.ts
  */
 import { createTestHarness, test, expect } from '../../../shared/test-utils/ipc-harness.js'
-import { handleDevSql, isDevSqlEnabled, DEV_SQL_PATH } from './dev-sql.js'
+import { handleDevSql, isDevSqlEnabled, awaitUsableComputer, DEV_SQL_PATH } from './dev-sql.js'
 
 const h = await createTestHarness()
 
@@ -111,4 +111,55 @@ test('refuses a non-loopback peer even under PLAYWRIGHT=1', () => {
 
   if (priorFlag === undefined) delete process.env.PLAYWRIGHT
   else process.env.PLAYWRIGHT = priorFlag
+})
+
+/**
+ * `awaitUsableComputer` backs `POST /api/dev/await-usable-computer`, which the e2e
+ * reset calls after restarting the side-car. It replaced a fixed 600ms sleep that
+ * was both too long on an idle box (computer back in ~250ms) and too short under
+ * full-suite load — so it must resolve on the EVENT, not on a poll or a timer.
+ */
+function fakeGateway(initiallyUsable: number) {
+  let usable = initiallyUsable
+  const listeners = new Set<() => void>()
+  return {
+    listUsableComputers: () => Array.from({ length: usable }, (_, i) => ({ computerId: `c${i}` })),
+    events: {
+      on: (_event: 'computer-connected', l: () => void) => {
+        listeners.add(l)
+        return () => listeners.delete(l)
+      }
+    },
+    connect() {
+      usable += 1
+      for (const l of [...listeners]) l()
+    },
+    listenerCount: () => listeners.size
+  }
+}
+
+test('awaitUsableComputer: resolves at once when a computer is already usable', async () => {
+  const gw = fakeGateway(1)
+  expect(await awaitUsableComputer(gw as never, 5_000)).toBe(true)
+  expect(gw.listenerCount()).toBe(0)
+})
+
+test('awaitUsableComputer: resolves on computer-connected, not on a timer', async () => {
+  const gw = fakeGateway(0)
+  const started = Date.now()
+  const pending = awaitUsableComputer(gw as never, 5_000)
+  setTimeout(() => gw.connect(), 20)
+  expect(await pending).toBe(true)
+  expect(Date.now() - started < 1_000).toBe(true)
+  expect(gw.listenerCount()).toBe(0)
+})
+
+test('awaitUsableComputer: false (not a throw) on timeout, listener released', async () => {
+  const gw = fakeGateway(0)
+  expect(await awaitUsableComputer(gw as never, 30)).toBe(false)
+  expect(gw.listenerCount()).toBe(0)
+})
+
+test('awaitUsableComputer: no gateway = nothing to wait for', async () => {
+  expect(await awaitUsableComputer(null, 5_000)).toBe(false)
 })

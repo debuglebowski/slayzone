@@ -244,20 +244,12 @@ export async function resetApp(page: Page): Promise<void> {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
 
-  // `app:reset-for-test` restarts the SIDE-CAR, which builds a fresh computer gateway
-  // — the computer's session belonged to the old one, so briefly the hub has zero
-  // connected computers while the computer (healthy) re-dials. Any spec spawning inside
-  // that gap resolves no computer and, with the in-process fallback gone, fails.
-  //
-  // Measured: resolver miss at t=2300ms, computer connect at t=2442ms.
-  //
-  // Cheap wait, deliberately: the computer's first redial is now 100ms
-  // (DEFAULT_BACKOFF.initialDelayMs), so a fixed sleep costs less than polling and
-  // adds no load. An earlier version polled `computers.list` over the renderer in
-  // every spec's beforeAll across 12 workers — the polling itself became the
-  // bottleneck, adding ~7min of wall-clock and causing load-shaped failures (30s
-  // click timeouts, closed pages) that looked like product bugs.
-  await wait(600)
+  // The side-car restart inside `app:reset-for-test` builds a fresh computer
+  // gateway; the handler itself now returns only once the local computer is usable
+  // again (hub-side event wait, `/api/dev/await-usable-computer`). This used to be
+  // a fixed `wait(600)` here — ~350ms of idle per call on a quiet box, and still
+  // too short under load. Polling `computers.list` from here is NOT the fix: across
+  // workers that poll became the bottleneck (~7min wall clock).
 }
 
 /**

@@ -493,6 +493,7 @@ const devSql = (method: string, sql: string, params?: unknown[]): Promise<unknow
   devPost('/api/dev/sql', { method, sql, params })
 const devSqlRun = (sql: string, params?: unknown[]): Promise<unknown> => devSql('run', sql, params)
 const devReset = (): Promise<unknown> => devPost('/api/dev/reset')
+const devAwaitUsableComputer = (): Promise<unknown> => devPost('/api/dev/await-usable-computer')
 
 async function markCliMigrationDialogShownLocally(): Promise<boolean> {
   const root = getClientRoot()
@@ -4140,6 +4141,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         if (!isRemoteMode && sidecarServerHandle) {
           await sidecarServerHandle.restart()
           await sidecarServerHandle.waitForReady()
+          // 8b. The fresh side-car built a fresh computer gateway, so the local
+          // computer (healthy) is re-dialling. Return only once it is usable —
+          // anything spawned in that gap resolves no computer. Event-driven on
+          // the hub side; replaces a fixed 600ms sleep in the e2e `resetApp`.
+          // A computer-less worker (`SLAYZONE_E2E_NO_COMPUTER`) has no handle and
+          // skips it. Not fatal on timeout: same outcome as the old sleep.
+          if (localComputerHandle) {
+            const r = (await devAwaitUsableComputer()) as { usable?: boolean } | null
+            if (!r?.usable) {
+              console.warn('[reset-for-test] no usable computer after side-car restart')
+            }
+          }
         }
 
         // 9. Process manager is owned + re-inited by the side-car on restart.
