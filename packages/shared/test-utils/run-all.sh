@@ -6,8 +6,8 @@
 # Strict: exits non-zero if any suite fails, or if any test file under packages/ is
 # neither run nor skipped with a reason (require_registered at the bottom). Add a suite:
 # one line below with the runner it needs (node suites: `run_harness <file>`, run together
-# by run_harness_suites under vitest.harness.config.ts); a test file nobody registers fails
-# the run.
+# under vitest.harness.config.ts); a test file nobody registers fails the run. The lines
+# below only register; run_suites at the bottom runs them all (see runners.sh).
 #
 # Needs Node >= 24 (the hub-auth suites use node:sqlite without a flag) and the native
 # modules rebuilt for Electron's ABI by the root postinstall (scripts/postinstall.js),
@@ -218,8 +218,11 @@ run_harness packages/domains/diagnostics/src/server/flush-on-exit.test.ts
 # Sidecar build identity — /health + getServerBuildInfo (pure; plans/sidecar-staleness.md P1)
 run_harness packages/apps/hub/src/build-info.test.ts
 # /health identity + loopback gating — the multi-hub discovery channel
-# (plans/hub-lifecycle-and-discovery.md P1).
-run_harness packages/apps/hub/src/health.test.ts
+# (plans/hub-lifecycle-and-discovery.md P1). PLAIN node: three tests dial this machine's
+# own non-loopback LAN address, and on macOS a LAN connect from inside Electron.app is
+# gated by its "Local Network" privacy permission — seen hanging there until granted,
+# and every new Electron binary (an upgrade) asks again. Plain node passed throughout.
+run_harness_node packages/apps/hub/src/health.test.ts
 # A closed window's warm-pool tab counts are dropped (after a reconnect grace).
 run_harness packages/apps/hub/src/warm-window-sockets.test.ts
 run_harness packages/apps/hub/src/web-assets.test.ts
@@ -979,13 +982,14 @@ run_harness packages/shared/build-guards/runtime-imports.test.ts
 # incl. inlined workspace server code outside the package's own src/.
 run_harness packages/shared/build-guards/watch-inputs.test.ts
 
+# Everything registered above runs here, in concurrent lanes (see runners.sh): the node
+# harness runs, ONE vitest run over every run_vitest_files group, and the package runs.
+run_suites
+
 # Every test file in every package must be run or skipped above, file by file or as
 # part of a package run. Without this, 75 test files had drifted out of every runner
 # (and most out of typecheck too) and rotted unnoticed.
 # shellcheck disable=SC2046
-# Every run_harness file above, in ONE parallel vitest run (see runners.sh).
-run_harness_suites
-
 require_registered $(find packages -mindepth 2 -maxdepth 2 -type d | sort)
 
 print_summary

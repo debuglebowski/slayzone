@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vitest/config'
 
@@ -55,6 +56,12 @@ export default defineConfig({
     setupFiles: [local('harness-setup.ts')],
     pool: 'forks',
     isolate: true,
+    // Two forks per core, not vitest's cores-1: these workers mostly WAIT (on a hub or
+    // computer bin booting, git, a child process, a timer), not compute. Measured on a
+    // 10-core Mac, 358 files: 9 forks kept ~2 cores busy and queued the bulk behind
+    // them (median file finished at 195s, run 222s); 18 forks finished the run in 168s,
+    // bounded by its single longest file, under the same background load.
+    maxWorkers: Math.max(2, availableParallelism() * 2),
     // Many suites boot a real hub/computer bin, git, or a fresh migrated DB.
     testTimeout: 120_000,
     hookTimeout: 120_000,

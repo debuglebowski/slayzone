@@ -13,20 +13,26 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { stripVitestInjectedEnv } from './vitest-injected-env'
 
 const rootDir = resolve(import.meta.dirname, '../../..')
 
 export default function setup(): void {
+  // This runs in vitest's own process, which has the same injected NODE_ENV/TEST.
+  const env = { ...process.env }
+  stripVitestInjectedEnv(env)
   for (const pkg of ['hub', 'computer', 'cli']) {
     execFileSync('node', ['build.mjs'], {
       cwd: join(rootDir, 'packages/apps', pkg),
-      stdio: 'inherit'
+      stdio: 'inherit',
+      env
     })
   }
   if (!existsSync(join(rootDir, 'packages/apps/hub/dist/web/index.html'))) {
     execFileSync('pnpm', ['--filter', '@slayzone/web-shell', 'build'], {
       cwd: rootDir,
-      stdio: 'inherit'
+      stdio: 'inherit',
+      env
     })
   }
 }
