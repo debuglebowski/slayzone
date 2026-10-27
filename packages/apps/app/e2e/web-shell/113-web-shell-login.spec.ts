@@ -288,8 +288,11 @@ test.describe('web shell — real login-required hub, real browser', () => {
   // #164: the hub refused a web session's `settings.get`, `settings.getAll` and
   // `pty.warmSetProjectTabCounts` (one `authz.denied` line each), and `settings.set`
   // too, so its layout never persisted. Now it reads and writes its OWN settings, and
-  // the client no longer pushes warm-pool counts it would only be refused.
-  test('a web session keeps its layout across a reload, and the hub refuses none of its settings or warm-pool calls', async () => {
+  // the client no longer pushes warm-pool counts it would only be refused. Later the
+  // same for `app.meta.getVersion` (now `read`), `app.auth.onCallback` and
+  // `telemetry.onIpcEvent` (still `never`, the client skips them): the hub refuses a
+  // web session NOTHING, so any new call a web session cannot make fails here.
+  test('a web session keeps its layout across a reload, and the hub refuses none of its calls', async () => {
     context = await browser.newContext()
     const page = await context.newPage()
     await page.goto(`http://127.0.0.1:${hub.port}/`)
@@ -336,9 +339,7 @@ test.describe('web shell — real login-required hub, real browser', () => {
 
     // Past the warm-pool push debounce (150 ms) and its `hub.describe` round trip.
     await page.waitForTimeout(1_500)
-    const refused = scopeDenials(hub.output())
-      .map((e) => e.targetId)
-      .filter((id) => id?.startsWith('settings.') || id === 'pty.warmSetProjectTabCounts')
+    const refused = scopeDenials(hub.output()).map((e) => e.targetId)
     expect(refused).toEqual([])
   })
 })

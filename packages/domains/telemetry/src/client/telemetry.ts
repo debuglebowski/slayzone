@@ -1,4 +1,4 @@
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient, hubAllows, type TrpcVanillaClient } from '@slayzone/transport/client'
 import { safeRandomUUID } from '@slayzone/ui/secure-context'
 import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
 
@@ -231,23 +231,38 @@ export async function initTelemetry(tier: TelemetryTier): Promise<void> {
 
 let ipcCleanup: (() => void) | null = null
 
+const IPC_EVENT_PATH = 'telemetry.onIpcEvent'
+
 export function startIpcTelemetryBridge(): void {
   if (ipcCleanup) return
   if (typeof window === 'undefined') return
   // Runs from TelemetryProvider's init effect — i.e. after a tRPC query has
   // already resolved — so the vanilla client is initialized. Guard defensively.
+  let client: TrpcVanillaClient
   try {
-    const sub = getTrpcClient().telemetry.onIpcEvent.subscribe(undefined, {
+    client = getTrpcClient()
+  } catch {
+    // tRPC client not yet initialized — bridge stays off (no telemetry loss that
+    // matters: pre-init IPC events predate posthog readiness anyway).
+    return
+  }
+  let sub: { unsubscribe: () => void } | null = null
+  let stopped = false
+  ipcCleanup = () => {
+    stopped = true
+    sub?.unsubscribe()
+  }
+  // A web session may not subscribe — the stream is the desktop host's own IPC
+  // telemetry, and the hub refuses it (`scopes.ts`) — so ask first (`hubAllows`).
+  void hubAllows(client, IPC_EVENT_PATH).then((allowed) => {
+    if (!allowed || stopped) return
+    sub = client.telemetry.onIpcEvent.subscribe(undefined, {
       onData: ({ event, props }) => {
         if (!initialized || !ph) return
         ph.capture(event, props)
       }
     })
-    ipcCleanup = () => sub.unsubscribe()
-  } catch {
-    // tRPC client not yet initialized — bridge stays off (no telemetry loss that
-    // matters: pre-init IPC events predate posthog readiness anyway).
-  }
+  })
 }
 
 export function stopIpcTelemetryBridge(): void {

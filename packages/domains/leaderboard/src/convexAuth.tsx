@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { useVisibleInterval } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { hubAllows, useTRPCClient } from '@slayzone/transport/client'
 import { api } from 'convex/_generated/api'
 import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
 
@@ -77,6 +77,8 @@ interface GithubSystemSignInResult {
   error?: string
 }
 
+const ON_CALLBACK_PATH = 'app.auth.onCallback'
+
 /** How the OAuth callback code is delivered to the bridge (see header). */
 export type OAuthDelivery = 'inline' | 'subscription'
 
@@ -126,23 +128,33 @@ function ConvexAuthBridge({
 
   // Fork only: the sidecar relays the OAuth callback over this subscription
   // after the chromium shell forwards the slayzone:// deep-link. Electron uses
-  // the inline mutation return and never opens this sub.
+  // the inline mutation return and never opens this sub. A web session (the same
+  // bundle in a browser) may not subscribe — the hub refuses it (`scopes.ts`) — so
+  // it asks first (`hubAllows`) rather than open a sub that is only refused.
   useEffect(() => {
     if (oauthDelivery !== 'subscription') return
-    const sub = trpcClient.app.auth.onCallback.subscribe(undefined, {
-      onData: (payload: { code?: string; error?: string }) => {
-        // Only act on a callback for a sign-in WE started — ignore unsolicited /
-        // injected deep-link callbacks.
-        if (!flowPendingRef.current) return
-        flowPendingRef.current = false
-        if (payload.error) {
-          setLastError(sanitizeAuthError(payload.error))
-          return
+    let sub: { unsubscribe: () => void } | null = null
+    let disposed = false
+    void hubAllows(trpcClient, ON_CALLBACK_PATH).then((allowed) => {
+      if (!allowed || disposed) return
+      sub = trpcClient.app.auth.onCallback.subscribe(undefined, {
+        onData: (payload: { code?: string; error?: string }) => {
+          // Only act on a callback for a sign-in WE started — ignore unsolicited /
+          // injected deep-link callbacks.
+          if (!flowPendingRef.current) return
+          flowPendingRef.current = false
+          if (payload.error) {
+            setLastError(sanitizeAuthError(payload.error))
+            return
+          }
+          if (payload.code) void completeOAuthCode(payload.code)
         }
-        if (payload.code) void completeOAuthCode(payload.code)
-      }
+      })
     })
-    return () => sub.unsubscribe()
+    return () => {
+      disposed = true
+      sub?.unsubscribe()
+    }
   }, [oauthDelivery, trpcClient, completeOAuthCode])
 
   const value = useMemo<LeaderboardAuthState>(

@@ -151,9 +151,23 @@ export type ProcedureScope = Scope | 'never'
  * `pty.create` instant — and no scoped session can call `pty.create`. The client
  * learns its scopes from `hub.describe` and does not push it (`hubAllows`).
  *
+ * ── app version: `app.meta.getVersion` → `read` ──────────────────────────────
+ * The same `appGetVersion()` value `hub.describe` already serves every caller,
+ * logged in or not — granting it reveals nothing new.
+ *
+ * ── hub-wide event buses: `never`, and the client skips them ─────────────────
+ * `app.auth.onCallback` and `telemetry.onIpcEvent` each fan out ONE process-wide
+ * emitter to every subscriber, with no notion of who the caller is: the first is
+ * the fork's GitHub OAuth deep-link (`slayzone://`) callback — a subscriber gets
+ * every sign-in code the host receives; the second is the desktop main process's
+ * IPC telemetry — everything any desktop user does. Neither can be narrowed to the
+ * caller, so neither is granted; the web client checks `hubAllows` and does not
+ * subscribe (`ConvexAuthBridge`, `startIpcTelemetryBridge`).
+ *
  * ── denied wholesale (infra, danger, or simply out of Phase-1 scope) ───────
  * Every procedure in `app` (native window/browser-panel/floating-agent/webview
- * control — nothing here is meaningful from a browser tab), `aiConfig`
+ * control — nothing here is meaningful from a browser tab; minus `getVersion`
+ * above), `aiConfig`
  * (provider API keys), `integrations` (credential-store backed), `worktrees`
  * (git mutations + `mergeWithAI`/`analyzeConflict`), `processes`, `automations`,
  * `menu`, `workspace` (includes `setAllowedRoots` — mutates the fs sandbox
@@ -342,7 +356,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.meta.getRendererZoomFactor': 'never',
   'app.meta.getSidecarStatus': 'never',
   'app.meta.getTrpcPort': 'never',
-  'app.meta.getVersion': 'never',
+  'app.meta.getVersion': 'read',
   'app.meta.getZoomFactor': 'never',
   'app.meta.installCli': 'never',
   'app.meta.isLoopModeEnabled': 'never',
