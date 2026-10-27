@@ -23,7 +23,8 @@ import {
   useStableCallback,
   PulseGrid,
   safeClipboardWriteText,
-  safeClipboardReadText
+  safeClipboardReadText,
+  useVisibleInterval
 } from '@slayzone/ui'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
@@ -742,15 +743,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [isActive, sessionId])
 
   // Cross-task leak detector (terminal-identity.ts): on reveal and periodically
-  // while on screen, the pane must hold exactly its own xterm.
+  // while on screen (the interval pauses while the window is hidden), the pane
+  // must hold exactly its own xterm.
   useEffect(() => {
     if (!isActive) return
-    const check = (site: string): void =>
-      checkTerminalIdentity(sessionId, containerRef.current, terminalRef.current, site)
-    check('reveal')
-    const id = window.setInterval(() => check('interval'), 10_000)
-    return () => window.clearInterval(id)
+    checkTerminalIdentity(sessionId, containerRef.current, terminalRef.current, 'reveal')
   }, [isActive, sessionId])
+  useVisibleInterval(
+    () => checkTerminalIdentity(sessionId, containerRef.current, terminalRef.current, 'interval'),
+    10_000,
+    { enabled: isActive }
+  )
 
   // Re-fit + re-rasterize on isActive false→true. A task switch is a CSS
   // visibility:hidden flip — no ResizeObserver fires on its own — so a panel
