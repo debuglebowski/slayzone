@@ -315,16 +315,46 @@ describe('createFsHandlers — file-editor ops', () => {
 })
 
 describe('createFsHandlers — watch lifecycle', () => {
+  type Notify = ReturnType<typeof vi.fn<ComputerDialer['notify']>>
+  const changesFor = (notify: Notify, relPath: string) =>
+    notify.mock.calls.filter((c) => (c[1] as { relPath: string }).relPath === relPath)
+
+  /**
+   * Resolves once the watch on `dir` delivers changes, with nothing left in flight. A
+   * recursive `fs.watch` on macOS rides FSEvents, whose stream starts asynchronously and
+   * drops changes made before it is up — under load, a write made right after
+   * watchStart can land first and is lost for good, however long the test then waits.
+   * So re-touch a probe file until one arrives, then let its debounced repeats drain.
+   */
+  async function untilWatching(notify: Notify): Promise<void> {
+    let n = 0
+    await vi.waitFor(
+      () => {
+        writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
+        expect(notify).toHaveBeenCalled()
+      },
+      { timeout: 10_000, interval: 200 }
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    notify.mockClear()
+  }
+
   it('streams fs.change tagged with the hub-minted watchId, and stops on watchStop', async () => {
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
     const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
     expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
+    await untilWatching(notify)
     writeFileSync(join(dir, 'touched.txt'), 'x')
     // The watcher debounces 100ms before emitting.
-    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 5000 })
+    await vi.waitFor(() => expect(changesFor(notify, 'touched.txt')).not.toHaveLength(0), {
+      timeout: 5000
+    })
 
-    const [method, params] = notify.mock.calls[0] as unknown as [string, { watchId: string }]
+    const [method, params] = changesFor(notify, 'touched.txt')[0] as unknown as [
+      string,
+      { watchId: string }
+    ]
     expect(method).toBe(ComputerNotificationMethods.fsChange)
     expect(params.watchId).toBe('w1')
 
@@ -343,14 +373,14 @@ describe('createFsHandlers — watch lifecycle', () => {
 
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
     handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+    await untilWatching(notify)
     writeFileSync(join(dir, 'once.txt'), 'x')
-    await vi.waitFor(() => expect(notify).toHaveBeenCalled(), { timeout: 5000 })
+    await vi.waitFor(() => expect(changesFor(notify, 'once.txt')).not.toHaveLength(0), {
+      timeout: 5000
+    })
     await new Promise((r) => setTimeout(r, 300))
 
-    const forThisFile = notify.mock.calls.filter(
-      (c) => (c[1] as { relPath: string }).relPath === 'once.txt'
-    )
-    expect(forThisFile).toHaveLength(1)
+    expect(changesFor(notify, 'once.txt')).toHaveLength(1)
 
     handlers[M.fsWatchStop]({ watchId: 'w1' })
   }, 20_000)
