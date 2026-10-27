@@ -779,6 +779,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/ProcessesPanel.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTitleEditing.test.tsx \
   packages/domains/task/src/client/task-detail/useTaskTerminalSession.test.tsx \
+  packages/domains/task/src/client/task-detail/useDevServerDetection.test.tsx \
+  packages/domains/task/src/client/usePanelOwnership.test.tsx \
+  packages/domains/app-shell/src/client/useExplodeMode.test.tsx \
   packages/domains/task/src/client/TaskProgressPopover.test.tsx \
   packages/domains/task/src/client/WebPanelView.test.tsx \
   packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \

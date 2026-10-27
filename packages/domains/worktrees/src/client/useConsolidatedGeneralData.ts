@@ -283,11 +283,12 @@ export function useConsolidatedGeneralData(
 
   // Worktree branch. Each reactive fetch below drops its response once its inputs
   // have changed, so a late answer for previous inputs can't replace current data.
+  // No linked worktree → no worktree branch: cleared while rendering (it is only read
+  // while a worktree is linked), which also clears an answer that landed before the
+  // previous fetch was cancelled.
+  if (!task.worktree_path && worktreeBranch !== null) setWorktreeBranch(null)
   useEffect(() => {
-    if (!task.worktree_path) {
-      setWorktreeBranch(null)
-      return
-    }
+    if (!task.worktree_path) return
     let cancelled = false
     queryClient
       .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path }))
@@ -607,12 +608,13 @@ export function useConsolidatedGeneralData(
     [projectPath, task.id, task.worktree_path, onUpdateTask]
   )
 
-  // Fetch detected worktrees when no worktree is linked
+  // Fetch detected worktrees when no worktree is linked. With a linked worktree or no
+  // project path there are none: cleared while rendering (they are only read while no
+  // worktree is linked), which also clears an answer that landed before the previous
+  // fetch was cancelled.
+  if ((hasWorktree || !projectPath) && detectedWorktrees.length > 0) setDetectedWorktrees([])
   useEffect(() => {
-    if (hasWorktree || !projectPath) {
-      setDetectedWorktrees([])
-      return
-    }
+    if (hasWorktree || !projectPath) return
     let cancelled = false
     queryClient
       .fetchQuery(trpc.worktrees.detectWorktrees.queryOptions({ repoPath: projectPath }))

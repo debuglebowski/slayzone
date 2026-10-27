@@ -25,12 +25,13 @@ export function usePanelOwnership(taskId: string | undefined) {
   const windowIdQuery = useQuery(trpc.app.taskWindows.getWindowId.queryOptions())
   const windowId = windowIdQuery.data ?? null
 
-  // Refresh ownership snapshot + subscribe to live changes
+  // Refresh ownership snapshot + subscribe to live changes. No task → no owners: cleared
+  // while rendering, which also clears an answer for the previous task that landed
+  // before its fetch was cancelled. (A task switch keeps the previous owners until the
+  // next task's list lands.)
+  if (!taskId && entries.length > 0) setEntries([])
   useEffect(() => {
-    if (!taskId) {
-      setEntries([])
-      return
-    }
+    if (!taskId) return
     let alive = true
     trpcClient.app.taskWindows.getOwnership.query({ taskId }).then((list) => {
       if (alive) setEntries(list)

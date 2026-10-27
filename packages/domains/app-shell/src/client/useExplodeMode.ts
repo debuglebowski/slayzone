@@ -33,11 +33,11 @@ export function useExplodeMode(openTaskIds: string[]): ExplodeModeApi {
     if (openTaskIds.length < 2) setExplodeMode(false)
   }, [openTaskIds.length])
 
-  // Clear the focused explode cell on leaving explode mode. Keyed on the mode only:
-  // run on every tab switch, even a no-op setState re-renders the whole shell.
-  useEffect(() => {
-    if (!explodeMode) setFocusedExplodeTaskId(null)
-  }, [explodeMode])
+  // No focused explode cell outside explode mode: cleared while rendering, and only when
+  // set, so a tab switch never re-renders the whole shell. Every reader gates the cell on
+  // `explodeMode`, so this changes no rendered output; it also clears a focusin that lands
+  // before the grid listener below is removed.
+  if (!explodeMode && focusedExplodeTaskId !== null) setFocusedExplodeTaskId(null)
 
   // Seed the focused explode cell on entering explode mode; keep it valid as tabs change
   useEffect(() => {

@@ -49,6 +49,11 @@ export function useDevServerDetection({
   useEffect(() => {
     browserOpenRef.current = browserVisible
   }, [browserVisible])
+  // No toast while the browser panel is visible: cleared while rendering. Nothing sets a
+  // URL while the panel is visible (handleUrl checks browserOpenRef), so this fires on the
+  // render that opens the panel, or right after a URL that landed before browserOpenRef
+  // caught up.
+  if (browserVisible && detectedDevUrl !== null) setDetectedDevUrl(null)
 
   // Load dev server settings (re-read on settingsRevision change)
   useEffect(() => {
@@ -91,10 +96,6 @@ export function useDevServerDetection({
 
     return unsub
   }, [task?.id, subscribeDevServer, getMainSessionId, trpcClient])
-
-  useEffect(() => {
-    if (browserVisible) setDetectedDevUrl(null)
-  }, [browserVisible])
 
   return {
     detectedDevUrl,

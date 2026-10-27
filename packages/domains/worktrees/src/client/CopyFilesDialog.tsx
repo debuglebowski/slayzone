@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Loader2, Folder, File, ChevronRight } from 'lucide-react'
@@ -14,7 +14,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
+  useDepsChanged
 } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import type { IgnoredFileNode, WorktreeCopyPreset } from '../shared/types'
@@ -37,8 +38,8 @@ interface CopyFilesDialogProps {
 }
 
 // The tree while there is none (dialog closed, scan not loaded, scan failed). One
-// shared instance: `tree` is a dep of the preset→selection sync effect, and a fresh
-// `[]` per render made a failed scan (no data, `treeLoaded` true) re-run that effect
+// shared instance: `tree` is a dep of the preset→selection sync, and a fresh `[]` per
+// render made a failed scan (no data, `treeLoaded` true) re-run that sync
 // → setSelected → re-render → new `[]` → … an infinite update loop.
 const NO_TREE: IgnoredFileNode[] = []
 
@@ -187,12 +188,15 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
     }
   }
 
-  useEffect(() => {
-    if (!treeLoaded || presets.length === 0) return
-    const preset = presets.find((p) => p.id === selectedPresetId)
-    if (!preset) return
-    setSelected(filterTreeByGlobs(tree, preset.pathGlobs))
-  }, [selectedPresetId, treeLoaded, tree, presets])
+  // The selection follows the selected preset: re-applied while rendering on mount and
+  // whenever the preset, the preset list or the scanned tree changes (a manual toggle
+  // switches to 'custom', which matches no preset), so no commit shows the previous
+  // selection against a new scan. Every dep is stable between renders (`tree` falls
+  // back to the shared NO_TREE), so this settles.
+  if (useDepsChanged([selectedPresetId, treeLoaded, tree, presets], true)) {
+    const preset = treeLoaded ? presets.find((p) => p.id === selectedPresetId) : undefined
+    if (preset) setSelected(filterTreeByGlobs(tree, preset.pathGlobs))
+  }
 
   const { states, selectedCounts, selectedFileCount } = useMemo(
     () => computeStates(tree, selected),

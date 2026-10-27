@@ -263,3 +263,65 @@ describe('useConsolidatedGeneralData — out-of-date responses', () => {
     expect(result.current.detectedWorktrees).toEqual([])
   })
 })
+
+// The worktree branch and the detected (linkable) worktrees are cleared when their
+// source goes away: no linked worktree → no worktree branch; a linked worktree or no
+// project path → no detected worktrees.
+describe('useConsolidatedGeneralData — resets', () => {
+  type P = { task: Task; projectPath: string | null }
+  async function setupResets(initial: P, results: Record<string, unknown>) {
+    const client = new QueryClient()
+    vi.spyOn(client, 'fetchQuery').mockImplementation((async (o: { queryKey: unknown[] }) => {
+      const key = String(o.queryKey[0])
+      return key in results ? results[key] : (queryResults[key] ?? null)
+    }) as never)
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const hook = renderHook(
+      (p: P) => useConsolidatedGeneralData(p.task, p.projectPath, true, 5000, async () => p.task),
+      { wrapper, initialProps: initial }
+    )
+    await act(async () => {})
+    return hook
+  }
+  const t = (over: Partial<Task>) =>
+    ({ ...task, worktree_parent_branch: null, ...over }) as unknown as Task
+  const wt = (path: string) => ({ path, branch: 'b', isMain: false })
+
+  it('unlinking the worktree clears the worktree branch', async () => {
+    const { result, rerender } = await setupResets(
+      { task: t({ worktree_path: '/wt1' }), projectPath: '/repo' },
+      { getCurrentBranch: 'b1' }
+    )
+    expect(result.current.worktreeBranch).toBe('b1')
+    rerender({ task: t({ worktree_path: null }), projectPath: '/repo' })
+    expect(result.current.worktreeBranch).toBe(null)
+    await act(async () => {})
+    expect(result.current.worktreeBranch).toBe(null)
+  })
+
+  it('linking a worktree clears the detected worktrees', async () => {
+    const { result, rerender } = await setupResets(
+      { task: t({ worktree_path: null }), projectPath: '/repo' },
+      { detectWorktrees: [wt('/one'), { path: '/repo', branch: 'main', isMain: true }] }
+    )
+    expect(result.current.detectedWorktrees).toEqual([wt('/one')])
+    rerender({ task: t({ worktree_path: '/wt' }), projectPath: '/repo' })
+    expect(result.current.detectedWorktrees).toEqual([])
+    // Unlinking again re-detects.
+    rerender({ task: t({ worktree_path: null }), projectPath: '/repo' })
+    await act(async () => {})
+    expect(result.current.detectedWorktrees).toEqual([wt('/one')])
+  })
+
+  it('losing the project path clears the detected worktrees', async () => {
+    const { result, rerender } = await setupResets(
+      { task: t({ worktree_path: null }), projectPath: '/repo' },
+      { detectWorktrees: [wt('/one')] }
+    )
+    expect(result.current.detectedWorktrees).toEqual([wt('/one')])
+    rerender({ task: t({ worktree_path: null }), projectPath: null })
+    expect(result.current.detectedWorktrees).toEqual([])
+  })
+})

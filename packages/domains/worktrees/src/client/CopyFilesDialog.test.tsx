@@ -8,7 +8,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { IgnoredFileNode } from '../shared/types'
 
 type Children = { children?: React.ReactNode }
-vi.mock('@slayzone/ui', () => ({
+vi.mock('@slayzone/ui', async (importOriginal) => ({
+  useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged,
   Dialog: ({ children }: Children) => <div>{children}</div>,
   DialogContent: ({ children }: Children) => <div>{children}</div>,
   DialogHeader: ({ children }: Children) => <div>{children}</div>,
@@ -65,7 +66,7 @@ function setPresets(data: string | null): void {
 // failed first fetch: no data, isError. `treeRenders` counts renders (one tree
 // useQuery per render); past RENDER_LOOP_LIMIT the mock throws, so a render loop fails
 // the test instead of hanging the synchronous act() flush forever.
-let treeState: 'success' | 'error' = 'success'
+let treeState: 'success' | 'error' | 'loading' = 'success'
 let treeRenders = 0
 const RENDER_LOOP_LIMIT = 100
 vi.mock('@slayzone/transport/client', () => ({
@@ -86,6 +87,8 @@ vi.mock('@tanstack/react-query', () => ({
       if (++treeRenders > RENDER_LOOP_LIMIT) throw new Error('CopyFilesDialog render loop')
       if (!o.enabled)
         return { data: undefined, isFetching: false, isSuccess: false, isError: false }
+      if (treeState === 'loading')
+        return { data: undefined, isFetching: true, isSuccess: false, isError: false }
       return treeState === 'error'
         ? { data: undefined, isFetching: false, isSuccess: false, isError: true }
         : { data: TREE, isFetching: false, isSuccess: true, isError: false }
@@ -189,5 +192,44 @@ describe('CopyFilesDialog', () => {
     fireEvent.change(screen.getByTestId('preset'), { target: { value: 'env-only' } })
     expect(treeRenders - before).toBeLessThan(10)
     expect(preset()).toBe('env-only')
+  })
+
+  it('applies the preset selection once the scan lands', () => {
+    setPresets(JSON.stringify([{ id: 'env', name: 'Env', pathGlobs: ['.env*'] }]))
+    treeState = 'loading'
+    const rerender = renderDialog(true)
+    expect(screen.getByText('Scanning ignored files…')).toBeDefined()
+    expect(copyLabel()).toBe('Copy 0 files')
+    treeState = 'success'
+    rerender(true)
+    expect(preset()).toBe('env')
+    expect(copyLabel()).toBe('Copy 1 file')
+  })
+
+  it('a manual toggle switches to Custom and the selection sticks', () => {
+    setPresets(null)
+    const rerender = renderDialog(true)
+    expect(copyLabel()).toBe('Copy 4 files')
+    // Rows: .env, docs/, cache.bin — uncheck cache.bin.
+    fireEvent.click(screen.getAllByRole('checkbox')[2])
+    expect(preset()).toBe('custom')
+    expect(copyLabel()).toBe('Copy 3 files')
+    rerender(true)
+    expect(preset()).toBe('custom')
+    expect(copyLabel()).toBe('Copy 3 files')
+    // Picking a preset again re-applies its selection.
+    fireEvent.change(screen.getByTestId('preset'), { target: { value: 'all-ignored' } })
+    expect(copyLabel()).toBe('Copy 4 files')
+  })
+
+  it('reopening re-applies the first preset over a manual selection', () => {
+    setPresets(null)
+    const rerender = renderDialog(true)
+    fireEvent.click(screen.getAllByRole('checkbox')[2])
+    expect(copyLabel()).toBe('Copy 3 files')
+    rerender(false)
+    rerender(true)
+    expect(preset()).toBe('all-ignored')
+    expect(copyLabel()).toBe('Copy 4 files')
   })
 })
