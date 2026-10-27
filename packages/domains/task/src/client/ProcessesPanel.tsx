@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { Plus, Cpu, Info, Loader2 } from 'lucide-react'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { Tooltip, TooltipTrigger, TooltipContent, useDepsChanged } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
 import type { ProcessEntry, ProcessStatus } from './ProcessesPanel.types'
 import { extractUrlFromLine } from './ProcessesPanel.utils'
@@ -44,10 +44,14 @@ export function ProcessesPanel({
   const [stats, setStats] = useState<Record<string, { cpu: number; rss: number }>>({})
   const logEndRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
+  // The spinner is for a list we don't have yet: the first load and a task/project
+  // change, adjusted while rendering. A tab re-show (<Activity>) re-runs the load
+  // effect below too, but keeps the current list on screen while it reloads.
+  if (useDepsChanged([taskId, projectId, trpcClient])) setLoading(true)
+
   useEffect(() => {
     // A response for a previous task/project must not replace the newer list.
     let cancelled = false
-    setLoading(true)
     trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
       if (cancelled) return
       const entries = (list as ProcessEntry[]).map((p) => {

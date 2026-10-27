@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } fro
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { TaskArtifact } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task/shared'
+import { depsChanged } from '@slayzone/ui'
 
 interface ArtifactSearchPanelProps {
   artifacts: TaskArtifact[]
@@ -31,8 +32,14 @@ interface ArtifactResult {
   matches: SearchMatch[]
 }
 
-// Debounced search body. Plain module function: try/finally can't be compiled
-// inside a component by the React Compiler.
+/** The last search run that finished: what it searched for, and what it found. */
+interface FinishedSearch {
+  deps: readonly unknown[]
+  results: ArtifactResult[]
+}
+
+// Debounced search body, kept a plain module function outside the component. `onDone`
+// gets the results, or [] for an invalid regex.
 async function runArtifactSearch({
   query,
   matchCase,
@@ -41,9 +48,8 @@ async function runArtifactSearch({
   contentCache,
   readContent,
   getArtifactPath,
-  setResults,
-  setCollapsed,
-  setSearching
+  onDone,
+  setCollapsed
 }: {
   query: string
   matchCase: boolean
@@ -52,9 +58,8 @@ async function runArtifactSearch({
   contentCache: RefObject<Map<string, string>>
   readContent: (id: string) => Promise<string | null>
   getArtifactPath: (artifact: TaskArtifact) => string
-  setResults: (results: ArtifactResult[]) => void
+  onDone: (results: ArtifactResult[]) => void
   setCollapsed: (collapsed: Set<string>) => void
-  setSearching: (searching: boolean) => void
 }): Promise<void> {
   try {
     const flags = matchCase ? 'g' : 'gi'
@@ -102,12 +107,10 @@ async function runArtifactSearch({
         res.push({ artifact, path: getArtifactPath(artifact), matches })
       }
     }
-    setResults(res)
+    onDone(res)
     setCollapsed(new Set())
   } catch {
-    setResults([])
-  } finally {
-    setSearching(false)
+    onDone([])
   }
 }
 
@@ -121,8 +124,7 @@ export function ArtifactSearchPanel({
   const [query, setQuery] = useState('')
   const [matchCase, setMatchCase] = useState(false)
   const [useRegex, setUseRegex] = useState(false)
-  const [results, setResults] = useState<ArtifactResult[]>([])
-  const [searching, setSearching] = useState(false)
+  const [finished, setFinished] = useState<FinishedSearch | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const contentCache = useRef<Map<string, string>>(new Map())
@@ -154,15 +156,32 @@ export function ArtifactSearchPanel({
     [artifacts]
   )
 
-  // Debounced search
+  const hasQuery = query.trim() !== ''
+  // An empty query has no results; clearing it drops the last search (adjusted while
+  // rendering; settles at once), so the next query starts from none.
+  if (!hasQuery && finished !== null) setFinished(null)
+  // The latest finished run's results stay on screen while a newer one runs.
+  const results = finished?.results ?? []
+  // "Searching..." until a run has finished for exactly what is searched now. A tab
+  // re-show (<Activity>) re-runs the search below but changes none of it, so the
+  // results on screen are not flagged as searching again.
+  const searching =
+    hasQuery &&
+    (finished === null ||
+      depsChanged(finished.deps, [
+        query,
+        matchCase,
+        useRegex,
+        textArtifacts,
+        readContent,
+        getArtifactPath
+      ]))
+
+  // Debounced search: on every change of what is searched, and on every tab re-show.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (!query.trim()) {
-      setResults([])
-      setSearching(false)
-      return
-    }
-    setSearching(true)
+    if (!query.trim()) return
+    const deps = [query, matchCase, useRegex, textArtifacts, readContent, getArtifactPath]
     debounceRef.current = setTimeout(() => {
       void runArtifactSearch({
         query,
@@ -172,9 +191,8 @@ export function ArtifactSearchPanel({
         contentCache,
         readContent,
         getArtifactPath,
-        setResults,
-        setCollapsed,
-        setSearching
+        onDone: (found) => setFinished({ deps, results: found }),
+        setCollapsed
       })
     }, 300)
     return () => {

@@ -804,6 +804,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useTerminalModes.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
+  packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
   packages/domains/worktrees/src/client/useGitMergeActions.test.tsx \

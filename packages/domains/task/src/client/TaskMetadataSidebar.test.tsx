@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React from 'react'
+import React, { Activity } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Task } from '@slayzone/task/shared'
@@ -17,7 +17,8 @@ type MockSplitButtonProps = MockChildren & {
   menu: (close: () => void) => React.ReactNode
 }
 
-vi.mock('@slayzone/ui', () => {
+vi.mock('@slayzone/ui', async (importOriginal) => {
+  const { useDepsChanged } = await importOriginal<typeof import('@slayzone/ui')>()
   const Passthrough = ({ children }: MockChildren) => <>{children}</>
   const Button = ({
     children,
@@ -90,7 +91,8 @@ vi.mock('@slayzone/ui', () => {
       }
     },
     PriorityIcon: () => null,
-    toast: { success: vi.fn(), error: vi.fn() }
+    toast: { success: vi.fn(), error: vi.fn() },
+    useDepsChanged
   }
 })
 
@@ -218,12 +220,15 @@ const allTasksList = [blockerTask, extraBlockerTask, availableTask, doneTask]
 const blockersList = [blockerTask, extraBlockerTask]
 
 const boardReads = vi.fn()
+// Current getBlockers payload. Replaced (new identity) only when a test simulates a
+// refetch that returned new data; otherwise every read returns the same list.
+let blockersData: Task[] = blockersList
 const queryData: Record<string, () => unknown> = {
   'task.loadBoardData': () => {
     boardReads()
     return { tasks: allTasksList }
   },
-  'task.getBlockers': () => blockersList,
+  'task.getBlockers': () => blockersData,
   'projects.list': () => projects,
   // No computers enrolled in the sidebar tests → ComputerCard shows its minimal
   // "runs locally" state (no Select), keeping the other assertions untouched.
@@ -323,6 +328,7 @@ globalThis.ResizeObserver = class {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  blockersData = blockersList
   mutationMocks['task.update'].mockResolvedValue(makeTask())
   mutationMocks['task.addBlocker'].mockResolvedValue(undefined)
   mutationMocks['task.removeBlocker'].mockResolvedValue(undefined)
@@ -493,5 +499,57 @@ describe('TaskMetadataSidebar', () => {
         blockedComment: null
       })
     })
+  })
+})
+
+// Task tabs live in <Activity>: hiding and re-showing a tab re-runs its effects.
+// The blocker list is a local mirror of the getBlockers query that add/remove
+// update optimistically; it re-syncs only when the query hands over new data.
+describe('TaskMetadataSidebar blockers across a tab switch', () => {
+  // `rev` re-renders the sidebar the way a query update would (this test file is
+  // compiled too, so identical props would be memoized and never re-render it).
+  function Tab({ mode, rev = 0 }: { mode: 'visible' | 'hidden'; rev?: number }) {
+    return (
+      <Activity mode={mode}>
+        <TaskMetadataSidebar
+          task={makeTask({ updated_at: `rev-${rev}` })}
+          tags={[]}
+          taskTagIds={[]}
+          onUpdate={vi.fn()}
+          onTagsChange={vi.fn()}
+        />
+      </Activity>
+    )
+  }
+  const blockerRow = (title: string) => screen.queryByText(title)
+
+  it('a blocker removed here stays removed after the tab is hidden and shown', async () => {
+    const view = render(<Tab mode="visible" />)
+    await screen.findByText('Fix API')
+    const row = screen.getByText('Fix API').closest('div') as HTMLElement
+    fireEvent.click(within(row).getByRole('button'))
+    await waitFor(() => expect(blockerRow('Fix API')).toBeNull())
+
+    view.rerender(<Tab mode="hidden" />)
+    view.rerender(<Tab mode="visible" />)
+    expect(blockerRow('Fix API')).toBeNull()
+    expect(blockerRow('Refactor auth')).not.toBeNull()
+  })
+
+  it('new query data (a refetch) replaces the list, also when it lands while hidden', async () => {
+    const view = render(<Tab mode="visible" />)
+    await screen.findByText('Fix API')
+
+    blockersData = [availableTask]
+    view.rerender(<Tab mode="visible" rev={1} />)
+    expect(blockerRow('Ship docs')).not.toBeNull()
+    expect(blockerRow('Fix API')).toBeNull()
+
+    view.rerender(<Tab mode="hidden" rev={1} />)
+    blockersData = [doneTask]
+    view.rerender(<Tab mode="hidden" rev={2} />)
+    view.rerender(<Tab mode="visible" rev={2} />)
+    expect(blockerRow('Already done')).not.toBeNull()
+    expect(blockerRow('Ship docs')).toBeNull()
   })
 })

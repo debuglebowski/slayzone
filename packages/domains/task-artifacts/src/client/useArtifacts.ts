@@ -16,7 +16,7 @@ import type {
   PruneReport
 } from '@slayzone/task-artifacts/shared'
 import { track } from '@slayzone/telemetry/client'
-import { toast, useStableCallback } from '@slayzone/ui'
+import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
 
 // Downloads reach the Electron host over the capability bridge, so they can fail for
 // reasons the user must see (no host capability, render failure, unwritable path).
@@ -122,12 +122,15 @@ export function useArtifacts(
     trpc.artifacts.foldersGetByTask.queryOptions({ taskId: taskId ?? '' }, { enabled: !!taskId })
   )
 
-  useEffect(() => {
-    if (artifactsQuery.data) setArtifacts(artifactsQuery.data)
-  }, [artifactsQuery.data])
-  useEffect(() => {
-    if (foldersQuery.data) setFolders(foldersQuery.data)
-  }, [foldersQuery.data])
+  // Mirror only when a query hands over NEW data (a fetch or refetch — including
+  // the reveal refetch of a `tasks-changed` refresh deferred while the tab was
+  // hidden). Adjusted while rendering, keyed on the data's identity: an effect
+  // also re-ran on every tab re-show (<Activity>) and reverted the local edits
+  // below to the older cached data.
+  const artifactsDataChanged = useDepsChanged([artifactsQuery.data], true)
+  if (artifactsDataChanged && artifactsQuery.data) setArtifacts(artifactsQuery.data)
+  const foldersDataChanged = useDepsChanged([foldersQuery.data], true)
+  if (foldersDataChanged && foldersQuery.data) setFolders(foldersQuery.data)
 
   // Clear local state immediately when there is no task (the queries are disabled
   // and won't emit data to drive the effects above). Adjusted during render —

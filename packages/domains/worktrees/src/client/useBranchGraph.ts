@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import { toast, useStablePoll } from '@slayzone/ui'
+import { toast, useDepsChanged, useStablePoll } from '@slayzone/ui'
 import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { DEFAULT_CONFIG, FETCH_LIMIT } from './branches-tab.constants'
 import type { CommitGraphPersistence, BranchGraphState } from './branches-tab.types'
@@ -18,7 +18,8 @@ export function useBranchGraph(
   const fetchMutation = useMutation(trpc.worktrees.fetch.mutationOptions())
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
-  const [loading, setLoading] = useState(false)
+  // Loading from the first render (the old mount effect set it true one commit later).
+  const [loading, setLoading] = useState(true)
   const [fetching, setFetching] = useState(false)
   const initialLoad = useRef(false)
 
@@ -141,9 +142,15 @@ export function useBranchGraph(
     }
   }, [projectPath, config, defaultBaseBranch, queryClient, trpc])
 
+  // A new project path loads from scratch: spinner until its first fetch lands.
+  // Adjusted while rendering, on a path change only — the poll re-runs at once on a
+  // tab re-show (<Activity>), and the graph on screen stays while it does.
+  if (useDepsChanged([projectPath])) setLoading(true)
+  // `fetchData` ends the spinner on the first fetch since this reset (a ref: read in
+  // the async fetch). Re-runs on a re-show too, where it is a no-op: `loading` is
+  // already false, and the next fetch's setLoading(false) changes nothing.
   useEffect(() => {
     initialLoad.current = false
-    setLoading(true)
   }, [projectPath])
 
   useStablePoll(fetchData, { enabled: visible && !!projectPath, baseDelayMs: 10_000 })

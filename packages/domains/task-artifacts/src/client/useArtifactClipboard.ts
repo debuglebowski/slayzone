@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
+import { useDepsChanged } from '@slayzone/ui'
 import type { TaskArtifact } from '@slayzone/task/shared'
 
 interface UseArtifactClipboardArgs {
@@ -49,15 +50,18 @@ export function useArtifactClipboard({
       .catch(() => setOsHasFiles(false))
   }, [queryClient, trpc])
 
-  // Keep multi-select in sync with single-select changes from outside (imperative handle, search panel)
-  useEffect(() => {
+  // Keep multi-select in sync with single-select changes from outside (imperative
+  // handle, search panel). Adjusted while rendering, on a change of `selectedId` only:
+  // an effect also re-ran on every tab re-show (<Activity>) and collapsed a
+  // multi-select that didn't contain the current artifact.
+  if (useDepsChanged([selectedId], true)) {
     setSelectedIds((prev) => {
       if (selectedId == null) return prev
       if (prev.size === 1 && prev.has(selectedId)) return prev
       if (prev.size > 1 && prev.has(selectedId)) return prev
       return new Set([selectedId])
     })
-  }, [selectedId])
+  }
 
   const handleArtifactClick = (e: React.MouseEvent, artifactId: string) => {
     const isMeta = e.metaKey || e.ctrlKey

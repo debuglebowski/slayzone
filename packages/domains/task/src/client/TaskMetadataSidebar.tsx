@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
+import { useDepsChanged } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { ProjectStatusCard } from './ProjectStatusCard'
@@ -49,9 +50,11 @@ export function TaskMetadataSidebar({
     setSearchTaskId(task.id)
     setAddBlockerSearch('')
   }
-  useEffect(() => {
-    if (blockersQuery.data) setBlockers(blockersQuery.data)
-  }, [blockersQuery.data])
+  // Re-mirror only when the query hands over NEW data, adjusted while rendering. An
+  // effect also re-ran on every tab re-show (<Activity>) and reverted an add/remove
+  // made here to the older cached list.
+  const blockersDataChanged = useDepsChanged([blockersQuery.data], true)
+  if (blockersDataChanged && blockersQuery.data) setBlockers(blockersQuery.data)
 
   const columnsByProject = new Map(projects.map((project) => [project.id, project.columns_config]))
   const selectedProject = projects.find((project) => project.id === task.project_id)

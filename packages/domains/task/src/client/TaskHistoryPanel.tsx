@@ -2,7 +2,7 @@ import type React from 'react'
 import { useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { formatDistanceToNowStrict, parseISO } from 'date-fns'
-import { useVisibleInterval } from '@slayzone/ui'
+import { useDepsChanged, useVisibleInterval } from '@slayzone/ui'
 import {
   Archive,
   Calendar,
@@ -127,12 +127,23 @@ function getEventMarkerMeta(event: ActivityEvent): {
   assertNever(event.kind)
 }
 
+function sameCursor(a: ActivityEventCursor | null, b: ActivityEventCursor): boolean {
+  return a !== null && a.createdAt === b.createdAt && a.id === b.id
+}
+
+interface HistoryList {
+  events: ActivityEvent[]
+  /** Where the next "Load more" page starts; null = no more pages. */
+  nextCursor: ActivityEventCursor | null
+}
+
 export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
-  const [events, setEvents] = useState<ActivityEvent[]>([])
+  // One state: a "Load more" page appends only onto the list it continues.
+  const [list, setList] = useState<HistoryList>({ events: [], nextCursor: null })
+  const { events, nextCursor } = list
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [nextCursor, setNextCursor] = useState<ActivityEventCursor | null>(null)
   const [expandedRunIds, setExpandedRunIds] = useState<Record<string, boolean>>({})
   const [actionRunsByRunId, setActionRunsByRunId] = useState<Record<string, AutomationActionRun[]>>(
     {}
@@ -143,19 +154,26 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
     runOnVisible: true
   })
 
-  useEffect(() => {
-    let active = true
+  // Another task's history (or hub client): start over — spinner, no expanded runs.
+  // Adjusted while rendering, so no commit shows the previous task's state.
+  if (useDepsChanged([taskId, trpcClient])) {
     setLoading(true)
     setLoadingMore(false)
-    setNextCursor(null)
+    setList((prev) => ({ events: prev.events, nextCursor: null }))
     setExpandedRunIds({})
     setActionRunsByRunId({})
+  }
+
+  // Page 1 on mount, task change, AND every tab re-show (<Activity> re-runs this):
+  // the panel has no live updates, so the re-show reload is its only refresh. It
+  // replaces the list in place: no spinner, expanded runs kept.
+  useEffect(() => {
+    let active = true
     trpcClient.history.listForTask
       .query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } })
       .then((result) => {
         if (!active) return
-        setEvents(result.events)
-        setNextCursor(result.nextCursor)
+        setList({ events: result.events, nextCursor: result.nextCursor })
         setLoading(false)
       })
     return () => {
@@ -171,7 +189,8 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
   }
 
   async function loadMore(): Promise<void> {
-    if (!nextCursor || loadingMore) return
+    const before = nextCursor
+    if (!before || loadingMore) return
 
     setLoadingMore(true)
     try {
@@ -179,11 +198,17 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
         taskId,
         options: {
           limit: TASK_HISTORY_PAGE_SIZE,
-          before: nextCursor
+          before
         }
       })
-      setEvents((prev) => [...prev, ...result.events])
-      setNextCursor(result.nextCursor)
+      // Append only if the list still ends where this page starts. A page-1 reload
+      // (tab re-show) or a task change that landed meanwhile replaced it: appending
+      // would leave a gap, or another task's events.
+      setList((prev) =>
+        sameCursor(prev.nextCursor, before)
+          ? { events: [...prev.events, ...result.events], nextCursor: result.nextCursor }
+          : prev
+      )
     } finally {
       setLoadingMore(false)
     }

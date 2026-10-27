@@ -44,12 +44,12 @@ export function useArtifactTree({
     readPersistedExpanded(expandedStorageKey)
   )
 
-  // Auto-expand all folders on first load when nothing was persisted
-  useEffect(() => {
-    if (expandedFolders === null && folders.length > 0) {
-      setExpandedFolders(new Set(folders.map((f) => f.id)))
-    }
-  }, [folders, expandedFolders])
+  // Auto-expand all folders on first load when nothing was persisted. Adjusted while
+  // rendering, so no commit has the folders without their expand set; settles at once
+  // (the set is non-null from then on). The persist effect below stores it.
+  if (expandedFolders === null && folders.length > 0) {
+    setExpandedFolders(new Set(folders.map((f) => f.id)))
+  }
 
   // Persist on change
   useEffect(() => {
