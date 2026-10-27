@@ -55,6 +55,7 @@ const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
  * the main process, which the hub has no handle on.
  */
 const restartLocalComputerSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+let localComputerStatus: unknown = null
 
 /** The manual "re-check which computers are connected" round trip. */
 const refetchSpy = vi.fn((_hub?: string) => Promise.resolve({} as any))
@@ -109,7 +110,10 @@ vi.mock('@slayzone/transport/client', () => ({
       }
     }
   },
-  electronBootstrap: { restartLocalComputer: () => restartLocalComputerSpy() }
+  electronBootstrap: {
+    restartLocalComputer: () => restartLocalComputerSpy(),
+    getLocalComputerStatus: () => Promise.resolve(localComputerStatus)
+  }
 }))
 
 vi.mock('@tanstack/react-query', () => ({
@@ -308,6 +312,7 @@ beforeEach(() => {
   remoteMintSpy.mockClear()
   remoteRevokeSpy.mockClear()
   restartLocalComputerSpy.mockClear()
+  localComputerStatus = null
   refetchSpy.mockClear()
 })
 
@@ -660,6 +665,55 @@ describe('HubCard', () => {
       fireEvent.click(screen.getByTestId('computer-local-start'))
     })
     expect(restartLocalComputerSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // #165: a computer whose node-pty cannot load dies ~100ms after every spawn. The
+  // row said only "Not running" while the cause sat in a boot log nobody reads.
+  it('names why the local computer is not running when it crashed at startup', async () => {
+    localComputerStatus = {
+      running: false,
+      stalled: 'backoff-exhausted',
+      lastExit: {
+        code: 1,
+        signal: null,
+        at: 1,
+        reason: "Error: Failed to load native module: pty.node — version `GLIBC_2.42' not found"
+      },
+      unspawnedReason: null
+    }
+    computersByHub = { local: [] }
+    await renderLocal()
+    await waitFor(() =>
+      expect(screen.getByTestId('computer-local-failure').textContent).toContain(
+        "version `GLIBC_2.42' not found"
+      )
+    )
+    // Supervision gave up — a stronger claim than "not running".
+    expect(screen.getByTestId('computer-local-missing').textContent).toContain('Failed')
+  })
+
+  it('names why the local computer was never started', async () => {
+    localComputerStatus = {
+      running: false,
+      stalled: null,
+      lastExit: null,
+      unspawnedReason: 'Could not enroll — the local hub refused to mint a join token.'
+    }
+    computersByHub = { local: [] }
+    await renderLocal()
+    await waitFor(() =>
+      expect(screen.getByTestId('computer-local-failure').textContent).toContain(
+        'refused to mint a join token'
+      )
+    )
+  })
+
+  it('shows no failure when the supervisor knows of none', async () => {
+    computersByHub = { local: [] }
+    await renderLocal()
+    expect(screen.getByTestId('computer-local-missing')).toBeDefined()
+    expect(screen.queryByTestId('computer-local-failure')).toBeNull()
+    expect(screen.getByTestId('computer-local-missing').textContent).toContain('Not running')
   })
 
   it('never claims a REMOTE hub is missing its local computer', async () => {

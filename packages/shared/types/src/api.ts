@@ -273,6 +273,23 @@ export interface BrowserShortcutPayload {
   kind?: string
 }
 
+/**
+ * Why the desktop app's own supervised computer is (not) connected — Settings →
+ * Computers' "Not running" row. The hub only sees that it never enrolled; the
+ * cause (it crashes at startup, its join token could not be minted) lives with
+ * the supervisor in the main process.
+ */
+export interface LocalComputerStatus {
+  /** A computer process is alive right now. */
+  running: boolean
+  /** Supervision gave up (only a manual start recovers); null while running or retrying. */
+  stalled: 'backoff-exhausted' | 'needs-re-enrollment' | null
+  /** Its most recent unrequested exit; `reason` is the dying output's error line. */
+  lastExit: { code: number | null; signal: string | null; at: number; reason: string } | null
+  /** Set when it was never spawned at all. */
+  unspawnedReason: string | null
+}
+
 export interface BackupInfo {
   filename: string
   name: string
@@ -482,6 +499,8 @@ export interface ElectronAPI {
     /** Cycle the co-located computer, or start it if it never came up. Stops every
      *  agent pty on this machine — they are all children of that process. */
     restartLocalComputer: () => Promise<{ ok: boolean; error?: string }>
+    /** Null when this host supervises no local computer (remote mode). */
+    getLocalComputerStatus: () => Promise<LocalComputerStatus | null>
     isPlaywright: boolean
     dataReady: () => void
     bootMark: (label: string) => void

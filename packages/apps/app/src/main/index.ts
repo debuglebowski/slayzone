@@ -90,7 +90,7 @@ import {
   resolveDefaultHubId,
   LOCAL_HUB_ID
 } from './boot-config'
-import type { HubEntry } from '@slayzone/types'
+import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, setHubToken, getAllHubTokens } from './hub-tokens'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -733,6 +733,15 @@ let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHand
 // in remote mode (no local hub to dial) or before the async spawn runs. Cycled by
 // `app:restart-local-computer`; reaped by the quit (see reapSupervisedChildrenForQuit).
 let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
+// Why the local computer was never spawned (join-token mint failed). Shown in
+// Settings → Computers next to "Not running"; cleared once a supervisor exists.
+let localComputerUnspawnedReason: string | null = null
+/**
+ * How long a started computer must stay up before Settings reports the (re)start a
+ * success. A computer that cannot start (native module fails to load, #165) dies
+ * ~100ms after its spawn; a healthy one is still booting its dialer at this point.
+ */
+const LOCAL_COMPUTER_STARTUP_WINDOW_MS = 2_000
 // Local cutover (slice 9): the side-car must be spawned with the desktop bridge
 // address in env, but that server starts on its own async path. This promise
 // lets the sidecar-spawn block await the bound port. One listener now carries
@@ -851,6 +860,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     // diagnostic error so it shows up in the Diagnostics tab instead of only in a
     // boot log nobody reads.
     logBoot('[local-computer] no join token minted — leaving computer unspawned')
+    localComputerUnspawnedReason = 'Could not enroll — the local hub refused to mint a join token.'
     try {
       recordDiagnosticEvent({
         level: 'error',
@@ -938,7 +948,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
           source: 'main',
           event: 'local_computer.exit',
           message:
-            `Local computer exited (code=${String(info.code)} signal=${String(info.signal)}) after ` +
+            `Local computer exited (${info.reason}) after ` +
             `${Math.round(info.uptimeMs / 1000)}s — every agent terminal on this machine died with it. ` +
             (info.restartAttempt === null
               ? 'No restart left in the backoff budget.'
@@ -949,6 +959,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
             uptimeMs: info.uptimeMs,
             restartAttempt: info.restartAttempt,
             restartDelayMs: info.restartDelayMs,
+            reason: info.reason,
             // The dying computer's own output — the only place an uncaught
             // exception stack or a fatal dialer error is visible.
             tail: info.tail
@@ -999,8 +1010,10 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
           source: 'main',
           event: 'local_computer.permanent_failure',
           message:
-            `Local computer failed to stay running after ${(info as { attempts?: number }).attempts ?? 0} attempts. ` +
-            'Agents, terminals and git work all run on computers — restart the app or enroll a computer manually.'
+            `Local computer failed to stay running after ${info.attempts} attempts` +
+            (info.reason ? ` — last exit: ${info.reason}. ` : '. ') +
+            'Agents, terminals and git work all run on computers — restart the app or enroll a computer manually.',
+          payload: { attempts: info.attempts, reason: info.reason }
         })
       } catch {
         /* diagnostics unavailable — the console error above still records it */
@@ -1008,6 +1021,7 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
     }
   })
   localComputerHandle = handleComputer
+  localComputerUnspawnedReason = null
   logBoot('local-computer supervisor started (auto-enrolled)')
 }
 
@@ -3460,6 +3474,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
             }
           }
         }
+        // The spawn returning is not the computer starting: one that cannot load
+        // its natives dies ~100ms later (#165), and used to be toasted "restarted".
+        const early = await localComputerHandle.awaitStartup(LOCAL_COMPUTER_STARTUP_WINDOW_MS)
+        if (early) {
+          return { ok: false as const, error: `Local computer exited at startup: ${early.reason}` }
+        }
         recordDiagnosticEvent({
           level: 'info',
           source: 'main',
@@ -3472,6 +3492,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    })
+    // Why the local computer is not connected, for Settings → Computers' "Not
+    // running" row — the hub only knows it never enrolled, not why.
+    ipcMain.handle('app:get-local-computer-status', (): LocalComputerStatus | null => {
+      if (isRemoteMode) return null
+      if (localComputerHandle) return { ...localComputerHandle.getStatus(), unspawnedReason: null }
+      return {
+        running: false,
+        stalled: null,
+        lastExit: null,
+        unspawnedReason: localComputerUnspawnedReason
       }
     })
     // Reads the pre-boot config the renderer needs for settings toggles that

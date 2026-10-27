@@ -1,4 +1,4 @@
-import type { ElectronAPI, HubEntry } from '@slayzone/types'
+import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
 
 declare global {
   interface Window {
@@ -72,6 +72,9 @@ export const electronBootstrap = {
   restartLocalComputer: () =>
     api().app.restartLocalComputer?.() ??
     Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  // No supervised computer outside Electron — nothing to report.
+  getLocalComputerStatus: () =>
+    api().app.getLocalComputerStatus?.() ?? Promise.resolve<LocalComputerStatus | null>(null),
   // Boot instrumentation is pure timing telemetry — optional outside Electron
   // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
   // chain so a missing host method is a no-op, not a TypeError that aborts the

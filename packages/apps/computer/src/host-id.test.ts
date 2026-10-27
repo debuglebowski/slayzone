@@ -135,8 +135,17 @@ describe('sharedHostIdPath', () => {
     if (process.platform === 'win32') {
       expect(sharedHostIdPath()).toBeNull()
     } else {
-      expect(sharedHostIdPath()).toBe('/tmp/slayzone-host-id')
-      expect(sharedHostIdPath()).not.toContain(tmpdir())
+      // Point os.tmpdir() somewhere else: on Linux it IS /tmp, so comparing against
+      // the default proves nothing there.
+      const saved = process.env.TMPDIR
+      process.env.TMPDIR = '/var/per-user-tmp'
+      try {
+        expect(tmpdir()).toBe('/var/per-user-tmp')
+        expect(sharedHostIdPath()).toBe('/tmp/slayzone-host-id')
+      } finally {
+        if (saved === undefined) delete process.env.TMPDIR
+        else process.env.TMPDIR = saved
+      }
     }
   })
 })

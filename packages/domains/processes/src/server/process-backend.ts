@@ -1,7 +1,6 @@
-// eslint-disable-next-line no-restricted-imports -- Windows-only `taskkill` on process kill (returns at once); hub runs it only with processes enabled.
-import { spawn, execFile, execFileSync } from 'child_process'
+import { spawn, execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
-import { buildShellInvocation, sanitizeSpawnEnv } from '@slayzone/platform'
+import { buildShellInvocation, killPidTree, sanitizeSpawnEnv } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 
@@ -56,25 +55,6 @@ export interface ProcessBackend {
    *  running `kill()` on its handle. Same POSIX detached-group / Windows
    *  `taskkill /T` mechanism as `ProcHandle.kill`. */
   killByPid(pid: number, sig?: string): void
-}
-
-/** Kill the entire process tree rooted at `pid` (must be the leader of a
- *  detached POSIX group, or any pid on Windows). Errors are swallowed — parity
- *  with the pre-seam inline `killProcessTree`, whose throws never reached callers. */
-function killPidTree(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
-  if (process.platform === 'win32') {
-    try {
-      execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)])
-    } catch {
-      // ignore
-    }
-  } else {
-    try {
-      process.kill(-pid, signal)
-    } catch {
-      // ignore
-    }
-  }
 }
 
 function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {

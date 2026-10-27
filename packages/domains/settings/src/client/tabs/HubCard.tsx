@@ -1,6 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import {
+  electronBootstrap,
+  useSubscription,
+  useTRPC,
+  useTRPCClient
+} from '@slayzone/transport/client'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
@@ -291,6 +296,9 @@ function Rail({ last = false }: { last?: boolean }) {
   )
 }
 
+/** Main-process supervisor state of the app's own computer — not hub-scoped. */
+const LOCAL_COMPUTER_STATUS_KEY = ['local-computer-status'] as const
+
 export function HubCard({
   hubId,
   hubLabel,
@@ -335,7 +343,10 @@ export function HubCard({
   // machine and ownership fields this event knows nothing about.
   useSubscription(
     trpc.computers.onStatusChange.subscriptionOptions(undefined, {
-      onData: () => void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
+      onData: () => {
+        void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
+        void queryClient.invalidateQueries({ queryKey: LOCAL_COMPUTER_STATUS_KEY })
+      }
     })
   )
   const computers = computersQuery.data ?? []
@@ -357,6 +368,19 @@ export function HubCard({
     isLocalHub &&
     computersQuery.isSuccess &&
     !computers.some((r) => r.name === DEFAULT_LOCAL_COMPUTER_NAME)
+
+  // WHY it is missing. The hub only knows the computer never enrolled; the cause —
+  // it dies at startup (a native module that will not load, #165), or its join
+  // token could not be minted — is with its supervisor in the main process. Keyed
+  // on `computerRevision` so a Start that failed re-reads the fresh cause.
+  const localStatusQuery = useQuery({
+    queryKey: [...LOCAL_COMPUTER_STATUS_KEY, computerRevision],
+    queryFn: () => electronBootstrap.getLocalComputerStatus(),
+    enabled: localComputerMissing,
+    staleTime: 0
+  })
+  const localStatus = localComputerMissing ? (localStatusQuery.data ?? null) : null
+  const localFailure = localStatus?.lastExit?.reason ?? localStatus?.unspawnedReason ?? null
 
   const mint = async (): Promise<void> => {
     try {
@@ -612,9 +636,31 @@ export function HubCard({
                         agents, terminals and git work all run on computers
                       </span>
                     </div>
+                    {localFailure && (
+                      // Wraps rather than truncates: the cause is usually one long
+                      // line (a dlopen error naming the missing GLIBC version), and
+                      // its tail is the part that says what to do. Selectable so it
+                      // can be pasted into an issue.
+                      <div
+                        className="text-destructive mt-1 font-mono text-xs break-all select-text"
+                        data-testid="computer-local-failure"
+                      >
+                        {localFailure}
+                      </div>
+                    )}
                   </td>
                   <td className="w-32 py-2 pr-3">
-                    <HubStatus tone="bad" label="Not running" />
+                    <HubStatus
+                      tone="bad"
+                      label={localStatus?.stalled ? 'Failed' : 'Not running'}
+                      title={
+                        localStatus?.stalled === 'needs-re-enrollment'
+                          ? 'The hub no longer recognizes this computer — Start enrolls it again'
+                          : localStatus?.stalled === 'backoff-exhausted'
+                            ? 'It kept exiting at startup, so restarts stopped — Start tries again'
+                            : undefined
+                      }
+                    />
                   </td>
                   <td className="w-24 py-2 text-right">
                     <Button

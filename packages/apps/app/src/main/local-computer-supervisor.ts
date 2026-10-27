@@ -87,6 +87,47 @@ export type LocalComputerExitInfo = {
   restartDelayMs: number | null
   /** Last {@link OUTPUT_TAIL_LINES} stdout+stderr lines from the dead computer. */
   tail: string[]
+  /** One line saying why it died — see {@link summarizeExitReason}. */
+  reason: string
+}
+
+/** Why supervision stopped respawning: only `restart()` recovers either. */
+export type LocalComputerStall = 'backoff-exhausted' | 'needs-re-enrollment'
+
+/** Point-in-time view of the supervised computer, for Settings → Computers. */
+export type LocalComputerStatus = {
+  /** A computer process is alive right now. */
+  running: boolean
+  /** Set once supervision has given up; null while it is running or retrying. */
+  stalled: LocalComputerStall | null
+  /** The most recent unrequested exit (a deliberate restart/stop is not one). */
+  lastExit: {
+    code: number | null
+    signal: NodeJS.Signals | null
+    at: number
+    reason: string
+  } | null
+}
+
+/**
+ * One line saying why a computer died, from its dying output.
+ *
+ * A computer that cannot start dies on an uncaught throw at module load — e.g.
+ * node-pty's native failing to dlopen on a host whose glibc is too old (#165) — and
+ * Node prints the throwing source line, a caret, then `Error: <message>` and the
+ * stack. The `…Error: …` line is the cause; everything around it is noise. With no
+ * such line (a clean non-zero exit, a signal) the exit itself is all there is.
+ */
+export function summarizeExitReason(
+  tail: readonly string[],
+  code: number | null,
+  signal: NodeJS.Signals | null
+): string {
+  const errorLine = tail
+    .map((l) => l.trim())
+    .find((l) => /^[A-Z]?\w*Error(?: \[[\w-]+\])?: /.test(l))
+  if (errorLine) return errorLine
+  return signal ? `killed by ${signal}` : `exited with code ${String(code)}`
 }
 
 export type LocalComputerOpts = {
@@ -125,8 +166,13 @@ export type LocalComputerOpts = {
    * records it as a diagnostics event.
    */
   onExit?: (info: LocalComputerExitInfo) => void
-  /** Called once the backoff budget is exhausted — log-only, non-fatal. */
-  onPermanentFailure?: (info: { attempts: number; lastError: unknown }) => void
+  /** Called once the backoff budget is exhausted — log-only, non-fatal. `reason` is
+   *  the last exit's (see {@link summarizeExitReason}); null when it never spawned. */
+  onPermanentFailure?: (info: {
+    attempts: number
+    lastError: unknown
+    reason: string | null
+  }) => void
   /** Called when the computer reports the hub no longer recognizes it. Restarts are
    *  suppressed from that point; the caller should surface it to the user. */
   onNeedsReEnrollment?: () => void
@@ -136,6 +182,17 @@ export type LocalComputerOpts = {
 
 export type LocalComputerHandle = {
   getPid: () => number | null
+  /** What Settings → Computers shows when the computer is not connected. */
+  getStatus: () => LocalComputerStatus
+  /**
+   * Resolve with the exit report if the most recently spawned computer dies within
+   * `windowMs` (including one that already died), else null.
+   *
+   * `restart()` resolves once the process EXISTS; a computer that cannot start
+   * dies ~100ms later (#165). Without this the Settings button reported "restarted"
+   * for a computer that was already dead.
+   */
+  awaitStartup: (windowMs: number) => Promise<LocalComputerExitInfo | null>
   /**
    * Cycle the computer in place (Settings → Computers restart button).
    *
@@ -202,6 +259,13 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   let healthyTimer: NodeJS.Timeout | null = null
   /** In-flight `restart()`, so concurrent calls coalesce instead of double-spawning. */
   let restartInFlight: Promise<void> | null = null
+  /** Why supervision gave up, until a `restart()` clears it. */
+  let stalled: LocalComputerStall | null = null
+  /** Bumped per spawn, so an exit report can be matched to the spawn it ended. */
+  let spawnSeq = 0
+  let lastExit: (LocalComputerExitInfo & { at: number; seq: number }) | null = null
+  /** `awaitStartup` waiters, woken by the next unrequested exit. */
+  const exitWaiters = new Set<(info: LocalComputerExitInfo & { seq: number }) => void>()
 
   const clearTimers = (): void => {
     if (backoffTimer) clearTimeout(backoffTimer)
@@ -230,9 +294,10 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   type RestartDecision = { restartAttempt: number | null; restartDelayMs: number | null }
   const NO_RESTART: RestartDecision = { restartAttempt: null, restartDelayMs: null }
 
-  const scheduleRestart = (lastError: unknown): RestartDecision => {
+  const scheduleRestart = (lastError: unknown, lastReason: string | null): RestartDecision => {
     if (stopped || restartsSuspended) return NO_RESTART
     if (needsReEnrollment) {
+      stalled = 'needs-re-enrollment'
       opts.logger(
         '[local-computer] not restarting: this computer must be enrolled again before it can connect'
       )
@@ -241,7 +306,8 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     }
     if (attempt >= backoffMs.length) {
       opts.logger(`[local-computer] giving up after ${attempt} attempts`)
-      opts.onPermanentFailure?.({ attempts: attempt, lastError })
+      stalled = 'backoff-exhausted'
+      opts.onPermanentFailure?.({ attempts: attempt, lastError, reason: lastReason })
       return NO_RESTART
     }
     const delay = backoffMs[attempt]
@@ -272,6 +338,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       stdio: ['pipe', 'pipe', 'pipe']
     })
     child = proc
+    const seq = ++spawnSeq
     reaper.track(proc)
     const spawnedAt = Date.now()
     // Scoped to THIS child: a fresh spawn must not inherit the corpse's output.
@@ -304,7 +371,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       if (child === proc) {
         child = null
         if (healthyTimer) clearTimeout(healthyTimer)
-        scheduleRestart(err)
+        scheduleRestart(err, `could not spawn: ${String(err)}`)
       }
     })
     proc.on('exit', (code, signal) => {
@@ -328,13 +395,25 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
       // timer already zeroed `attempt`); a quick crash consumes an attempt.
       const uptimeMs = Date.now() - spawnedAt
       if (uptimeMs >= healthyResetMs) attempt = 0
-      const decision = scheduleRestart(new Error(`exit code=${code} signal=${signal}`))
+      const reason = summarizeExitReason(outputTail, code, signal)
+      opts.logger(`[local-computer] exit reason: ${reason}`)
+      const decision = scheduleRestart(new Error(`exit code=${code} signal=${signal}`), reason)
+      const info: LocalComputerExitInfo = {
+        code,
+        signal,
+        uptimeMs,
+        tail: [...outputTail],
+        reason,
+        ...decision
+      }
+      lastExit = { ...info, at: Date.now(), seq }
+      for (const wake of exitWaiters) wake(lastExit)
       // Report AFTER scheduling so the caller can say whether a restart follows.
       // Guarded: a throwing consumer must not skip the restart that just got
       // scheduled — the agents are already dead, losing the respawn too would
       // leave the machine unable to run anything.
       try {
-        opts.onExit?.({ code, signal, uptimeMs, tail: [...outputTail], ...decision })
+        opts.onExit?.(info)
       } catch {
         /* a throwing exit reporter must never break supervision */
       }
@@ -360,6 +439,7 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     clearTimers()
     attempt = 0
     needsReEnrollment = false
+    stalled = null
     const proc = child
     child = null
     if (proc) {
@@ -377,8 +457,34 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
 
   spawnChild()
 
+  const awaitStartup = (windowMs: number): Promise<LocalComputerExitInfo | null> => {
+    const seq = spawnSeq
+    if (lastExit?.seq === seq) return Promise.resolve(lastExit)
+    if (!child) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const done = (info: LocalComputerExitInfo | null): void => {
+        clearTimeout(timer)
+        exitWaiters.delete(onExit)
+        resolve(info)
+      }
+      const onExit = (info: LocalComputerExitInfo & { seq: number }): void => {
+        if (info.seq === seq) done(info)
+      }
+      const timer = setTimeout(() => done(null), windowMs)
+      exitWaiters.add(onExit)
+    })
+  }
+
   return {
     getPid: () => child?.pid ?? null,
+    getStatus: () => ({
+      running: child !== null,
+      stalled,
+      lastExit: lastExit
+        ? { code: lastExit.code, signal: lastExit.signal, at: lastExit.at, reason: lastExit.reason }
+        : null
+    }),
+    awaitStartup,
     restart: () => {
       if (restartInFlight) return restartInFlight
       restartInFlight = doRestart().finally(() => {

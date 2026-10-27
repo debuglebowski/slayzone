@@ -179,24 +179,44 @@ jobs:
           - name: macos-x64
             os: macos-latest
             build_args: --mac --x64
+          # Builds INSIDE a pinned container, never on the runner image: electron-builder
+          # compiles natives without a Linux prebuild (node-pty) on the build host, so
+          # its glibc is the oldest the app loads on. ubuntu-latest moved to glibc 2.42
+          # and v0.36.0's local computer died at load on Ubuntu 24.04 / Debian 12
+          # (#165). ubuntu:22.04 = glibc 2.35, the floor the "Gate Linux glibc floor"
+          # step enforces; a container tag, unlike a runner image, is not retired
+          # under us. Toolchain: scripts/release/linux-build-env.sh.
           - name: linux-x64
             os: ubuntu-latest
+            container: ubuntu:22.04
             build_args: --linux --x64
             smoke_dir: linux-unpacked
+            glibc_gate: true
           - name: windows
             os: windows-latest
             build_args: --win --x64 --arm64
             smoke_dir: win-unpacked
 
     runs-on: ${{ matrix.os }}
+    # Empty for every entry but linux-x64, which then runs on the runner directly.
+    container: ${{ matrix.container }}
 
     permissions:
       contents: write
 
     steps:
+      # A bare image has no git, so checkout would fall back to a tarball with no .git.
+      - name: Install git (container)
+        if: matrix.container
+        run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates git
+
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Install Linux build toolchain (container)
+        if: matrix.container
+        run: bash scripts/release/linux-build-env.sh
 
       - uses: pnpm/action-setup@v4
 
@@ -282,6 +302,15 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: node scripts/release/stamp-min-system-version.mjs --dist packages/apps/app/dist
+
+      # The smoke step below runs the build on the host that built it, so it cannot
+      # see a native that needs a newer glibc than our users have (#165). This reads
+      # every ELF file's symbol-version requirements against the floor instead. The
+      # .deb and AppImage are packed from this same directory.
+      - name: Gate Linux glibc floor
+        if: matrix.glibc_gate
+        shell: bash
+        run: node scripts/release/check-glibc-floor.mjs packages/apps/app/dist/linux-unpacked
 
       # Boots the PACKAGED hub and loads the computer's natives from the builder's
       # unpacked output. Nothing else in CI runs from a packaged layout, which is how

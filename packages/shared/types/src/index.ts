@@ -11,6 +11,7 @@ export type { ProcessStatus, ProcessInfo, ProcessStats, ProcessEventMap } from '
 export type { ExecutionContext } from './api'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from './api'
 export type { BackupInfo, BackupSettings } from './api'
+export type { LocalComputerStatus } from './api'
 export type {
   BrowserCreateTaskFromLinkIntent,
   BrowserCreateTaskFromLinkSource,

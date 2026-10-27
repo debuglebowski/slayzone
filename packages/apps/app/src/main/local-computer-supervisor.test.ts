@@ -107,6 +107,10 @@ if (process.env.FAKE_EXIT_FILE) {
 process.stdout.write('fake-computer token=' + (process.env.SLAYZONE_HUB_JOIN_TOKEN || '') + '\\n')
 for (let i = 1; i <= lines; i++) process.stderr.write('computer-line-' + i + '\\n')
 process.stdout.write('fake-computer bye\\n')
+// Dies the way the real computer does when a native will not load: an uncaught
+// throw at module load, so Node prints the source line, a caret, the error and its
+// stack to stderr and exits 1.
+if (process.env.FAKE_CRASH_MESSAGE) throw new Error(process.env.FAKE_CRASH_MESSAGE)
 if (stayAlive) {
   setInterval(function () {}, 1000)
 } else {
@@ -232,6 +236,148 @@ test('reports the scheduled restart, then reports the give-up exit', async () =>
     assertEq(ctx.exits[2].restartAttempt, null, 'third exit has no restart left')
     assertEq(ctx.exits[2].restartDelayMs, null, 'no delay when not restarting')
     await waitFor(() => ctx.permanentFailure !== null, 5_000, 'permanent failure reported')
+  } finally {
+    await handle.stop()
+  }
+})
+
+// --- why it died (issue #165) -------------------------------------------------
+
+// A computer whose node-pty will not load dies ~100ms after every spawn. The only
+// record of why is the error line in its dying output; before this the app said
+// "Not running" and, after a manual start, "Local computer restarted".
+const NATIVE_LOAD_ERROR =
+  "Failed to load native module: pty.node — ../build/Release/pty.node: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.42' not found"
+
+test('exit report names the cause: the error line of an uncaught throw', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_CRASH_MESSAGE: NATIVE_LOAD_ERROR },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => ctx.exits.length >= 1, 15_000, 'crash exit reported')
+    assertEq(ctx.exits[0].code, 1, 'an uncaught throw exits 1')
+    assertEq(ctx.exits[0].reason, `Error: ${NATIVE_LOAD_ERROR}`, 'reason is the error line')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('exit report without an error line falls back to the exit code', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_EXIT_CODE: '7' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => ctx.exits.length >= 1, 15_000, 'exit reported')
+    assertEq(ctx.exits[0].reason, 'exited with code 7', 'reason names the code')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('permanent failure carries the last exit reason', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_CRASH_MESSAGE: NATIVE_LOAD_ERROR },
+    { backoffMs: [5], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
+    assertEq(
+      (ctx.permanentFailure as { reason?: string } | null)?.reason,
+      `Error: ${NATIVE_LOAD_ERROR}`,
+      'permanent failure names why'
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('getStatus: running while up; after the give-up, stalled with the last exit', async () => {
+  const live = makeHarness(
+    { FAKE_STAY_ALIVE: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    await waitFor(() => live.handle.getPid() !== null, 15_000, 'computer spawned')
+    const s = live.handle.getStatus()
+    assertEq(s.running, true, 'a live computer reports running')
+    assertEq(s.stalled, null, 'not stalled')
+    assertEq(s.lastExit, null, 'no exit yet')
+  } finally {
+    await live.handle.stop()
+  }
+
+  const { handle, ctx } = makeHarness(
+    { FAKE_CRASH_MESSAGE: NATIVE_LOAD_ERROR },
+    { backoffMs: [5], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => ctx.permanentFailure !== null, 20_000, 'backoff budget exhausted')
+    const s = handle.getStatus()
+    assertEq(s.running, false, 'nothing running after the give-up')
+    assertEq(s.stalled, 'backoff-exhausted', 'stalled: only a restart recovers')
+    assertEq(s.lastExit?.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'last exit names the cause')
+    assertEq(s.lastExit?.code, 1, 'last exit code')
+    assert(typeof s.lastExit?.at === 'number', 'last exit is timestamped')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('getStatus: a needs-re-enrollment exit stalls as such', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_EXIT_CODE: '78' },
+    { backoffMs: [5, 5], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    await waitFor(() => ctx.needsReEnrollment >= 1, 20_000, 'latched')
+    assertEq(handle.getStatus().stalled, 'needs-re-enrollment', 'stalled on re-enrollment')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitStartup: reports a computer that dies right after its spawn', async () => {
+  // The restart button resolved as soon as the process existed, so a computer that
+  // crashed 100ms later was toasted "Local computer restarted".
+  const { handle } = makeHarness(
+    { FAKE_CRASH_MESSAGE: NATIVE_LOAD_ERROR },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    const early = await handle.awaitStartup(10_000)
+    assert(early !== null, 'an early death is reported')
+    assertEq(early.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'with its cause')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitStartup: also reports a death that landed before it was called', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_CRASH_MESSAGE: NATIVE_LOAD_ERROR },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 100 }
+  )
+  try {
+    await waitFor(() => ctx.exits.length >= 1, 15_000, 'crash exit reported')
+    const early = await handle.awaitStartup(50)
+    assertEq(early?.reason, `Error: ${NATIVE_LOAD_ERROR}`, 'the already-dead spawn is reported')
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('awaitStartup: null for a computer that stays up through the window', async () => {
+  const { handle } = makeHarness(
+    { FAKE_STAY_ALIVE: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    await waitFor(() => handle.getPid() !== null, 15_000, 'computer spawned')
+    assertEq(await handle.awaitStartup(300), null, 'survived the window')
+    await handle.restart()
+    assertEq(await handle.awaitStartup(300), null, 'the restarted one survives too')
   } finally {
     await handle.stop()
   }

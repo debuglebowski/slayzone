@@ -15,6 +15,42 @@ index 1ec12f796a822c78fba9ad7f6448c3987e325c23..9cd843ca50777e1e22df49df6def9d50
  var DEFAULT_FILE = 'sh';
  var DEFAULT_NAME = 'xterm';
  var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/lib/utils.js b/lib/utils.js
+index af7918b6902a105a7c49813bc0bb4d687d87a7d4..54d46d7d6415b2cdd0432f9d14c8268d05bb8921 100644
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -19,7 +19,10 @@ function loadNativeModule(name) {
+     var dirs = ['build/Release', 'build/Debug', "prebuilds/" + process.platform + "-" + process.arch];
+     // Check relative to the parent dir for unbundled and then the current dir for bundled
+     var relative = ['..', '.'];
+-    var lastError;
++    // Every candidate that EXISTS but failed to load, not just the last attempt: a
++    // native built against a newer glibc ("version `GLIBC_2.42' not found") was
++    // otherwise reported as the missing prebuilds dir tried after it.
++    var failures = [];
+     for (var _i = 0, dirs_1 = dirs; _i < dirs_1.length; _i++) {
+         var d = dirs_1[_i];
+         for (var _a = 0, relative_1 = relative; _a < relative_1.length; _a++) {
+@@ -29,11 +32,16 @@ function loadNativeModule(name) {
+                 return { dir: dir, module: require(dir + "/" + name + ".node") };
+             }
+             catch (e) {
+-                lastError = e;
++                if (!e || e.code !== 'MODULE_NOT_FOUND') {
++                    failures.push(dir + name + ".node: " + (e && e.message !== undefined ? e.message : e));
++                }
+             }
+         }
+     }
+-    throw new Error("Failed to load native module: " + name + ".node, checked: " + dirs.join(', ') + ": " + lastError);
++    if (failures.length > 0) {
++        throw new Error("Failed to load native module: " + name + ".node — " + failures.join('; '));
++    }
++    throw new Error("Failed to load native module: " + name + ".node not found in " + dirs.join(', '));
+ }
+ exports.loadNativeModule = loadNativeModule;
+ //# sourceMappingURL=utils.js.map
+\ No newline at end of file
 diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
 index 98733dc0cd752b554bd94e45904ca341ad141bba..54d94119af63ca29ce6527b83dafb3e5ebced0f1 100644
 --- a/src/unixTerminal.ts
@@ -32,3 +68,35 @@ index 98733dc0cd752b554bd94e45904ca341ad141bba..54d94119af63ca29ce6527b83dafb3e5
  
  const DEFAULT_FILE = 'sh';
  const DEFAULT_NAME = 'xterm';
+diff --git a/src/utils.ts b/src/utils.ts
+index 81a70c77a18e25c50b26f0d80aa0e8d8c2672805..f19e10b4c9f1db8bad83cb60d658dcc44aafce76 100644
+--- a/src/utils.ts
++++ b/src/utils.ts
+@@ -14,16 +14,24 @@ export function loadNativeModule(name: string): {dir: string, module: any} {
+   const dirs = ['build/Release', 'build/Debug', `prebuilds/${process.platform}-${process.arch}`];
+   // Check relative to the parent dir for unbundled and then the current dir for bundled
+   const relative = ['..', '.'];
+-  let lastError: unknown;
++  // Every candidate that EXISTS but failed to load, not just the last attempt: a
++  // native built against a newer glibc ("version `GLIBC_2.42' not found") was
++  // otherwise reported as the missing prebuilds dir tried after it.
++  const failures: string[] = [];
+   for (const d of dirs) {
+     for (const r of relative) {
+       const dir = `${r}/${d}/`;
+       try {
+         return { dir, module: require(`${dir}/${name}.node`) };
+       } catch (e) {
+-        lastError = e;
++        if ((e as NodeJS.ErrnoException)?.code !== 'MODULE_NOT_FOUND') {
++          failures.push(`${dir}${name}.node: ${(e as Error)?.message ?? e}`);
++        }
+       }
+     }
+   }
+-  throw new Error(`Failed to load native module: ${name}.node, checked: ${dirs.join(', ')}: ${lastError}`);
++  if (failures.length > 0) {
++    throw new Error(`Failed to load native module: ${name}.node — ${failures.join('; ')}`);
++  }
++  throw new Error(`Failed to load native module: ${name}.node not found in ${dirs.join(', ')}`);
+ }

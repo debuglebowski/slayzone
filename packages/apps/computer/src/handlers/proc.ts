@@ -35,7 +35,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
-import { buildShellInvocation } from '@slayzone/platform'
+import { buildShellInvocation, killPidTree, PROCESS_TREE_DETACHED } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import {
   HubToComputerMethods,
@@ -115,6 +115,18 @@ export function createProcHandlers(
     return merged
   }
 
+  /**
+   * Kill a spawned process AND everything it started. Signalling only the direct
+   * child left a shell-wrapped command's descendants running with the stdout pipe
+   * open, so its exit never arrived — on Linux even for `sh -c 'sleep 30'`, since
+   * dash forks rather than execs a lone command. Same mechanism as the hub-local
+   * process backend.
+   */
+  function killTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+    if (typeof child.pid === 'number') killPidTree(child.pid, signal)
+    // Never got a pid (spawn failed): nothing to signal; `error` reports it.
+  }
+
   function procSpawn(rawParams: unknown): { pid: number | null } {
     const params = procSpawnParamsSchema.parse(rawParams)
     if (params.spawnId !== undefined) {
@@ -139,11 +151,7 @@ export function createProcHandlers(
     // Replace any pre-existing process with the same sessionId.
     const existing = procs.get(params.sessionId)
     if (existing) {
-      try {
-        existing.child.kill()
-      } catch {
-        // ignore
-      }
+      killTree(existing.child)
       procs.delete(params.sessionId)
     }
 
@@ -160,7 +168,10 @@ export function createProcHandlers(
       ...(cwd ? { cwd } : {}),
       env: buildEnv(params.env),
       // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // Its own process group, so a kill reaches everything it started (`pnpm dev`
+      // → node → …), not just the shell — see `killTree`.
+      detached: PROCESS_TREE_DETACHED
     })
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
@@ -244,11 +255,7 @@ export function createProcHandlers(
       ctx.log('proc kill on unknown session', { sessionId: params.sessionId })
       return { ok: true }
     }
-    try {
-      session.child.kill((params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
-    } catch (err) {
-      ctx.log('proc kill failed', { sessionId: params.sessionId, error: String(err) })
-    }
+    killTree(session.child, (params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
     return { ok: true }
   }
 
@@ -300,11 +307,7 @@ export function createProcHandlers(
 
   function disposeAll(): void {
     for (const [sessionId, session] of procs) {
-      try {
-        session.child.kill()
-      } catch {
-        // ignore
-      }
+      killTree(session.child)
       ctx.log('proc disposed on shutdown', { sessionId })
     }
     procs.clear()

@@ -71,6 +71,16 @@ require_contains \
 
 require_contains \
   ".github/workflows/release-foundation.yml" \
+  "check-glibc-floor.mjs" \
+  "release-foundation.yml must gate Linux binaries on the glibc floor (#165)"
+
+require_contains \
+  ".github/workflows/release-foundation.yml" \
+  "container: ubuntu:22.04" \
+  "release-foundation.yml must build Linux in the pinned glibc-floor container (#165)"
+
+require_contains \
+  ".github/workflows/release-foundation.yml" \
   'Publish (${{ matrix.channel }})' \
   "release-foundation.yml must keep channel publish jobs"
 

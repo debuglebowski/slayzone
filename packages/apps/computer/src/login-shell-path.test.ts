@@ -83,7 +83,10 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
     script(join(shellOnlyBin, 'gh'), ['echo "gh ran: $*"'])
     process.env.PATH = BARE_GUI_PATH
     const gh = createGhHandlers(ctx())[HubToComputerMethods.ghExec]
-    expect(await gh({ args: ['pr', 'list'], cwd: dir })).toMatchObject({ status: null })
+    // Not this gh: none at all (macOS), or a system one (/usr/bin/gh on Linux CI).
+    expect(await gh({ args: ['pr', 'list'], cwd: dir })).not.toMatchObject({
+      stdout: 'gh ran: pr list\n'
+    })
 
     await adoptLoginShellPath({ env: process.env, shell: noisyLoginShell() })
     expect(await gh({ args: ['pr', 'list'], cwd: dir })).toEqual({

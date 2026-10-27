@@ -79,6 +79,8 @@ const webApiTarget: ElectronAPI = {
     probeServerHealth: async () => ({ ok: false, error: NOT_SUPPORTED }),
     restartSidecar: async () => ({ ok: false, error: NOT_SUPPORTED }),
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
+    // A browser tab supervises no computer.
+    getLocalComputerStatus: async () => null,
     // A plain boolean, NOT a function — `electron-bootstrap.ts` wraps it as
     // `() => api().app.isPlaywright`, and a function reference here would make
     // every truthiness check on it (`if (api().app.isPlaywright)`) pass, which

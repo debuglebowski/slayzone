@@ -146,6 +146,7 @@ export {
   buildExecCommand,
   buildShellInvocation
 } from './shell'
+export { killPidTree, PROCESS_TREE_DETACHED } from './process-tree'
 export {
   LOGIN_SHELL_PATH_MARKER,
   LOGIN_SHELL_PATH_PROBE_TIMEOUT_MS,

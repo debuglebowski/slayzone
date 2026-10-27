@@ -11,6 +11,7 @@
 // the existing `__testEmit(channel, data)` hook (dispatches a CustomEvent).
 // Production menu accelerator dispatch is unchanged (still deferred).
 
+import type { LocalComputerStatus } from '@slayzone/types'
 import { resolveServerUrl, CHROMIUM_WINDOW_ID } from '../server-url'
 
 const noopUnsub = (): void => undefined
@@ -105,6 +106,7 @@ export const appShim = {
     ok: false,
     error: 'Not supported in the Chromium shell'
   }),
+  getLocalComputerStatus: async (): Promise<LocalComputerStatus | null> => null,
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),

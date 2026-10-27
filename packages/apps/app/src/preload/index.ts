@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ElectronAPI, HubEntry } from '@slayzone/types'
+import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
 
 // Intentional bootstrap-only preload surface. Do not add domain APIs here.
 // Renderer/backend traffic uses tRPC over WebSocket after boot.
@@ -78,6 +78,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>
       ipcRenderer.invoke('app:restart-local-computer') as Promise<{ ok: boolean; error?: string }>,
+    getLocalComputerStatus: () =>
+      ipcRenderer.invoke('app:get-local-computer-status') as Promise<LocalComputerStatus | null>,
     isPlaywright,
     dataReady: () => ipcRenderer.send('app:data-ready'),
     bootMark:

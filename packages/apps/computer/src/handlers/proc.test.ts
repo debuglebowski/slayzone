@@ -231,6 +231,31 @@ describe('createProcHandlers — proc.kill', () => {
     proc.disposeAll()
   })
 
+  // A shell-wrapped spawn (`pnpm dev`) is a tree: the shell, and what it started.
+  // Signalling only the shell left the rest running with the stdout pipe open, so
+  // the exit never arrived and the dev server outlived its Stop. Seen on Linux,
+  // where `sh` (dash) forks even a lone `sleep 30`; forced here with a background
+  // child so it reproduces on every POSIX shell.
+  it.skipIf(process.platform === 'win32')(
+    'kills the whole process tree, and the exit arrives',
+    async () => {
+      const { notifies, ctx } = makeCtx(roots)
+      const proc = createProcHandlers(ctx)
+      const id = 'p-tree'
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: id,
+        command: 'sh',
+        args: ['-c', 'sleep 30 & echo $!; wait']
+      })
+      await waitFor(() => /^\d+\n/.test(dataFor(notifies, id, 'stdout')))
+      const grandchild = Number(dataFor(notifies, id, 'stdout').trim())
+      await proc.handlers[ProcMethods.procKill]({ sessionId: id })
+      await waitFor(() => exitFor(notifies, id) !== undefined, 3000)
+      expect(() => process.kill(grandchild, 0)).toThrow()
+      proc.disposeAll()
+    }
+  )
+
   it('kill on an unknown id is a no-op that still acks ok', async () => {
     const { ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)

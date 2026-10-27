@@ -363,6 +363,8 @@ run_test packages/apps/app/src/main/extension-id.test.ts
 run_test packages/apps/app/src/main/dev-launcher-contract.test.ts
 # macOS update manifest: OS-minimum stamp (Electron 44 = macOS 13+) survives the arch merge.
 run_test scripts/release/update-manifest.test.mjs
+# Linux glibc-floor release gate (#165): ELF symbol-version parser + floor check.
+run_test scripts/release/check-glibc-floor.test.mjs
 # `pnpm lint:trpc-deps`: flags a useMutation() result object bare in a hook dep array
 # (by `*Mutation` name and by binding, multi-line arrays included); quiet on stable forms.
 run_test scripts/check-trpc-stable-deps.test.mjs
@@ -903,17 +905,13 @@ run_vitest_files "vitest (owner checks)" \
   packages/shared/transport/src/server/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
-# jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config, ~150
-# assertions — were never in this aggregate, so they only ran if someone happened
-# to run the package directly. Listing the files under the app's jsdom config is
-# not a substitute: `fs.watch({recursive:true})` never delivers there, at any
-# timeout. Run each package's own suite instead.
-if [ -n "${CI:-}" ]; then
-  skip_package_tests packages/apps/computer @slayzone/computer \
-    "not yet proven green on Linux CI: its handler suites spawn real ptys, git and gh, and fs.test.ts's fs.watch test timed out once under load (5s). TODO(T-01): enable after the first green unit-tests run, then drop this branch"
-else
-  run_package_tests packages/apps/computer @slayzone/computer
-fi
+# jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config — were never
+# in this aggregate, so they only ran if someone happened to run the package directly.
+# Listing the files under the app's jsdom config is not a substitute:
+# `fs.watch({recursive:true})` never delivers there, at any timeout. Run each
+# package's own suite instead. Proven on Linux (ubuntu 24.04) before CI ran it: that
+# run found proc.kill leaking a shell's children (dash forks a lone command).
+run_package_tests packages/apps/computer @slayzone/computer
 
 # Same reason: the hub⇄computer fs round trip loads the real computer handlers.
 run_package_tests packages/domains/computer-transport @slayzone/computer-transport
