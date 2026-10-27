@@ -229,6 +229,50 @@ test.describe('HTML artifact preview executes scripts', () => {
         ;(globalThis as Record<string, unknown>).__htmlLinkCalls = []
       })
 
+    /** Task browser-panel tab URLs, as persisted. */
+    const browserTabUrls = (page: Page) =>
+      page.evaluate(async (id) => {
+        const tasks = await window.getTrpcVanillaClient().task.getAll.query()
+        const task = tasks.find((t) => t.id === id) as
+          | { browser_tabs?: { tabs?: { url: string }[] } | null }
+          | undefined
+        return task?.browser_tabs?.tabs?.map((t) => t.url) ?? []
+      }, taskId)
+
+    /** Hold modifiers via the keyboard: Playwright's click `modifiers` don't reach MouseEvent flags in Electron. */
+    async function withKeys(page: Page, keys: string[], action: () => Promise<void>) {
+      for (const k of keys) await page.keyboard.down(k)
+      try {
+        await action()
+      } finally {
+        for (const k of [...keys].reverse()) await page.keyboard.up(k)
+      }
+    }
+
+    const mouseUps = (page: Page) =>
+      previewFrame(page)
+        .locator('body')
+        .evaluate(() => (window as unknown as { __mouseUps: number }).__mouseUps)
+
+    /**
+     * Click in the preview until the page actually receives it. Selecting an
+     * artifact loads the (out-of-process) preview twice (`?v=N`, then `?v=N+1`);
+     * a click right after the swap can be routed to the old document and lost —
+     * measured: hit target was the iframe, the page saw no event. A lost click
+     * did nothing, so retrying is safe.
+     */
+    async function clickInPreview(
+      page: Page,
+      selector: string,
+      { keys = [], button = 'left' }: { keys?: string[]; button?: 'left' | 'middle' } = {}
+    ) {
+      await expect(async () => {
+        const before = await mouseUps(page)
+        await withKeys(page, keys, () => previewFrame(page).locator(selector).click({ button }))
+        expect(await mouseUps(page)).toBeGreaterThan(before)
+      }).toPass({ timeout: 5_000 })
+    }
+
     async function openLinkArtifact(page: Page, title: string, extraScript = '') {
       const html = `<!DOCTYPE html><html><body>
         <a id="self" href="https://example.com/self">self</a>
@@ -238,6 +282,8 @@ test.describe('HTML artifact preview executes scripts', () => {
         <div id="section">section</div>
         <script>
           document.getElementById('handled').addEventListener('click', (e) => e.preventDefault());
+          window.__mouseUps = 0;
+          addEventListener('mouseup', () => window.__mouseUps++, true);
           ${extraScript}
         </script>
       </body></html>`
@@ -268,7 +314,7 @@ test.describe('HTML artifact preview executes scripts', () => {
       await clearLinkCalls(electronApp)
       await openLinkArtifact(mainWindow, 'link-self.html')
       const frame = previewFrame(mainWindow)
-      await frame.locator('#self').click()
+      await clickInPreview(mainWindow, '#self')
       await expect.poll(() => linkCalls(electronApp)).toEqual(['https://example.com/self'])
       // The iframe did not navigate away from the artifact.
       await expect(frame.locator('#section')).toHaveText('section')
@@ -277,7 +323,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     test('target=_blank link opens externally', async ({ electronApp, mainWindow }) => {
       await clearLinkCalls(electronApp)
       await openLinkArtifact(mainWindow, 'link-blank.html')
-      await previewFrame(mainWindow).locator('#blank').click()
+      await clickInPreview(mainWindow, '#blank')
       await expect.poll(() => linkCalls(electronApp)).toEqual(['https://example.com/blank'])
     })
 
@@ -288,8 +334,8 @@ test.describe('HTML artifact preview executes scripts', () => {
       await clearLinkCalls(electronApp)
       await openLinkArtifact(mainWindow, 'link-local.html')
       const frame = previewFrame(mainWindow)
-      await frame.locator('#hash').click()
-      await frame.locator('#handled').click()
+      await clickInPreview(mainWindow, '#hash')
+      await clickInPreview(mainWindow, '#handled')
       await mainWindow.waitForTimeout(300)
       expect(await linkCalls(electronApp)).toEqual([])
       await expect(frame.locator('#section')).toHaveText('section')
@@ -315,6 +361,32 @@ test.describe('HTML artifact preview executes scripts', () => {
       // gesture — the exact thing the renderer gates on. The page's timer has none.
       await mainWindow.waitForTimeout(7_000)
       await expect(previewFrame(mainWindow).locator('#section')).toHaveText('forged')
+      expect(await linkCalls(electronApp)).toEqual([])
+    })
+
+    test('⌘⇧ click opens externally', async ({ electronApp, mainWindow }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-cmd-shift.html')
+      await clickInPreview(mainWindow, '#self', { keys: ['Meta', 'Shift'] })
+      await expect.poll(() => linkCalls(electronApp)).toEqual(['https://example.com/self'])
+      expect(await browserTabUrls(mainWindow)).not.toContain('https://example.com/self')
+    })
+
+    // These open the browser panel — keep LAST.
+    test("⌘ click opens in the task's in-app browser", async ({ electronApp, mainWindow }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-cmd.html')
+      await clickInPreview(mainWindow, '#self', { keys: ['Meta'] })
+      await expect.poll(() => browserTabUrls(mainWindow)).toContain('https://example.com/self')
+      await expect(mainWindow.locator('[data-browser-panel]:visible').first()).toBeVisible()
+      expect(await linkCalls(electronApp)).toEqual([])
+    })
+
+    test("middle click opens in the task's in-app browser", async ({ electronApp, mainWindow }) => {
+      await clearLinkCalls(electronApp)
+      await openLinkArtifact(mainWindow, 'link-middle.html')
+      await clickInPreview(mainWindow, '#blank', { button: 'middle' })
+      await expect.poll(() => browserTabUrls(mainWindow)).toContain('https://example.com/blank')
       expect(await linkCalls(electronApp)).toEqual([])
     })
   })

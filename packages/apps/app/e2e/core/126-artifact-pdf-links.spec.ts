@@ -39,13 +39,23 @@ function pdfWithFullPageLink(url: string): string {
   return body
 }
 
+const PDF_VIEWER_ORIGIN = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai'
+
 const linkCalls = (app: ElectronApplication) =>
   app.evaluate(() => [...((globalThis as Record<string, unknown>).__pdfLinkCalls as string[])])
 
 test.describe('PDF artifact links', () => {
   let taskId: string
 
+  const LINK_URL = 'https://example.com/pdf-link'
+  let linkAt: { x: number; y: number } | null = null
+  const openOnce = async (app: ElectronApplication, page: Page) =>
+    (linkAt ??= await openLinkPdf(app, page, 'links.pdf', LINK_URL))
+  const countCalls = async (app: ElectronApplication) =>
+    (await linkCalls(app)).filter((u) => u === LINK_URL).length
+
   test.beforeAll(async ({ electronApp, mainWindow }) => {
+    linkAt = null
     await resetApp(mainWindow)
     await electronApp.evaluate(({ shell }) => {
       const g = globalThis as Record<string, unknown>
@@ -91,29 +101,134 @@ test.describe('PDF artifact links', () => {
     })
   })
 
-  test('bare click on a PDF link opens it externally', async ({ electronApp, mainWindow }) => {
-    const url = 'https://example.com/pdf-link'
-    const s = seed(mainWindow)
-    await s.createArtifact({ taskId, title: 'links.pdf', content: pdfWithFullPageLink(url) })
+  /** Task browser-panel tab URLs, as persisted. */
+  const browserTabUrls = (page: Page) =>
+    page.evaluate(async (id) => {
+      const tasks = await window.getTrpcVanillaClient().task.getAll.query()
+      const task = tasks.find((t) => t.id === id) as
+        | { browser_tabs?: { tabs?: { url: string }[] } | null }
+        | undefined
+      return task?.browser_tabs?.tabs?.map((t) => t.url) ?? []
+    }, taskId)
+
+  /**
+   * Seed a one-link PDF, select it, and wait until main's bridge is installed in
+   * its viewer frame (probed from main — the extension frame is invisible to
+   * Playwright). A bare click before that would navigate the whole app window.
+   *
+   * Called ONCE per run: swapping one PDF artifact for another intermittently
+   * re-points Playwright's main-window Page at the old viewer's extension frame
+   * (measured: `page.url()` = the viewer while the app's webContents stayed on
+   * index.html), after which every locator searches the wrong document.
+   */
+  async function openLinkPdf(app: ElectronApplication, page: Page, title: string, url: string) {
+    const s = seed(page)
+    const artifact = (await s.createArtifact({
+      taskId,
+      title,
+      content: pdfWithFullPageLink(url)
+    })) as { id: string }
     await s.refreshData()
     if (
-      !(await artifactsPanel(mainWindow)
+      !(await artifactsPanel(page)
         .isVisible()
         .catch(() => false))
     ) {
-      await mainWindow.keyboard.press('Meta+Shift+A')
+      await page.keyboard.press('Meta+Shift+A')
     }
-    await artifactRow(mainWindow, 'links.pdf').click()
-    const box = await pdfFrame(mainWindow).boundingBox()
+    await artifactRow(page, title).click()
+    // THIS artifact's frame: an earlier test's viewer can still be alive (and
+    // bridged) while the panel swaps documents.
+    const filePath = await page.evaluate(
+      (id) => window.getTrpcVanillaClient().artifacts.getFilePath.query({ id }),
+      artifact.id
+    )
+    expect(filePath).toBeTruthy()
+    // Matched by path, not full URL: selecting a PDF swaps the iframe's src
+    // `?v=N` → `?v=N+1` (preview version bump), and the frame can still report
+    // either one (measured: attribute `?v=2`, live bridged frame `?v=1`).
+    const docUrl = `slz-file://app${filePath}`
+    await expect
+      .poll(
+        () =>
+          app.evaluate(
+            async ({ webContents }, { docUrl, origin }) => {
+              const viewers = webContents
+                .getAllWebContents()
+                .flatMap((wc) => wc.mainFrame.framesInSubtree)
+                .filter((f) => f.url.split('?')[0] === docUrl)
+                .flatMap((f) => f.framesInSubtree)
+                .filter((f) => f.origin === origin)
+              const installed = await Promise.all(
+                viewers.map((f) =>
+                  f.executeJavaScript('window.__slzPdfViewerLinkBridge === true').catch(() => false)
+                )
+              )
+              return installed.some(Boolean)
+            },
+            { docUrl, origin: PDF_VIEWER_ORIGIN }
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    const box = await pdfFrame(page).boundingBox()
     expect(box).not.toBeNull()
+    return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }
+  }
 
-    // The viewer + main's bridge load asynchronously and expose nothing to
-    // Playwright; retry the real click until the bridge routes it.
+  /**
+   * Real click with modifiers held via the keyboard: Playwright's click
+   * `modifiers` don't reach MouseEvent flags in Electron. Retried because the
+   * viewer can still be painting the page when the bridge is already in.
+   */
+  async function clickUntil(
+    page: Page,
+    at: { x: number; y: number },
+    keys: string[],
+    done: () => Promise<void>
+  ) {
     await expect(async () => {
-      await mainWindow.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2)
-      expect(await linkCalls(electronApp)).toContain(url)
+      for (const k of keys) await page.keyboard.down(k)
+      try {
+        await page.mouse.click(at.x, at.y)
+      } finally {
+        for (const k of [...keys].reverse()) await page.keyboard.up(k)
+      }
+      await done()
     }).toPass({ timeout: 15_000 })
+  }
+
+  test('bare click on a PDF link opens it externally', async ({ electronApp, mainWindow }) => {
+    const at = await openOnce(electronApp, mainWindow)
+    const before = await countCalls(electronApp)
+    await clickUntil(mainWindow, at, [], async () => {
+      expect(await countCalls(electronApp)).toBeGreaterThan(before)
+    })
     // The app window itself did not navigate to the link.
     expect(mainWindow.url()).not.toContain('example.com')
+    expect(await browserTabUrls(mainWindow)).not.toContain(LINK_URL)
+  })
+
+  test('⌘⇧ click on a PDF link opens it externally', async ({ electronApp, mainWindow }) => {
+    const at = await openOnce(electronApp, mainWindow)
+    const before = await countCalls(electronApp)
+    await clickUntil(mainWindow, at, ['Meta', 'Shift'], async () => {
+      expect(await countCalls(electronApp)).toBeGreaterThan(before)
+    })
+    expect(await browserTabUrls(mainWindow)).not.toContain(LINK_URL)
+  })
+
+  // Opens the browser panel — keep LAST.
+  test("⌘ click on a PDF link opens it in the task's in-app browser", async ({
+    electronApp,
+    mainWindow
+  }) => {
+    const at = await openOnce(electronApp, mainWindow)
+    const before = await countCalls(electronApp)
+    await clickUntil(mainWindow, at, ['Meta'], async () => {
+      expect(await browserTabUrls(mainWindow)).toContain(LINK_URL)
+    })
+    expect(await countCalls(electronApp)).toBe(before)
+    await expect(mainWindow.locator('[data-browser-panel]:visible').first()).toBeVisible()
   })
 })
