@@ -111,6 +111,7 @@ const { ContextFilesPanel } = await import('./ContextFilesPanel')
 const { ProviderSyncSection } = await import('./ProviderSyncSection')
 const { ProjectContextFilesView } = await import('./ProjectContextFilesView')
 const { ProjectInstructions } = await import('./ProjectInstructions')
+const { AddItemPicker } = await import('./AddItemPicker')
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void }
 function deferred<T>(): Deferred<T> {
@@ -388,11 +389,119 @@ describe('ProjectInstructions', () => {
     expect(screen.getByText('No provider files found')).toBeTruthy()
   })
 
+  it('reloads on a project change: Loading only while no files are on screen', async () => {
+    const root = deferredHandler('aiConfig.getRootInstructions')
+    handlers['aiConfig.getProjectInstructionVariant'] = async () => null
+    const synced = { providerHealth: { claude: { health: 'synced', reason: null } } }
+    const { rerender } = render(<ProjectInstructions projectId="p1" projectPath="/a" />)
+    await flush()
+    await act(async () => root[0].resolve({ providerHealth: {} }))
+    await flush()
+    expect(screen.getByText('No provider files found')).toBeTruthy()
+
+    rerender(<ProjectInstructions projectId="p2" projectPath="/b" />)
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    await flush()
+    expect(callsTo('aiConfig.getRootInstructions').map((c) => c.input)).toEqual([
+      { projectId: 'p1', projectPath: '/a' },
+      { projectId: 'p2', projectPath: '/b' }
+    ])
+    await act(async () => root[1].resolve(synced))
+    await flush()
+    expect(screen.queryByText('Loading...')).toBeNull()
+    expect(screen.getByText('CLAUDE.md')).toBeTruthy()
+
+    // Files already on screen stay up while the next project's load runs.
+    rerender(<ProjectInstructions projectId="p3" projectPath="/c" />)
+    expect(screen.queryByText('Loading...')).toBeNull()
+    expect(screen.getByText('CLAUDE.md')).toBeTruthy()
+    await flush()
+    expect(callsTo('aiConfig.getRootInstructions').at(-1)?.input).toEqual({
+      projectId: 'p3',
+      projectPath: '/c'
+    })
+    await act(async () => root[2].resolve({ providerHealth: {} }))
+    await flush()
+    expect(screen.getByText('No provider files found')).toBeTruthy()
+
+    // Gaining a project after none: Loading (never settled without one) until it lands.
+    cleanup()
+    const { rerender: rerender2 } = render(<ProjectInstructions />)
+    await flush()
+    expect(screen.queryByText('Loading...')).toBeNull()
+    rerender2(<ProjectInstructions projectId="p4" projectPath="/d" />)
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    await flush()
+    expect(callsTo('aiConfig.getRootInstructions').at(-1)?.input).toEqual({
+      projectId: 'p4',
+      projectPath: '/d'
+    })
+    await act(async () => root[3].resolve({ providerHealth: {} }))
+    await flush()
+    expect(screen.queryByText('Loading...')).toBeNull()
+  })
+
   it('without a project, loads nothing and never shows Loading', async () => {
     render(<ProjectInstructions />)
     await flush()
     expect(callsTo('aiConfig.getRootInstructions')).toHaveLength(0)
     expect(screen.queryByText('Loading...')).toBeNull()
     expect(screen.getByText('No provider files found')).toBeTruthy()
+  })
+})
+
+describe('AddItemPicker', () => {
+  const props = {
+    onOpenChange: () => {},
+    type: 'skill' as const,
+    projectId: 'p1',
+    projectPath: '/a',
+    enabledProviders: ['claude' as const],
+    existingLinks: [],
+    onAdded: () => {}
+  }
+  const libItem = {
+    id: 'lib-1',
+    type: 'skill',
+    scope: 'library',
+    project_id: null,
+    name: 'lib-one',
+    slug: 'lib-one',
+    content: 'body',
+    metadata_json: '{}',
+    created_at: '',
+    updated_at: ''
+  }
+
+  it('fetches the library on entering that step, and every open starts on choose', async () => {
+    handlers['aiConfig.listItems'] = async () => [libItem]
+    const libraryFetches = () =>
+      callsTo('aiConfig.listItems').filter(
+        (c) => (c.input as { scope: string }).scope === 'library'
+      )
+    const { rerender } = render(<AddItemPicker open {...props} />)
+    await flush()
+    expect(screen.getByText('Add Skill')).toBeTruthy()
+    expect(libraryFetches()).toHaveLength(0)
+
+    fireEvent.click(screen.getByText('From library'))
+    await flush()
+    expect(screen.getByText('Add from Library')).toBeTruthy()
+    expect(screen.getByTestId('add-item-option-lib-one')).toBeTruthy()
+    expect(libraryFetches()).toHaveLength(1)
+
+    // Closed on the library step, then reopened: the dialog opens on choose and
+    // never commits (nor fetches for) the previous session's library step.
+    rerender(<AddItemPicker open={false} {...props} />)
+    rerender(<AddItemPicker open {...props} />)
+    expect(screen.getByText('Add Skill')).toBeTruthy()
+    expect(screen.queryByTestId('add-item-option-lib-one')).toBeNull()
+    await flush()
+    expect(screen.getByText('Add Skill')).toBeTruthy()
+    expect(libraryFetches()).toHaveLength(1)
+
+    fireEvent.click(screen.getByText('From library'))
+    await flush()
+    expect(libraryFetches()).toHaveLength(2)
   })
 })

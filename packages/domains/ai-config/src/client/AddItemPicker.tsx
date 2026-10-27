@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Library, Plus, Sparkles } from 'lucide-react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, cn, useDepsChanged } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, AiConfigItemType, CliProvider } from '../shared'
 import { PROVIDER_PATHS } from '../shared/provider-registry'
@@ -45,12 +45,11 @@ export function AddItemPicker({
   const [libraryItems, setLibraryItems] = useState<AiConfigItem[]>([])
   const [loading, setLoading] = useState(false)
 
-  // Reset step when dialog opens
-  useEffect(() => {
-    if (open) {
-      setStep('choose')
-    }
-  }, [open])
+  // Every open starts on the choose step. Reset while rendering on the open edge, so
+  // a reopen never commits the last session's library step: its list would take the
+  // dialog's mount auto-focus and fire the library fetch below for nothing.
+  const openChanged = useDepsChanged([open])
+  if (openChanged && open && step !== 'choose') setStep('choose')
 
   // Fetch library items when entering library step
   useEffect(() => {

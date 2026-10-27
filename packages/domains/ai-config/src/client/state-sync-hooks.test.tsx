@@ -51,6 +51,7 @@ const { useProjectMcpServers } = await import('./mcp-servers-panel/useProjectMcp
 const { useComputerMcpServers } = await import('./mcp-servers-panel/useComputerMcpServers')
 const { useMcpFlatState } = await import('./useMcpFlatState')
 const { useSkillMarketplace } = await import('./useSkillMarketplace')
+const { useContextManagerStore } = await import('./useContextManagerStore')
 const { useLegacyContextState } = await import('./useLegacyContextState')
 const { useContextItemEditorState } = await import('./useContextItemEditorState')
 const { useSkillItem } = await import('./useSkillItem')
@@ -295,6 +296,59 @@ describe('useSkillMarketplace', () => {
     expect(listed().at(-1)).toEqual({ registryId: undefined, search: undefined, projectId: 'p2' })
     await act(async () => entries[2].resolve([]))
     await flush()
+  })
+})
+
+describe('useSkillMarketplace external drill-in', () => {
+  afterEach(() => {
+    useContextManagerStore.setState({
+      marketplaceDrillRegistryId: null,
+      marketplaceDrillEntryId: null
+    })
+  })
+
+  it('mounts drilled into the requested registry and lists only its entries', async () => {
+    handlers['aiConfig.marketplace.listRegistries'] = async () => [{ id: 'r1' }]
+    handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})
+    const byRegistry = new Map<string | undefined, Deferred<unknown>>()
+    handlers['aiConfig.marketplace.listEntries'] = (input) => {
+      const d = deferred<unknown>()
+      byRegistry.set((input as { registryId?: string }).registryId, d)
+      return d.promise
+    }
+    useContextManagerStore.getState().navigateToMarketplaceRegistry('r1')
+
+    const { result } = renderHook(() => useSkillMarketplace('p1', '/a'))
+    expect(result.current.activeRegistryId).toBe('r1')
+    expect(result.current.browseMode).toBe('registries')
+    expect(result.current.loading).toBe(true)
+    await flush()
+    expect(useContextManagerStore.getState().marketplaceDrillRegistryId).toBe(null)
+    expect(result.current.isDrilledIn).toBe(true)
+
+    // The registry's answer lands first; an unfiltered load, had one gone out,
+    // answers later — the drilled-in view must still show only the registry's entries.
+    await act(async () => byRegistry.get('r1')?.resolve([{ id: 'r1-e1' }]))
+    await flush()
+    await act(async () => byRegistry.get(undefined)?.resolve([{ id: 'r1-e1' }, { id: 'r2-e1' }]))
+    await flush()
+    expect(result.current.loading).toBe(false)
+    expect(result.current.entries).toEqual([{ id: 'r1-e1' }])
+    expect(callsTo('aiConfig.marketplace.listEntries').map((c) => c.input)).toEqual([
+      { registryId: 'r1', search: undefined, projectId: 'p1' }
+    ])
+  })
+
+  it('without a pending drill-in, mounts on the registry list', async () => {
+    handlers['aiConfig.marketplace.listRegistries'] = async () => []
+    handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})
+    handlers['aiConfig.marketplace.listEntries'] = async () => []
+    const { result } = renderHook(() => useSkillMarketplace('p1', '/a'))
+    await flush()
+    expect(result.current.activeRegistryId).toBe(null)
+    expect(callsTo('aiConfig.marketplace.listEntries').map((c) => c.input)).toEqual([
+      { registryId: undefined, search: undefined, projectId: 'p1' }
+    ])
   })
 })
 

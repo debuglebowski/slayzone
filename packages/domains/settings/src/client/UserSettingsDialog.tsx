@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { XIcon } from 'lucide-react'
-import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
+import { Dialog, DialogContent, SettingsLayout, useDepsChanged } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
@@ -109,9 +109,13 @@ export function UserSettingsDialog({
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 
+  // Opening (or a new initialTab while open) shows initialTab. Applied while rendering,
+  // so a reopen never mounts the last-viewed tab first (running its effects/fetches).
+  const tabSourceChanged = useDepsChanged([open, initialTab])
+  if (tabSourceChanged && open && activeTab !== initialTab) setActiveTab(initialTab)
+
   useEffect(() => {
     if (!open) return
-    setActiveTab(initialTab)
     void defaultModeQuery.refetch()
   }, [open, initialTab, defaultModeQuery.refetch])
 

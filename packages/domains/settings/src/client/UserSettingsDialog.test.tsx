@@ -35,7 +35,8 @@ vi.mock('@slayzone/transport/client', () => ({
 }))
 
 type Kids = { children?: React.ReactNode }
-vi.mock('@slayzone/ui', () => ({
+vi.mock('@slayzone/ui', async () => ({
+  ...(await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')),
   Dialog: ({ open, children }: { open: boolean } & Kids) => (open ? <div>{children}</div> : null),
   DialogContent: ({ children }: Kids) => <div>{children}</div>,
   SettingsLayout: ({ children, onSelect }: Kids & { onSelect: (key: string) => void }) => (
@@ -62,7 +63,18 @@ vi.mock('@slayzone/telemetry/client', () => ({
   TelemetrySettings: () => null
 }))
 
-const tab = (name: string) => () => <div data-testid={`tab-${name}`} />
+/** Tab mounts, in order — a tab that mounts runs its own effects (fetches, listeners). */
+let mounted: string[] = []
+function useMountLog(name: string): void {
+  React.useEffect(() => {
+    mounted.push(name)
+  }, [name])
+}
+const tab = (name: string) =>
+  function MockTab() {
+    useMountLog(name)
+    return <div data-testid={`tab-${name}`} />
+  }
 vi.mock('./tabs/McpSettingsTab', () => ({ McpSettingsTab: tab('mcp') }))
 vi.mock('./tabs/AppearanceSettingsTab', () => ({ AppearanceSettingsTab: tab('appearance') }))
 vi.mock('./tabs/LayoutSettingsTab', () => ({ LayoutSettingsTab: tab('layout') }))
@@ -80,17 +92,20 @@ vi.mock('./tabs/PanelsSettingsTab', () => ({
   )
 }))
 vi.mock('./tabs/AiProvidersSettingsTab', () => ({
-  AiProvidersSettingsTab: ({
+  AiProvidersSettingsTab: function MockAiProvidersTab({
     defaultTerminalMode,
     onDefaultTerminalModeChange
   }: {
     defaultTerminalMode: string
     onDefaultTerminalModeChange: (m: string) => void
-  }) => (
-    <div data-testid="tab-ai-providers" data-mode={defaultTerminalMode}>
-      <button onClick={() => onDefaultTerminalModeChange('gemini')}>pick-gemini</button>
-    </div>
-  )
+  }) {
+    useMountLog('ai-providers')
+    return (
+      <div data-testid="tab-ai-providers" data-mode={defaultTerminalMode}>
+        <button onClick={() => onDefaultTerminalModeChange('gemini')}>pick-gemini</button>
+      </div>
+    )
+  }
 }))
 
 const { UserSettingsDialog } = await import('./UserSettingsDialog')
@@ -114,6 +129,7 @@ function renderDialog(props: { open: boolean; initialTab?: string }) {
 const mode = () => screen.getByTestId('tab-ai-providers').getAttribute('data-mode')
 
 beforeEach(() => {
+  mounted = []
   storedMode = 'codex'
   mutations = []
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -166,5 +182,18 @@ describe('UserSettingsDialog active tab', () => {
     rerender({ open: true, initialTab: 'about' })
     await flush()
     expect(screen.getByTestId('tab-about')).toBeTruthy()
+  })
+
+  it('reopening on another initialTab mounts only that tab, never the last-viewed one', async () => {
+    const { rerender } = renderDialog({ open: true, initialTab: 'about' })
+    await flush()
+    fireEvent.click(screen.getByText('nav-providers'))
+    expect(screen.getByTestId('tab-ai-providers')).toBeTruthy()
+    rerender({ open: false, initialTab: 'about' })
+    mounted = []
+    rerender({ open: true, initialTab: 'diagnostics' })
+    await flush()
+    expect(screen.getByTestId('tab-diagnostics')).toBeTruthy()
+    expect(mounted).toEqual(['diagnostics'])
   })
 })

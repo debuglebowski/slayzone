@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Dialog, DialogContent, Button, cn, useVisibleInterval } from '@slayzone/ui'
+import { Dialog, DialogContent, Button, cn, useDepsChanged, useVisibleInterval } from '@slayzone/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { SceneProjects } from './scenes/SceneProjects'
 import { SceneOpenTask } from './scenes/SceneOpenTask'
@@ -164,14 +164,16 @@ export function TutorialAnimationModal({ open, onClose }: Props): React.JSX.Elem
     return () => window.removeEventListener('resize', update)
   }, [open])
 
-  useEffect(() => {
-    if (open) {
-      setTabIndex(0)
-      setStepIndex(0)
-      setDirection(1)
-      setCycle(0)
-    }
-  }, [open])
+  // Every open starts the tour from the first scene. Reset while rendering on the open
+  // edge, so a reopen never mounts the last session's scene — nor queues the first
+  // caption behind that scene's caption exiting (its AnimatePresence is mode="wait").
+  const openChanged = useDepsChanged([open])
+  if (openChanged && open) {
+    setTabIndex(0)
+    setStepIndex(0)
+    setDirection(1)
+    setCycle(0)
+  }
 
   // Replay scene animations on the same interval as the timer bar
   const cycleDur = TABS[tabIndex].steps[stepIndex].duration ?? 6000

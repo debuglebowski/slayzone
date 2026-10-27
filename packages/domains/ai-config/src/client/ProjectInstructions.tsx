@@ -20,7 +20,8 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  cn
+  cn,
+  useDepsChanged
 } from '@slayzone/ui'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
@@ -149,9 +150,9 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     setSelectedPath(files[0].path)
   }
 
-  const load = useCallback(async () => {
+  // Fetch + settle `loading`; whoever starts a load raises it first.
+  const fetchInstructions = useCallback(async () => {
     if (!isProject) return
-    setLoading(true)
     try {
       const [result, variant] = await Promise.all([
         trpcClient.aiConfig.getRootInstructions.query({
@@ -167,9 +168,20 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     }
   }, [trpcClient, isProject, projectId, projectPath])
 
+  const load = useCallback(async () => {
+    if (!isProject) return
+    setLoading(true)
+    return fetchInstructions()
+  }, [isProject, fetchInstructions])
+
+  // The effect below loads on mount (initial state is already loading) and whenever
+  // the client or project changes — raise loading for the latter while rendering.
+  const instructionsSourceChanged = useDepsChanged([trpcClient, isProject, projectId, projectPath])
+  if (instructionsSourceChanged && isProject && !loading) setLoading(true)
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchInstructions()
+  }, [fetchInstructions])
 
   // Editable file: read/save/watch via shared primitive. relPath null in linked-variant mode
   // (Textarea is readOnly there).

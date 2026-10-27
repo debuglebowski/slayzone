@@ -759,6 +759,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/file-editor/src/client/SearchPanel.test.tsx \
   packages/domains/file-editor/src/client/useFileTreeData.test.tsx \
   packages/domains/onboarding/src/client/CliInstallStep.test.tsx \
+  packages/domains/onboarding/src/client/OnboardingDialog.test.tsx \
+  packages/domains/onboarding/src/client/tutorial/TutorialAnimationModal.test.tsx \
   packages/domains/tags/src/client/CreateTagDialog.test.tsx \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \

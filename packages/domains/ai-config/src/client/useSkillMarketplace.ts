@@ -12,7 +12,12 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
   const hasProject = !!projectId && !!projectPath
   const [view, setView] = useState<View>('browse')
   const [browseMode, setBrowseMode] = useState<BrowseMode>('registries')
-  const [activeRegistryId, setActiveRegistryId] = useState<string | null>(null)
+  // External navigation (e.g. clicking a marketplace badge in the skill list) lands
+  // drilled into that registry: seeded from the store's one-shot value at mount, so
+  // the first entries load is already the registry's. The mount effect below clears it.
+  const [activeRegistryId, setActiveRegistryId] = useState<string | null>(
+    () => useContextManagerStore.getState().marketplaceDrillRegistryId
+  )
   const [entries, setEntries] = useState<SkillRegistryEntry[]>([])
   const [registries, setRegistries] = useState<SkillRegistry[]>([])
   const [search, setSearch] = useState('')
@@ -90,12 +95,10 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
       })
   }, [trpcClient])
 
-  // Handle external navigation (e.g. clicking marketplace badge in skill list)
+  // Consume the one-shot drill-in seeded into `activeRegistryId` above (browseMode
+  // already starts on 'registries').
   useEffect(() => {
-    const { marketplaceDrillRegistryId: drillId } = useContextManagerStore.getState()
-    if (drillId) {
-      setActiveRegistryId(drillId)
-      setBrowseMode('registries')
+    if (useContextManagerStore.getState().marketplaceDrillRegistryId) {
       useContextManagerStore.setState({ marketplaceDrillRegistryId: null })
     }
   }, [])

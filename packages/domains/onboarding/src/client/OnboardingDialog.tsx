@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Dialog, DialogContent } from '@slayzone/ui'
+import { Dialog, DialogContent, useDepsChanged } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import { useTelemetry, track } from '@slayzone/telemetry/client'
@@ -42,11 +42,21 @@ export function OnboardingDialog({
     if (open) track('onboarding_step', { step, step_name: STEP_NAMES[step] })
   }, [step, open])
 
-  useEffect(() => {
-    if (onboardingCompletedQuery.isSuccess && onboardingCompletedQuery.data !== 'true') {
-      setAutoOpen(true)
-    }
-  }, [onboardingCompletedQuery.isSuccess, onboardingCompletedQuery.data])
+  // Self-open while onboarding isn't completed — on each new answer for the setting
+  // (mount included), adjusted while rendering. The commit this skips only repeated
+  // the previous output (null, or the externally opened dialog as it was).
+  const completedAnswerChanged = useDepsChanged(
+    [onboardingCompletedQuery.isSuccess, onboardingCompletedQuery.data],
+    true
+  )
+  if (
+    completedAnswerChanged &&
+    !autoOpen &&
+    onboardingCompletedQuery.isSuccess &&
+    onboardingCompletedQuery.data !== 'true'
+  ) {
+    setAutoOpen(true)
+  }
 
   const handleNext = (): void => {
     if (step === 2) {
