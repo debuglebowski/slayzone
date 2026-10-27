@@ -1,0 +1,13 @@
+{
+  "name": "@slayzone/react-compiler-config",
+  "version": "0.36.0",
+  "private": true,
+  "description": "The one React Compiler setup for @vitejs/plugin-react, shared by the shipped renderer builds (Electron renderer, web shell) and the vitest configs that render their components, so tests run components compiled exactly as they ship. Plain .mjs: Vite and vitest config files import it under bare Node.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    }
+  }
+}

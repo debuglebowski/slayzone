@@ -110,8 +110,9 @@ run_test_electron_strict() {
 }
 
 # One vitest run over explicit files, under the app's vitest config (jsdom + react
-# plugin + '@' alias). Explicit paths override vitest's default include glob, so only
-# these run (no sweep of the tsx-harness *.test.ts). Usage: run_vitest_files <label> <file>...
+# plugin with the renderer build's React Compiler setup + '@' alias). Explicit paths
+# override vitest's default include glob, so only these run (no sweep of the
+# tsx-harness *.test.ts). Usage: run_vitest_files <label> <file>...
 run_vitest_files() {
   local label="$1"
   shift

@@ -25,10 +25,12 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@slayzone/react-compiler-config": "workspace:*",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "babel-plugin-react-compiler": "^1.0.0",
     "jsdom": "^26.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

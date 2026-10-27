@@ -69,6 +69,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/react-compiler-config": "workspace:*",
     "@slayzone/search": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/shortcuts": "workspace:*",

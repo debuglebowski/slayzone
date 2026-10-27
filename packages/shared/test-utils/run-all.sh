@@ -709,13 +709,17 @@ skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-mig
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) can't run
 # under the tsx/electron computers above — they need the vitest computer. The app
-# vitest config wires @vitejs/plugin-react. Explicit file paths override vitest's
-# default include glob so only these run (no sweep of the tsx-harness *.test.ts).
+# vitest config wires @vitejs/plugin-react with the React Compiler, set up exactly as
+# the renderer build runs it (@slayzone/react-compiler-config), so these suites test
+# components compiled the way they ship; react-compiler-canary.test.tsx pins that.
+# Explicit file paths override vitest's default include glob so only these run (no
+# sweep of the tsx-harness *.test.ts).
 #
 # A few non-jsdom node suites ride along here because they need vitest's computer for
 # other reasons (vi.mock, or node:sqlite which the tsx/electron computers above don't
 # provide).
 run_vitest_files "vitest (jsdom client suites)" \
+  packages/apps/app/src/renderer/src/react-compiler-canary.test.tsx \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \

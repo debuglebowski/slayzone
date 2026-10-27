@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv, type Plugin } from 'vite'
 import { runtimeImportsRollupPlugin } from '@slayzone/build-guards/runtime-imports'
+import { reactCompilerBabelOptions } from '@slayzone/react-compiler-config'
 import { buildCspFloor } from './src/main/renderer-csp'
 import { NO_MODULE_RE, reactCompilerCachePlugin } from './vite/react-compiler-cache'
 import { devWatchIgnored, envFilesRestartPlugin } from './vite/dev-watch'
@@ -179,10 +180,12 @@ export default defineConfig(({ mode, command }) => {
       ...(useReactProdInDev ? { esbuild: { jsxDev: false } } : {}),
       plugins: [
         // Babel + React Compiler in all modes — auto-memoization cuts re-renders
-        // in both dev and prod. No SWC: compiler has no SWC equivalent.
+        // in both dev and prod. No SWC: compiler has no SWC equivalent. The setup
+        // is shared with vitest.config.ts so the jsdom suites run components
+        // compiled exactly as they ship.
         cachedReactCompiler && reactCompilerCachePlugin(),
         react({
-          babel: { plugins: ['babel-plugin-react-compiler'] },
+          babel: reactCompilerBabelOptions(),
           ...(cachedReactCompiler ? { include: NO_MODULE_RE } : {})
         }),
         tailwindcss(),
