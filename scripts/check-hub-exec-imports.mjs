@@ -38,6 +38,8 @@ const ALLOWLIST = {
     'background processes; every entry point refuses, boot loads no row (T-04)',
   'packages/domains/processes/src/server/pid-stats.ts':
     'ps/pgrep for running hub processes; none exist with processes off (T-04)',
+  'packages/shared/platform/src/process-tree.ts':
+    'Windows taskkill in killPidTree; the hub calls it only from localProcessBackend, which refuses (T-04)',
   'packages/domains/terminal/src/server/runtime/pty-backend.ts':
     'node-pty for localPtyBackend; refuses (T-04), required on first spawn only (T-30)',
   'packages/domains/terminal/src/server/runtime/pty-manager.ts':
