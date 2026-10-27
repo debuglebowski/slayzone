@@ -1020,6 +1020,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.testTakePtyCreateOpts': none(TEST),
   'pty.testTakePtyKillCalls': none(TEST),
   'pty.testExecutionContext': none(TEST),
+  'pty.testWarmStatus': none(TEST),
   'pty.write': checked(session('sessionId')),
   'pty.submit': checked(session('sessionId')),
   'pty.resize': checked(session('sessionId')),
