@@ -4,6 +4,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { ensureComputerBuilt } from './fixtures/computer-build'
 import { parsePgrepOutput, readProcessEnviron, selectTestRunPids } from './fixtures/stale-processes'
+import { pruneStaleRuntimeDirs } from './fixtures/stale-runtime-dirs'
 
 /**
  * Kill processes from a previous TEST run whose command line matches `pattern`.
@@ -77,6 +78,14 @@ export default function globalSetup(): void {
   // scriptPath (`app.getAppPath()/../hub/dist/bin.cjs`) resolves to
   // out/hub/... — the root build doesn't create that link. Idempotent.
   const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+  // Every worker/isolated launch leaves `.e2e-runtime/<prefix>-<pid>-<ms>`
+  // behind; unpruned they reached 231 GB and filled the disk. Only dirs whose
+  // owning process is dead go — concurrent groups' live workers keep theirs.
+  const pruned = pruneStaleRuntimeDirs(path.join(appDir, '.e2e-runtime'))
+  if (pruned.length > 0) {
+    console.log(`[global-setup] Removed ${pruned.length} stale .e2e-runtime dir(s)`)
+  }
   const linkPath = path.join(appDir, 'out', 'hub')
   if (!fs.existsSync(linkPath)) {
     fs.mkdirSync(path.dirname(linkPath), { recursive: true })

@@ -13,7 +13,7 @@ export function registerPtyWriteRoute(app: Express, deps: RestApiDeps): void {
       return
     }
     const id = req.params.id
-    if (!pty.hasPty(id)) {
+    if (!pty.hasLivePty(id)) {
       const taskId = extractMainTaskId(id)
       if (taskId) {
         const r = await startMainPty(deps, pty, taskId, { timeoutMs: AUTO_START_TIMEOUT_MS })

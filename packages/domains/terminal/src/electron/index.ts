@@ -34,6 +34,7 @@ export {
   submitPty,
   getState,
   hasPty,
+  hasLivePty,
   subscribeToPtyData,
   subscribeToStateChange,
   onPtyInputSubmit,

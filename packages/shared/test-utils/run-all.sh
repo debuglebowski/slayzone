@@ -530,6 +530,9 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/warm-process-manager.test.ts
 # Terminal — createPty warm-shell adoption branch (fake pty/win/db, no real spawn).
 run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
+# exists/write/start must not treat an exited session in its ~100ms drain window
+# as live (a Retry raced it; writes landed in the dead pty).
+run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 
@@ -549,6 +552,10 @@ run_harness packages/apps/app/src/main/local-computer-supervisor.test.ts
 # e2e stale-process reaper: must never match the dev app's live computer (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).
 run_harness packages/apps/app/e2e/fixtures/stale-processes.test.ts
+
+# e2e runtime-dir pruner: only dirs whose owning pid is dead (231 GB of leftovers
+# filled the disk); a concurrent group's live worker dirs must survive.
+run_harness packages/apps/app/e2e/fixtures/stale-runtime-dirs.test.ts
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
 run_harness packages/domains/task/src/server/events.test.ts

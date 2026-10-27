@@ -1,4 +1,4 @@
-import { test, expect, seed, resetApp } from '../fixtures/electron'
+import { test, expect, seed, resetApp, proveConversationTurn } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   openTaskTerminal,
@@ -260,7 +260,8 @@ test.describe('Session invalidation', () => {
   // --- Restart terminal (menu) ---
 
   test('restart terminal preserves conversationId and remounts with same ID', async ({
-    mainWindow
+    mainWindow,
+    electronApp
   }) => {
     const storedId = 'keep-on-restart'
     const s = seed(mainWindow)
@@ -273,6 +274,7 @@ test.describe('Session invalidation', () => {
         }),
       { id: t.id, cid: storedId }
     )
+    await proveConversationTurn(electronApp, storedId)
     await s.refreshData()
 
     const sessionId = getMainSessionId(t.id)

@@ -72,6 +72,7 @@ import {
   chatQueueEvents,
   listPtys,
   hasPty,
+  hasLivePty,
   getBuffer,
   writePty,
   submitPty,
@@ -1373,6 +1374,7 @@ export function composeServer(opts: {
     pty: {
       listPtys,
       hasPty,
+      hasLivePty,
       getBuffer,
       writePty,
       submitPty,

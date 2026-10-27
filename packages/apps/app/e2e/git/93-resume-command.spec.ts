@@ -1,4 +1,4 @@
-import { test, expect, seed, resetApp } from '../fixtures/electron'
+import { test, expect, seed, resetApp, proveConversationTurn } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
 
@@ -112,7 +112,10 @@ test.describe('Resume command opts', () => {
 
   // --- Resume: stored conversationId flows through ---
 
-  test('claude-code resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
+  test('claude-code resume: existingConversationId equals stored ID', async ({
+    mainWindow,
+    electronApp
+  }) => {
     const storedId = 'claude-resume-11111111'
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume claude', status: 'in_progress' })
@@ -124,6 +127,7 @@ test.describe('Resume command opts', () => {
         }),
       { id: t.id, cid: storedId }
     )
+    await proveConversationTurn(electronApp, storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)

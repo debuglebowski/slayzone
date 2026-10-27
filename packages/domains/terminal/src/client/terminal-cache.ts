@@ -4,6 +4,7 @@ import type { SerializeAddon } from '@xterm/addon-serialize'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { WebglAddon } from '@xterm/addon-webgl'
 import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { WebLinkProvider } from './web-link-provider'
 
 export interface CachedTerminal {
   terminal: XTerm
@@ -15,6 +16,8 @@ export interface CachedTerminal {
   serializedState?: string
   mode?: TerminalMode
   lastRenderedSeq?: number
+  /** Re-registered as the e2e link handle on reattach. */
+  linkProvider?: WebLinkProvider
 }
 
 // Module-level cache for terminal instances (unmounted terminals)

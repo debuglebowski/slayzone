@@ -10,7 +10,7 @@ export function registerPtyWaitRoute(app: Express, deps: RestApiDeps): void {
       return
     }
     const id = req.params.id
-    if (!pty.hasPty(id)) {
+    if (!pty.hasLivePty(id)) {
       res.status(404).json({ error: 'PTY session not found' })
       return
     }
@@ -46,7 +46,7 @@ export function registerPtyWaitRoute(app: Express, deps: RestApiDeps): void {
 
     const unsubSession = pty.onSessionChange(() => {
       if (resolved) return
-      if (!pty.hasPty(id)) {
+      if (!pty.hasLivePty(id)) {
         cleanup()
         res.status(410).json({ error: 'PTY session died while waiting', state: 'dead' })
       }

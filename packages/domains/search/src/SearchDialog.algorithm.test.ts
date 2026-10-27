@@ -5,7 +5,8 @@ import {
   createFzf,
   firstResultValue,
   groupResults,
-  rankResults
+  rankResults,
+  resultValue
 } from './SearchDialog.algorithm'
 
 const taskCommands: PaletteCommand[] = [
@@ -209,5 +210,57 @@ describe('firstResultValue — best hit inside the top group', () => {
     expect(groups.taskCommands[0]?.context).toBeFalsy()
     expect(groups.taskCommands[0]?.item.label).toBe('Change status…')
     expect(firstResultValue(groups)).toBe('task-command:cmd:status:done')
+  })
+})
+
+describe('firstResultValue — entity picks never default over the entity itself', () => {
+  // A capped entity page ("Blocked by…") lists OTHER tasks/projects. Its rows match
+  // those entities' titles exactly, so with a task open, typing another task's title
+  // + Enter used to mark it as a blocker instead of opening it.
+  const entityPage = (id: string, label: string, title: string, values: string[]) =>
+    ({
+      id,
+      label,
+      page: {
+        kind: 'list',
+        title,
+        searchLimit: 5,
+        items: values.map((v) => ({ id: `${id}:${v}`, label: v, run: () => {} }))
+      }
+    }) satisfies PaletteCommand
+  const select = (
+    q: string,
+    tasks: { id: string; title: string }[] = [],
+    projects: { id: string; name: string }[] = []
+  ) => {
+    const items = buildSearchItems({
+      ...base,
+      filter: 'all',
+      taskCommands: [
+        entityPage('blocked-by', 'Blocked by…', 'Blocked by', ['Release notes']),
+        entityPage('move', 'Move to project…', 'Move to project', ['Website'])
+      ],
+      tasks: tasks.map((t) => ({ ...t, project_id: 'p', status: 'todo', priority: 3 })) as never,
+      projects: projects.map((p) => ({ ...p, color: '#000' })) as never
+    })
+    const { fzfLabel, fzfPath } = createFzf(items)
+    const groups = groupResults(rankResults(fzfLabel, fzfPath, q, items))
+    return { groups, selected: firstResultValue(groups) }
+  }
+
+  it('an equally matching task is selected over the pick naming it', () => {
+    const { groups, selected } = select('release notes', [{ id: 't1', title: 'Release notes' }])
+    expect(groups.taskCommands.some((r) => !r.context)).toBe(true) // pick still listed
+    expect(selected).toBe(resultValue(groups.tasks[0]!))
+  })
+
+  it('an equally matching project is selected over the pick naming it', () => {
+    const { groups, selected } = select('website', [], [{ id: 'p1', name: 'Website' }])
+    expect(selected).toBe(resultValue(groups.projects[0]!))
+  })
+
+  it('the pick stays the selection when no task or project matches as well', () => {
+    const { selected } = select('release notes', [{ id: 't1', title: 'Release planning notes' }])
+    expect(selected).toBe('task-command:cmd:blocked-by:Release notes')
   })
 })

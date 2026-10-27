@@ -54,7 +54,7 @@ export async function startMainPty(
   taskId: string,
   opts: { timeoutMs?: number } = {}
 ): Promise<StartMainPtyResult> {
-  if (pty.hasPty(mainSessionIdFor(taskId))) return 'already-alive'
+  if (pty.hasLivePty(mainSessionIdFor(taskId))) return 'already-alive'
 
   const task = (await deps.db
     .prepare('SELECT id, terminal_mode FROM tasks WHERE id = ?')

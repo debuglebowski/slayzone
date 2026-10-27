@@ -28,6 +28,8 @@ import {
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import type { WebglAddon } from '@xterm/addon-webgl'
+import type { WebLinkProvider } from './web-link-provider'
+import { unregisterTestTerminalLinks } from './xterm-init'
 import { initTerminalSession, type TerminalInitOptions } from './terminal-session-init'
 import { watchTerminalFocusLoss } from './terminal-focus-watch'
 import { installTerminalFileInput } from './terminal-file-input'
@@ -104,6 +106,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
+  const linkProviderRef = useRef<WebLinkProvider | null>(null)
   const webglRafIdRef = useRef<number | null>(null)
   const atlasCorrectionRafRef = useRef<number | null>(null)
   // Signal B (frame-time heartbeat) cleanup handle.
@@ -433,6 +436,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           serializeAddonRef,
           searchAddonRef,
           webglAddonRef,
+          linkProviderRef,
           webglRafIdRef,
           frameTimeStopRef,
           scrambleProbeRef,
@@ -540,7 +544,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             element,
             serializedState,
             mode,
-            lastRenderedSeq: lastRenderedSeqRef.current
+            lastRenderedSeq: lastRenderedSeqRef.current,
+            linkProvider: linkProviderRef.current ?? undefined
           })
         }
       }
@@ -552,11 +557,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       webglAddonRef.current = null
       initializedRef.current = false
 
-      // Clean up test helper reference
-      const wClean = window as unknown as Record<string, Record<string, unknown> | undefined>
-      if (wClean.__slayzone_terminalLinks) {
-        delete wClean.__slayzone_terminalLinks[sessionId]
-      }
+      unregisterTestTerminalLinks(sessionId, linkProviderRef.current)
+      linkProviderRef.current = null
     }
   }, [initTerminal, sessionId])
 

@@ -138,6 +138,22 @@ test.describe('Warm pool (computer-hosted)', () => {
         { timeout: 15_000, intervals: [500, 1_000] }
       )
       .toBe(true)
+    // Pooled ≠ reservable: the row exists from spawn, but only a READY agent is
+    // reserved by a task create. A create that lands while it still boots misses,
+    // the create's own tab re-report drops this project, and the pool tears the
+    // booting agent down — the task then cold-spawns (correct, not adoption).
+    await expect
+      .poll(
+        async () => {
+          await reportTabOpen()
+          const status = (await mainWindow.evaluate(() =>
+            window.getTrpcVanillaClient().pty.testWarmStatus.query()
+          )) as Record<string, string>
+          return status[projectId]
+        },
+        { timeout: 30_000, intervals: [500, 1_000] }
+      )
+      .toBe('ready')
 
     // What the scratch-terminal button does: create a temp task it opens at once.
     const task = (await mainWindow.evaluate(

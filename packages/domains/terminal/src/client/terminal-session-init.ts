@@ -7,7 +7,8 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { useTRPCClient } from '@slayzone/transport/client'
 import { safeRandomUUID } from '@slayzone/ui'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
-import { createXterm } from './xterm-init'
+import { createXterm, registerTestTerminalLinks } from './xterm-init'
+import type { WebLinkProvider } from './web-link-provider'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
 import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scramble-detector'
 import {
@@ -84,6 +85,7 @@ export interface TerminalInitContext {
   serializeAddonRef: RefObject<SerializeAddon | null>
   searchAddonRef: RefObject<SearchAddon | null>
   webglAddonRef: RefObject<WebglAddon | null>
+  linkProviderRef: RefObject<WebLinkProvider | null>
   webglRafIdRef: RefObject<number | null>
   frameTimeStopRef: RefObject<(() => void) | null>
   scrambleProbeRef: RefObject<ScrambleProbe | null>
@@ -145,6 +147,7 @@ export async function initTerminalSession(
     serializeAddonRef,
     searchAddonRef,
     webglAddonRef,
+    linkProviderRef,
     webglRafIdRef,
     frameTimeStopRef,
     scrambleProbeRef,
@@ -465,6 +468,8 @@ export async function initTerminalSession(
         serializeAddonRef.current = cached.serializeAddon
         searchAddonRef.current = cached.searchAddon
         setSearchAddon(cached.searchAddon)
+        linkProviderRef.current = cached.linkProvider ?? null
+        if (cached.linkProvider) registerTestTerminalLinks(sessionId, cached.linkProvider)
         // A cached addon may have been evicted by the WebGL budget (or disposed
         // by a downgrade) while detached — only a live one is re-adopted.
         const cachedWebgl = isLiveWebglAddon(cached.webglAddon) ? (cached.webglAddon ?? null) : null
@@ -591,7 +596,8 @@ export async function initTerminalSession(
     })
     if (!created) return
     timeline.mark('xterm_created')
-    const { terminal, fitAddon, serializeAddon, searchAddon } = created
+    const { terminal, fitAddon, serializeAddon, searchAddon, linkProvider } = created
+    linkProviderRef.current = linkProvider
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon

@@ -69,7 +69,11 @@ export interface TaskOpsBus {
  *  today (terminal/server after the pty inversion slice). Absent → pty routes 501. */
 export interface PtyAccess {
   listPtys: () => Promise<PtyInfo[]> | PtyInfo[]
+  /** Registered, including an exited session's ~100ms output-drain window. Only
+   *  for following output; to decide on writing or respawning use `hasLivePty`. */
   hasPty: (sessionId: string) => boolean
+  /** Registered and its process has not exited. */
+  hasLivePty: (sessionId: string) => boolean
   getBuffer: (sessionId: string) => string | null
   writePty: (sessionId: string, data: string) => boolean
   submitPty: (sessionId: string, data: string) => boolean

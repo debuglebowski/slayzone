@@ -99,18 +99,33 @@ export async function ensureBrowserPanelVisible(page: Page): Promise<void> {
   await expect(urlInput(page)).toBeVisible({ timeout: 5000 })
 }
 
-/** Close the browser panel if it's currently visible. */
+/**
+ * Close the browser panel if it's currently visible. Retries Cmd+B like
+ * {@link ensureBrowserPanelVisible} — the same shortcut-activation race swallows
+ * a single press (measured: 2 of 3 runs of 72-browser-view-lifecycle under load).
+ * Each press waits for the panel to actually close before pressing again, so a
+ * late-handled press is never toggled back open.
+ */
 export async function ensureBrowserPanelHidden(page: Page): Promise<void> {
-  if (
-    await urlInput(page)
-      .isVisible()
-      .catch(() => false)
-  ) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (
+      !(await urlInput(page)
+        .isVisible()
+        .catch(() => false))
+    )
+      return
     await focusForAppShortcut(page)
     await page.waitForTimeout(150)
     await page.keyboard.press('Meta+b')
-    await expect(urlInput(page)).not.toBeVisible({ timeout: 5000 })
+    if (
+      await urlInput(page)
+        .waitFor({ state: 'hidden', timeout: 1_000 })
+        .then(() => true)
+        .catch(() => false)
+    )
+      return
   }
+  await expect(urlInput(page)).not.toBeVisible({ timeout: 5000 })
 }
 
 // ── Task navigation ─────────────────────────────────────────────────

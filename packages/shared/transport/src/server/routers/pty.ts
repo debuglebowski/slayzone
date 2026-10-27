@@ -45,6 +45,13 @@ export const ptyRouter = router({
       ops().setCreateCapture(input.enabled)
       return { ok: true }
     }),
+  // Test-only (PLAYWRIGHT): warm-pool state per project ('booting' | 'ready' |
+  // 'reserved'). A `pooled` ledger row exists from spawn, so it cannot tell a
+  // booting agent (not reservable) from a ready one.
+  testWarmStatus: publicProcedure.query(() => {
+    if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+    return ops().warmStatus()
+  }),
   testTakePtyCreateOpts: publicProcedure.query(() => {
     if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
     return ops().takeCreateOpts()

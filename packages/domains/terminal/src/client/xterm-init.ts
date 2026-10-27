@@ -210,12 +210,28 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
     )
   )
 
-  // Test helper — allows e2e tests to trigger link activation without mouse coordinates
-  const w = window as unknown as Record<string, unknown>
-  w.__slayzone_terminalLinks = {
-    ...(w.__slayzone_terminalLinks as object),
-    [sessionId]: linkProvider
-  }
+  registerTestTerminalLinks(sessionId, linkProvider)
 
   return { terminal, fitAddon, serializeAddon, searchAddon, linkProvider }
+}
+
+type TestLinksWindow = { __slayzone_terminalLinks?: Record<string, WebLinkProvider> }
+
+/**
+ * e2e handle (`window.__slayzone_terminalLinks[sid]`) — link activation without
+ * mouse coordinates, and `_terminal` for reading the buffer. Registered on a
+ * fresh create AND on reattaching a cached terminal: registering only on create
+ * left a reattached terminal (e.g. the terminal-first pane handing over to the
+ * task page) with no handle at all.
+ */
+export function registerTestTerminalLinks(sessionId: string, provider: WebLinkProvider): void {
+  const w = window as unknown as TestLinksWindow
+  w.__slayzone_terminalLinks = { ...w.__slayzone_terminalLinks, [sessionId]: provider }
+}
+
+/** Drop the handle only if it is still `provider`'s: an unmount that runs after
+ *  another mount of the same session registered must not delete that one. */
+export function unregisterTestTerminalLinks(sessionId: string, provider: WebLinkProvider | null): void {
+  const links = (window as unknown as TestLinksWindow).__slayzone_terminalLinks
+  if (links && provider && links[sessionId] === provider) delete links[sessionId]
 }

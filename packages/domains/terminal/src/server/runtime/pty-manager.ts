@@ -335,6 +335,10 @@ interface PtySession {
   awaitingUser?: boolean
   // Armed cancellable timer between hibernate-warn and the kill.
   hibernateTimer?: NodeJS.Timeout
+  // Set the instant the process's exit is finalized. The session then lingers
+  // ~100ms for trailing output; `state` cannot mark that window ('dead' goes
+  // through the debounced state machine), so `hasLivePty` reads this.
+  exited?: boolean
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -1944,6 +1948,8 @@ export async function createPty(
     const finalizeSessionExit = (exitCode: number): void => {
       if (finalized) return
       finalized = true
+      const exiting = sessions.get(sessionId)
+      if (exiting && exiting.pty === ptyProcess) exiting.exited = true
       // Drop the pending-spawn provenance row for this (task, mode). A row that
       // isn't pruned here gets swept by the periodic 10-min TTL anyway, but
       // explicit pruning here keeps the table small and avoids stale rows
@@ -3098,8 +3104,19 @@ export function prioritizePty(sessionId: string): void {
   getPtyBackend().prioritize?.(sessionId)
 }
 
+/** Registered — INCLUDING an exited session's ~100ms drain window (state
+ *  'dead'), which follow streams rely on to receive trailing output. Anything
+ *  deciding whether to write, respawn or wait must use {@link hasLivePty}. */
 export function hasPty(sessionId: string): boolean {
   return sessions.has(sessionId)
+}
+
+/** Registered AND its process has not exited. During the post-exit drain window
+ *  a session is still in the map but dead: a write there is lost, and treating
+ *  it as alive skips the respawn that should replace it. */
+export function hasLivePty(sessionId: string): boolean {
+  const session = sessions.get(sessionId)
+  return !!session && !session.exited
 }
 
 /** Find a live session by taskId + mode. Used by the agent-hook REST handler to

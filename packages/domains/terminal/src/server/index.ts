@@ -113,6 +113,7 @@ export {
   type PtyEventMap,
   listPtys,
   hasPty,
+  hasLivePty,
   getBuffer,
   writePty,
   submitPty,

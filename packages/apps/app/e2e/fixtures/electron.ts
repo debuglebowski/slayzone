@@ -956,6 +956,31 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
   ]
 })
 
+/**
+ * Record that `conversationId` took its first turn — the `session_turns` proof
+ * (migration v158) the real agent-hook path writes when the user first prompts.
+ *
+ * A claude-code id stored via `task.update` lands as `slay-spawned-fresh`, which
+ * for a turn-tracked agent is UNPROVEN: Claude writes its transcript only at the
+ * first turn, so the app (correctly) never resumes it — `existingConversationId`
+ * stays null. A spec asserting resume of a seeded claude id must call this to
+ * build the state a real prompted session leaves behind.
+ */
+export function proveConversationTurn(
+  electronApp: ElectronApplication,
+  conversationId: string
+): Promise<void> {
+  return electronApp.evaluate(async ({}, conv) => {
+    const db = (globalThis as Record<string, unknown>).__db as {
+      run: (sql: string, params?: unknown[]) => Promise<unknown>
+    }
+    await db.run(
+      `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
+      [conv, Date.now()]
+    )
+  }, conversationId)
+}
+
 /** Seed helpers — use the vanilla tRPC client to create test data without UI interaction. */
 export function seed(page: Page) {
   return {

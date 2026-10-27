@@ -19,6 +19,8 @@ export interface RankedResult {
   context?: boolean
   /** Position in match order before nesting (0 = best hit). Absent on context rows. */
   rank?: number
+  /** Match quality (0 = exact … see `labelTier`). Absent on context rows. */
+  tier?: number
 }
 
 export interface GroupedResults {
@@ -189,7 +191,7 @@ export function rankResults(
     perPage.set(limit.key, n)
     return n <= limit.max
   })
-  const ranked = capped.map(({ tier: _tier, ...r }, rank) => ({ ...r, rank }))
+  const ranked = capped.map((r, rank) => ({ ...r, rank }))
   return nestUnderCommands(ranked, items, search).slice(0, MAX_RESULTS)
 }
 
@@ -299,8 +301,19 @@ export function resultValue(r: RankedResult): string {
 /**
  * The row selected on open: the best hit of the first group on screen. Groups render in a
  * fixed order, and inside a group a command row can head a better-matching sub-page item.
+ *
+ * One exception: an entity pick (a row of a capped entity page, e.g. "Blocked by → X")
+ * never defaults over a task or project matching at least as well. Its label IS that
+ * entity's title, so typing a title + Enter would otherwise write a relation to the
+ * entity instead of opening it. The pick stays listed; it just isn't the default.
  */
 export function firstResultValue(groups: GroupedResults): string {
+  const entityTiers = [...groups.tasks, ...groups.projects]
+    .filter((r) => !r.context)
+    .map((r) => r.tier ?? Infinity)
+  const bestEntityTier = Math.min(Infinity, ...entityTiers)
+  const yieldsToEntity = (r: RankedResult): boolean =>
+    r.item.kind === 'task-command' && !!r.item.limit && bestEntityTier <= (r.tier ?? Infinity)
   for (const group of [
     groups.taskCommands,
     groups.actions,
@@ -310,7 +323,7 @@ export function firstResultValue(groups: GroupedResults): string {
   ]) {
     let best: RankedResult | undefined
     for (const r of group) {
-      if (r.context) continue
+      if (r.context || yieldsToEntity(r)) continue
       if (!best || (r.rank ?? 0) < (best.rank ?? 0)) best = r
     }
     if (best) return resultValue(best)
