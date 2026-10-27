@@ -5,9 +5,7 @@
   "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
   "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
   "packages/domains/ai-config/src/client/ComputerFilesView.tsx": ["ComputerFilesView"],
-  "packages/domains/ai-config/src/client/ContextFilesPanel.tsx": ["ContextFilesPanel"],
   "packages/domains/ai-config/src/client/InstructionVariantsView.tsx": ["InstructionVariantsView"],
-  "packages/domains/ai-config/src/client/LibraryItemPicker.tsx": ["LibraryItemPicker"],
   "packages/domains/ai-config/src/client/mcp-servers-panel/dialogs/AddComputerMcpDialog.tsx": [
     "AddComputerMcpDialog"
   ],

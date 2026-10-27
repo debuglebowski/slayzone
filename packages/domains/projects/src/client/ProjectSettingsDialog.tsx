@@ -31,7 +31,6 @@ interface ProjectSettingsDialogProps {
     | 'worktrees'
     | 'repos'
     | 'integrations'
-    | 'ai-config'
     | 'tests'
     | 'templates'
   groupBy?: 'none' | 'path' | 'label'
@@ -91,7 +90,6 @@ export function ProjectSettingsDialog({
     | 'repos'
     | 'templates'
     | 'integrations'
-    | 'ai-config'
     | 'tests'
   >('general')
   const trpc = useTRPC()

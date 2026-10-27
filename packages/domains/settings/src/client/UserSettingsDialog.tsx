@@ -6,7 +6,6 @@ import { Dialog, DialogContent, SettingsLayout, useDepsChanged } from '@slayzone
 import { useTerminalModes } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
-import type { ContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings.types'
 
 // Import autonomous tabs
 import { McpSettingsTab } from './tabs/McpSettingsTab'
@@ -40,7 +39,6 @@ interface UserSettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialTab?: string
-  initialAiConfigSection?: ContextManagerSection | null
   onTabChange?: (tab: string) => void
 }
 
@@ -48,7 +46,6 @@ export function UserSettingsDialog({
   open,
   onOpenChange,
   initialTab = 'appearance',
-  initialAiConfigSection: _initialAiConfigSection = null,
   onTabChange
 }: UserSettingsDialogProps) {
   // Modes list is SHARED because multiple tabs (AI Providers, Panels) need it

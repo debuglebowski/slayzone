@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 /**
- * Pins what the ai-config views render around their mount loads, prop-driven form
- * fills and trigger-counter props: the loading → loaded sequence, which tRPC calls
- * go out, and what a dialog shows each time it opens.
+ * Pins what the ai-config views render around their mount loads and prop-driven
+ * form fills: the loading → loaded sequence, which tRPC calls go out, and what a
+ * dialog shows each time it opens.
  */
 
 type Handler = (input: unknown) => Promise<unknown>
@@ -86,20 +86,9 @@ vi.mock('@slayzone/file-editor/client/workspace-target', () => ({
   WorkspaceTargetProvider: ({ children }: Kids) => <>{children}</>
 }))
 
-vi.mock('./LibraryItemPicker', () => ({
-  LibraryItemPicker: () => <div data-testid="library-picker" />
-}))
-vi.mock('./ContextItemEditor', () => ({
-  ContextItemEditor: ({ item }: { item: { id: string } }) => (
-    <div data-testid={`editor-${item.id}`} />
-  )
-}))
-
-const { ProjectSkills } = await import('./ProjectSkills')
 const { AddComputerMcpDialog } = await import('./mcp-servers-panel/dialogs/AddComputerMcpDialog')
 const { AddProjectMcpDialog } = await import('./mcp-servers-panel/dialogs/AddProjectMcpDialog')
 const { ComputerMcpView } = await import('./ComputerMcpView')
-const { ContextFilesPanel } = await import('./ContextFilesPanel')
 const { ProviderSyncSection } = await import('./ProviderSyncSection')
 const { ProjectInstructions } = await import('./ProjectInstructions')
 const { AddItemPicker } = await import('./AddItemPicker')
@@ -136,81 +125,6 @@ beforeEach(() => {
   client = makeClient()
 })
 afterEach(() => cleanup())
-
-describe('ProjectSkills', () => {
-  const props = { projectId: 'p1', projectPath: '/a' }
-
-  it('shows Loading until both lists arrive; reloads on project change', async () => {
-    const status = deferredHandler('aiConfig.getProjectSkillsStatus')
-    handlers['aiConfig.listItems'] = async () => []
-    const { rerender } = render(<ProjectSkills {...props} />)
-    expect(screen.getByText('Loading...')).toBeTruthy()
-    await flush()
-    expect(screen.getByText('Loading...')).toBeTruthy()
-    await act(async () => status[0].resolve([]))
-    await flush()
-    expect(screen.getByText('No skills yet')).toBeTruthy()
-
-    rerender(<ProjectSkills projectId="p2" projectPath="/b" />)
-    expect(screen.getByText('Loading...')).toBeTruthy()
-    await flush()
-    expect(callsTo('aiConfig.getProjectSkillsStatus').map((c) => c.input)).toEqual([
-      { projectId: 'p1', projectPath: '/a' },
-      { projectId: 'p2', projectPath: '/b' }
-    ])
-    await act(async () => status[1].resolve([]))
-    await flush()
-    expect(screen.getByText('No skills yet')).toBeTruthy()
-  })
-
-  it('opens the picker for a positive trigger at mount and on every bump', async () => {
-    handlers['aiConfig.getProjectSkillsStatus'] = async () => []
-    handlers['aiConfig.listItems'] = async () => []
-    const { rerender } = render(<ProjectSkills {...props} openPickerTrigger={0} />)
-    await flush()
-    expect(screen.queryByTestId('library-picker')).toBeNull()
-    rerender(<ProjectSkills {...props} openPickerTrigger={1} />)
-    await flush()
-    expect(screen.getByTestId('library-picker')).toBeTruthy()
-    cleanup()
-
-    render(<ProjectSkills {...props} openPickerTrigger={3} />)
-    await flush()
-    expect(screen.getByTestId('library-picker')).toBeTruthy()
-  })
-
-  it('creates a skill once per create-trigger bump and opens its editor', async () => {
-    handlers['aiConfig.getProjectSkillsStatus'] = async () => []
-    handlers['aiConfig.listItems'] = async () => []
-    let n = 0
-    handlers['aiConfig.createItem'] = async () => ({
-      id: `new-${++n}`,
-      type: 'skill',
-      scope: 'project',
-      project_id: 'p1',
-      name: 'new-skill',
-      slug: 'new-skill',
-      content: '',
-      metadata_json: '{}',
-      created_at: '',
-      updated_at: ''
-    })
-    const onChanged = vi.fn()
-    const { rerender } = render(
-      <ProjectSkills {...props} openCreateTrigger={0} onChanged={onChanged} />
-    )
-    await flush()
-    expect(callsTo('aiConfig.createItem')).toHaveLength(0)
-    rerender(<ProjectSkills {...props} openCreateTrigger={1} onChanged={onChanged} />)
-    await flush()
-    expect(callsTo('aiConfig.createItem')).toHaveLength(1)
-    expect(screen.getByTestId('editor-new-1')).toBeTruthy()
-    expect(onChanged).toHaveBeenCalledTimes(1)
-    rerender(<ProjectSkills {...props} openCreateTrigger={1} onChanged={onChanged} />)
-    await flush()
-    expect(callsTo('aiConfig.createItem')).toHaveLength(1)
-  })
-})
 
 describe('AddComputerMcpDialog / AddProjectMcpDialog', () => {
   const editTarget = {
@@ -280,27 +194,6 @@ describe('ComputerMcpView', () => {
     await act(async () => discover[0].resolve([]))
     await flush()
     expect(screen.getByText('Computer MCP Servers')).toBeTruthy()
-  })
-})
-
-describe('ContextFilesPanel', () => {
-  it('discovers files on mount and again when projectPath changes', async () => {
-    handlers['aiConfig.discoverContextFiles'] = async (input) => [
-      {
-        path: `${(input as { projectPath: string }).projectPath}/CLAUDE.md`,
-        name: 'CLAUDE.md',
-        exists: true
-      }
-    ]
-    const { rerender } = render(<ContextFilesPanel projectPath="/a" />)
-    await flush()
-    expect(screen.getByText('CLAUDE.md')).toBeTruthy()
-    rerender(<ContextFilesPanel projectPath="/b" />)
-    await flush()
-    expect(callsTo('aiConfig.discoverContextFiles').map((c) => c.input)).toEqual([
-      { projectPath: '/a' },
-      { projectPath: '/b' }
-    ])
   })
 })
 

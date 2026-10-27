@@ -137,11 +137,7 @@ import {
   COMMUNITY_DISCORD_URL,
   COMMUNITY_X_URL
 } from './app-shell'
-import type {
-  ProjectSettingsTab,
-  ProjectIntegrationOnboardingProvider,
-  ContextManagerSection
-} from './app-shell'
+import type { ProjectSettingsTab, ProjectIntegrationOnboardingProvider } from './app-shell'
 
 // Expose the stores for e2e tests. Same escape hatch the fork's HomeView uses:
 // these keys are test-only, so they get an index-signature view of `window`
@@ -273,8 +269,6 @@ function App(): React.JSX.Element {
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>(
     settingsReopenTab ?? 'appearance'
   )
-  const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] =
-    useState<ContextManagerSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(onboardingOpen)
   const changelogOpen = useDialogStore((s) => s.changelogOpen)
@@ -844,7 +838,6 @@ function App(): React.JSX.Element {
     agentStatusState,
     setAgentStatusState,
     setSettingsInitialTab,
-    setSettingsInitialAiConfigSection,
     setSettingsOpen,
     projects,
     setProjectSettingsInitialTab,
@@ -1193,7 +1186,6 @@ function App(): React.JSX.Element {
   }
   const handleOpenSettings = (): void => {
     setSettingsInitialTab('appearance')
-    setSettingsInitialAiConfigSection(null)
     setSettingsOpen(true)
   }
 
@@ -1202,7 +1194,6 @@ function App(): React.JSX.Element {
     const handleGlobal = (e: Event) => {
       const tab = (e as CustomEvent<string>).detail || 'appearance'
       setSettingsInitialTab(tab)
-      setSettingsInitialAiConfigSection(null)
       setSettingsOpen(true)
     }
     const handleProject = (e: Event) => {
@@ -1734,8 +1725,6 @@ function App(): React.JSX.Element {
             setSettingsRevision={setSettingsRevision}
             settingsInitialTab={settingsInitialTab}
             setSettingsInitialTab={setSettingsInitialTab}
-            settingsInitialAiConfigSection={settingsInitialAiConfigSection}
-            setSettingsInitialAiConfigSection={setSettingsInitialAiConfigSection}
             searchOpen={searchOpen}
             tasks={tasks}
             projects={projects}

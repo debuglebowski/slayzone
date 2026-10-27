@@ -1,6 +1,6 @@
 # Task Domain
 
-Task CRUD operations, detail view, and AI-powered description generation.
+Task CRUD operations and detail view.
 
 ## Contracts (shared/)
 
@@ -21,15 +21,19 @@ type TaskStatus = 'inbox' | 'backlog' | 'todo' | 'in_progress' | 'review' | 'don
 
 Also exports validation schemas (`createTaskSchema`, `updateTaskSchema`) and form types.
 
-## Main Process (main/)
+## Server (server/)
 
-- `registerTaskHandlers(ipcMain, db)` - Task CRUD, archive, reorder
-- `registerAiHandlers(ipcMain)` - AI description generation
-- `registerFilesHandlers(ipcMain)` - Temp image saving for AI
+- `server/ops/` - Electron-free task ops (CRUD, archive, reorder, blockers, conversation ledger) behind the transport tRPC routers
+
+## Electron (electron/)
+
+- `filesSaveTempImage` / `filesPathExists` - Temp image saving for pasted images, path check
 
 ## Client (client/)
 
 - `TaskDetailPage` - Full task view with terminal
+- `CreateTaskDialog` / `EditTaskDialog` / `DeleteTaskDialog`
+- `TaskMetadataSidebar` - Priority, status, project, tags, blockers
 
 ### Keyboard Shortcuts (TaskDetailPage)
 
@@ -37,9 +41,6 @@ Also exports validation schemas (`createTaskSchema`, `updateTaskSchema`) and for
 |----------|--------|
 | Cmd+I | Inject task title into active terminal |
 | Cmd+Shift+I | Inject task description into active terminal |
-- `CreateTaskDialog` / `EditTaskDialog` / `DeleteTaskDialog`
-- `QuickRunDialog` - Quick task execution
-- `TaskMetadataSidebar` - Priority, status, project, tags, blockers
 
 ## Dependencies
 

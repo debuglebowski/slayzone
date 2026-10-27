@@ -7,11 +7,7 @@ import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
-import type {
-  ProjectSettingsTab,
-  ProjectIntegrationOnboardingProvider,
-  ContextManagerSection
-} from './constants'
+import type { ProjectSettingsTab, ProjectIntegrationOnboardingProvider } from './constants'
 
 export interface AppIpcListenersDeps {
   closeTab: (index: number) => void
@@ -25,7 +21,6 @@ export interface AppIpcListenersDeps {
   agentStatusState: AgentStatusState
   setAgentStatusState: (updates: Partial<AgentStatusState>) => void
   setSettingsInitialTab: Dispatch<SetStateAction<string>>
-  setSettingsInitialAiConfigSection: Dispatch<SetStateAction<ContextManagerSection | null>>
   setSettingsOpen: Dispatch<SetStateAction<boolean>>
   projects: Project[]
   setProjectSettingsInitialTab: Dispatch<SetStateAction<ProjectSettingsTab>>
@@ -52,7 +47,6 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     agentStatusState,
     setAgentStatusState,
     setSettingsInitialTab,
-    setSettingsInitialAiConfigSection,
     setSettingsOpen,
     projects,
     setProjectSettingsInitialTab,
@@ -126,7 +120,6 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     trpc.menu.onOpenSettings.subscriptionOptions(undefined, {
       onData: () => {
         setSettingsInitialTab('appearance')
-        setSettingsInitialAiConfigSection(null)
         setSettingsOpen(true)
       }
     })

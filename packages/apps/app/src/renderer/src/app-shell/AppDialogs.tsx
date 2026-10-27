@@ -36,7 +36,7 @@ import {
   TemplatesSettingsTab,
   TerminalStatusDialog
 } from './lazy'
-import type { ProjectIntegrationOnboardingProvider, ContextManagerSection } from './constants'
+import type { ProjectIntegrationOnboardingProvider } from './constants'
 
 type CreateTaskProps = ComponentProps<typeof CreateTaskDialog>
 type EditTaskProps = ComponentProps<typeof EditTaskDialog>
@@ -86,8 +86,6 @@ interface AppDialogsProps {
   setSettingsRevision: Dispatch<SetStateAction<number>>
   settingsInitialTab: string
   setSettingsInitialTab: Dispatch<SetStateAction<string>>
-  settingsInitialAiConfigSection: ContextManagerSection | null
-  setSettingsInitialAiConfigSection: Dispatch<SetStateAction<ContextManagerSection | null>>
   // Search
   searchOpen: boolean
   tasks: Task[]
@@ -170,8 +168,6 @@ export function AppDialogs({
   setSettingsRevision,
   settingsInitialTab,
   setSettingsInitialTab,
-  settingsInitialAiConfigSection,
-  setSettingsInitialAiConfigSection,
   searchOpen,
   tasks,
   projects,
@@ -304,13 +300,9 @@ export function AppDialogs({
             open={settingsOpen}
             onOpenChange={(open) => {
               setSettingsOpen(open)
-              if (!open) {
-                setSettingsRevision((r) => r + 1)
-                setSettingsInitialAiConfigSection(null)
-              }
+              if (!open) setSettingsRevision((r) => r + 1)
             }}
             initialTab={settingsInitialTab}
-            initialAiConfigSection={settingsInitialAiConfigSection}
             onTabChange={setSettingsInitialTab}
           />
         </Suspense>

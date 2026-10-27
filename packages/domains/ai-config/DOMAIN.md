@@ -21,4 +21,3 @@ Centralized management for AI configuration:
 
 - `ContextManagerPage` / `ContextManagerShell` - Full-page Context Manager
 - `ContextItemEditor` - Inline editor for skills/commands
-- `ContextFilesPanel` - Context file discovery and editing

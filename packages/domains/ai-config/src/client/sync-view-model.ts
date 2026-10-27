@@ -54,10 +54,6 @@ export function groupProvidersByPath(
   return groupsInOrder
 }
 
-export function contextEntryToSyncHealth(entry: { syncHealth: SyncHealth }): SyncHealth {
-  return entry.syncHealth
-}
-
 export function aggregateProviderSyncHealth(
   providers: Partial<Record<CliProvider, ProviderSyncEntry>>
 ): SyncHealth {

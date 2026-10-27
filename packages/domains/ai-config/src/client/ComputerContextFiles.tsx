@@ -14,10 +14,10 @@ import type { CliProvider, ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
 
 interface ComputerContextFilesProps {
-  filter?: 'instructions' | 'skill'
+  filter: 'instructions' | 'skill'
 }
 
-export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {}) {
+export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
   const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ComputerFileEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -202,12 +202,9 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
           ) : (
             // Grouped-by-provider layout for skills
             providerSections.map(({ provider, spec }) => {
-              const files = entries
-                .filter((entry) => entry.provider === provider)
-                .filter((entry) => !filter || entry.category === filter)
+              const skills = entries
+                .filter((entry) => entry.provider === provider && entry.category === 'skill')
                 .sort((a, b) => a.name.localeCompare(b.name))
-              const instructions = files.filter((f) => f.category === 'instructions')
-              const skills = files.filter((f) => f.category === 'skill')
 
               return (
                 <div key={provider} data-testid={`computer-files-provider-${provider}`}>
@@ -215,14 +212,6 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
                     {spec.label}
                   </p>
                   <div className="space-y-0.5">
-                    {instructions.map((entry) => (
-                      <FileRow
-                        key={entry.path}
-                        entry={entry}
-                        selected={selectedPath === entry.path}
-                        onClick={() => openFile(entry)}
-                      />
-                    ))}
                     {skills.length > 0 && (
                       <div className="mt-1">
                         <p className="px-1 py-0.5 text-[10px] text-muted-foreground">Skills</p>
@@ -233,12 +222,11 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
                             selected={selectedPath === entry.path}
                             onClick={() => openFile(entry)}
                             onDelete={() => deleteFile(entry)}
-                            indent
                           />
                         ))}
                       </div>
                     )}
-                    {instructions.length === 0 && skills.length === 0 && (
+                    {skills.length === 0 && (
                       <p className="px-1 py-0.5 text-[10px] text-muted-foreground">No files yet</p>
                     )}
                     {/* Add button for providers with skills dir */}
@@ -265,10 +253,6 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
                 </div>
               )
             })
-          )}
-
-          {!filter && entries.length === 0 && !loading && (
-            <p className="text-sm text-muted-foreground">No computer config files found.</p>
           )}
         </div>
 
@@ -394,25 +378,20 @@ function FileRow({
   entry,
   selected,
   onClick,
-  onDelete,
-  indent,
-  providerLabel
+  onDelete
 }: {
   entry: ComputerFileEntry
   selected: boolean
   onClick: () => void
-  onDelete?: () => void
-  indent?: boolean
-  providerLabel?: string
+  onDelete: () => void
 }) {
   const fileName = entry.name.split('/').pop() ?? entry.name
   return (
     <div
       className={cn(
-        'group flex flex-col gap-0.5 rounded px-1 py-1.5 text-xs',
+        'group flex flex-col gap-0.5 rounded px-1 py-1.5 pl-3 text-xs',
         selected ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/50',
-        !entry.exists && 'text-muted-foreground',
-        indent && 'pl-3'
+        !entry.exists && 'text-muted-foreground'
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -424,26 +403,17 @@ function FileRow({
           )}
           <span className="min-w-0 truncate font-mono">{fileName}</span>
         </button>
-        {onDelete && (
-          <button
-            className="hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:block"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete()
-            }}
-            title="Delete"
-          >
-            <Trash2 className="size-3" />
-          </button>
-        )}
+        <button
+          className="hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:block"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          title="Delete"
+        >
+          <Trash2 className="size-3" />
+        </button>
       </div>
-      {providerLabel && (
-        <div className="flex gap-1 pl-5">
-          <span className="rounded-full bg-muted px-1.5 py-0 text-[10px] text-muted-foreground">
-            {providerLabel}
-          </span>
-        </div>
-      )}
     </div>
   )
 }
