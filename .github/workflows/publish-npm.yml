@@ -58,13 +58,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0 # publish-npm.sh builds from a clean-HEAD worktree
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.0.0
         with:
           # node 24: the hub bundle uses the node:sqlite builtin. Absent on node
           # 20 (smoke crashes ERR_UNKNOWN_BUILTIN_MODULE); flag-gated on 22.

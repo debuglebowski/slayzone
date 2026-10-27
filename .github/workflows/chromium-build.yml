@@ -64,7 +64,7 @@ jobs:
             artifact: chrome
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
       - name: Resolve Chromium version
         id: version
@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: scripts/chromium/smoke-hello.sh out/Default
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: chromium-${{ matrix.os }}-${{ matrix.arch }}
