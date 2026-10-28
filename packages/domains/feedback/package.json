@@ -24,8 +24,10 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "convex": "^1.46.0",
-    "lucide-react": "^1.48.0"
+    "lucide-react": "^1.48.0",
+    "zod": "^4.3.5"
   }
 }
