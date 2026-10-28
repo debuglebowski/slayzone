@@ -349,7 +349,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for
       // this session become no-ops (matches the old `cancelled = true`).
-      genRef.current++
+      genRef.current = gen + 1
     }
   }, [
     opts.tabId,

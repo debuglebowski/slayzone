@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useInsertionEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -42,9 +42,6 @@ export function DeviceWebview({
   const enableEmulation = useMutation(
     trpc.app.webview.enableDeviceEmulation.mutationOptions()
   ).mutateAsync
-  const disableEmulation = useMutation(
-    trpc.app.webview.disableDeviceEmulation.mutationOptions()
-  ).mutate
   const webviewRef = useRef<WebviewElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webviewReady, setWebviewReady] = useState(false)
@@ -168,24 +165,8 @@ export function DeviceWebview({
     }
   }, [forceReloadTrigger, webviewReady])
 
-  // Disable emulation on unmount
-  const disableEmulationRef = useRef(disableEmulation)
-  useInsertionEffect(() => {
-    disableEmulationRef.current = disableEmulation
-  })
-  useEffect(() => {
-    return () => {
-      const wv = webviewRef.current
-      if (wv) {
-        try {
-          const wcId = wv.getWebContentsId()
-          disableEmulationRef.current({ webviewId: wcId })
-        } catch {
-          /* webview may be destroyed */
-        }
-      }
-    }
-  }, [])
+  // No disable on unmount: removing the <webview> destroys its guest page, and
+  // the emulation with it.
 
   const scaledWidth = preset.width * widthScale
   const scaledHeight = preset.height * widthScale

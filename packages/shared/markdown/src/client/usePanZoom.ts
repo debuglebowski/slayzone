@@ -167,6 +167,8 @@ export function usePanZoom(opts: PanZoomOptions = {}): UsePanZoomReturn {
     const host = hostRef.current
     const content = contentRef.current
     if (!host || !content) return
+    // One Map for the hook's life (never reassigned), so handlers + cleanup share it.
+    const pointers = pointersRef.current
 
     content.style.transformOrigin = '0 0'
     content.style.willChange = 'transform'
@@ -181,28 +183,28 @@ export function usePanZoom(opts: PanZoomOptions = {}): UsePanZoomReturn {
 
     const onPointerDown = (e: PointerEvent) => {
       const pos = hostLocal(e.clientX, e.clientY)
-      pointersRef.current.set(e.pointerId, pos)
+      pointers.set(e.pointerId, pos)
       try {
         content.setPointerCapture(e.pointerId)
       } catch {
         // ignore
       }
-      if (pointersRef.current.size === 2) {
-        const [a, b] = Array.from(pointersRef.current.values())
+      if (pointers.size === 2) {
+        const [a, b] = Array.from(pointers.values())
         const startDist = Math.hypot(a.x - b.x, a.y - b.y) || 1
         pinchRef.current = { startDist, lastFactor: 1 }
       }
     }
 
     const onPointerMove = (e: PointerEvent) => {
-      const prev = pointersRef.current.get(e.pointerId)
+      const prev = pointers.get(e.pointerId)
       if (!prev) return
       const next = hostLocal(e.clientX, e.clientY)
-      pointersRef.current.set(e.pointerId, next)
+      pointers.set(e.pointerId, next)
       userInteractedRef.current = true
 
-      if (pointersRef.current.size === 2 && pinchRef.current) {
-        const [a, b] = Array.from(pointersRef.current.values())
+      if (pointers.size === 2 && pinchRef.current) {
+        const [a, b] = Array.from(pointers.values())
         const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
         const factor = dist / pinchRef.current.startDist
         const step = factor / pinchRef.current.lastFactor
@@ -213,20 +215,20 @@ export function usePanZoom(opts: PanZoomOptions = {}): UsePanZoomReturn {
         return
       }
 
-      if (pointersRef.current.size === 1) {
+      if (pointers.size === 1) {
         const t = transformRef.current
         apply({ x: t.x + (next.x - prev.x), y: t.y + (next.y - prev.y), scale: t.scale })
       }
     }
 
     const releasePointer = (e: PointerEvent) => {
-      pointersRef.current.delete(e.pointerId)
+      pointers.delete(e.pointerId)
       try {
         content.releasePointerCapture(e.pointerId)
       } catch {
         // ignore
       }
-      if (pointersRef.current.size < 2) pinchRef.current = null
+      if (pointers.size < 2) pinchRef.current = null
     }
 
     const onWheel = (e: WheelEvent) => {
@@ -277,7 +279,7 @@ export function usePanZoom(opts: PanZoomOptions = {}): UsePanZoomReturn {
       ro?.disconnect()
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
-      pointersRef.current.clear()
+      pointers.clear()
       pinchRef.current = null
     }
   }, [
