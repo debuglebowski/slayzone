@@ -12,7 +12,8 @@
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
-    "./project-settings-tabs": "./src/client/project-settings-tabs.ts"
+    "./project-settings-tabs": "./src/client/project-settings-tabs.ts",
+    "./task-panels": "./src/client/task-panels.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

@@ -12,7 +12,6 @@ import { TagsCard } from './TagsCard'
 import { BlockedBySection } from './BlockedBySection'
 
 export { BlockerStatusIcon } from './BlockerStatusIcon'
-export { ExternalSyncCard, LinearCard } from './ExternalSyncCard'
 
 interface TaskMetadataSidebarProps {
   task: Task

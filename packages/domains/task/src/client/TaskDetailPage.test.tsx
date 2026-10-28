@@ -170,8 +170,7 @@ vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('./DescriptionDialog', () => ({ DescriptionDialog: () => null }))
 vi.mock('./DeleteTaskDialog', () => ({ DeleteTaskDialog: () => null }))
 vi.mock('./TaskMetadataSidebar', () => ({
-  TaskMetadataSidebar: () => null,
-  ExternalSyncCard: () => null
+  TaskMetadataSidebar: () => null
 }))
 vi.mock('./WebPanelView', () => ({ WebPanelView: () => null }))
 vi.mock('./ResizeHandle', () => ({ ResizeHandle: () => null }))
@@ -298,7 +297,8 @@ import { TaskDetailPage } from './TaskDetailPage'
 import { registerTaskPanels } from './task-detail/TaskPanels'
 import { detectPlatform } from '@slayzone/ui'
 
-// The app injects the artifacts + git panels and their data hooks; stub them.
+// The app injects the artifacts + git panels, their data hooks and the external
+// sync card; stub them.
 // Stable singleton returns so their values don't churn dep arrays.
 const NO_ARTIFACTS = { artifacts: [] }
 const NO_REPOS = { repos: [] }
@@ -308,7 +308,8 @@ registerTaskPanels({
   UnifiedGitPanel: React.forwardRef(() => null),
   useArtifacts: () => NO_ARTIFACTS,
   useProjectRepos: () => NO_REPOS,
-  useDetectedRepos: () => NO_DETECTED_REPOS
+  useDetectedRepos: () => NO_DETECTED_REPOS,
+  ExternalSyncCard: () => null
 })
 
 // --- Test helpers ---

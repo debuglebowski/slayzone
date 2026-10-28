@@ -102,7 +102,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { safeRandomUUID, safeClipboardWriteText } from '@slayzone/ui'
-import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
+import { TaskMetadataSidebar } from './TaskMetadataSidebar'
 import { TaskStatusMenu } from './TaskStatusMenu'
 import {
   normalizeDescription,
@@ -280,8 +280,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  // Artifacts + git panels, injected by the composing app (registerTaskPanels).
-  const { ArtifactsPanel, UnifiedGitPanel } = getTaskPanels()
+  // Artifacts + git panels + external sync card, injected by the composing app
+  // (registerTaskPanels).
+  const { ArtifactsPanel, UnifiedGitPanel, ExternalSyncCard } = getTaskPanels()
   // mutateAsync is stable; the mutation result object is not (new each render).
   const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 

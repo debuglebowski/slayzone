@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { ArrowDownToLineIcon, ArrowUpToLineIcon, Loader2 } from 'lucide-react'
 import type { Task } from '@slayzone/task-contracts'
 import { Button } from '@slayzone/ui'
@@ -7,13 +7,9 @@ import { cn } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 
-// Integration types derived from the tRPC API this card consumes, so the task
-// package needs no direct dependency on the integrations package.
-type IntegrationsClient = ReturnType<typeof useTRPCClient>['integrations']
-type ExternalLink = NonNullable<Awaited<ReturnType<IntegrationsClient['getLink']['query']>>>
-type TaskSyncStatus = Awaited<ReturnType<IntegrationsClient['getTaskSyncStatus']['query']>>
+import type { ExternalLink, TaskSyncStatus } from '../shared'
 
-interface ExternalSyncCardProps {
+export interface ExternalSyncCardProps {
   taskId: string
   onUpdate: (task: Task) => void
 }

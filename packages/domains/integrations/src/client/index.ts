@@ -4,3 +4,5 @@ export { ProjectIntegrationConnectionModal } from './ProjectIntegrationConnectio
 export { PROVIDER_CONFIG, providerDisplayName, type ProviderUiConfig } from './provider-config'
 export { fetchStatusSyncLock, useStatusSyncLockLookup } from './useStatusSyncLockLookup'
 export { integrationsProjectSettingsTabs } from './project-settings-tabs'
+export { ExternalSyncCard, LinearCard, type ExternalSyncCardProps } from './ExternalSyncCard'
+export { integrationsTaskPanels } from './task-panels'

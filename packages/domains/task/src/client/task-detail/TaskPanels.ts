@@ -4,10 +4,11 @@ import type { GitTabId, Task, TaskArtifact, UpdateTaskInput } from '@slayzone/ta
 
 /**
  * Panels and data hooks the task page embeds from features built ON TOP of task
- * (artifacts, git). Task owns this contract; the composing app injects the real
- * implementations once via registerTaskPanels() — so task never imports those
- * features (they import task). Each feature ships its half of the binding
- * (`@slayzone/task-artifacts/task-panels`, `@slayzone/worktrees/task-panels`).
+ * (artifacts, git, integrations). Task owns this contract; the composing app injects
+ * the real implementations once via registerTaskPanels() — so task never imports
+ * those features (they import task). Each feature ships its half of the binding
+ * (`@slayzone/task-artifacts/task-panels`, `@slayzone/worktrees/task-panels`,
+ * `@slayzone/integrations/task-panels`).
  *
  * Types are the minimal, structurally compatible surface the page uses.
  */
@@ -49,6 +50,11 @@ export interface UnifiedGitPanelProps {
   onRepoChange?: (repoName: string) => void
 }
 
+export interface ExternalSyncCardProps {
+  taskId: string
+  onUpdate: (task: Task) => void
+}
+
 export interface TaskPanels {
   /** Lazy component — keep it code-split on the app side. */
   ArtifactsPanel: ComponentType<ArtifactsPanelProps & RefAttributes<ArtifactsPanelHandle>>
@@ -65,6 +71,8 @@ export interface TaskPanels {
    * (`projectId` routes the scan there). Empty while `projectPath` is null.
    */
   useDetectedRepos: (projectPath: string | null, projectId?: string) => DetectedRepo[]
+  /** External sync links (Linear/GitHub/Jira) pinned above the settings cards. */
+  ExternalSyncCard: ComponentType<ExternalSyncCardProps>
 }
 
 let registered: TaskPanels | null = null

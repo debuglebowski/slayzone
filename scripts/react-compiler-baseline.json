@@ -18,6 +18,7 @@
   "packages/domains/ai-config/src/client/useSkillMarketplace.ts": ["useSkillMarketplace"],
   "packages/domains/automations/src/client/AutomationCard.tsx": ["AutomationCard"],
   "packages/domains/feedback/src/client/FeedbackDialog.tsx": ["FeedbackDialog"],
+  "packages/domains/integrations/src/client/ExternalSyncCard.tsx": ["ExternalSyncCard"],
   "packages/domains/integrations/src/client/ProjectIntegrationConnectionModal.tsx": [
     "ProjectIntegrationConnectionModal"
   ],
@@ -61,7 +62,6 @@
     "SessionsSidebar"
   ],
   "packages/domains/task/src/client/CreateTaskDialog.tsx": ["CreateTaskDialog"],
-  "packages/domains/task/src/client/ExternalSyncCard.tsx": ["ExternalSyncCard"],
   "packages/domains/task/src/client/ProcessDialog.tsx": ["ProcessDialog"],
   "packages/domains/task/src/client/task-detail/useTaskDoctor.ts": ["useTaskDoctor"],
   "packages/domains/task/src/client/TaskHistoryPanel.tsx": ["TaskHistoryPanel"],
