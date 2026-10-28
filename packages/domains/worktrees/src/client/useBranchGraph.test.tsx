@@ -400,7 +400,7 @@ describe('useBranchGraph', () => {
         const [path, setPath] = useState('/repo')
         useLayoutEffect(() => {
           switchPath = setPath
-        })
+        }, [])
         return (
           <>
             <Probe path={path} visible />
