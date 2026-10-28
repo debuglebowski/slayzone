@@ -69,7 +69,8 @@ export function DeviceWebview({
     return () => ro.disconnect()
   }, [])
 
-  // Webview dom-ready
+  // Webview dom-ready. The webview mounts once the container is measured.
+  const hasContainer = containerSize !== null
   useEffect(() => {
     const wv = webviewRef.current
     if (!wv) return
@@ -91,7 +92,7 @@ export function DeviceWebview({
       wv.removeEventListener('did-fail-load', handleFailLoad)
       wv.removeEventListener('crashed', handleCrashed)
     }
-  }, [containerSize !== null])
+  }, [hasContainer])
 
   const widthScale = containerSize ? Math.min(1, containerSize.width / preset.width) : 1
 

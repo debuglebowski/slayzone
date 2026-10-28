@@ -1,5 +1,6 @@
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import type { RefObject } from 'react'
+import { depsChanged } from '@slayzone/ui'
 import { waterLevel } from './card-water-fill'
 
 /**
@@ -38,7 +39,12 @@ export function useSharedCardHeights(
   deps: unknown[],
   minPx = 144
 ): void {
-  // Caller-supplied deps: re-measure when the caller's layout inputs change.
+  // Caller-supplied deps: re-measure when the caller's layout inputs change. The
+  // list is rebuilt every render, so keep the last one and swap it only when an
+  // element changes — its identity is then the effect's trigger.
+  const [layoutDeps, setLayoutDeps] = useState(deps)
+  if (depsChanged(layoutDeps, deps)) setLayoutDeps(deps)
+
   useLayoutEffect(() => {
     const grid = gridRef.current
     if (!grid) return
@@ -129,5 +135,5 @@ export function useSharedCardHeights(
       ro.disconnect()
       mo.disconnect()
     }
-  }, deps)
+  }, [gridRef, minPx, layoutDeps])
 }
