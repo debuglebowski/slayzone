@@ -26,6 +26,7 @@
     "@slayzone/history": "workspace:*",
     "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/integrations": "workspace:*",
+    "@slayzone/notify": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",

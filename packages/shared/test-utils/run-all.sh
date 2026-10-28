@@ -935,7 +935,7 @@ run_vitest_files "vitest (swept-in suites)" \
 # per-task query refresh that defers hidden tabs until they are revealed, the one
 # shared panel config, and the first-paint theme cache.
 run_vitest_files "vitest (tasks-changed refresh)" \
-  packages/apps/api/src/notify-coalescer.test.ts \
+  packages/shared/notify/src/server/notify-coalescer.test.ts \
   packages/domains/tasks/src/client/board-patch.test.ts \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \

@@ -1,8 +1,8 @@
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import type { TasksChange, TasksChangedEvent } from '@slayzone/task-contracts'
-import { getNotifyEvents, type SettingsChange } from '../app-deps'
-import { createNotifyCoalescer } from '../notify-coalescer'
+import { getNotifyEvents, type SettingsChange } from './notify-events'
+import { createNotifyCoalescer } from './notify-coalescer'
 
 /**
  * Cross-domain refresh signals. Mirrors (and in slice 5 replaces) the
@@ -60,3 +60,7 @@ export const notifyRouter = router({
     })
   )
 })
+
+export type NotifyRouter = typeof notifyRouter
+/** Where `@slayzone/api` mounts it: `notify`. */
+export type NotifyMounts = { notify: NotifyRouter }

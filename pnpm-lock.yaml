@@ -272,6 +272,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
+      '@slayzone/notify':
+        specifier: workspace:*
+        version: link:../../shared/notify
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -3020,6 +3023,24 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+
+  packages/shared/notify:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../settings-core
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
 
   packages/shared/platform:
     devDependencies:

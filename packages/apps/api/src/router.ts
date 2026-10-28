@@ -62,7 +62,7 @@ import {
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'
-import { notifyRouter } from './routers/notify'
+import { notifyRouter, type NotifyMounts } from '@slayzone/notify/server'
 import {
   projectsRouter,
   projectGroupsRouter,
@@ -169,6 +169,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<IntegrationsMounts>>,
   AssertAppSlice<IsAppSlice<MenuMounts>>,
+  AssertAppSlice<IsAppSlice<NotifyMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<ProjectsMounts>>,
