@@ -16,6 +16,9 @@ import {
 // re-runs them.
 //  - A merge with conflicts switches the panel to Conflicts once. Re-showing the task
 //    tab must not take the user's own tab back (it did: the switch was an effect).
+//  - A saved PR tab is hidden only until the GitHub remote is known. It must be shown
+//    once it is, and the tab shown meanwhile must not be saved over it (it was, and
+//    the panel then stayed on that tab).
 
 const panels = (git: boolean) => ({
   terminal: true,
@@ -107,5 +110,42 @@ test.describe('Conflicts auto-switch across a task-tab switch', () => {
     await expect(panel.getByTestId('git-diff-panel')).toBeVisible()
     await expect(panel.getByText('Complete Merge')).toBeHidden()
     expect(await savedGitTab(mainWindow, taskA)).toBe('changes')
+  })
+})
+
+test.describe('Saved PR tab while the GitHub remote loads', () => {
+  const PR_URL = 'https://github.com/slayzone-e2e/tab-restore/pull/1'
+  let taskId = ''
+
+  test.beforeAll(async ({ mainWindow }) => {
+    // Also reloads the renderer: nothing about this repo is cached when the panel opens.
+    await resetApp(mainWindow)
+    const repo = freshRepo('tab-selection-pr')
+    git(repo, 'remote add origin https://github.com/slayzone-e2e/tab-restore.git')
+
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Tab PR', color: '#8b5cf6', path: repo })
+    taskId = (await s.createTask({ projectId: p.id, title: 'TS pr task', status: 'todo' })).id
+    await s.updateTask({
+      id: taskId,
+      prUrl: PR_URL,
+      gitActiveTab: 'pr',
+      panelVisibility: panels(true)
+    })
+    await s.refreshData()
+  })
+
+  test('opens on the saved PR tab once the remote is known, and keeps it saved', async ({
+    mainWindow
+  }) => {
+    await openTaskById(mainWindow, taskId)
+    const panel = gitPanel(mainWindow)
+    await expect(panel).toBeVisible({ timeout: 10_000 })
+    // The PR tab's own content, in either state gh leaves it: the linked PR's URL
+    // (gh found, PR not loadable) or the missing-gh notice.
+    await expect(
+      panel.getByText(PR_URL).or(panel.getByText('GitHub CLI not found')).first()
+    ).toBeVisible({ timeout: 15_000 })
+    expect(await savedGitTab(mainWindow, taskId)).toBe('pr')
   })
 })

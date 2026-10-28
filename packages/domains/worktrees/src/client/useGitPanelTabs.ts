@@ -36,27 +36,21 @@ export function useGitPanelTabs(
   }
 ) {
   const trpc = useTRPC()
-  const [activeTab, setActiveTabRaw] = useState<GitTabId>(defaultTab)
+  // The tab chosen (a click, switchToTab, a merge starting) and saved through
+  // onTabChange. It can be hidden right now: the panel then shows `activeTab` below.
+  const [selectedTab, setSelectedTab] = useState<GitTabId>(defaultTab)
   // The tab the parent last heard of through onTabChange — at first the one it gave
   // us. Written only by the handler below and the merge-switch effect.
   const notifiedTabRef = useRef(defaultTab)
   const setActiveTab = useCallback(
     (tab: GitTabId) => {
-      setActiveTabRaw(tab)
+      setSelectedTab(tab)
       notifiedTabRef.current = tab
       onTabChange?.(tab)
     },
     [onTabChange]
   )
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      switchToTab: setActiveTab,
-      getActiveTab: () => activeTab
-    }),
-    [activeTab, setActiveTab]
-  )
   const hasConflicts =
     !!task && (task.merge_state === 'conflicts' || task.merge_state === 'rebase-conflicts')
   const isUncommitted = !!task && task.merge_state === 'uncommitted'
@@ -87,7 +81,7 @@ export function useGitPanelTabs(
       ? String(branchPr.number)
       : null
 
-  // Single predicate used by both render + auto-switch fallback.
+  // Single predicate used by the tab bar and the fallback below.
   // Conflicts tab bypasses the user toggle — always shown when merge/rebase conflicts are live.
   const isTabVisible = useCallback(
     (id: GitTabId): boolean => {
@@ -120,23 +114,34 @@ export function useGitPanelTabs(
   // task tab (<Activity> re-runs effects, not this) does not switch back.
   const mergeTab: GitTabId | null = hasConflicts ? 'conflicts' : isUncommitted ? 'changes' : null
   const mergeStateChanged = useDepsChanged([hasConflicts, isUncommitted], true)
-  if (mergeStateChanged && mergeTab !== null && activeTab !== mergeTab) setActiveTabRaw(mergeTab)
+  if (mergeStateChanged && mergeTab !== null && selectedTab !== mergeTab) setSelectedTab(mergeTab)
 
   // Tell the parent (which saves it) about that switch, once: a re-run of this effect
   // (a re-show, a new onTabChange) finds nothing it has not already heard.
   useEffect(() => {
-    if (notifiedTabRef.current === activeTab) return
-    notifiedTabRef.current = activeTab
-    onTabChange?.(activeTab)
-  }, [activeTab, onTabChange])
+    if (notifiedTabRef.current === selectedTab) return
+    notifiedTabRef.current = selectedTab
+    onTabChange?.(selectedTab)
+  }, [selectedTab, onTabChange])
 
-  // Reset active tab if it becomes hidden (runtime gate, user toggle, or stale 'branches').
-  useEffect(() => {
-    if ((activeTab as string) === 'branches' || !isTabVisible(activeTab)) {
-      const fallback = tabOrder.find(isTabVisible) ?? 'general'
-      setActiveTab(fallback)
-    }
-  }, [activeTab, isTabVisible, tabOrder])
+  // The tab on screen: the selected one while the tab bar shows it, else the first tab
+  // the bar shows. Display only, never selected or saved: a selection hidden for a
+  // while (the PR tab until the GitHub remote or the branch's PR loads, a tab disabled
+  // in settings, Conflicts after the merge) is shown again once its tab is; a retired
+  // id (a saved 'branches') is not in the order, so it never is.
+  const activeTab: GitTabId =
+    tabOrder.includes(selectedTab) && isTabVisible(selectedTab)
+      ? selectedTab
+      : (tabOrder.find(isTabVisible) ?? 'general')
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      switchToTab: setActiveTab,
+      getActiveTab: () => activeTab
+    }),
+    [activeTab, setActiveTab]
+  )
 
   return {
     activeTab,

@@ -236,3 +236,124 @@ describe('saved tab', () => {
     expect(p.saves).toEqual(['stash', 'changes'])
   })
 })
+
+describe('hidden tab fallback', () => {
+  const PR_URL = 'https://github.com/o/r/pull/7'
+  /** The persisted git tab settings (null = never set). */
+  const tabSettings = (
+    order: GitTabId[] | null,
+    visibility: Partial<Record<GitTabId, boolean>> | null
+  ) => {
+    answers['settings.get'] = ({ key }) => {
+      const value = key === 'git_tab_order' ? order : visibility
+      return value ? JSON.stringify(value) : null
+    }
+  }
+
+  it('shows the first visible tab when the saved one is disabled in settings', async () => {
+    tabSettings(['stash', 'general', 'changes', 'worktrees', 'conflicts', 'pr'], { changes: false })
+    const p = mount({ task: makeTask(), defaultTab: 'changes' })
+    await p.settled()
+    expect(latest.activeTab).toBe('stash')
+    expect(p.panelRef.current?.getActiveTab()).toBe('stash')
+  })
+
+  it('a tab disabled while shown gives way to the first visible tab', async () => {
+    const p = mount({ task: makeTask(), defaultTab: 'changes' })
+    await p.settled()
+    expect(latest.activeTab).toBe('changes')
+    tabSettings(null, { changes: false })
+    act(() => {
+      window.dispatchEvent(new Event('sz:settings-changed'))
+    })
+    await waitFor(() => expect(latest.activeTab).toBe('general'))
+    expect(p.panelRef.current?.getActiveTab()).toBe('general')
+  })
+
+  it("a stale 'branches' tab shows the first visible tab", async () => {
+    const p = mount({ task: makeTask(), defaultTab: 'branches' as GitTabId })
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+    expect(p.panelRef.current?.getActiveTab()).toBe('general')
+  })
+
+  it('the Conflicts tab gives way to the first visible tab when the conflicts end', async () => {
+    const p = mount({ task: makeTask({ merge_state: 'conflicts' }) })
+    await p.settled()
+    p.update({ task: makeTask() })
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+  })
+
+  it('Home (no task) opens on its saved Worktrees tab', async () => {
+    const p = mount({ task: null, defaultTab: 'worktrees' })
+    await p.settled()
+    expect(latest.activeTab).toBe('worktrees')
+  })
+
+  it('Home (no task) without a GitHub remote shows the first visible tab for a saved PR tab', async () => {
+    const p = mount({ task: null, defaultTab: 'pr' })
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+  })
+
+  it('never saves the tab it falls back to', async () => {
+    tabSettings(null, { changes: false })
+    const p = mount({ task: makeTask(), defaultTab: 'changes' })
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+    expect(p.saves).toEqual([])
+  })
+
+  // Bug: the fallback was written into the state (and saved) while the PR tab was
+  // only hidden because its GitHub info was still loading — and then stuck.
+  it('a saved PR tab is shown once the GitHub remote loads, without saving the fallback', async () => {
+    const remote = deferred<boolean>()
+    answers['worktrees.hasGithubRemote'] = () => remote.promise
+    const p = mount({ task: makeTask({ pr_url: PR_URL }), defaultTab: 'pr' })
+    await act(async () => {})
+    expect(latest.activeTab).toBe('general')
+    await act(async () => remote.resolve(true))
+    await p.settled()
+    expect(latest.activeTab).toBe('pr')
+    expect(p.panelRef.current?.getActiveTab()).toBe('pr')
+    expect(p.saves).toEqual([])
+  })
+
+  it("a saved PR tab is shown once the branch's PR loads, without saving the fallback", async () => {
+    answers['worktrees.hasGithubRemote'] = () => true
+    const branchPr = deferred<{ number: number } | null>()
+    answers['worktrees.getPrForCheckout'] = () => branchPr.promise
+    const p = mount({ task: makeTask(), defaultTab: 'pr' })
+    await waitFor(() => expect(latest.hasGithubRemote).toBe(true))
+    expect(latest.activeTab).toBe('general')
+    await act(async () => branchPr.resolve({ number: 7 }))
+    await p.settled()
+    expect(latest.activeTab).toBe('pr')
+    expect(p.saves).toEqual([])
+  })
+
+  it('Home (no task): a saved PR tab is shown once the GitHub remote loads, without saving the fallback', async () => {
+    const remote = deferred<boolean>()
+    answers['worktrees.hasGithubRemote'] = () => remote.promise
+    const p = mount({ task: null, defaultTab: 'pr' })
+    await act(async () => {})
+    expect(latest.activeTab).toBe('general')
+    await act(async () => remote.resolve(true))
+    await p.settled()
+    expect(latest.activeTab).toBe('pr')
+    expect(p.saves).toEqual([])
+  })
+
+  it('picking the shown fallback tab saves it once and keeps it when the saved tab reappears', async () => {
+    const remote = deferred<boolean>()
+    answers['worktrees.hasGithubRemote'] = () => remote.promise
+    const p = mount({ task: makeTask({ pr_url: PR_URL }), defaultTab: 'pr' })
+    await act(async () => {})
+    select('general')
+    await act(async () => remote.resolve(true))
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+    expect(p.saves).toEqual(['general'])
+  })
+})
