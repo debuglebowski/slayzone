@@ -17,6 +17,7 @@ export {
   getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
+  useTaskDetectedRepos,
   type TaskPanels,
   type ArtifactsPanelHandle,
   type ArtifactsPanelProps,

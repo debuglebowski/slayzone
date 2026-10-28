@@ -60,6 +60,11 @@ export interface TaskPanels {
     taskBoundPath: string | null,
     projectId?: string
   ) => { repos: readonly DetectedRepo[] }
+  /**
+   * Child repos of a project directory, discovered on the machine that owns it
+   * (`projectId` routes the scan there). Empty while `projectPath` is null.
+   */
+  useDetectedRepos: (projectPath: string | null, projectId?: string) => DetectedRepo[]
 }
 
 let registered: TaskPanels | null = null
@@ -96,4 +101,12 @@ export function useTaskProjectRepos(
   projectId?: string
 ): { repos: readonly DetectedRepo[] } {
   return getTaskPanels().useProjectRepos(projectPath, taskBoundPath, projectId)
+}
+
+/** The injected `useDetectedRepos` (fixed for the app's lifetime — see registerTaskPanels). */
+export function useTaskDetectedRepos(
+  projectPath: string | null,
+  projectId?: string
+): DetectedRepo[] {
+  return getTaskPanels().useDetectedRepos(projectPath, projectId)
 }

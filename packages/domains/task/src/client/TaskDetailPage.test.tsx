@@ -134,10 +134,6 @@ vi.mock('@slayzone/ui', async (importOriginal) => {
   }
 })
 
-vi.mock('@slayzone/projects', () => ({
-  useDetectedRepos: () => []
-}))
-
 vi.mock('@slayzone/projects-contracts', () => ({
   getDefaultStatus: () => 'todo',
   getDoneStatus: () => 'done',
@@ -306,11 +302,13 @@ import { detectPlatform } from '@slayzone/ui'
 // Stable singleton returns so their values don't churn dep arrays.
 const NO_ARTIFACTS = { artifacts: [] }
 const NO_REPOS = { repos: [] }
+const NO_DETECTED_REPOS: never[] = []
 registerTaskPanels({
   ArtifactsPanel: React.forwardRef(() => null),
   UnifiedGitPanel: React.forwardRef(() => null),
   useArtifacts: () => NO_ARTIFACTS,
-  useProjectRepos: () => NO_REPOS
+  useProjectRepos: () => NO_REPOS,
+  useDetectedRepos: () => NO_DETECTED_REPOS
 })
 
 // --- Test helpers ---

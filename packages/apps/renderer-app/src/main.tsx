@@ -13,12 +13,17 @@ import { taskPanels } from './taskPanels'
 import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSettingsTabs'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
+import { useDetectedRepos } from '@slayzone/worktrees/hooks'
 
 // Artifacts + git panels TaskDetailPage embeds — registered before any render.
 registerTaskPanels(taskPanels)
-// Settings' tag editor + integrations' tab ProjectSettingsDialog embeds — registered
-// before any render.
-registerProjectSettingsTabs({ TagsSettingsTab, ...integrationsProjectSettingsTabs })
+// Settings' tag editor, integrations' tab and worktrees' repo detection
+// ProjectSettingsDialog embeds — registered before any render.
+registerProjectSettingsTabs({
+  TagsSettingsTab,
+  ...integrationsProjectSettingsTabs,
+  useDetectedRepos
+})
 import { OverlayDialogApp } from './OverlayDialogApp'
 
 // window.api shim is installed by the shell before this module evaluates

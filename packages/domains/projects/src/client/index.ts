@@ -4,7 +4,6 @@ export { ProjectSettingsDialog } from './ProjectSettingsDialog'
 export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'
-export { useDetectedRepos } from './useDetectedRepos'
 export { SettingsTabIntro } from './project-settings-shared'
 export {
   isRateLimited,

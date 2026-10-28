@@ -61,7 +61,6 @@ import {
   isTerminalStatus,
   resolveRepoPath
 } from '@slayzone/projects-contracts'
-import { useDetectedRepos } from '@slayzone/projects'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import {
   Button,
@@ -200,6 +199,7 @@ import {
   getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
+  useTaskDetectedRepos,
   type ArtifactsPanelHandle,
   type UnifiedGitPanelHandle
 } from './task-detail'
@@ -425,7 +425,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [baseDirPickerOpen, setBaseDirPickerOpen] = useState(false)
 
   // Multi-repo detection (drives the *task-bound* axis: terminal cwd, editor root, browser, worktree creation)
-  const detectedRepos = useDetectedRepos(project?.path ?? null, project?.id)
+  const detectedRepos = useTaskDetectedRepos(project?.path ?? null, project?.id)
   // Task-bound repo name: only what the user has explicitly bound to this task or to the project default.
   // Intentionally NO fallback to first-detected — wrapper folder stays wrapper folder for the bound axis,
   // so the terminal/editor don't silently jump into an arbitrary child repo.

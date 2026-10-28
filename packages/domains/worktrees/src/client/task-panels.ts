@@ -1,6 +1,7 @@
 import { lazyWithPreload } from '@slayzone/ui'
 import type { TaskPanels } from '@slayzone/task/client/TaskPanels'
 import { useProjectRepos } from './useProjectRepos'
+import { useDetectedRepos } from './useDetectedRepos'
 
 /**
  * This feature's half of the task page's injected panels (see task's
@@ -13,5 +14,6 @@ export const UnifiedGitPanel = lazyWithPreload(() =>
 
 export const worktreesTaskPanels = {
   UnifiedGitPanel,
-  useProjectRepos
-} satisfies Pick<TaskPanels, 'UnifiedGitPanel' | 'useProjectRepos'>
+  useProjectRepos,
+  useDetectedRepos
+} satisfies Pick<TaskPanels, 'UnifiedGitPanel' | 'useProjectRepos' | 'useDetectedRepos'>

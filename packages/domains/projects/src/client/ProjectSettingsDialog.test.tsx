@@ -35,7 +35,6 @@ vi.mock('@slayzone/ui', async () => ({
 }))
 
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
-vi.mock('./useDetectedRepos', () => ({ useDetectedRepos: () => [] }))
 vi.mock('./ColumnsTab', () => ({
   ColumnsTab: ({ lockedByProvider }: { lockedByProvider: string | null }) => {
     useMountLog('tasks/statuses')
@@ -62,14 +61,17 @@ vi.mock('@slayzone/test-panel/client', () => ({ TestsTab: () => null }))
 import { ProjectSettingsDialog } from './ProjectSettingsDialog'
 import { registerProjectSettingsTabs } from './ProjectSettingsTabs'
 
-// The app registers settings' tag editor and integrations' tab + lock lookup; stub the slots.
+// The app registers settings' tag editor, integrations' tab + lock lookup and worktrees'
+// repo detection; stub the slots.
+const NO_DETECTED_REPOS: never[] = []
 registerProjectSettingsTabs({
   TagsSettingsTab: () => null,
   IntegrationsTab: () => {
     useMountLog('integrations')
     return null
   },
-  useStatusSyncLockLookup: () => lookup
+  useStatusSyncLockLookup: () => lookup,
+  useDetectedRepos: () => NO_DETECTED_REPOS
 })
 
 const project = (id: string) => ({ id, path: `/tmp/${id}` }) as unknown as Project

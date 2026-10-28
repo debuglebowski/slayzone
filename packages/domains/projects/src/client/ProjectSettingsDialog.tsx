@@ -12,11 +12,11 @@ import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
 import {
   getProjectSettingsTabs,
+  useProjectDetectedRepos,
   useStatusSyncLockLookup,
   type IntegrationOnboardingProvider,
   type IntegrationsSettingsTabProps
 } from './ProjectSettingsTabs'
-import { useDetectedRepos } from './useDetectedRepos'
 import { TasksGeneralTab } from './TasksGeneralTab'
 
 interface ProjectSettingsDialogProps {
@@ -72,7 +72,7 @@ export function ProjectSettingsDialog({
     | 'tests'
   >('general')
   const lookupStatusSyncLock = useStatusSyncLockLookup()
-  const detectedRepos = useDetectedRepos(open ? (project?.path ?? null) : null, project?.id)
+  const detectedRepos = useProjectDetectedRepos(open ? (project?.path ?? null) : null, project?.id)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = useCallback(async () => {
