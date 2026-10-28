@@ -36,14 +36,23 @@ function parse(value: string): HomePanelState {
   return result
 }
 
+/** Panels tagged with the project they belong to. */
+interface OwnedPanelState {
+  projectId: string
+  state: HomePanelState
+}
+
 export function useHomePanelState(
   projectId: string
 ): [HomePanelState, (updater: (prev: HomePanelState) => HomePanelState) => void] {
   const trpcClient = useTRPCClient()
-  const [state, setState] = useState<HomePanelState>(DEFAULTS)
-  // Mirrors the latest state set (every setState below writes it first), so
+  const [owned, setOwned] = useState<OwnedPanelState>(() => ({ projectId, state: DEFAULTS }))
+  // Another project's panels are never shown: until this project's load or first
+  // edit lands, it is on the defaults.
+  const state = owned.projectId === projectId ? owned.state : DEFAULTS
+  // Mirrors the latest value set (every setOwned below writes it first), so
   // back-to-back updates chain without waiting for a render.
-  const stateRef = useRef(state)
+  const ownedRef = useRef(owned)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef<HomePanelState | null>(null)
 
@@ -58,21 +67,26 @@ export function useHomePanelState(
     }
   }, [projectId, trpcClient])
 
-  // Load on mount / project change
+  // Load on mount / project change. A reply for a project no longer shown, or one
+  // that lands after the user edited this project's panels while it loaded, is dropped.
   useEffect(() => {
-    stateRef.current = DEFAULTS
-    setState(DEFAULTS)
+    let stale = false
+    const atStart = ownedRef.current
     void trpcClient.settings.get.query({ key: getKey(projectId) }).then((value) => {
-      if (value) {
-        try {
-          const loaded = parse(value)
-          stateRef.current = loaded
-          setState(loaded)
-        } catch {
-          /* use defaults */
-        }
+      if (stale || !value) return
+      const current = ownedRef.current
+      if (current !== atStart && current.projectId === projectId) return
+      try {
+        const next = { projectId, state: parse(value) }
+        ownedRef.current = next
+        setOwned(next)
+      } catch {
+        /* use defaults */
       }
     })
+    return () => {
+      stale = true
+    }
   }, [projectId, trpcClient])
 
   // Flush pending save on project change / unmount
@@ -89,9 +103,11 @@ export function useHomePanelState(
 
   const update = useCallback(
     (updater: (prev: HomePanelState) => HomePanelState) => {
-      const next = updater(stateRef.current)
-      stateRef.current = next
-      setState(next)
+      const current = ownedRef.current
+      const next = updater(current.projectId === projectId ? current.state : DEFAULTS)
+      const nextOwned = { projectId, state: next }
+      ownedRef.current = nextOwned
+      setOwned(nextOwned)
       pendingRef.current = next
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
