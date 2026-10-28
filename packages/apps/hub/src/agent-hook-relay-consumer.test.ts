@@ -17,10 +17,14 @@ vi.mock('@slayzone/terminal/server', async () => {
   const lifecycle = await import('../../../domains/terminal/src/server/agent-lifecycle-router.js')
   const pty = await import('../../../domains/terminal/src/server/pty-router.js')
   const chat = await import('../../../domains/terminal/src/server/chat-router.js')
+  const usage = await import('../../../domains/terminal/src/server/usage-router.js')
+  const usageDeps = await import('../../../domains/terminal/src/server/usage-router-deps.js')
   return {
     agentLifecycleRouter: lifecycle.agentLifecycleRouter,
     ptyRouter: pty.ptyRouter,
     chatRouter: chat.chatRouter,
+    appUsageRouter: usage.appUsageRouter,
+    setUsageRouterDeps: usageDeps.setUsageRouterDeps,
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,
     createAgentTree: agentTree.createAgentTree,
