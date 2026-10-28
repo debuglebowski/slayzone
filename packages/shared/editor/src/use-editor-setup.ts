@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useInsertionEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/core'
 import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
@@ -90,6 +90,13 @@ export function useEditorSetup({
   const onBlurRef = useRef(onBlur)
   const onReadyRef = useRef(onReady)
   const contentRef = useRef(value)
+  // The latest `value` prop. The editor is (re)built from it, not from
+  // contentRef: a value that changed while a hidden <Activity> tab had the
+  // sync effect below torn down must not be lost when the tab is shown.
+  const valueRef = useRef(value)
+  useInsertionEffect(() => {
+    valueRef.current = value
+  })
   const suppressOnChange = useRef(false)
   const [formatState, setFormatState] = useState<FormatState>(emptyFormatState)
   const [editorReady, setEditorReady] = useState(false)
@@ -138,6 +145,8 @@ export function useEditorSetup({
   // Create editor
   useEffect(() => {
     if (!containerRef.current) return
+    const start = valueRef.current
+    contentRef.current = start
 
     let prevFormats = emptyFormatState
     const formatStatePlugin = $prose(
@@ -240,7 +249,7 @@ export function useEditorSetup({
     let editor = Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, containerRef.current!)
-        ctx.set(defaultValueCtx, contentRef.current)
+        ctx.set(defaultValueCtx, start)
       })
       .config((ctx) => {
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prevMarkdown) => {

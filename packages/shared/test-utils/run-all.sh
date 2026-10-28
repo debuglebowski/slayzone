@@ -822,6 +822,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/telemetry/src/client/TelemetryProvider.test.tsx \
   packages/shared/editor/src/ArtifactPicker.test.tsx \
   packages/shared/editor/src/rich-text-editor.mention.test.tsx \
+  packages/shared/editor/src/rich-text-editor.tab-switch.test.tsx \
   packages/domains/projects/src/client/ProjectSettingsDialog.test.tsx \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
   packages/domains/projects/src/client/useIntegrationsTab.test.tsx \
