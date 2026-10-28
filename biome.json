@@ -97,7 +97,7 @@
         "noDuplicateJsxProps": "error",
         "noDuplicateObjectKeys": "error",
         "noDuplicateParameters": "error",
-        "noEmptyBlockStatements": "warn",
+        "noEmptyBlockStatements": "error",
         "noExplicitAny": "error",
         "noExtraNonNullAssertion": "error",
         "noFallthroughSwitchClause": "error",
@@ -332,7 +332,7 @@
             }
           },
           "suspicious": {
-            "noEmptyBlockStatements": "warn"
+            "noEmptyBlockStatements": "error"
           }
         }
       }
