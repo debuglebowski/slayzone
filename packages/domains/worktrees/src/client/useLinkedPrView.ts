@@ -24,7 +24,7 @@ export function useLinkedPrView({
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const addPrCommentMutation = useMutation(trpc.worktrees.addPrComment.mutationOptions())
-  const editPrCommentMutation = useMutation(trpc.worktrees.editPrComment.mutationOptions())
+  const { mutateAsync: editPrComment } = useMutation(trpc.worktrees.editPrComment.mutationOptions())
   const mergePrMutation = useMutation(trpc.worktrees.mergePr.mutationOptions())
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
@@ -164,7 +164,7 @@ export function useLinkedPrView({
     if (!editingId || !editBody.trim()) return
     setEditSubmitting(true)
     try {
-      await editPrCommentMutation.mutateAsync({
+      await editPrComment({
         repoPath: projectPath,
         commentId: editingId,
         body: editBody.trim()
@@ -176,7 +176,7 @@ export function useLinkedPrView({
       setCommentError(err instanceof Error ? err.message : 'Failed to edit comment')
     }
     setEditSubmitting(false)
-  }, [editingId, editBody, projectPath, fetchComments])
+  }, [editingId, editBody, projectPath, fetchComments, editPrComment])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)

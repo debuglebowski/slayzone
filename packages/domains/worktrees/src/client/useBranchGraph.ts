@@ -16,7 +16,7 @@ export function useBranchGraph(
 ): BranchGraphState {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const fetchMutation = useMutation(trpc.worktrees.fetch.mutationOptions())
+  const { mutateAsync: fetchRemote } = useMutation(trpc.worktrees.fetch.mutationOptions())
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
   // The path whose read has landed (graph or failure) since it last became the shown
@@ -180,7 +180,7 @@ export function useBranchGraph(
     if (!projectPath) return
     setFetching(true)
     try {
-      await fetchMutation.mutateAsync({ path: projectPath })
+      await fetchRemote({ path: projectPath })
       await fetchData()
       toast('Fetched from remote')
     } catch {
@@ -189,7 +189,7 @@ export function useBranchGraph(
       setFetching(false)
     }
     // refresh is wrapped above
-  }, [projectPath, fetchData])
+  }, [projectPath, fetchData, fetchRemote])
 
   const refresh = useCallback(async (): Promise<void> => {
     await fetchData()

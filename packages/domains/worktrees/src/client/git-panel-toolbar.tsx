@@ -60,12 +60,15 @@ export function GitPanelToolbar({
   conflictToolbar: ConflictToolbarData | null
 }) {
   const trpc = useTRPC()
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const { diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
-  const setBoolSetting = useCallback((key: string, value: boolean) => {
-    setSettingMutation.mutate({ key, value: value ? '1' : '0' })
-    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  const setBoolSetting = useCallback(
+    (key: string, value: boolean) => {
+      setSetting({ key, value: value ? '1' : '0' })
+      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+    },
+    [setSetting]
+  )
 
   return (
     <>

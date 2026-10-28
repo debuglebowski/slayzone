@@ -44,7 +44,9 @@ export function ProjectGeneralTab({
 }: ProjectGeneralTabProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutateAsync: setSettingAsync, mutate: setSetting } = useMutation(
+    trpc.settings.set.mutationOptions()
+  )
   const initMutation = useMutation(trpc.worktrees.init.mutationOptions())
   const checkoutBranchMutation = useMutation(trpc.worktrees.checkoutBranch.mutationOptions())
   const createBranchMutation = useMutation(trpc.worktrees.createBranch.mutationOptions())
@@ -77,19 +79,19 @@ export function ProjectGeneralTab({
         return json ? JSON.parse(json) : null
       },
       save: (cfg) => {
-        setSettingMutation.mutate({
+        setSetting({
           key: `commit_graph:project:${projectId}`,
           value: JSON.stringify(cfg)
         })
       },
       clear: async () => {
-        await setSettingMutation.mutateAsync({
+        await setSettingAsync({
           key: `commit_graph:project:${projectId}`,
           value: ''
         })
       }
     }),
-    [projectId, queryClient, trpc]
+    [projectId, queryClient, trpc, setSetting, setSettingAsync]
   )
   const branchGraph = useBranchGraph(
     projectPath,

@@ -59,7 +59,7 @@ export function WorktreesSettingsTab() {
     trpc.settings.get.queryOptions({ key: 'worktree_submodule_init' })
   )
   const presetsQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }))
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
 
   // Each new stored value re-seeds its control (which local edits override in
   // between) — adjusted while rendering, one block per setting.
@@ -107,13 +107,16 @@ export function WorktreesSettingsTab() {
     else if (presetsQuery.data !== undefined) setPresets(presetsFromSetting(presetsQuery.data))
   }
 
-  const savePresets = useCallback((updated: CopyPreset[]) => {
-    setPresets(updated)
-    setSettingMutation.mutate({
-      key: 'worktree_copy_presets',
-      value: JSON.stringify(updated)
-    })
-  }, [])
+  const savePresets = useCallback(
+    (updated: CopyPreset[]) => {
+      setPresets(updated)
+      setSetting({
+        key: 'worktree_copy_presets',
+        value: JSON.stringify(updated)
+      })
+    },
+    [setSetting]
+  )
 
   const addPreset = () => {
     const id = `preset-${Date.now()}`
@@ -160,7 +163,7 @@ export function WorktreesSettingsTab() {
             value={worktreeBasePath}
             onChange={(e) => setWorktreeBasePath(e.target.value)}
             onBlur={() => {
-              setSettingMutation.mutate({
+              setSetting({
                 key: 'worktree_base_path',
                 value: worktreeBasePath.trim()
               })
@@ -176,7 +179,7 @@ export function WorktreesSettingsTab() {
               onChange={(e) => {
                 const enabled = e.target.checked
                 setAutoCreateWorktreeOnTaskCreate(enabled)
-                setSettingMutation.mutate({
+                setSetting({
                   key: 'auto_create_worktree_on_task_create',
                   value: enabled ? '1' : '0'
                 })
@@ -204,7 +207,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeCopyBehavior
               setCopyBehavior(v)
-              setSettingMutation.mutate({ key: 'worktree_copy_behavior', value: v })
+              setSetting({ key: 'worktree_copy_behavior', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">
@@ -231,7 +234,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeSubmoduleInit
               setSubmoduleInit(v)
-              setSettingMutation.mutate({ key: 'worktree_submodule_init', value: v })
+              setSetting({ key: 'worktree_submodule_init', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">

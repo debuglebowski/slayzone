@@ -31,7 +31,7 @@ export function OnboardingDialog({
   const [closing, setClosing] = useState(false)
   const { setTier } = useTelemetry()
 
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const onboardingCompletedQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'onboarding_completed' })
   )
@@ -61,7 +61,7 @@ export function OnboardingDialog({
   const handleNext = (): void => {
     if (step === 2) {
       track('onboarding_provider_selected', { provider: selectedProvider })
-      setSettingMutation.mutate({ key: 'default_terminal_mode', value: selectedProvider })
+      setSetting({ key: 'default_terminal_mode', value: selectedProvider })
     }
     if (step < STEP_COUNT - 1) {
       setStep(step + 1)
@@ -82,19 +82,19 @@ export function OnboardingDialog({
   const finishOnboarding = useCallback(
     (tier?: 'anonymous' | 'opted_in'): void => {
       if (tier) setTier(tier)
-      setSettingMutation.mutate({ key: 'onboarding_completed', value: 'true' })
+      setSetting({ key: 'onboarding_completed', value: 'true' })
       setStep(0)
       setClosing(false)
       setAutoOpen(false)
       onExternalClose?.()
     },
-    [setTier, onExternalClose]
+    [setTier, setSetting, onExternalClose]
   )
 
   const handleAnalyticsChoice = (tier: 'anonymous' | 'opted_in'): void => {
     setTier(tier)
     track('onboarding_completed', { provider: selectedProvider, tier })
-    setSettingMutation.mutate({ key: 'onboarding_completed', value: 'true' })
+    setSetting({ key: 'onboarding_completed', value: 'true' })
     setStep(4)
   }
 

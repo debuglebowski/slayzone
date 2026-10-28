@@ -31,10 +31,14 @@ export function ConflictPhaseContent({
   // `mutateAsync` (stable): handleCompleteMerge depends on it, and the useMutation()
   // result object is new on every render.
   const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
-  const continueRebaseMutation = useMutation(trpc.worktrees.continueRebase.mutationOptions())
-  const skipRebaseCommitMutation = useMutation(trpc.worktrees.skipRebaseCommit.mutationOptions())
-  const abortRebaseMutation = useMutation(trpc.worktrees.abortRebase.mutationOptions())
-  const abortMergeMutation = useMutation(trpc.worktrees.abortMerge.mutationOptions())
+  const { mutateAsync: continueRebase } = useMutation(
+    trpc.worktrees.continueRebase.mutationOptions()
+  )
+  const { mutateAsync: skipRebaseCommit } = useMutation(
+    trpc.worktrees.skipRebaseCommit.mutationOptions()
+  )
+  const { mutateAsync: abortRebase } = useMutation(trpc.worktrees.abortRebase.mutationOptions())
+  const { mutateAsync: abortMerge } = useMutation(trpc.worktrees.abortMerge.mutationOptions())
   const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
@@ -110,7 +114,7 @@ export function ConflictPhaseContent({
     setCompleting(true)
     setError(null)
     try {
-      const result = await continueRebaseMutation.mutateAsync({ path: projectPath })
+      const result = await continueRebase({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         if (markDone) updates.status = completedStatus
@@ -126,12 +130,12 @@ export function ConflictPhaseContent({
     } finally {
       setCompleting(false)
     }
-  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated, continueRebase])
 
   const handleSkipCommit = useCallback(async () => {
     setError(null)
     try {
-      const result = await skipRebaseCommitMutation.mutateAsync({ path: projectPath })
+      const result = await skipRebaseCommit({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         const updated = await onUpdateTask(updates)
@@ -144,21 +148,21 @@ export function ConflictPhaseContent({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [task, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated, skipRebaseCommit])
 
   const handleAbort = useCallback(async () => {
     try {
       if (isRebase) {
-        await abortRebaseMutation.mutateAsync({ path: projectPath })
+        await abortRebase({ path: projectPath })
       } else {
-        await abortMergeMutation.mutateAsync({ path: projectPath })
+        await abortMerge({ path: projectPath })
       }
     } catch {
       /* already aborted */
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated])
+  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated, abortRebase, abortMerge])
 
   // Push toolbar data to parent for unified header
   useEffect(() => {

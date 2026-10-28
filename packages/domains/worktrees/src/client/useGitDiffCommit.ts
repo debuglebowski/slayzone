@@ -15,7 +15,7 @@ interface UseGitDiffCommitParams {
  */
 export function useGitDiffCommit({ targetPath, stagedCount, refreshRef }: UseGitDiffCommitParams) {
   const trpc = useTRPC()
-  const commitFilesMutation = useMutation(trpc.worktrees.commitFiles.mutationOptions())
+  const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
   const [commitError, setCommitError] = useState<string | null>(null)
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
@@ -24,7 +24,7 @@ export function useGitDiffCommit({ targetPath, stagedCount, refreshRef }: UseGit
     if (!targetPath || !commitMessage.trim() || stagedCount === 0) return
     setCommitting(true)
     try {
-      await commitFilesMutation.mutateAsync({ repoPath: targetPath, message: commitMessage.trim() })
+      await commitFiles({ repoPath: targetPath, message: commitMessage.trim() })
       setCommitMessage('')
       await refreshRef.current()
     } catch (err) {
@@ -32,7 +32,7 @@ export function useGitDiffCommit({ targetPath, stagedCount, refreshRef }: UseGit
     } finally {
       setCommitting(false)
     }
-  }, [targetPath, commitMessage, stagedCount, refreshRef])
+  }, [targetPath, commitMessage, stagedCount, refreshRef, commitFiles])
 
   return {
     commitMessage,

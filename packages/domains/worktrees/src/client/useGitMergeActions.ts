@@ -23,7 +23,7 @@ export function useGitMergeActions({
   const { mutateAsync: stageAll } = useMutation(trpc.worktrees.stageAll.mutationOptions())
   const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
   const { mutateAsync: mergeWithAi } = useMutation(trpc.worktrees.mergeWithAI.mutationOptions())
-  const abortMergeMutation = useMutation(trpc.worktrees.abortMerge.mutationOptions())
+  const { mutateAsync: abortMerge } = useMutation(trpc.worktrees.abortMerge.mutationOptions())
 
   // Merge-mode: commit and continue merge
   const handleCommitAndContinueMerge = useCallback(async () => {
@@ -91,14 +91,14 @@ export function useGitMergeActions({
     if (!task || !onUpdateTask || !onTaskUpdated) return
     if (projectPath) {
       try {
-        await abortMergeMutation.mutateAsync({ path: projectPath })
+        await abortMerge({ path: projectPath })
       } catch {
         /* already aborted */
       }
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated, abortMerge])
 
   return { handleCommitAndContinueMerge, handleAbortMerge }
 }

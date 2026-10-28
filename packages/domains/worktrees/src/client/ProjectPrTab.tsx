@@ -31,7 +31,7 @@ const DEFAULT_FILTER: PrFilterState = {
 
 function usePrFilterState(projectId: string | null) {
   const trpc = useTRPC()
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
   const [filter, setFilter] = useState<PrFilterState>(DEFAULT_FILTER)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const key = projectId ? `pr-filter:${projectId}` : null
@@ -74,13 +74,13 @@ function usePrFilterState(projectId: string | null) {
         if (key) {
           clearTimeout(saveTimerRef.current)
           saveTimerRef.current = setTimeout(() => {
-            setSettingMutation.mutate({ key, value: JSON.stringify(updated) })
+            setSetting({ key, value: JSON.stringify(updated) })
           }, 500)
         }
         return updated
       })
     },
-    [key]
+    [key, setSetting]
   )
 
   return { filter, updateFilter }

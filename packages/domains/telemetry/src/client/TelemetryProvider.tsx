@@ -39,7 +39,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
   const versionAppliedRef = useRef(false)
 
   const tierSetting = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
-  const setTierMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setTierSetting } = useMutation(trpc.settings.set.mutationOptions())
 
   // Version fetched once init has completed (posthog may have loaded). Mirrors
   // the original nested getVersion() call that ran after initTelemetry.
@@ -95,11 +95,14 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const changeTier = useCallback((newTier: TelemetryTier) => {
-    setTier(newTier)
-    setTelemetryTierInternal(newTier)
-    setTierMutation.mutate({ key: SETTINGS_KEY, value: newTier })
-  }, [])
+  const changeTier = useCallback(
+    (newTier: TelemetryTier) => {
+      setTier(newTier)
+      setTelemetryTierInternal(newTier)
+      setTierSetting({ key: SETTINGS_KEY, value: newTier })
+    },
+    [setTierSetting]
+  )
 
   return (
     <TelemetryContext.Provider value={{ tier, setTier: changeTier, track }}>

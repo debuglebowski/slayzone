@@ -31,8 +31,8 @@ interface RemoteSectionProps {
 
 export function RemoteSection({ upstreamAB, targetPath, onSyncDone }: RemoteSectionProps) {
   const trpc = useTRPC()
-  const pushMutation = useMutation(trpc.worktrees.push.mutationOptions())
-  const pullMutation = useMutation(trpc.worktrees.pull.mutationOptions())
+  const { mutateAsync: pushBranch } = useMutation(trpc.worktrees.push.mutationOptions())
+  const { mutateAsync: pullBranch } = useMutation(trpc.worktrees.pull.mutationOptions())
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pushMenuOpen, setPushMenuOpen] = useState(false)
@@ -44,7 +44,7 @@ export function RemoteSection({ upstreamAB, targetPath, onSyncDone }: RemoteSect
       setPushMenuOpen(false)
       setForcePushConfirmOpen(false)
       try {
-        const result = await pushMutation.mutateAsync({ path: targetPath, force })
+        const result = await pushBranch({ path: targetPath, force })
         if (!result.success) {
           toast(result.error ?? 'Push failed')
         } else {
@@ -57,13 +57,13 @@ export function RemoteSection({ upstreamAB, targetPath, onSyncDone }: RemoteSect
         setPushing(false)
       }
     },
-    [targetPath, onSyncDone]
+    [targetPath, onSyncDone, pushBranch]
   )
 
   const handlePull = useCallback(async () => {
     setPulling(true)
     try {
-      const result = await pullMutation.mutateAsync({ path: targetPath })
+      const result = await pullBranch({ path: targetPath })
       if (!result.success) {
         toast(result.error ?? 'Pull failed')
       } else {
@@ -75,7 +75,7 @@ export function RemoteSection({ upstreamAB, targetPath, onSyncDone }: RemoteSect
     } finally {
       setPulling(false)
     }
-  }, [targetPath, onSyncDone])
+  }, [targetPath, onSyncDone, pullBranch])
 
   const behind = upstreamAB?.behind ?? 0
   const ahead = upstreamAB?.ahead ?? 0

@@ -61,7 +61,11 @@ export function useUsageAnalytics() {
   const rawData = analyticsQuery.data ?? EMPTY
 
   // Background refresh — recompute fresh data, write it into the cached query.
-  const refreshMutation = useMutation(
+  const {
+    mutate: refreshInBackground,
+    mutateAsync: refreshNow,
+    isPending: loading
+  } = useMutation(
     trpc.usageAnalytics.refresh.mutationOptions({
       onSuccess: (fresh) => {
         queryClient.setQueryData(trpc.usageAnalytics.query.queryKey(range), fresh)
@@ -72,11 +76,9 @@ export function useUsageAnalytics() {
   // Auto background-refresh whenever the range becomes active / changes
   // (mirrors the old cached-then-fresh load).
   useEffect(() => {
-    if (settingsLoaded) refreshMutation.mutate(range)
+    if (settingsLoaded) refreshInBackground(range)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, settingsLoaded])
-
-  const loading = refreshMutation.isPending
 
   // Filtered view
   const data = useMemo(() => {
@@ -113,11 +115,11 @@ export function useUsageAnalytics() {
 
   const refresh = useCallback(async () => {
     try {
-      await refreshMutation.mutateAsync(range)
+      await refreshNow(range)
     } catch {
       /* swallow — matches the old refresh's finally-only handling */
     }
-  }, [range])
+  }, [range, refreshNow])
 
   return {
     data,

@@ -54,9 +54,13 @@ export function ConflictFileView({
   branchContext
 }: ConflictFileViewProps) {
   const trpc = useTRPC()
-  const writeResolvedFileMutation = useMutation(trpc.worktrees.writeResolvedFile.mutationOptions())
-  const stageFileMutation = useMutation(trpc.worktrees.stageFile.mutationOptions())
-  const analyzeConflictMutation = useMutation(trpc.worktrees.analyzeConflict.mutationOptions())
+  const { mutateAsync: writeResolvedFile } = useMutation(
+    trpc.worktrees.writeResolvedFile.mutationOptions()
+  )
+  const { mutateAsync: stageFile } = useMutation(trpc.worktrees.stageFile.mutationOptions())
+  const { mutateAsync: analyzeConflict } = useMutation(
+    trpc.worktrees.analyzeConflict.mutationOptions()
+  )
   const { editorThemeId, contentVariant } = useTheme()
   const { editorFontSize } = useAppearance()
   const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
@@ -129,21 +133,15 @@ export function ConflictFileView({
     async (text: string) => {
       setError(null)
       try {
-        await writeResolvedFileMutation.mutateAsync({ repoPath, filePath, content: text })
-        await stageFileMutation.mutateAsync({ path: repoPath, filePath })
+        await writeResolvedFile({ repoPath, filePath, content: text })
+        await stageFile({ path: repoPath, filePath })
         setResolved(true)
         onResolved()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [
-      repoPath,
-      filePath,
-      onResolved,
-      writeResolvedFileMutation.mutateAsync,
-      stageFileMutation.mutateAsync
-    ]
+    [repoPath, filePath, onResolved, writeResolvedFile, stageFile]
   )
 
   const handleAcceptOurs = useCallback(async () => {
@@ -174,7 +172,7 @@ export function ConflictFileView({
     setAnalyzing(true)
     setError(null)
     try {
-      const result = await analyzeConflictMutation.mutateAsync({
+      const result = await analyzeConflict({
         mode: terminalMode,
         filePath,
         base: content.base,
@@ -187,7 +185,7 @@ export function ConflictFileView({
     } finally {
       setAnalyzing(false)
     }
-  }, [content, terminalMode, filePath])
+  }, [content, terminalMode, filePath, analyzeConflict])
 
   if (!content) {
     return (

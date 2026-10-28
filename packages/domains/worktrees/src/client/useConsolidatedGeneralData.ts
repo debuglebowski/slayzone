@@ -115,14 +115,18 @@ export function useConsolidatedGeneralData(
 ): ConsolidatedGeneralData {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const initMutation = useMutation(trpc.worktrees.init.mutationOptions())
+  const { mutateAsync: initWorktrees } = useMutation(trpc.worktrees.init.mutationOptions())
   // `mutateAsync` (stable) for the ones the action callbacks depend on — never the
   // useMutation() result object, which is new on every render.
   const { mutateAsync: createWorktree } = useMutation(
     trpc.worktrees.createWorktree.mutationOptions()
   )
-  const copyIgnoredFilesMutation = useMutation(trpc.worktrees.copyIgnoredFiles.mutationOptions())
-  const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
+  const { mutateAsync: copyIgnoredFiles } = useMutation(
+    trpc.worktrees.copyIgnoredFiles.mutationOptions()
+  )
+  const { mutateAsync: removeWorktree } = useMutation(
+    trpc.worktrees.removeWorktree.mutationOptions()
+  )
   const { mutateAsync: rebaseOnto } = useMutation(trpc.worktrees.rebaseOnto.mutationOptions())
   const { mutateAsync: mergeFrom } = useMutation(trpc.worktrees.mergeFrom.mutationOptions())
   const { mutateAsync: mergeIntoParent } = useMutation(
@@ -442,7 +446,7 @@ export function useConsolidatedGeneralData(
     if (!projectPath) return
     setInitializing(true)
     try {
-      await initMutation.mutateAsync({ path: projectPath })
+      await initWorktrees({ path: projectPath })
       setIsGitRepo(true)
       const branch = await queryClient.fetchQuery(
         trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
@@ -453,7 +457,7 @@ export function useConsolidatedGeneralData(
     } finally {
       setInitializing(false)
     }
-  }, [projectPath, queryClient, trpc])
+  }, [projectPath, queryClient, trpc, initWorktrees])
 
   /** Resolve worktree path params (shared by direct create and ask-dialog flows) */
   const resolveWorktreeParams = useCallback(async () => {
@@ -484,14 +488,14 @@ export function useConsolidatedGeneralData(
         ...(useExistingBranch ? { sourceBranch: branch } : { branch })
       })
       if (filesToCopy === 'all') {
-        await copyIgnoredFilesMutation.mutateAsync({
+        await copyIgnoredFiles({
           repoPath: projectPath,
           worktreePath,
           paths: [],
           mode: 'all'
         })
       } else if (Array.isArray(filesToCopy) && filesToCopy.length > 0) {
-        await copyIgnoredFilesMutation.mutateAsync({
+        await copyIgnoredFiles({
           repoPath: projectPath,
           worktreePath,
           paths: filesToCopy,
@@ -500,7 +504,7 @@ export function useConsolidatedGeneralData(
       }
       await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
     },
-    [projectPath, task.id, currentBranch, onUpdateTask]
+    [projectPath, task.id, currentBranch, onUpdateTask, createWorktree, copyIgnoredFiles]
   )
 
   const handleAddWorktree = useCallback(async () => {
@@ -665,7 +669,7 @@ export function useConsolidatedGeneralData(
       if (!projectPath || !task.worktree_path) return
       setRemoving(true)
       try {
-        const result = await removeWorktreeMutation.mutateAsync({
+        const result = await removeWorktree({
           repoPath: projectPath,
           worktreePath: task.worktree_path,
           branchHint: branchToDelete
@@ -680,7 +684,7 @@ export function useConsolidatedGeneralData(
         setRemoving(false)
       }
     },
-    [projectPath, task.id, task.worktree_path, onUpdateTask]
+    [projectPath, task.id, task.worktree_path, onUpdateTask, removeWorktree]
   )
 
   // Fetch detected worktrees when no worktree is linked. With a linked worktree or no

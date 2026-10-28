@@ -72,7 +72,7 @@ export function UserSettingsDialog({
   const defaultModeQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }, { enabled: open })
   )
-  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
 
   // Opening, or a new stored value while open, re-seeds the mode (which a local pick
   // overrides in between) — adjusted while rendering, on an [open, data] effect's
@@ -100,11 +100,14 @@ export function UserSettingsDialog({
     return () => window.removeEventListener('sz:settings-changed', onSettingsChanged)
   }, [open, defaultModeQuery.refetch])
 
-  const onDefaultTerminalModeChange = useCallback((mode: TerminalMode) => {
-    setDefaultTerminalMode(mode)
-    setSettingMutation.mutate({ key: 'default_terminal_mode', value: mode })
-    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  const onDefaultTerminalModeChange = useCallback(
+    (mode: TerminalMode) => {
+      setDefaultTerminalMode(mode)
+      setSetting({ key: 'default_terminal_mode', value: mode })
+      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+    },
+    [setSetting]
+  )
 
   // Opening (or a new initialTab while open) shows initialTab. Applied while rendering,
   // so a reopen never mounts the last-viewed tab first (running its effects/fetches).

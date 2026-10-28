@@ -33,9 +33,9 @@ export function ProcessesPanel({
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const killMutation = useMutation(trpc.processes.kill.mutationOptions())
-  const stopMutation = useMutation(trpc.processes.stop.mutationOptions())
-  const restartMutation = useMutation(trpc.processes.restart.mutationOptions())
+  const { mutateAsync: killProcess } = useMutation(trpc.processes.kill.mutationOptions())
+  const { mutateAsync: stopProcess } = useMutation(trpc.processes.stop.mutationOptions())
+  const { mutateAsync: restartProcess } = useMutation(trpc.processes.restart.mutationOptions())
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
   // 'failed' only while there is no list to show: a failed reload of a loaded list
   // (tab re-show) keeps that list on screen.
@@ -159,23 +159,32 @@ export function ProcessesPanel({
     })
   }, [])
 
-  const handleKill = useCallback(async (id: string) => {
-    await killMutation.mutateAsync({ processId: id })
-    setProcesses((prev) => prev.filter((p) => p.id !== id))
-    setExpandedLogs((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-  }, [])
+  const handleKill = useCallback(
+    async (id: string) => {
+      await killProcess({ processId: id })
+      setProcesses((prev) => prev.filter((p) => p.id !== id))
+      setExpandedLogs((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    },
+    [killProcess]
+  )
 
-  const handleStop = useCallback(async (id: string) => {
-    await stopMutation.mutateAsync({ processId: id })
-  }, [])
+  const handleStop = useCallback(
+    async (id: string) => {
+      await stopProcess({ processId: id })
+    },
+    [stopProcess]
+  )
 
-  const handleRestart = useCallback(async (id: string) => {
-    await restartMutation.mutateAsync({ processId: id })
-  }, [])
+  const handleRestart = useCallback(
+    async (id: string) => {
+      await restartProcess({ processId: id })
+    },
+    [restartProcess]
+  )
 
   const handleInject = useCallback(
     (proc: ProcessEntry) => {
