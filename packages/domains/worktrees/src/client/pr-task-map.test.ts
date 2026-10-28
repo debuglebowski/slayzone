@@ -5,7 +5,7 @@
  *   packages/domains/worktrees/src/client/pr-task-map.test.ts
  */
 import { describe, expect, it } from 'vitest'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { GhPullRequest } from '../shared/types'
 import { mapPrsToTasks } from './pr-task-map'
 

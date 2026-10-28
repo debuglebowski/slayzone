@@ -10,7 +10,7 @@ import {
   getClientForHub,
   type TrpcVanillaClient
 } from '@slayzone/transport/client'
-import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task/shared'
+import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contracts'
 import { refreshTaskScopedQueries } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'

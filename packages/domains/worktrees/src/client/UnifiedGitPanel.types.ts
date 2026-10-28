@@ -1,4 +1,4 @@
-import type { GitTabId } from '@slayzone/task/shared'
+import type { GitTabId } from '@slayzone/task-contracts'
 
 export interface UnifiedGitPanelHandle {
   switchToTab: (tab: GitTabId) => void

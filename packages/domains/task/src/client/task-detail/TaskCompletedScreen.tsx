@@ -16,7 +16,7 @@ import {
 import { cn, getColumnStatusStyle } from '@slayzone/ui'
 import { resolveColumns } from '@slayzone/projects-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 export interface TaskCompletedScreenProps {
   task: Task

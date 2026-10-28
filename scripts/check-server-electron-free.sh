@@ -132,7 +132,7 @@ done
 #     should consume the computed `currentConversationByMode` field on the
 #     task object instead. (Phase 3 of conversation-id-robustness plan; Phase 4
 #     deletes the helpers entirely.)
-LEGACY_HELPERS="from ['\"]@slayzone/task/shared['\"]|from ['\"]@slayzone/task['\"]"
+LEGACY_HELPERS="from ['\"]@slayzone/task-contracts['\"]|from ['\"]@slayzone/task['\"]"
 LEGACY_NAMES="getProviderConversationId|setProviderConversationId|appendProviderConversationId|chatConversationId"
 client_hits=""
 glob_dirs packages/domains/*/src/client

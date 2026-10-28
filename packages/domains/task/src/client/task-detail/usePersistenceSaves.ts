@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
 
 export interface UsePersistenceSavesResult {

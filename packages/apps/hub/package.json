@@ -31,6 +31,7 @@
     "@slayzone/computers": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",

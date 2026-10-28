@@ -18,7 +18,7 @@ import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { DB_PRAGMAS, type BatchOp, type SlayzoneDb } from '@slayzone/platform'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
-import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task/shared'
+import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task-contracts'
 import { recordConversation } from './task-conversations.js'
 import {
   deleteSession,

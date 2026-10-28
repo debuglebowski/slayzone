@@ -44,7 +44,7 @@ import {
   TooltipTrigger,
   useShortcutDisplay
 } from '@slayzone/ui'
-import { type Task } from '@slayzone/task/shared'
+import { type Task } from '@slayzone/task-contracts'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
 import { groupTreeRows, orderTreeRows, PINNED_GROUP_KEY, type TreeGroup } from './treeGrouping'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client/hooks'

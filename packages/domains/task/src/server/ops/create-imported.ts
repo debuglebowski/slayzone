@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig, Task } from '@slayzone/task/shared'
+import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
 import { colorOne, getEnabledModeDefaults, maybeAutoCreateWorktree, parseTask } from './shared.js'
 import { insertTaskRow } from './insert.js'

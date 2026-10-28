@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { TerminalProgressDot } from '@slayzone/ui'
-import { type Task } from '@slayzone/task/shared'
+import { type Task } from '@slayzone/task-contracts'
 
 // Floating drag preview — renders portal'd to document.body via DragOverlay,
 // so it escapes the project's `overflow-hidden` collapsible wrapper. Without

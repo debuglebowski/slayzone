@@ -13,7 +13,7 @@ import {
   statSync
 } from 'fs'
 import { randomUUID } from 'crypto'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { getExtensionFromTitle } from '@slayzone/task-contracts'
 import { uniqueName } from '@slayzone/file-editor/shared'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server/artifact-paths'

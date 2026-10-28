@@ -9,13 +9,13 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { useDepsChanged } from '@slayzone/ui'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import {
   isGitTabEnabled,
   normalizeGitTabOrder,
   normalizeGitTabVisibility,
   type GitTabId
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type { UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
 import { useBranchPr } from './useBranchPr'
 

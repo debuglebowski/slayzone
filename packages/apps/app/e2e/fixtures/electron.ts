@@ -13,7 +13,7 @@ import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { pressShortcut } from './shortcuts'
 import { E2E_OWNER_ENV } from './stale-processes'
-import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
+import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)

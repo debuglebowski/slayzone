@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useState } from 'react'
 import { cn } from '@slayzone/ui'
-import type { Task, UpdateTaskInput, GitTabId } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput, GitTabId } from '@slayzone/task-contracts'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project, DetectedRepo } from '@slayzone/projects-contracts'
 import { GitDiffPanel, type GitDiffPanelHandle } from './GitDiffPanel'
@@ -18,7 +18,7 @@ import { GitPanelToolbar } from './git-panel-toolbar'
 import { ConflictPhaseContent } from './ConflictPhaseContent'
 import type { ConflictToolbarData, UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
 
-export type { GitTabId } from '@slayzone/task/shared'
+export type { GitTabId } from '@slayzone/task-contracts'
 export type { UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
 
 type UnifiedGitPanelProps = {

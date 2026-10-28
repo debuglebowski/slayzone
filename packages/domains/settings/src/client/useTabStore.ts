@@ -7,7 +7,7 @@ import {
   hubAllows,
   type TrpcVanillaClient
 } from '@slayzone/transport/client'
-import type { TaskStatus } from '@slayzone/task/shared'
+import type { TaskStatus } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 
 export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics' | 'context'

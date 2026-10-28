@@ -1,5 +1,5 @@
-import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task/shared'
-import type { RenderMode } from '@slayzone/task/shared'
+import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task-contracts'
+import type { RenderMode } from '@slayzone/task-contracts'
 import { BlobStore } from './blob-store'
 import type { DbLike } from './db'
 import { getCurrentVersion } from './resolve'

@@ -1,6 +1,6 @@
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { ProviderConfig, PanelVisibility, WebPanelUrls } from './types'
-import type { BrowserTabsState } from '@slayzone/task-browser/shared'
+import type { BrowserTabsState } from './browser-tabs'
 
 export interface TaskTemplate {
   id: string

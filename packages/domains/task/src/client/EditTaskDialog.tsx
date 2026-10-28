@@ -5,9 +5,13 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { getDefaultStatus } from '@slayzone/projects-contracts'
-import { updateTaskSchema, type UpdateTaskFormData, priorityOptions } from '@slayzone/task/shared'
+import {
+  updateTaskSchema,
+  type UpdateTaskFormData,
+  priorityOptions
+} from '@slayzone/task-contracts'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'

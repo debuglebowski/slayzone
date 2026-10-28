@@ -11,7 +11,7 @@ import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { buildCodeMirrorTheme } from './codemirror-theme'
 import type { ConflictAnalysis } from '../shared/types'
-import type { MergeContext } from '@slayzone/task/shared'
+import type { MergeContext } from '@slayzone/task-contracts'
 
 interface ConflictFileViewProps {
   repoPath: string

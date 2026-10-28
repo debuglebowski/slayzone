@@ -53,6 +53,7 @@
 @source "../../../domains/task/src";
 @source "../../../domains/task-artifacts/src";
 @source "../../../domains/task-browser/src";
+@source "../../../domains/task-contracts/src";
 @source "../../../domains/task-terminals/src";
 @source "../../../domains/tasks/src";
 @source "../../../domains/terminal/src";

@@ -3,7 +3,7 @@ import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/cli
 import { useStableCallback } from '@slayzone/ui'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal-contracts'
 import { isAliveTerminalState } from '@slayzone/terminal-contracts'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
 
 export interface IdleTask {

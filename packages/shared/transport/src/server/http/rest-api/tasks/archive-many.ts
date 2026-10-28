@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { ZodError } from 'zod'
 import { archiveManyTasksOp } from '@slayzone/task/server'
-import { archiveManyInputSchema } from '@slayzone/task/shared'
+import { archiveManyInputSchema } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { respondUnsafePath } from '../unsafe-path'

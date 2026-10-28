@@ -22,7 +22,7 @@ import {
   getTaskOp
 } from '@slayzone/task/server'
 import { capturePrompt } from '@slayzone/agent-turns/server'
-import type { ConversationOrigin } from '@slayzone/task/shared'
+import type { ConversationOrigin } from '@slayzone/task-contracts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
 import { getAuthGate } from '../../app-deps'

@@ -10,7 +10,7 @@ import {
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import type {
   Project,

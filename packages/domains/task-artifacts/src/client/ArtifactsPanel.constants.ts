@@ -1,5 +1,5 @@
 import { FileText, Code, Globe, Image, GitBranch, Monitor, Moon, Sun } from 'lucide-react'
-import type { RenderMode } from '@slayzone/task/shared'
+import type { RenderMode } from '@slayzone/task-contracts'
 
 export const INDENT_PX = 20
 export const BASE_PAD = 4

@@ -4,7 +4,7 @@
 import { Activity, useLayoutEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
-import type { ArtifactFolder } from '@slayzone/task/shared'
+import type { ArtifactFolder } from '@slayzone/task-contracts'
 import { useArtifactTree } from './useArtifactTree'
 
 const KEY = 'slayzone:artifacts-panel:expanded:t1'

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Column } from './kanban'
 import type { KanbanSelectionAPI } from './useKanbanSelection'
 

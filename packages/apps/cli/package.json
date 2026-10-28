@@ -11,6 +11,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "archiver": "^8.0.0",
     "commander": "^15.0.0"
   },

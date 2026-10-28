@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
 
 export async function getSubTasksOp(db: SlayzoneDb, parentId: string): Promise<Task[]> {

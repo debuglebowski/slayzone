@@ -143,7 +143,7 @@ vi.mock('@slayzone/projects-contracts', () => ({
   resolveRepoPath: () => ({ path: null, detected: false })
 }))
 
-vi.mock('@slayzone/task/shared', () => ({
+vi.mock('@slayzone/task-contracts', () => ({
   BUILTIN_PANEL_IDS: ['terminal', 'browser', 'diff', 'settings', 'editor', 'processes'],
   getProviderConversationId: () => null,
   getProviderFlags: () => '',

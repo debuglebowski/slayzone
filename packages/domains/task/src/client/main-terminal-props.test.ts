@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { mainTerminalProps, plainMainTerminalCwd } from './main-terminal-props'
 
 const task = (extra: Partial<Task> = {}): Task =>

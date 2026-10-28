@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { buildTaskRestoredEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, type OpDeps } from './shared.js'

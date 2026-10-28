@@ -11,7 +11,7 @@ import {
   type OpDeps,
   type TaskEventMap
 } from '@slayzone/task/server'
-import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
+import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '../trpc'
 import { getTaskBus, getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
 

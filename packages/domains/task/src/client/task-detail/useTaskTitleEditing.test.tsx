@@ -3,7 +3,7 @@
 // editing, never clobber an in-progress edit, re-sync when editing ends.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 const mutateAsync = vi.fn()
 vi.mock('@slayzone/transport/client', () => ({

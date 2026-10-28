@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'

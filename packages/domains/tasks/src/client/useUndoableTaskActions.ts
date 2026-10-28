@@ -5,7 +5,7 @@ import {
   useHubOwnershipStore,
   useTRPCClient
 } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
 export interface UndoAPI {

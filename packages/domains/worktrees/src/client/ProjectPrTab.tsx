@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'lucide-react'
 import { cn, PulseGrid } from '@slayzone/ui'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { GhPullRequest } from '../shared/types'
 import { mapPrsToTasks } from './pr-task-map'
 

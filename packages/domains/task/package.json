@@ -7,7 +7,6 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
     "./server/artifact-paths": "./src/server/artifact-paths.ts",
     "./electron": "./src/electron/index.ts",
@@ -46,6 +45,7 @@
     "@slayzone/suspense": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task-browser": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",

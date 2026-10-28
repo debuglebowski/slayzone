@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { ArrowDownToLineIcon, ArrowUpToLineIcon, Loader2 } from 'lucide-react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { Button } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'

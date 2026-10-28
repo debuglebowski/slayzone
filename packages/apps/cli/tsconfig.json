@@ -7,12 +7,7 @@
       "*": ["./*"],
       "@slayzone/projects-contracts": ["../../domains/projects-contracts/src/index.ts"],
       "@slayzone/terminal-contracts": ["../../domains/terminal-contracts/src/index.ts"],
-      "@slayzone/task/shared/types": ["../../domains/task/src/shared/types.ts"],
-      "@slayzone/task/shared/panel-config": ["../../domains/task/src/shared/panel-config.ts"],
-      "@slayzone/task/shared/handoff": ["../../domains/task/src/shared/handoff.ts"],
-      "@slayzone/task/shared/reparent-validation": [
-        "../../domains/task/src/shared/reparent-validation.ts"
-      ],
+      "@slayzone/task-contracts/types": ["../../domains/task-contracts/src/types.ts"],
       "@slayzone/ai-config/shared": ["../../domains/ai-config/src/shared/index.ts"],
       "@slayzone/automations/shared": ["../../domains/automations/src/shared/index.ts"]
     },

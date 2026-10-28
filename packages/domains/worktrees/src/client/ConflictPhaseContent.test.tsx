@@ -7,7 +7,7 @@ import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 
 type Children = { children?: React.ReactNode }
 const buttonHandlers = new Map<string, Set<unknown>>()

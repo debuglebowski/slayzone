@@ -10,8 +10,8 @@ import type {
   CreateTaskTemplateInput,
   UpdateTaskTemplateInput,
   PanelVisibility
-} from '@slayzone/task/shared'
-import { BUILTIN_PANEL_IDS } from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
+import { BUILTIN_PANEL_IDS } from '@slayzone/task-contracts'
 
 const NONE = '__none__'
 

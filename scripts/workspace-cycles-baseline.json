@@ -20,7 +20,6 @@
   "@slayzone/projects -> @slayzone/transport",
   "@slayzone/settings -> @slayzone/file-editor",
   "@slayzone/settings -> @slayzone/tags",
-  "@slayzone/settings -> @slayzone/task",
   "@slayzone/settings -> @slayzone/telemetry",
   "@slayzone/settings -> @slayzone/terminal",
   "@slayzone/settings -> @slayzone/transport",

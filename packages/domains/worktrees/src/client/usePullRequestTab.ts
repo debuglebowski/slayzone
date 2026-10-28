@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { useStablePoll } from '@slayzone/ui'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { GhPullRequest } from '../shared/types'
 import { useBranchPr } from './useBranchPr'
 

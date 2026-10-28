@@ -52,7 +52,7 @@ import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
 import type { useTasksData } from '@slayzone/tasks/client'
 import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
 import type { Project } from '@slayzone/projects-contracts'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 // Lazy chunks so the heavy settings/project-settings tab code (CodeMirror, MCP/
 // AI-provider editors, integration + test panels) stays out of the initial

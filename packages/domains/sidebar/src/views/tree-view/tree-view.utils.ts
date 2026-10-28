@@ -1,5 +1,5 @@
 import type { DragEndEvent, DragMoveEvent } from '@dnd-kit/core'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { NONE_GROUP_KEY, PINNED_GROUP_KEY } from '../treeGrouping'
 import { pointerYFromEvent, resolveDropMode } from '../projectDrop'
 import type { ProjDropMode } from './tree-view.types'

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// Mirrors UpdateTaskInput (packages/domains/task/src/shared/types.ts).
+// Mirrors UpdateTaskInput (packages/domains/task-contracts/src/types.ts).
 // Scalars validated strictly; opaque JSON-blob shapes (providerConfig,
 // panelVisibility, browserTabs, webPanelUrls, editorOpenFiles, mergeState,
 // mergeContext, loopConfig) are passthrough — their structure is defined

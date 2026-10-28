@@ -28,7 +28,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
-    "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",

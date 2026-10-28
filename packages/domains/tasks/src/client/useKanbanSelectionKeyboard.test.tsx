@@ -4,7 +4,7 @@
 // the focused card disappears, and picker close on focus change.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Column } from './kanban'
 
 // Latest registration per key string, so a test can "press" a hotkey the way

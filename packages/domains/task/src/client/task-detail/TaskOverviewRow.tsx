@@ -25,7 +25,7 @@ import {
 import { PtyProgressDot } from '@slayzone/terminal'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 export function TaskOverviewRow({
   sub,

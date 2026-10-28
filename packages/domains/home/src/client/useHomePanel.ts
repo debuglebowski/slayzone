@@ -3,7 +3,7 @@ import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { track } from '@slayzone/telemetry/client'
 import { resolvePanels, planPanelStrip } from '@slayzone/task/client/usePanelSizes'
-import type { PanelSizes, PanelConfig } from '@slayzone/task/shared'
+import type { PanelSizes, PanelConfig } from '@slayzone/task-contracts'
 import { useHomePanelState } from './useHomePanelVisibility'
 
 export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'

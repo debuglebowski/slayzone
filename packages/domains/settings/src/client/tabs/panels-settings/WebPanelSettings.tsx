@@ -1,6 +1,6 @@
 import { Trash2 } from 'lucide-react'
 import { Button, Input, Label, Switch } from '@slayzone/ui'
-import { inferProtocolFromUrl } from '@slayzone/task/shared'
+import { inferProtocolFromUrl } from '@slayzone/task-contracts'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import type { PanelSettingsState } from './usePanelSettings'

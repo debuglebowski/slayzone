@@ -1,4 +1,4 @@
-import type { Task, MergeState } from '@slayzone/task/shared'
+import type { Task, MergeState } from '@slayzone/task-contracts'
 import type { FileDiff as FileDiffType } from './parse-diff'
 
 export interface GitDiffPanelProps {

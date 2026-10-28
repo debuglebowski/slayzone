@@ -1,6 +1,6 @@
 import { FileText, Code } from 'lucide-react'
-import type { TaskArtifact } from '@slayzone/task/shared'
-import { getEffectiveRenderMode } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
+import { getEffectiveRenderMode } from '@slayzone/task-contracts'
 import { RENDER_MODE_ICONS } from './ArtifactsPanel.constants'
 
 export function formatRelativeDate(iso: string): string {

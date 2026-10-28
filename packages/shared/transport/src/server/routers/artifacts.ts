@@ -23,7 +23,7 @@ import type {
   UpdateArtifactInput,
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers

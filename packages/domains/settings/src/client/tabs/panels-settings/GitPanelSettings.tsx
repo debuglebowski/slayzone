@@ -9,8 +9,8 @@ import {
   SelectValue,
   Switch
 } from '@slayzone/ui'
-import type { GitTabId, GitTabVisibility } from '@slayzone/task/shared'
-import { isGitTabEnabled, isPanelEnabled } from '@slayzone/task/shared'
+import type { GitTabId, GitTabVisibility } from '@slayzone/task-contracts'
+import { isGitTabEnabled, isPanelEnabled } from '@slayzone/task-contracts'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import { SortableGitTabRow } from './SortableGitTabRow'

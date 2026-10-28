@@ -9,7 +9,7 @@ import {
   normalizeOverrides
 } from './usePanelSizes'
 import type { ResolvedLayout } from './usePanelSizes'
-import type { PanelLayout, PanelConfig } from '../shared/types'
+import type { PanelLayout, PanelConfig } from '@slayzone/task-contracts'
 
 const L = (
   p: Partial<PanelLayout> & { unit: PanelLayout['unit']; value: number }

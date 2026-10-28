@@ -35,7 +35,7 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../test-utils/ipc-harness.js'
-import type { CreateTaskInput, Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { CreateTaskInput, Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { taskRouter } from './task.js'
 import { setTaskDeps } from '../app-deps.js'
 import {

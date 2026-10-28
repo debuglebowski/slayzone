@@ -19,6 +19,7 @@
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",

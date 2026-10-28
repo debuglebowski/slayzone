@@ -23,7 +23,7 @@ import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { DB_PRAGMAS } from '@slayzone/platform'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
-import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task/shared'
+import { ALL_ORIGINS, HONORED_ORIGINS } from '@slayzone/task-contracts'
 
 /** Fresh in-memory DB with the full production migration chain applied. */
 function migratedDb(): Database.Database {

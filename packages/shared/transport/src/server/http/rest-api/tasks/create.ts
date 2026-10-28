@@ -1,5 +1,5 @@
 import type { Express, Response } from 'express'
-import { CreateTaskInputSchema, type Task } from '@slayzone/task/shared'
+import { CreateTaskInputSchema, type Task } from '@slayzone/task-contracts'
 import { createTaskOp, getTaskOp } from '@slayzone/task/server'
 import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'

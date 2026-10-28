@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
 

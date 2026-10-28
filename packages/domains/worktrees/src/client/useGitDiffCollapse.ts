@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 /**
  * Continuous-flow per-file collapse set, persisted per task. Distinct from the

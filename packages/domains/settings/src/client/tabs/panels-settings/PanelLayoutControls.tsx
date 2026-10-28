@@ -7,8 +7,8 @@ import {
   SelectTrigger,
   SelectValue
 } from '@slayzone/ui'
-import type { PanelConfig, PanelLayout, PanelUnit, PanelAlign } from '@slayzone/task/shared'
-import { coerceBound, panelLayoutFallback } from '@slayzone/task/shared'
+import type { PanelConfig, PanelLayout, PanelUnit, PanelAlign } from '@slayzone/task-contracts'
+import { coerceBound, panelLayoutFallback } from '@slayzone/task-contracts'
 
 /** Per-panel default layout editor (size + unit + min/max + anchor). Writes to
  *  panel_config.layout[orderId]; falls back to the hardcoded default when unset. */

@@ -16,7 +16,7 @@ import type {
   WebPanelDefinition,
   GitTabId,
   GitTabVisibility
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import {
   DEFAULT_PANEL_CONFIG,
   DEFAULT_GIT_TAB_ORDER,
@@ -28,7 +28,7 @@ import {
   normalizeGitTabOrder,
   normalizeGitTabVisibility,
   validatePanelShortcut
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 
 /** Context-line choices offered by the diff settings Select. */
 export type DiffContextLines = '0' | '3' | '5' | 'all'

@@ -11,14 +11,18 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 import { CalendarIcon, Plus } from 'lucide-react'
-import type { CreateTaskInput, Task } from '@slayzone/task/shared'
-import type { CreateTaskDraft } from '@slayzone/task/shared'
+import type { CreateTaskInput, Task } from '@slayzone/task-contracts'
+import type { CreateTaskDraft } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import { getDefaultStatus } from '@slayzone/projects-contracts'
 import { track } from '@slayzone/telemetry/client'
-import { createTaskSchema, type CreateTaskFormData, priorityOptions } from '@slayzone/task/shared'
+import {
+  createTaskSchema,
+  type CreateTaskFormData,
+  priorityOptions
+} from '@slayzone/task-contracts'
 import { buildCreateTaskFormDefaults } from './createTaskFormDefaults'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@slayzone/ui'

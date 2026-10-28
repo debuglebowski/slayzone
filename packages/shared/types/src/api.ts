@@ -28,7 +28,7 @@ import type {
   ArtifactFolder,
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type {
   ArtifactVersion,
   VersionRef,
@@ -134,7 +134,7 @@ import type {
   RepoEntry,
   ListProjectReposOpts
 } from '@slayzone/worktrees/shared'
-import type { MergeContext } from '@slayzone/task/shared'
+import type { MergeContext } from '@slayzone/task-contracts'
 import type {
   AiConfigItem,
   AiConfigProjectSelection,

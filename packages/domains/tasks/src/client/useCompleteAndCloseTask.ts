@@ -7,7 +7,7 @@ import {
   useTRPCClient
 } from '@slayzone/transport/client'
 import { getDoneStatus, type Project } from '@slayzone/projects-contracts'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { toast } from '@slayzone/ui'
 import type { CloseTaskTabOptions } from './useCloseTaskTab'
 import type { UndoAPI } from './useUndoableTaskActions'

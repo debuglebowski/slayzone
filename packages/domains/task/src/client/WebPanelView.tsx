@@ -20,8 +20,8 @@ import {
   isUrlWithinHostScope,
   normalizeDesktopHostScope,
   normalizeDesktopProtocol
-} from '../shared/handoff'
-import type { DesktopHandoffPolicy } from '../shared/types'
+} from '@slayzone/task-contracts'
+import type { DesktopHandoffPolicy } from '@slayzone/task-contracts'
 import { useState } from 'react'
 
 interface WebPanelViewProps {

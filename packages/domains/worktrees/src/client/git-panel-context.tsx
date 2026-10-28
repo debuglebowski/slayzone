@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project } from '@slayzone/projects-contracts'
 

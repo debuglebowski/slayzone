@@ -8,7 +8,7 @@ import type {
   UpdateArtifactInput,
   ArtifactFolder,
   UpdateArtifactFolderInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type {
   ArtifactVersion,
   VersionRef,

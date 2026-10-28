@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { ZodError } from 'zod'
-import { unarchiveInputSchema } from '@slayzone/task/shared'
+import { unarchiveInputSchema } from '@slayzone/task-contracts'
 import { unarchiveTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'

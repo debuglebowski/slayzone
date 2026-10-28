@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { apiGet, apiPost, apiPatch, apiDelete } from '../api'
-import type { WebPanelDefinition } from '@slayzone/task/shared/types'
+import type { WebPanelDefinition } from '@slayzone/task-contracts/types'
 
 type PanelWithEnabled = WebPanelDefinition & { enabled?: boolean }
 

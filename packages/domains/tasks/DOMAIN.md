@@ -13,6 +13,6 @@ Kanban board view for task management. Client-only domain (shared/ and main/ are
 
 ## Dependencies
 
-- `@slayzone/task/shared` - Task types
+- `@slayzone/task-contracts` - Task types
 - `@slayzone/terminal` - usePty for card status indicator
 - `@dnd-kit/*` - Drag and drop

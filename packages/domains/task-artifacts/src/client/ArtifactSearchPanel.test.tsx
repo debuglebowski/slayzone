@@ -7,7 +7,7 @@
 import { Activity } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { TaskArtifact } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
 
 const artifact = (id: string, title: string): TaskArtifact =>

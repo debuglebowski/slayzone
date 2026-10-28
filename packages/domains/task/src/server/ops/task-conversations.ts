@@ -4,7 +4,7 @@ import {
   HONORED_ORIGINS,
   HONORED_ORIGINS_SQL,
   type ConversationOrigin
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { agentSessionsEvents } from '../events'
 import { isTurnTrackedMode } from './agent-sessions'
 

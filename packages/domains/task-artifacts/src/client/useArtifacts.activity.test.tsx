@@ -10,7 +10,7 @@ import { Activity } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ArtifactFolder, TaskArtifact } from '@slayzone/task/shared'
+import type { ArtifactFolder, TaskArtifact } from '@slayzone/task-contracts'
 
 type Row = Record<string, unknown> & { id: string }
 // The hub: rows per procedure, keyed by task.

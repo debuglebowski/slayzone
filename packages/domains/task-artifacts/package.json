@@ -25,6 +25,7 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

@@ -4,7 +4,7 @@
 import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 type Children = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', () => ({

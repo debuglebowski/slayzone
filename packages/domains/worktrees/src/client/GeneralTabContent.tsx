@@ -4,7 +4,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { GitBranch, FolderOpen, ArrowLeft, Cloud, CloudOff } from 'lucide-react'
 import { Button, toast, safeClipboardWriteText } from '@slayzone/ui'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { useConsolidatedGeneralData } from './useConsolidatedGeneralData'
 import {
   useBranchGraph,

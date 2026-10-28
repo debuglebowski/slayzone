@@ -15,7 +15,7 @@
     "@slayzone/mojo-bindings": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
-    "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/types": "workspace:*"

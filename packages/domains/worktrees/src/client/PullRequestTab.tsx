@@ -2,7 +2,7 @@ import { GitPullRequest, Link2, Plus, Unlink, AlertTriangle } from 'lucide-react
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Button, PulseGrid } from '@slayzone/ui'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { LinkedPrView } from './LinkedPrView'
 import { CreatePrDialog, LinkPrDialog } from './pr-dialogs'
 import { usePullRequestTab } from './usePullRequestTab'

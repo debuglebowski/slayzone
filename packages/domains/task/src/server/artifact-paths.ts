@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { getExtensionFromTitle } from '@slayzone/task-contracts'
 
 // The ONE place an artifact's on-disk location is computed:
 // `<dataDir>/artifacts/<taskId>/<artifactId><ext>`. The store, the named txns, task

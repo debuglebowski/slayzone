@@ -31,7 +31,7 @@ import {
   ContextMenuSubContent,
   formatKeysForDisplay
 } from '@slayzone/ui'
-import type { TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
+import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import {
   getEffectiveRenderMode,
   getExtensionFromTitle,
@@ -39,7 +39,7 @@ import {
   canExportAsPdf,
   canExportAsPng,
   canExportAsHtml
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { INDENT_PX, BASE_PAD } from './ArtifactsPanel.constants'
 import { getArtifactIcon, formatRelativeDate } from './ArtifactsPanel.utils'
 

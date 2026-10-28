@@ -18,12 +18,12 @@ import {
 } from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
-import type { RenderMode, TaskArtifact } from '@slayzone/task/shared'
+import type { RenderMode, TaskArtifact } from '@slayzone/task-contracts'
 import {
   getEffectiveRenderMode,
   getExtensionFromTitle,
   isBinaryRenderMode
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { Markdown, MermaidBlock, MediaView } from '@slayzone/markdown/client'
 import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'

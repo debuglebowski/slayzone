@@ -56,7 +56,7 @@ import {
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
 import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
-import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
+import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import {
   getEffectiveRenderMode,
   RENDER_MODE_INFO,
@@ -65,7 +65,7 @@ import {
   canExportAsPdf,
   canExportAsPng,
   canExportAsHtml
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'

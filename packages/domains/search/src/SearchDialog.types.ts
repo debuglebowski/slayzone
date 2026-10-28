@@ -1,5 +1,5 @@
 import type { Tab } from '@slayzone/settings'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { PaletteCommand } from '@slayzone/ui'
 

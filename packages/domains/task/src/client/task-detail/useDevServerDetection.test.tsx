@@ -4,7 +4,7 @@
 // opening the browser panel clears a showing one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 let buffer = ''
 const trpcClient = {

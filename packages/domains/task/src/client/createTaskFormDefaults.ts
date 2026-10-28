@@ -1,5 +1,5 @@
-import type { CreateTaskFormData } from '@slayzone/task/shared'
-import type { CreateTaskDraft } from '@slayzone/task/shared'
+import type { CreateTaskFormData } from '@slayzone/task-contracts'
+import type { CreateTaskDraft } from '@slayzone/task-contracts'
 
 export function buildCreateTaskFormDefaults(
   draft: CreateTaskDraft = {},

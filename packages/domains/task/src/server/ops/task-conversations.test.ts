@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
-import { ALL_ORIGINS } from '@slayzone/task/shared'
+import { ALL_ORIGINS } from '@slayzone/task-contracts'
 import {
   recordConversation,
   getCurrentConversationId,

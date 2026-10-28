@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { archiveManyTasksOp } from '@slayzone/task/server'
-import { archiveManyInputSchema } from '@slayzone/task/shared'
+import { archiveManyInputSchema } from '@slayzone/task-contracts'
 import { NOOP_TASK_BUS } from '../rest-api/types'
 import type { McpToolsDeps } from './types'
 

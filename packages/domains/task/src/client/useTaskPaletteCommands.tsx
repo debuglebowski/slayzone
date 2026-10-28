@@ -61,7 +61,7 @@ import { track } from '@slayzone/telemetry/client'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
-import { priorityOptions, type Task, type TaskTemplate } from '@slayzone/task/shared'
+import { priorityOptions, type Task, type TaskTemplate } from '@slayzone/task-contracts'
 import { getSnoozePresets } from './SnoozePicker'
 
 const selectTasks = (board: { tasks: Task[] }): Task[] => board.tasks

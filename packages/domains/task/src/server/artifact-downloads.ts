@@ -16,7 +16,7 @@ import {
   canExportAsPng,
   canExportAsHtml,
   type RenderMode
-} from '../shared'
+} from '@slayzone/task-contracts'
 import { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
 import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
 

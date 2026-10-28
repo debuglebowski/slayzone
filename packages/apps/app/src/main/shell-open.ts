@@ -8,7 +8,7 @@ import {
   normalizeDesktopHostScope,
   normalizeDesktopProtocol,
   type DesktopHandoffPolicy
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 
 // Pure shell ops shared by the IPC handlers (shell:open-external / shell:open-path)
 // and the tRPC `app.shell` router (via setAppDeps). Both transports delegate here

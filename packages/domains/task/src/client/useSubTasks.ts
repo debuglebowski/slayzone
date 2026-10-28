@@ -8,7 +8,7 @@ import {
 } from '@slayzone/transport/client'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
-import type { CreateTaskInput, Task } from '@slayzone/task/shared'
+import type { CreateTaskInput, Task } from '@slayzone/task-contracts'
 import { track } from '@slayzone/telemetry/client'
 
 export interface UseSubTasksReturn {

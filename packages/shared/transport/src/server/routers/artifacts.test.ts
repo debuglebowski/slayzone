@@ -14,7 +14,7 @@ import type {
   CreateTaskInput,
   CreateArtifactInput,
   CreateArtifactFolderInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { artifactsRouter } from './artifacts.js'
 import { taskOps } from '@slayzone/task/server'
 

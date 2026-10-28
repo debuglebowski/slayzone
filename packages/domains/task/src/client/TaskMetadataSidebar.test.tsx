@@ -2,7 +2,7 @@
 import React, { Activity } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 // Stand-in prop shapes: only what the sidebar tree actually passes to each
 // primitive, so a changed call site fails here instead of silently drifting.

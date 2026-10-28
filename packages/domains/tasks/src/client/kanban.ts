@@ -1,5 +1,5 @@
-import type { Task } from '@slayzone/task/shared'
-import type { CreateTaskDraft } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
+import type { CreateTaskDraft } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { isTerminalStatus, resolveColumns } from '@slayzone/projects-contracts'
 import {

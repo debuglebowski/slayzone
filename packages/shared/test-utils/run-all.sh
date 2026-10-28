@@ -196,9 +196,9 @@ run_harness packages/apps/hub/src/web-sessions.test.ts
 # Password sign-in off (T-10): every password route 403s with the switch code before the
 # gate; break-glass (O-9) opens/closes with the switch over real hub-auth + app DB.
 run_harness packages/apps/hub/src/password-switch.test.ts
-run_harness packages/domains/task/src/shared/revive-decision.test.ts
-run_harness packages/domains/task/src/shared/provider-config-history.test.ts
-run_harness packages/domains/task/src/shared/conversation-heal.test.ts
+run_harness packages/domains/task-contracts/src/revive-decision.test.ts
+run_harness packages/domains/task-contracts/src/provider-config-history.test.ts
+run_harness packages/domains/task-contracts/src/conversation-heal.test.ts
 run_harness packages/domains/task/src/client/card-water-fill.test.ts
 # Workflow columns — statuses shared by several projects (bulk status menu).
 run_harness packages/shared/workflow/src/columns.test.ts
@@ -705,9 +705,9 @@ run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
-run_harness packages/domains/task/src/shared/handoff.test.ts
-run_harness packages/domains/task/src/shared/panel-config.test.ts
-run_harness packages/domains/task/src/shared/reparent-validation.test.ts
+run_harness packages/domains/task-contracts/src/handoff.test.ts
+run_harness packages/domains/task-contracts/src/panel-config.test.ts
+run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/client/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/client/useLoopMode.test.ts
 run_harness packages/domains/terminal/src/client/web-link-provider.test.ts
@@ -897,7 +897,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/TaskSettingsPanel.test.tsx \
   packages/domains/task/src/client/createTaskFormDefaults.test.ts \
   packages/domains/task/src/client/usePanelSizes.test.ts \
-  packages/domains/task/src/shared/create-task-draft.test.ts \
+  packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/GhMarkdown.test.tsx \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
   packages/domains/worktrees/src/client/highlight.test.ts \

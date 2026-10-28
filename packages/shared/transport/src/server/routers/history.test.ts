@@ -17,7 +17,7 @@ import { tagsRouter } from './tags.js'
 import { historyRouter } from './history.js'
 import { setTaskDeps } from '../app-deps.js'
 import { taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 
 const h = await createTestHarness()
 setTaskDeps({ ops: taskOps })

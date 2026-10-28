@@ -7,7 +7,7 @@ import { Activity, createRef, type RefObject } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { GitTabId, Task } from '@slayzone/task/shared'
+import type { GitTabId, Task } from '@slayzone/task-contracts'
 import type { UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }

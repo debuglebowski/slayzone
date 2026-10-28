@@ -1,6 +1,6 @@
 import type { Express, Response } from 'express'
 import { createArtifactStore } from '@slayzone/task-artifacts/server'
-import type { RenderMode } from '@slayzone/task/shared'
+import type { RenderMode } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'

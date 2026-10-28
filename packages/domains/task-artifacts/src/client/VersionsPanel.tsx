@@ -17,7 +17,7 @@ import {
   TabsTrigger,
   toast
 } from '@slayzone/ui'
-import type { TaskArtifact } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactVersion, VersionRef } from '@slayzone/task-artifacts/shared'
 import { ArtifactVersionsDialog } from './ArtifactVersionsDialog'
 import { ArtifactVersionDiffView } from './ArtifactVersionDiffView'

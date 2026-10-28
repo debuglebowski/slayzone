@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { dirname } from 'node:path'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
-import { getEffectiveRenderMode, canExportAsPng, type RenderMode } from '@slayzone/task/shared'
+import { getEffectiveRenderMode, canExportAsPng, type RenderMode } from '@slayzone/task-contracts'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'

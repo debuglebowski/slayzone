@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from 'react'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
-import type { TaskArtifact } from '@slayzone/task/shared'
-import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
+import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task-contracts'
 import { depsChanged, useDepsChanged } from '@slayzone/ui'
 
 interface ArtifactSearchPanelProps {

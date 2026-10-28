@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { getExtensionFromTitle } from '@slayzone/task-contracts'
 import { isPathSafeId } from '@slayzone/platform/safe-path'
 import { BlobStore } from './blob-store'
 import { betterSqliteTxn, type DbLike } from './db'
@@ -47,7 +47,7 @@ import type {
  *     it can't be serialized, so the caller sends the data dir instead.
  *
  * Pure: imports only node builtins, better-sqlite3 (type-only), the pure
- * `@slayzone/task/shared` string helper, and this domain's own pure logic — so
+ * `@slayzone/task-contracts` string helper, and this domain's own pure logic — so
  * it is safe to pull into the worker bundle (unlike the React/electron-laden
  * `/main` barrel).
  *

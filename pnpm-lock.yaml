@@ -393,6 +393,9 @@ importers:
       '@slayzone/task-browser':
         specifier: workspace:*
         version: link:../../domains/task-browser
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
@@ -593,6 +596,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       archiver:
         specifier: ^8.0.0
         version: 8.0.0
@@ -694,6 +700,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
@@ -806,6 +815,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks
@@ -907,9 +919,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/task':
+      '@slayzone/task-contracts':
         specifier: workspace:*
-        version: link:../task
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1258,6 +1270,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1335,6 +1350,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../tasks
@@ -1576,9 +1594,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
-      '@slayzone/task':
+      '@slayzone/task-contracts':
         specifier: workspace:*
-        version: link:../task
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1631,9 +1649,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
-      '@slayzone/task':
+      '@slayzone/task-contracts':
         specifier: workspace:*
-        version: link:../task
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1701,9 +1719,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
-      '@slayzone/task':
+      '@slayzone/task-contracts':
         specifier: workspace:*
-        version: link:../task
+        version: link:../task-contracts
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../tasks
@@ -1839,6 +1857,9 @@ importers:
       '@slayzone/task-browser':
         specifier: workspace:*
         version: link:../task-browser
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../task-terminals
@@ -1921,6 +1942,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1982,6 +2006,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -2004,6 +2031,15 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+
+  packages/domains/task-contracts:
+    dependencies:
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../terminal-contracts
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
 
   packages/domains/task-terminals:
     dependencies:
@@ -2080,6 +2116,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -2345,6 +2384,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../tasks
@@ -2733,6 +2775,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
@@ -2854,6 +2899,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
@@ -3011,9 +3059,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
-      '@slayzone/task':
+      '@slayzone/task-contracts':
         specifier: workspace:*
-        version: link:../../domains/task
+        version: link:../../domains/task-contracts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals

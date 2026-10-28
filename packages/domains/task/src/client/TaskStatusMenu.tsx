@@ -22,7 +22,7 @@ import {
   type StatusOption
 } from '@slayzone/ui'
 import { Circle, ShieldAlert, AlarmClock, Check, ListChecks, MessageSquare } from 'lucide-react'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { track } from '@slayzone/telemetry/client'
 import { CustomSnoozeDialog } from './SnoozePicker'

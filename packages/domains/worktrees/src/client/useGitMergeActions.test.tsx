@@ -7,7 +7,7 @@ import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 
 const calls: Array<[string, unknown]> = []
 const mutation = (name: string, result?: unknown) => ({

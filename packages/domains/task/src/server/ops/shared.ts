@@ -1,11 +1,11 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig, Task, TasksChange, UpdateTaskInput } from '@slayzone/task/shared'
+import type { ProviderConfig, Task, TasksChange, UpdateTaskInput } from '@slayzone/task-contracts'
 import {
   prioritySchema,
   validateReparent,
   reparentErrorMessage,
   type ReparentTaskRow
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import { recordConversation } from './task-conversations.js'
 // The resume predicate is DEFINED in agent-sessions.ts and interpolated here, so
 // the renderer's hint and the spawn-time resolver cannot answer the same question

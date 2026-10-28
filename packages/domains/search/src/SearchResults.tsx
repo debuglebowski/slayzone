@@ -9,7 +9,7 @@ import {
 } from '@slayzone/ui'
 import { CheckSquare, Folder } from 'lucide-react'
 import { FileIcon } from '@slayzone/icons'
-import { priorityOptions } from '@slayzone/task/shared'
+import { priorityOptions } from '@slayzone/task-contracts'
 import type { ActionId, SearchItem, TaskTab } from './SearchDialog.types'
 import type { GroupedResults } from './SearchDialog.algorithm'
 import { ACTION_DEFS, ACTION_ICONS } from './SearchDialog.constants'

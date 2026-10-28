@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import type { Express } from 'express'
 import { SettingsService, type SettingsView } from '@slayzone/settings/server'
-import type { PanelConfig, WebPanelDefinition } from '@slayzone/task/shared'
+import type { PanelConfig, WebPanelDefinition } from '@slayzone/task-contracts'
 import {
   DEFAULT_PANEL_CONFIG,
   inferHostScopeFromUrl,
@@ -11,7 +11,7 @@ import {
   mergePredefinedWebPanels,
   normalizeDesktopProtocol,
   validatePanelShortcut
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { restPrincipalOf } from '../principal'
 

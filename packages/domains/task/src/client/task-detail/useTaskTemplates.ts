@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import type { Task, TaskTemplate } from '@slayzone/task/shared'
+import type { Task, TaskTemplate } from '@slayzone/task-contracts'
 
 /** Loads task templates for the task's project (only for temporary tasks). */
 export function useTaskTemplates(task: Task | null): { templates: TaskTemplate[] } {

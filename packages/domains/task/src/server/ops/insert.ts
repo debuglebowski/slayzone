@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig, Task } from '@slayzone/task/shared'
+import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { buildTaskCreatedEvents } from '../history.js'
 import { parseTask } from './shared.js'

@@ -40,8 +40,8 @@ import type {
   PanelSizes,
   UpdateTaskInput,
   GitTabId
-} from '@slayzone/task/shared'
-import type { TaskTemplate } from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
+import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { TaskDetailData } from './taskDetailCache'
 import { mainTerminalProps } from './main-terminal-props'
 import {
@@ -50,7 +50,7 @@ import {
   setProviderFlags,
   clearAllConversationIds,
   priorityOptions
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
@@ -111,7 +111,7 @@ import {
   getExtensionFromTitle,
   getEffectiveRenderMode,
   RENDER_MODE_INFO
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import {
   useTheme,
   useDialogStore,

@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { updateTaskInputSchema, type UpdateTaskInput } from '@slayzone/task/shared'
+import { updateTaskInputSchema, type UpdateTaskInput } from '@slayzone/task-contracts'
 import { updateTaskOp } from '@slayzone/task/server'
 import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'

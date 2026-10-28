@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import { motion } from 'motion/react'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
 import type { Project } from '@slayzone/projects-contracts'

@@ -21,6 +21,7 @@
     "@slayzone/ui": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@dnd-kit/core": "^6.3.1",

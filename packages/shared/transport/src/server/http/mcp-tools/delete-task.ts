@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { deleteTaskOp } from '@slayzone/task/server'
-import { deleteTaskInputSchema } from '@slayzone/task/shared'
+import { deleteTaskInputSchema } from '@slayzone/task-contracts'
 import { NOOP_TASK_BUS } from '../rest-api/types'
 import type { McpToolsDeps } from './types'
 

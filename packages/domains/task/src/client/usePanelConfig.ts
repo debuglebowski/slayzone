@@ -1,14 +1,14 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, getTrpcClient } from '@slayzone/transport/client'
-import type { PanelConfig, PanelView, WebPanelDefinition } from '../shared/types'
+import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task-contracts'
 import {
   DEFAULT_PANEL_CONFIG,
   isPanelEnabled,
   orderIdToTaskId,
   orderIdToHomeId
-} from '../shared/types'
-import { mergePanelOrder, mergePredefinedWebPanels } from '../shared/panel-config'
+} from '@slayzone/task-contracts'
+import { mergePanelOrder, mergePredefinedWebPanels } from '@slayzone/task-contracts'
 
 const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'

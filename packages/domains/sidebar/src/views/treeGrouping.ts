@@ -1,4 +1,4 @@
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects-contracts'
 import type { TreeGroupBy, TreeOrderBy, TreeOrderDir } from '@slayzone/settings'
 

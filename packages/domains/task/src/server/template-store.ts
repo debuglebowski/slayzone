@@ -4,7 +4,7 @@ import type {
   TaskTemplate,
   CreateTaskTemplateInput,
   UpdateTaskTemplateInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 
 // Electron-free task-template store. Single implementation behind both the IPC
 // handlers (../main/template-handlers.ts) and the tRPC `template` router. Logic

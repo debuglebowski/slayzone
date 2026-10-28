@@ -7,8 +7,8 @@ import {
   Settings2,
   SquareTerminal
 } from 'lucide-react'
-import type { PanelConfig, PanelView } from '@slayzone/task/shared'
-import { isPanelEnabled, panelLayoutFallback } from '@slayzone/task/shared'
+import type { PanelConfig, PanelView } from '@slayzone/task-contracts'
+import { isPanelEnabled, panelLayoutFallback } from '@slayzone/task-contracts'
 import type { PanelRowDescriptor } from './panels-settings.types'
 
 /** Format a panel's effective default layout size for the row badge. */

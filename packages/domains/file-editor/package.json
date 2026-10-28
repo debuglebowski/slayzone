@@ -44,6 +44,7 @@
     "@slayzone/icons": "workspace:*",
     "@slayzone/markdown": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

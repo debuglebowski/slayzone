@@ -1,6 +1,6 @@
 import type { ComponentType, RefAttributes } from 'react'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
-import type { GitTabId, Task, TaskArtifact, UpdateTaskInput } from '@slayzone/task/shared'
+import type { GitTabId, Task, TaskArtifact, UpdateTaskInput } from '@slayzone/task-contracts'
 
 /**
  * Panels and data hooks the task page embeds from features built ON TOP of task

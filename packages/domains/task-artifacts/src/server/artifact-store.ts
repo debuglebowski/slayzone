@@ -9,7 +9,7 @@ import type {
   ArtifactFolder,
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import type { AuthorContext, VersionRef, ArtifactVersion, DiffResult, PruneReport } from '../shared'
 import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // Pure node:fs/crypto path math — the blob PATH for a content hash, so a caller

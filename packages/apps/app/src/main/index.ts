@@ -102,7 +102,7 @@ import {
   normalizeDesktopHostScope,
   normalizeDesktopProtocol,
   type DesktopHandoffPolicy
-} from '@slayzone/task/shared'
+} from '@slayzone/task-contracts'
 import {
   toElectronAccelerator,
   matchesElectronInput,

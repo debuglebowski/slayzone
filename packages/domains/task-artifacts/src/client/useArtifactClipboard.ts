@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { useDepsChanged } from '@slayzone/ui'
-import type { TaskArtifact } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
 
 interface UseArtifactClipboardArgs {
   taskId: string

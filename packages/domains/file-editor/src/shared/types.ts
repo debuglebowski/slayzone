@@ -58,14 +58,4 @@ export interface GitStatusMap {
   isGitRepo: boolean
 }
 
-export type MarkdownViewMode = 'rich' | 'split' | 'code'
-
-export interface EditorOpenFilesState {
-  files: string[]
-  activeFile: string | null
-  treeWidth?: number
-  treeVisible?: boolean
-  expandedFolders?: string[]
-  fileViewModes?: Record<string, MarkdownViewMode>
-  tocWidth?: number
-}
+export type { MarkdownViewMode, EditorOpenFilesState } from '@slayzone/task-contracts'

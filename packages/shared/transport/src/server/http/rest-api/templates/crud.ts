@@ -6,7 +6,7 @@ import {
   listTemplatesByProject,
   updateTemplate
 } from '@slayzone/task/server'
-import type { UpdateTaskTemplateInput } from '@slayzone/task/shared'
+import type { UpdateTaskTemplateInput } from '@slayzone/task-contracts'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix, resolveProjectRef } from '../resolve'

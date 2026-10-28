@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig } from '@slayzone/task/shared'
+import type { ProviderConfig } from '@slayzone/task-contracts'
 import { safeJsonParse } from './shared.js'
 
 /**

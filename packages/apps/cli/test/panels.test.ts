@@ -5,21 +5,21 @@
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAllAsync } from './test-harness.js'
-import type { PanelConfig, WebPanelDefinition } from '../../../domains/task/src/shared/types.js'
+import type { PanelConfig, WebPanelDefinition } from '../../../domains/task-contracts/src/types.js'
 import {
   DEFAULT_PANEL_CONFIG,
   PREDEFINED_WEB_PANELS,
   isPanelEnabled
-} from '../../../domains/task/src/shared/types.js'
+} from '../../../domains/task-contracts/src/types.js'
 import {
   mergePredefinedWebPanels,
   validatePanelShortcut
-} from '../../../domains/task/src/shared/panel-config.js'
+} from '../../../domains/task-contracts/src/panel-config.js'
 import {
   normalizeDesktopProtocol,
   inferProtocolFromUrl,
   inferHostScopeFromUrl
-} from '../../../domains/task/src/shared/handoff.js'
+} from '../../../domains/task-contracts/src/handoff.js'
 
 const h = await createTestHarness()
 afterAll(() => h.cleanup())

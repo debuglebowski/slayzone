@@ -19,6 +19,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@slayzone/platform": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

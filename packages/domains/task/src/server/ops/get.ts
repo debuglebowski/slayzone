@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { parseAndColorTask } from './shared.js'
 
 export async function getTaskOp(db: SlayzoneDb, id: string): Promise<Task | null> {

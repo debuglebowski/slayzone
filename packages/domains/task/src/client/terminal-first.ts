@@ -1,4 +1,4 @@
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { plainMainTerminalCwd } from './main-terminal-props'
 

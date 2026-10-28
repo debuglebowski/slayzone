@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import { cn, useShortcutDisplay } from '@slayzone/ui'
-import type { Task, GitTabId } from '@slayzone/task/shared'
+import type { Task, GitTabId } from '@slayzone/task-contracts'
 
 export function GitPanelTabBar({
   tabOrder,

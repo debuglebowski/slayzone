@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ArtifactFolder, TaskArtifact } from '@slayzone/task/shared'
+import type { ArtifactFolder, TaskArtifact } from '@slayzone/task-contracts'
 
 interface UseArtifactTreeArgs {
   taskId: string

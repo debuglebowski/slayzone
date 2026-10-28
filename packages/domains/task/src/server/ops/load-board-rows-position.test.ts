@@ -10,7 +10,7 @@ import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
 import { createTaskOp } from './create.js'
 import { loadBoardDataOp, loadBoardRowsOp } from './load-board-data.js'
-import type { TasksChange } from '../../shared/tasks-changed.js'
+import type { TasksChange } from '@slayzone/task-contracts'
 
 async function setup() {
   const h = await createTestHarness()

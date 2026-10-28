@@ -27,7 +27,7 @@ import {
 } from '@slayzone/ui'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, MountWhenOpened } from '@slayzone/ui'
 import { Button, Textarea, safeClipboardWriteText } from '@slayzone/ui'
-import type { Task, TaskStatus } from '@slayzone/task/shared'
+import type { Task, TaskStatus } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'

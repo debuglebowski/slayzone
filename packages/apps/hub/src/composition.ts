@@ -59,7 +59,7 @@ import {
   registerConversationResolver,
   taskSessionStore
 } from '@slayzone/task/server'
-import type { TasksChange } from '@slayzone/task/shared'
+import type { TasksChange } from '@slayzone/task-contracts'
 import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
 import {
   createPtyOps,

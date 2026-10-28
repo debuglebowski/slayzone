@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/task": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",

@@ -14,7 +14,7 @@ import {
   canExportAsPng,
   canExportAsHtml,
   type RenderMode
-} from '@slayzone/task/shared/types'
+} from '@slayzone/task-contracts/types'
 import {
   apiGet,
   apiPost,

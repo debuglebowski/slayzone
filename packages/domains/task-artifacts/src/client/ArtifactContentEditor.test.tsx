@@ -9,7 +9,7 @@ import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
-import type { TaskArtifact } from '@slayzone/task/shared'
+import type { TaskArtifact } from '@slayzone/task-contracts'
 
 // Stable clients, like the real providers' (the editor's callbacks depend on them).
 vi.mock('@slayzone/transport/client', () => {

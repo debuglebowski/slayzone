@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { parseColumnsConfig } from '@slayzone/projects-contracts'
-import type { ProviderConfig } from '@slayzone/task/shared'
+import type { ProviderConfig } from '@slayzone/task-contracts'
 
 export async function getProjectColumns(
   db: SlayzoneDb,

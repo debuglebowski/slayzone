@@ -38,7 +38,7 @@ import { DebuggerHolders, type DebuggerHolder } from './debugger-holders'
 import { isEngagementInputType, shouldReportEngagement } from '@slayzone/terminal/server'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
-import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
+import type { DesktopHandoffPolicy } from '@slayzone/task-contracts'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 import {
   buildBrowserLinkContextMenuItems,

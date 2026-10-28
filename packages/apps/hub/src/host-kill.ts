@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { setOnHostKillHandler } from '@slayzone/terminal/server'
-import { setProviderLastKilledAt } from '@slayzone/task/shared'
-import type { ProviderConfig } from '@slayzone/task/shared'
+import { setProviderLastKilledAt } from '@slayzone/task-contracts'
+import type { ProviderConfig } from '@slayzone/task-contracts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 /**

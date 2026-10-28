@@ -38,7 +38,7 @@ import type {
   StashApplyResult,
   WorktreeSubmoduleResult
 } from '../shared/types'
-import type { MergeContext } from '@slayzone/task/shared'
+import type { MergeContext } from '@slayzone/task-contracts'
 import {
   execAsync,
   execGit,

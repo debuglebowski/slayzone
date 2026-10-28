@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { Check, X } from 'lucide-react'
 import { Button, Checkbox, cn } from '@slayzone/ui'
-import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task/shared'
+import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task-contracts'
 import { ConflictFileView } from './ConflictFileView'
 import type { ConflictToolbarData } from './UnifiedGitPanel.types'
 

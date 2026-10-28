@@ -1,6 +1,6 @@
 import type { TerminalMode, LoopConfig } from '@slayzone/terminal-contracts'
-import type { BrowserTabsState } from '@slayzone/task-browser/shared'
-import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
+import type { BrowserTabsState } from './browser-tabs'
+import type { EditorOpenFilesState } from './editor-open-files'
 
 // Built-in starter statuses used as defaults for new projects.
 export const BUILTIN_STATUSES = [

@@ -11,7 +11,7 @@ import {
   type DragEndEvent
 } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { groupTasksBy, columnToCreateTaskDraft, type Column } from './kanban'

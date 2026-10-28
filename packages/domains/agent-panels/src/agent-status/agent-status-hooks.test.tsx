@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { DEFAULT_AGENT_STATUS_PANEL_WIDTH, useAgentStatusState } from './useAgentStatusState'
 import { useActiveSessionTaskIds, useIdleTasks } from './useIdleTasks'
 

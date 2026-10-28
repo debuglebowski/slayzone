@@ -8,13 +8,13 @@ import type {
   PanelSizeOverride,
   PanelSizes,
   PanelConfig
-} from '../shared/types'
+} from '@slayzone/task-contracts'
 import {
   taskIdToOrderId,
   panelLayoutFallback,
   coerceBound,
   DEFAULT_PANEL_MIN_WIDTH
-} from '../shared/types'
+} from '@slayzone/task-contracts'
 
 export type { PanelLayout, PanelSizeOverride, PanelSizes }
 

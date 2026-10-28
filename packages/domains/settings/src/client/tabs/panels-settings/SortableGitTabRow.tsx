@@ -2,8 +2,8 @@ import { GripVertical } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Switch, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
-import type { GitTabId } from '@slayzone/task/shared'
-import { GIT_TAB_LABELS } from '@slayzone/task/shared'
+import type { GitTabId } from '@slayzone/task-contracts'
+import { GIT_TAB_LABELS } from '@slayzone/task-contracts'
 
 export function SortableGitTabRow({
   id,

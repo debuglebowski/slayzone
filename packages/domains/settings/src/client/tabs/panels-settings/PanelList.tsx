@@ -10,7 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@slayzone/ui'
-import { inferProtocolFromUrl } from '@slayzone/task/shared'
+import { inferProtocolFromUrl } from '@slayzone/task-contracts'
 import { buildPanelRowDescriptors } from './panels-settings.utils'
 import { SortablePanelRow } from './SortablePanelRow'
 import type { PanelSettingsState } from './usePanelSettings'

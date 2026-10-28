@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { TasksChange } from '@slayzone/task/shared'
+import type { TasksChange } from '@slayzone/task-contracts'
 import type { MenuEventMap } from '../../../app-deps'
 
 interface StoredTab {

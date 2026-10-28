@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogDescription
 } from '@slayzone/ui'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import { PrStateIcon } from './pr-badges'
 
 // --- Create PR dialog ---

@@ -1,9 +1,9 @@
 import { createSuspenseCache } from '@slayzone/suspense'
 import { getTrpcClient, getHubClient, type TrpcVanillaClient } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
-import type { PanelVisibility, PanelSizes } from '@slayzone/task/shared'
+import type { PanelVisibility, PanelSizes } from '@slayzone/task-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import { normalizeOverrides } from './usePanelSizes'
 

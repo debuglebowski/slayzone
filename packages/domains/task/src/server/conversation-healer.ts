@@ -15,7 +15,7 @@ import {
   parseSqliteUtc,
   type HealTranscriptMeta,
   type TasksChange
-} from '../shared/index.js'
+} from '@slayzone/task-contracts'
 import {
   getTaskOp,
   collectReferencedConversationIds,

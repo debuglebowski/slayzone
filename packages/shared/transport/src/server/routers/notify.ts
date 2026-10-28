@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '../trpc'
-import type { TasksChange, TasksChangedEvent } from '@slayzone/task/shared'
+import type { TasksChange, TasksChangedEvent } from '@slayzone/task-contracts'
 import { getNotifyEvents, type SettingsChange } from '../app-deps'
 import { createNotifyCoalescer } from '../notify-coalescer'
 
