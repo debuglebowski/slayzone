@@ -23,3 +23,11 @@ export const historyRouter = router({
     .input(z.object({ runId: z.string() }))
     .query(({ ctx, input }) => listAutomationActionRuns(ctx.db, input.runId))
 })
+
+export type HistoryRouter = typeof historyRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `historyRouter` at
+ * `history` and asserts the slice in its `router.ts`.
+ */
+export type HistoryMounts = { history: HistoryRouter }

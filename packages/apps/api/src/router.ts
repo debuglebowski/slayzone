@@ -19,7 +19,7 @@ import { chatRouter } from './routers/chat'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
 import { fileEditorRouter } from './routers/file-editor'
-import { historyRouter } from '@slayzone/history/server'
+import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter } from './routers/integrations'
 import { menuRouter } from './routers/menu'
@@ -101,6 +101,7 @@ type AssertAppSlice<T extends true> = T
 export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
+  AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TestPanelMounts>>
 ]

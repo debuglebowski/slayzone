@@ -1,2 +1,2 @@
 export * from './recorder'
-export { historyRouter } from './history-router'
+export { historyRouter, type HistoryRouter, type HistoryMounts } from './history-router'
