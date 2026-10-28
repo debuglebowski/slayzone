@@ -332,8 +332,7 @@
             }
           },
           "suspicious": {
-            "noEmptyBlockStatements": "warn",
-            "noExplicitAny": "warn"
+            "noEmptyBlockStatements": "warn"
           }
         }
       }
