@@ -430,7 +430,7 @@ run_harness packages/apps/api/src/http/rest-api/hub/web-login.test.ts
 run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
-run_harness packages/apps/api/src/routers/worktrees.test.ts
+run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.

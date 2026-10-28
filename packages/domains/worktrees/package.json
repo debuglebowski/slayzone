@@ -44,11 +44,14 @@
     "@slayzone/tasks": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "@tanstack/react-virtual": "^3.14.13",
+    "@trpc/server": "^11.19.0",
     "codemirror": "^6.0.1",
-    "lucide-react": "^1.48.0"
+    "lucide-react": "^1.48.0",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "react": "^19.3.1"

@@ -8,11 +8,17 @@
  * @module api/domain-router-deps
  */
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
-import { getComputersDepsOrNull } from './app-deps'
+import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { getAppDeps, getComputersDepsOrNull, getWorkspaceDeps } from './app-deps'
 
 setProjectsRouterDeps({
   countUsableComputers: () => {
     const gateway = getComputersDepsOrNull()?.getGateway()
     return gateway ? gateway.listUsableComputers().length : null
   }
+})
+
+setWorktreesRouterDeps({
+  getWorkspace: () => getWorkspaceDeps(),
+  shellOpenPath: (absPath) => getAppDeps().shellOpenPath(absPath)
 })

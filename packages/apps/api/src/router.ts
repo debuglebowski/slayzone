@@ -48,7 +48,7 @@ import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
-import { worktreesRouter } from './routers/worktrees'
+import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/server'
 
 export const appRouter = router({
   app: appLevelRouter,
@@ -124,5 +124,6 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,
-  AssertAppSlice<IsAppSlice<TestPanelMounts>>
+  AssertAppSlice<IsAppSlice<TestPanelMounts>>,
+  AssertAppSlice<IsAppSlice<WorktreesMounts>>
 ]

@@ -2,7 +2,7 @@
  * worktrees tRPC router contract tests.
  * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
- *   packages/apps/api/src/routers/worktrees.test.ts
+ *   packages/domains/worktrees/src/server/worktrees-router.test.ts
  *
  * Two halves:
  *  1. Watcher subscriptions — cover the streaming procs nothing else touches
@@ -18,7 +18,7 @@
  */
 import { describe, test, expect, beforeAll } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { worktreesRouter } from './worktrees.js'
+import { worktreesRouter } from './worktrees-router.js'
 import {
   getGitWatcher,
   createWorktree,
@@ -27,7 +27,7 @@ import {
   resolveSubmoduleInitBehavior,
   getIgnoredFileTree,
   copyIgnoredFiles
-} from '@slayzone/worktrees/server'
+} from './index.js'
 import { _mock } from '../../../../shared/test-utils/mock-merge-ai.js'
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'

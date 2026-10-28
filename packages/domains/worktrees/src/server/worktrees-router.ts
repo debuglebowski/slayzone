@@ -65,15 +65,18 @@ import {
   popStash,
   dropStash,
   branchFromStash,
-  getStashDiff,
+  getStashDiff
+} from './git-worktree'
+import {
   resolveCopyBehavior,
-  detectChildRepos,
   detectWorktreesWithColors,
   createWorktreeWithSetup,
   mergeWithAI,
-  analyzeConflict,
-  listProjectRepos,
-  getGitWatcher,
+  analyzeConflict
+} from './composite-ops'
+import { detectChildRepos, listProjectRepos } from './list-project-repos'
+import { getGitWatcher } from './git-watcher'
+import {
   checkGhInstalled,
   hasGithubRemote,
   listOpenPrs,
@@ -85,9 +88,9 @@ import {
   mergePr,
   getPrDiff,
   getGhUser,
-  editPrComment,
-  worktreesEvents
-} from '@slayzone/worktrees/server'
+  editPrComment
+} from './gh-cli'
+import { worktreesEvents } from './events'
 import type {
   CreateWorktreeOpts,
   CreateWorktreePhase,
@@ -95,10 +98,10 @@ import type {
   CreatePrInput,
   MergePrInput,
   EditPrCommentInput
-} from '@slayzone/worktrees/shared'
-import type { GitDiffChangedPayload } from '@slayzone/worktrees/server'
+} from '../shared/types'
+import type { GitDiffChangedPayload } from './git-watcher'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
-import { getAppDeps, getWorkspaceDeps } from '../app-deps'
+import { getWorktreesRouterDeps } from './worktrees-router-deps'
 
 const u = z.unknown()
 const s = z.string()
@@ -133,14 +136,14 @@ export const worktreesRouter = router({
       obj({ projectPath: s, projectId: s.optional(), taskId: s.optional(), opts: u.optional() })
     )
     .query(async ({ input }) => {
-      const { fs, resolveComputer } = getWorkspaceDeps()
+      const { fs, resolveComputer } = getWorktreesRouterDeps().getWorkspace()
       const computerId = await resolveComputer(input)
       return listProjectRepos(fs, computerId, input.projectPath, (input.opts ?? {}) as never)
     }),
   detectChildRepos: publicProcedure
     .input(obj({ projectPath: s, projectId: s.optional(), taskId: s.optional() }))
     .query(async ({ input }) => {
-      const { fs, resolveComputer } = getWorkspaceDeps()
+      const { fs, resolveComputer } = getWorktreesRouterDeps().getWorkspace()
       const computerId = await resolveComputer(input)
       return detectChildRepos(fs, computerId, input.projectPath)
     }),
@@ -280,7 +283,7 @@ export const worktreesRouter = router({
   // runs in the Electron host when the renderer talks to the side-car.
   revealInFinder: hubLocalProcedure
     .input(obj({ path: s }))
-    .mutation(({ input }) => getAppDeps().shellOpenPath(input.path)),
+    .mutation(({ input }) => getWorktreesRouterDeps().shellOpenPath(input.path)),
   isDirty: hubLocalProcedure.input(obj({ path: s })).query(async ({ input }) => {
     const summary = await getStatusSummary(input.path)
     return summary.staged + summary.unstaged + summary.untracked > 0
@@ -485,3 +488,11 @@ export const worktreesRouter = router({
     })
   )
 })
+
+export type WorktreesRouter = typeof worktreesRouter
+
+/**
+ * Where this domain's router sits in the app router. `@slayzone/api` mounts
+ * `worktreesRouter` at `worktrees` and asserts the slice in its `router.ts`.
+ */
+export type WorktreesMounts = { worktrees: WorktreesRouter }

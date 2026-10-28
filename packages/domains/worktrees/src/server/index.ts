@@ -124,3 +124,12 @@ export {
   analyzeConflict,
   type WorktreePolicyOps
 } from './composite-ops'
+// `worktrees.*` tRPC router + the host seam it reads. Composed by `@slayzone/api`,
+// which also wires the seam from its workspace/app registries.
+export { worktreesRouter, type WorktreesRouter, type WorktreesMounts } from './worktrees-router'
+export {
+  setWorktreesRouterDeps,
+  getWorktreesRouterDeps,
+  type WorktreesRouterDeps,
+  type WorktreesComputerTarget
+} from './worktrees-router-deps'
