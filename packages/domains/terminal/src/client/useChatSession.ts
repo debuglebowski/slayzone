@@ -104,10 +104,13 @@ interface HydrateChatCtx {
   gen: number
   genRef: RefObject<number>
   hydratedRef: RefObject<boolean>
+  /** True once any load of this hook finished — the next one is a reload. */
+  loadedOnceRef: RefObject<boolean>
   liveQueueRef: RefObject<Array<{ event: AgentEvent; seq: number }>>
   applyLive: (event: AgentEvent, seq: number) => void
   dispatch: Dispatch<ChatTimelineAction>
-  setHydrating: (v: boolean) => void
+  clearPermissionRequests: () => void
+  onHydrated: () => void
 }
 
 /**
@@ -118,6 +121,11 @@ interface HydrateChatCtx {
  * skeleton into the main-side sessions map (seeded with persisted history)
  * synchronously enough for getBufferSince to return real data. Awaiting
  * guarantees session.buffer is seeded with persisted history.
+ *
+ * The buffer is the whole history, so a RELOAD (same tab, new folder / flags)
+ * clears the timeline right before replaying it — otherwise every message shows
+ * twice. The first load never clears: there is nothing to replace, and it keeps
+ * an optimistic message sent while that load runs.
  */
 async function hydrateAndReplay({
   trpcClient,
@@ -125,10 +133,12 @@ async function hydrateAndReplay({
   gen,
   genRef,
   hydratedRef,
+  loadedOnceRef,
   liveQueueRef,
   applyLive,
   dispatch,
-  setHydrating
+  clearPermissionRequests,
+  onHydrated
 }: HydrateChatCtx): Promise<void> {
   try {
     await trpcClient.chat.hydrate.mutate(target)
@@ -147,6 +157,10 @@ async function hydrateAndReplay({
       afterSeq: -1
     })
     if (gen !== genRef.current) return
+    if (loadedOnceRef.current) {
+      dispatch({ type: 'reset' })
+      clearPermissionRequests()
+    }
     // Route replay through applyLive (not raw dispatch) so side-channel
     // state — notably `permissionRequests` for unresolved AskUserQuestion
     // prompts — repopulates on tab reattach. Without this, hydrating a tab
@@ -161,9 +175,10 @@ async function hydrateAndReplay({
       // Drain live events queued during hydration. Dedup via lastSeqRef
       // so anything already covered by the replay buffer is skipped.
       hydratedRef.current = true
+      loadedOnceRef.current = true
       for (const { event, seq } of liveQueueRef.current) applyLive(event, seq)
       liveQueueRef.current = []
-      setHydrating(false)
+      onHydrated()
     }
   }
 }
@@ -185,7 +200,6 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
-  const [hydrating, setHydrating] = useState(true)
   const lastSeqRef = useRef<number>(-1)
   const [permissionRequests, setPermissionRequests] = useState<
     Map<string, { requestId: string; toolName: string; input: unknown }>
@@ -199,6 +213,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // (queue events until the buffer replay completes), `liveQueueRef` holds them.
   const genRef = useRef(0)
   const hydratedRef = useRef(false)
+  const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<Array<{ event: AgentEvent; seq: number }>>([])
 
   // Stable: only reads refs + stable setters. Applies one event to the reducer
@@ -270,12 +285,46 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     })
   )
 
+  // Loading = no load has finished for the CURRENT inputs. Derived during render
+  // (not set in the effect) so the first frame for new inputs already shows it.
+  // Any input change clears the finished marker, so switching away and back still
+  // waits for the new load; a stale load can't set it (genRef gate).
+  const loadInputs = {
+    tabId: opts.tabId,
+    taskId: opts.taskId,
+    mode: opts.mode,
+    cwd: opts.cwd,
+    providerFlagsOverride: opts.providerFlagsOverride ?? null,
+    trpcClient
+  }
+  const [seenInputs, setSeenInputs] = useState(loadInputs)
+  const [loadedInputs, setLoadedInputs] = useState<typeof loadInputs | null>(null)
+  const inputsChanged = (a: typeof loadInputs, b: typeof loadInputs): boolean =>
+    a.tabId !== b.tabId ||
+    a.taskId !== b.taskId ||
+    a.mode !== b.mode ||
+    a.cwd !== b.cwd ||
+    a.providerFlagsOverride !== b.providerFlagsOverride ||
+    a.trpcClient !== b.trpcClient
+  if (inputsChanged(seenInputs, loadInputs)) {
+    setSeenInputs(loadInputs)
+    setLoadedInputs(null)
+  }
+  const hydrating = loadedInputs === null || inputsChanged(loadedInputs, loadInputs)
+
   useEffect(() => {
     const gen = ++genRef.current
     hydratedRef.current = false
     liveQueueRef.current = []
     lastSeqRef.current = -1
-    setHydrating(true)
+    const inputs = {
+      tabId: opts.tabId,
+      taskId: opts.taskId,
+      mode: opts.mode,
+      cwd: opts.cwd,
+      providerFlagsOverride: opts.providerFlagsOverride ?? null,
+      trpcClient
+    }
 
     void hydrateAndReplay({
       trpcClient,
@@ -289,10 +338,12 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       gen,
       genRef,
       hydratedRef,
+      loadedOnceRef,
       liveQueueRef,
       applyLive,
       dispatch,
-      setHydrating
+      clearPermissionRequests: () => setPermissionRequests(new Map()),
+      onHydrated: () => setLoadedInputs(inputs)
     })
 
     return () => {
