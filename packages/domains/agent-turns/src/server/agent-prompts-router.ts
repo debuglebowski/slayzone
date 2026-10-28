@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { agentPromptsEvents, listPromptsForTask } from '@slayzone/agent-turns/server'
+import { agentPromptsEvents } from './events'
+import { listPromptsForTask } from './prompt-db'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 export const agentPromptsRouter = router({

@@ -9,5 +9,6 @@ export {
   type CapturePromptInput
 } from './prompt-capture'
 export { listPromptsForTask, insertPrompt, prunePrompts } from './prompt-db'
+export { agentPromptsRouter } from './agent-prompts-router'
 export { agentPromptsEvents, type AgentPromptsEventMap } from './events'
 export type { AgentPrompt } from '../shared/types'
