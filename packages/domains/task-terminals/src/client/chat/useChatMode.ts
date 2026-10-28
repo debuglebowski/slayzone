@@ -204,6 +204,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
     if (pendingModeRef.current !== null) return
     const mapped = rawPermissionModeToChatMode(livePermissionMode) as AgentMode | null
     if (mapped && mapped !== chatMode) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- accepted, see comment above the effect
       setChatModeState(mapped)
       confirmedModeRef.current = mapped
     }

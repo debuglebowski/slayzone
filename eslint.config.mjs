@@ -44,8 +44,10 @@ export default defineConfig(
       reportUnusedDisableDirectives: 'off'
     },
     rules: {
-      'react-hooks/set-state-in-effect': 'warn',
-      // Cleared to zero → error, so they can't regrow under the shared warning cap.
+      // All cleared to zero → error. The two accepted set-state-in-effect sites carry an
+      // inline disable with their reason; that disable doesn't make the React Compiler
+      // skip the hook (it only honors exhaustive-deps / rules-of-hooks suppressions).
+      'react-hooks/set-state-in-effect': 'error',
       'react-hooks/refs': 'error',
       'react-hooks/immutability': 'error',
       'react-hooks/purity': 'error',

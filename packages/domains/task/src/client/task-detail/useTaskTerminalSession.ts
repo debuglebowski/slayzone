@@ -148,6 +148,7 @@ export function useTaskTerminalSession({
       // and hiding the id instead of clearing it lets a stale id resurface after
       // "Start fresh" and be written back (phantom conv-id clobber).
       persistedSessionIdRef.current = null
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- accepted, see comment above
       setDetectedSessionId(null)
       return
     }
