@@ -31,7 +31,7 @@ export interface TerminalTheme {
  * bundled into the sidecar and the hub). `sync-query-response.test.ts` resolves
  * `@xterm/xterm/package.json` and fails loudly if the two drift.
  */
-export const XTERM_JS_VERSION = '6.1.0-beta.292'
+export const XTERM_JS_VERSION = '6.1.0-beta.304'
 
 /**
  * XTVERSION reply — byte-identical to what xterm.js's `sendXtVersion` emits.

@@ -454,6 +454,9 @@ run_harness packages/domains/terminal/src/client/webgl-loader.test.ts
 # shared-texture-atlas fix (#6042/#6055). Without it, correcting the atlas on one
 # pane scrambles every pane sharing it (CharAtlasCache is module-level).
 run_harness packages/domains/terminal/src/client/xterm-atlas-fix.test.ts
+# Terminal — the pinned xterm build must carry the ESC[3J fix (#6081): erasing the
+# scrollback a user scrolled into releases the viewport to follow output again.
+run_harness packages/domains/terminal/src/client/xterm-ed3-scrollback.test.ts
 # Terminal — scramble detection signals + paint throttle. Both suites existed and
 # passed but were never registered here, so nothing ran them.
 run_harness packages/domains/terminal/src/client/scramble-detector.test.ts
