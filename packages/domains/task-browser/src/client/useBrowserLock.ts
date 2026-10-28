@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
 import type { BrowserTab, BrowserTabsState } from '../shared'
+import { useSetBrowserTabLocked } from './BrowserTaskSource'
 
 interface UseBrowserLockParams {
   taskId?: string
@@ -13,8 +13,7 @@ interface UseBrowserLockParams {
 
 export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBrowserLockParams) {
   const trpc = useTRPC()
-  const setLockedMutation = useMutation(trpc.task.setBrowserTabLocked.mutationOptions())
-  const setLocked = setLockedMutation.mutate
+  const setLocked = useSetBrowserTabLocked()
 
   // Previous agentTouched value per tab id. We auto-lock only on a live
   // `false → true` transition (i.e. observed during this session). First-time

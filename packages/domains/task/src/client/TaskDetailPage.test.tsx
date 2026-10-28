@@ -162,7 +162,10 @@ vi.mock('@slayzone/terminal-contracts', () => ({
 
 vi.mock('@slayzone/editor', () => ({ RichTextEditor: () => null }))
 vi.mock('@slayzone/task-terminals', () => ({ TerminalContainer: React.forwardRef(() => null) }))
-vi.mock('@slayzone/task-browser', () => ({ BrowserPanel: React.forwardRef(() => null) }))
+vi.mock('@slayzone/task-browser', () => ({
+  BrowserPanel: React.forwardRef(() => null),
+  registerBrowserTaskSource: () => {}
+}))
 vi.mock('@slayzone/task-browser/shared', () => ({}))
 vi.mock('@slayzone/file-editor/client', () => ({ FileEditorView: React.forwardRef(() => null) }))
 vi.mock('@slayzone/file-editor/shared', () => ({}))

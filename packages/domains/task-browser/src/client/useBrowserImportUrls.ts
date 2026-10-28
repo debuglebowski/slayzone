@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useBrowserImportTasks } from './BrowserTaskSource'
 import type { TaskUrlEntry } from './BrowserPanel.types'
 
 interface UseBrowserImportUrlsParams {
@@ -9,23 +8,12 @@ interface UseBrowserImportUrlsParams {
 }
 
 export function useBrowserImportUrls({ taskId, projectId }: UseBrowserImportUrlsParams) {
-  const trpc = useTRPC()
   const [importDropdownOpen, setImportDropdownOpen] = useState(false)
 
   // Fetch URLs from other tasks in the same project (or all tasks) when the
-  // dropdown opens. Two mutually-exclusive queries keyed on projectId presence.
+  // dropdown opens. Task data comes from task via the registered source.
   const enabled = importDropdownOpen && !!taskId
-  const byProjectQuery = useQuery(
-    trpc.task.getByProject.queryOptions(
-      { projectId: projectId ?? '' },
-      { enabled: enabled && !!projectId }
-    )
-  )
-  const allQuery = useQuery(
-    trpc.task.getAll.queryOptions(undefined, { enabled: enabled && !projectId })
-  )
-
-  const tasks = projectId ? byProjectQuery.data : allQuery.data
+  const tasks = useBrowserImportTasks({ projectId, enabled })
 
   const otherTaskUrls = useMemo<TaskUrlEntry[]>(() => {
     if (!enabled || !tasks) return []
