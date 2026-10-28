@@ -31,4 +31,9 @@ export {
 } from './procedure-policy'
 export { registerAppCode, type AppCodeOf } from './app-codes'
 export { trpcTransformer, serializeOutput } from './trpc-transformer'
-export type { RouterMounts, MountedRouter } from './mounted-router'
+export type {
+  RouterMounts,
+  MountedRouter,
+  IsMountedSlice,
+  AssertSlice
+} from './mounted-router'
