@@ -28,5 +28,13 @@ if (!process.env.CI_SKIP_POSTINSTALL && !process.env.CF_PAGES) {
         if (file === 'spawn-helper') chmodSync(join(dir, file), 0o755)
       }
     }
-  } catch {}
+  } catch (err) {
+    // No prebuilds dir (node-pty built from source): no spawn-helper to fix.
+    // Anything else would leave terminals failing with "posix_spawnp failed" — say so.
+    if (err?.code !== 'ENOENT') {
+      console.warn(
+        `[postinstall] could not restore spawn-helper execute bit: ${err?.message ?? err}`
+      )
+    }
+  }
 }
