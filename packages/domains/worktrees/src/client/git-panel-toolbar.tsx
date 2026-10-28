@@ -25,7 +25,7 @@ import {
   TooltipTrigger,
   cn
 } from '@slayzone/ui'
-import { useAppearance } from '@slayzone/settings/client'
+import { useAppearance } from '@slayzone/ui'
 import type { GitTabId } from '@slayzone/task-contracts'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { RepoKindPill } from './RepoKindPill'

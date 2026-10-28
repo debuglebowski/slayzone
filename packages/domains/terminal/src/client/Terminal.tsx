@@ -60,7 +60,7 @@ import {
 } from './terminal-cache'
 import { usePty } from './PtyContext'
 import { useSessionState } from './useTerminalStateStore'
-import { useTheme, useAppearance } from '@slayzone/settings/client'
+import { useTheme, useAppearance } from '@slayzone/ui'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalState } from '@slayzone/terminal-contracts'

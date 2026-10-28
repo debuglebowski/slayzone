@@ -29,7 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '@slayzone/ui'
-import { useAppearance } from '@slayzone/settings/client'
+import { useAppearance } from '@slayzone/ui'
 import { DiffView } from './DiffView'
 import type {
   ConfirmAction,

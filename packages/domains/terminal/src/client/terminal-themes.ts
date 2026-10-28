@@ -1,5 +1,5 @@
 import type { ITheme } from '@xterm/xterm'
-import type { Theme } from '@slayzone/settings/shared'
+import type { Theme } from '@slayzone/ui/theme-types'
 
 export interface TerminalThemeDefinition {
   id: string
