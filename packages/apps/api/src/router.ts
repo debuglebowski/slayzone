@@ -5,7 +5,7 @@ import './procedure-policy'
 import './automation-engine-context'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
 import { agentLifecycleRouter, type AgentLifecycleMounts } from '@slayzone/terminal/server'
-import { processesRouter } from '@slayzone/processes/server'
+import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
 import { aiConfigRouter } from './routers/ai-config'
 import {
@@ -104,6 +104,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
+  AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,

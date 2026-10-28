@@ -102,3 +102,11 @@ export const processesRouter = router({
     })
   )
 })
+
+export type ProcessesRouter = typeof processesRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `processesRouter` at
+ * `processes` and asserts the slice in its `router.ts`.
+ */
+export type ProcessesMounts = { processes: ProcessesRouter }

@@ -31,5 +31,5 @@ export type { ProcessBackend, ProcSpawnSpec, ProcHandle } from './process-backen
 export { createStatsPoller } from './pid-stats'
 // `processes.*` tRPC router + the host-injected process-manager deps it calls.
 // Composed by `@slayzone/api`; the deps are injected by the composition root.
-export { processesRouter } from './processes-router'
+export { processesRouter, type ProcessesRouter, type ProcessesMounts } from './processes-router'
 export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './processes-deps'
