@@ -16,17 +16,21 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { PtySessionWindow } from '../pty-host'
 import { createPty, hasLivePty, hasPty, setDatabase } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 const fakeWin = {
   isDestroyed: () => false,
   webContents: { send: () => undefined }
 } as unknown as PtySessionWindow
-setDatabase({
-  get: async () => ({ project_id: 'proj-1' }),
-  all: async () => [],
-  run: async () => ({ changes: 0, lastInsertRowid: 0 }),
-  batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
-} as unknown as SlayzoneDb)
+setDatabase(
+  {
+    get: async () => ({ project_id: 'proj-1' }),
+    all: async () => [],
+    run: async () => ({ changes: 0, lastInsertRowid: 0 }),
+    batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
+  } as unknown as SlayzoneDb,
+  createFakeTaskSessionStore()
+)
 
 /** `fireExit` emits output first, as a real shell that drew its prompt and then
  *  ran `exit 7` does — an exit with no output takes the fast-exit recovery path. */

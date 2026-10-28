@@ -57,7 +57,8 @@ import {
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
-  registerConversationResolver
+  registerConversationResolver,
+  taskSessionStore
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task/shared'
 import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
@@ -98,6 +99,7 @@ import {
   setOnTaskReachedTerminalHandler,
   broadcastRespawnRequest,
   initWarmProcessManager,
+  createDbWarmPoolDataOps,
   reapOrphanWarms,
   reserveWarmTaskId,
   onGlobalStateChange,
@@ -683,7 +685,9 @@ export function composeServer(opts: {
     ...dbLookups,
     resolveComputerId: (taskId) => resolveComputerForTask(taskId)
   })
-  setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
+  // `taskSessionStore`: task's ledger writes (task_conversations / agent_sessions),
+  // injected because terminal must not import task.
+  setPtyDeps({ ops: createPtyOps(db, taskSessionStore), events: ptyEvents })
 
   // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as
   // `wireIdleClose` below: the pty/chat runtimes live in THIS process, so the
@@ -728,6 +732,7 @@ export function composeServer(opts: {
   })
   initWarmProcessManager({
     db,
+    ops: createDbWarmPoolDataOps(db, taskSessionStore),
     isEnabled: () => prewarmEnabled,
     // `settings.set` writes the row but emits no settings-changed, so the cache
     // above would otherwise stay stale until the next boot — i.e. changing the
@@ -750,9 +755,9 @@ export function composeServer(opts: {
     // just the explicit binding while the backend applied the connected default,
     // an unbound task would build a hub-shaped agent env (loopback agent-hook URL)
     // and then run that agent on the computer, where the URL points nowhere.
-    ops: createChatOps(db, {
+    ops: createChatOps({
       dataOps: {
-        ...createDbChatDataOps(db),
+        ...createDbChatDataOps(db, taskSessionStore),
         resolveComputerId: (taskId) => resolveComputerForTask(taskId)
       }
     }),

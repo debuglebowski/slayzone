@@ -15,7 +15,7 @@ import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
-import type { ConversationOrigin } from '@slayzone/task/shared'
+import type { ConversationOrigin } from '../../shared/conversation-origin'
 import type { BufferedEvent } from '../chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -169,7 +169,7 @@ export function setTransportDepsForTests(override: Partial<TransportDeps>): void
 
 /**
  * Composition-root hook to persist how a chat tab's agent last ended
- * (`terminal_tabs.agent_state`). We can't import `@slayzone/task-terminals` from
+ * (`terminal_tabs.agent_state`). We can't import the task-terminals package from
  * inside the terminal package (would cycle), so the app wires this at boot. Called
  * `running` on successful spawn and `stopped` on natural / user-initiated exit,
  * unless the app is shutting down (see `setChatShuttingDown`). Same recorder type

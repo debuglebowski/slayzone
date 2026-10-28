@@ -83,6 +83,7 @@ export {
   bindSessionToTask
 } from './ops'
 export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
+export { taskSessionStore } from './task-session-store'
 export {
   configureTaskRuntimeAdapters,
   updateTask,

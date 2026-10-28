@@ -15,6 +15,7 @@ import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { PtySessionWindow } from '../pty-host'
 import { createPty, killPty, setDatabase, testExecutionContext } from './pty-manager'
 import { localPtyBackend, setPtyBackend, type PtyBackend } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 import { childProcessToHandle, createLocalChatBackend } from './chat-proc-handle'
 import * as chat from './chat-transport-manager'
 
@@ -45,12 +46,15 @@ const fakeWin = {
   isDestroyed: () => false,
   webContents: { send: () => undefined }
 } as unknown as PtySessionWindow
-setDatabase({
-  get: async () => ({ project_id: 'proj-1' }),
-  all: async () => [],
-  run: async () => ({ changes: 0, lastInsertRowid: 0 }),
-  batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
-} as unknown as SlayzoneDb)
+setDatabase(
+  {
+    get: async () => ({ project_id: 'proj-1' }),
+    all: async () => [],
+    run: async () => ({ changes: 0, lastInsertRowid: 0 }),
+    batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
+  } as unknown as SlayzoneDb,
+  createFakeTaskSessionStore()
+)
 
 function fakePty() {
   return {

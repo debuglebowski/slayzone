@@ -1,21 +1,11 @@
+import type { ConversationOrigin } from '@slayzone/terminal/shared'
+
 /**
- * Provenance tag for each row in `task_conversations`. Decides whether the
- * row is honored by `getCurrentConversationId` on read.
- *
- * If you add a value here, also add it to the CHECK constraint in migration
- * v145 — the enum/CHECK sync test (`task-conversations.test.ts`) catches drift
- * by asserting every value in this union INSERTs cleanly.
+ * `ConversationOrigin` (the provenance tag for each `task_conversations` row)
+ * is owned by `@slayzone/terminal/shared` — the terminal runtime produces it and
+ * must not import task. Re-exported here so task consumers keep one import site.
  */
-export type ConversationOrigin =
-  | 'slay-spawned-fresh'
-  | 'slay-spawned-resume'
-  | 'in-band-clear'
-  | 'user-selected'
-  | 'cas-repoint-heal'
-  | 'legacy-migration'
-  | 'foreign-observed'
-  | 'manual-reset'
-  | 'pending-spawn'
+export type { ConversationOrigin }
 
 /**
  * Origins whose rows can become the "current" conversation on read.

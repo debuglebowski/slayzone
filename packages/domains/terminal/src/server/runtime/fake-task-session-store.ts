@@ -1,0 +1,46 @@
+import type { SlayzoneDb } from '@slayzone/platform'
+import type { TaskSessionStore } from './task-session-store'
+
+/** One recorded `TaskSessionStore` call: method name, the db it was handed, its args. */
+export interface TaskSessionStoreCall {
+  method: keyof TaskSessionStore
+  db: SlayzoneDb
+  args: unknown
+}
+
+/**
+ * TEST DOUBLE for the task-owned `TaskSessionStore` (terminal tests cannot import
+ * the task package). Records every call in `calls` and resolves with the
+ * neutral result: `prunePendingSpawns` → 0, `bindSessionToTask` → `bindResult`
+ * (default true). The real SQL is covered by task's own op tests.
+ */
+export function createFakeTaskSessionStore(
+  opts: { bindResult?: boolean } = {}
+): TaskSessionStore & {
+  calls: TaskSessionStoreCall[]
+} {
+  const calls: TaskSessionStoreCall[] = []
+  return {
+    calls,
+    recordConversation: async (db, args) => {
+      calls.push({ method: 'recordConversation', db, args })
+    },
+    recordPendingSpawn: async (db, args) => {
+      calls.push({ method: 'recordPendingSpawn', db, args })
+    },
+    prunePendingSpawns: async (db, args) => {
+      calls.push({ method: 'prunePendingSpawns', db, args })
+      return 0
+    },
+    bindSessionToTask: async (db, args) => {
+      calls.push({ method: 'bindSessionToTask', db, args })
+      return opts.bindResult ?? true
+    },
+    recordSessionSpawn: async (db, args) => {
+      calls.push({ method: 'recordSessionSpawn', db, args })
+    },
+    markSessionDead: async (db, args) => {
+      calls.push({ method: 'markSessionDead', db, args })
+    }
+  }
+}

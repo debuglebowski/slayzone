@@ -28,6 +28,7 @@ import {
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { createDbPtySpawnLookups, mapModeRow, type PtySpawnLookups } from './pty-data-ops'
+import type { TaskSessionStore } from './task-session-store'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { getAdapter, type ExecutionContext } from '../adapters'
@@ -84,10 +85,11 @@ export interface PtyCreateOpts {
  * Window-close cleanup is the hub's: it clears a window's counts once that
  * window's last `/trpc` socket stays closed (apps/hub warm-window-sockets.ts).
  */
-export function createPtyOps(db: SlayzoneDb) {
+export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   // Wires the pty-manager's session ledger (hub/computer wave 1: the runtime's
-  // DB touchpoints go through an injected ops interface, db-backed by default).
-  setDatabase(db)
+  // DB touchpoints go through an injected ops interface, db-backed by default;
+  // the task-side ledger writes go through the task-owned `taskStore`).
+  setDatabase(db, taskStore)
   // Spawn-time reads (mode row, task→project, computer assignment) — same queries,
   // behind the seam. Injectable (wave 2) so a computer-aware impl can replace the
   // db default; unset → the db-backed impl (byte-identical). The terminal_modes

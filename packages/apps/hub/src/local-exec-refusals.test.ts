@@ -121,7 +121,7 @@ const worktrees = await import('@slayzone/worktrees/server')
 const { execGit } = await import('../../../domains/worktrees/src/server/exec-async.js')
 // By path, not `./merge-ai`: the test loader redirects that specifier to a mock.
 const { runAiCommand } = await import('../../../domains/worktrees/src/server/merge-ai.js')
-const { defaultWorktreeExecAdapters } = await import('@slayzone/task/server')
+const { defaultWorktreeExecAdapters, taskSessionStore } = await import('@slayzone/task/server')
 const terminal = await import('@slayzone/terminal/server')
 const { listProjectFiles } = await import('../../../domains/terminal/src/server/files-scan.js')
 const turns = await import('../../../domains/agent-turns/src/server/git-snapshot.js')
@@ -277,9 +277,13 @@ describe('processes off, zero computers: every hub-local call refuses (exec laye
   test('terminal: shell PATH, which, terminal-mode test, file + autocomplete scans', async () => {
     await expectRefused('getEnrichedPath', () => terminal.getEnrichedPath())
     await expectRefused('whichBinary', () => terminal.whichBinary('git'))
-    await expectRefused('modesTest', () => terminal.createPtyOps(h.slayDb).terminalModesTest('git'))
+    await expectRefused('modesTest', () =>
+      terminal.createPtyOps(h.slayDb, taskSessionStore).terminalModesTest('git')
+    )
     await expectRefused('listProjectFiles', () => listProjectFiles(OUTSIDE, ''))
-    const chat = terminal.createChatOps(h.slayDb)
+    const chat = terminal.createChatOps({
+      dataOps: terminal.createDbChatDataOps(h.slayDb, taskSessionStore)
+    })
     await expectRefused('listSkills', () => chat.listSkills(OUTSIDE))
     await expectRefused('listCommands', () => chat.listCommands(OUTSIDE))
     await expectRefused('listAgents', () => chat.listAgents(OUTSIDE))

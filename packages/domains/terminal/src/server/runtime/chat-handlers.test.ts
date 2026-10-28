@@ -16,6 +16,8 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type Database from 'better-sqlite3'
 import { registerChatHandlers } from './chat-handlers'
+import { createDbChatDataOps } from './chat-data-ops'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
 import { persistChatEvent } from '../chat-events-store'
 import {
@@ -54,6 +56,14 @@ function createMockIpcMain(): MockIpcMain {
       // chat-handlers register(_, ...args) — pass null event placeholder.
       return handler(null, ...args)
     }
+  }
+}
+
+/** The composition root's local-DB chat data ops; task's ledger store is a fake
+ * (terminal tests cannot import the task package). */
+function localChatOpts(db: Database.Database) {
+  return {
+    dataOps: createDbChatDataOps(createSlayzoneDbAdapter(db), createFakeTaskSessionStore())
   }
 }
 
@@ -108,7 +118,8 @@ test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversa
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   // Pre-seed: eager start that DOES --resume the stored id (mirrors what
@@ -217,7 +228,8 @@ test('chat:reset still wipes events + clears conv id when no live session exists
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   // Reset on a tab whose session is NOT in the in-memory map (e.g. after app restart
@@ -257,7 +269,8 @@ test('chat:getModel falls back to account default (or DEFAULT_CHAT_MODEL=opus) w
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   // Resolution reads `~/.claude/settings.json` on the host. Result is one of
@@ -278,7 +291,8 @@ test('chat:getModel returns stored value', async () => {
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   const got = (await ipc.invoke('chat:getModel', taskId, mode)) as string
@@ -298,7 +312,8 @@ test('chat:getModel falls back to account default for unknown / legacy stored va
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   const got = (await ipc.invoke('chat:getModel', taskId, mode)) as string
@@ -329,7 +344,8 @@ test('chat:setModel persists to provider_config + respawns with --model flag', a
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   // Initial eager start — no model stored. We always emit --model now, picking
@@ -388,7 +404,8 @@ test('chat:setModel rejects invalid model id', async () => {
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   let threw = false
@@ -430,7 +447,8 @@ test('chat:start reads stored chatModel and adds --model on cold spawn', async (
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   await ipc.invoke('chat:start', {
@@ -472,7 +490,8 @@ test('explicit providerFlagsOverride suppresses --model injection', async () => 
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   await ipc.invoke('chat:start', {
@@ -510,7 +529,8 @@ test('chat:hydrate does NOT spawn a subprocess', async () => {
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   const info = (await ipc.invoke('chat:hydrate', {
@@ -552,7 +572,8 @@ test('chat:send triggers lazy spawn on a hydrated session', async () => {
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   await ipc.invoke('chat:hydrate', {
@@ -596,7 +617,8 @@ test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', asyn
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   await ipc.invoke('chat:hydrate', {
@@ -647,7 +669,8 @@ test('chat:reset wipes DB and leaves the new session lazy (no spawn)', async () 
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   await ipc.invoke('chat:reset', {
@@ -700,7 +723,8 @@ test('chat:setMode pre-spawn persists DB without spawning', async () => {
   const ipc = createMockIpcMain()
   registerChatHandlers(
     ipc as unknown as Parameters<typeof registerChatHandlers>[0],
-    createSlayzoneDbAdapter(db)
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
   )
 
   // Hydrate skeleton.

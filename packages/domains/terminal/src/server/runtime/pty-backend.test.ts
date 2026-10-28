@@ -26,6 +26,7 @@ import {
   getState
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend, type PtyHandle, type PtySpawnSpec } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 const fakeWin = {
   isDestroyed: () => false,
@@ -41,7 +42,7 @@ const stubDb = {
   batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
 } as unknown as SlayzoneDb
 
-setDatabase(stubDb)
+setDatabase(stubDb, createFakeTaskSessionStore())
 
 // ── Fake PtyHandle: records writes/resizes/kills, replays data/exit on demand ──
 interface FakeHandle extends PtyHandle {

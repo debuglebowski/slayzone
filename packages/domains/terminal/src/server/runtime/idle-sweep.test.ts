@@ -33,6 +33,7 @@ import {
   transitionStateFromHook
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 // createPty still takes a target window (legacy redirect seam); the SWEEP must not.
 const fakeWin = {
@@ -46,7 +47,7 @@ const stubDb = {
   run: async () => ({ changes: 0, lastInsertRowid: 0 }),
   batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
 } as unknown as SlayzoneDb
-setDatabase(stubDb)
+setDatabase(stubDb, createFakeTaskSessionStore())
 
 const killed: string[] = []
 function makeFakePty(sessionId: string): unknown {

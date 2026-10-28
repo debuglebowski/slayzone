@@ -24,6 +24,7 @@ import type {
 } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
+import type { TaskSessionStore } from './task-session-store'
 // No `spawnLocalPty` import: this process no longer spawns a pty itself under any
 // path. It reaches every agent through the injected backend, which routes to a
 // computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
@@ -147,8 +148,8 @@ export const ptyEvents = new TypedEmitter<PtyEventMap>()
 // `setPtySessionLedger` without touching call sites.
 let ledger: PtySessionLedger | null = null
 
-export function setDatabase(database: SlayzoneDb): void {
-  ledger = createDbPtySessionLedger(database)
+export function setDatabase(database: SlayzoneDb, taskStore: TaskSessionStore): void {
+  ledger = createDbPtySessionLedger(database, taskStore)
 }
 
 /** Wave-2 seam: inject a non-DB-backed ledger (e.g. hub RPC). NOTE: call sites

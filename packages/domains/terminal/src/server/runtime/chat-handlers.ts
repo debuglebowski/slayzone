@@ -28,7 +28,7 @@ import {
   type ShutdownOptions,
   type TransportShutdownResult
 } from './chat-transport-manager'
-import { createDbChatDataOps, type ChatDataOps, type ProviderConfigEntry } from './chat-data-ops'
+import type { ChatDataOps, ProviderConfigEntry } from './chat-data-ops'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
@@ -64,9 +64,10 @@ export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
    * agent-turns domain to detect turn boundaries (user-message + result). */
   onChatEvent?: (tabId: string, event: AgentEvent) => void
-  /** Injectable data seam (hub/computer split). Defaults to the local-DB impl
-   * (`createDbChatDataOps`) which runs the same SQL the handlers always ran. */
-  dataOps?: ChatDataOps
+  /** Data seam (hub/computer split). The composition root passes the local-DB
+   * impl (`createDbChatDataOps(db, taskStore)`), which runs the same SQL the
+   * handlers always ran. */
+  dataOps: ChatDataOps
 }
 
 interface ChatCreateOpts {
@@ -392,10 +393,11 @@ async function buildHydrateOpts(
  * (injected via `setChatDeps`). Wires SQLite persistence + live-sync into the
  * transport once on creation; the IPC and tRPC layers are thin delegators.
  */
-export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
+export function createChatOps(opts: ChatHandlerOpts) {
   // Data seam: all tasks/chat_events/autocomplete access goes through this.
-  // Default is the local-DB impl (same SQL as before the hub/computer split).
-  const data = opts.dataOps ?? createDbChatDataOps(db)
+  // The local-DB impl (same SQL as before the hub/computer split) is built by
+  // the composition root, which owns the task-side `taskStore` it needs.
+  const data = opts.dataOps
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -973,9 +975,9 @@ export type ChatOps = ReturnType<typeof createChatOps>
 export function registerChatHandlers(
   ipcMain: IpcMainLike,
   db: SlayzoneDb,
-  opts: ChatHandlerOpts = {}
+  opts: ChatHandlerOpts
 ): { ops: ChatOps; queueOps: ReturnType<typeof createChatQueueOps> } {
-  const ops = createChatOps(db, opts)
+  const ops = createChatOps(opts)
   const queueOps = createChatQueueOps(db)
   registerChatQueueHandlers(ipcMain, queueOps)
 

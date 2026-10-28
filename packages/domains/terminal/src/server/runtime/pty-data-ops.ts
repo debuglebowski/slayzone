@@ -1,11 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import {
-  recordPendingSpawn as recordPendingSpawnDb,
-  prunePendingSpawns as prunePendingSpawnsDb,
-  bindSessionToTask as bindSessionToTaskDb
-} from '@slayzone/task/server'
 import type { TerminalMode, TerminalModeInfo, UsageProviderConfig } from '@slayzone/terminal/shared'
 import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
+import type { TaskSessionStore } from './task-session-store'
 
 /**
  * Hub/computer split (wave 1): the PTY runtime's DB touchpoints, pulled behind
@@ -57,12 +53,16 @@ export interface PtySessionLedger {
   ): Promise<Record<string, string>>
 }
 
-/** Default local-DB ledger — same SQL as before the split (task/server ops + mcp-env). */
-export function createDbPtySessionLedger(db: SlayzoneDb): PtySessionLedger {
+/** Default local-DB ledger — same SQL as before the split (the injected
+ *  task-owned `taskStore` ops + mcp-env). */
+export function createDbPtySessionLedger(
+  db: SlayzoneDb,
+  taskStore: TaskSessionStore
+): PtySessionLedger {
   return {
-    recordPendingSpawn: (args) => recordPendingSpawnDb(db, args),
-    prunePendingSpawns: (scope) => prunePendingSpawnsDb(db, scope),
-    bindSessionToTask: (args) => bindSessionToTaskDb(db, args),
+    recordPendingSpawn: (args) => taskStore.recordPendingSpawn(db, args),
+    prunePendingSpawns: (scope) => taskStore.prunePendingSpawns(db, scope),
+    bindSessionToTask: (args) => taskStore.bindSessionToTask(db, args),
     buildMcpEnv: (taskId, mode, remote) => buildMcpEnvDb(db, taskId, mode, undefined, remote)
   }
 }

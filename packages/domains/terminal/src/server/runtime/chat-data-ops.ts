@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { recordConversation } from '@slayzone/task/server'
+import type { RecordConversationInput, TaskSessionStore } from './task-session-store'
 import {
   persistChatEvent,
   loadChatEvents,
@@ -42,8 +42,7 @@ export interface ProviderConfigEntry {
   chatFastMode?: boolean
 }
 
-/** Input shape of `recordConversation` (task-conversations ledger append). */
-export type RecordConversationInput = Parameters<typeof recordConversation>[1]
+export type { RecordConversationInput }
 
 /**
  * Every DB touchpoint of the terminal chat runtime, behind one injectable
@@ -105,9 +104,10 @@ export interface ChatDataOps {
 /**
  * Default local-DB implementation. Bodies are the exact SQL the chat handlers
  * ran inline before the ops split — behavior (incl. no-op write skips and
- * corrupt-JSON tolerance) is preserved verbatim.
+ * corrupt-JSON tolerance) is preserved verbatim. The conversation-ledger
+ * append goes through the injected task-owned `taskStore`.
  */
-export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
+export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore): ChatDataOps {
   return {
     readProviderConfig: async (taskId, mode) => {
       const row = (await db
@@ -251,7 +251,7 @@ export function createDbChatDataOps(db: SlayzoneDb): ChatDataOps {
       return row?.default_flags ?? null
     },
 
-    recordConversation: (input) => recordConversation(db, input),
+    recordConversation: (input) => taskStore.recordConversation(db, input),
 
     bumpLastInteraction: async (taskId, now) => {
       const res = await db

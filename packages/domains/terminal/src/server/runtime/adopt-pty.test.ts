@@ -16,6 +16,7 @@ import type { PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb, BatchOp } from '@slayzone/platform'
 import { createPty, hasPty, getBuffer, killPty, setDatabase } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 interface FakePty {
   pid: number
@@ -63,7 +64,7 @@ const stubDb = {
   get: async () => ({ project_id: 'proj-1' })
 } as unknown as SlayzoneDb
 
-setDatabase(stubDb)
+setDatabase(stubDb, createFakeTaskSessionStore())
 
 /**
  * Stands in for the routing backend. `adopt` hands back the fake pty (the computer's
@@ -225,7 +226,7 @@ test('adopt: resizes to the 80x24 default when the tab requests no explicit size
 })
 
 test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled session (B4)', async () => {
-  // Real in-memory db so we can assert the bind actually happened.
+  // Real in-memory db backs the spawn's reads; the bind goes through the task store.
   const raw = new Database(':memory:')
   raw.exec(`
     CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT);
@@ -252,7 +253,10 @@ test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled sessi
     batchTxn: async (ops: BatchOp[]) =>
       raw.transaction(() => ops.map((o) => raw.prepare(o.sql)[o.type](...o.params)))()
   } as unknown as SlayzoneDb
-  setDatabase(realDb)
+  // Task's ledger store is a fake (terminal cannot import task): the bind is
+  // asserted as the call terminal makes; its SQL is covered by task's op tests.
+  const taskStore = createFakeTaskSessionStore()
+  setDatabase(realDb, taskStore)
   try {
     const fake = makeFakePty()
     installFakeBackend(fake)
@@ -294,15 +298,14 @@ test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled sessi
     )
     // The task's initial prompt is sent to the live agent.
     expect(cmd, `initial prompt not sent: ${JSON.stringify(cmd)}`).toContain('HELLO-PROMPT')
-    // The pooled session entity was bound to the task (set-once).
-    const row = raw
-      .prepare("SELECT task_id, status FROM agent_sessions WHERE id = 'poolS'")
-      .get() as { task_id: string | null; status: string }
-    expect(row.task_id, `pooled session not bound: ${JSON.stringify(row)}`).toBe('taskD')
-    expect(row.status, `pooled session not bound: ${JSON.stringify(row)}`).toBe('bound')
+    // The pooled session entity was bound to the task (set-once), on the ledger db.
+    const binds = taskStore.calls.filter((c) => c.method === 'bindSessionToTask')
+    expect(binds.length, `pooled session not bound: ${JSON.stringify(binds)}`).toBe(1)
+    expect(binds[0].db).toBe(realDb)
+    expect(binds[0].args).toEqual({ sessionId: 'poolS', taskId: 'taskD', tabId: 'taskD' })
     killPty(sessionId)
   } finally {
-    setDatabase(stubDb)
+    setDatabase(stubDb, createFakeTaskSessionStore())
     raw.close()
   }
 })

@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'fs'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { recordSessionSpawn, markSessionDead } from '@slayzone/task/server'
 import { buildBaseEnv, maybeReinstallHooksForSpawn } from './pty-manager'
 import { getPtyBackend } from './pty-backend'
 import { buildMcpEnv } from '../mcp-env'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell } from '../shell-env'
 import { interpolateTemplate } from '../adapters/template-interpolation'
 import { parseShellArgs } from '../adapters/flag-parser'
+import type { TaskSessionStore } from './task-session-store'
 
 /**
  * Keeps ONE warm, pre-booted agent ready per (computer, project), so the first agent a
@@ -126,8 +126,12 @@ export interface WarmPoolDataOps {
   markSessionDead(sessionId: string): Promise<void>
 }
 
-/** Default local-DB impl — same SQL / `@slayzone/task/server` calls as before the seam. */
-export function createDbWarmPoolDataOps(db: SlayzoneDb): WarmPoolDataOps {
+/** Default local-DB impl — same SQL / task-owned calls (the injected `taskStore`,
+ *  i.e. the task package's server functions) as before the seam. */
+export function createDbWarmPoolDataOps(
+  db: SlayzoneDb,
+  taskStore: TaskSessionStore
+): WarmPoolDataOps {
   return {
     async getModeSpawnConfig(modeId) {
       const row = await db.get<{
@@ -136,15 +140,16 @@ export function createDbWarmPoolDataOps(db: SlayzoneDb): WarmPoolDataOps {
       }>(`SELECT initial_command, default_flags FROM terminal_modes WHERE id = ?`, [modeId])
       return row ?? null
     },
-    recordSessionSpawn: (input) => recordSessionSpawn(db, input),
-    markSessionDead: (sessionId) => markSessionDead(db, sessionId)
+    recordSessionSpawn: (input) => taskStore.recordSessionSpawn(db, input),
+    markSessionDead: (sessionId) => taskStore.markSessionDead(db, sessionId)
   }
 }
 
 interface WarmDeps {
   db: SlayzoneDb
-  /** Data seam; defaults to the local-DB impl (`createDbWarmPoolDataOps(db)`) when omitted. */
-  ops?: WarmPoolDataOps
+  /** Data seam. The composition root passes the local-DB impl
+   *  (`createDbWarmPoolDataOps(db, taskStore)`); an exec-side computer can inject a remote impl. */
+  ops: WarmPoolDataOps
   isEnabled: () => boolean
   /**
    * Refresh whatever `isEnabled` reads, awaited before each reconcile.
@@ -191,7 +196,7 @@ const tabCountsByWindow = new Map<number /* windowId */, Record<string, number>>
 let reconcileTimer: NodeJS.Timeout | undefined
 
 export function initWarmProcessManager(d: WarmDeps): void {
-  deps = { ...d, ops: d.ops ?? createDbWarmPoolDataOps(d.db) }
+  deps = { ...d }
   shuttingDown = false
 }
 

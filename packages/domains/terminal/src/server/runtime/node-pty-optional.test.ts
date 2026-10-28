@@ -13,6 +13,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import type { PtySessionWindow } from '../pty-host'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 async function caught(fn: () => unknown): Promise<unknown> {
   try {
@@ -92,12 +93,15 @@ test('processes on, node-pty missing: clear refusal at the spawn', async () => {
 })
 
 test('createPty, node-pty missing: an error result, and no -l retry', async () => {
-  setDatabase({
-    get: async () => ({ project_id: 'proj-1' }),
-    all: async () => [],
-    run: async () => ({ changes: 0, lastInsertRowid: 0 }),
-    batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
-  } as unknown as SlayzoneDb)
+  setDatabase(
+    {
+      get: async () => ({ project_id: 'proj-1' }),
+      all: async () => [],
+      run: async () => ({ changes: 0, lastInsertRowid: 0 }),
+      batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
+    } as unknown as SlayzoneDb,
+    createFakeTaskSessionStore()
+  )
   setPtyBackend(null) // the in-process default, as before the routing backend is installed
   const fakeWin = {
     isDestroyed: () => false,

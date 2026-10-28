@@ -65,7 +65,6 @@
   "@slayzone/tasks -> @slayzone/transport",
   "@slayzone/telemetry -> @slayzone/transport",
   "@slayzone/terminal -> @slayzone/settings",
-  "@slayzone/terminal -> @slayzone/task",
   "@slayzone/terminal -> @slayzone/telemetry",
   "@slayzone/terminal -> @slayzone/transport",
   "@slayzone/test-panel -> @slayzone/transport",

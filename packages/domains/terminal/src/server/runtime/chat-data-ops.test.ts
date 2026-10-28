@@ -12,6 +12,7 @@ import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createDbChatDataOps } from './chat-data-ops'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 /**
  * Minimal async SlayzoneDb bridge over a raw better-sqlite3 handle, mirroring
@@ -63,7 +64,7 @@ const updateCount = (runLog: string[]): number =>
 test('writeChatMode skips the UPDATE when the value is unchanged', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t1')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
 
   await ops.writeChatMode('t1', 'claude-chat', 'plan')
   expect(updateCount(runLog)).toBe(1)
@@ -81,7 +82,7 @@ test('writes merge per-mode: one key does not clobber the others', async () => {
   raw
     .prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)')
     .run('t2', JSON.stringify({ 'claude-chat': { chatMode: 'plan', chatConversationId: 'sid' } }))
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
 
   await ops.writeChatModel('t2', 'claude-chat', 'sonnet')
   const cfg = await ops.readProviderConfig('t2', 'claude-chat')
@@ -93,7 +94,7 @@ test('writes merge per-mode: one key does not clobber the others', async () => {
 test('writeChatEffort/writeChatFastMode treat missing as null/false (no-op skip)', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t3')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
 
   // Missing chatEffort ≡ null, missing chatFastMode ≡ false — both no-ops.
   await ops.writeChatEffort('t3', 'claude-chat', null)
@@ -108,7 +109,7 @@ test('writeChatEffort/writeChatFastMode treat missing as null/false (no-op skip)
 test('clearChatConversationId no-ops when nothing stored, clears when set', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t4')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
 
   // NULL provider_config → early return, no write.
   await ops.clearChatConversationId('t4', 'claude-chat')
@@ -131,7 +132,7 @@ test('clearChatConversationId no-ops when nothing stored, clears when set', asyn
 test('bumpLastInteraction only moves forward and reports changed', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id) VALUES (?)').run('t5')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
 
   // NULL → set.
   expect(await ops.bumpLastInteraction('t5', 1000)).toBe(true)
@@ -164,7 +165,7 @@ test('bumpLastInteraction only moves forward and reports changed', async () => {
 test('readProviderConfig returns {} for corrupt provider_config', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t6', '{not json')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   const cfg = await ops.readProviderConfig('t6', 'claude-chat')
   expect(Object.keys(cfg).length).toBe(0)
 })
@@ -172,7 +173,7 @@ test('readProviderConfig returns {} for corrupt provider_config', async () => {
 test('writeChatMode replaces corrupt provider_config with a fresh valid object', async () => {
   const { raw, db } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t7', '{not json')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   await ops.writeChatMode('t7', 'claude-chat', 'plan')
   const row = raw.prepare('SELECT provider_config AS v FROM tasks WHERE id = ?').get('t7') as {
     v: string
@@ -184,7 +185,7 @@ test('writeChatMode replaces corrupt provider_config with a fresh valid object',
 test('clearChatConversationId leaves corrupt provider_config untouched (no throw)', async () => {
   const { raw, db, runLog } = makeDb()
   raw.prepare('INSERT INTO tasks (id, provider_config) VALUES (?, ?)').run('t8', '{not json')
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   await ops.clearChatConversationId('t8', 'claude-chat')
   expect(updateCount(runLog)).toBe(0)
   const row = raw.prepare('SELECT provider_config AS v FROM tasks WHERE id = ?').get('t8') as {
@@ -195,7 +196,7 @@ test('clearChatConversationId leaves corrupt provider_config untouched (no throw
 
 test('loadChatEvents drops corrupt event rows instead of throwing', async () => {
   const { raw, db } = makeDb()
-  const ops = createDbChatDataOps(db)
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   await ops.persistChatEvent('tab-1', 0, {
     kind: 'assistant-text',
     messageId: 'm1',

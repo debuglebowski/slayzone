@@ -19,6 +19,7 @@ import {
   setReinstallHooks
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 
 interface FakePty {
   pid: number
@@ -63,7 +64,7 @@ const stubDb = {
   batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
 } as unknown as SlayzoneDb
 
-setDatabase(stubDb)
+setDatabase(stubDb, createFakeTaskSessionStore())
 
 /**
  * Warm adoption is a REKEY on a COMPUTER (`pty.warmAdopt`) reached through
@@ -259,8 +260,7 @@ function makeAsyncDb(): SlayzoneDb {
     CREATE TABLE task_conversations (
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, conversation_id TEXT,
       origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL);
-    -- v147 triple-write target: recordPendingSpawn → recordConversation mirrors
-    -- into agent_sessions, so the table must exist for batchTxn (not tolerant).
+    -- Production schema shape (ledger writes go through the fake task store here).
     CREATE TABLE agent_sessions (
       id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, conversation_id TEXT,
       origin TEXT NOT NULL, status TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER);
@@ -304,7 +304,7 @@ test('real-db resolver drives resume from the ledger (renderer hint absent)', as
     `INSERT INTO task_conversations (id, task_id, mode, conversation_id, origin, created_at)
      VALUES ('row1','rt1','claude-code','REAL-LEDGER-ID','slay-spawned-fresh', 1000)`
   )
-  setDatabase(adb)
+  setDatabase(adb, createFakeTaskSessionStore())
   // Resolver shape registerConversationResolver wires in production: the
   // latest-honored-after-reset read, run against a real async db.
   setConversationResolver(async ({ taskId, mode }) => {
@@ -343,7 +343,7 @@ test('real-db resolver drives resume from the ledger (renderer hint absent)', as
   expect(cmd, `must NOT fresh-spawn over the ledger id: ${cmd}`).not.toContain('--session-id')
   killPty(sid)
   setConversationResolver(null)
-  setDatabase(stubDb)
+  setDatabase(stubDb, createFakeTaskSessionStore())
 })
 
 // ── Spawn-time hook self-heal (part 3) ───────────────────────────────────────

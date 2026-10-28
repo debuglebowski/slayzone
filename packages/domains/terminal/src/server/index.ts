@@ -109,11 +109,13 @@ export {
 // land here, not in the Electron host). See plans/agent-sessions.md.
 export {
   clearWindowTabCounts,
+  createDbWarmPoolDataOps,
   initWarmProcessManager,
   reapOrphanWarms,
   reserveWarmTaskId,
   teardownAllWarm,
-  unadoptedWarmAgent
+  unadoptedWarmAgent,
+  type WarmPoolDataOps
 } from './runtime/warm-process-manager'
 export {
   ptyEvents,
@@ -219,6 +221,16 @@ export {
 // (e.g. computer resolution) over the db-backed defaults instead of reimplementing
 // the whole interface.
 export { createDbChatDataOps, type ChatDataOps } from './runtime/chat-data-ops'
+// Task-side session/conversation ledger writes the runtime makes. Terminal owns
+// the interface; the task package's server barrel exports the implementation
+// (`taskSessionStore`), and the composition root passes it to
+// `createPtyOps` / `createDbChatDataOps` / `createDbWarmPoolDataOps`.
+export type {
+  PendingSpawnInput,
+  RecordConversationInput,
+  SessionSpawnInput,
+  TaskSessionStore
+} from './runtime/task-session-store'
 export {
   createChatQueueOps,
   chatQueueEvents,

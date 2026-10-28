@@ -18,8 +18,10 @@ import {
   getWarmStatus,
   reapOrphanWarms,
   __resetForTests,
+  createDbWarmPoolDataOps,
   type WarmPoolDataOps
 } from './warm-process-manager'
+import { createFakeTaskSessionStore } from './fake-task-session-store'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
 import { setReinstallHooks, buildBaseEnv } from './pty-manager'
 
@@ -62,7 +64,7 @@ const fakeBackend = {
     throw new Error('cold spawn must not run from the warm pool')
   },
   async warmSpawn(computerId: string, spec: Omit<WarmSpawnCall, 'computerId'>) {
-    rowsAtSpawn.push(dbRunCalls.filter((c) => /INSERT INTO agent_sessions/.test(c.sql)).length)
+    rowsAtSpawn.push(sessionCalls('recordSessionSpawn').length)
     spawnCalls.push({ computerId, ...spec })
     if (failNextSpawn) {
       failNextSpawn = false
@@ -84,9 +86,13 @@ const fakeBackend = {
 let enabled = true
 // cwd must exist on disk — spawnWarm guards on existsSync(projectRoot).
 const PROJECT_ROOT = tmpdir()
-// Stub db: the mode lookup returns the claude-code template; `run` captures
-// writes (recordSessionSpawn / markSessionDead) so the agent-warm test can
-// assert a pooled session row was recorded.
+// Stub db: the mode lookup returns the claude-code template; `run` captures any
+// direct db write. Session writes (recordSessionSpawn / markSessionDead) go through
+// the task-owned store — a fake here (terminal cannot import task) — so the
+// agent-warm tests assert the pooled session was recorded / marked dead there.
+let taskStore = createFakeTaskSessionStore()
+const sessionCalls = (method: 'recordSessionSpawn' | 'markSessionDead') =>
+  taskStore.calls.filter((c) => c.method === method)
 let dbRunCalls: Array<{ sql: string; params: unknown[] }> = []
 const db = {
   get: async (sql: string) =>
@@ -106,6 +112,7 @@ function init(opts: { reserveTtlMs?: number } = {}): void {
   killCalls = []
   listResult = []
   dbRunCalls = []
+  taskStore = createFakeTaskSessionStore()
   rowsAtSpawn = []
   failNextSpawn = false
   enabled = true
@@ -113,6 +120,7 @@ function init(opts: { reserveTtlMs?: number } = {}): void {
   setPtyBackend(fakeBackend as unknown as PtyBackend)
   initWarmProcessManager({
     db,
+    ops: createDbWarmPoolDataOps(db, taskStore),
     isEnabled: () => enabled,
     getProjectRoot: async () => PROJECT_ROOT,
     resolveComputerId: async () => computerId,
@@ -167,10 +175,11 @@ test('warm spawn pre-boots the agent + records a pooled session (B3b)', async ()
   // authority on mode templates + conversation ids.
   const post = lastSpawn()?.postSpawnCommand ?? ''
   expect(post.includes('exec ') && post.includes('claude')).toBeTruthy()
-  // A pooled agent_sessions row was recorded.
-  const pooledInsert = dbRunCalls.find((c) => /INSERT INTO agent_sessions/.test(c.sql))
+  // A pooled agent_sessions row was recorded (via the task store, on the pool's db).
+  const pooledInsert = sessionCalls('recordSessionSpawn')[0]
   expect(!!pooledInsert).toBeTruthy()
-  expect((pooledInsert!.params as unknown[]).includes('pooled')).toBeTruthy()
+  expect(pooledInsert!.db).toBe(db)
+  expect((pooledInsert!.args as { status: string }).status).toBe('pooled')
 })
 
 test('warm agent boots with its own reserved task id — never a session id', async () => {
@@ -217,9 +226,8 @@ test('a failed warm spawn marks its pooled row dead and leaves no agent', async 
   expect(getWarmStatus().p1).toBe(undefined as unknown as 'ready')
   expect(unadoptedWarmAgent(lastSpawn()!.env.SLAYZONE_TASK_ID)).toBeNull()
   await wait(10)
-  expect(dbRunCalls.some((c) => /UPDATE agent_sessions/.test(c.sql) && /dead/.test(c.sql))).toBe(
-    true
-  )
+  const pooledId = (sessionCalls('recordSessionSpawn')[0]!.args as { id: string }).id
+  expect(sessionCalls('markSessionDead').map((c) => c.args)).toContain(pooledId)
 })
 
 test('warm spawn fires the notify.sh self-heal (the clobber-bug population)', async () => {
