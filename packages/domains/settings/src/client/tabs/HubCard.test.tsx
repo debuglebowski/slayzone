@@ -25,6 +25,10 @@ type MockComputer = {
   createdAt: number
 }
 
+/** What the card sends to `computers.mintJoinToken`. */
+type MintInput = { label: string; forUser?: string }
+type Kids = { children?: React.ReactNode }
+
 /** Per-hub computer lists, keyed by hub id. */
 let computersByHub: Record<string, MockComputer[]> = {}
 /** Query lifecycle, so the loading / error / empty summaries can be exercised. */
@@ -35,10 +39,10 @@ const mintSpy = vi.fn(() =>
     token: 'szjt1.MOCKTOKEN',
     label: 'x',
     hubUrl: 'ws://127.0.0.1:51100/computers'
-  } as any)
+  })
 )
 const revokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
-const remoteMintSpy = vi.fn((_input: any, hub?: string) =>
+const remoteMintSpy = vi.fn((_input: MintInput, hub?: string) =>
   Promise.resolve({
     token: 'szjt1.REMOTETOKEN',
     label: 'x',
@@ -46,7 +50,7 @@ const remoteMintSpy = vi.fn((_input: any, hub?: string) =>
     // the computer is co-located, and the case the token dialog must warn about.
     hubUrl:
       hub === 'hub-lo' ? 'ws://127.0.0.1:51100/computers' : 'wss://hub-b.example.com:8443/computers'
-  } as any)
+  })
 )
 const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 
@@ -58,7 +62,7 @@ const restartLocalComputerSpy = vi.fn(() => Promise.resolve({ ok: true as const 
 let localComputerStatus: unknown = null
 
 /** The manual "re-check which computers are connected" round trip. */
-const refetchSpy = vi.fn((_hub?: string) => Promise.resolve({} as any))
+const refetchSpy = vi.fn((_hub?: string) => Promise.resolve({}))
 
 /** Reads/writes of a computer's filesystem path-jail, tagged with the asking hub. */
 const editRootsSpy = vi.fn(
@@ -169,7 +173,7 @@ vi.mock('@tanstack/react-query', () => ({
           ? remoteRevokeSpy
           : revokeSpy
         : remote
-          ? (input: any) => remoteMintSpy(input, opts?.__hub)
+          ? (input: MintInput) => remoteMintSpy(input, opts?.__hub)
           : mintSpy,
       isPending: false
     }
@@ -178,38 +182,40 @@ vi.mock('@tanstack/react-query', () => ({
 }))
 
 vi.mock('@slayzone/ui', () => {
-  const Pass = ({ children }: any) => <>{children}</>
+  const Pass = ({ children }: Kids) => <>{children}</>
   return {
-    Button: ({ children, onClick, disabled, ...props }: any) => (
+    Button: ({ children, onClick, disabled, ...props }: React.ComponentProps<'button'>) => (
       <button onClick={onClick} disabled={disabled} {...props}>
         {children}
       </button>
     ),
-    IconButton: ({ children, onClick, disabled, ...props }: any) => (
+    IconButton: ({ children, onClick, disabled, ...props }: React.ComponentProps<'button'>) => (
       <button onClick={onClick} disabled={disabled} {...props}>
         {children}
       </button>
     ),
-    Input: (props: any) => <input {...props} />,
-    Skeleton: (props: any) => <div data-slot="skeleton" {...props} />,
-    cn: (...parts: any[]) => parts.filter(Boolean).join(' '),
+    Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
+    Skeleton: (props: React.ComponentProps<'div'>) => <div data-slot="skeleton" {...props} />,
+    cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
     AlertDialog: Pass,
-    AlertDialogAction: ({ children, onClick, ...props }: any) => (
+    AlertDialogAction: ({ children, onClick, ...props }: React.ComponentProps<'button'>) => (
       <button onClick={onClick} {...props}>
         {children}
       </button>
     ),
-    AlertDialogCancel: ({ children }: any) => <button>{children}</button>,
+    AlertDialogCancel: ({ children }: Kids) => <button>{children}</button>,
     AlertDialogContent: Pass,
     AlertDialogDescription: Pass,
     AlertDialogFooter: Pass,
     AlertDialogHeader: Pass,
-    AlertDialogTitle: ({ children }: any) => <div>{children}</div>,
-    Dialog: ({ open, children }: any) => (open ? <>{children}</> : null),
-    DialogContent: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+    AlertDialogTitle: ({ children }: Kids) => <div>{children}</div>,
+    Dialog: ({ open, children }: { open?: boolean } & Kids) => (open ? <>{children}</> : null),
+    DialogContent: ({ children, ...props }: React.ComponentProps<'div'>) => (
+      <div {...props}>{children}</div>
+    ),
     DialogHeader: Pass,
-    DialogTitle: ({ children }: any) => <div>{children}</div>,
-    DialogDescription: ({ children }: any) => <div>{children}</div>,
+    DialogTitle: ({ children }: Kids) => <div>{children}</div>,
+    DialogDescription: ({ children }: Kids) => <div>{children}</div>,
     DialogFooter: Pass,
     toast: { success: vi.fn(), error: vi.fn() }
   }

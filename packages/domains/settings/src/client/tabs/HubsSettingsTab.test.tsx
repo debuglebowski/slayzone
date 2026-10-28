@@ -2,6 +2,12 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ComputersHeading, HubCardProps, HubCardShellProps, HubStatus } from './HubCard'
+
+type Kids = { children?: React.ReactNode }
+/** Radix checkbox/switch props the mocks map onto a plain `<input>`. */
+type CheckProps = Omit<React.ComponentProps<'input'>, 'children'> &
+  Kids & { onCheckedChange?: (checked: boolean) => void }
 
 /**
  * Sign in is offered only when a hub ACTUALLY gates its client API.
@@ -70,7 +76,7 @@ vi.mock('@slayzone/transport/client', () => ({
   },
   useHubRegistryStore: { getState: () => ({ setTokens: vi.fn() }) },
   useFederationOrNull: () => federation,
-  HubScope: ({ hubId, children }: any) => {
+  HubScope: ({ hubId, children }: { hubId: string } & Kids) => {
     renderingHubId = hubId
     return <>{children}</>
   }
@@ -85,7 +91,13 @@ vi.mock('@slayzone/transport/client', () => ({
  * the Sign in / Verify / signed-in assertions below live in those slots, and a
  * not-connected remote goes through the SHELL rather than the card.
  */
-const header = (headerTestId: string, identity: any, status: any, primary: any, more: any) => (
+const header = (
+  headerTestId: string,
+  identity: React.ReactNode,
+  status: React.ReactNode,
+  primary: React.ReactNode,
+  more: React.ReactNode
+) => (
   <div data-testid={headerTestId}>
     {identity}
     {status}
@@ -95,7 +107,7 @@ const header = (headerTestId: string, identity: any, status: any, primary: any, 
 )
 
 vi.mock('./HubCard', () => ({
-  HubCard: ({ hubId, isLocalHub, identity, status, primary, more, headerTestId }: any) => (
+  HubCard: ({ hubId, isLocalHub, identity, status, primary, more, headerTestId }: HubCardProps) => (
     <div data-testid={`hub-group-${hubId}`}>
       {header(headerTestId, identity, status, primary, more)}
       <div
@@ -106,18 +118,26 @@ vi.mock('./HubCard', () => ({
       />
     </div>
   ),
-  HubCardShell: ({ hubId, headerTestId, identity, status, primary, more, body }: any) => (
+  HubCardShell: ({
+    hubId,
+    headerTestId,
+    identity,
+    status,
+    primary,
+    more,
+    body
+  }: HubCardShellProps) => (
     <div data-testid={`hub-group-${hubId}`}>
       {header(headerTestId, identity, status, primary, more)}
       {body}
     </div>
   ),
-  HubStatus: ({ tone, label }: any) => (
+  HubStatus: ({ tone, label }: React.ComponentProps<typeof HubStatus>) => (
     <span data-testid="hub-status" data-tone={tone}>
       {label}
     </span>
   ),
-  ComputersHeading: ({ note, noteTestId }: any) => (
+  ComputersHeading: ({ note, noteTestId }: React.ComponentProps<typeof ComputersHeading>) => (
     <div>
       <span>Computers</span>
       {note ? <span data-testid={noteTestId}>{note}</span> : null}
@@ -126,34 +146,45 @@ vi.mock('./HubCard', () => ({
 }))
 
 vi.mock('./ComputerActions', () => ({
-  ComputerActionsProvider: ({ children }: any) => <>{children}</>
+  ComputerActionsProvider: ({ children }: Kids) => <>{children}</>
 }))
 
 vi.mock('@slayzone/ui', () => {
-  const Pass = ({ children }: any) => <>{children}</>
+  const Pass = ({ children }: Kids) => <>{children}</>
   return {
-    Button: ({ children, onClick, disabled, ...props }: any) => (
+    Button: ({ children, onClick, disabled, ...props }: React.ComponentProps<'button'>) => (
       <button onClick={onClick} disabled={disabled} {...props}>
         {children}
       </button>
     ),
-    IconButton: ({ children, onClick, disabled, ...props }: any) => (
+    IconButton: ({ children, onClick, disabled, ...props }: React.ComponentProps<'button'>) => (
       <button onClick={onClick} disabled={disabled} {...props}>
         {children}
       </button>
     ),
-    Input: (props: any) => <input {...props} />,
+    Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
     // Menu content renders inline: these tests are about WHICH actions a hub
     // offers, not about the menu's open/close mechanics (Radix owns that).
-    DropdownMenu: ({ children }: any) => <>{children}</>,
-    DropdownMenuTrigger: ({ children }: any) => <>{children}</>,
-    DropdownMenuContent: ({ children }: any) => <div>{children}</div>,
-    DropdownMenuItem: ({ children, onSelect, disabled, ...props }: any) => (
+    DropdownMenu: Pass,
+    DropdownMenuTrigger: Pass,
+    DropdownMenuContent: ({ children }: Kids) => <div>{children}</div>,
+    DropdownMenuItem: ({
+      children,
+      onSelect,
+      disabled,
+      ...props
+    }: React.ComponentProps<'button'>) => (
       <button onClick={onSelect} disabled={disabled} {...props}>
         {children}
       </button>
     ),
-    DropdownMenuCheckboxItem: ({ children, checked, onCheckedChange, disabled, ...props }: any) => (
+    DropdownMenuCheckboxItem: ({
+      children,
+      checked,
+      onCheckedChange,
+      disabled,
+      ...props
+    }: CheckProps) => (
       <input
         type="checkbox"
         checked={checked}
@@ -164,7 +195,7 @@ vi.mock('@slayzone/ui', () => {
       />
     ),
     DropdownMenuSeparator: () => <hr />,
-    Switch: ({ checked, onCheckedChange, ...props }: any) => (
+    Switch: ({ checked, onCheckedChange, ...props }: CheckProps) => (
       <input
         type="checkbox"
         checked={checked}
@@ -173,12 +204,14 @@ vi.mock('@slayzone/ui', () => {
       />
     ),
     toast: { success: vi.fn(), error: vi.fn() },
-    cn: (...parts: any[]) => parts.filter(Boolean).join(' '),
-    Dialog: ({ open, children }: any) => (open ? <>{children}</> : null),
-    DialogContent: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+    cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
+    Dialog: ({ open, children }: { open?: boolean } & Kids) => (open ? <>{children}</> : null),
+    DialogContent: ({ children, ...props }: React.ComponentProps<'div'>) => (
+      <div {...props}>{children}</div>
+    ),
     DialogHeader: Pass,
-    DialogTitle: ({ children }: any) => <div>{children}</div>,
-    DialogDescription: ({ children }: any) => <div>{children}</div>,
+    DialogTitle: ({ children }: Kids) => <div>{children}</div>,
+    DialogDescription: ({ children }: Kids) => <div>{children}</div>,
     DialogFooter: Pass
   }
 })
