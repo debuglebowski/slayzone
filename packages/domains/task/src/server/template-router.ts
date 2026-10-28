@@ -6,12 +6,12 @@ import {
   updateTemplate,
   deleteTemplate,
   setDefaultTemplate
-} from '@slayzone/task/server'
+} from './template-store'
 import type { CreateTaskTemplateInput, UpdateTaskTemplateInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 6 `db:taskTemplates:*` IPC handlers (task/src/main/template-handlers.ts).
-// The store is electron-free (../../../../domains/task/src/server/template-store) so it's
+// The store is electron-free (./template-store) so it's
 // imported directly — both IPC + tRPC call one implementation (coexistence until slice 5).
 // create/update pass shapes through unchecked (IPC validates by TypeScript only).
 const createInput = z.unknown() as unknown as z.ZodType<CreateTaskTemplateInput>

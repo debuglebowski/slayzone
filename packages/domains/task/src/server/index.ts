@@ -25,6 +25,7 @@ export {
   deleteTemplate,
   setDefaultTemplate
 } from './template-store'
+export { templateRouter } from './template-router'
 
 // The artifact store (createArtifactStore / parseArtifact / parseFolder) and its
 // worker txns live in `task-artifacts/server` + `/db`.

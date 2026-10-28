@@ -5,6 +5,8 @@
  * (domains/task/src/electron/template-handlers.test.ts): template CRUD +
  * default handling, template APPLICATION on task creation (via taskRouter), and
  * task-update round-trips of template-like fields.
+ * The template router lives in @slayzone/task/server; this test stays in api because
+ * it also drives api's taskRouter + task deps registry (a domain never imports api).
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,10 +19,9 @@ import type {
   PanelVisibility,
   TaskTemplate
 } from '@slayzone/task-contracts'
-import { templateRouter } from './template.js'
 import { taskRouter } from './task.js'
 import { setTaskDeps } from '../app-deps.js'
-import { taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import { templateRouter, taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 setTaskDeps({ ops: taskOps })
