@@ -218,7 +218,7 @@ run_harness packages/domains/processes/src/server/process-persistence.test.ts
 run_harness packages/domains/processes/src/server/process-backend.test.ts
 # Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
-run_harness packages/apps/api/src/routers/ai-config.test.ts
+run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/apps/api/src/routers/file-editor.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.

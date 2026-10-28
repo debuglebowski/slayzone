@@ -23,10 +23,12 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "js-yaml": "^5.4.2",
     "lucide-react": "^1.48.0",
+    "zod": "^4.3.5",
     "zustand": "^5.0.15"
   },
   "peerDependencies": {

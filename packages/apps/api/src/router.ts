@@ -15,7 +15,7 @@ import {
 } from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
-import { aiConfigRouter } from './routers/ai-config'
+import { aiConfigRouter, type AiConfigMounts } from '@slayzone/ai-config/server'
 import {
   agentPromptsRouter,
   agentTurnsRouter,
@@ -115,6 +115,7 @@ type AssertAppSlice<T extends true> = T
 
 export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,
+  AssertAppSlice<IsAppSlice<AiConfigMounts>>,
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<ArtifactsMounts>>,

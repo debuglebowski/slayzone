@@ -9,13 +9,13 @@
  * Run with vitest (packages/shared/test-utils/vitest.harness.config.ts, see run-all.sh):
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *     --config packages/shared/test-utils/vitest.harness.config.ts \
- *     packages/apps/api/src/routers/ai-config.test.ts
+ *     packages/domains/ai-config/src/server/ai-config-router.test.ts
  */
 import { describe, test, expect, beforeAll } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { skillSlugFromContextPath } from '@slayzone/ai-config/shared'
-import { aiConfigRouter } from './ai-config.js'
+import { aiConfigRouter } from './ai-config-router.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'

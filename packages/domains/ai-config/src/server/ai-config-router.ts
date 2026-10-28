@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { getAiConfigOps, getMarketplaceOps } from '@slayzone/ai-config/server'
+import { getAiConfigOps, getMarketplaceOps } from './ai-config-ops'
 import type {
   ListAiConfigItemsInput,
   CreateAiConfigItemInput,
@@ -346,3 +346,8 @@ export const aiConfigRouter = router({
       .mutation(({ input }) => getMarketplaceOps().updateSkill(input.itemId, input.entryId))
   })
 })
+
+export type AiConfigRouter = typeof aiConfigRouter
+
+/** Where `@slayzone/api` mounts this router; it asserts the slice in its `router.ts`. */
+export type AiConfigMounts = { aiConfig: AiConfigRouter }
