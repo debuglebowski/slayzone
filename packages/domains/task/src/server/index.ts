@@ -6,6 +6,7 @@
 
 export { taskEvents, agentSessionsEvents } from './events'
 export type { TaskEventMap, AgentSessionsEventMap } from './events'
+export { agentSessionsRouter } from './agent-sessions-router'
 
 export {
   artifactWatcherEvents,

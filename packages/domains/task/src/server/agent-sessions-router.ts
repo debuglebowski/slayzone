@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { listTaskSessions, agentSessionsEvents } from '@slayzone/task/server'
+import { listTaskSessions } from './ops'
+import { agentSessionsEvents } from './events'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 export const agentSessionsRouter = router({
