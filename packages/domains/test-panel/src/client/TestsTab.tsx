@@ -36,6 +36,8 @@ interface TestsTabProps {
 }
 
 const CUSTOM_VALUE = '__custom__'
+/** The list while the query has no data: one identity, so effects keyed on it don't re-run every render. */
+const NO_CATEGORIES: TestCategory[] = []
 const COLORS = [
   '#ef4444',
   '#f97316',
@@ -74,7 +76,7 @@ export function TestsTab({
   const labelsQuery = useQuery(trpc.testPanel.getLabels.queryOptions({ projectId }))
   const profilesQuery = useQuery(trpc.testPanel.getProfiles.queryOptions())
 
-  const categories = categoriesQuery.data ?? []
+  const categories = categoriesQuery.data ?? NO_CATEGORIES
   const labels = labelsQuery.data ?? []
   const profiles = profilesQuery.data ?? []
 
