@@ -16,6 +16,9 @@
  */
 import { beforeAll, describe, expect, test } from 'vitest'
 import { spawnSync } from 'node:child_process'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { type EventLoopStall, startEventLoopStallDetector } from './event-loop-stall'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -187,6 +190,36 @@ describe('one long blocking call', () => {
 
   test('the child-process snapshot names what the thread was waiting on', () => {
     expect(s, 'no stall').toBeDefined()
+    expect(childText(s!)).toContain('sleep 1.6')
+  })
+})
+
+// --- one long blocking call, on a loaded machine (slow `ps`) ---
+describe('one long blocking call, when the child snapshot is slow to return', () => {
+  // On a loaded box `ps` reads the process table during the freeze but its output
+  // lands after the thaw. That snapshot is still evidence from the freeze: it must
+  // not be dropped for arriving late. A fake `ps` (first on PATH, inherited by the
+  // watcher thread) snapshots at once and replies 1.5s later — past the thaw.
+  let stalls: EventLoopStall[] = []
+  let s: EventLoopStall | undefined
+  beforeAll(async () => {
+    if (process.platform === 'win32') return
+    const dir = mkdtempSync(join(tmpdir(), 'slow-ps-'))
+    const fake = join(dir, 'ps')
+    writeFileSync(fake, '#!/bin/sh\nout=$(/bin/ps "$@")\nsleep 1.5\nprintf \'%s\\n\' "$out"\n')
+    chmodSync(fake, 0o755)
+    const savedPath = process.env.PATH
+    process.env.PATH = `${dir}:${savedPath}`
+    try {
+      stalls = await observe(oneLongBlockingCallForTest)
+    } finally {
+      process.env.PATH = savedPath
+    }
+    s = stalls[0]
+  })
+
+  test.skipIf(process.platform === 'win32')('a late snapshot still names the blocking call', () => {
+    expect(stalls.length, `count=${stalls.length}`).toBe(1)
     expect(childText(s!)).toContain('sleep 1.6')
   })
 })

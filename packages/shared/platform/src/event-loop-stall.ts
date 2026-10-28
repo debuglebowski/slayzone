@@ -78,6 +78,9 @@ export interface EventLoopStallDetector {
 const TICK_MS = 100
 /** How long to wait after thawing for the watcher's samples to arrive. */
 const REPORT_GRACE_MS = 300
+/** Cap on one `ps` child snapshot. A report waits at most this long past the grace
+ *  window for a snapshot taken during the freeze whose output has not landed. */
+const PS_TIMEOUT_MS = 2_000
 const SAMPLE_EVERY_MS = 1_000
 const MAX_SAMPLES_PER_STALL = 5
 const MAX_FRAMES = 20
@@ -87,10 +90,17 @@ const GC_ENTRY_TTL_MS = 300_000
 
 type WatcherMessage =
   | { kind: 'stack'; at: number; frames: string[] }
+  /** A child snapshot was TAKEN at `at`; its result follows under the same id. */
+  | { kind: 'children-pending'; at: number; id: number }
   | {
       kind: 'children'
+      /** When the snapshot was TAKEN (ps launched), not when its output arrived:
+       *  on a loaded box `ps` reads the table mid-freeze and finishes after the
+       *  thaw, and it is still evidence from the freeze. */
       at: number
-      processes: Array<{ pid: number; elapsed: string; command: string }>
+      id: number
+      /** `null` when `ps` failed or timed out. */
+      processes: Array<{ pid: number; elapsed: string; command: string }> | null
     }
 
 /**
@@ -102,7 +112,7 @@ const WATCHER_SOURCE = `
 'use strict'
 const { parentPort, workerData } = require('node:worker_threads')
 const { execFile } = require('node:child_process')
-const { beat, thresholdMs, tickMs, sampleEveryMs, maxSamples, maxFrames, parentPid } = workerData
+const { beat, thresholdMs, tickMs, sampleEveryMs, maxSamples, maxFrames, parentPid, psTimeoutMs } = workerData
 
 let session = null
 try {
@@ -115,6 +125,7 @@ try {
 
 let pausePending = false
 let psPending = false
+let snapshotId = 0
 if (session) {
   session.on('Debugger.paused', (message) => {
     const frames = message.params.callFrames.slice(0, maxFrames).map((f) => {
@@ -131,9 +142,15 @@ if (session) {
 function snapshotChildren() {
   if (process.platform === 'win32' || psPending) return
   psPending = true
-  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,command='], { timeout: 2000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+  const id = ++snapshotId
+  const takenAt = Date.now()
+  parentPort.postMessage({ kind: 'children-pending', at: takenAt, id })
+  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,command='], { timeout: psTimeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
     psPending = false
-    if (err) return
+    if (err) {
+      parentPort.postMessage({ kind: 'children', at: takenAt, id, processes: null })
+      return
+    }
     const processes = []
     for (const line of String(stdout).split('\\n')) {
       const m = line.trim().match(/^(\\d+)\\s+(\\d+)\\s+(\\S+)\\s+(.*)$/)
@@ -142,7 +159,7 @@ function snapshotChildren() {
       if (pid === ps.pid) continue // this snapshot's own ps
       processes.push({ pid, elapsed: m[3], command: m[4].slice(0, 300) })
     }
-    parentPort.postMessage({ kind: 'children', at: Date.now(), processes })
+    parentPort.postMessage({ kind: 'children', at: takenAt, id, processes })
   })
 }
 
@@ -234,7 +251,8 @@ export function startEventLoopStallDetector(
         sampleEveryMs: SAMPLE_EVERY_MS,
         maxSamples: MAX_SAMPLES_PER_STALL,
         maxFrames: MAX_FRAMES,
-        parentPid: process.pid
+        parentPid: process.pid,
+        psTimeoutMs: PS_TIMEOUT_MS
       }
     })
     watcher.on('message', (m: WatcherMessage) => {
@@ -295,7 +313,9 @@ export function startEventLoopStallDetector(
         m.kind === 'stack' ? [{ atMs: m.at - from.wall, frames: m.frames }] : []
       ),
       children: during.flatMap((m) =>
-        m.kind === 'children' ? [{ atMs: m.at - from.wall, processes: m.processes }] : []
+        m.kind === 'children' && m.processes
+          ? [{ atMs: m.at - from.wall, processes: m.processes }]
+          : []
       )
     }
     try {
@@ -305,6 +325,28 @@ export function startEventLoopStallDetector(
     }
   }
 
+  /** A child snapshot taken during [from, to] whose result has not arrived yet. */
+  const snapshotInFlight = (from: Tick, to: Tick): boolean => {
+    const done = new Set(messages.flatMap((m) => (m.kind === 'children' ? [m.id] : [])))
+    return messages.some(
+      (m) =>
+        m.kind === 'children-pending' && m.at >= from.wall && m.at <= to.wall && !done.has(m.id)
+    )
+  }
+
+  const scheduleReport = (from: Tick, to: Tick, deadline: number, delayMs: number): void => {
+    const timer = setTimeout(() => {
+      reportTimers.delete(timer)
+      if (snapshotInFlight(from, to) && Date.now() < deadline) {
+        scheduleReport(from, to, deadline, TICK_MS)
+      } else {
+        report(from, to)
+      }
+    }, delayMs)
+    timer.unref?.()
+    reportTimers.add(timer)
+  }
+
   const tick = setInterval(() => {
     const now = readTick()
     Atomics.store(heartbeat, 0, BigInt(now.wall))
@@ -312,13 +354,9 @@ export function startEventLoopStallDetector(
     last = now
     if (now.perf - from.perf - TICK_MS < thresholdMs) return
     // Thawed. The watcher's samples are already queued behind this timer; give
-    // them one short window to land, then report.
-    const timer = setTimeout(() => {
-      reportTimers.delete(timer)
-      report(from, now)
-    }, REPORT_GRACE_MS)
-    timer.unref?.()
-    reportTimers.add(timer)
+    // them one short window to land, then report — later only for a child
+    // snapshot taken mid-freeze whose `ps` is still running (bounded by its timeout).
+    scheduleReport(from, now, Date.now() + REPORT_GRACE_MS + PS_TIMEOUT_MS, REPORT_GRACE_MS)
   }, TICK_MS)
   tick.unref?.()
 
