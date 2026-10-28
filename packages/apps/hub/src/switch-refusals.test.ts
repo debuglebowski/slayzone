@@ -22,12 +22,7 @@ import superjson from 'superjson'
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import {
-  appRouter,
-  setAppDeps,
-  setIntegrationOps,
-  setProcessesDeps
-} from '@slayzone/transport/server'
+import { appRouter, setAppDeps, setIntegrationOps, setProcessesDeps } from '@slayzone/api'
 import {
   createProcess,
   initProcessManager,

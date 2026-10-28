@@ -1,0 +1,465 @@
+/**
+ * REST: POST /api/computers/join-token contract tests (Wave3.5-D3).
+ * Run with the electron+loader computer (better-sqlite3 native ABI via the harness DB).
+ *
+ * The route is the mint channel the Electron MAIN process hits at boot to
+ * auto-enroll its local computer (main has no tRPC client to the sidecar), AND the
+ * channel `slay computer mint` uses. It wraps the same store `mintJoinToken` as the
+ * computers tRPC proc, gated on the `deps.computers` slot (wired once the computer init
+ * resolves):
+ *   - computer ON + listener bound  → 200 { token (decodable szjt1), hubUrl (wss) }
+ *   - computer ON + not-yet-bound   → 503 (main retries)
+ *   - computer OFF (slot absent)    → 503 (never mints; default boot byte-identical)
+ *
+ * WHO MAY CALL IT is a separate axis, decided by the pure `joinTokenAuthDecision`
+ * and asserted at the bottom: on a hub with NO auth (no `restAuth` slot —
+ * supervised, the Electron host's own boot auto-enroll), loopback is the sole
+ * authority. On a hub that ENFORCES auth (every standalone hub now — see
+ * server.ts), a bearer is required from everyone, loopback included — that used
+ * to be an unconditional loopback bypass, which a reverse proxy in front of a
+ * standalone hub turns into "anyone who reaches the hub can mint". The HTTP
+ * harness binds 127.0.0.1, so every peer it can produce is loopback — which is
+ * exactly why that decision is a pure exported function rather than reachable
+ * through a request (same reasoning as the sibling `hub/users.ts` suite).
+ */
+import { afterAll, describe, expect, test } from 'vitest'
+import express from 'express'
+import { createTestHarness } from '../../../../../../shared/test-utils/ipc-harness.js'
+import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
+import { decodeJoinToken } from '@slayzone/computers/server'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
+import {
+  isLoopbackAddress,
+  joinTokenAuthDecision,
+  registerComputersJoinTokenRoute
+} from './join-token.js'
+import type { RestApiDeps } from '../types.js'
+
+const h = await createTestHarness()
+
+/** The hub's accounts, as the hub-auth lookup reports them (T-20). */
+const ACCOUNTS: Record<string, { userId: string; disabled: boolean }> = {
+  'u-bob': { userId: 'u-bob', disabled: false },
+  'bob@example.com': { userId: 'u-bob', disabled: false },
+  'u-dave': { userId: 'u-dave', disabled: true }
+}
+
+/** A bound computer listener (computer ON, url present). */
+const boundComputers = {
+  getHubUrl: () => 'wss://127.0.0.1:54321/computers',
+  findAccount: async (ref: string) => ACCOUNTS[ref] ?? null
+}
+
+/** A hub with login, the caller signed in as `principal`. */
+const loginHub = (principal: {
+  userId: string
+  role: 'admin' | 'user'
+  scopes: Array<'full' | 'read' | 'tasks'>
+}): RestApiDeps['restAuth'] => ({
+  required: () => true,
+  verifyBearer: async () => principal
+})
+
+const lastRow = () =>
+  h.db
+    .prepare(
+      'SELECT minted_by_user_id, owner_user_id, expires_at - created_at AS ttl FROM join_tokens ORDER BY rowid DESC LIMIT 1'
+    )
+    .get() as { minted_by_user_id: string | null; owner_user_id: string | null; ttl: number }
+const rowCount = () =>
+  (h.db.prepare('SELECT COUNT(*) AS n FROM join_tokens').get() as { n: number }).n
+
+function mount(computers: RestApiDeps['computers'], restAuth?: RestApiDeps['restAuth']) {
+  const app = express()
+  app.use(express.json())
+  registerComputersJoinTokenRoute(app, {
+    db: h.slayDb,
+    notifyRenderer: () => {},
+    computers,
+    ...(restAuth ? { restAuth } : {})
+  })
+  return mountRestApp(app)
+}
+
+describe('POST /api/computers/join-token', () => {
+  test('computer ON + bound: mints a decodable szjt1 token embedding the wss hub url', async () => {
+    const rest = await mount(boundComputers)
+    try {
+      const res = await rest.request<{ token: string; hubUrl: string }>(
+        'POST',
+        '/api/computers/join-token',
+        { label: 'local-computer' }
+      )
+      expect(res.status).toBe(200)
+      expect(res.body.hubUrl).toBe('wss://127.0.0.1:54321/computers')
+      const payload = decodeJoinToken(res.body.token)
+      expect(payload).not.toBeNull()
+      expect(payload!.hubUrl).toBe('wss://127.0.0.1:54321/computers')
+      // The hub presents no certificate of its own, so the token carries no pin.
+      expect('certFingerprint' in payload!).toBe(false)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('computer ON but listener not yet bound (null url): 503', async () => {
+    const rest = await mount({ getHubUrl: () => null })
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(503)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('computer OFF (computers slot absent): 503, never mints', async () => {
+    const rest = await mount(undefined)
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(503)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('defaults the label when omitted', async () => {
+    const rest = await mount(boundComputers)
+    try {
+      const res = await rest.request<{ token: string; hubUrl: string }>(
+        'POST',
+        '/api/computers/join-token',
+        {}
+      )
+      expect(res.status).toBe(200)
+      expect(typeof res.body.token).toBe('string')
+    } finally {
+      await rest.close()
+    }
+  })
+
+  // NO `restAuth` slot at all (the Electron host's shape): loopback is the sole
+  // authority, no bearer is ever consulted. This is the boot auto-enroll path.
+  test('with no restAuth slot, loopback mints with no bearer check', async () => {
+    const rest = await mount(boundComputers)
+    try {
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(200)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  // THE REGRESSION FIX: a loopback caller on an auth-ENFORCING hub must present a
+  // bearer like anyone else — the old unconditional loopback bypass is exactly
+  // what a reverse proxy in front of a standalone hub turns into "anyone reaches
+  // this route". Bootstrap-owner (hub.owner.json) is what keeps an on-box caller
+  // working without operator action; this is asserted from the CLI side, not
+  // here — this test asserts the SERVER no longer trusts the peer alone.
+  test('loopback caller on an auth-enforcing hub MUST present a bearer', async () => {
+    let verifyCalls = 0
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => {
+        verifyCalls += 1
+        return null
+      }
+    })
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(401)
+      expect(verifyCalls).toBe(1)
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('loopback caller on an auth-enforcing hub mints WITH a valid admin bearer, for a named user', async () => {
+    const rest = await mount(
+      boundComputers,
+      loginHub({ userId: 'u1', role: 'admin', scopes: ['full'] })
+    )
+    try {
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {
+        forUser: 'bob@example.com'
+      })
+      expect(res.status).toBe(200)
+      // T-20: the named user owns the computer the token enrolls; the admin is only
+      // the minter, kept for the record.
+      const row = lastRow()
+      expect([row.minted_by_user_id, row.owner_user_id]).toEqual(['u1', 'u-bob'])
+    } finally {
+      await rest.close()
+    }
+  })
+
+  // T-15 (O-5): only an admin mints. A valid full session of a `user` account is 403.
+  test('a valid full bearer of a NON-admin account is 403 ADMIN_ONLY', async () => {
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u3', role: 'user', scopes: ['full'] })
+    })
+    try {
+      const res = await rest.request<{ error: string; code?: string }>(
+        'POST',
+        '/api/computers/join-token',
+        {}
+      )
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe('ADMIN_ONLY')
+    } finally {
+      await rest.close()
+    }
+  })
+
+  test('loopback caller on an auth-enforcing hub is REFUSED with a scoped (non-full) bearer', async () => {
+    // A szw_ web session must not be able to mint a computer join token even
+    // though it presents a genuinely valid credential — join-token.ts checks
+    // for `full` specifically, not merely "verifyBearer resolved something".
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => ({ userId: 'u2', role: 'user', scopes: ['read', 'tasks'] })
+    })
+    try {
+      const res = await rest.request<{ error: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(401)
+    } finally {
+      await rest.close()
+    }
+  })
+})
+
+// T-20 (O-5): on a hub with login an admin mints FOR a named, enabled user, for at most
+// 1 hour. Each refusal is a 400 with a stable code, and nothing is minted.
+describe('who the token is for, and for how long (T-20)', () => {
+  const admin = loginHub({ userId: 'u-admin', role: 'admin', scopes: ['full'] })
+  const refused = async (
+    restAuth: RestApiDeps['restAuth'] | undefined,
+    body: Record<string, unknown>
+  ): Promise<{ status: number; code?: string }> => {
+    const rest = await mount(boundComputers, restAuth)
+    try {
+      const before = rowCount()
+      const res = await rest.request<{ code?: string }>('POST', '/api/computers/join-token', body)
+      if (res.status !== 200) expect(rowCount()).toBe(before)
+      return { status: res.status, code: res.body.code }
+    } finally {
+      await rest.close()
+    }
+  }
+
+  test('an admin naming nobody is refused: JOIN_TOKEN_OWNER_REQUIRED', async () => {
+    expect(await refused(admin, {})).toEqual({ status: 400, code: 'JOIN_TOKEN_OWNER_REQUIRED' })
+    expect(await refused(admin, { forUser: '  ' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_REQUIRED'
+    })
+  })
+
+  test('an unknown or disabled user is refused', async () => {
+    expect(await refused(admin, { forUser: 'nobody@example.com' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_UNKNOWN'
+    })
+    expect(await refused(admin, { forUser: 'u-dave' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_DISABLED'
+    })
+  })
+
+  test('a lifetime over 1 hour is refused, on every hub; 1 hour exactly mints', async () => {
+    const twoHours = 2 * 60 * 60_000
+    expect(await refused(admin, { forUser: 'u-bob', ttlMs: twoHours })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect(await refused(undefined, { ttlMs: twoHours })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_TTL_TOO_LONG'
+    })
+    expect((await refused(admin, { forUser: 'u-bob', ttlMs: 60 * 60_000 })).status).toBe(200)
+    expect(lastRow().ttl).toBe(60 * 60_000)
+  })
+
+  test('the default lifetime is 15 minutes', async () => {
+    expect((await refused(admin, { forUser: 'u-bob' })).status).toBe(200)
+    expect(lastRow().ttl).toBe(15 * 60_000)
+  })
+
+  test('a non-admin is still 403 ADMIN_ONLY, naming a user or not', async () => {
+    const user = loginHub({ userId: 'u-bob', role: 'user', scopes: ['full'] })
+    expect(await refused(user, { forUser: 'u-bob' })).toEqual({ status: 403, code: 'ADMIN_ONLY' })
+  })
+
+  // Login off (the desktop app's own hub, no restAuth slot): unchanged — anyone on the
+  // box mints, for nobody. Naming a user there is refused rather than ignored.
+  test('login off: mints for nobody, as before; naming a user is refused', async () => {
+    expect((await refused(undefined, { label: 'local-computer' })).status).toBe(200)
+    const row = lastRow()
+    expect([row.minted_by_user_id, row.owner_user_id]).toEqual([null, null])
+    expect(await refused(undefined, { forUser: 'u-bob' })).toEqual({
+      status: 400,
+      code: 'JOIN_TOKEN_OWNER_UNSUPPORTED'
+    })
+  })
+})
+
+describe('audit (T-03)', () => {
+  test('a refusal writes authz.denied; a mint is written as the verified caller', async () => {
+    const audit: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+    let principal: {
+      userId: string
+      role: 'admin' | 'user'
+      scopes: Array<'full' | 'read' | 'tasks'>
+    } | null = null
+    const rest = await mount(boundComputers, {
+      required: () => true,
+      verifyBearer: async () => principal
+    })
+    try {
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
+      principal = { userId: 'u-scoped', role: 'user', scopes: ['read', 'tasks'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
+      principal = { userId: 'u-user', role: 'user', scopes: ['full'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(403)
+      principal = { userId: 'u-full', role: 'admin', scopes: ['full'] }
+      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(400)
+      expect(
+        (await rest.request('POST', '/api/computers/join-token', { forUser: 'u-dave' })).status
+      ).toBe(400)
+      const minted = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {
+        forUser: 'bob@example.com'
+      })
+      expect(minted.status).toBe(200)
+      expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
+        'authz.denied:denied:null',
+        'authz.denied:denied:u-scoped',
+        'authz.denied:denied:u-user',
+        'computer.join_token.mint:denied:u-full',
+        'computer.join_token.mint:denied:u-full',
+        'computer.join_token.mint:success:u-full'
+      ])
+      expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
+        'unauthenticated',
+        'scoped_session',
+        'not_admin',
+        'JOIN_TOKEN_OWNER_REQUIRED',
+        'JOIN_TOKEN_OWNER_DISABLED',
+        undefined
+      ])
+      // Minter (actor), owner and lifetime; the disabled owner's id, never the typed email.
+      expect(audit[4]!.detail).toEqual({
+        reason: 'JOIN_TOKEN_OWNER_DISABLED',
+        ttlMs: 15 * 60_000,
+        owner: 'u-dave'
+      })
+      expect(audit[5]!.targetKind).toBe('join_token')
+      expect(audit[5]!.detail).toEqual({
+        label: 'local-computer',
+        ttlMs: 15 * 60_000,
+        owner: 'u-bob'
+      })
+      expect(audit[0]!.route).toBe('POST /api/computers/join-token')
+      expect(audit[0]!.ip).toBe('127.0.0.1')
+      const all = JSON.stringify(audit)
+      expect(all).not.toContain(minted.body.token)
+      expect(all).not.toContain(minted.body.token.split('.')[1]!)
+      expect(all).not.toContain('bob@example.com')
+    } finally {
+      setSecurityLogSink()
+      await rest.close()
+    }
+  })
+})
+
+/**
+ * WHO MAY MINT — the pure decision, exhaustively.
+ *
+ * The 403/401 exists because a join token is a bearer-equivalent secret. On an
+ * auth-enforcing hub a valid session ALREADY grants the identical operation over
+ * `/trpc` (`computers.mintJoinToken` is not loopback-gated), so refusing an
+ * off-box session here was a capability gap between two transports, not a
+ * boundary — but an unconditional loopback bypass was a REAL boundary, and one a
+ * reverse proxy silently erases. Loopback is authoritative ONLY when there is no
+ * auth to check at all.
+ */
+describe('joinTokenAuthDecision', () => {
+  test('auth NOT required (supervised): loopback mints, off-box is forbidden', () => {
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('mint')
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('forbid')
+  })
+
+  test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
+    // THE REGRESSION MATRIX. A loopback peer on an enforcing hub gets exactly the
+    // same answer an off-box peer would: verified bearer mints, missing/invalid
+    // is 401. This is the fix — the old function returned 'mint' unconditionally
+    // for loopback regardless of `authRequired`.
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('mint')
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
+  })
+
+  test('off-box on a hub that does NOT enforce auth: 403, unchanged', () => {
+    // A local-mode hub has no sessions to verify, so a bearer would be
+    // unverifiable — accepting one would be security theater. Being on the box
+    // stays the only authority here.
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
+    ).toBe('forbid')
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true, admin: true })
+    ).toBe('forbid')
+  })
+
+  test('auth REQUIRED: a valid bearer of a non-admin account is not-admin (T-15)', () => {
+    for (const loopback of [true, false]) {
+      expect(
+        joinTokenAuthDecision({ loopback, authRequired: true, bearerOk: true, admin: false })
+      ).toBe('not-admin')
+    }
+    // No login on this hub: no account, no role — loopback stays the authority.
+    expect(
+      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
+    ).toBe('mint')
+  })
+
+  test('off-box on an enforcing hub: valid bearer mints, missing/invalid is 401', () => {
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: true, admin: true })
+    ).toBe('mint')
+    // 401, not 403: the caller has a credential problem (fixable by signing in),
+    // not a policy one (fixable only by moving to the hub's machine).
+    expect(
+      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false, admin: true })
+    ).toBe('unauthorized')
+  })
+})
+
+// Exported so the peer classification is asserted directly — the harness binds
+// 127.0.0.1, so no request it can make is ever off-box.
+describe('isLoopbackAddress', () => {
+  test('accepts every loopback form node reports', () => {
+    expect(isLoopbackAddress('127.0.0.1')).toBe(true)
+    expect(isLoopbackAddress('127.0.0.53')).toBe(true)
+    expect(isLoopbackAddress('::1')).toBe(true)
+    expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true)
+  })
+
+  test('rejects off-box and unknown peers', () => {
+    expect(isLoopbackAddress('10.0.0.5')).toBe(false)
+    expect(isLoopbackAddress('203.0.113.9')).toBe(false)
+    // Unknown peer must fail CLOSED — an absent address is not a loopback proof.
+    expect(isLoopbackAddress(undefined)).toBe(false)
+  })
+})
+
+afterAll(() => {
+  h.cleanup()
+})

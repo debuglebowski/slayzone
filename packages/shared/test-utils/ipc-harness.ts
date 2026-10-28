@@ -72,7 +72,7 @@ async function loadTxnRegistry(): Promise<
   // shared database, and its two app-only txn sources (export-import,
   // reset-for-test) moved into the shared domain registry with it. That registry is
   // now the whole set, so the harness resolves it directly.
-  const registryPath = path.resolve(import.meta.dirname, '../transport/src/txns/index.ts')
+  const registryPath = path.resolve(import.meta.dirname, '../../apps/api/src/txns/index.ts')
   const mod = await import(registryPath)
   _txnRegistry = mod.domainTxnRegistry
   return _txnRegistry!

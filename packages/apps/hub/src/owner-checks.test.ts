@@ -18,7 +18,7 @@
  *   - The admin gets exactly what B gets of A's: nothing.
  *
  * The hub without login is `owner-checks-login-off.test.ts`; the exhaustiveness of
- * the policy is `transport/src/server/owner-policy.test.ts`.
+ * the policy is `api/src/owner-policy.test.ts`.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
@@ -35,7 +35,7 @@ import {
   isCustomRef,
   type OwnerRule,
   type ResourceKind
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import {
   BY_MUTATION,

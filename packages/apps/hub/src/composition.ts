@@ -45,7 +45,7 @@ import {
   type AuthEventMap,
   type RestApiDeps,
   type FloatingAgentState
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
 import { getDesktopBridgeCapUrl, getDesktopBridgeToken } from './desktop-bridge-address.js'
 import { getServerBuildInfo } from './build-info.js'

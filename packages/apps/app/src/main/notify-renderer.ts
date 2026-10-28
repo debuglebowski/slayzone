@@ -1,5 +1,5 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { NotifyEventMap } from '@slayzone/transport/server'
+import type { NotifyEventMap } from '@slayzone/api'
 
 /**
  * Source for the tRPC `notify.*` subscriptions.

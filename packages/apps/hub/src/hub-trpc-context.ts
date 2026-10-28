@@ -20,7 +20,7 @@ import type { HubRole } from '@slayzone/hub-auth'
 import type { HubAuth } from '@slayzone/hub-auth/server'
 import { verifySession } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Scope } from '@slayzone/transport/server'
+import type { Scope } from '@slayzone/api'
 import { isBreakGlassToken } from './break-glass.js'
 import { isWebSessionToken, resolveWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 

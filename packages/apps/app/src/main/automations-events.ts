@@ -1,5 +1,5 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { AutomationsEventMap } from '@slayzone/transport/server'
+import type { AutomationsEventMap } from '@slayzone/api'
 
 /**
  * Host-owned automations-changed bus. Dual-emitted alongside the legacy

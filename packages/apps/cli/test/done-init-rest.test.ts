@@ -29,10 +29,10 @@ import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/o
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
 import { BUILTIN_SKILLS, PROVIDER_PATHS } from '../../../domains/ai-config/src/shared/index.js'
-import { registerDoneTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/done.js'
-import { registerProjectSkillsRoute } from '../../../shared/transport/src/server/http/rest-api/projects/skills.js'
-import { registerProjectsResolveByPathRoute } from '../../../shared/transport/src/server/http/rest-api/projects/resolve-by-path.js'
-import { registerNotifyRoute } from '../../../shared/transport/src/server/http/rest-api/notify.js'
+import { registerDoneTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/done.js'
+import { registerProjectSkillsRoute } from '../../../apps/api/src/http/rest-api/projects/skills.js'
+import { registerProjectsResolveByPathRoute } from '../../../apps/api/src/http/rest-api/projects/resolve-by-path.js'
+import { registerNotifyRoute } from '../../../apps/api/src/http/rest-api/notify.js'
 import { ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')

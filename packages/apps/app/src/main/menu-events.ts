@@ -1,5 +1,5 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { MenuEventMap } from '@slayzone/transport/server'
+import type { MenuEventMap } from '@slayzone/api'
 
 /**
  * Host-owned bus for the one-way main→renderer menu / app-shortcut signals

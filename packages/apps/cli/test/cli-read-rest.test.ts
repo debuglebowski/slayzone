@@ -20,7 +20,7 @@ import { afterAll, describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS } from '../../../shared/platform/src/index.js'
-import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
+import { registerRestApi } from '../../../apps/api/src/http/rest-api/index.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 // Without the bundle there is nothing to spawn: every suite below is skipped (the old

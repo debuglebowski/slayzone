@@ -9,7 +9,7 @@ import {
   getAuthEvents,
   setHubDescribeDeps,
   setAuthGate
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 import {
   beginTerminalShutdown,
   clearWindowTabCounts,

@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@slayzone/ai-config": "workspace:*",
+    "@slayzone/api": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
@@ -35,7 +36,6 @@
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
-    "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@trpc/client": "^11.19.0",

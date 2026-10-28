@@ -231,6 +231,118 @@ importers:
         specifier: 7.1.0-beta
         version: 7.1.0-beta
 
+  packages/apps/api:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.1
+        version: 1.30.1(supports-color@7.2.0)(zod@4.6.5)
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../../domains/agent-turns
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
+      '@slayzone/automations':
+        specifier: workspace:*
+        version: link:../../domains/automations
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../../domains/computers
+      '@slayzone/db-migrations':
+        specifier: workspace:*
+        version: link:../../shared/db-migrations
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../../domains/diagnostics
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
+      '@slayzone/history':
+        specifier: workspace:*
+        version: link:../../domains/history
+      '@slayzone/integrations':
+        specifier: workspace:*
+        version: link:../../domains/integrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../../domains/projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../../domains/tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../../domains/task
+      '@slayzone/task-artifacts':
+        specifier: workspace:*
+        version: link:../../domains/task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../../domains/task-contracts
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../../domains/task-terminals
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../../domains/terminal-contracts
+      '@slayzone/test-panel':
+        specifier: workspace:*
+        version: link:../../domains/test-panel
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../../domains/usage-analytics
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../../domains/worktrees
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
+      bufferutil:
+        specifier: ^4.1.0
+        version: 4.1.0
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1(supports-color@7.2.0)
+      superjson:
+        specifier: ^2.2.1
+        version: 2.2.6
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+
   packages/apps/app:
     dependencies:
       '@modelcontextprotocol/sdk':
@@ -300,6 +412,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
+      '@slayzone/api':
+        specifier: workspace:*
+        version: link:../api
       '@slayzone/app-shell':
         specifier: workspace:*
         version: link:../../domains/app-shell
@@ -664,6 +779,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
+      '@slayzone/api':
+        specifier: workspace:*
+        version: link:../api
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
@@ -715,9 +833,6 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../../domains/terminal-contracts
-      '@slayzone/transport':
-        specifier: workspace:*
-        version: link:../../shared/transport
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
@@ -2754,81 +2869,12 @@ importers:
 
   packages/shared/transport:
     dependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: 1.30.1
-        version: 1.30.1(supports-color@7.2.0)(zod@4.6.5)
-      '@slayzone/agent-turns':
+      '@slayzone/api':
         specifier: workspace:*
-        version: link:../../domains/agent-turns
-      '@slayzone/ai-config':
-        specifier: workspace:*
-        version: link:../../domains/ai-config
-      '@slayzone/automations':
-        specifier: workspace:*
-        version: link:../../domains/automations
-      '@slayzone/computers':
-        specifier: workspace:*
-        version: link:../../domains/computers
-      '@slayzone/db-migrations':
-        specifier: workspace:*
-        version: link:../db-migrations
-      '@slayzone/diagnostics':
-        specifier: workspace:*
-        version: link:../../domains/diagnostics
-      '@slayzone/feedback':
-        specifier: workspace:*
-        version: link:../../domains/feedback
-      '@slayzone/file-editor':
-        specifier: workspace:*
-        version: link:../../domains/file-editor
-      '@slayzone/history':
-        specifier: workspace:*
-        version: link:../../domains/history
-      '@slayzone/integrations':
-        specifier: workspace:*
-        version: link:../../domains/integrations
+        version: link:../../apps/api
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
-      '@slayzone/projects':
-        specifier: workspace:*
-        version: link:../../domains/projects
-      '@slayzone/projects-contracts':
-        specifier: workspace:*
-        version: link:../../domains/projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../../domains/settings
-      '@slayzone/tags':
-        specifier: workspace:*
-        version: link:../../domains/tags
-      '@slayzone/task':
-        specifier: workspace:*
-        version: link:../../domains/task
-      '@slayzone/task-artifacts':
-        specifier: workspace:*
-        version: link:../../domains/task-artifacts
-      '@slayzone/task-contracts':
-        specifier: workspace:*
-        version: link:../../domains/task-contracts
-      '@slayzone/task-terminals':
-        specifier: workspace:*
-        version: link:../../domains/task-terminals
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../../domains/terminal
-      '@slayzone/terminal-contracts':
-        specifier: workspace:*
-        version: link:../../domains/terminal-contracts
-      '@slayzone/test-panel':
-        specifier: workspace:*
-        version: link:../../domains/test-panel
-      '@slayzone/usage-analytics':
-        specifier: workspace:*
-        version: link:../../domains/usage-analytics
-      '@slayzone/worktrees':
-        specifier: workspace:*
-        version: link:../../domains/worktrees
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
@@ -2841,43 +2887,25 @@ importers:
       '@trpc/tanstack-react-query':
         specifier: ^11.19.0
         version: 11.19.0(@tanstack/react-query@5.104.0(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)
-      better-sqlite3:
-        specifier: ^13.0.3
-        version: 13.0.3
-      bufferutil:
-        specifier: ^4.1.0
-        version: 4.1.0
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1(supports-color@7.2.0)
       react:
         specifier: ^19.3.1
         version: 19.3.1
       superjson:
         specifier: ^2.2.1
         version: 2.2.6
-      ws:
-        specifier: ^8.22.0
-        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      zod:
-        specifier: ^4.5.4
-        version: 4.6.5
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
     devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^9.6.0
-        version: 9.6.0
-      '@types/express':
-        specifier: ^5.0.6
-        version: 5.0.6
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
   packages/shared/tsgo:
     dependencies:

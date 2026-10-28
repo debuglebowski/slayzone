@@ -11,7 +11,7 @@ import type {
   CapabilityEventFrame,
   MenuEventMap,
   PowerResumeEventMap
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 
 /**
  * Side-car → Electron-host capability bridge (slice 9 local cutover).

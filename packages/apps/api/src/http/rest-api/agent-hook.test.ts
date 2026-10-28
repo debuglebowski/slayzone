@@ -1,0 +1,1830 @@
+import express from 'express'
+import http from 'http'
+import { describe, test, expect, vi, beforeEach } from 'vitest'
+import { registerAgentHookRoute, evictAgentTree } from './agent-hook'
+
+// Lifecycle spy — captures every event the route emits on deps.agentLifecycle
+// (the host bridges that emitter to the renderer; legacyBroadcast is unused
+// by this route). Receives the event object only.
+const lifecycleSpy = vi.fn()
+
+// PTY state-machine bridge — injected via deps.terminalStateBridge (the route
+// no longer imports @slayzone/terminal/electron; the host wires the live impl).
+const findSessionSpy = vi.fn<(taskId: string, mode: string) => string | null>()
+const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) => boolean>()
+const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
+const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
+const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => void>()
+const noteBackgroundJobsSpy = vi.fn<(sessionId: string, count: number) => void>()
+const probeBackgroundJobsSpy =
+  vi.fn<(sessionId: string, jobs: Array<{ id: string }>) => Promise<string[] | null>>()
+// The warm pool's view of a task id: a warm agent that booted with it and has not
+// been adopted yet. Defaults to none — every agent is an ordinary one.
+const unadoptedWarmAgentSpy = vi.fn<
+  (taskId: string) => { sessionId: string; projectId: string; computerId: string } | null
+>(() => null)
+
+// isHookDrivenMode comes from the (electron-free) terminal server entry, but
+// importing it for real would pull the adapter registry into vitest — mock it.
+// Mirror the real registry-derived set (claude-code/codex/antigravity carry
+// hookDriven=true). The route uses this to decide whether hooks drive state;
+// the gemini "lifecycle only" test below exercises the false branch.
+// The `@slayzone/terminal/server` barrel pulls in the node-pty-backed pty manager
+// (native module) which vitest can't load, so it is stubbed. The claude agent-tree
+// model is PURE (no pty/DB/Electron), so rather than hand-roll a fake — which
+// would silently drift from the real state ladder — pull the actual module in by
+// path and re-export it. Deep path is deliberate and test-only: it is the one way
+// to reach the real implementation without dragging the barrel's native deps in.
+vi.mock('@slayzone/terminal/server', async () => {
+  const agentTree = await import('../../../../../domains/terminal/src/server/agent-tree.js')
+  return {
+    isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
+    applyAgentHook: agentTree.applyAgentHook,
+    createAgentTree: agentTree.createAgentTree,
+    resolveState: agentTree.resolveState,
+    subagentIdOf: agentTree.subagentIdOf,
+    applyBackgroundJobHook: agentTree.applyBackgroundJobHook,
+    dropBackgroundJobs: agentTree.dropBackgroundJobs,
+    CLAUDE_BLOCKING_TOOLS: agentTree.CLAUDE_BLOCKING_TOOLS,
+    unadoptedWarmAgent: (taskId: string) => unadoptedWarmAgentSpy(taskId)
+  }
+})
+
+// Diagnostics call from the handler must not blow up under vitest's lack of
+// Electron app — stub it out.
+vi.mock('@slayzone/diagnostics/server', () => ({
+  recordDiagnosticEvent: () => {}
+}))
+
+// Conversation-id capture goes through the provenance gate: `findPendingSpawn`
+// (spawn-intent lookup) + `recordConversation` (append-only ledger). Mock both
+// so the test never pulls the task domain (+ DB) into vitest.
+const recordConversationSpy = vi.fn()
+const confirmSessionConversationSpy = vi.fn()
+const findPendingSpawnSpy = vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
+// In-band `/clear` path: the current honored conversation (the id being rotated
+// away from) + the ownership lookup that proves slay spawned the process holding
+// it. Both default to "nothing known", so every pre-existing test keeps taking
+// the standard id-match gate untouched.
+const getCurrentConversationIdSpy = vi.fn<
+  (db: unknown, taskId: string, mode: string) => Promise<string | null>
+>(() => Promise.resolve(null))
+const findOwnedSpawnForConversationSpy = vi.fn<
+  (db: unknown, taskId: string, mode: string, outgoing: string | null) => Promise<string | null>
+>(() => Promise.resolve(null))
+// Resumability proof (v158). Must be in this mock even for tests that ignore it:
+// the route calls it on every turn-proof event, so a missing export is not an
+// unasserted spy — it is a TypeError inside the handler and a 500 on the ack.
+const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(() =>
+  Promise.resolve()
+)
+// The task's board row, read before and after a conversation write to tell a real
+// change from a no-op re-record. Default: the row reflects the ledger (it changes
+// with every recordConversation), so pre-existing tests see "changed → notify".
+const getTaskOpSpy = vi.fn<(db: unknown, id: string) => Promise<unknown>>((_db, id) =>
+  Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
+)
+vi.mock('@slayzone/task/server', () => ({
+  getTaskOp: (db: unknown, id: string) => getTaskOpSpy(db, id),
+  recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
+  findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
+    findPendingSpawnSpy(db, taskId, mode),
+  findOwnedSpawnForConversation: (
+    db: unknown,
+    taskId: string,
+    mode: string,
+    outgoing: string | null
+  ) => findOwnedSpawnForConversationSpy(db, taskId, mode, outgoing),
+  getCurrentConversationId: (db: unknown, taskId: string, mode: string) =>
+    getCurrentConversationIdSpy(db, taskId, mode),
+  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
+  markSessionFirstTurn: (db: unknown, conversationId: string) =>
+    markSessionFirstTurnSpy(db, conversationId)
+}))
+
+interface ServerHandle {
+  port: number
+  close(): Promise<void>
+}
+
+function startServer(deps?: {
+  notifyRenderer?: (change?: { taskIds: readonly string[] }) => void
+}): Promise<ServerHandle> {
+  const app = express()
+  registerAgentHookRoute(app, {
+    db: {} as never,
+    notifyRenderer: deps?.notifyRenderer ?? (() => {}),
+    agentLifecycle: {
+      emit: (_channel: string, event: unknown) => {
+        lifecycleSpy(event)
+        return true
+      }
+    } as never,
+    terminalStateBridge: {
+      findSession: (taskId, mode) => findSessionSpy(taskId, mode),
+      transition: (sessionId, state, event) => transitionSpy(sessionId, state, event),
+      markActive: (sessionId) => markActiveSpy(sessionId),
+      noteConversationId: (sessionId, conversationId) =>
+        noteConversationIdSpy(sessionId, conversationId),
+      noteAwaitingInput: (sessionId, awaiting) => noteAwaitingInputSpy(sessionId, awaiting),
+      noteBackgroundJobs: (sessionId, count) => noteBackgroundJobsSpy(sessionId, count),
+      probeBackgroundJobs: (sessionId, jobs) => probeBackgroundJobsSpy(sessionId, [...jobs])
+    }
+  })
+  return new Promise((resolve) => {
+    const server = http.createServer(app).listen(0, '127.0.0.1', () => {
+      const addr = server.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+      resolve({
+        port,
+        close: () =>
+          new Promise<void>((r) => {
+            server.close(() => r())
+          })
+      })
+    })
+  })
+}
+
+function postJson(port: number, body: unknown): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path: '/api/agent-hook',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c) => chunks.push(c as Buffer))
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
+        )
+      }
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+describe('POST /api/agent-hook', () => {
+  beforeEach(() => {
+    lifecycleSpy.mockClear()
+    findSessionSpy.mockReset()
+    transitionSpy.mockReset()
+    markActiveSpy.mockReset()
+    noteConversationIdSpy.mockReset()
+    noteAwaitingInputSpy.mockReset()
+    noteBackgroundJobsSpy.mockReset()
+    probeBackgroundJobsSpy.mockReset()
+    recordConversationSpy.mockReset()
+    confirmSessionConversationSpy.mockReset()
+    findPendingSpawnSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReturnValue(null)
+    getCurrentConversationIdSpy.mockReset()
+    findOwnedSpawnForConversationSpy.mockReset()
+    markSessionFirstTurnSpy.mockReset()
+    markSessionFirstTurnSpy.mockResolvedValue(undefined)
+    // Default: no known current conversation and no ownership claim → the
+    // in-band-clear branch can never fire unless a test sets both up.
+    getCurrentConversationIdSpy.mockResolvedValue(null)
+    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
+    findSessionSpy.mockReturnValue(null)
+    transitionSpy.mockReturnValue(true)
+    markActiveSpy.mockReturnValue(true)
+    // Default: slay launched the agent without pre-minting a session id → the
+    // first observed id is accepted as fresh ('slay-spawned-fresh').
+    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
+  })
+
+  test('valid payload → 200 + emits agent lifecycle event', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        sessionId: 'sess-1',
+        taskId: 'task-1'
+      })
+      expect(res.status).toBe(200)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      const [event] = lifecycleSpy.mock.calls[0]
+      expect(event).toMatchObject({
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        type: 'agent-start',
+        sessionId: 'sess-1',
+        taskId: 'task-1'
+      })
+      expect(typeof event.timestamp).toBe('number')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('turn proof: a turn marks the session resumable, SessionStart does not', async () => {
+    const srv = await startServer()
+    try {
+      // SessionStart is the signal that lied (v158): it fires before the provider
+      // has written a byte, so it must never prove a conversation resumable.
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        sessionId: 'proof-a',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).not.toHaveBeenCalled()
+
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        sessionId: 'proof-b',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).toHaveBeenCalledTimes(1)
+      expect(markSessionFirstTurnSpy.mock.calls[0][1]).toBe('proof-b')
+
+      // Write-once per process: a second turn on the same id issues no further
+      // UPDATE. Ids are unique per test because that latch is module-scoped.
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        sessionId: 'proof-b',
+        taskId: 'task-1'
+      })
+      expect(markSessionFirstTurnSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('unknown hookEvent → 204 + no lifecycle event', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'TotallyUnknown' })
+      expect(res.status).toBe(204)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('invalid payload → 400 + no lifecycle event', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, { agentId: 'unknown-agent', hookEvent: 'Stop' })
+      expect(res.status).toBe(400)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('missing hookEvent → 400', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, { agentId: 'claude-code' })
+      expect(res.status).toBe(400)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code agent-start → state machine running', async () => {
+    findSessionSpy.mockReturnValue('task-1')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-1'
+      })
+      expect(findSessionSpy).toHaveBeenCalledWith('task-1', 'claude-code')
+      expect(transitionSpy).toHaveBeenCalledWith('task-1', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Stop → state machine idle', async () => {
+    findSessionSpy.mockReturnValue('task-2')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-2' })
+      expect(transitionSpy).toHaveBeenCalledWith('task-2', 'idle', 'Stop')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Notification → state machine idle (permission-request surfaces as idle)', async () => {
+    findSessionSpy.mockReturnValue('task-3')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Notification',
+        taskId: 'task-3'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-3', 'idle', 'Notification')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- idle-close (hibernation) "awaiting user" signal -----------------------
+  test('claude-code PreToolUse(AskUserQuestion) → awaitingInput true (blocks hibernation)', async () => {
+    findSessionSpy.mockReturnValue('task-aq')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-aq',
+        raw: { tool_name: 'AskUserQuestion' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-aq', true)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  describe('claude background jobs (no hook fires when one exits → liveness probe)', () => {
+    const bgPost = (taskId: string, id: string) => ({
+      agentId: 'claude-code',
+      hookEvent: 'PostToolUse',
+      taskId,
+      raw: {
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm dev', run_in_background: true },
+        tool_response: { stdout: '', backgroundTaskId: id }
+      }
+    })
+
+    test('a started job is counted, probed, and cleared once its process is gone', async () => {
+      findSessionSpy.mockReturnValue('task-bg')
+      probeBackgroundJobsSpy.mockResolvedValueOnce(['job1']).mockResolvedValueOnce([])
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg', 'job1'))
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 1)
+
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(probeBackgroundJobsSpy).toHaveBeenCalledWith('task-bg', [
+          { id: 'job1', kind: 'shell', command: 'pnpm dev' }
+        ])
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 1)
+
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg', 0)
+
+        // Nothing left to watch → polling stops.
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(probeBackgroundJobsSpy).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg')
+        await srv.close()
+      }
+    })
+
+    test('"can\'t tell" (null) clears every job rather than showing one forever', async () => {
+      findSessionSpy.mockReturnValue('task-bg-null')
+      probeBackgroundJobsSpy.mockResolvedValue(null)
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg-null', 'j'))
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-null', 0)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg-null')
+        await srv.close()
+      }
+    })
+
+    test('a failed probe (lost connection) keeps the job and asks again', async () => {
+      findSessionSpy.mockReturnValue('task-bg-err')
+      probeBackgroundJobsSpy.mockRejectedValueOnce(new Error('disposed')).mockResolvedValue([])
+      const srv = await startServer()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        await postJson(srv.port, bgPost('task-bg-err', 'j'))
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-err', 1)
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-err', 0)
+      } finally {
+        vi.useRealTimers()
+        evictAgentTree('task-bg-err')
+        await srv.close()
+      }
+    })
+
+    test('TaskStop clears the job at once', async () => {
+      findSessionSpy.mockReturnValue('task-bg-stop')
+      probeBackgroundJobsSpy.mockResolvedValue(['j'])
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-stop', 'j'))
+        await postJson(srv.port, {
+          agentId: 'claude-code',
+          hookEvent: 'PostToolUse',
+          taskId: 'task-bg-stop',
+          raw: {
+            tool_name: 'TaskStop',
+            tool_input: { task_id: 'j' },
+            tool_response: { task_id: 'j' }
+          }
+        })
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-stop', 0)
+      } finally {
+        evictAgentTree('task-bg-stop')
+        await srv.close()
+      }
+    })
+
+    test('SessionEnd resets the published count with the tree', async () => {
+      findSessionSpy.mockReturnValue('task-bg-end')
+      probeBackgroundJobsSpy.mockResolvedValue(['j'])
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-end', 'j'))
+        await postJson(srv.port, {
+          agentId: 'claude-code',
+          hookEvent: 'SessionEnd',
+          taskId: 'task-bg-end'
+        })
+        expect(noteBackgroundJobsSpy).toHaveBeenLastCalledWith('task-bg-end', 0)
+      } finally {
+        await srv.close()
+      }
+    })
+
+    test('the TerminalState is untouched by a background job', async () => {
+      findSessionSpy.mockReturnValue('task-bg-state')
+      const srv = await startServer()
+      try {
+        await postJson(srv.port, bgPost('task-bg-state', 'j'))
+        expect(transitionSpy).not.toHaveBeenCalled()
+      } finally {
+        evictAgentTree('task-bg-state')
+        await srv.close()
+      }
+    })
+  })
+
+  test('claude-code Stop → awaitingInput false (completed turn is hibernatable)', async () => {
+    findSessionSpy.mockReturnValue('task-stop')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-stop' })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-stop', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse(non-blocking) → awaitingInput false', async () => {
+    findSessionSpy.mockReturnValue('task-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-bash',
+        raw: { tool_name: 'Bash' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-bash', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(ExitPlanMode) → awaitingInput false (resumed, hibernatable again)', async () => {
+    // The accept-resume must clear the awaiting flag PreToolUse set. Otherwise
+    // the session would report running+awaiting (contradiction) and the idle-
+    // close gate's bookkeeping drifts.
+    findSessionSpy.mockReturnValue('task-epm-accept')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-epm-accept',
+        raw: { tool_name: 'ExitPlanMode' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-epm-accept', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(non-blocking) → never latches awaitingInput', async () => {
+    // Ordinary mid-turn tool completion must stay a no-op for the awaiting flag
+    // (and for state) — only blocking-tool PostToolUse is the resume signal.
+    //
+    // claude's awaiting flag is now re-asserted from the session's agent tree on
+    // every hook (ONE truth, so a background subagent can't report "not blocked"
+    // for a main loop parked on a question). So the assertion is on the VALUE, not
+    // on call count: this event must never latch `true`.
+    findSessionSpy.mockReturnValue('task-post-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-post-bash',
+        raw: { tool_name: 'Bash' }
+      })
+      expect(noteAwaitingInputSpy).not.toHaveBeenCalledWith('task-post-bash', true)
+      expect(transitionSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Notification → does NOT set awaitingInput (idle_prompt stays hibernatable)', async () => {
+    findSessionSpy.mockReturnValue('task-notif')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Notification',
+        taskId: 'task-notif'
+      })
+      // Value, not call count — see the PostToolUse case above. Notification ends
+      // the working stretch but must never latch `true`: its dominant subtype is
+      // idle_prompt, which is exactly the stale case idle-close SHOULD reap.
+      expect(noteAwaitingInputSpy).not.toHaveBeenCalledWith('task-notif', true)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PermissionRequest → awaitingInput true', async () => {
+    findSessionSpy.mockReturnValue('task-perm')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PermissionRequest',
+        taskId: 'task-perm'
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-perm', true)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart → lifecycle + markActive, no state transition (PTY drives its own starting→running)', async () => {
+    findSessionSpy.mockReturnValue('task-4')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'task-4'
+      })
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('task-4')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse → running (mid-turn tool starting)', async () => {
+    findSessionSpy.mockReturnValue('task-pre')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-pre'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-pre', 'running', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse AskUserQuestion → idle (blocking tool, agent paused for user)', async () => {
+    // Claude Code does NOT fire Notification for AskUserQuestion — without
+    // this branch the session would pin on 'running' until 5min silence-timer.
+    findSessionSpy.mockReturnValue('task-aq')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-aq',
+        raw: { tool_name: 'AskUserQuestion' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-aq', 'idle', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse ExitPlanMode → idle (plan approval blocks)', async () => {
+    findSessionSpy.mockReturnValue('task-epm')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-epm',
+        raw: { tool_name: 'ExitPlanMode' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-epm', 'idle', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse Bash → running (non-blocking tool, unchanged)', async () => {
+    findSessionSpy.mockReturnValue('task-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-bash',
+        raw: { tool_name: 'Bash' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-bash', 'running', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse → markActive only, NO state transition (prevents sidebar flicker)', async () => {
+    // Regression: agent-event-handler maps PostToolUse → 'agent-stop' which
+    // would flip the session 'idle' between every tool. Keep state 'running'
+    // until Stop fires at the actual turn boundary. Still refresh the
+    // silence-timer clock since the agent just emitted a hook → it's alive.
+    findSessionSpy.mockReturnValue('task-post')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-post'
+      })
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('task-post')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(ExitPlanMode) → running (plan accepted, agent resumed)', async () => {
+    // The symmetric partner to "PreToolUse ExitPlanMode → idle". PreToolUse
+    // parked the session on 'idle' (agent blocked on the plan dialog). When the
+    // user ACCEPTS, Claude runs the tool to completion and fires PostToolUse —
+    // the ONLY hook between accept and the agent's first real tool call (which
+    // can be minutes of thinking/writing away). Without this the spinner stays
+    // dark through that whole gap. Reject never reaches here (denied PreToolUse
+    // fires no PostToolUse), so PostToolUse(blocking) ⟺ accepted ⟹ running.
+    findSessionSpy.mockReturnValue('task-epm-accept')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-epm-accept',
+        raw: { tool_name: 'ExitPlanMode' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-epm-accept', 'running', 'PostToolUse')
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(AskUserQuestion) → running (answered, agent resumed)', async () => {
+    // Same shape as ExitPlanMode: PreToolUse parked on 'idle', the user's answer
+    // completes the tool → PostToolUse → resume → 'running'.
+    findSessionSpy.mockReturnValue('task-aq-answered')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-aq-answered',
+        raw: { tool_name: 'AskUserQuestion' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-aq-answered', 'running', 'PostToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SubagentStop → markActive only (main agent still working)', async () => {
+    findSessionSpy.mockReturnValue('task-sub')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SubagentStop',
+        taskId: 'task-sub'
+      })
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('task-sub')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreCompact → markActive only (continuation event)', async () => {
+    findSessionSpy.mockReturnValue('task-pc')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreCompact',
+        taskId: 'task-pc'
+      })
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('task-pc')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Stop → transition only, markActive NOT called (transition path refreshes clock itself)', async () => {
+    findSessionSpy.mockReturnValue('task-stop-clock')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Stop',
+        taskId: 'task-stop-clock'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-stop-clock', 'idle', 'Stop')
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionEnd → idle', async () => {
+    findSessionSpy.mockReturnValue('task-se')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionEnd',
+        taskId: 'task-se'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-se', 'idle', 'SessionEnd')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('evictAgentTree drops a stale subagent so the NEXT session on the same id does not inherit its stuck background state', async () => {
+    findSessionSpy.mockReturnValue('task-evict')
+    const srv = await startServer()
+    try {
+      // Main loop starts, a background subagent starts, main loop ends first —
+      // subagent's SubagentStop never arrives (the bug: e.g. the pty was killed
+      // mid-subagent-run rather than exiting cleanly).
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-evict'
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-evict',
+        raw: { agent_id: 'sub-orphan', tool_name: 'Bash' }
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Stop',
+        taskId: 'task-evict'
+      })
+      expect(transitionSpy).toHaveBeenLastCalledWith('task-evict', 'background', 'Stop')
+
+      // Without eviction, a brand-new turn on the SAME session id would still
+      // resolve to 'background' on its own Stop — the orphaned 'sub-orphan' id
+      // never left the tree. Simulate the pty-exit funnel calling it directly
+      // (composition.ts wires `ptyEvents.on('exit', evictAgentTree)` for this).
+      evictAgentTree('task-evict')
+
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task-evict'
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Stop',
+        taskId: 'task-evict'
+      })
+      expect(transitionSpy).toHaveBeenLastCalledWith('task-evict', 'idle', 'Stop')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code w/o taskId → lifecycle only, no session lookup', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop' })
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(findSessionSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex UserPromptSubmit → state machine running (looked up by codex mode)', async () => {
+    findSessionSpy.mockReturnValue('cx-1')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'cx-1'
+      })
+      expect(findSessionSpy).toHaveBeenCalledWith('cx-1', 'codex')
+      expect(transitionSpy).toHaveBeenCalledWith('cx-1', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex Stop → state machine idle', async () => {
+    findSessionSpy.mockReturnValue('cx-2')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'Stop', taskId: 'cx-2' })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-2', 'idle', 'Stop')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PermissionRequest → idle (paused for user approval)', async () => {
+    findSessionSpy.mockReturnValue('cx-3')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PermissionRequest',
+        taskId: 'cx-3'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-3', 'idle', 'PermissionRequest')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PreToolUse → running (no blocking-tool allowlist; approvals are PermissionRequest)', async () => {
+    findSessionSpy.mockReturnValue('cx-4')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PreToolUse',
+        taskId: 'cx-4',
+        raw: { tool_name: 'shell' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-4', 'running', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart / PostToolUse → markActive only, no transition', async () => {
+    findSessionSpy.mockReturnValue('cx-5')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'SessionStart', taskId: 'cx-5' })
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'PostToolUse', taskId: 'cx-5' })
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('cx-5')
+      expect(markActiveSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- Codex conversation-id capture (PRIMARY codex resume-id path) ---------
+
+  test('codex SessionStart with sessionId → persists conversationId to provider_config', async () => {
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-task',
+        sessionId: '11111111-1111-4111-8111-111111111111'
+      })
+      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cx-task', 'codex')
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1]
+      expect(data).toEqual({
+        taskId: 'cx-task',
+        mode: 'codex',
+        conversationId: '11111111-1111-4111-8111-111111111111',
+        origin: 'slay-spawned-fresh'
+      })
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- Warm agents ---------------------------------------------------------
+  // A warm agent boots with the id of a task that is created later, if ever. Until
+  // a terminal adopts it, its hooks name a task with no terminal (and maybe no row),
+  // so the route treats them as pool hooks: the conversation is confirmed on the
+  // agent's pooled session, and nothing task-scoped runs.
+
+  const WARM = { sessionId: 'pool-sess-1', projectId: 'p1', computerId: 'computer-1' }
+
+  test('unadopted warm agent SessionStart → confirms its conversation on the pooled session', async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) => (taskId === 'reserved-1' ? WARM : null))
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'reserved-1',
+        sessionId: '33333333-3333-4333-8333-333333333333'
+      })
+      expect(confirmSessionConversationSpy).toHaveBeenCalledTimes(1)
+      expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
+        sessionId: 'pool-sess-1',
+        observedConversationId: '33333333-3333-4333-8333-333333333333'
+      })
+      // The task-keyed ledger is NOT written: the task may not exist, and the
+      // adoption bind is what hands this conversation to it.
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('unadopted warm agent: no lifecycle event, no state machine (no terminal holds it yet)', async () => {
+    unadoptedWarmAgentSpy.mockReturnValue(WARM)
+    findSessionSpy.mockReturnValue('reserved-1:reserved-1')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'reserved-1'
+      })
+      expect(res.status).toBe(200)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+      expect(findSessionSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).not.toHaveBeenCalled()
+      expect(confirmSessionConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('adopted warm agent: its task id drives the state machine like any agent', async () => {
+    // Once adopted the pool no longer knows it — the hooks are its task's.
+    findSessionSpy.mockReturnValue('adopted-1:adopted-1')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'adopted-1'
+      })
+      expect(unadoptedWarmAgentSpy).toHaveBeenCalledWith('adopted-1')
+      expect(transitionSpy).toHaveBeenCalledWith(
+        'adopted-1:adopted-1',
+        'running',
+        'UserPromptSubmit'
+      )
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ taskId: 'adopted-1' })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('a slaySessionId from an agent booted by an older build is ignored', async () => {
+    // Agents booted before warm agents carried a task id had only a session id.
+    // There is no session → task lookup any more; such a hook names no task.
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        slaySessionId: 'pool-sess-legacy'
+      })
+      expect(res.status).toBe(200)
+      expect(findSessionSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart with only raw.session_id → still persists (envelope fallback)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-task',
+        raw: { session_id: '22222222-2222-4222-8222-222222222222' }
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
+      expect(data.conversationId).toBe('22222222-2222-4222-8222-222222222222')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart without any session id → no persist', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'SessionStart', taskId: 'cx-task' })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart with no pending spawn → recorded foreign-observed, no notify', async () => {
+    // No spawn-intent row: a manual `claude --resume <foreign>` inside a slay
+    // PTY must never bind the foreign session to the task (RC1 clobber fix) —
+    // it's recorded for audit only and the renderer is NOT refreshed.
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-task',
+        sessionId: '33333333-3333-4333-8333-333333333333'
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart with mismatching pending id → recorded foreign-observed', async () => {
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: '99999999-9999-4999-8999-999999999999',
+      usedResume: true
+    })
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx-missing',
+        sessionId: '44444444-4444-4444-8444-444444444444'
+      })
+      expect(res.status).toBe(200)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart with sessionId but no taskId → no persist', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        sessionId: '55555555-5555-4555-8555-555555555555'
+      })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart with sessionId → persists conversationId to provider_config', async () => {
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        sessionId: '66666666-6666-4666-8666-666666666666'
+      })
+      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cc-task', 'claude-code')
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1]
+      expect(data).toEqual({
+        taskId: 'cc-task',
+        mode: 'claude-code',
+        conversationId: '66666666-6666-4666-8666-666666666666',
+        origin: 'slay-spawned-fresh'
+      })
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+      // Names the one row it changed → the renderer patches just that row.
+      expect(notifyRendererSpy).toHaveBeenCalledWith({ taskIds: ['cc-task'] })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart re-recording the bound id (resume) → no renderer ping', async () => {
+    // A respawn resumes the conversation the task already shows: the ledger gains a
+    // row but the board row is identical, so no renderer should refetch for it.
+    getTaskOpSpy.mockImplementation((_db, id) =>
+      Promise.resolve({ id, currentConversationByMode: { 'claude-code': 'same' } })
+    )
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: '77777777-7777-4777-8777-777777777777',
+      usedResume: true
+    })
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        sessionId: '77777777-7777-4777-8777-777777777777'
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-resume'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+      getTaskOpSpy.mockImplementation((_db, id) =>
+        Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
+      )
+    }
+  })
+
+  test('claude-code SessionStart with only raw.session_id → still persists (envelope fallback)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        raw: { session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
+      expect(data.conversationId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- In-band `/clear` (agent rotates its own session id) ------------------
+  //
+  // `/clear` keeps the agent's process but mints a NEW session id, so the id it
+  // reports can never match the one slay pre-minted — the plain id-match gate
+  // reads it exactly like a hijack and files it `foreign-observed` (audit-only).
+  // The consequence was silent: the task kept resuming the PRE-clear
+  // conversation and the cleared session never showed in the sessions sidebar.
+  //
+  // Honoring it requires BOTH signals, so these tests pin each half failing
+  // independently — that pairing is the entire security argument.
+  const CLEAR_OLD = 'e9a303db-042b-4bf9-97b7-7759b6f859e2'
+  const CLEAR_NEW = 'de675b93-6ec1-4596-a01e-260e5c7a1861'
+
+  /** A Claude `SessionStart` carrying `source`, shaped like the real payload. */
+  function clearHook(
+    port: number,
+    source: string,
+    sessionId: string = CLEAR_NEW
+  ): Promise<{ status: number; body: string }> {
+    return postJson(port, {
+      agentId: 'claude-code',
+      taskId: 'cc-clear',
+      raw: {
+        session_id: sessionId,
+        hook_event_name: 'SessionStart',
+        source,
+        cwd: '/w'
+      }
+    })
+  }
+
+  test("source 'clear' + owned outgoing conversation → honored as in-band-clear", async () => {
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      const res = await clearHook(srv.port, 'clear')
+      expect(res.status).toBe(200)
+      // Ownership is asked about the OUTGOING id — the conversation being
+      // replaced — not the newly minted one.
+      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cc-clear',
+        'claude-code',
+        CLEAR_OLD
+      )
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toEqual({
+        taskId: 'cc-clear',
+        mode: 'claude-code',
+        conversationId: CLEAR_NEW,
+        origin: 'in-band-clear'
+      })
+      // Honored → the renderer must refresh so the sidebar shows the new session.
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+      // The standard gate must be bypassed entirely, not merely overruled.
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'clear' but NO ownership claim → still foreign-observed", async () => {
+    // A `/clear` fired from a process slay never spawned for this task (or whose
+    // outgoing conversation isn't slay's). `source` alone must not be trusted —
+    // it's self-reported by the agent.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await clearHook(srv.port, 'clear')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'resume' with a matching owned conversation → NOT honored as clear", async () => {
+    // The hijack the gate exists for: `claude --resume <foreign>` typed inside a
+    // slay PTY inherits the same env and can satisfy ownership, so `source` is
+    // what has to reject it.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'resume')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'startup' with a matching owned conversation → NOT honored as clear", async () => {
+    // A bare `claude` relaunched in the terminal. Same reasoning as 'resume'.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'startup')
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("repeated 'clear' SessionStart for an already-recorded clear → no duplicate row", async () => {
+    // After the first clear is honored, the new id IS the current conversation.
+    // A replayed SessionStart (Claude re-fires it on compact, and the hook can be
+    // redelivered) must be a no-op rather than appending a row per replay.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_NEW)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      const res = await clearHook(srv.port, 'clear', CLEAR_NEW)
+      expect(res.status).toBe(200)
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("source 'clear' with no prior conversation → falls through to the standard gate", async () => {
+    // Nothing to rotate away from (a fresh task that has never bound an id), so
+    // no ownership claim is possible. The pre-minted-id gate still applies and
+    // can legitimately honor it as a fresh spawn.
+    getCurrentConversationIdSpy.mockResolvedValue(null)
+    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
+    const srv = await startServer()
+    try {
+      await clearHook(srv.port, 'clear')
+      // Ownership is never even asked — there is no outgoing id to claim.
+      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-fresh'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('SessionStart without source → unchanged id-match gate', async () => {
+    // Codex/older payloads carry no `source`. Must behave exactly as before.
+    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: CLEAR_NEW,
+      usedResume: true
+    })
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-clear',
+        sessionId: CLEAR_NEW
+      })
+      expect(getCurrentConversationIdSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-resume'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart without any session id → no persist', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task'
+      })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart with exact pending match → recorded as honored resume', async () => {
+    findPendingSpawnSpy.mockResolvedValue({
+      expectedSessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      usedResume: true
+    })
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'slay-spawned-resume'
+      })
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex Stop with sessionId → no persist (SessionStart-only capture)', async () => {
+    findSessionSpy.mockReturnValue('cx-stop')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'Stop',
+        taskId: 'cx-task',
+        sessionId: '77777777-7777-4777-8777-777777777777'
+      })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- Antigravity conversation-id capture (PreInvocation event, conversationId) ---
+
+  test('antigravity PreInvocation with sessionId → persists conversationId to provider_config', async () => {
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag-task',
+        sessionId: 'a1111111-1111-4111-8111-111111111111'
+      })
+      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'ag-task', 'antigravity')
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1]
+      expect(data).toEqual({
+        taskId: 'ag-task',
+        mode: 'antigravity',
+        conversationId: 'a1111111-1111-4111-8111-111111111111',
+        origin: 'slay-spawned-fresh'
+      })
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity PreInvocation with only raw.conversationId → still persists (envelope fallback)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag-task',
+        raw: { conversationId: 'a2222222-2222-4222-8222-222222222222' }
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
+      expect(data.conversationId).toBe('a2222222-2222-4222-8222-222222222222')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity PreInvocation without any session id → no persist', async () => {
+    findSessionSpy.mockReturnValue('ag-noid')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag-task'
+      })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity PreInvocation with no pending spawn → recorded foreign-observed, no notify', async () => {
+    findPendingSpawnSpy.mockResolvedValue(null)
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag-task',
+        sessionId: 'a3333333-3333-4333-8333-333333333333'
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        origin: 'foreign-observed'
+      })
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity Stop with sessionId → no persist (PreInvocation-only capture)', async () => {
+    findSessionSpy.mockReturnValue('ag-stop')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'Stop',
+        taskId: 'ag-task',
+        sessionId: 'a4444444-4444-4444-8444-444444444444'
+      })
+      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity PreInvocation → transition running', async () => {
+    findSessionSpy.mockReturnValue('ag-run')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag-run'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('ag-run', 'running', 'PreInvocation')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity Stop → transition idle', async () => {
+    findSessionSpy.mockReturnValue('ag-idle')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'Stop',
+        taskId: 'ag-idle'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('ag-idle', 'idle', 'Stop')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity PostToolUse → markActive only, no transition', async () => {
+    findSessionSpy.mockReturnValue('ag-mid')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PostToolUse',
+        taskId: 'ag-mid'
+      })
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('ag-mid')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('gemini → lifecycle only, no state-machine drive (still adapter-detected)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'gemini', hookEvent: 'Stop', taskId: 'gm-1' })
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(findSessionSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code event but no matching session → no transition or markActive', async () => {
+    findSessionSpy.mockReturnValue(null)
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-6' })
+      expect(findSessionSpy).toHaveBeenCalledTimes(1)
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // ── NEW benign-forwarder envelope: `{ ctx, raw, arg }` ─────────────────────
+  // The v2 notify.sh forwards three OPAQUE channels; the server does all field
+  // extraction (resolveHookIdentity). These pin that the new envelope resolves
+  // every identity path AND that the OLD flat envelope (above) still works.
+
+  test('ctx envelope: taskId + agentId resolved from the opaque ctx blob', async () => {
+    findSessionSpy.mockReturnValue('ctx-task')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'ctx-task', agentId: 'claude-code', channel: 'dev' },
+        raw: { hook_event_name: 'UserPromptSubmit' },
+        arg: null
+      })
+      expect(res.status).toBe(200)
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({
+        agentId: 'claude-code',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'ctx-task'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('ctx-task', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("ctx envelope: a warm agent's reserved taskId routes its SessionStart to the pool", async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) =>
+      taskId === 'reserved-ctx'
+        ? { sessionId: 'pool-ctx-1', projectId: 'p1', computerId: 'c1' }
+        : null
+    )
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'reserved-ctx', projectId: 'p1', agentId: 'claude-code' },
+        raw: { hook_event_name: 'SessionStart', session_id: '44444444-4444-4444-8444-444444444444' }
+      })
+      expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
+        sessionId: 'pool-ctx-1',
+        observedConversationId: '44444444-4444-4444-8444-444444444444'
+      })
+      expect(recordConversationSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('antigravity: event NAME arrives via `arg` (payload omits it)', async () => {
+    // Antigravity's installer appends the event name as argv $1; its stdin
+    // payload has no hook_event_name. The dumb forwarder ships `arg` opaquely
+    // and the server treats a non-JSON arg as the event name.
+    findSessionSpy.mockReturnValue('ag-arg')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'ag-arg', agentId: 'antigravity' },
+        raw: { conversationId: 'c1' },
+        arg: 'PreInvocation'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('ag-arg', 'running', 'PreInvocation')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('opencode plugin: `arg` carries the whole JSON payload (no stdin raw)', async () => {
+    // The OpenCode plugin shells `bash notify.sh '<json>'`, so the payload is on
+    // argv $1 and stdin is empty (raw:null). The server parses the JSON arg and
+    // derives hook_event_name from it.
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'oc-task', agentId: 'opencode' },
+        raw: null,
+        arg: JSON.stringify({ hook_event_name: 'Stop' })
+      })
+      expect(res.status).toBe(200)
+      // opencode is not hook-driven for state, but the lifecycle event still fires.
+      expect(lifecycleSpy).toHaveBeenCalledTimes(1)
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({
+        agentId: 'opencode',
+        hookEvent: 'Stop',
+        taskId: 'oc-task'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx envelope: codex SessionStart → conversation id from raw.session_id persists', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cx-ctx', agentId: 'codex' },
+        raw: {
+          hook_event_name: 'SessionStart',
+          session_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+        }
+      })
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
+      expect(data.conversationId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // ── User-defined provider: `ctx.mode` ≠ `agentId` ─────────────────────────
+  // A provider wrapping claude-code posts as agent `claude-code` (the only value
+  // `isAgentId` accepts) and names its OWN mode in `ctx.mode`. Every lookup keyed
+  // by mode — the ledger and the PTY registry — must use that mode, or the
+  // provider's conversation lands on the built-in claude-code row of the task.
+
+  test('ctx.mode: SessionStart is gated + recorded under the provider mode, not the agent', async () => {
+    findSessionSpy.mockReturnValue('pty-my-claude')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-task', agentId: 'claude-code', mode: 'my-claude' },
+        raw: {
+          hook_event_name: 'SessionStart',
+          session_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+        },
+        agentId: 'claude-code'
+      })
+      expect(res.status).toBe(200)
+      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cp-task', 'my-claude')
+      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        taskId: 'cp-task',
+        mode: 'my-claude',
+        conversationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        origin: 'slay-spawned-fresh'
+      })
+      // Both PTY lookups (idle-close conversation mirror + state machine).
+      expect(findSessionSpy.mock.calls.every(([, mode]) => mode === 'my-claude')).toBe(true)
+      expect(findSessionSpy).toHaveBeenCalledTimes(2)
+      expect(noteConversationIdSpy).toHaveBeenCalledWith(
+        'pty-my-claude',
+        'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+      )
+      // Agent-scoped decisions still read the AGENT.
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ agentId: 'claude-code' })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx.mode: a turn drives the provider PTY state machine', async () => {
+    findSessionSpy.mockImplementation((_taskId, mode) => (mode === 'my-claude' ? 'pty-mc' : null))
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-turn', agentId: 'claude-code', mode: 'my-claude' },
+        raw: { hook_event_name: 'UserPromptSubmit', session_id: 'ee-turn' },
+        agentId: 'claude-code'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('pty-mc', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('ctx.mode: in-band /clear checks ownership under the provider mode', async () => {
+    getCurrentConversationIdSpy.mockResolvedValue('old-conv')
+    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-owner')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-clear', agentId: 'claude-code', mode: 'my-claude' },
+        raw: { hook_event_name: 'SessionStart', session_id: 'new-conv', source: 'clear' },
+        agentId: 'claude-code'
+      })
+      expect(getCurrentConversationIdSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cp-clear',
+        'my-claude'
+      )
+      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        'cp-clear',
+        'my-claude',
+        'old-conv'
+      )
+      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
+        mode: 'my-claude',
+        conversationId: 'new-conv',
+        origin: 'in-band-clear'
+      })
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('envelope with no usable identity (no agent, no event) → 400', async () => {
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, { ctx: { v: 1 }, raw: null, arg: null })
+      expect(res.status).toBe(400)
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+})

@@ -31,7 +31,7 @@ import {
   getProcessesDeps,
   getPtyDeps,
   type AppRouter
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'

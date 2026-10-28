@@ -33,7 +33,7 @@ import {
 } from '@slayzone/platform/security-log'
 import { findHubAccount, type HubAuth, isEntraSsoAuth } from '@slayzone/hub-auth/server'
 import type { HubRole } from '@slayzone/hub-auth'
-import type { Scope } from '@slayzone/transport/server'
+import type { Scope } from '@slayzone/api'
 
 /**
  * The scope bundle a web login mints today. Phase 1 has no UI for choosing a

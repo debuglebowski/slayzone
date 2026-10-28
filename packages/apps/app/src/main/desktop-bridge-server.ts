@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
-import { capabilityBridgeRouter } from '@slayzone/transport/server'
+import { capabilityBridgeRouter } from '@slayzone/api'
 
 /**
  * Desktop-side bridge server (slice 9 local cutover; cap+REST merged).

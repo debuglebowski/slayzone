@@ -3800,7 +3800,7 @@ export const migrations: Migration[] = [
       // stolen backup or a compromised replica could produce one.
       //
       // `scopes_json` is a JSON array of `Scope` values (see
-      // `@slayzone/transport/server`'s scopes.ts) — TEXT, not a join table,
+      // `@slayzone/transport/scopes`) — TEXT, not a join table,
       // because the vocabulary is deliberately tiny and closed; a session's
       // scopes never need to be queried independently of the session itself.
       //

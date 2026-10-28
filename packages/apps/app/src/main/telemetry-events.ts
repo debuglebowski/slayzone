@@ -1,5 +1,5 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { TelemetryEventMap } from '@slayzone/transport/server'
+import type { TelemetryEventMap } from '@slayzone/api'
 
 /**
  * Host-owned telemetry IPC-event bus. Dual-emitted alongside the legacy

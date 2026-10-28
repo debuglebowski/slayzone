@@ -3,7 +3,7 @@ import { createTRPCClient, createWSClient, wsLink, type TRPCLink } from '@trpc/c
 import superjson from 'superjson'
 import { connectDeadlineLink } from './connectDeadlineLink'
 import { createConnectPacer } from './connectPacing'
-import type { AppRouter } from '../server/router'
+import type { AppRouter } from './app-router'
 
 // New TanStack React Query integration (replaces classic createTRPCReact).
 // Components: `const trpc = useTRPC()` then `useQuery(trpc.x.queryOptions(...))`,

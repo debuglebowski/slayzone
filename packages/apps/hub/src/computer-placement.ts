@@ -39,7 +39,7 @@ import {
   resource,
   type OwnedResource,
   type WorkspaceComputerTarget
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 
 /** A connected computer, as the gateway lists it. */
 export interface UsableComputer {

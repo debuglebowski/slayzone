@@ -14,7 +14,7 @@
  */
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
-import type { AppRouter } from '@slayzone/transport/server'
+import type { AppRouter } from '@slayzone/api'
 
 const port = Number(process.argv[2] ?? 4399)
 const base = `http://127.0.0.1:${port}`

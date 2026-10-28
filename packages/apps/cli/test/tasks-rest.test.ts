@@ -38,15 +38,15 @@ import {
   getStorageDir
 } from '../../../shared/platform/src/index.js'
 import { taskEvents } from '../../../domains/task/src/server/events.js'
-import { registerCreateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/create.js'
-import { registerUpdateTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/update.js'
-import { registerArchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/archive.js'
-import { registerDeleteTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/delete.js'
-import { registerUnarchiveTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/unarchive.js'
-import { registerOpenTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/open.js'
+import { registerCreateTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/create.js'
+import { registerUpdateTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/update.js'
+import { registerArchiveTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/archive.js'
+import { registerDeleteTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/delete.js'
+import { registerUnarchiveTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/unarchive.js'
+import { registerOpenTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/open.js'
 // `tasks update --worktree-path` reads the project path from the task detail
 // route (it must not open the hub's DB file), so that route has to be mounted here.
-import { registerGetTaskRoute } from '../../../shared/transport/src/server/http/rest-api/tasks/get.js'
+import { registerGetTaskRoute } from '../../../apps/api/src/http/rest-api/tasks/get.js'
 import { BrowserWindow, ipcMain } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')

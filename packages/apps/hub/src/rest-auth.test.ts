@@ -39,7 +39,7 @@ import {
   type SecurityContext
 } from '@slayzone/platform/security-log'
 import { createHubAuth, createHubUser, type HubAuth } from '@slayzone/hub-auth/server'
-import { restPrincipalOf, type RestPrincipal } from '@slayzone/transport/server'
+import { restPrincipalOf, type RestPrincipal } from '@slayzone/api'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import {
   type RestAuthAction,

@@ -95,6 +95,7 @@ export default defineConfig(
   {
     files: [
       'packages/apps/hub/src/**/*.ts',
+      'packages/apps/api/src/**/*.ts',
       'packages/shared/transport/src/**/*.ts',
       'packages/shared/db-migrations/src/**/*.ts',
       'packages/shared/platform/src/**/*.ts',

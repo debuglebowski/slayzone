@@ -19,7 +19,7 @@
  *   - The admin gets exactly what B gets of A's: nothing.
  *
  * The hub without login is `owner-checks-http-login-off.test.ts`; the exhaustiveness
- * of the policy is `transport/src/server/http-owner-policy.test.ts`.
+ * of the policy is `api/src/http-owner-policy.test.ts`.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
@@ -40,15 +40,15 @@ import {
   type HttpOwnerRule,
   type RestApiDeps,
   type TerminalStateBridge
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 // Reached by path (the same module instances the hub runs: workspace symlinks resolve
 // to these files) — the gates themselves, to show A passes them without side effects.
-import { ownerRouteGuard } from '../../../shared/transport/src/server/http/rest-api/owner-routes.js'
-import { withMcpOwnerGate } from '../../../shared/transport/src/server/http/mcp-tools/owner-gate.js'
-import { bindRestPrincipal } from '../../../shared/transport/src/server/http/rest-api/principal.js'
-import { mcpAuthInfo } from '../../../shared/transport/src/server/http/mcp-tools/admin-gate.js'
-import { httpAccessRequest } from '../../../shared/transport/src/server/http/owner-scope.js'
+import { ownerRouteGuard } from '../../../apps/api/src/http/rest-api/owner-routes.js'
+import { withMcpOwnerGate } from '../../../apps/api/src/http/mcp-tools/owner-gate.js'
+import { bindRestPrincipal } from '../../../apps/api/src/http/rest-api/principal.js'
+import { mcpAuthInfo } from '../../../apps/api/src/http/mcp-tools/admin-gate.js'
+import { httpAccessRequest } from '../../../apps/api/src/http/owner-scope.js'
 import { relayAgentHook } from './agent-hook-relay-consumer.js'
 import {
   bootInProcessHub,

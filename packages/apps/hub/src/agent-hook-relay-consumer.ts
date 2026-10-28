@@ -1,5 +1,5 @@
-import type { RestApiDeps, TerminalStateBridge } from '@slayzone/transport/server'
-import { getAuthGate, processAgentHook } from '@slayzone/transport/server'
+import type { RestApiDeps, TerminalStateBridge } from '@slayzone/api'
+import { getAuthGate, processAgentHook } from '@slayzone/api'
 import { AGENT_HOOK_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 

@@ -46,7 +46,7 @@ import {
   runWithSecurityContext,
   securityEvent
 } from '@slayzone/platform/security-log'
-import { bindRestPrincipal, type RestPrincipal } from '@slayzone/transport/server'
+import { bindRestPrincipal, type RestPrincipal } from '@slayzone/api'
 import { BREAK_GLASS_PATH, type BreakGlass, isBreakGlassToken } from './break-glass'
 import {
   isWebSessionToken,

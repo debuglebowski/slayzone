@@ -20,7 +20,7 @@ import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 
 const { capabilityBridgeRouter, setAppDeps, setMenuEvents, setPowerResumeEvents } = await import(
-  '@slayzone/transport/server'
+  '@slayzone/api'
 )
 const { TypedEmitter } = await import('@slayzone/platform/events')
 const { createHostBridge } = await import('./host-bridge.js')

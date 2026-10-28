@@ -3,10 +3,10 @@
  * calls `open` are exactly the ones this hub's bearer gate lets through with no
  * session, and every route the gate lets through unverified is either `open` or an
  * admin route that verifies its caller (and the role) itself. The tRPC and MCP sides,
- * and the refusals themselves, are `transport/src/server/admin-policy.test.ts`.
+ * and the refusals themselves, are `api/src/admin-policy.test.ts`.
  */
 import { describe, expect, test } from 'vitest'
-import { REST_ADMIN_POLICY } from '@slayzone/transport/server'
+import { REST_ADMIN_POLICY } from '@slayzone/api'
 import { restAuthAction } from './rest-auth'
 
 /** A concrete url for a route key (`GET /api/tasks/:id` → `/api/tasks/x`). */

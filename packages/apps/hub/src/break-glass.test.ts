@@ -42,7 +42,7 @@ import {
 import type { SlayzoneDb } from '@slayzone/platform'
 import { adoptClientAddress, parseTrustedProxies } from '@slayzone/platform/client-address'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { createMcpRestApp } from '@slayzone/transport/server'
+import { createMcpRestApp } from '@slayzone/api'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import {
   BREAK_GLASS_GRANT_TTL_MS,

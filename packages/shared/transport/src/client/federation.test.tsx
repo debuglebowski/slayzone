@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { createTRPCClient, type TRPCLink } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from '../server/router'
+import type { AppRouter } from './app-router'
 
 // Fake per-hub clients keyed by hub id. Built with the REAL createTRPCClient so
 // the tanstack integration's untyped-client symbol is present (a plain object

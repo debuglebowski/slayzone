@@ -1380,9 +1380,9 @@ async function githubSystemSignIn(input: {
     oauthCallbackQueue.length = 0
 
     // Shared with the chromium-fork sidecar — single PKCE-handshake impl. The
-    // transport/server barrel is already loaded by boot, so this resolves the
+    // @slayzone/api barrel is already loaded by boot, so this resolves the
     // cached module instantly.
-    const { requestGithubSignInStart } = await import('@slayzone/transport/server')
+    const { requestGithubSignInStart } = await import('@slayzone/api')
     const start = await requestGithubSignInStart(input.convexUrl, input.redirectTo, 'electron-main')
     await shell.openExternal(start.redirect)
 
@@ -2275,7 +2275,7 @@ app
     if (!isRemoteMode)
       setImmediate(() => {
         logBoot('host capability server import dispatched')
-        import('@slayzone/transport/server')
+        import('@slayzone/api')
           .then(async (mod) => {
             // The chat / pty / integration data-dep registries are NOT set here.
             // Nothing in this process reads them — the renderer talks to the side-car,
@@ -4181,7 +4181,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       // `globalThis.__appDepSpies[method] = { calls, lastArgs }`. Optional
       // `fakeResult` short-circuits the real impl (deterministic/offline).
       ipcMain.handle('e2e:spy-app-dep', async (_e, method: string, fakeResult?: unknown) => {
-        const mod = await import('@slayzone/transport/server')
+        const mod = await import('@slayzone/api')
         const deps = mod.getAppDeps() as unknown as Record<string, (...a: unknown[]) => unknown>
         const g = globalThis as Record<string, unknown>
         const spies = (g.__appDepSpies ??= {}) as Record<

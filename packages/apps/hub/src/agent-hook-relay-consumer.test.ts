@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
-import type { RestApiDeps, TerminalStateBridge } from '@slayzone/transport/server'
+import type { RestApiDeps, TerminalStateBridge } from '@slayzone/api'
 import {
   attachAgentHookRelayConsumer,
   type AgentHookRelayGateway

@@ -62,7 +62,7 @@ import {
 } from '@slayzone/hub-auth/server'
 import { clientAddress } from '@slayzone/platform/client-address'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
-import type { RestPrincipal } from '@slayzone/transport/server'
+import type { RestPrincipal } from '@slayzone/api'
 
 /** Where a grant is redeemed (POST) and a session ends itself (DELETE). */
 export const BREAK_GLASS_PATH = '/api/auth/break-glass'

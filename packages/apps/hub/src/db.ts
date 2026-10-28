@@ -15,7 +15,7 @@ import {
   type TxnParams,
   type TxnResult
 } from '@slayzone/platform'
-import { domainTxnRegistry } from '@slayzone/transport/txns'
+import { domainTxnRegistry } from '@slayzone/api/txns'
 import { createPreMigrationBackup, LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
 import { bootstrapSchema } from './bootstrap-schema'
 import { createDiagnosticsSchema, applyDiagnosticsPragmas } from '@slayzone/diagnostics/server'
@@ -41,7 +41,7 @@ export function getDatabasePathFromEnv(): string {
  * it runs better-sqlite3 directly and wraps each call in a resolved promise —
  * satisfying the one `SlayzoneDb` contract every domain/router consumer now
  * expects, without a worker. `namedTxn` dispatches against the shared domain
- * registry (`@slayzone/transport/txns`); app-only txns are absent by design.
+ * registry (`@slayzone/api/txns`); app-only txns are absent by design.
  */
 class SyncSlayzoneDb implements SlayzoneDb {
   constructor(private readonly db: Database.Database) {}

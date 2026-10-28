@@ -20,7 +20,7 @@ import { observable, behaviorSubject } from '@trpc/server/observable'
 import superjson from 'superjson'
 import { connectDeadlineLink, type ConnectionStateSource } from './connectDeadlineLink'
 import { createTrpcWsClient } from './trpc'
-import type { AppRouter } from '../server/router'
+import type { AppRouter } from './app-router'
 
 /** A port nothing listens on — bound, read, then released. */
 async function deadPort(): Promise<number> {

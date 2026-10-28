@@ -22,7 +22,7 @@ import {
   setHubUserRole,
   type HubAuth
 } from '@slayzone/hub-auth/server'
-import type { ComputersDeps, RestApiDeps } from '@slayzone/transport/server'
+import type { ComputersDeps, RestApiDeps } from '@slayzone/api'
 import type { UserAccessRevoker } from './user-access.js'
 
 export function createHubUsersCapability(

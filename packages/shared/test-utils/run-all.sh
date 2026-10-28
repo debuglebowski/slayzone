@@ -35,10 +35,10 @@ fi
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
 # in the Wave C2 split; repointed here.
-run_harness packages/shared/transport/src/server/routers/settings.test.ts
-run_harness packages/shared/transport/src/server/routers/hub.test.ts
-run_harness packages/shared/transport/src/server/routers/tags.test.ts
-run_harness packages/shared/transport/src/server/routers/projects.test.ts
+run_harness packages/apps/api/src/routers/settings.test.ts
+run_harness packages/apps/api/src/routers/hub.test.ts
+run_harness packages/apps/api/src/routers/tags.test.ts
+run_harness packages/apps/api/src/routers/projects.test.ts
 run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 run_harness packages/domains/projects/src/server/project-groups-txns.test.ts
@@ -60,7 +60,7 @@ run_harness packages/domains/task/src/server/ops/list-task-sessions.test.ts
 run_harness packages/domains/task/src/server/ops/session-switch-delete.test.ts
 # agent-prompts capture + the deleted-session filter on listPromptsForTask.
 run_harness packages/domains/agent-turns/src/server/prompt-capture.test.ts
-run_harness packages/shared/transport/src/server/routers/task-terminals.test.ts
+run_harness packages/apps/api/src/routers/task-terminals.test.ts
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
@@ -70,13 +70,13 @@ run_harness packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_harness packages/domains/task/src/server/ops/exec-boundary.test.ts
 # Artifact export routes after the inversion: served by the HUB against ctx.db,
 # reaching the desktop over AppDeps for the offscreen render alone.
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/export.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/export.test.ts
 # GHSA-27r3-jxmh-p828: compressed request bodies are refused 415 on /mcp and /api/*
 # (one compressed frame + trailing bytes crashed the process); one way to build a parser.
-run_harness packages/shared/transport/src/server/http/json-body.test.ts
+run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
-run_harness packages/shared/transport/src/server/path-ids.test.ts
+run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
@@ -139,13 +139,13 @@ run_harness packages/apps/hub/src/rest-auth.test.ts
 run_harness packages/apps/hub/src/ownership-backfill.test.ts
 run_harness packages/apps/hub/src/ownership-boot.test.ts
 # Every project-create surface (tRPC, REST, import; MCP has none) stores its owner.
-run_harness packages/shared/transport/src/server/project-owner-surfaces.test.ts
+run_harness packages/apps/api/src/project-owner-surfaces.test.ts
 # Session retention (T-23): the sweep and its schedule, then through the built hub.
 run_harness packages/apps/hub/src/session-retention.test.ts
 run_harness packages/apps/hub/src/session-retention-boot.test.ts
 # Owner checks (T-17): the one access function over a real DB, then two users on a real
 # hub with login (ids, lists, live streams, admin) and the desktop's hub with login off.
-run_harness packages/shared/transport/src/server/access.test.ts
+run_harness packages/apps/api/src/access.test.ts
 run_harness packages/apps/hub/src/owner-checks.test.ts
 run_harness packages/apps/hub/src/owner-checks-login-off.test.ts
 # Owner checks over REST, MCP and agent hooks (T-18): two users on a real hub with
@@ -158,7 +158,7 @@ run_harness packages/apps/hub/src/owner-checks-admin.test.ts
 run_harness packages/apps/hub/src/owner-checks-admin-login-off.test.ts
 # Upload procedures never copy the hub's own files (DB, auth store, SSO key) or another
 # user's to a caller, and read nothing off the hub's disk with processes off (T-107).
-run_harness packages/shared/transport/src/server/routers/upload-sources.test.ts
+run_harness packages/apps/api/src/routers/upload-sources.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -172,7 +172,7 @@ run_harness packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.
 # node-pty optional in the published hub (T-30): loaded on the first local spawn, never at
 # import; missing → a clear refusal at that spawn.
 run_harness packages/domains/terminal/src/server/runtime/node-pty-optional.test.ts
-run_harness packages/shared/transport/src/server/routers/computers.test.ts
+run_harness packages/apps/api/src/routers/computers.test.ts
 # Hub↔computer install handshake — boots the built hub+computer bins, isolated (tmp
 # home/store, ports 0, scrubbed env), asserts the computer enrolls + the real
 # dev/prod DBs stay byte-unchanged. The bundles are built by the harness globalSetup.
@@ -217,8 +217,8 @@ run_harness packages/domains/processes/src/server/process-persistence.test.ts
 run_harness packages/domains/processes/src/server/process-backend.test.ts
 # Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
-run_harness packages/shared/transport/src/server/routers/ai-config.test.ts
-run_harness packages/shared/transport/src/server/routers/file-editor.test.ts
+run_harness packages/apps/api/src/routers/ai-config.test.ts
+run_harness packages/apps/api/src/routers/file-editor.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -295,7 +295,7 @@ run_harness packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
 run_harness packages/apps/cli/src/commands/tasks/cli-author.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/data-root.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
 # Client-local settings store: corrupt-file handling, downgrade safety (unknown
 # fields survive), and serialized read-modify-write.
@@ -419,42 +419,42 @@ run_harness packages/apps/hub/src/sidecar-socket-path.test.ts
 # Wave-3.5 D5 computer restart-survival — stable port + local-computer dedup (count stays 1 across reboots).
 run_harness packages/apps/hub/src/computer-restart-survival.test.ts
 # Wave-3.5 loopback join-token mint route (main auto-enroll channel).
-run_harness packages/shared/transport/src/server/http/rest-api/computers/join-token.test.ts
+run_harness packages/apps/api/src/http/rest-api/computers/join-token.test.ts
 # T-19: the REST computer roster is the caller's own (every one for an admin).
-run_harness packages/shared/transport/src/server/http/rest-api/computers/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/computers/list.test.ts
 # Loopback operator account routes (`slay hub users`). The routes never touch the DB
 # (the hubUsers capability is stubbed).
-run_harness packages/shared/transport/src/server/http/rest-api/hub/users.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/hub/web-login.test.ts
-run_harness packages/shared/transport/src/server/routers/integrations.test.ts
+run_harness packages/apps/api/src/http/rest-api/hub/users.test.ts
+run_harness packages/apps/api/src/http/rest-api/hub/web-login.test.ts
+run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
-run_harness packages/shared/transport/src/server/routers/worktrees.test.ts
+run_harness packages/apps/api/src/routers/worktrees.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.
 run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
-run_harness packages/shared/transport/src/server/routers/agent-turns.test.ts
-run_harness packages/shared/transport/src/server/routers/chat.test.ts
+run_harness packages/apps/api/src/routers/agent-turns.test.ts
+run_harness packages/apps/api/src/routers/chat.test.ts
 # pty.onData's server-side sessionIds filter — the web-bandwidth fix (§2.6).
-run_harness packages/shared/transport/src/server/routers/pty.test.ts
+run_harness packages/apps/api/src/routers/pty.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
-run_harness packages/shared/transport/src/server/routers/task.test.ts
-run_harness packages/shared/transport/src/server/routers/template.test.ts
-run_harness packages/shared/transport/src/server/routers/artifacts.test.ts
+run_harness packages/apps/api/src/routers/task.test.ts
+run_harness packages/apps/api/src/routers/template.test.ts
+run_harness packages/apps/api/src/routers/artifacts.test.ts
 # Cross-domain: task+tags+history activity-event recording + cursor pagination.
-run_harness packages/shared/transport/src/server/routers/history.test.ts
+run_harness packages/apps/api/src/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB
-run_harness packages/shared/transport/src/server/routers/app.browser-events.test.ts
+run_harness packages/apps/api/src/routers/app.browser-events.test.ts
 # Desktop bridge replay cache: a browser tab subscribing right after a relayed
 # dom-ready/did-stop-loading is replayed THAT state (stale "loading" stranded the overlay).
 run_harness packages/apps/hub/src/host-bridge.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
-run_harness packages/shared/transport/src/server/routers/automations.test.ts
+run_harness packages/apps/api/src/routers/automations.test.ts
 run_harness packages/domains/automations/src/server/engine.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
@@ -586,60 +586,60 @@ run_harness packages/apps/app/e2e/fixtures/stale-runtime-dirs.test.ts
 
 # Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
 run_harness packages/domains/task/src/server/events.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/archive.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/archive-many.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/create.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/delete.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/unarchive.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/update.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/archive.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/archive-many.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/create.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/delete.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/unarchive.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/update.test.ts
 # `slay tasks done [--close]`: the done INTENT (project completed column) — not
 # PATCH's status-alias resolution. See tasks/done.ts.
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/done.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/done.test.ts
 # Wave-3 CLI cutover — dark hub REST read/CRUD surface consumed by the CLI.
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/list.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/get.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/search.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/subtasks.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/blockers.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/blocking.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/blocked.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/tags.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/progress.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/reset-conversation.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tags/crud.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/projects/list.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/projects/resolve-by-path.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/projects/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/get.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/search.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/subtasks.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/blockers.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/blocking.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/blocked.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/tags.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/progress.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/reset-conversation.test.ts
+run_harness packages/apps/api/src/http/rest-api/tags/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/projects/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/projects/resolve-by-path.test.ts
+run_harness packages/apps/api/src/http/rest-api/projects/crud.test.ts
 # `slay init` hub-state half: skill rows + the installedVersion content-hash compare.
-run_harness packages/shared/transport/src/server/http/rest-api/projects/skills.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/templates/crud.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/panels/crud.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/automations/crud.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/switch-refusal.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/list.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/projects/skills.test.ts
+run_harness packages/apps/api/src/http/rest-api/templates/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/panels/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/automations/crud.test.ts
+run_harness packages/apps/api/src/http/rest-api/switch-refusal.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/content.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of
 # the streamed write/append bodies and the blob-streamed version read, plus the
 # `Error [CODE]: …` 400 contract the CLI prints verbatim.
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/versions.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/versions.test.ts
 # Artifact title+content search — the scan reads the blob store, so it can only
 # run host-side; asserts the CLI's exact result shape + flag semantics.
-run_harness packages/shared/transport/src/server/http/rest-api/artifacts/search.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/agent-hook-attention.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/archive-task.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/archive-many-task.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/create-task.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/delete-task.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/unarchive-task.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/update-task.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/search.test.ts
+run_harness packages/apps/api/src/http/rest-api/agent-hook-attention.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/archive-task.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/archive-many-task.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/create-task.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/delete-task.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/unarchive-task.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/update-task.test.ts
 # Warm-pool session → task fallback for MCP tools (mirrors the CLI/REST fallback above).
-run_harness packages/shared/transport/src/server/http/mcp-tools/get-current-task-id.test.ts
-run_harness packages/shared/transport/src/server/http/mcp-tools/create-subtask.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/tasks/open.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/auth-deep-link.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/get-current-task-id.test.ts
+run_harness packages/apps/api/src/http/mcp-tools/create-subtask.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/open.test.ts
+run_harness packages/apps/api/src/http/rest-api/auth-deep-link.test.ts
 run_harness packages/apps/cli/test/tasks-rest.test.ts
 
 # CLI command tests (better-sqlite3 + ESM interop). @dagrejs/dagre (pulled transitively
@@ -864,19 +864,19 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/server/scope.test.ts \
   packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
-  packages/shared/transport/src/server/http/rest-api/agent-hook.test.ts \
+  packages/apps/api/src/http/rest-api/agent-hook.test.ts \
   packages/apps/hub/src/agent-hook-relay-consumer.test.ts \
-  packages/shared/transport/src/server/http/rest-api/agent-hook-prompt-capture.test.ts \
+  packages/apps/api/src/http/rest-api/agent-hook-prompt-capture.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-execution.test.ts \
   packages/apps/app/src/main/agent-hooks/hook-roundtrip.test.ts \
   packages/apps/app/src/main/agent-hooks/notify-script-gemini.test.ts \
   packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
-  packages/shared/transport/src/server/scopes.test.ts \
-  packages/shared/transport/src/server/routers/settings-admin.test.ts \
-  packages/shared/transport/src/server/trpc.test.ts \
-  packages/shared/transport/src/server/trpc-transformer.test.ts \
+  packages/apps/api/src/scopes.test.ts \
+  packages/apps/api/src/routers/settings-admin.test.ts \
+  packages/apps/api/src/trpc.test.ts \
+  packages/apps/api/src/trpc-transformer.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 
@@ -907,13 +907,13 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/shared/editor/src/milkdown-task-list.test.ts \
   packages/shared/suspense/src/suspense-cache.test.tsx \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \
-  packages/shared/transport/src/txns/txns.test.ts
+  packages/apps/api/src/txns/txns.test.ts
 
 # tasks-changed refresh: per-subscriber burst coalescing, board row patching, the
 # per-task query refresh that defers hidden tabs until they are revealed, the one
 # shared panel config, and the first-paint theme cache.
 run_vitest_files "vitest (tasks-changed refresh)" \
-  packages/shared/transport/src/server/notify-coalescer.test.ts \
+  packages/apps/api/src/notify-coalescer.test.ts \
   packages/domains/tasks/src/client/board-patch.test.ts \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \
@@ -931,14 +931,14 @@ run_vitest_files "vitest (boot idle hydration)" \
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
 # hub's open REST routes.
 run_vitest_files "vitest (role gate)" \
-  packages/shared/transport/src/server/admin-policy.test.ts \
+  packages/apps/api/src/admin-policy.test.ts \
   packages/apps/hub/src/admin-authz.test.ts
 
 # The owner-check classification (T-17): every user procedure marked, exhaustively.
 run_vitest_files "vitest (owner checks)" \
-  packages/shared/transport/src/server/owner-policy.test.ts \
-  packages/shared/transport/src/server/http-owner-policy.test.ts \
-  packages/shared/transport/src/server/http/rest-api/agent-hook-owner.test.ts
+  packages/apps/api/src/owner-policy.test.ts \
+  packages/apps/api/src/http-owner-policy.test.ts \
+  packages/apps/api/src/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no
 # jsdom). Its handler suites — pty/proc/fs/git/project/gh/computer-config — were never
@@ -982,7 +982,7 @@ run_harness packages/apps/hub/src/security-headers-served.test.ts
 # allowlist, TTL / end / boot closing, over real hub-auth + app DB; and the computer
 # revoke route it uses (hub-auth's account half runs in its package suite).
 run_harness packages/apps/hub/src/break-glass.test.ts
-run_harness packages/shared/transport/src/server/http/rest-api/hub/computers.test.ts
+run_harness packages/apps/api/src/http/rest-api/hub/computers.test.ts
 
 # Flood limits (T-26): the hub's front-door limits (web-login, break-glass redemption,
 # /trpc upgrades). better-auth's limiter and the /computers caps run in their packages.

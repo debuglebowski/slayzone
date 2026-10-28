@@ -1,6 +1,6 @@
 import { TRPCClientError, type TRPCLink, type TRPCWebSocketClient } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from '../server/router'
+import type { AppRouter } from './app-router'
 
 /**
  * Fail an operation that is still waiting for its hub's socket to open.

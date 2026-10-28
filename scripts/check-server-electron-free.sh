@@ -49,7 +49,7 @@ ELECTRON="from ['\"]electron['\"]|require\(['\"]electron['\"]\)"
 # `*.test.ts` is exempt (same carve-out as (2b) below): tests are never bundled
 # into the side-car, and some MUST resolve the electron binary path to spawn the
 # built bins under Electron's node ABI (install-handshake.test.ts).
-for p in packages/apps/hub/src packages/shared/transport/src packages/shared/db-migrations/src packages/shared/platform/src; do
+for p in packages/apps/hub/src packages/apps/api/src packages/shared/transport/src packages/shared/db-migrations/src packages/shared/platform/src; do
   require_dir "$p"
   grep_hits -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
     --exclude="*.test.ts" --exclude="*.test.tsx" \
@@ -106,7 +106,7 @@ fi
 #      open is fatal (`-Mwarnings=FATAL,inplace`; by default perl warns, skips it
 #      and exits 0), so with pipefail any find/perl failure fails the guard.
 glob_dirs packages/domains/*/src/server
-for p in packages/apps/hub/src packages/shared/transport/src packages/shared/db-migrations/src "${dirs[@]}"; do
+for p in packages/apps/hub/src packages/apps/api/src packages/shared/transport/src packages/shared/db-migrations/src "${dirs[@]}"; do
   require_dir "$p"
   # shellcheck disable=SC2016 # single-quoted perl source: its $vars are perl's
   hit=$(find "$p" -name "*.ts" -not -name "*.test.ts" -print0 | xargs -0 perl -Mwarnings=FATAL,inplace -0777 -ne '

@@ -15,7 +15,7 @@
 import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { TRPC_OWNER_POLICY, appRouter, checkOwnership } from '@slayzone/transport/server'
+import { TRPC_OWNER_POLICY, appRouter, checkOwnership } from '@slayzone/api'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import {
   BY_MUTATION,

@@ -7,59 +7,29 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./server": "./src/server/index.ts",
     "./client": "./src/client/index.ts",
-    "./testing": "./src/testing/index.tsx",
-    "./txns": "./src/txns/index.ts"
+    "./scopes": "./src/shared/scopes.ts",
+    "./testing": "./src/testing/index.tsx"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.1",
-    "@slayzone/agent-turns": "workspace:*",
-    "@slayzone/ai-config": "workspace:*",
-    "@slayzone/automations": "workspace:*",
-    "@slayzone/db-migrations": "workspace:*",
-    "@slayzone/diagnostics": "workspace:*",
-    "@slayzone/feedback": "workspace:*",
-    "@slayzone/file-editor": "workspace:*",
-    "@slayzone/history": "workspace:*",
-    "@slayzone/integrations": "workspace:*",
+    "@slayzone/api": "workspace:*",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/projects": "workspace:*",
-    "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/computers": "workspace:*",
-    "@slayzone/settings": "workspace:*",
-    "@slayzone/tags": "workspace:*",
-    "@slayzone/task": "workspace:*",
-    "@slayzone/task-contracts": "workspace:*",
-    "@slayzone/task-artifacts": "workspace:*",
-    "@slayzone/task-terminals": "workspace:*",
-    "@slayzone/terminal": "workspace:*",
-    "@slayzone/terminal-contracts": "workspace:*",
-    "@slayzone/test-panel": "workspace:*",
-    "@slayzone/usage-analytics": "workspace:*",
-    "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
-    "better-sqlite3": "^13.0.3",
-    "bufferutil": "^4.1.0",
-    "express": "^5.2.1",
     "superjson": "^2.2.1",
-    "ws": "^8.22.0",
-    "zod": "^4.3.5",
     "zustand": "^5.0.15"
   },
   "peerDependencies": {
     "react": "^19.3.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/express": "^5.0.6",
     "@types/react": "^19.3.0",
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.5.13",
+    "ws": "^8.22.0"
   }
 }

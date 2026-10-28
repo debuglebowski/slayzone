@@ -114,7 +114,7 @@ syncBuiltinESMExports()
 // --- Modules under test (after the spies) --------------------------------------
 const { setSecurityLogSink } = await import('@slayzone/platform/security-log')
 const { isHubSwitchedOffError } = await import('@slayzone/platform/hub-switch-refusal')
-const { appRouter, setAppDeps, getWorkspaceDeps } = await import('@slayzone/transport/server')
+const { appRouter, setAppDeps, getWorkspaceDeps } = await import('@slayzone/api')
 const { createLocalWorkspaceFs } = await import('@slayzone/file-editor/server')
 const { createRemoteFsAdapters } = await import('@slayzone/computer-transport/server')
 const worktrees = await import('@slayzone/worktrees/server')

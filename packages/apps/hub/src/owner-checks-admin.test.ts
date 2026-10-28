@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { appRouter, getAutomationsEvents } from '@slayzone/transport/server'
+import { appRouter, getAutomationsEvents } from '@slayzone/api'
 import {
   asUser,
   bootInProcessHub,

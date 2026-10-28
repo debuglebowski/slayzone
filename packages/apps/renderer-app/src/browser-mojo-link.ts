@@ -11,7 +11,7 @@
 // task-browser package stays 100% unmodified.
 //
 // The mapping is near 1:1: the `app.browser` tRPC router (packages/shared/
-// transport/src/server/routers/app.ts) is `input → getAppDeps().browser.<m>(...args)`,
+// api/src/routers/app.ts) is `input → getAppDeps().browser.<m>(...args)`,
 // and the shim object is typed AS that same `ElectronAPI['browser']` namespace, so
 // the positional arg order matches. The shim implements only a subset at runtime
 // (the rest are `as unknown as` type-only), so every call is optional-chained with a

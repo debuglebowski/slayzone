@@ -28,7 +28,7 @@ import {
   hubGithubSignInConvexUrl,
   requestGithubSignInStart,
   setAppDeps
-} from '@slayzone/transport/server'
+} from '@slayzone/api'
 
 const h = await createTestHarness()
 

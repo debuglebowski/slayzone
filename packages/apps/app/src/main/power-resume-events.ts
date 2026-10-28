@@ -1,5 +1,5 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { PowerResumeEventMap } from '@slayzone/transport/server'
+import type { PowerResumeEventMap } from '@slayzone/api'
 
 /**
  * Host `powerMonitor 'resume'` events. Electron's powerMonitor is host-only, but

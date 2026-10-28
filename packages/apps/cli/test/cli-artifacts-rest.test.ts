@@ -35,7 +35,7 @@ import { afterAll, describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
-import { registerRestApi } from '../../../shared/transport/src/server/http/rest-api/index.js'
+import { registerRestApi } from '../../../apps/api/src/http/rest-api/index.js'
 
 /**
  * The storage dir a process anchored at `root` resolves — derived by running the

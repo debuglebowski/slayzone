@@ -4,7 +4,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { processAgentHook } from '@slayzone/transport/server'
+import { processAgentHook } from '@slayzone/api'
 import { formatHookCommand, installNotifyScript } from '@slayzone/platform/agent-hooks'
 import { NOTIFY_SCRIPT_SOURCE } from './sources'
 
