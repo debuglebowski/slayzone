@@ -409,9 +409,6 @@ importers:
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../../domains/agent-panels
-      '@slayzone/agent-turns':
-        specifier: workspace:*
-        version: link:../../domains/agent-turns
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../../domains/ai-config
@@ -442,9 +439,6 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../../domains/file-editor
-      '@slayzone/history':
-        specifier: workspace:*
-        version: link:../../domains/history
       '@slayzone/home':
         specifier: workspace:*
         version: link:../../domains/home
@@ -463,9 +457,6 @@ importers:
       '@slayzone/leaderboard':
         specifier: workspace:*
         version: link:../../domains/leaderboard
-      '@slayzone/markdown':
-        specifier: workspace:*
-        version: link:../../shared/markdown
       '@slayzone/onboarding':
         specifier: workspace:*
         version: link:../../domains/onboarding
@@ -496,9 +487,6 @@ importers:
       '@slayzone/sidebar':
         specifier: workspace:*
         version: link:../../domains/sidebar
-      '@slayzone/suspense':
-        specifier: workspace:*
-        version: link:../../shared/suspense
       '@slayzone/tabs':
         specifier: workspace:*
         version: link:../../domains/tabs
@@ -517,9 +505,6 @@ importers:
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
-      '@slayzone/task-terminals':
-        specifier: workspace:*
-        version: link:../../domains/task-terminals
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks
@@ -668,9 +653,6 @@ importers:
       '@slayzone/theme-css':
         specifier: workspace:*
         version: link:../../shared/theme-css
-      '@slayzone/types':
-        specifier: workspace:*
-        version: link:../../shared/types
       '@slayzone/window-api-shim':
         specifier: workspace:*
         version: link:../../shared/window-api-shim
@@ -2347,9 +2329,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/projects-contracts':
-        specifier: workspace:*
-        version: link:../projects-contracts
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry

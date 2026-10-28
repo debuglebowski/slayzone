@@ -27,7 +27,6 @@
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
