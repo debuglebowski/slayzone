@@ -10,7 +10,7 @@
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { automationsRouter } from './automations.js'
+import { automationsRouter } from './automations-router.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 
 const h = await createTestHarness()

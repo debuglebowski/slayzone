@@ -455,7 +455,7 @@ run_harness packages/apps/hub/src/host-bridge.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
-run_harness packages/apps/api/src/routers/automations.test.ts
+run_harness packages/domains/automations/src/server/automations-router.test.ts
 run_harness packages/domains/automations/src/server/engine.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 

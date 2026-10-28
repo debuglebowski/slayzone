@@ -37,7 +37,7 @@ registered, gated calls fail closed.
 - **Host deps on the context**: `TrpcServerDeps` is an interface. A package that owns a
   host-wired dependency adds it by augmentation
   (`declare module '@slayzone/trpc-server' { interface TrpcServerDeps { … } }`), as
-  api's `automation-engine-context.ts` does.
+  `@slayzone/automations/server`'s `automation-engine-context.ts` does.
 - **Domain refusal codes**: `registerAppCode(cause => code | undefined)` from the module
   defining the error puts its code on the wire as `data.appCode` (api's
   `join-token-policy.ts`).

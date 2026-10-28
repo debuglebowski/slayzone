@@ -21,13 +21,8 @@ import superjson from 'superjson'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
-import {
-  getAppDeps,
-  getAutomationsEvents,
-  getMenuEvents,
-  getNotifyEvents,
-  type AppRouter
-} from '@slayzone/api'
+import { getAppDeps, getMenuEvents, getNotifyEvents, type AppRouter } from '@slayzone/api'
+import { getAutomationsEvents } from '@slayzone/automations/server'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import { getAgentLifecycleEvents, getChatDeps, getPtyDeps } from '@slayzone/terminal/server'

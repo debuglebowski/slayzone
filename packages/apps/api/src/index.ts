@@ -12,7 +12,6 @@ export {
   type TrpcServerDeps,
   type TrpcContextFactory
 } from '@slayzone/trpc-server'
-export type { AutomationEngineLike } from './automation-engine-context'
 export {
   SCOPE_POLICY,
   requiredScope,
@@ -39,11 +38,9 @@ export {
 } from './app-deps'
 export { setIntegrationOps, getIntegrationOps } from './app-deps'
 export { setNotifyEvents, getNotifyEvents, type NotifyEventMap } from './app-deps'
-export {
-  setAutomationsEvents,
-  getAutomationsEvents,
-  type AutomationsEventMap
-} from './app-deps'
+// The automations domain's bus setter, re-exported for the Electron host, which
+// reaches it through its lazy `import('@slayzone/api')` (one registry, the domain's).
+export { setAutomationsEvents } from '@slayzone/automations/server'
 export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
 export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
 export {

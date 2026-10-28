@@ -5,7 +5,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { getServerHost, getTrpcPort } from '@slayzone/platform'
 import { appRouter } from './router'
 import type { TrpcContext } from '@slayzone/trpc-server'
-import type { AutomationEngineLike } from './automation-engine-context'
+import type { AutomationEngineLike } from '@slayzone/automations/server'
 
 let httpServer: HttpServer | null = null
 let wss: WebSocketServer | null = null

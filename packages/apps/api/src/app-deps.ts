@@ -123,29 +123,6 @@ export function getNotifyEvents(): TypedEmitter<NotifyEventMap> {
   return notifyEvents
 }
 
-// Automations-changed bus — fires when the AutomationEngine mutates automations
-// (manual run, trigger fire, CRUD). Backs the `automations.onChanged` sub. The
-// emitter is owned by the Electron-main host, injected here so the router and the
-// still-live `automations:changed` webContents.send share one instance (dual-emit).
-export type AutomationsEventMap = {
-  /** Any automation data change — renderer invalidates affected queries. No payload. */
-  changed: []
-}
-
-let automationsEvents: TypedEmitter<AutomationsEventMap> | null = null
-
-export function setAutomationsEvents(ev: TypedEmitter<AutomationsEventMap>): void {
-  automationsEvents = ev
-}
-
-export function getAutomationsEvents(): TypedEmitter<AutomationsEventMap> {
-  if (!automationsEvents)
-    throw new Error(
-      'automationsEvents not initialized — call setAutomationsEvents() in main host first'
-    )
-  return automationsEvents
-}
-
 // Menu / app-shortcut event bus — the one-way main→renderer `app:*` / `browser:*`
 // broadcasts driven by native menus, the `before-input-event` accelerator handler,
 // the auto-updater, and the REST/MCP task-open routes. The emitter is owned by the

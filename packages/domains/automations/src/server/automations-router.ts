@@ -11,10 +11,12 @@ import {
   reorderAutomations,
   listAutomationRuns,
   clearAutomationRuns
-} from '@slayzone/automations/server'
+} from './automations-store'
 import type { CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getAutomationsEvents } from '../app-deps'
+import { getAutomationsEvents } from './automations-events'
+// Adds `automationEngine` to the tRPC context type (read by `runManual`).
+import './automation-engine-context'
 
 // The Create/Update shapes carry nested trigger/condition/action configs; mirror
 // the diagnostics router and pass them through unchecked (the still-live IPC
@@ -87,3 +89,8 @@ export const automationsRouter = router({
     })
   )
 })
+
+export type AutomationsRouter = typeof automationsRouter
+
+/** Where `@slayzone/api` mounts this router; it asserts the slice in its `router.ts`. */
+export type AutomationsMounts = { automations: AutomationsRouter }

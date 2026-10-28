@@ -18,7 +18,7 @@ export type PrincipalRole = 'admin' | 'user'
  *     interface TrpcServerDeps { automationEngine?: AutomationEngineLike }
  *   }
  *
- * (`@slayzone/api`'s `automation-engine-context.ts` does exactly this today.)
+ * (`@slayzone/automations/server`'s `automation-engine-context.ts` does exactly this.)
  */
 export interface TrpcServerDeps {
   db: SlayzoneDb

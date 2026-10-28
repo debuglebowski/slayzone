@@ -1,8 +1,7 @@
 import { router, type MountedRouter, type RouterMounts } from '@slayzone/trpc-server'
-// The composition root: register the per-procedure tables with the gate chain, and add
-// the composition's host deps to the context type, before any router is served.
+// The composition root: register the per-procedure tables with the gate chain, and wire
+// the host seams of domain-owned routers, before any router is served.
 import './procedure-policy'
-import './automation-engine-context'
 import './settings-host-wiring'
 import './domain-router-deps'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
@@ -22,7 +21,7 @@ import {
   agentTurnsRouter,
   type AgentTurnsMounts
 } from '@slayzone/agent-turns/server'
-import { automationsRouter } from './routers/automations'
+import { automationsRouter, type AutomationsMounts } from '@slayzone/automations/server'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
 import { fileEditorRouter } from './routers/file-editor'
@@ -119,6 +118,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<ArtifactsMounts>>,
+  AssertAppSlice<IsAppSlice<AutomationsMounts>>,
   AssertAppSlice<IsAppSlice<ChatMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,

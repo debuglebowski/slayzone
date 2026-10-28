@@ -1,10 +1,10 @@
 /**
  * The automation engine on the tRPC context. `@slayzone/trpc-server` cannot name an
  * automations type (it sits below the domains), so the context field is added here by
- * module augmentation of its `TrpcServerDeps` interface. When the automations router
- * moves into its domain, this file moves with it.
+ * module augmentation of its `TrpcServerDeps` interface, next to the router that reads
+ * it. Any program that imports `@slayzone/automations/server` sees the field.
  *
- * @module api/automation-engine-context
+ * @module automations/server/automation-engine-context
  */
 import type { AutomationRun } from '@slayzone/automations/shared'
 

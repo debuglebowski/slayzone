@@ -17,7 +17,6 @@ import {
 import {
   setIntegrationOps,
   setNotifyEvents,
-  setAutomationsEvents,
   setMenuEvents,
   setTaskTriggerBus,
   setAppDeps,
@@ -32,7 +31,6 @@ import {
   resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
-  type AutomationsEventMap,
   type MenuEventMap,
   type AuthEventMap,
   type RestApiDeps,
@@ -120,7 +118,11 @@ import {
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
-import { AutomationEngine } from '@slayzone/automations/server'
+import {
+  AutomationEngine,
+  setAutomationsEvents,
+  type AutomationsEventMap
+} from '@slayzone/automations/server'
 import {
   recordDiagnosticEvent,
   bindDiagnosticsDbs,
