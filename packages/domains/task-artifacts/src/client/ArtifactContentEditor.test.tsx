@@ -62,7 +62,7 @@ const disk: { content: Record<string, string>; mtime: Record<string, number> } =
   content: {},
   mtime: {}
 }
-const readContent = vi.fn(async (id: string) => disk.content[id] ?? null)
+const readContent = vi.fn(async (id: string): Promise<string | null> => disk.content[id] ?? null)
 const saveContent = vi.fn(async (id: string, content: string) => {
   disk.content[id] = content
   disk.mtime[id] = (disk.mtime[id] ?? 0) + 1
@@ -106,6 +106,7 @@ beforeEach(() => {
   disk.content = { a1: 'v1' }
   disk.mtime = { a1: 1, img: 1 }
   readContent.mockClear()
+  readContent.mockImplementation(async (id: string) => disk.content[id] ?? null)
   saveContent.mockClear()
   getFilePath.mockClear()
 })
@@ -174,5 +175,34 @@ describe('ArtifactContentEditor across a tab switch', () => {
     view.rerender(<Tab mode="visible" art={IMAGE} />)
     await flush()
     expect(src()).toBe(toSlzFileUrl('/data/img', 2))
+  })
+
+  it('showing keeps the same editor mounted (caret, scroll and undo survive)', async () => {
+    const view = render(<Tab mode="visible" />)
+    await flush()
+    const before = code()
+    expect(before?.value).toBe('v1')
+
+    view.rerender(<Tab mode="hidden" />)
+    view.rerender(<Tab mode="visible" />)
+    expect(screen.queryByText('Loading...')).toBeNull()
+    await flush()
+    expect(code()).toBe(before)
+  })
+})
+
+describe('ArtifactContentEditor switching artifacts', () => {
+  const OTHER = artifact('a2', 'other.md')
+
+  it('shows Loading, then the new artifact in a fresh editor', async () => {
+    disk.content.a2 = 'second'
+    const view = render(<Tab mode="visible" />)
+    await flush()
+    const first = code()
+    view.rerender(<Tab mode="visible" art={OTHER} />)
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    await flush()
+    expect(code()?.value).toBe('second')
+    expect(code()).not.toBe(first)
   })
 })

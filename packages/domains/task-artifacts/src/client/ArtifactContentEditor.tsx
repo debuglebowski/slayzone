@@ -207,7 +207,10 @@ export function ArtifactContentEditor({
     [themeColors]
   )
   const [content, setContent] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Which artifact's text `content` holds. "Loading" is derived from it, so it
+  // is shown only until an artifact's text first arrives — never on a tab
+  // re-show, where the editor must stay mounted (caret, scroll, undo).
+  const [loadedId, setLoadedId] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
   const [externalChangePending, setExternalChangePending] = useState(false)
   // Two counters with distinct purposes:
@@ -238,30 +241,47 @@ export function ArtifactContentEditor({
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const isBinary = isBinaryRenderMode(renderMode)
   const zoom = zoomPct / 100
+  const loading = !isBinary && loadedId !== artifact.id
 
-  // Read file from disk + refresh baseline mtime. Clears dirty + pending flags.
-  const loadFromDisk = useCallback(async (): Promise<void> => {
-    const [c, mtime] = await Promise.all([readContent(artifact.id), getMtime(artifact.id)])
+  // Read file + mtime from disk. Pure: callers apply the result.
+  const readFromDisk = useCallback(
+    (): Promise<[string | null, number | null]> =>
+      Promise.all([readContent(artifact.id), getMtime(artifact.id)]),
+    [artifact.id, readContent, getMtime]
+  )
+  // Show a disk read + refresh baseline mtime. Clears dirty + pending flags.
+  const applyDisk = useCallback(([c, mtime]: [string | null, number | null]): void => {
     setContent(c ?? '')
     baselineMtimeRef.current = mtime
     setIsDirty(false)
     setExternalChangePending(false)
     setEditorReloadVersion((v) => v + 1)
     setPreviewVersion((v) => v + 1)
-  }, [artifact.id, readContent, getMtime])
+  }, [])
+  const loadFromDisk = useCallback(
+    (): Promise<void> => readFromDisk().then(applyDisk),
+    [readFromDisk, applyDisk]
+  )
 
   // Load on mount / artifact change. Flush pending save on unmount (with mtime guard).
   useEffect(() => {
+    const id = artifact.id
     if (isBinary) {
-      setLoading(false)
-      getMtime(artifact.id).then((m) => {
-        baselineMtimeRef.current = m
-      })
-      setPreviewVersion((v) => v + 1)
+      // Cache-bust the preview once the baseline is in (or failed), so it
+      // re-reads the file on every show.
+      getMtime(id)
+        .then(
+          (m) => {
+            baselineMtimeRef.current = m
+          },
+          () => undefined
+        )
+        .then(() => setPreviewVersion((v) => v + 1))
       return
     }
-    setLoading(true)
-    loadFromDisk().finally(() => setLoading(false))
+    readFromDisk()
+      .then(applyDisk)
+      .finally(() => setLoadedId(id))
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
@@ -273,7 +293,7 @@ export function ArtifactContentEditor({
         saveContent(artifact.id, contentRef.current)
       }
     }
-  }, [artifact.id, isBinary, loadFromDisk, saveContent, getMtime])
+  }, [artifact.id, isBinary, readFromDisk, applyDisk, saveContent, getMtime])
 
   // fs.watch subscription — disk is the single source of truth for content.
   const handleContentChanged = useStableCallback((changedId: string) => {
