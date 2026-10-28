@@ -23,6 +23,9 @@ export interface UseChatLifecycleOpts {
    *  an agent that was running. */
   isMain?: boolean
   isTemporary?: boolean
+  /** Task view on screen. Off screen (tab-bar restore on reload/restart) the
+   *  startup mode only restores what `auto` would; the rest waits until shown. */
+  shown?: boolean
   chatApi: ChatActions
   inFlight: boolean
   hydrating: boolean
@@ -137,6 +140,7 @@ export function useChatLifecycle({
   agentState = 'stopped',
   isMain = false,
   isTemporary = false,
+  shown = true,
   chatApi,
   inFlight,
   hydrating,
@@ -159,6 +163,8 @@ export function useChatLifecycle({
   // conversation id.
   const [openState] = useState(() => ({ agentState, isMain, isTemporary }))
   const autoStartedRef = useRef(false)
+  // 'now' = start, 'shown' = start once the task is on screen (effect below).
+  const [startDecision, setStartDecision] = useState<'now' | 'shown' | null>(null)
   useEffect(() => {
     if (hydrating || autoStartedRef.current) return
     autoStartedRef.current = true
@@ -167,26 +173,35 @@ export function useChatLifecycle({
     void trpcClient.settings.get
       .query({ key: AGENT_STARTUP_SETTING })
       .then((raw) => {
-        const start = openState.isMain
-          ? agentStartsOnOpen({
-              mode: parseAgentStartupMode(raw),
-              state: openState.agentState,
-              isTemporary: openState.isTemporary
-            })
-          : openState.agentState === 'running'
-        if (!start) return
-        void chatApi.start({
-          tabId,
-          taskId,
-          mode,
-          cwd,
-          providerFlagsOverride: providerFlagsOverride ?? null
-        })
+        if (!openState.isMain) {
+          if (openState.agentState === 'running') setStartDecision('now')
+          return
+        }
+        const rule = {
+          mode: parseAgentStartupMode(raw),
+          state: openState.agentState,
+          isTemporary: openState.isTemporary
+        }
+        if (agentStartsOnOpen({ ...rule, shown: false })) setStartDecision('now')
+        else if (agentStartsOnOpen({ ...rule, shown: true })) setStartDecision('shown')
       })
       .catch(() => {
         /* best-effort — the chat still spawns when the user types */
       })
-  }, [hydrating, openState, trpcClient, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
+  }, [hydrating, openState, trpcClient])
+  const startFiredRef = useRef(false)
+  useEffect(() => {
+    if (startDecision === null || (startDecision === 'shown' && !shown)) return
+    if (startFiredRef.current) return
+    startFiredRef.current = true
+    void chatApi.start({
+      tabId,
+      taskId,
+      mode,
+      cwd,
+      providerFlagsOverride: providerFlagsOverride ?? null
+    })
+  }, [startDecision, shown, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

@@ -99,6 +99,8 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       conversationHydrated,
       ...terminalProps
     } = props
+    // Task view on screen. `isActive` is also passed through to <Terminal>.
+    const shown = terminalProps.isActive ?? true
     // Snapshot at mount: the decision is made once per mount ("when you open a
     // task"), so later prop changes must not re-run it.
     const [openState] = useState(() => ({ agentState, isTemporary: !!isTemporary }))
@@ -110,6 +112,9 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     const [existsChecked, setExistsChecked] = useState(() => forceStartSet.has(sessionId))
     // Set when the decision is "start" but the spawn waits for hydration.
     const [startPending, setStartPending] = useState(false)
+    // Set when the decision is "start once the task is shown": mounted off screen
+    // (tab-bar restore on reload/restart) in a mode that only starts on a real open.
+    const [startWhenShown, setStartWhenShown] = useState(false)
     const [dontShowAgain, setDontShowAgain] = useState(false)
     // Why the Start screen is showing: 'initial' (never started / stopped) vs
     // 'hibernated' (idle-close killed it). Drives copy + the "Don't show again"
@@ -134,6 +139,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       const start = (): void => {
         setReason('initial')
         setStartPending(false)
+        setStartWhenShown(false)
         setStarted(true)
         setExistsChecked(true)
       }
@@ -177,15 +183,17 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
           setExistsChecked(true)
           return
         }
-        if (
-          agentStartsOnOpen({
-            mode: startup,
-            state: openState.agentState,
-            isTemporary: openState.isTemporary
-          })
-        ) {
+        const rule = {
+          mode: startup,
+          state: openState.agentState,
+          isTemporary: openState.isTemporary
+        }
+        if (agentStartsOnOpen({ ...rule, shown: false })) {
           // Spawns now, or once the conversation id hydrates (effect below).
           setStartPending(true)
+        } else if (agentStartsOnOpen({ ...rule, shown: true })) {
+          // Starts when the task is shown (effect below) — at once if it already is.
+          setStartWhenShown(true)
         } else {
           // Persisted idle-close shows the "Reopen … (resumes)" screen — survives
           // reload/restart so a stale agent stays distinct from a stopped one.
@@ -220,6 +228,13 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         cancelled = true
       }
     }, [agentState, started, sessionId, trpcClient])
+
+    // Deferred open-start: the task is now on screen.
+    useEffect(() => {
+      if (!startWhenShown || !shown) return
+      setStartWhenShown(false)
+      setStartPending(true)
+    }, [startWhenShown, shown])
 
     // Hydration gate for an auto-start: hold the spawn while the conversation id
     // is still un-hydrated (boot window). Spawning now would pass a null hint and,

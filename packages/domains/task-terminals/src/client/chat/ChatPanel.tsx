@@ -180,6 +180,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         agentState,
         isMain,
         isTemporary,
+        shown: isActive,
         chatApi,
         inFlight,
         hydrating,

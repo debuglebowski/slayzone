@@ -205,7 +205,8 @@ async function reserveWarmAgent(
     !agentStartsOnOpen({
       mode: parseAgentStartupMode(startup?.value),
       state: 'new',
-      isTemporary: Boolean(data.isTemporary)
+      isTemporary: Boolean(data.isTemporary),
+      shown: true
     })
   ) {
     return null

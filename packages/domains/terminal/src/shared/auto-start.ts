@@ -49,14 +49,22 @@ export function parseAgentState(raw: string | null | undefined): AgentState {
 /**
  * Whether opening a task starts its main agent without the Start gate. Temporary
  * tasks always do (scratch terminals are "always live").
+ *
+ * `shown: false` = the task view is mounted but not on screen — every tab in the
+ * tab bar remounts on reload/restart. That is not the user opening the task, so
+ * `instant` starts only what `auto` would (a `running` agent restores, a sleeping
+ * `auto_stopped` one stays asleep); the rest start once the task is shown.
  */
 export function agentStartsOnOpen(input: {
   mode: AgentStartupMode
   state: AgentState
   isTemporary: boolean
+  shown: boolean
 }): boolean {
   if (input.isTemporary) return true
-  switch (input.mode) {
+  // Not shown, `instant` is `auto`.
+  const mode = input.mode === 'instant' && !input.shown ? 'auto' : input.mode
+  switch (mode) {
     case 'instant':
       return true
     case 'auto':

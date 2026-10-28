@@ -23,9 +23,10 @@ const TABLE: Record<AgentStartupMode, Record<AgentState, boolean>> = {
 test('agentStartsOnOpen matches the behaviour table', () => {
   for (const mode of Object.keys(TABLE) as AgentStartupMode[]) {
     for (const state of Object.keys(TABLE[mode]) as AgentState[]) {
-      expect(agentStartsOnOpen({ mode, state, isTemporary: false }), `${mode}/${state}:`).toBe(
-        TABLE[mode][state]
-      )
+      expect(
+        agentStartsOnOpen({ mode, state, isTemporary: false, shown: true }),
+        `${mode}/${state}:`
+      ).toBe(TABLE[mode][state])
     }
   }
 })
@@ -33,7 +34,27 @@ test('agentStartsOnOpen matches the behaviour table', () => {
 test('temporary tasks always start, in every mode and state', () => {
   for (const mode of Object.keys(TABLE) as AgentStartupMode[]) {
     for (const state of Object.keys(TABLE[mode]) as AgentState[]) {
-      expect(agentStartsOnOpen({ mode, state, isTemporary: true }), `${mode}/${state}:`).toBe(true)
+      for (const shown of [true, false]) {
+        expect(
+          agentStartsOnOpen({ mode, state, isTemporary: true, shown }),
+          `${mode}/${state}/shown=${shown}:`
+        ).toBe(true)
+      }
+    }
+  }
+})
+
+// A task tab mounted but not shown (tab-bar restore on reload/restart) is not the
+// user opening it: `instant` starts only what `auto` would, so a sleeping
+// (`auto_stopped`) agent stays asleep until its task is actually shown.
+test('not-shown mount: instant starts only what auto starts', () => {
+  for (const mode of Object.keys(TABLE) as AgentStartupMode[]) {
+    const rule = mode === 'instant' ? TABLE.auto : TABLE[mode]
+    for (const state of Object.keys(TABLE[mode]) as AgentState[]) {
+      expect(
+        agentStartsOnOpen({ mode, state, isTemporary: false, shown: false }),
+        `${mode}/${state}:`
+      ).toBe(rule[state])
     }
   }
 })
