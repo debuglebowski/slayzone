@@ -12,7 +12,9 @@ formatter), the procedure builders and the gate chain every procedure runs throu
   exports `XMounts = { <key>: XRouter }` and its client uses
   `typedTrpc<XMounts>()` (`@slayzone/transport`, README "Typed views"), which types
   the shared client as `MountedRouter<XMounts>` from here. api asserts each slice in
-  `router.ts`.
+  `router.ts` with `IsMountedSlice`, which also takes nested partial mounts
+  (`{ app: { meta: AppMetaRouter } }`); `mounted-router.typetest.ts` proves it refuses
+  a wrong key, a wrong router, a drifted type and a wrong depth.
 - This package depends on `@slayzone/platform`, `@trpc/server` and `superjson` only:
   never on a domain, never on `api`. It must stay out of every workspace cycle
   (`node scripts/check-workspace-cycles.mjs`).

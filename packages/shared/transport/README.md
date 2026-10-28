@@ -22,6 +22,10 @@ export const { useTRPC, useTRPCClient, getTrpcClient } = typedTrpc<XMounts>()
 // a domain that also calls a domain it depends on (downward only)
 export const { useTRPC } = typedTrpc<XMounts & YMounts>()
 
+// a domain that calls `app.*` routers: nested mounts name just those
+// (`AppMetaMounts = { app: { meta: AppMetaRouter } }`, @slayzone/host-capabilities)
+export const { useTRPC } = typedTrpc<XMounts & AppMetaMounts & AppShellMounts>()
+
 // an app (depends on @slayzone/api): the whole router
 export const { useTRPC } = trpcFor<AppRouter>()
 ```
@@ -38,6 +42,14 @@ keys. `XMounts` is `{ <mount key>: XRouter }`, `typedTrpc` types the runtime as
 `MountedRouter<XMounts>` (what `router(XMounts)` would build, `@slayzone/trpc-server`),
 and `@slayzone/api`'s `router.ts` asserts, per migrated domain, that this equals the
 `AppRouter` slice at those keys. A wrong key or a drifted type fails `pnpm typecheck`.
+
+A mount may be nested and partial: `app` holds routers of many owners (meta, shell,
+browser, …), each in its owning package (`app.ts` in api composes them at the same keys,
+so wire paths never change), and `{ app: { meta: AppMetaRouter } }` is just `app.meta`.
+`IsMountedSlice` (`@slayzone/trpc-server`) checks every router it names is the whole
+router at that path; a plain-object level names a subset of keys. Only `app.exportImport`
+stays in api (it needs api's access scope), so a domain calling it stays on the whole-app
+view.
 
 ## Migrating a domain
 
