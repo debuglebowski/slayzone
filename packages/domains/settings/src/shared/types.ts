@@ -1,5 +1,4 @@
-export type Theme = 'light' | 'dark'
-export type ThemePreference = 'light' | 'dark' | 'system'
+export type { Theme, ThemePreference } from '@slayzone/ui/theme-types'
 
 export interface BackupInfo {
   filename: string

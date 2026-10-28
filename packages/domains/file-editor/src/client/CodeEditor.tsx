@@ -1,7 +1,5 @@
 import { useEffect, useInsertionEffect, useMemo, useRef, type MutableRefObject } from 'react'
-import { useAppearance } from '@slayzone/settings/client'
-import { useTheme } from '@slayzone/settings/client'
-import { getThemeEditorColors } from '@slayzone/ui'
+import { getThemeEditorColors, useAppearance, useTheme } from '@slayzone/ui'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { keymap, highlightWhitespace } from '@codemirror/view'

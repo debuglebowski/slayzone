@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./utils": "./src/utils.ts",
     "./secure-context": "./src/secure-context.ts",
-    "./is-modal-dialog-open": "./src/is-modal-dialog-open.ts"
+    "./is-modal-dialog-open": "./src/is-modal-dialog-open.ts",
+    "./theme-types": "./src/theme-types.ts"
   },
   "scripts": {
     "test": "vitest run",

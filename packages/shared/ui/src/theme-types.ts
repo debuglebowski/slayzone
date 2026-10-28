@@ -101,3 +101,8 @@ export interface UnifiedThemeDefinition {
   dark?: UnifiedThemeVariant
   light?: UnifiedThemeVariant
 }
+
+/** Resolved app theme. Owned here so `useTheme` consumers need not depend on settings. */
+export type Theme = 'light' | 'dark'
+/** The user's choice; `system` follows the OS. */
+export type ThemePreference = 'light' | 'dark' | 'system'

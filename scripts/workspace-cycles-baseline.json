@@ -10,7 +10,6 @@
   "@slayzone/editor -> @slayzone/transport",
   "@slayzone/feedback -> @slayzone/transport",
   "@slayzone/file-editor -> @slayzone/editor",
-  "@slayzone/file-editor -> @slayzone/settings",
   "@slayzone/file-editor -> @slayzone/telemetry",
   "@slayzone/file-editor -> @slayzone/transport",
   "@slayzone/integrations -> @slayzone/task",

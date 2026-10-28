@@ -7,8 +7,7 @@ import {
   useRef,
   type MutableRefObject
 } from 'react'
-import { useTheme } from '@slayzone/settings/client'
-import { getThemeEditorColors } from '@slayzone/ui'
+import { getThemeEditorColors, useTheme } from '@slayzone/ui'
 import {
   EditorView,
   lineNumbers,

@@ -1,7 +1,6 @@
 import { useState, useEffect, type CSSProperties, type MutableRefObject } from 'react'
 import { Markdown } from '@slayzone/markdown/client'
-import { useTheme } from '@slayzone/settings/client'
-import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
+import { getThemeEditorColors, useAppearance, useTheme } from '@slayzone/ui'
 import { resolveReadOnlyLinkClickTarget, type LinkOpenTarget } from '@slayzone/editor'
 import type { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'

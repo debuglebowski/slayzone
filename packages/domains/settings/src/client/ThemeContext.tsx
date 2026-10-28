@@ -1,38 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
+import { ThemeContext, type ThemeContextValue } from '@slayzone/ui'
 import { applyTheme } from './apply-theme'
 import { readThemeCache, resolveThemeCache, systemTheme, writeThemeCache } from './theme-cache'
-
-interface ThemeContextValue {
-  // Core
-  theme: Theme
-  preference: ThemePreference
-  themeId: string // resolved chrome theme (accounts for split)
-  setPreference: (pref: ThemePreference) => Promise<void>
-  setThemeId: (id: string) => void
-
-  // Split dark/light themes
-  splitThemes: boolean
-  setSplitThemes: (enabled: boolean) => void
-  themeIdDark: string
-  setThemeIdDark: (id: string) => void
-  themeIdLight: string
-  setThemeIdLight: (id: string) => void
-
-  // Per-section overrides (empty string = same as app)
-  terminalOverrideThemeId: string
-  setTerminalOverrideThemeId: (id: string) => void
-  editorOverrideThemeId: string
-  setEditorOverrideThemeId: (id: string) => void
-
-  // Resolved for consumers
-  terminalThemeId: string
-  editorThemeId: string
-  contentVariant: Theme
-}
 
 const DEFAULT_THEME_ID = 'slay'
 
@@ -64,8 +37,6 @@ function resolveEffective(source: ThemePreference, serverEffective: Theme): Them
   if (source === 'system') return systemTheme()
   return serverEffective
 }
-
-const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC()
@@ -311,8 +282,5 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
-export function useTheme() {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error('useTheme must be used within ThemeProvider')
-  return ctx
-}
+// Consumer hook lives in @slayzone/ui (with the context); re-exported for settings-internal callers.
+export { useTheme } from '@slayzone/ui'

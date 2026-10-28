@@ -1228,9 +1228,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
