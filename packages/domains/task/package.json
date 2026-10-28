@@ -37,7 +37,6 @@
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
-    "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",

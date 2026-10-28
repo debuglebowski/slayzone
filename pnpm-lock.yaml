@@ -1758,9 +1758,6 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../history
-      '@slayzone/integrations':
-        specifier: workspace:*
-        version: link:../integrations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform

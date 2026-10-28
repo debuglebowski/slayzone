@@ -32,7 +32,6 @@
   "@slayzone/tags -> @slayzone/transport",
   "@slayzone/task -> @slayzone/editor",
   "@slayzone/task -> @slayzone/file-editor",
-  "@slayzone/task -> @slayzone/integrations",
   "@slayzone/task -> @slayzone/projects",
   "@slayzone/task -> @slayzone/settings",
   "@slayzone/task -> @slayzone/tags",
