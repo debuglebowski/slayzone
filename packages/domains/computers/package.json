@@ -15,7 +15,10 @@
     "test": "ELECTRON_RUN_AS_NODE=1 electron ../../../node_modules/vitest/vitest.mjs run"
   },
   "dependencies": {
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@slayzone/db-migrations": "workspace:*",

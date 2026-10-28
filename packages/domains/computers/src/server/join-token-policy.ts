@@ -23,13 +23,13 @@
  * `denied`, with the code as `detail.reason`. The reference the caller typed is
  * never written (it may be an email); a resolved account id is.
  *
- * @module api/join-token-policy
+ * @module computers/server/join-token-policy
  */
 import {
   DEFAULT_JOIN_TOKEN_TTL_MS,
   JOIN_TOKEN_TTL_TOO_LONG,
   MAX_JOIN_TOKEN_TTL_MS
-} from '@slayzone/computers/server'
+} from './join-tokens'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { registerAppCode } from '@slayzone/trpc-server'
 

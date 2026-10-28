@@ -4,7 +4,7 @@ import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
 import { ADMIN_ONLY } from '../../../admin-policy'
-import { decideJoinTokenMint } from '../../../join-token-policy'
+import { decideJoinTokenMint } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**

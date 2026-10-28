@@ -17,7 +17,9 @@ import { setUsageRouterDeps } from '@slayzone/terminal/server'
 import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
 import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
 import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'
+import { setComputersRouterDeps } from '@slayzone/computers/server'
 import { createAccessScope } from './access'
+import { filterManagedComputers, mayManageComputer } from './computer-access'
 import { getAppDeps, getComputersDepsOrNull } from './app-deps'
 import { accessRequestOf, ownedProjectIds } from './owner-gate'
 
@@ -69,3 +71,17 @@ setAgentPanelsRouterDeps({ getHost: () => getAppDeps() })
 // `app.leaderboard` and `usageAnalytics` sum over the caller's projects only (T-17):
 // api's owner gate.
 setUsageAnalyticsRouterDeps({ ownedProjectIds })
+
+// Who may manage a computer (T-19): api's `computer-access.ts` over the owner gate's
+// request, plus the caller's role, decided once per call (once per subscription for
+// `onStatusChange`).
+setComputersRouterDeps({
+  managerAccessFor: (ctx) => {
+    const req = { ...accessRequestOf(ctx), role: ctx.principal?.role ?? null }
+    return {
+      enforcing: req.authRequired,
+      mayManage: (computerId) => mayManageComputer(ctx.db, req, computerId),
+      filterManaged: (rows) => filterManagedComputers(ctx.db, req, rows)
+    }
+  }
+})

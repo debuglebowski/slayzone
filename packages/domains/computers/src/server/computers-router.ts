@@ -14,30 +14,29 @@ import {
   callerIsNotAdmin,
   type TrpcContext
 } from '@slayzone/trpc-server'
-import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
-import { decideJoinTokenMint } from '../join-token-policy'
-import { accessRequestOf } from '../owner-gate'
-import {
-  filterManagedComputers,
-  mayManageComputer,
-  type ComputerManagerRequest
-} from '../computer-access'
+import { getComputersDeps, getComputersDepsOrNull } from './computers-deps'
+import { getComputersRouterDeps, type ComputerManagerAccess } from './computers-router-deps'
+import { decideJoinTokenMint } from './join-token-policy'
 import {
   listComputers as storeListComputers,
-  mintJoinToken as storeMintJoinToken,
   revokeComputer as storeRevokeComputer,
   unrevokeComputer as storeUnrevokeComputer,
   deleteComputer as storeDeleteComputer,
   setProjectDefaultComputer as storeSetProjectDefaultComputer,
   setTaskComputer as storeSetTaskComputer,
   resolveTaskComputerId as storeResolveTaskComputerId,
+  getComputer as storeGetComputer
+} from './store'
+import { mintJoinToken as storeMintJoinToken } from './join-tokens'
+import {
   machinesByHostId as storeMachinesByHostId,
-  renameMachine as storeRenameMachine,
-  getComputer as storeGetComputer,
+  renameMachine as storeRenameMachine
+} from './machines'
+import {
   ownsEveryComputerOnHost,
   claimComputer as storeClaimComputer,
   setComputerVisibility as storeSetComputerVisibility
-} from '@slayzone/computers/server'
+} from './visibility'
 
 /**
  * Audit line for a change to who can use a computer (T-03). The acting user, peer
@@ -70,19 +69,20 @@ function auditComputer(
  *    listening would hand a computer an un-dialable URL.
  *
  * Follows the `processesRouter` conventions: `ctx.db`, `publicProcedure`, zod
- * inputs. Registered as `computers` in router.ts.
+ * inputs. `@slayzone/api` mounts it at `computers`.
  */
 
 /**
- * The request as a computer MANAGER (T-19, `computer-access.ts`): the owner, or an
- * admin, who sees every computer for management only. Binding work to a computer is
- * not management: `setTaskComputer` / `setProjectDefaultComputer` are id-checked by
- * the owner gate (`computer` in owner-policy.ts — the owner only), so the admin role
- * opens no path to run on, or read from, another user's computer.
+ * The request as a computer MANAGER (T-19, api's `computer-access.ts` through the
+ * router seam): the owner, or an admin, who sees every computer for management only.
+ * Binding work to a computer is not management: `setTaskComputer` /
+ * `setProjectDefaultComputer` are id-checked by the owner gate (`computer` in
+ * owner-policy.ts — the owner only), so the admin role opens no path to run on, or
+ * read from, another user's computer.
  */
-const managerRequestOf = (
-  ctx: Pick<TrpcContext, 'principal' | 'dataRoot'>
-): ComputerManagerRequest => ({ ...accessRequestOf(ctx), role: ctx.principal?.role ?? null })
+const managerAccessOf = (
+  ctx: Pick<TrpcContext, 'db' | 'principal' | 'dataRoot'>
+): ComputerManagerAccess => getComputersRouterDeps().managerAccessFor(ctx)
 
 const noSuchComputer = (): Error => new Error('no such computer, or you do not have access to it')
 
@@ -96,7 +96,7 @@ async function requireManager(
   path: string,
   computerId: string
 ): Promise<void> {
-  if (!(await mayManageComputer(ctx.db, managerRequestOf(ctx), computerId))) {
+  if (!(await managerAccessOf(ctx).mayManage(computerId))) {
     // An admin manages every computer there is, so for one it is simply missing.
     throw callerIsNotAdmin(ctx) ? adminOnlyTrpcError(path) : noSuchComputer()
   }
@@ -128,13 +128,9 @@ export const computersRouter = router({
       // Active rows only, as before T-19: the visibility predicate this replaces
       // never listed a revoked computer, whatever `includeRevoked` said.
       const visible = new Set(
-        (
-          await filterManagedComputers(
-            ctx.db,
-            managerRequestOf(ctx),
-            rows.filter((r) => r.revoked_at === null)
-          )
-        ).map((r) => r.id)
+        (await managerAccessOf(ctx).filterManaged(rows.filter((r) => r.revoked_at === null))).map(
+          (r) => r.id
+        )
       )
       // One query for the whole list rather than a join per row: the machine is
       // decoration, and a computer with no host id is legitimately ungrouped.
@@ -412,13 +408,13 @@ export const computersRouter = router({
     observable<{ computerId: string; connected: boolean }>((emit) => {
       const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
       if (!subscribe) return () => undefined
-      const req = managerRequestOf(ctx)
-      if (!req.authRequired) return subscribe((change) => emit.next(change))
+      const access = managerAccessOf(ctx)
+      if (!access.enforcing) return subscribe((change) => emit.next(change))
       let closed = false
       let tail: Promise<void> = Promise.resolve()
       const unsubscribe = subscribe((change) => {
         tail = tail.then(async () => {
-          const allowed = await mayManageComputer(ctx.db, req, change.computerId).catch(() => false)
+          const allowed = await access.mayManage(change.computerId).catch(() => false)
           if (allowed && !closed) emit.next(change)
         })
       })
@@ -452,3 +448,7 @@ function parseCapabilities(json: string): string[] {
   }
   return []
 }
+
+export type ComputersRouter = typeof computersRouter
+/** Where `@slayzone/api` mounts it: `computers`. */
+export type ComputersMounts = { computers: ComputersRouter }

@@ -69,7 +69,7 @@ import {
   type ProjectGroupsMounts,
   type ProjectsMounts
 } from '@slayzone/projects/server'
-import { computersRouter } from './routers/computers'
+import { computersRouter, type ComputersMounts } from '@slayzone/computers/server'
 import { settingsRouter, type SettingsMounts } from '@slayzone/settings-core/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import {
@@ -163,6 +163,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<ArtifactsMounts>>,
   AssertAppSlice<IsAppSlice<AutomationsMounts>>,
   AssertAppSlice<IsAppSlice<ChatMounts>>,
+  AssertAppSlice<IsAppSlice<ComputersMounts>>,
   AssertAppSlice<IsAppSlice<DiagnosticsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<FileEditorMounts>>,

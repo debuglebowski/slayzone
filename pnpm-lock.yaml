@@ -1331,6 +1331,15 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@slayzone/db-migrations':
         specifier: workspace:*

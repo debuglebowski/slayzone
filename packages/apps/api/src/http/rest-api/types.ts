@@ -6,7 +6,7 @@ import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '@slayzone/trpc-server'
-import type { FindJoinTokenAccount } from '../../join-token-policy'
+import type { FindJoinTokenAccount } from '@slayzone/computers/server'
 import type { Scope } from '@slayzone/transport/scopes'
 
 /**

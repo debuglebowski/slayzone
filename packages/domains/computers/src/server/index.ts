@@ -63,3 +63,34 @@ export {
   revokeComputerAccess,
   type ComputerViewer
 } from './visibility'
+
+// The `computers` router, mounted by `@slayzone/api` at `computers`, its host seams
+// (the live gateway registry; api's management-access policy) and the join-token
+// mint decision it shares with the REST route.
+export { computersRouter, type ComputersRouter, type ComputersMounts } from './computers-router'
+export {
+  setComputersDeps,
+  getComputersDeps,
+  getComputersDepsOrNull,
+  type ComputersDeps,
+  type ComputerGateway
+} from './computers-deps'
+export {
+  setComputersRouterDeps,
+  getComputersRouterDeps,
+  type ComputersRouterDeps,
+  type ComputerManagerAccess
+} from './computers-router-deps'
+export {
+  decideJoinTokenMint,
+  isJoinTokenRefusedError,
+  JoinTokenRefusedError,
+  JOIN_TOKEN_OWNER_REQUIRED,
+  JOIN_TOKEN_OWNER_UNKNOWN,
+  JOIN_TOKEN_OWNER_DISABLED,
+  JOIN_TOKEN_OWNER_UNSUPPORTED,
+  type JoinTokenRefusalCode,
+  type JoinTokenAccount,
+  type FindJoinTokenAccount,
+  type JoinTokenMintDecision
+} from './join-token-policy'
