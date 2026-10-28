@@ -143,6 +143,10 @@ export function useTaskTerminalSession({
   useEffect(() => {
     if (!task || !detectedSessionId || !sessionIdCommand) return
     if (getConversationIdForMode(task) === detectedSessionId) {
+      // Stays in the effect (lint set-state-in-effect, accepted): the clear must
+      // pair with the dedupe-ref reset (a ref write in render → Compiler skip),
+      // and hiding the id instead of clearing it lets a stale id resurface after
+      // "Start fresh" and be written back (phantom conv-id clobber).
       persistedSessionIdRef.current = null
       setDetectedSessionId(null)
       return

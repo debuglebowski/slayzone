@@ -194,6 +194,10 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   // change. `pendingModeRef` skips drift while a user-driven change is in
   // flight — the dying session may emit a final livePermissionMode before the
   // new subprocess's turn-init lands.
+  // Stays an effect (lint set-state-in-effect, accepted): moving it into render
+  // means reading `pendingModeRef` — written by the async click loop — during
+  // render, which the React Compiler skips; the event-stream alternative changes
+  // when drift applies (replay, reset). Cost: one extra render per transition.
   useEffect(() => {
     if (livePermissionMode === lastAppliedLiveRef.current) return
     lastAppliedLiveRef.current = livePermissionMode
