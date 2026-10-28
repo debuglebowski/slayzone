@@ -1,4 +1,4 @@
-import { router } from '@slayzone/trpc-server'
+import { router, type MountedRouter, type RouterMounts } from '@slayzone/trpc-server'
 // The composition root: register the per-procedure tables with the gate chain, and add
 // the composition's host deps to the context type, before any router is served.
 import './procedure-policy'
@@ -26,7 +26,7 @@ import { ptyRouter } from './routers/pty'
 import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
 import { settingsRouter } from './routers/settings'
-import { tagsRouter } from './routers/tags'
+import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import { taskRouter } from './routers/task'
 import { templateRouter } from '@slayzone/task/server'
 import { artifactsRouter } from './routers/artifacts'
@@ -71,3 +71,27 @@ export const appRouter = router({
 })
 
 export type AppRouter = typeof appRouter
+
+// ---------------------------------------------------------------------------
+// Domain router slices. A domain's client is typed against the routers it mounts
+// (`typedTrpc<XMounts>()` in `@slayzone/transport/client`), not the whole
+// AppRouter. That view shares the one runtime client, and tRPC calls are path-based,
+// so it is sound exactly when the slice IS this router's slice at the same keys.
+// One line per migrated domain: a wrong mount key, a renamed key here, or a slice
+// type that drifted from what is mounted fails `pnpm typecheck`.
+// ---------------------------------------------------------------------------
+
+type Exactly<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
+type IsAppSlice<TMounts extends RouterMounts> =
+  Exactly<
+    MountedRouter<TMounts>['_def']['record'],
+    Pick<AppRouter['_def']['record'], keyof TMounts & keyof AppRouter['_def']['record']>
+  > extends true
+    ? keyof TMounts extends keyof AppRouter['_def']['record']
+      ? true
+      : false
+    : false
+type AssertAppSlice<T extends true> = T
+
+export type DomainRouterSlices = [AssertAppSlice<IsAppSlice<TagsMounts>>]

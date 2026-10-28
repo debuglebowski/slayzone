@@ -8,9 +8,9 @@ import {
   getTagsForTask,
   getAllTaskTagIds,
   setTagsForTask
-} from '@slayzone/tags/server'
+} from './tag-store'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getTaskTriggerBus } from '../app-deps'
+import { getTaskTriggerBus } from './task-trigger-bus'
 
 const createTagInput = z.object({
   name: z.string().min(1),
@@ -65,3 +65,12 @@ export const tagsRouter = router({
       getTaskTriggerBus()?.emit('db:taskTags:setForTask:done', null, input.taskId, input.tagIds)
     })
 })
+
+export type TagsRouter = typeof tagsRouter
+
+/**
+ * Where this domain's router sits in the app router. `@slayzone/api` mounts
+ * `tagsRouter` at `tags` (and asserts the slice in its `router.ts`); the domain's
+ * client is typed against exactly this (`client/trpc.ts`).
+ */
+export type TagsMounts = { tags: TagsRouter }

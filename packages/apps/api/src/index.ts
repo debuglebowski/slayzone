@@ -81,7 +81,8 @@ export {
   getPowerResumeEvents,
   type PowerResumeEventMap
 } from './app-deps'
-export { setTaskTriggerBus, getTaskTriggerBus, type TaskTriggerBus } from './app-deps'
+// The tags router's trigger bus lives with it; re-exported so the hub wires it here.
+export { setTaskTriggerBus, getTaskTriggerBus, type TaskTriggerBus } from '@slayzone/tags/server'
 
 // Capability bridge — host↔side-car seam (slice 9). The Electron host serves
 // `capabilityBridgeRouter`; the side-car forwards its Electron-only `AppDeps`

@@ -7,7 +7,7 @@
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { tagsRouter } from './tags.js'
+import { tagsRouter } from './router.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: '' }

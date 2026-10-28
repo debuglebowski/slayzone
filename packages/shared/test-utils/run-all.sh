@@ -37,7 +37,7 @@ fi
 # in the Wave C2 split; repointed here.
 run_harness packages/apps/api/src/routers/settings.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
-run_harness packages/apps/api/src/routers/tags.test.ts
+run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/projects.test.ts
 run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).

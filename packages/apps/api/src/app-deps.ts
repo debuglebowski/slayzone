@@ -323,26 +323,6 @@ export function getAuthEvents(): TypedEmitter<AuthEventMap> {
   return authEvents
 }
 
-// Task-trigger bus — the AutomationEngine's `start(bus)` listens here for
-// `db:taskTags:setForTask:done` (the tag-change trigger). Legacy host emitted it
-// on `ipcMain`; the tRPC `tags.setForTask` path never did (the pre-existing
-// trigger gap). The side-car sets this to the SAME EventEmitter it passes to
-// `engine.start()`, so `tags.setForTask` can fire the trigger. Nullable — when
-// unset (host/standalone with no started engine) the tags path just no-ops it.
-export type TaskTriggerBus = {
-  emit: (channel: string, ...args: unknown[]) => boolean
-}
-
-let taskTriggerBus: TaskTriggerBus | null = null
-
-export function setTaskTriggerBus(bus: TaskTriggerBus): void {
-  taskTriggerBus = bus
-}
-
-export function getTaskTriggerBus(): TaskTriggerBus | null {
-  return taskTriggerBus
-}
-
 // Power-resume bus — Electron `powerMonitor.on('resume')` is host-only, but the
 // AutomationEngine (which runs catchup on wake) lives in the side-car after the
 // slice-9 cutover. The host fires `resume` on this emitter; the capability
