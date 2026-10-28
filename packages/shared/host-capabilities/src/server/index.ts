@@ -57,3 +57,6 @@ export {
   type TaskWindowsHost
 } from './host'
 export { hubGithubSignInConvexUrl } from './github-sign-in-url'
+// The `menu` router (top-level key `menu`) and the menu/app-shortcut bus it streams.
+export { menuRouter, type MenuRouter, type MenuMounts } from './menu-router'
+export { setMenuEvents, getMenuEvents, type MenuEventMap } from './menu-events'

@@ -20,17 +20,19 @@ import {
 } from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
-import type {
-  AppAuthMounts,
-  AppClipboardMounts,
-  AppDialogMounts,
-  AppFilesMounts,
-  AppMetaMounts,
-  AppScreenshotMounts,
-  AppShellMounts,
-  AppShortcutsMounts,
-  AppTaskWindowsMounts,
-  AppWindowMounts
+import {
+  menuRouter,
+  type MenuMounts,
+  type AppAuthMounts,
+  type AppClipboardMounts,
+  type AppDialogMounts,
+  type AppFilesMounts,
+  type AppMetaMounts,
+  type AppScreenshotMounts,
+  type AppShellMounts,
+  type AppShortcutsMounts,
+  type AppTaskWindowsMounts,
+  type AppWindowMounts
 } from '@slayzone/host-capabilities/server'
 import type { AppBackupMounts } from '@slayzone/settings/server'
 import {
@@ -60,7 +62,6 @@ import {
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'
-import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
 import {
   projectsRouter,
@@ -167,6 +168,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<FileEditorMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<IntegrationsMounts>>,
+  AssertAppSlice<IsAppSlice<MenuMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<ProjectsMounts>>,

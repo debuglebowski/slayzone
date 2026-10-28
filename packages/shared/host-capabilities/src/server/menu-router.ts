@@ -2,7 +2,7 @@ import { observable } from '@trpc/server/observable'
 import type { UpdateStatus } from '@slayzone/platform/app-update-status'
 import { z } from 'zod'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getMenuEvents } from '../app-deps'
+import { getMenuEvents } from './menu-events'
 
 /**
  * Menu / app-shortcut signals. Mirrors (and in slice 5 replaces) the one-way
@@ -193,3 +193,7 @@ export const menuRouter = router({
     })
   )
 })
+
+export type MenuRouter = typeof menuRouter
+/** Where `@slayzone/api` mounts it: `menu`. */
+export type MenuMounts = { menu: MenuRouter }
