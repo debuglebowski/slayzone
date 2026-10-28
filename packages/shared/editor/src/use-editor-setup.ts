@@ -6,7 +6,7 @@ import { history } from '@milkdown/plugin-history'
 import { indent } from '@milkdown/plugin-indent'
 import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { replaceAll, $prose } from '@milkdown/utils'
-import { Plugin, PluginKey } from '@milkdown/prose/state'
+import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state'
 import { createPlaceholderPlugin } from './milkdown-placeholder'
 import { listItemMovePlugin } from './milkdown-list-move'
 import { escapeBlurPlugin } from './milkdown-escape-blur'
@@ -97,6 +97,12 @@ export function useEditorSetup({
   useInsertionEffect(() => {
     valueRef.current = value
   })
+  // What the editor held when it was last torn down (a tab hide destroys it,
+  // a show rebuilds it), restored onto the same text so the caret and scroll
+  // survive. Undo history cannot: the rebuilt editor has its own schema.
+  // Scroll is recorded while visible: a display:none scroller reads 0.
+  const savedRef = useRef<{ markdown: string; anchor: number; head: number } | null>(null)
+  const scrollTopRef = useRef(0)
   const suppressOnChange = useRef(false)
   const [formatState, setFormatState] = useState<FormatState>(emptyFormatState)
   const [editorReady, setEditorReady] = useState(false)
@@ -145,8 +151,14 @@ export function useEditorSetup({
   // Create editor
   useEffect(() => {
     if (!containerRef.current) return
+    const scroller = containerRef.current
+    const onScroll = (): void => {
+      scrollTopRef.current = scroller.scrollTop
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
     const start = valueRef.current
     contentRef.current = start
+    let alive = true
 
     let prevFormats = emptyFormatState
     const formatStatePlugin = $prose(
@@ -291,6 +303,22 @@ export function useEditorSetup({
         editorInstanceRef.current = e
         if (externalEditorRef) externalEditorRef.current = e
 
+        const saved = savedRef.current
+        if (alive && saved && saved.markdown === start) {
+          const view = e.ctx.get(editorViewCtx)
+          const size = view.state.doc.content.size
+          view.dispatch(
+            view.state.tr.setSelection(
+              TextSelection.create(
+                view.state.doc,
+                Math.min(saved.anchor, size),
+                Math.min(saved.head, size)
+              )
+            )
+          )
+          scroller.scrollTop = scrollTopRef.current
+        }
+
         setEditorReady(true)
 
         if (autoFocus) {
@@ -318,6 +346,13 @@ export function useEditorSetup({
       })
 
     return () => {
+      alive = false
+      scroller.removeEventListener('scroll', onScroll)
+      const current = editorInstanceRef.current
+      if (current) {
+        const { anchor, head } = current.ctx.get(editorViewCtx).state.selection
+        savedRef.current = { markdown: contentRef.current, anchor, head }
+      }
       saveKeydownTeardown?.()
       editor.destroy().catch(() => {
         // Teardown is best-effort: the component is already unmounting, and a

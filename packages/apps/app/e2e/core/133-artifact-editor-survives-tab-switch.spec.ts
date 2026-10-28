@@ -16,10 +16,13 @@ const PANELS_WITH_ARTIFACTS = {
   processes: false
 }
 
-/** The task's artifacts panel; only task A has one, so it is A's when visible. */
+/** The shown task's artifacts panel (hidden tabs' panels are not :visible). */
 const panel = (page: Page) => page.locator('[data-panel-id="artifacts"]:visible')
 const editor = (page: Page) => panel(page).locator('.cm-editor').first()
+const richText = (page: Page) => panel(page).locator('.ProseMirror').first()
+const richScroller = (page: Page) => panel(page).locator('.mk-doc-scroll').first()
 
+const MD = Array.from({ length: 200 }, (_, i) => `para${i + 1}`).join('\n\n') + '\n'
 const DOC = Array.from({ length: 300 }, (_, i) => `line${i + 1}`).join('\n') + '\n'
 /** The artifact's text on disk (the editor autosaves 500 ms after an edit). */
 const readDoc = (page: Page, id: string) =>
@@ -43,10 +46,31 @@ const frames = (page: Page, n: number) =>
     n
   )
 
+/** The rich-text scroller's scrollTop once it has held still for 10 frames. */
+const settledScrollTop = (page: Page) =>
+  richScroller(page).evaluate(
+    (el) =>
+      new Promise<number>((resolve) => {
+        let last = -1
+        let still = 0
+        const tick = (): void => {
+          if (el.scrollTop === last) still++
+          else {
+            last = el.scrollTop
+            still = 0
+          }
+          if (still >= 10) resolve(last)
+          else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+  )
+
 test.describe('Artifact editor across a tab switch', () => {
   let taskA = ''
   let taskB = ''
   let artifactId = ''
+  let taskC = ''
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -70,6 +94,15 @@ test.describe('Artifact editor across a tab switch', () => {
       id: taskA,
       panelVisibility: PANELS_WITH_ARTIFACTS,
       activeArtifactId: artifact.id
+    })
+    // A markdown artifact, which opens in the rich-text (Milkdown) preview.
+    taskC = (await s.createTask({ projectId: p.id, title: 'ES task C', status: 'todo' })).id
+    const md = await s.createArtifact({ taskId: taskC, title: 'notes.md', content: MD })
+    if (!md) throw new Error('seed returned no artifact notes.md')
+    await s.updateTask({
+      id: taskC,
+      panelVisibility: PANELS_WITH_ARTIFACTS,
+      activeArtifactId: md.id
     })
     await s.refreshData()
   })
@@ -127,5 +160,28 @@ test.describe('Artifact editor across a tab switch', () => {
     await mainWindow.keyboard.press('Meta+z')
     await mainWindow.keyboard.press('Meta+z')
     await expect.poll(() => readDoc(mainWindow, artifactId), { timeout: 3_000 }).toBe(DOC)
+  })
+
+  test('the rich-text editor keeps its scroll position across a tab switch', async ({
+    mainWindow
+  }) => {
+    await openTaskById(mainWindow, taskC)
+    await expect(richText(mainWindow)).toBeVisible({ timeout: 10_000 })
+    // para150 scrolled into view by the click.
+    await richText(mainWindow).getByText('para150', { exact: true }).click()
+    await mainWindow.keyboard.press('End')
+    const scrollBefore = await settledScrollTop(mainWindow)
+    expect(scrollBefore, 'para150 scrolled into view').toBeGreaterThan(500)
+
+    await openTaskById(mainWindow, taskB)
+    await expect(panel(mainWindow)).toHaveCount(0, { timeout: 10_000 })
+    await openTaskById(mainWindow, taskC)
+    await expect(richText(mainWindow)).toBeVisible({ timeout: 10_000 })
+    await frames(mainWindow, 30)
+
+    expect(await settledScrollTop(mainWindow), 'scroll kept').toBe(scrollBefore)
+    // Not asserted here: the caret. Focusing a ProseMirror editor from outside
+    // races the browser's caret against ProseMirror's own, with or without a tab
+    // switch; the restored selection is pinned by rich-text-editor.tab-switch.test.
   })
 })

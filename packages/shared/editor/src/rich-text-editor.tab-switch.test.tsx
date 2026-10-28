@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The rich-text editor across a tab switch. Task tabs live in <Activity>, which
 // tears effects down on hide and re-runs them on show, so the Milkdown editor is
-// destroyed and rebuilt from the latest text.
+// destroyed and rebuilt. Caret and scroll must carry over (undo cannot: the new
+// editor has its own schema).
 import { Activity } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
@@ -67,6 +68,20 @@ async function setUp(editorRef: { current: Editor | null }) {
 }
 
 describe('RichTextEditor across a tab switch', () => {
+  it('keeps the caret and the scroll position', async () => {
+    const editorRef: { current: Editor | null } = { current: null }
+    const { r, first, scroller } = await setUp(editorRef)
+
+    r.rerender(<Tab mode="hidden" value={DOC} editorRef={editorRef} />)
+    scroller.scrollTop = 0 // what a display:none scroller reads
+    r.rerender(<Tab mode="visible" value={DOC} editorRef={editorRef} />)
+    await waitFor(() => expect(editorRef.current).not.toBe(first))
+    await waitFor(() => expect(editorRef.current).not.toBeNull())
+
+    expect(view(editorRef.current!).state.selection.head).toBe(22)
+    expect(scroller.scrollTop).toBe(120)
+  })
+
   it('starts at the top when the text changed while hidden', async () => {
     const editorRef: { current: Editor | null } = { current: null }
     const { r, first, scroller } = await setUp(editorRef)
