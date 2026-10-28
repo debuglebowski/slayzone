@@ -29,7 +29,7 @@ SlayZone is an Electron desktop app organized as a **pnpm monorepo** following t
 ```
 packages/
 ├── apps/
-│   ├── api/               # @slayzone/api - tRPC routers, REST/MCP API, app-deps (server half)
+│   ├── api/               # @slayzone/api - router composition (AppRouter), per-path policy tables, REST/MCP API, app-deps
 │   └── app/               # @slayzone/app - Electron shell
 │       └── APP.md
 ├── domains/
@@ -44,6 +44,7 @@ packages/
 │       └── DOMAIN.md      # Each domain has DOMAIN.md
 └── shared/
     ├── transport/         # @slayzone/transport - tRPC client (+ scopes)
+    ├── trpc-server/       # @slayzone/trpc-server - tRPC procedure builders + gate chain (domains build routers here; api composes)
     ├── types/             # @slayzone/types - shared app/domain contracts
     ├── ui/                # @slayzone/ui - Radix/shadcn components
     └── editor/            # @slayzone/editor - Milkdown rich text
