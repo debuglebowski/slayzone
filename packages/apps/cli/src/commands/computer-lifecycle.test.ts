@@ -420,6 +420,33 @@ describe('slay computer — end-to-end against a real hub', () => {
     ).toBe(false)
   })
 
+  test('a computer that exits at once fails create fast and leaves no root state', async () => {
+    // SLZ_FORCE_NO_SERVICE takes the unsupervised branch (nothing registered), and
+    // SLZ_COMPUTER_BIN points at a bundle that exits at once. Nothing restarts it, so
+    // `create` must say so then — not after polling its log for the enroll deadline.
+    const deadRoot = join(TMP, 'dead-computer')
+    mkdirSync(deadRoot, { recursive: true })
+    const deadBin = join(TMP, 'exiting-computer-bin.js')
+    writeFileSync(deadBin, 'console.error("simulated computer crash"); process.exit(1);\n')
+    const fake = `szjt1.${Buffer.from(
+      JSON.stringify({ hubUrl: 'ws://127.0.0.1:1/computers', secret: 's' })
+    ).toString('base64url')}`
+    const started = Date.now()
+    const res = slay(
+      ['computer', 'create', `${NAME_PREFIX}dead`, '--token', fake, '--root', deadRoot],
+      { root: deadRoot, env: { SLZ_FORCE_NO_SERVICE: '1', SLZ_COMPUTER_BIN: deadBin } }
+    )
+    expect(Date.now() - started, 'gave up as soon as the computer exited').toBeLessThan(10_000)
+    expect(res.status, `exited non-zero (stdout: ${res.stdout})`).not.toBe(0)
+    expect(res.stderr, `surfaced the child's own error: ${res.stderr}`).toMatch(
+      /simulated computer crash/
+    )
+    expect(
+      existsSync(join(deadRoot, 'computer.config.json')),
+      'the failed first boot was rolled back'
+    ).toBe(false)
+  })
+
   test('create refuses a duplicate name, pointing at start/rm', async () => {
     if (backend === 'none') {
       console.log('    (skipped — no user service manager on this platform)')

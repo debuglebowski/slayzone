@@ -238,13 +238,15 @@ async function waitForConnected(
   root: string,
   timeoutMs: number,
   backend: ServiceBackend,
-  name: string
+  name: string,
+  /** True once the computer can no longer connect (its process exited): stop waiting. */
+  gone: () => boolean = () => false
 ): Promise<boolean> {
   const unit = backend === 'systemd' ? systemdUnitName('computer', name) : undefined
   const deadline = Date.now() + timeoutMs
   for (;;) {
     if (CONNECTED_RE.test(readServiceLogTail('computer', root, 200, unit))) return true
-    if (Date.now() >= deadline) return false
+    if (gone() || Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 300))
   }
 }
@@ -289,7 +291,15 @@ async function launchComputer(args: {
       }
     })
     child.unref()
-    if (!(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name))) {
+    // Without a supervisor nothing restarts a computer that exits, so its exit is
+    // final: report it then rather than at the deadline.
+    let exit: string | undefined
+    child.once('exit', (code, signal) => {
+      exit = signal ? `signal ${signal}` : `code ${code}`
+    })
+    if (
+      !(await waitForConnected(root, ENROLL_TIMEOUT_MS, backend, name, () => exit !== undefined))
+    ) {
       // Same all-or-nothing rule as the supervised path: a first boot that never
       // reached a hub must not leave root state behind claiming this computer exists.
       if (creating) runCreateRollback()
@@ -297,7 +307,9 @@ async function launchComputer(args: {
         'computer',
         name,
         logs.out,
-        `did not reach its hub within ${ENROLL_TIMEOUT_MS / 1000}s`
+        exit === undefined
+          ? `did not reach its hub within ${ENROLL_TIMEOUT_MS / 1000}s`
+          : `did not reach its hub: it exited (${exit})`
       )
     }
     console.log(`Computer "${name}" started (pid ${child.pid ?? '?'}) and reached its hub.`)

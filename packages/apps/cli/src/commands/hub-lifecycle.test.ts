@@ -873,12 +873,16 @@ describe('slay hub — end-to-end against real hubs', () => {
   // environment, so `create` writes the shape to hub.config.json and demands the
   // secret from the caller.
   //
-  // None of these cases may leave a REAL reachable hub running: the spawned hub is
-  // either bound to a throwaway loopback port the sweep cannot find (`--bind
-  // 127.0.0.1:0`, so `create` gives up and kills it) or made to refuse at boot
-  // (login on with password and SSO both off — rule B2). hub.config.json is written
-  // BEFORE launch, so the boot outcome is irrelevant to what is asserted.
+  // None of these cases may leave a REAL reachable hub running: the hub they launch is
+  // a stub that exits at once (EXITING_HUB), so `create` gives up as soon as it is
+  // gone and nothing ever listens. hub.config.json is written BEFORE launch, so the
+  // boot outcome is irrelevant to what is asserted.
   const SECRET = { SLAYZONE_HUB_AUTH_SECRET: 'test-only-secret-not-used-anywhere-else' }
+  const EXITING_HUB = (): Record<string, string> => {
+    const bin = join(TMP, 'exiting-hub-bin.js')
+    if (!existsSync(bin)) writeFileSync(bin, 'process.exit(1)\n')
+    return { SLZ_FORCE_NO_SERVICE: '1', SLZ_HUB_BIN: bin }
+  }
 
   test('create --public-address persists the reachable shape to hub.config.json', async () => {
     const remoteRoot = join(TMP, 'remote-cfg')
@@ -893,9 +897,9 @@ describe('slay hub — end-to-end against real hubs', () => {
         '--public-address',
         'hub.example.com:8443',
         '--bind',
-        '127.0.0.1:0'
+        '127.0.0.1:51989'
       ],
-      { root: remoteRoot, env: { SLZ_FORCE_NO_SERVICE: '1', ...SECRET } }
+      { root: remoteRoot, env: { ...EXITING_HUB(), ...SECRET } }
     )
     const cfg = JSON.parse(readFileSync(join(remoteRoot, 'hub.config.json'), 'utf8')) as Record<
       string,
@@ -904,7 +908,7 @@ describe('slay hub — end-to-end against real hubs', () => {
     // login is the lever: a hub other machines can reach is refused at boot without it.
     expect(cfg.requireLogin, 'login required persisted').toBe(true)
     expect(cfg.publicAddress, 'public address persisted').toBe('hub.example.com:8443')
-    expect(cfg.listenAddress, 'explicit --bind persisted verbatim').toBe('127.0.0.1:0')
+    expect(cfg.listenAddress, 'explicit --bind persisted verbatim').toBe('127.0.0.1:51989')
     for (const retired of ['mode', 'address', 'port', 'publicUrl']) {
       expect(cfg, `no retired key '${retired}' written`).not.toHaveProperty([retired])
     }
@@ -943,9 +947,9 @@ describe('slay hub — end-to-end against real hubs', () => {
         '--public-address',
         'hub.example.com:8443',
         '--bind',
-        '127.0.0.1:0'
+        '127.0.0.1:51989'
       ],
-      { root: noSecretRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      { root: noSecretRoot, env: EXITING_HUB() }
     )
     expect(res.status, 'refused').not.toBe(0)
     expect(res.stderr, `names the variable: ${res.stderr}`).toMatch(/SLAYZONE_HUB_AUTH_SECRET/)
@@ -1002,8 +1006,7 @@ describe('slay hub — end-to-end against real hubs', () => {
   test('create --public-address with an explicit wildcard --bind persists it as given', async () => {
     const wideRoot = join(TMP, 'remote-wide')
     mkdirSync(wideRoot, { recursive: true })
-    // ENABLE_PASSWORD=0 with no SSO makes the spawned hub refuse at boot (B2), so
-    // this does not leave a hub listening on every interface.
+    // The stub hub never listens, so this leaves no hub on every interface.
     slay(
       [
         'hub',
@@ -1016,10 +1019,7 @@ describe('slay hub — end-to-end against real hubs', () => {
         '--bind',
         '0.0.0.0:51987'
       ],
-      {
-        root: wideRoot,
-        env: { SLZ_FORCE_NO_SERVICE: '1', SLAYZONE_HUB_ENABLE_PASSWORD: '0', ...SECRET }
-      }
+      { root: wideRoot, env: { ...EXITING_HUB(), ...SECRET } }
     )
     const cfg = JSON.parse(readFileSync(join(wideRoot, 'hub.config.json'), 'utf8')) as Record<
       string,
@@ -1042,9 +1042,9 @@ describe('slay hub — end-to-end against real hubs', () => {
         '--public-address',
         'hub.example.com:8443',
         '--bind',
-        '127.0.0.1:0'
+        '127.0.0.1:51989'
       ],
-      { root: acctRoot, env: { SLZ_FORCE_NO_SERVICE: '1', ...SECRET } }
+      { root: acctRoot, env: { ...EXITING_HUB(), ...SECRET } }
     )
     // A hub that requires login AND closes public signup with no account is
     // permanently unauthenticatable. This instruction is the difference between a
@@ -1095,18 +1095,36 @@ describe('slay hub — end-to-end against real hubs', () => {
   })
 
   test('create accepts a loopback --bind with no public address', async () => {
-    // The refusal above must not catch the ordinary local shape. `:0` keeps the hub
-    // out of the discovery block, so `create` gives up and kills it — exit status is
-    // not the point; the absence of the off-loopback refusal is.
+    // The refusal above must not catch the ordinary local shape. The stub hub exits at
+    // once, so `create` fails — exit status is not the point; the absence of the
+    // off-loopback refusal is.
     const loopRoot = join(TMP, 'remote-loop')
     mkdirSync(loopRoot, { recursive: true })
     const res = slay(
-      ['hub', 'create', `${NAME_PREFIX}loop`, '--root', loopRoot, '--bind', '127.0.0.1:0'],
-      { root: loopRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+      ['hub', 'create', `${NAME_PREFIX}loop`, '--root', loopRoot, '--bind', '127.0.0.1:51989'],
+      { root: loopRoot, env: EXITING_HUB() }
     )
     expect(res.stderr, `not asked for a public address: ${res.stderr}`).not.toMatch(
       /--public-address/
     )
+  })
+
+  test('create refuses an OS-assigned --bind port, writing nothing', async () => {
+    // `slay hub` finds a hub by its port (or by name over the hub block), and a port
+    // the OS assigns is neither known nor stable across restarts: such a `create`
+    // could only wait out its deadline and tear the hub down again.
+    const zeroRoot = join(TMP, 'remote-zero')
+    mkdirSync(zeroRoot, { recursive: true })
+    const started = Date.now()
+    const res = slay(
+      ['hub', 'create', `${NAME_PREFIX}zero`, '--root', zeroRoot, '--bind', '127.0.0.1:0'],
+      { root: zeroRoot, env: { SLZ_FORCE_NO_SERVICE: '1' } }
+    )
+    expect(Date.now() - started, 'refused before launching anything').toBeLessThan(10_000)
+    expect(res.status, 'refused').not.toBe(0)
+    expect(res.stderr, `says why: ${res.stderr}`).toMatch(/port 0/)
+    expect(res.stderr, `names the fix: ${res.stderr}`).toMatch(/--bind 127\.0\.0\.1:<port>/)
+    expect(existsSync(join(zeroRoot, 'hub.config.json')), 'nothing written').toBe(false)
   })
 
   test('create refuses a --bind and --port that disagree', async () => {
@@ -1223,10 +1241,14 @@ describe('slay hub — end-to-end against real hubs', () => {
       brokenBin,
       'console.error("simulated hub crash: cannot load native module"); process.exit(1);\n'
     )
+    const started = Date.now()
     const res = slay(['hub', 'create', `${NAME_PREFIX}broken`, '--root', brokenRoot], {
       root: rootA,
       env: { SLZ_FORCE_NO_SERVICE: '1', SLZ_HUB_BIN: brokenBin }
     })
+    // A hub that is already gone cannot come up: `create` says so at once instead of
+    // polling /health until its 20s deadline.
+    expect(Date.now() - started, 'gave up as soon as the hub exited').toBeLessThan(10_000)
     expect(res.status, `failed loudly (stdout: ${res.stdout})`).not.toBe(0)
     const combined = res.stdout + res.stderr
     expect(combined, `said it did not start: ${combined}`).toMatch(/did not come up/i)

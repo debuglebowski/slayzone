@@ -136,13 +136,15 @@ function refuseSupervised(hub: DiscoveredHub, verb: string): void {
 /** Poll `/health` until the hub answers, or give up. Returns the hub or null. */
 async function waitForHub(
   predicate: () => Promise<DiscoveredHub | null>,
-  timeoutMs: number
+  timeoutMs: number,
+  /** True once the hub can no longer come up (its process exited): stop waiting. */
+  gone: () => boolean = () => false
 ): Promise<DiscoveredHub | null> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const hub = await predicate()
     if (hub) return hub
-    if (Date.now() >= deadline) return null
+    if (gone() || Date.now() >= deadline) return null
     await new Promise((r) => setTimeout(r, 250))
   }
 }
@@ -269,7 +271,13 @@ async function launchHub(args: {
       }
     })
     child.unref()
-    const started = await waitForHub(findIt, 20_000)
+    // Without a supervisor nothing restarts a hub that exits, so its exit is final:
+    // report it then rather than at the deadline.
+    let exit: string | undefined
+    child.once('exit', (code, signal) => {
+      exit = signal ? `signal ${signal}` : `code ${code}`
+    })
+    const started = await waitForHub(findIt, 20_000, () => exit !== undefined)
     if (!started) {
       // Kill what we spawned before declaring failure. This backend has NO service
       // manager to own the child, and `failWithLog` exits the process — so a hub
@@ -278,7 +286,12 @@ async function launchHub(args: {
       // can't reach), which is exactly the state in which `hub stop <name>` cannot
       // clean it up either. Left unkilled these accumulated for days.
       await terminateChild(child, 3_000)
-      failWithLog('hub', name, logs.out, 'did not come up within 20s')
+      failWithLog(
+        'hub',
+        name,
+        logs.out,
+        exit === undefined ? 'did not come up within 20s' : `did not come up: it exited (${exit})`
+      )
     }
     console.log(`Hub "${started.name}" started on port ${started.port} (pid ${started.pid}).`)
     console.log(`  Root:  ${shortenPath(root)}`)
@@ -754,6 +767,17 @@ export function hubCommand(): Command {
           fail(
             `Invalid --bind "${opts.bind}" — expected host[:port] with no scheme and no path ` +
               `(e.g. 0.0.0.0:51100). IPv6 must be bracketed: [::]:51100`
+          )
+        }
+        if (bind !== undefined && parseHubAddress(bind)?.port === 0) {
+          // `:0` is the hub's grammar for an OS-assigned port, and such a hub is
+          // deliberately undiscoverable: `create` could only wait out its deadline and
+          // tear it down again, and no other `slay hub` command could ever reach it.
+          const host = bind.replace(/:0$/, '')
+          fail(
+            `--bind ${bind} asks for port 0 (OS-assigned), which \`slay hub\` cannot find and ` +
+              `which changes on every restart. Leave the port out to take the first free hub ` +
+              `port (--bind ${host}), or name one (--bind ${host}:<port>).`
           )
         }
         if (bind !== undefined && port !== undefined && parseHubAddress(bind)?.port !== port) {
