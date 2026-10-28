@@ -176,7 +176,9 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
   )
   terminal.registerLinkProvider(linkProvider)
 
-  // Clickable file paths — Cmd+Click → editor (in-project) or Finder (external).
+  // Clickable file paths — Cmd+Click → editor (in-project), else the OS default
+  // handler (`app.shell.openPath`, the same host opener `worktrees.revealInFinder`
+  // calls).
   // Shift+Click is consumed by xterm for text selection, so no Shift variant.
   terminal.registerLinkProvider(
     new FileLinkProvider(
@@ -188,7 +190,7 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
         const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd
         const onOpenFile = getOnOpenFile()
         if (!isInProject) {
-          void getTrpcClient().worktrees.revealInFinder.mutate({ path: resolved })
+          void getTrpcClient().app.shell.openPath.mutate({ absPath: resolved })
         } else if (onOpenFile) {
           // Pass relative path to editor panel
           const relative = resolved.startsWith(cwd + '/')
@@ -202,7 +204,7 @@ export async function createXterm(opts: CreateXtermOptions): Promise<CreatedXter
               : undefined
           )
         } else {
-          void getTrpcClient().worktrees.revealInFinder.mutate({ path: resolved })
+          void getTrpcClient().app.shell.openPath.mutate({ absPath: resolved })
         }
       },
       (e, text) => showTooltip(e, text, fileHint),
