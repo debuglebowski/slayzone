@@ -43,7 +43,9 @@ source_files() {
 # ── (1) by name ──────────────────────────────────────────────────────────────
 # A dep-array literal `[ ... <ident>Mutation ]` where the token is the bare
 # object (no `.` before the closing `]`, so `.mutate` usage is NOT flagged).
-# `useMutation(` declarations have no `[` and are excluded.
+# `useMutation(` declarations have no `[` and are excluded. A token right after a
+# quote is a string key (`OpDeps['onMutation']`), not a dep: the char before the
+# identifier must not be a quote or part of a name.
 #
 # grep exits 0 = matches, 1 = none, anything else = it failed. xargs folds every
 # non-zero batch status into one (123), so map them per batch first: "none" is
@@ -53,7 +55,7 @@ if ! CANDIDATES=$(source_files | xargs -0 sh -c '
   pattern=$1
   shift
   grep -HnE -- "$pattern" "$@" || [ "$?" -eq 1 ]
-' sh '\[[^]]*[A-Za-z]+Mutation[^].]*\]'); then
+' sh '\[([^]]*[^]'"'"'"A-Za-z0-9_$])?[A-Za-z]+Mutation[^].]*\]'); then
   echo "check-trpc-stable-deps: the by-name pass failed to run" >&2
   exit 2
 fi

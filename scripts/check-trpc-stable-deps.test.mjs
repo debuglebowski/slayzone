@@ -168,6 +168,14 @@ test('names inside strings and comments do not count', () => {
   )
 })
 
+test('a quoted *Mutation key (indexed-access type) is not a dep array', () => {
+  passes(`let onMutation: OpDeps['onMutation']
+export function f(): OpDeps["onMutation"] {
+  return onMutation
+}
+`)
+})
+
 // ── by name (existing behaviour, unchanged) ──────────────────────────────────
 
 test('still flags a *Mutation-named token from outside the file (prop)', () => {
