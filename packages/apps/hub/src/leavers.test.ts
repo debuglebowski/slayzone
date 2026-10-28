@@ -68,9 +68,13 @@ import {
   webLogin
 } from './web-sessions.js'
 
-/** Poll until `cond` holds (the tick runs its pass without being awaited). */
+/** Poll until `cond` holds (the tick runs its pass without being awaited). A wall-clock
+ *  deadline, not an iteration count: 400 × 5ms (~2s) timed out under full-suite load.
+ *  Every caller waits for something that SHOULD happen, so a long cap costs a passing
+ *  test nothing. */
 async function waitFor(cond: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  for (let i = 0; i < 400; i++) {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
     if (await cond()) return
     await new Promise((r) => setTimeout(r, 5))
   }
