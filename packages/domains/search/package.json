@@ -20,6 +20,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@tanstack/react-query": "^5.104.0",
     "fzf": "^0.5.2",
     "lucide-react": "^1.48.0"
   },

@@ -47,6 +47,22 @@ test.describe('Cmd+K task commands', () => {
     await mainWindow.keyboard.press('Escape')
   })
 
+  test('reopening highlights the top row, not the one last arrowed to', async ({ mainWindow }) => {
+    await openTaskById(mainWindow, taskA)
+    await openPalette(mainWindow)
+    await expect.poll(() => selected(mainWindow)).not.toBeNull()
+    const top = await selected(mainWindow)
+    await mainWindow.keyboard.press('ArrowDown')
+    await mainWindow.keyboard.press('ArrowDown')
+    await expect.poll(() => selected(mainWindow)).not.toBe(top)
+    await mainWindow.keyboard.press('Escape')
+    await expect(palette(mainWindow)).toHaveCount(0)
+
+    await openPalette(mainWindow)
+    await expect.poll(() => selected(mainWindow)).toBe(top)
+    await mainWindow.keyboard.press('Escape')
+  })
+
   test('status sub-page sets the status; Backspace goes back', async ({ mainWindow }) => {
     await openTaskById(mainWindow, taskA)
     await openPalette(mainWindow)

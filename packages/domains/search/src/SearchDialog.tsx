@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Command,
   CommandInput,
@@ -12,7 +13,7 @@ import {
 } from '@slayzone/ui'
 import { ChevronLeft } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
 import { FILTERS, MAX_RECENT } from './SearchDialog.constants'
@@ -27,10 +28,53 @@ import { SearchResults } from './SearchResults'
 import { PageResults, PROMPT_SUBMIT_VALUE, taskCommandValue } from './PaletteCommandResults'
 
 const NO_COMMANDS: PaletteCommand[] = []
+const NO_FILES: string[] = []
 
-export function SearchDialog({
-  open,
+type RunLater = () => void | Promise<void>
+
+export function SearchDialog({ open, onOpenChange, ...props }: SearchDialogProps) {
+  // A command that moves focus itself runs once the dialog's focus trap is gone
+  // (onCloseAutoFocus) — run earlier, the closing trap would pull focus back.
+  const pendingFocusRunRef = useRef<RunLater | null>(null)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="overflow-hidden p-0 max-w-2xl !bg-surface-0 !rounded-3xl !border-0 shadow-2xl duration-[60ms]"
+        // The content sits inside the overlay, so the overlay's fade multiplies into it:
+        // match its duration or the 60ms palette open (a40626b75) becomes 150ms.
+        overlayClassName="duration-[60ms]"
+        showCloseButton={false}
+        onCloseAutoFocus={(e) => {
+          const run = pendingFocusRunRef.current
+          if (!run) return
+          pendingFocusRunRef.current = null
+          e.preventDefault()
+          void run()
+        }}
+      >
+        {/* Mounted only while open: every open starts from a fresh search, filter,
+            page and highlight. */}
+        <SearchPalette
+          {...props}
+          onOpenChange={onOpenChange}
+          runAfterClose={(run) => {
+            pendingFocusRunRef.current = run
+          }}
+        />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface SearchPaletteProps extends Omit<SearchDialogProps, 'open'> {
+  /** Runs `run` once the dialog has closed and its focus trap is gone. */
+  runAfterClose: (run: RunLater) => void
+}
+
+function SearchPalette({
   onOpenChange,
+  runAfterClose,
   tasks,
   projects,
   closedTabs,
@@ -46,13 +90,22 @@ export function SearchDialog({
   onToggleGlobalAgentPanel,
   onOpenChangelog,
   onOpenSettings
-}: SearchDialogProps) {
-  const trpcClient = useTRPCClient()
+}: SearchPaletteProps) {
+  const trpc = useTRPC()
   const fileContext = useDialogStore((s) => s.searchFileContext)
-  const [allFiles, setAllFiles] = useState<string[]>([])
+  // Fetched once per project and kept for the session (never refetched), keyed by
+  // path so a slow answer can only ever fill its own project.
+  // `files` is capped at the transport layer; `truncated` says so. Nothing here
+  // acts on it yet.
+  const { data: filesData } = useQuery({
+    ...trpc.fileEditor.listAllFiles.queryOptions({ rootPath: fileContext?.projectPath ?? '' }),
+    enabled: fileContext != null,
+    staleTime: Infinity,
+    gcTime: Infinity
+  })
+  const allFiles = fileContext ? (filesData?.files ?? NO_FILES) : NO_FILES
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterKind>('all')
-  const cacheRef = useRef<{ path: string; files: string[] } | null>(null)
   // Commands the current task published (null outside a task).
   const taskScope = usePaletteCommandStore((s) => s.scope)
   const taskCommands = taskScope?.commands ?? NO_COMMANDS
@@ -60,39 +113,9 @@ export function SearchDialog({
   // Sub-page stack; the last entry is the page shown.
   const [pages, setPages] = useState<PalettePage[]>([])
   const page = pages.at(-1) ?? null
-  // A command that moves focus itself runs once the dialog's focus trap is gone
-  // (onCloseAutoFocus) — run earlier, the closing trap would pull focus back.
-  const pendingFocusRunRef = useRef<(() => void | Promise<void>) | null>(null)
   // Page changes refocus the input: a mouse-picked row would otherwise leave focus
   // outside it, and typing (a prompt page's value) would go nowhere.
   const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!open || !fileContext) {
-      setAllFiles([])
-      return
-    }
-    const path = fileContext.projectPath
-    if (cacheRef.current?.path === path) {
-      setAllFiles(cacheRef.current.files)
-      return
-    }
-    // `files` is capped at the transport layer; `truncated` says so. Nothing here
-    // acts on it yet, but destructuring keeps the cap visible at the call site
-    // rather than letting a partial tree look like the whole one.
-    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then(({ files }) => {
-      cacheRef.current = { path, files }
-      setAllFiles(files)
-    })
-  }, [open, fileContext, trpcClient])
-
-  useEffect(() => {
-    if (open) {
-      setSearch('')
-      setFilter('all')
-      setPages([])
-    }
-  }, [open])
 
   const items = useMemo(() => {
     if (page) {
@@ -215,7 +238,7 @@ export function SearchDialog({
       return
     }
     if (command.takesFocus) {
-      pendingFocusRunRef.current = command.run
+      runAfterClose(command.run)
       onOpenChange(false)
       return
     }
@@ -258,126 +281,109 @@ export function SearchDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="overflow-hidden p-0 max-w-2xl !bg-surface-0 !rounded-3xl !border-0 shadow-2xl duration-[60ms]"
-        // The content sits inside the overlay, so the overlay's fade multiplies into it:
-        // match its duration or the 60ms palette open (a40626b75) becomes 150ms.
-        overlayClassName="duration-[60ms]"
-        showCloseButton={false}
-        onCloseAutoFocus={(e) => {
-          const run = pendingFocusRunRef.current
-          if (!run) return
-          pendingFocusRunRef.current = null
-          e.preventDefault()
-          void run()
-        }}
-      >
-        <Command
-          shouldFilter={false}
-          value={selected}
-          onValueChange={(value) => {
-            if (searchEditedRef.current) {
-              // cmdk's own select-first-row after a search edit. It has already moved its
-              // internal selection, and re-reads ours only when our prop changes — so toggle
-              // a trailing space (cmdk trims values, per its docs) to make it re-sync.
-              searchEditedRef.current = false
-              setSelected((cur) => (cur.endsWith(' ') ? cur.trimEnd() : `${cur} `))
-              return
-            }
-            setSelected(value)
-          }}
-          onKeyDown={handleKeyDown}
-          className="bg-transparent [&_[cmdk-input-wrapper]]:border-b-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-16 [&_[cmdk-input]]:text-base [&_[cmdk-item]]:rounded-xl [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-2.5 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-        >
-          <CommandInput
-            ref={inputRef}
-            placeholder={
-              page
-                ? (page.placeholder ?? `Search ${page.title.toLowerCase()}...`)
-                : 'Search files, folders, commands, projects, and tasks...'
-            }
-            value={search}
-            onValueChange={handleSearchChange}
-          />
-          <div className="bg-card rounded-t-3xl">
-            {page && (
-              <div className="flex items-center gap-1 px-2 py-1.5">
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={popPage}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/40"
-                >
-                  <ChevronLeft className="size-3.5" />
-                  {[taskScope?.title, ...pages.map((p) => p.title)].filter(Boolean).join(' › ')}
-                </button>
-                <span className="ml-auto text-[10px] text-muted-foreground/70">
-                  Backspace to go back
-                </span>
-              </div>
-            )}
-            {isSearching && !page && (
-              <div className="flex items-center gap-1 px-2 py-1.5">
-                {filters.map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    tabIndex={-1}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setFilter(f.id)}
-                    className={cn(
-                      'rounded-md px-2 py-1 text-xs transition-colors',
-                      filter === f.id
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
-                    )}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-                <span className="ml-auto text-[10px] text-muted-foreground/70">Tab to switch</span>
-              </div>
-            )}
-            {/* No fixed cap: grows with its results, bounded only by the window (input + chips + margins). */}
-            <CommandList className="max-h-[calc(100dvh-12rem)]">
-              {page ? (
-                <PageResults
-                  page={page}
-                  search={search}
-                  results={groupedResults.taskCommands}
-                  onSelect={runTaskCommand}
-                  onSubmitPrompt={submitPrompt}
-                />
-              ) : (
-                <SearchResults
-                  isSearching={isSearching}
-                  groups={groupedResults}
-                  recentItems={recentItems}
-                  taskHeading={taskHeading}
-                  featuredTaskCommands={featuredTaskCommands}
-                  onRunTaskCommand={runTaskCommand}
-                  onRunAction={(id) => handlerFor(id)()}
-                  onSelectFile={(filePath) => {
-                    track('quick_open_used')
-                    fileContext?.openFile(filePath)
-                    onOpenChange(false)
-                  }}
-                  onSelectTask={(taskId) => {
-                    onSelectTask(taskId)
-                    onOpenChange(false)
-                  }}
-                  onSelectProject={(projectId) => {
-                    onSelectProject(projectId)
-                    onOpenChange(false)
-                  }}
-                />
-              )}
-            </CommandList>
+    <Command
+      shouldFilter={false}
+      value={selected}
+      onValueChange={(value) => {
+        if (searchEditedRef.current) {
+          // cmdk's own select-first-row after a search edit. It has already moved its
+          // internal selection, and re-reads ours only when our prop changes — so toggle
+          // a trailing space (cmdk trims values, per its docs) to make it re-sync.
+          searchEditedRef.current = false
+          setSelected((cur) => (cur.endsWith(' ') ? cur.trimEnd() : `${cur} `))
+          return
+        }
+        setSelected(value)
+      }}
+      onKeyDown={handleKeyDown}
+      className="bg-transparent [&_[cmdk-input-wrapper]]:border-b-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-16 [&_[cmdk-input]]:text-base [&_[cmdk-item]]:rounded-xl [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-2.5 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+    >
+      <CommandInput
+        ref={inputRef}
+        placeholder={
+          page
+            ? (page.placeholder ?? `Search ${page.title.toLowerCase()}...`)
+            : 'Search files, folders, commands, projects, and tasks...'
+        }
+        value={search}
+        onValueChange={handleSearchChange}
+      />
+      <div className="bg-card rounded-t-3xl">
+        {page && (
+          <div className="flex items-center gap-1 px-2 py-1.5">
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={popPage}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/40"
+            >
+              <ChevronLeft className="size-3.5" />
+              {[taskScope?.title, ...pages.map((p) => p.title)].filter(Boolean).join(' › ')}
+            </button>
+            <span className="ml-auto text-[10px] text-muted-foreground/70">
+              Backspace to go back
+            </span>
           </div>
-        </Command>
-      </DialogContent>
-    </Dialog>
+        )}
+        {isSearching && !page && (
+          <div className="flex items-center gap-1 px-2 py-1.5">
+            {filters.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setFilter(f.id)}
+                className={cn(
+                  'rounded-md px-2 py-1 text-xs transition-colors',
+                  filter === f.id
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+            <span className="ml-auto text-[10px] text-muted-foreground/70">Tab to switch</span>
+          </div>
+        )}
+        {/* No fixed cap: grows with its results, bounded only by the window (input + chips + margins). */}
+        <CommandList className="max-h-[calc(100dvh-12rem)]">
+          {page ? (
+            <PageResults
+              page={page}
+              search={search}
+              results={groupedResults.taskCommands}
+              onSelect={runTaskCommand}
+              onSubmitPrompt={submitPrompt}
+            />
+          ) : (
+            <SearchResults
+              isSearching={isSearching}
+              groups={groupedResults}
+              recentItems={recentItems}
+              taskHeading={taskHeading}
+              featuredTaskCommands={featuredTaskCommands}
+              onRunTaskCommand={runTaskCommand}
+              onRunAction={(id) => handlerFor(id)()}
+              onSelectFile={(filePath) => {
+                track('quick_open_used')
+                fileContext?.openFile(filePath)
+                onOpenChange(false)
+              }}
+              onSelectTask={(taskId) => {
+                onSelectTask(taskId)
+                onOpenChange(false)
+              }}
+              onSelectProject={(projectId) => {
+                onSelectProject(projectId)
+                onOpenChange(false)
+              }}
+            />
+          )}
+        </CommandList>
+      </div>
+    </Command>
   )
 }
