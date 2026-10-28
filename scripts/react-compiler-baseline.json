@@ -69,7 +69,6 @@
   "packages/domains/task/src/client/TaskHistoryPanel.tsx": ["TaskHistoryPanel"],
   "packages/domains/task/src/client/TemplatesSettingsTab.tsx": ["TemplateFormDialog"],
   "packages/domains/task/src/client/WebPanelView.tsx": ["WebPanelView"],
-  "packages/domains/tasks/src/client/KanbanListView.tsx": ["KanbanListView"],
   "packages/domains/terminal/src/client/PtyContext.tsx": ["PtyEventStreams"],
   "packages/domains/terminal/src/client/useTerminalModes.ts": ["useTerminalModes"],
   "packages/domains/usage-analytics/src/client/useUsageAnalytics.ts": ["useUsageAnalytics"],

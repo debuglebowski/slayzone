@@ -91,7 +91,17 @@ export function KanbanListView({
       return splitActiveInactiveColumns(base[0].tasks, activeTaskIds, showEmptyColumns)
     }
     return base
-  }, [tasks, projectColumns, groupBy, sortBy, shouldTrackActive, showEmptyColumns, activeTaskIds])
+  }, [
+    tasks,
+    projectColumns,
+    groupBy,
+    sortBy,
+    blockedTaskIds,
+    viewConfig,
+    shouldTrackActive,
+    showEmptyColumns,
+    activeTaskIds
+  ])
 
   const visibleColumns = showEmptyColumns
     ? allColumns

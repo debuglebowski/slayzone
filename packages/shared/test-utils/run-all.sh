@@ -849,6 +849,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/TaskProgressPopover.test.tsx \
   packages/domains/task/src/client/WebPanelView.test.tsx \
   packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \
+  packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
