@@ -63,3 +63,11 @@ export const projectGroupsRouter = router({
     .input(z.object({ groupId: z.string(), projectIds: z.array(z.string()) }))
     .mutation(({ ctx, input }) => reorderProjectsInGroup(ctx.db, input.groupId, input.projectIds))
 })
+
+export type ProjectGroupsRouter = typeof projectGroupsRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `projectGroupsRouter` at
+ * `projectGroups` and asserts the slice in its `router.ts`.
+ */
+export type ProjectGroupsMounts = { projectGroups: ProjectGroupsRouter }

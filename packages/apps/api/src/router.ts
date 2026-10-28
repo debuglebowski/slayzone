@@ -25,7 +25,7 @@ import { integrationsRouter } from './routers/integrations'
 import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
 import { projectsRouter } from './routers/projects'
-import { projectGroupsRouter } from '@slayzone/projects/server'
+import { projectGroupsRouter, type ProjectGroupsMounts } from '@slayzone/projects/server'
 import { ptyRouter } from './routers/pty'
 import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
@@ -103,6 +103,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
+  AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,
   AssertAppSlice<IsAppSlice<TestPanelMounts>>
