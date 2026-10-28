@@ -73,7 +73,6 @@
   "packages/domains/task/src/client/task-detail/useTaskDoctor.ts": ["useTaskDoctor"],
   "packages/domains/task/src/client/TaskHistoryPanel.tsx": ["TaskHistoryPanel"],
   "packages/domains/task/src/client/TemplatesSettingsTab.tsx": ["TemplateFormDialog"],
-  "packages/domains/task/src/client/useSharedCardHeights.ts": ["useSharedCardHeights"],
   "packages/domains/task/src/client/WebPanelView.tsx": ["WebPanelView"],
   "packages/domains/tasks/src/client/KanbanListView.tsx": ["KanbanListView"],
   "packages/domains/telemetry/src/client/TelemetryProvider.tsx": ["TelemetryProvider"],

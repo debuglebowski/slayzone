@@ -38,7 +38,7 @@ export function useSharedCardHeights(
   deps: unknown[],
   minPx = 144
 ): void {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Caller-supplied deps: re-measure when the caller's layout inputs change.
   useLayoutEffect(() => {
     const grid = gridRef.current
     if (!grid) return

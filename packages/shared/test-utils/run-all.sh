@@ -805,6 +805,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
   packages/domains/settings/src/client/UserSettingsDialog.test.tsx \
   packages/domains/settings/src/client/AppearanceContext.test.tsx \
+  packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
