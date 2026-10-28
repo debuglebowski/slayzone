@@ -1779,9 +1779,6 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
-      '@slayzone/task-artifacts':
-        specifier: workspace:*
-        version: link:../task-artifacts
       '@slayzone/task-browser':
         specifier: workspace:*
         version: link:../task-browser
@@ -1800,9 +1797,6 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
-      '@slayzone/worktrees':
-        specifier: workspace:*
-        version: link:../worktrees
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)

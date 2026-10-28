@@ -16,27 +16,24 @@ import { randomUUID } from 'crypto'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { uniqueName } from '@slayzone/file-editor/shared'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
+import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server/artifact-paths'
+import { BlobStore } from './blob-store'
+import { betterSqliteTxn } from './db'
 import {
-  BlobStore,
-  betterSqliteTxn,
   createVersion,
   saveCurrent,
   setCurrentVersion,
   mutateVersion,
-  listVersions,
-  resolveVersionRef,
-  getCurrentVersion,
   readVersionContent,
-  renameVersion,
-  pruneVersions,
-  diffVersions,
-  searchArtifacts,
-  isVersionError,
-  InvalidSearchRegexError
-} from '@slayzone/task-artifacts/server'
-import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task-artifacts/server'
-import type { ArtifactVersion, AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
-import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
+  renameVersion
+} from './mutations'
+import { listVersions, resolveVersionRef, getCurrentVersion } from './resolve'
+import { pruneVersions } from './prune'
+import { diffVersions } from './diff'
+import { searchArtifacts, InvalidSearchRegexError } from './search'
+import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
+import { isVersionError } from './errors'
+import type { ArtifactVersion, AuthorContext, VersionRef } from '../shared'
 
 /**
  * Named-transaction adapters for task artifacts + their version history.
@@ -56,12 +53,15 @@ import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
  * `app.getPath`), and `artifactsDir` is derived from it the same way the IPC
  * layer does.
  *
- * Pure: imports only better-sqlite3 types, fs/path/crypto and the worker-safe
- * `@slayzone/task-artifacts/server` + `@slayzone/{task,file-editor}/shared`
- * barrels — safe to pull into the worker bundle.
+ * Pure: imports only better-sqlite3 types, fs/path/crypto, this domain's own
+ * pure version logic, `@slayzone/{task,file-editor}/shared` and the narrow
+ * `@slayzone/task/server/artifact-paths` entry — safe to pull into the worker bundle.
  *
  * Returns are kept structured-cloneable (raw rows / version objects / scalars):
  * the IPC layer parses rows via `parseArtifact` / `parseFolder` after the call.
+ *
+ * The async-side caller is `./artifact-store.ts`. Registered into the worker's
+ * txn registry via the narrow `@slayzone/task-artifacts/db` entry.
  */
 
 const uiAuthor: AuthorContext = { type: 'user', id: null }

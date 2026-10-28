@@ -7,3 +7,4 @@
  * helpers) named-transaction logic the worker needs.
  */
 export { artifactTxns } from './artifact-txns'
+export { artifactsTxns } from './artifact-store-txns'

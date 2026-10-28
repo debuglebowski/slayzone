@@ -10,19 +10,17 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
-import type {
-  AuthorContext,
-  VersionRef,
-  ArtifactVersion,
-  DiffResult,
-  PruneReport
-} from '@slayzone/task-artifacts/shared'
-import type { ArtifactSearchOptions, ArtifactSearchReport } from '@slayzone/task-artifacts/server'
+import type { AuthorContext, VersionRef, ArtifactVersion, DiffResult, PruneReport } from '../shared'
+import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // Pure node:fs/crypto path math — the blob PATH for a content hash, so a caller
 // can stream a version's bytes off disk instead of hauling them through the
 // worker boundary as a utf-8 string.
-import { BlobStore } from '@slayzone/task-artifacts/server'
-import { artifactFilePathIn, artifactsDirOf, artifactTaskDir } from './artifact-paths'
+import { BlobStore } from './blob-store'
+import {
+  artifactFilePathIn,
+  artifactsDirOf,
+  artifactTaskDir
+} from '@slayzone/task/server/artifact-paths'
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -31,7 +29,8 @@ import { artifactFilePathIn, artifactsDirOf, artifactTaskDir } from './artifact-
 // `app.getPath('userData')` for IPC, `ctx.dataRoot` for tRPC — aligned via
 // `app.setPath('userData', dataRoot)` at boot). The binary upload/download flows
 // run here too (uploads are pure fs+worker; the Electron *dialog* orchestration
-// stays in the IPC handlers / router, both reusing the tree helpers below).
+// stays in the IPC handlers / router; the folder-tree helpers they share live in
+// `@slayzone/task/server`). The worker half of these calls is `./artifact-store-txns.ts`.
 
 export function parseArtifact(row: Record<string, unknown> | undefined): TaskArtifact | null {
   if (!row) return null
@@ -64,41 +63,6 @@ export function parseFolder(row: Record<string, unknown> | undefined): ArtifactF
     order: row.order as number,
     created_at: row.created_at as string
   }
-}
-
-/** Build a folderId → relative-path resolver from a task's full folder list. */
-export function buildFolderPathResolver(
-  folders: Record<string, unknown>[]
-): (id: string) => string {
-  const byId = new Map(folders.map((f) => [f.id as string, f]))
-  function folderPath(id: string): string {
-    const f = byId.get(id)
-    if (!f) return ''
-    const parent = f.parent_id as string | null
-    return parent ? path.join(folderPath(parent), f.name as string) : (f.name as string)
-  }
-  return folderPath
-}
-
-/** Collect a folder id plus all its (transitive) descendant folder ids. */
-export function collectFolderAndDescendants(
-  folders: Record<string, unknown>[],
-  rootId: string
-): Set<string> {
-  const targetIds = new Set<string>([rootId])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const f of folders) {
-      const id = f.id as string
-      const parentId = f.parent_id as string | null
-      if (parentId && targetIds.has(parentId) && !targetIds.has(id)) {
-        targetIds.add(id)
-        changed = true
-      }
-    }
-  }
-  return targetIds
 }
 
 export type ArtifactStore = ReturnType<typeof createArtifactStore>
@@ -331,9 +295,9 @@ export function createArtifactStore(dataDir: string) {
     },
 
     // --- Versions ---
-    // The `@slayzone/task-artifacts` version helpers operate on a synchronous
+    // The version helpers (./mutations, ./resolve, …) operate on a synchronous
     // better-sqlite3 db + `TxnRunner`, so they run inside the DB worker via `namedTxn`
-    // (see ../main/artifacts-txns.ts). Each named txn re-formats `VersionError` into a
+    // (see ./artifact-store-txns.ts). Each named txn re-formats `VersionError` into a
     // serializable `[CODE] message` string before crossing the worker boundary.
 
     listArtifactVersions(

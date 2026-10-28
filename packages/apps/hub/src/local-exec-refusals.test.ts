@@ -121,7 +121,8 @@ const worktrees = await import('@slayzone/worktrees/server')
 const { execGit } = await import('../../../domains/worktrees/src/server/exec-async.js')
 // By path, not `./merge-ai`: the test loader redirects that specifier to a mock.
 const { runAiCommand } = await import('../../../domains/worktrees/src/server/merge-ai.js')
-const { defaultWorktreeExecAdapters, taskSessionStore } = await import('@slayzone/task/server')
+const { taskSessionStore } = await import('@slayzone/task/server')
+const { defaultWorktreeExecAdapters } = worktrees
 const terminal = await import('@slayzone/terminal/server')
 const { listProjectFiles } = await import('../../../domains/terminal/src/server/files-scan.js')
 const turns = await import('../../../domains/agent-turns/src/server/git-snapshot.js')

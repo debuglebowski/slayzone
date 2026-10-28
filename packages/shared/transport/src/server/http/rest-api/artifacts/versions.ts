@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express } from 'express'
-import { createArtifactStore } from '@slayzone/task/server'
+import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
@@ -33,7 +33,7 @@ import { getArtifactsDataRoot } from './shared'
  * immutable, refs resolve through one shared resolver (int / hash prefix / name /
  * `-N` / `HEAD~N`), and the lock/branch rules live in
  * `@slayzone/task-artifacts`. Each route calls the artifact store
- * (`@slayzone/task/server`), i.e. the same `task-artifacts:*` named txns the app
+ * (`@slayzone/task-artifacts/server`), i.e. the same `task-artifacts:*` named txns the app
  * itself uses, so the CLI and the UI cannot drift.
  *
  * CONTENT NEVER BECOMES A STRING, in either direction. `write`/`append` stage
@@ -85,7 +85,7 @@ async function resolveArtifact(
 /**
  * The worker re-throws a `VersionError` as a plain `Error` whose message is
  * `[CODE] message` (its class identity does not survive the thread boundary —
- * see task/server/artifacts-txns.ts `wrapVersionError`). Recover the code here so
+ * see task-artifacts/server/artifact-store-txns.ts `wrapVersionError`). Recover the code here so
  * the route can answer 400 with a machine-readable `code`.
  */
 const VERSION_ERROR_RE = /^\[([A-Z_]+)\]\s([\s\S]*)$/

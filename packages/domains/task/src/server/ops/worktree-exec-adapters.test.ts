@@ -12,7 +12,7 @@
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import crypto from 'node:crypto'
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
@@ -20,7 +20,8 @@ import {
   cleanupTaskFull,
   configureTaskRuntimeAdapters,
   maybeAutoCreateWorktree,
-  type WorktreeExecAdapters
+  type WorktreeExecAdapters,
+  type WorktreePolicyAdapters
 } from './shared.js'
 
 type Harness = Awaited<ReturnType<typeof createTestHarness>>
@@ -100,6 +101,22 @@ const makeFakes = (
   ...overrides
 })
 
+/** Policy fake (the real impl lives in worktrees, which task must not import):
+ *  copy behavior read from the seeded project row, default base-path template
+ *  expanded project-relative. */
+const makePolicy = (h: Harness): WorktreePolicyAdapters => ({
+  resolveCopyBehavior: async (_db, projectId) => {
+    const row = h.db
+      .prepare('SELECT worktree_copy_behavior FROM projects WHERE id = ?')
+      .get(projectId) as { worktree_copy_behavior: string | null } | undefined
+    const behavior = (row?.worktree_copy_behavior ?? 'none') as 'ask' | 'none' | 'all' | 'custom'
+    return { behavior, customPaths: [] }
+  },
+  defaultBasePathTemplate: '../{project-folder-name}-workspaces',
+  resolveBasePathTemplate: (template, projectPath) =>
+    resolve(projectPath, template.replaceAll('{project-folder-name}', basename(projectPath)))
+})
+
 test('maybeAutoCreateWorktree: create → link → copy → setup ordering', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
@@ -123,7 +140,11 @@ test('maybeAutoCreateWorktree: create → link → copy → setup ordering', asy
       calls.push('copy')
     }
   })
-  configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir(), worktrees: fakes })
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => tmpdir(),
+    worktrees: fakes,
+    worktreePolicy: makePolicy(h)
+  })
 
   await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'Order Test Task')
 
@@ -154,7 +175,11 @@ test('maybeAutoCreateWorktree: create throws but dir exists → task still linke
       return true
     }
   })
-  configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir(), worktrees: fakes })
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => tmpdir(),
+    worktrees: fakes,
+    worktreePolicy: makePolicy(h)
+  })
 
   await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'Recovered Worktree Task')
 
@@ -181,7 +206,11 @@ test('maybeAutoCreateWorktree: create throws and dir missing → no link, no cop
     }
     // pathExists stays false
   })
-  configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir(), worktrees: fakes })
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => tmpdir(),
+    worktrees: fakes,
+    worktreePolicy: makePolicy(h)
+  })
 
   await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'Failed Worktree Task')
 
@@ -218,7 +247,11 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
     // so the guard is hubPathExists (never routed to a computer).
     hubPathExists: () => true
   })
-  configureTaskRuntimeAdapters({ getDataRoot: () => dataRoot, worktrees: fakes })
+  configureTaskRuntimeAdapters({
+    getDataRoot: () => dataRoot,
+    worktrees: fakes,
+    worktreePolicy: makePolicy(h)
+  })
 
   // taskB still live and outside the batch → guard skips removal.
   await cleanupTaskFull(h.slayDb, taskA)
@@ -251,7 +284,8 @@ test('maybeAutoCreateWorktree: no computer → skips the worktree, task creation
   const calls: string[] = []
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
-    worktrees: makeFakes(calls, { isGitRepo: async () => noComputer() })
+    worktrees: makeFakes(calls, { isGitRepo: async () => noComputer() }),
+    worktreePolicy: makePolicy(h)
   })
 
   // Must NOT throw.
@@ -280,7 +314,8 @@ test('maybeAutoCreateWorktree: git cannot start → skips with an error event, c
       isGitRepo: async () => {
         throw new Error('Could not start git: spawn git EMFILE')
       }
-    })
+    }),
+    worktreePolicy: makePolicy(h)
   })
 
   await maybeAutoCreateWorktree(h.slayDb, taskId, projectId, 'Git Unavailable Task')

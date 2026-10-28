@@ -52,7 +52,6 @@ import { getServerBuildInfo } from './build-info.js'
 import {
   taskOps,
   configureTaskRuntimeAdapters,
-  defaultWorktreeExecAdapters,
   startArtifactWatcher,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
@@ -150,7 +149,10 @@ import {
   runGhLocally,
   setGhExecutor,
   invalidateProjectReposCache,
-  resetWorktreeColorsForTest
+  resetWorktreeColorsForTest,
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters,
+  getCurrentBranch
 } from '@slayzone/worktrees/server'
 import { missingRootsForProjects } from './local-computer-roots'
 import { seedProjectPaths } from './seed-computer-project-paths'
@@ -467,12 +469,14 @@ export function composeServer(opts: {
   // caller of the ops (tRPC via setTaskDeps, REST, MCP). Listeners: integration push
   // and the automation engine's tag trigger, both wired below.
   const taskBus = new EventEmitter()
-  // Base task runtime adapters (no worktrees override → the task server's local
-  // git/fs default stays bound). Extracted so the computer-routing path can re-supply a
+  // Base task runtime adapters (worktrees = the in-process local git/fs impl from
+  // @slayzone/worktrees/server). Extracted so the computer-routing path can re-supply a
   // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
+    worktrees: defaultWorktreeExecAdapters,
+    worktreePolicy: defaultWorktreePolicyAdapters,
     killTaskProcesses,
     killPtysByTaskId,
     recordDiagnosticEvent,
@@ -506,7 +510,7 @@ export function composeServer(opts: {
   // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
   // ("No conversation found") forever with no self-heal. Same orphaned-listener
   // class as the state-change consumers wired just below.
-  registerConversationHealer(db, notifyTasksChanged)
+  registerConversationHealer(db, notifyTasksChanged, { getCurrentBranch })
   registerConversationResolver(db)
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.

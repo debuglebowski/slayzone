@@ -25,14 +25,9 @@ export {
   setDefaultTemplate
 } from './template-store'
 
-export {
-  createArtifactStore,
-  parseArtifact,
-  parseFolder,
-  buildFolderPathResolver,
-  collectFolderAndDescendants
-} from './artifact-store'
-export type { ArtifactStore } from './artifact-store'
+// The artifact store (createArtifactStore / parseArtifact / parseFolder) and its
+// worker txns live in `task-artifacts/server` + `/db`.
+export { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
 export { artifactsDirOf, artifactTaskDir, artifactFilePathIn } from './artifact-paths'
 
 // Artifact downloads. Electron-free — the host-only steps (dialogs, reveal,
@@ -84,13 +79,10 @@ export {
 } from './ops'
 export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
 export { taskSessionStore } from './task-session-store'
-export {
-  configureTaskRuntimeAdapters,
-  updateTask,
-  InvalidTaskUpdateError,
-  defaultWorktreeExecAdapters
-} from './ops/shared'
-export type { WorktreeExecAdapters } from './ops/shared'
+export { configureTaskRuntimeAdapters, updateTask, InvalidTaskUpdateError } from './ops/shared'
+// The in-process implementations (`defaultWorktreeExecAdapters`,
+// `defaultWorktreePolicyAdapters`) live in `worktrees/server`.
+export type { WorktreeExecAdapters, WorktreePolicyAdapters } from './ops/shared'
 export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
@@ -104,6 +96,8 @@ export { handleAttentionTransition } from './attention'
 // Conversation self-heal + resolver. Registered by BOTH composition roots (the
 // Electron main process and the slice-9 sidecar that owns the pty runtime) so
 // the healer/resolver seams `createPty` calls are never left null. Lives here
-// because it needs task DB ops + terminal transcript helpers + worktrees branch
-// lookup, and the package graph runs task → those (a cycle from terminal/server).
+// because it needs task DB ops + terminal transcript helpers, and the package graph
+// runs task → terminal (a cycle from terminal/server). The git branch lookup is
+// injected (`ConversationHealerDeps`) since worktrees builds on task.
 export { registerConversationHealer, registerConversationResolver } from './conversation-healer'
+export type { ConversationHealerDeps } from './conversation-healer'

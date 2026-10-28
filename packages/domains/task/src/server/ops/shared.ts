@@ -26,25 +26,8 @@ import {
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
-import {
-  assertHubLocalExecEnabled,
-  isHubSwitchedOffError
-} from '@slayzone/platform/hub-switch-refusal'
-import {
-  removeWorktree,
-  createWorktree,
-  runWorktreeSetupScript,
-  getCurrentBranch,
-  isGitRepo,
-  copyIgnoredFiles,
-  resolveCopyBehavior,
-  getWorktreeColor,
-  ensureProjectWorktreeColors
-} from '@slayzone/worktrees/server'
-import {
-  DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
-  resolveWorktreeBasePathTemplate
-} from '@slayzone/worktrees/shared'
+import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import type { WorktreeCopyBehavior } from '@slayzone/projects/shared'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 
 /**
@@ -86,9 +69,13 @@ export interface DiagnosticEventPayload {
  * Exec-side worktree/git/fs operations task ops previously ran inline. Injected
  * behind this seam so hub-side task code never spawns git or touches the
  * filesystem directly (hub/computer split, wave 1). Method signatures mirror the
- * `@slayzone/worktrees/server` exports they wrap (narrowed to the parameters
+ * `worktrees/server` exports they wrap (narrowed to the parameters
  * task ops actually pass), plus two raw-fs seams (`pathExists`,
  * `removeArtifactDir`) that replace direct `existsSync`/`rmSync` calls.
+ *
+ * Task owns this interface; the in-process implementation is
+ * `defaultWorktreeExecAdapters` in `worktrees/server` (worktrees builds
+ * on task, never the reverse), passed in by the composition roots.
  *
  * OVERRIDE CONTRACT: `configureTaskRuntimeAdapters` merges SHALLOWLY. Any
  * future override of `worktrees` must supply a COMPLETE `WorktreeExecAdapters`
@@ -108,7 +95,7 @@ export interface WorktreeExecAdapters {
    * given one: they are hub-local UI state, never routed (and the former is sync,
    * so it could not be a network call).
    */
-  /** `createWorktree` from `@slayzone/worktrees/server`. */
+  /** `createWorktree` from `worktrees/server`. */
   createWorktree: (
     taskId: string,
     repoPath: string,
@@ -116,20 +103,20 @@ export interface WorktreeExecAdapters {
     branch: string,
     sourceBranch?: string
   ) => Promise<void>
-  /** `removeWorktree` from `@slayzone/worktrees/server` (no branch deletion). */
+  /** `removeWorktree` from `worktrees/server` (no branch deletion). */
   removeWorktree: (
     taskId: string,
     projectPath: string,
     worktreePath: string
   ) => Promise<{ branchDeleted?: boolean; branchError?: string }>
-  /** `runWorktreeSetupScript` from `@slayzone/worktrees/server`. */
+  /** `runWorktreeSetupScript` from `worktrees/server`. */
   runWorktreeSetupScript: (
     taskId: string,
     worktreePath: string,
     repoPath: string,
     sourceBranch?: string | null
   ) => Promise<{ ran: boolean; success?: boolean; output?: string }>
-  /** `copyIgnoredFiles` from `@slayzone/worktrees/server`. */
+  /** `copyIgnoredFiles` from `worktrees/server`. */
   copyIgnoredFiles: (
     taskId: string,
     repoPath: string,
@@ -137,13 +124,13 @@ export interface WorktreeExecAdapters {
     behavior: 'all' | 'custom',
     customPaths: string[]
   ) => Promise<void>
-  /** `getCurrentBranch` from `@slayzone/worktrees/server`. */
+  /** `getCurrentBranch` from `worktrees/server`. */
   getCurrentBranch: (taskId: string, repoPath: string) => Promise<string | null>
-  /** `isGitRepo` from `@slayzone/worktrees/server`. */
+  /** `isGitRepo` from `worktrees/server`. */
   isGitRepo: (taskId: string, path: string) => Promise<boolean>
-  /** `getWorktreeColor` from `@slayzone/worktrees/server`. */
+  /** `getWorktreeColor` from `worktrees/server`. */
   getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
-  /** `ensureProjectWorktreeColors` from `@slayzone/worktrees/server`. */
+  /** `ensureProjectWorktreeColors` from `worktrees/server`. */
   ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
   /** `fs.existsSync` for a path in the task's WORKSPACE (e.g. the recovered-worktree
    *  check). Routed: the workspace lives wherever the task's agents run. The local
@@ -165,6 +152,27 @@ export interface WorktreeExecAdapters {
   removeArtifactDir: (absDir: string) => void | Promise<void>
 }
 
+/**
+ * Hub-side worktree POLICY reads task ops make while auto-creating a worktree:
+ * which ignored files to copy, and how the base-path setting template expands.
+ * Not exec work (never routed to a computer), so deliberately not part of
+ * {@link WorktreeExecAdapters}. Task owns this interface; the implementation is
+ * `defaultWorktreePolicyAdapters` in `worktrees/server`, passed in by
+ * the composition roots.
+ */
+export interface WorktreePolicyAdapters {
+  /** `resolveCopyBehavior` from `worktrees/server` (hub-side DB read). */
+  resolveCopyBehavior: (
+    db: SlayzoneDb,
+    projectId?: string
+  ) => Promise<{ behavior: WorktreeCopyBehavior; customPaths: string[] }>
+  /** `DEFAULT_WORKTREE_BASE_PATH_TEMPLATE` from `worktrees/shared`:
+   *  used when the `worktree_base_path` setting is unset/empty. */
+  defaultBasePathTemplate: string
+  /** `resolveWorktreeBasePathTemplate` from `worktrees/shared`. */
+  resolveBasePathTemplate: (template: string, projectPath: string) => string
+}
+
 export interface TaskRuntimeAdapters {
   killPtysByTaskId: (taskId: string) => void
   killTaskProcesses: (taskId: string) => void
@@ -179,55 +187,70 @@ export interface TaskRuntimeAdapters {
   /** Resolve the app data root (`<ROOT>/storage`). Electron-free seam so ops/
    *  stays server-pure; the app wires it to getStorageDir(). */
   getDataRoot: () => string
-  /** Exec-side worktree/git/fs ops. Defaults to the in-process implementations
-   *  below; overrides must be COMPLETE (shallow merge — see WorktreeExecAdapters). */
+  /** Exec-side worktree/git/fs ops. The composition roots pass the in-process
+   *  `defaultWorktreeExecAdapters` from `worktrees/server` (or a routing
+   *  impl wrapping it); unconfigured, every worktree op rejects/throws. Overrides
+   *  must be COMPLETE (shallow merge — see WorktreeExecAdapters). */
   worktrees: WorktreeExecAdapters
+  /** Hub-side worktree policy reads. The composition roots pass
+   *  `defaultWorktreePolicyAdapters` from `worktrees/server`; unconfigured,
+   *  each read throws. Overrides must be COMPLETE (shallow merge). */
+  worktreePolicy: WorktreePolicyAdapters
+}
+
+function notConfigured(what: string): Error {
+  return new Error(
+    `TaskRuntimeAdapters.${what} not configured (the composition root passes the ` +
+      'implementation from worktrees/server via configureTaskRuntimeAdapters)'
+  )
 }
 
 /**
- * The workspace ops below run on the hub's own disk, so each refuses first (as a
- * rejection) on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06) — this default is
- * live before the hub installs the routing adapter, and stays live if that init
- * fails. Colors and the two hub-storage ops are hub-owned and stay.
+ * Placeholder until a composition root injects `defaultWorktreeExecAdapters`
+ * (`worktrees/server`): every worktree/git op rejects (sync ones throw).
+ * The two hub-STORAGE ops are plain fs, not worktree work, so they keep their
+ * real implementation here.
  */
-const onHubDisk =
-  <A extends unknown[], R>(op: string, fn: (...args: A) => R | Promise<R>) =>
-  async (...args: A): Promise<R> => {
-    assertHubLocalExecEnabled({ op: `worktree.${op}` })
-    return fn(...args)
-  }
-
-/**
- * Default exec adapters wrap today's direct imports 1:1 — the build-time
- * dependency on `@slayzone/worktrees/server` intentionally REMAINS this wave.
- * The seam (not the import) is what a later wave rebinds to a computer-backed
- * implementation. Neither composition root passes `worktrees`, so this default
- * must survive every partial `configureTaskRuntimeAdapters` call.
- */
-export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
-  // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
-  // so a routing impl can resolve which computer the work belongs to.
-  createWorktree: onHubDisk('create', (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
-    createWorktree(repoPath, worktreePath, branch, sourceBranch)
-  ),
-  removeWorktree: onHubDisk('remove', (_taskId, projectPath, worktreePath) =>
-    removeWorktree(projectPath, worktreePath)
-  ),
-  runWorktreeSetupScript: onHubDisk('setup', (_taskId, worktreePath, repoPath, sourceBranch) =>
-    runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
-  ),
-  copyIgnoredFiles: onHubDisk(
-    'copy_ignored',
-    (_taskId, repoPath, worktreePath, behavior, customPaths) =>
-      copyIgnoredFiles(repoPath, worktreePath, behavior, customPaths)
-  ),
-  getCurrentBranch: onHubDisk('branch', (_taskId, repoPath) => getCurrentBranch(repoPath)),
-  isGitRepo: onHubDisk('is_git_repo', (_taskId, path) => isGitRepo(path)),
-  getWorktreeColor,
-  ensureProjectWorktreeColors,
-  pathExists: onHubDisk('path_exists', (_taskId, p) => existsSync(p)),
+const unconfiguredWorktreeExecAdapters: WorktreeExecAdapters = {
+  createWorktree: async () => {
+    throw notConfigured('worktrees.createWorktree')
+  },
+  removeWorktree: async () => {
+    throw notConfigured('worktrees.removeWorktree')
+  },
+  runWorktreeSetupScript: async () => {
+    throw notConfigured('worktrees.runWorktreeSetupScript')
+  },
+  copyIgnoredFiles: async () => {
+    throw notConfigured('worktrees.copyIgnoredFiles')
+  },
+  getCurrentBranch: async () => {
+    throw notConfigured('worktrees.getCurrentBranch')
+  },
+  isGitRepo: async () => {
+    throw notConfigured('worktrees.isGitRepo')
+  },
+  getWorktreeColor: () => {
+    throw notConfigured('worktrees.getWorktreeColor')
+  },
+  ensureProjectWorktreeColors: async () => {
+    throw notConfigured('worktrees.ensureProjectWorktreeColors')
+  },
+  pathExists: async () => {
+    throw notConfigured('worktrees.pathExists')
+  },
   hubPathExists: (p) => existsSync(p),
   removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
+}
+
+const unconfiguredWorktreePolicyAdapters: WorktreePolicyAdapters = {
+  resolveCopyBehavior: async () => {
+    throw notConfigured('worktreePolicy.resolveCopyBehavior')
+  },
+  defaultBasePathTemplate: '',
+  resolveBasePathTemplate: () => {
+    throw notConfigured('worktreePolicy.resolveBasePathTemplate')
+  }
 }
 
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
@@ -241,16 +264,17 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
       'TaskRuntimeAdapters.getDataRoot not configured (call configureTaskRuntimeAdapters)'
     )
   },
-  worktrees: defaultWorktreeExecAdapters
+  worktrees: unconfiguredWorktreeExecAdapters,
+  worktreePolicy: unconfiguredWorktreePolicyAdapters
 }
 
 let runtimeAdapters: TaskRuntimeAdapters = defaultRuntimeAdapters
 
 /**
- * SHALLOW merge: top-level keys absent from `adapters` keep their defaults, so
- * a partial configure call (neither composition root passes `worktrees`) leaves
- * `defaultWorktreeExecAdapters` bound. Nested objects are NOT deep-merged — a
- * future `worktrees` override must pass a COMPLETE `WorktreeExecAdapters`.
+ * SHALLOW merge: top-level keys absent from `adapters` keep their defaults (the
+ * unconfigured placeholders for `worktrees` / `worktreePolicy`), so every
+ * configure call must re-supply them. Nested objects are NOT deep-merged — a
+ * `worktrees` override must pass a COMPLETE `WorktreeExecAdapters`.
  */
 export function configureTaskRuntimeAdapters(adapters: Partial<TaskRuntimeAdapters>): void {
   runtimeAdapters = {
@@ -691,8 +715,8 @@ async function createWorktreeForTask(
 
   const baseTemplate =
     (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'worktree_base_path'"))
-      ?.value || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
-  const basePath = resolveWorktreeBasePathTemplate(baseTemplate, repoPath)
+      ?.value || runtimeAdapters.worktreePolicy.defaultBasePathTemplate
+  const basePath = runtimeAdapters.worktreePolicy.resolveBasePathTemplate(baseTemplate, repoPath)
   const branch = slugify(taskTitle) || `task-${taskId.slice(0, 8)}`
   const worktreePath = path.join(basePath, branch)
   const parentBranch = await runtimeAdapters.worktrees.getCurrentBranch(taskId, repoPath)
@@ -763,9 +787,10 @@ async function createWorktreeForTask(
 
   // Block B: Post-creation extras (non-critical, won't affect linkage)
   try {
-    // resolveCopyBehavior is a hub-side DB read — intentionally a DIRECT call,
-    // not part of WorktreeExecAdapters (only exec work goes behind the seam).
-    const { behavior: copyBehavior, customPaths } = await resolveCopyBehavior(db, projectId)
+    // resolveCopyBehavior is a hub-side DB read — the policy seam, not part of
+    // WorktreeExecAdapters (only exec work goes behind that seam).
+    const { behavior: copyBehavior, customPaths } =
+      await runtimeAdapters.worktreePolicy.resolveCopyBehavior(db, projectId)
     if (copyBehavior === 'all' || copyBehavior === 'custom') {
       await runtimeAdapters.worktrees.copyIgnoredFiles(
         taskId,

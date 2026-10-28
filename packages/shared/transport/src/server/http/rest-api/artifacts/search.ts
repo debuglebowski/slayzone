@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { createArtifactStore } from '@slayzone/task/server'
+import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
@@ -117,7 +117,7 @@ export function registerArtifactsSearchRoute(app: Express, deps: RestApiDeps): v
       // An uncompilable `--regex` is the CALLER's mistake, so it must be a 400
       // with the CLI's own wording — not a 500. The worker re-throws it as
       // `[INVALID_REGEX] <message>` (its class identity does not cross the thread
-      // boundary; see task/server/artifacts-txns.ts wrapVersionError).
+      // boundary; see task-artifacts/server/artifact-store-txns.ts wrapVersionError).
       const raw = err instanceof Error ? err.message : String(err)
       const m = /^\[INVALID_REGEX\]\s([\s\S]*)$/.exec(raw)
       if (m) {

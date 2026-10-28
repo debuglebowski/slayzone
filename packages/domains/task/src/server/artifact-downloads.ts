@@ -17,11 +17,8 @@ import {
   canExportAsHtml,
   type RenderMode
 } from '../shared'
-import {
-  createArtifactStore,
-  buildFolderPathResolver,
-  collectFolderAndDescendants
-} from './artifact-store'
+import { buildFolderPathResolver, collectFolderAndDescendants } from './artifact-folder-tree'
+import { artifactFilePathIn, artifactsDirOf } from './artifact-paths'
 
 // Artifact download/export flows. Electron-free by construction: the host-only
 // steps (save sheet, directory picker, downloads dir, reveal, offscreen PDF/PNG
@@ -76,10 +73,10 @@ async function resolveSource(
   dataDir: string,
   id: string
 ): Promise<{ row: Record<string, unknown>; srcPath: string } | null> {
-  const store = createArtifactStore(dataDir)
+  const artifactsDir = artifactsDirOf(dataDir)
   const row = await getArtifactRow(db, id)
   if (!row) return null
-  const srcPath = store.getArtifactFilePath(row.task_id as string, id, row.title as string)
+  const srcPath = artifactFilePathIn(artifactsDir, row.task_id as string, id, row.title as string)
   if (!existsSync(srcPath)) return null
   return { row, srcPath }
 }
@@ -107,7 +104,7 @@ export async function downloadArtifactFolder(
   dataDir: string,
   folderId: string
 ): Promise<boolean> {
-  const store = createArtifactStore(dataDir)
+  const artifactsDir = artifactsDirOf(dataDir)
   const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId)) as
     | Record<string, unknown>
     | undefined
@@ -148,7 +145,8 @@ export async function downloadArtifactFolder(
     )
     .all(taskId, ...targetIds)) as Record<string, unknown>[]
   for (const artifact of artifacts) {
-    const srcPath = store.getArtifactFilePath(
+    const srcPath = artifactFilePathIn(
+      artifactsDir,
       taskId,
       artifact.id as string,
       artifact.title as string
@@ -256,7 +254,7 @@ export async function downloadAllArtifactsAsZip(
   dataDir: string,
   taskId: string
 ): Promise<boolean> {
-  const store = createArtifactStore(dataDir)
+  const artifactsDir = artifactsDirOf(dataDir)
   const allArtifacts = (await db
     .prepare('SELECT * FROM task_artifacts WHERE task_id = ?')
     .all(taskId)) as Record<string, unknown>[]
@@ -279,7 +277,8 @@ export async function downloadAllArtifactsAsZip(
   archive.pipe(output)
 
   for (const artifact of allArtifacts) {
-    const srcPath = store.getArtifactFilePath(
+    const srcPath = artifactFilePathIn(
+      artifactsDir,
       taskId,
       artifact.id as string,
       artifact.title as string

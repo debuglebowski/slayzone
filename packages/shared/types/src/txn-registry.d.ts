@@ -26,8 +26,8 @@
  */
 import type { TxnSigOf } from '@slayzone/platform'
 import type { chatQueueTxns } from '@slayzone/terminal/db'
-import type { taskTxns, artifactsTxns, templatesTxns } from '@slayzone/task/db'
-import type { artifactTxns } from '@slayzone/task-artifacts/db'
+import type { taskTxns, templatesTxns } from '@slayzone/task/db'
+import type { artifactTxns, artifactsTxns } from '@slayzone/task-artifacts/db'
 import type { integrationTxns } from '@slayzone/integrations/db'
 import type { tagsTxns } from '@slayzone/tags/db'
 import type { projectsTxns } from '@slayzone/projects/db'

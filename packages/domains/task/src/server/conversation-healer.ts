@@ -9,7 +9,6 @@ import {
   readClaudeTranscriptMeta,
   type ConversationHealRequest
 } from '@slayzone/terminal/server'
-import { getCurrentBranch } from '@slayzone/worktrees/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import {
   decideConversationHeal,
@@ -25,6 +24,13 @@ import {
   getConversationFirstSeenAt,
   listResumeCandidates
 } from './ops/index.js'
+
+/** Capabilities the healer needs from packages built on top of task. */
+export interface ConversationHealerDeps {
+  /** `getCurrentBranch` from `worktrees/server`: the checked-out branch
+   *  of the git repo at `cwd`, or null. */
+  getCurrentBranch: (cwd: string) => Promise<string | null>
+}
 
 /** Max gap between task creation and the real Claude session's first message,
  *  used to bound the orphan candidate window. */
@@ -47,9 +53,11 @@ const FIX_SHIP_TS = Date.parse('2026-06-04T00:00:00Z')
  * conversation id looped `--resume` forever. See plans/conv-id-robustness-v2.md
  * and the slice-9 orphaned-listener class (composition.ts state-change note).
  *
- * The package graph runs task → terminal/worktrees/diagnostics, so this module
- * can reach the task DB ops, transcript helpers, branch lookup, and diagnostics
- * without a cycle — the reason it could not live in `terminal/server` directly.
+ * The package graph runs task → terminal/diagnostics, so this module can reach
+ * the task DB ops, transcript helpers and diagnostics without a cycle — the
+ * reason it could not live in `terminal/server` directly. The git branch lookup
+ * is the one capability task does not own (worktrees builds on task), so the
+ * composition root injects it via {@link ConversationHealerDeps}.
  *
  * Safety: never guesses. A healthy pointer is left untouched; any ambiguity in the
  * legacy orphan path resolves to the honest "session expired" overlay. The decision
@@ -59,8 +67,10 @@ const FIX_SHIP_TS = Date.parse('2026-06-04T00:00:00Z')
  */
 export function registerConversationHealer(
   db: SlayzoneDb,
-  notifyRenderer: (change?: TasksChange) => void
+  notifyRenderer: (change?: TasksChange) => void,
+  deps: ConversationHealerDeps
 ): void {
+  const { getCurrentBranch } = deps
   setConversationHealer(async ({ taskId, mode, cwd, storedId }: ConversationHealRequest) => {
     // Only claude-code persists transcripts at the path we read.
     if (mode !== 'claude-code') return { id: storedId, healed: false }

@@ -528,7 +528,11 @@ import {
   taskWindowsOps,
   taskWindowsEvents
 } from './task-windows'
-import { closeGitWatcher } from '@slayzone/worktrees/server'
+import {
+  closeGitWatcher,
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters
+} from '@slayzone/worktrees/server'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/shared'
 import {
   registerDiagnosticsHandlers,
@@ -2133,7 +2137,10 @@ app
       // app.getPath('userData') — post-migration artifacts live under
       // <hub-root>/artifacts, so a userData-based root would strand deleted-task
       // artifact cleanup at the empty legacy dir.
-      getDataRoot: () => getStorageDir()
+      getDataRoot: () => getStorageDir(),
+      // In-process worktree impls (task owns the seams; worktrees builds on task).
+      worktrees: defaultWorktreeExecAdapters,
+      worktreePolicy: defaultWorktreePolicyAdapters
     })
     // Wire the cross-domain terminal seam so server-pure callers (integrations
     // sync) reach the real pty-killing impl.

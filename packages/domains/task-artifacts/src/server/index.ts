@@ -1,3 +1,4 @@
+export * from './artifact-store'
 export * from './blob-store'
 export * from './db'
 export * from './diff'

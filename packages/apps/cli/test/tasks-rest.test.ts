@@ -24,6 +24,10 @@ import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { configureTaskRuntimeAdapters } from '../../../domains/task/src/server/ops/shared.js'
+import {
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters
+} from '../../../domains/worktrees/src/server/task-adapters.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../shared/test-utils/mock-electron.js'
@@ -90,7 +94,12 @@ mod.runMigrations(db)
 // the task runtime adapter — wrap the raw connection + configure the adapter so
 // the mounted routes don't 500 (which would make the CLI subprocess exit 1).
 const slayDb = createSlayzoneDbAdapter(db)
-configureTaskRuntimeAdapters({ getDataRoot: () => tmpDir })
+configureTaskRuntimeAdapters({
+  getDataRoot: () => tmpDir,
+  // The in-process worktree impls a composition root injects (task owns the seams).
+  worktrees: defaultWorktreeExecAdapters,
+  worktreePolicy: defaultWorktreePolicyAdapters
+})
 
 const projectId = crypto.randomUUID()
 db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(

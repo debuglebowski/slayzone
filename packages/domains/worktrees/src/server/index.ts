@@ -107,6 +107,9 @@ export {
   __resetForTests as resetWorktreeColorsForTest
 } from './color-registry'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
+// In-process implementations of task's injected worktree seams — passed to
+// `configureTaskRuntimeAdapters` by the composition roots.
+export { defaultWorktreeExecAdapters, defaultWorktreePolicyAdapters } from './task-adapters'
 export type { GitDiffChangedPayload } from './git-watcher'
 export { worktreesEvents, type WorktreesEventMap } from './events'
 // Composite orchestrations + behavior resolvers shared with the IPC handlers.

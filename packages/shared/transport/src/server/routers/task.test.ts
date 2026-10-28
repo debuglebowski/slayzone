@@ -45,6 +45,10 @@ import {
   handleAttentionTransition,
   taskEvents
 } from '@slayzone/task/server'
+import {
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters
+} from '@slayzone/worktrees/server'
 
 const h = await createTestHarness()
 setTaskDeps({ ops: taskOps })
@@ -54,7 +58,12 @@ const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-task-')) 
 // (separate from ctx.dataRoot) — point it at the test tmp dir. EVERY later
 // reconfigure must re-include this getDataRoot (configureTaskRuntimeAdapters
 // replaces the whole adapter set), else archive/cleanup throws.
-const baseAdapters = { getDataRoot: () => ctx.dataRoot }
+const baseAdapters = {
+  getDataRoot: () => ctx.dataRoot,
+  // The in-process worktree impls a composition root injects (task owns the seams).
+  worktrees: defaultWorktreeExecAdapters,
+  worktreePolicy: defaultWorktreePolicyAdapters
+}
 configureTaskRuntimeAdapters(baseAdapters)
 const caller = taskRouter.createCaller(ctx)
 

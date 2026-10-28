@@ -6,8 +6,8 @@ import {
   assertHubLocalExecEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
+import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import {
-  createArtifactStore,
   artifactWatcherEvents,
   downloadArtifactFile,
   downloadArtifactFolder,

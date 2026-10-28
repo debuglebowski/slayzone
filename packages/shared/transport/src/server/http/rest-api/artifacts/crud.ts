@@ -1,5 +1,5 @@
 import type { Express, Response } from 'express'
-import { createArtifactStore } from '@slayzone/task/server'
+import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
@@ -10,7 +10,7 @@ import { createArtifactFromStream } from './content'
 /**
  * Artifact + folder metadata CRUD. Mirrors the metadata half of `slay tasks
  * artifacts` (cli/src/commands/tasks/artifacts.ts), reusing the shared artifact
- * store (@slayzone/task/server) — the exact ops behind the app's own artifact
+ * store (@slayzone/task-artifacts/server) — the exact ops behind the app's own artifact
  * flows (worker `namedTxn`s that also place/version the file on disk):
  *
  * - GET    /api/artifacts/:id           single-artifact metadata by id prefix

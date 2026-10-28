@@ -30,12 +30,11 @@ import superjson from 'superjson'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   configureTaskRuntimeAdapters,
-  createArtifactStore,
   downloadArtifactFolder,
   taskOps,
   type ArtifactDownloadHost
 } from '@slayzone/task/server'
-import { BlobStore } from '@slayzone/task-artifacts/server'
+import { BlobStore, createArtifactStore } from '@slayzone/task-artifacts/server'
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../test-utils/rest-harness.js'
