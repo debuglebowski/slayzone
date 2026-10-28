@@ -42,3 +42,11 @@ export const templateRouter = router({
     .input(z.object({ projectId: z.string(), templateId: z.string().nullable() }))
     .mutation(({ ctx, input }) => setDefaultTemplate(ctx.db, input.projectId, input.templateId))
 })
+
+export type TemplateRouter = typeof templateRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `templateRouter` at
+ * `template` and asserts the slice in its `router.ts`.
+ */
+export type TemplateMounts = { template: TemplateRouter }

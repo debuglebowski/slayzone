@@ -6,7 +6,11 @@
 
 export { taskEvents, agentSessionsEvents } from './events'
 export type { TaskEventMap, AgentSessionsEventMap } from './events'
-export { agentSessionsRouter } from './agent-sessions-router'
+export {
+  agentSessionsRouter,
+  type AgentSessionsRouter,
+  type AgentSessionsMounts
+} from './agent-sessions-router'
 
 export {
   artifactWatcherEvents,
@@ -25,7 +29,7 @@ export {
   deleteTemplate,
   setDefaultTemplate
 } from './template-store'
-export { templateRouter } from './template-router'
+export { templateRouter, type TemplateRouter, type TemplateMounts } from './template-router'
 
 // The artifact store (createArtifactStore / parseArtifact / parseFolder) and its
 // worker txns live in `task-artifacts/server` + `/db`.
