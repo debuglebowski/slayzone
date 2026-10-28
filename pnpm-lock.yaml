@@ -269,6 +269,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/processes':
+        specifier: workspace:*
+        version: link:../../domains/processes
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
@@ -1668,6 +1671,15 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../terminal-contracts
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: ^24.19.0

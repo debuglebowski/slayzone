@@ -27,13 +27,13 @@ import {
   getChatDeps,
   getMenuEvents,
   getNotifyEvents,
-  getProcessesDeps,
   getPtyDeps,
   type AppRouter
 } from '@slayzone/api'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import { getAgentLifecycleEvents } from '@slayzone/terminal/server'
+import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
 import { settingsEvents } from '@slayzone/settings/server'
 // Not a dependency of the hub app; reached by path so it is the SAME module instance

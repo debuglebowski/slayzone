@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getProcessesDeps } from '../app-deps'
+import { getProcessesDeps } from './processes-deps'
 
 /** Far past any real value (a label is a tab title, a command one shell line, a cwd a
  *  path, Windows long paths included): only a client sending junk reaches them. */

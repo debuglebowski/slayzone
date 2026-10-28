@@ -584,7 +584,8 @@ import {
   killAllProcesses,
   shutdownAllProcesses,
   processEvents,
-  createStatsPoller
+  createStatsPoller,
+  setProcessesDeps
 } from '@slayzone/processes/server'
 import { notifyEvents } from './notify-renderer'
 import { presentWindow } from './present-window'
@@ -2574,7 +2575,7 @@ app
             // Process-manager lifecycle ops + the dual-emit event stream for the
             // processes router. Same module-singleton ops/emitter the IPC handlers
             // delegate to → one implementation, both transports (slice 5 cutover).
-            mod.setProcessesDeps({
+            setProcessesDeps({
               create: createProcess,
               spawn: spawnProcess,
               update: updateProcess,

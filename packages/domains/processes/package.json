@@ -18,6 +18,9 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/terminal": "workspace:*",
-    "@slayzone/terminal-contracts": "workspace:*"
+    "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "zod": "^4.3.5"
   }
 }

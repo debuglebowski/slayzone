@@ -17,7 +17,6 @@ import {
 import {
   setTaskDeps,
   setIntegrationOps,
-  setProcessesDeps,
   setNotifyEvents,
   setAutomationsEvents,
   setMenuEvents,
@@ -141,7 +140,8 @@ import {
   listAllProcesses,
   subscribeToProcessLogs,
   setProjectCwdResolver,
-  killAllProcesses
+  killAllProcesses,
+  setProcessesDeps
 } from '@slayzone/processes/server'
 import { createLocalWorkspaceFs, closeAllFileWatchers } from '@slayzone/file-editor/server'
 import {

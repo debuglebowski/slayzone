@@ -64,7 +64,6 @@ export {
   type BackupOps,
   type FloatingAgentState
 } from './app-deps'
-export { setProcessesDeps, getProcessesDeps, type ProcessesDeps } from './app-deps'
 export {
   setComputersDeps,
   getComputersDeps,
