@@ -21,8 +21,8 @@ export function useUsageAnalytics() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [range, setRange] = useState<DateRange>('30d')
-  const [selectedProvider, setSelectedProvider] = useState<string>(ALL_PROVIDERS)
-  const [defaultApplied, setDefaultApplied] = useState(false)
+  // The provider the user picked in the filter; null until they pick one.
+  const [pickedProvider, setSelectedProvider] = useState<string | null>(null)
 
   // Enabled modes + persisted default provider.
   const modesQuery = useQuery(trpc.pty.modesList.queryOptions())
@@ -41,15 +41,14 @@ export function useUsageAnalytics() {
       }))
   }, [modesQuery.data])
 
-  // Apply the persisted default provider once, after options + default load.
-  useEffect(() => {
-    if (defaultApplied || !settingsLoaded) return
-    const defaultMode = defaultModeQuery.data
-    if (defaultMode && providerOptions.some((o) => o.id === defaultMode)) {
-      setSelectedProvider(defaultMode)
-    }
-    setDefaultApplied(true)
-  }, [defaultApplied, settingsLoaded, defaultModeQuery.data, providerOptions])
+  // Until the user picks one, the filter shows the persisted default agent — once
+  // options + default load, and only while it is an enabled agent; else "All".
+  const defaultMode = defaultModeQuery.data
+  const defaultProvider =
+    settingsLoaded && defaultMode && providerOptions.some((o) => o.id === defaultMode)
+      ? defaultMode
+      : ALL_PROVIDERS
+  const selectedProvider = pickedProvider ?? defaultProvider
 
   const providerSupported =
     selectedProvider === ALL_PROVIDERS ||

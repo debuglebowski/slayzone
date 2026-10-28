@@ -839,6 +839,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/usePanelOwnership.test.tsx \
   packages/domains/app-shell/src/client/useExplodeMode.test.tsx \
   packages/domains/home/src/client/useHomePanelVisibility.test.tsx \
+  packages/domains/usage-analytics/src/client/useUsageAnalytics.test.tsx \
   packages/domains/task/src/client/TaskProgressPopover.test.tsx \
   packages/domains/task/src/client/WebPanelView.test.tsx \
   packages/domains/tasks/src/client/useKanbanSelectionKeyboard.test.tsx \
