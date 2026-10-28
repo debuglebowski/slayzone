@@ -209,4 +209,58 @@ describe('useExplodeMode', () => {
     expect(result.current.restoreExplodeTask).toBe(restoreExplodeTask)
     expect(result.current.restoreAllExplodeTasks).toBe(restoreAllExplodeTasks)
   })
+
+  it('setExplodeMode keeps one identity across renders and accepts an updater', () => {
+    const { result, rerender } = setup(['a', 'b', 'c'])
+    const { setExplodeMode } = result.current
+    act(() => result.current.setExplodeMode((prev) => !prev))
+    expect(result.current.explodeMode).toBe(true)
+    rerender({ ids: ['a', 'b', 'c', 'd'] })
+    expect(result.current.setExplodeMode).toBe(setExplodeMode)
+    act(() => result.current.setExplodeMode((prev) => !prev))
+    expect(result.current.explodeMode).toBe(false)
+  })
+
+  // Every render the shell would draw, as [open task count, explodeMode, focused cell].
+  function setupRecorded(initial: string[]) {
+    const seen: Array<[number, boolean, string | null]> = []
+    const hook = renderHook(
+      (p: { ids: string[] }) => {
+        const r = useExplodeMode(p.ids)
+        seen.push([p.ids.length, r.explodeMode, r.focusedExplodeTaskId])
+        return r
+      },
+      { initialProps: { ids: initial } }
+    )
+    hook.result.current.explodeGridRef.current = grid
+    return { ...hook, seen }
+  }
+
+  it('closing down to one task never draws the grid with one task', () => {
+    const { result, rerender, seen } = setupRecorded(['a', 'b'])
+    act(() => result.current.setExplodeMode(true))
+    seen.length = 0
+    rerender({ ids: ['a'] })
+    expect(result.current.explodeMode).toBe(false)
+    expect(seen.filter(([n, on]) => on && n < 2)).toEqual([])
+  })
+
+  it('entering explode mode draws the focused cell from the first frame', () => {
+    const { result, seen } = setupRecorded(['a', 'b', 'c'])
+    seen.length = 0
+    act(() => result.current.setExplodeMode(true))
+    expect(seen.filter(([, on, focused]) => on && focused === null)).toEqual([])
+    expect(result.current.focusedExplodeTaskId).toBe('b')
+  })
+
+  // Behaviour change (approved): the replacement for a closed focused cell is the tab
+  // that was active when explode mode was entered, not the active tab at close time.
+  it('a closed focused cell is replaced by the tab active on entry', () => {
+    const { result, rerender } = setup(['a', 'b', 'c'])
+    act(() => result.current.setExplodeMode(true))
+    focusCell('c')
+    store = { ...store, activeTabIndex: 1 } // 'a', switched while in explode mode
+    rerender({ ids: ['a', 'b'] })
+    expect(result.current.focusedExplodeTaskId).toBe('b')
+  })
 })

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -55,12 +56,16 @@ function restoreAllExplodeTasks(): void {
 // the grid ref, the responsive grid size, and the user's arrangement (order +
 // which terminals are parked in the header tray). Effects keep all of it in sync
 // with the open task tabs. Blind to the active tab index on purpose: the shell that
-// calls it must not re-render on a tab switch (the seed reads the store instead).
+// calls it must not re-render on a tab switch (the seed reads the store instead, at the
+// toggle — never while rendering).
 export function useExplodeMode(openTaskIds: string[]): ExplodeModeApi {
-  const [explodeMode, setExplodeMode] = useState(false)
+  const [explodeModeRequested, setExplodeModeRequested] = useState(false)
   // In explode mode, tracks which grid cell owns keyboard shortcuts (Cmd+D etc.).
   // Null outside explode mode. Updated via focusin bubble on the grid wrapper.
-  const [focusedExplodeTaskId, setFocusedExplodeTaskId] = useState<string | null>(null)
+  const [focusedCell, setFocusedExplodeTaskId] = useState<string | null>(null)
+  // The task tab that was active at the last toggle: the cell focused on entry, and
+  // the replacement when the focused cell closes or is minimized.
+  const [seedTaskId, setSeedTaskId] = useState<string | null>(null)
   const explodeGridRef = useRef<HTMLDivElement | null>(null)
   const [explodeGridWidth, setExplodeGridWidth] = useState(0)
   const [explodeGridHeight, setExplodeGridHeight] = useState(0)
@@ -71,10 +76,17 @@ export function useExplodeMode(openTaskIds: string[]): ExplodeModeApi {
   const order = useTabStore((s) => s.explodeOrder)
   const minimizedList = useTabStore((s) => s.explodeMinimized)
 
-  // Auto-disable explode mode when fewer than 2 task tabs
-  useEffect(() => {
-    if (openTaskIds.length < 2) setExplodeMode(false)
-  }, [openTaskIds.length])
+  // Explode mode turns itself off below 2 task tabs, and stays off when tabs come
+  // back. Gated here too, so not even the render that turns it off shows the grid.
+  if (explodeModeRequested && openTaskIds.length < 2) setExplodeModeRequested(false)
+  const explodeMode = explodeModeRequested && openTaskIds.length >= 2
+
+  const setExplodeMode = useCallback<Dispatch<SetStateAction<boolean>>>((action) => {
+    const { tabs, activeTabIndex } = useTabStore.getState()
+    const activeTab = tabs[activeTabIndex]
+    setSeedTaskId(activeTab?.type === 'task' ? activeTab.taskId : null)
+    setExplodeModeRequested(action)
+  }, [])
 
   // Drop tray entries for tasks that are no longer open, so a closed-then-reopened
   // task comes back visible instead of invisibly stuck in the tray.
@@ -108,27 +120,22 @@ export function useExplodeMode(openTaskIds: string[]): ExplodeModeApi {
     })
   }
 
-  // No focused explode cell outside explode mode: cleared while rendering, and only when
-  // set, so a tab switch never re-renders the whole shell. Every reader gates the cell on
-  // `explodeMode`, so this changes no rendered output; it also clears a focusin that lands
-  // before the grid listener below is removed.
-  if (!explodeMode && focusedExplodeTaskId !== null) setFocusedExplodeTaskId(null)
-
-  // Seed the focused explode cell on entering explode mode; keep it valid as tabs change.
-  // A minimized task must never hold focus — its cell is gone, so shortcuts would
-  // route to a terminal the user cannot see.
-  useEffect(() => {
-    if (!explodeMode) return
-    setFocusedExplodeTaskId((prev) => {
-      if (prev && explodeVisibleTaskIds.includes(prev)) return prev
-      const { tabs, activeTabIndex } = useTabStore.getState()
-      const activeTab = tabs[activeTabIndex]
-      if (activeTab?.type === 'task' && explodeVisibleTaskIds.includes(activeTab.taskId)) {
-        return activeTab.taskId
-      }
-      return explodeVisibleTaskIds[0] ?? null
-    })
-  }, [explodeMode, explodeVisibleTaskIds])
+  // The focused cell, corrected while rendering (and stored only when it changes, so a
+  // tab switch never re-renders the whole shell). Outside explode mode: none — this
+  // also clears a focusin that lands before the grid listener below is removed. Inside:
+  // kept while its cell is in the grid, else the seed tab, else the first cell. A
+  // minimized task must never hold focus — its cell is gone, so shortcuts would route
+  // to a terminal the user cannot see.
+  const inGrid = (id: string | null): id is string =>
+    id !== null && explodeVisibleTaskIds.includes(id)
+  const focusedExplodeTaskId = !explodeMode
+    ? null
+    : inGrid(focusedCell)
+      ? focusedCell
+      : inGrid(seedTaskId)
+        ? seedTaskId
+        : (explodeVisibleTaskIds[0] ?? null)
+  if (focusedExplodeTaskId !== focusedCell) setFocusedExplodeTaskId(focusedExplodeTaskId)
 
   // Delegated focusin: bubble from xterm / editor / browser → grid cell; resolve task id.
   useEffect(() => {
