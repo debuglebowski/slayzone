@@ -10,9 +10,13 @@ import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
 import { taskPanels } from './taskPanels'
+import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSettingsTabs'
+import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 
 // Artifacts + git panels TaskDetailPage embeds — registered before any render.
 registerTaskPanels(taskPanels)
+// Settings' tag editor ProjectSettingsDialog embeds — registered before any render.
+registerProjectSettingsTabs({ TagsSettingsTab })
 import { OverlayDialogApp } from './OverlayDialogApp'
 
 // window.api shim is installed by the shell before this module evaluates

@@ -13,7 +13,7 @@ import { IntegrationsTab } from './IntegrationsTab'
 import { TestsTab } from '@slayzone/test-panel/client'
 import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
-import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
+import { getProjectSettingsTabs } from './ProjectSettingsTabs'
 import { useDetectedRepos } from './useDetectedRepos'
 import { TasksGeneralTab } from './TasksGeneralTab'
 
@@ -228,7 +228,7 @@ export function ProjectSettingsDialog({
             />
           )}
 
-          {activeTab === 'tasks/tags' && project && <TagsSettingsTab projectId={project.id} />}
+          {activeTab === 'tasks/tags' && project && <RegisteredTagsTab projectId={project.id} />}
 
           {activeTab === 'templates' && project && renderTemplatesTab?.(project.id)}
 
@@ -250,4 +250,10 @@ export function ProjectSettingsDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+/** The app-registered tag editor (see ProjectSettingsTabs.ts). */
+function RegisteredTagsTab({ projectId }: { projectId: string }) {
+  const { TagsSettingsTab } = getProjectSettingsTabs()
+  return <TagsSettingsTab projectId={projectId} />
 }

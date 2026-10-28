@@ -83,9 +83,12 @@ vi.mock('./WorktreesTab', () => ({ WorktreesTab: () => null }))
 vi.mock('./ReposTab', () => ({ ReposTab: () => null }))
 vi.mock('./TasksGeneralTab', () => ({ TasksGeneralTab: () => null }))
 vi.mock('@slayzone/test-panel/client', () => ({ TestsTab: () => null }))
-vi.mock('@slayzone/settings/client/tabs/TagsSettingsTab', () => ({ TagsSettingsTab: () => null }))
 
 import { ProjectSettingsDialog } from './ProjectSettingsDialog'
+import { registerProjectSettingsTabs } from './ProjectSettingsTabs'
+
+// The app registers settings' tag editor; stub the slot.
+registerProjectSettingsTabs({ TagsSettingsTab: () => null })
 
 const project = (id: string) => ({ id, path: `/tmp/${id}` }) as unknown as Project
 const ui = (p: Project | null, open = true) => (

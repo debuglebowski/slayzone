@@ -31,7 +31,6 @@
   "@slayzone/integrations -> @slayzone/terminal",
   "@slayzone/projects -> @slayzone/file-editor",
   "@slayzone/projects -> @slayzone/integrations",
-  "@slayzone/projects -> @slayzone/settings",
   "@slayzone/projects -> @slayzone/telemetry",
   "@slayzone/projects -> @slayzone/test-panel",
   "@slayzone/projects -> @slayzone/transport",

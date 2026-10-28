@@ -11,7 +11,8 @@
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
-    "./client/useDetectedRepos": "./src/client/useDetectedRepos.ts"
+    "./client/useDetectedRepos": "./src/client/useDetectedRepos.ts",
+    "./client/ProjectSettingsTabs": "./src/client/ProjectSettingsTabs.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -22,7 +23,6 @@
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/transport": "workspace:*",

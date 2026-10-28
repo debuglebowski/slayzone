@@ -1675,9 +1675,6 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
