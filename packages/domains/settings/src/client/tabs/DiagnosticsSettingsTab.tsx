@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@slayzone/ui'
-import type { DiagnosticsConfig } from '@slayzone/types'
+import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DiagnosticsSettingsTab() {

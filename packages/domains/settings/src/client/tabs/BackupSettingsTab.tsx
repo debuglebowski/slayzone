@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
   toast
 } from '@slayzone/ui'
-import type { BackupInfo, BackupSettings } from '@slayzone/types'
+import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 

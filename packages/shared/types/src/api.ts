@@ -290,20 +290,8 @@ export interface LocalComputerStatus {
   unspawnedReason: string | null
 }
 
-export interface BackupInfo {
-  filename: string
-  name: string
-  timestamp: string
-  type: 'auto' | 'manual' | 'migration'
-  sizeBytes: number
-}
-
-export interface BackupSettings {
-  autoEnabled: boolean
-  intervalMinutes: number
-  maxAutoBackups: number
-  nextBackupNumber: number
-}
+import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
+export type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 
 import type { LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
@@ -343,12 +331,8 @@ export type ProcessEventMap = {
   stats: [stats: Record<string, ProcessStats>]
 }
 
-export interface DiagnosticsConfig {
-  enabled: boolean
-  verbose: boolean
-  includePtyOutput: boolean
-  retentionDays: number
-}
+import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
+export type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 
 export interface DiagnosticsExportRequest {
   fromTsMs: number
