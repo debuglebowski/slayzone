@@ -16,3 +16,11 @@ export const telemetryRouter = router({
     })
   )
 })
+
+export type TelemetryRouter = typeof telemetryRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `telemetryRouter` at
+ * `telemetry` and asserts the slice in its `router.ts`.
+ */
+export type TelemetryMounts = { telemetry: TelemetryRouter }
