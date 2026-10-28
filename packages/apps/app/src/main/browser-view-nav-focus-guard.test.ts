@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { NAV_FOCUS_RECLAIM_MS, NavFocusGuard, type FocusOwner } from './browser-view-nav-focus-guard'
+import {
+  NAV_FOCUS_RECLAIM_MS,
+  NavFocusGuard,
+  type FocusOwner
+} from './browser-view-nav-focus-guard'
 
 const VIEW_ID = 7
 const terminalOwner: FocusOwner = { id: 1, isDestroyed: () => false }
