@@ -805,6 +805,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
   packages/domains/automations/src/client/automation-dialog/AutomationDialog.test.tsx \
+  packages/domains/feedback/src/client/FeedbackDialog.test.tsx \
   packages/domains/search/src/SearchDialog.test.tsx \
   packages/domains/file-editor/src/client/SearchPanel.test.tsx \
   packages/domains/file-editor/src/client/useFileTreeData.test.tsx \

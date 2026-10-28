@@ -83,15 +83,16 @@ export function FeedbackDialog(): React.JSX.Element {
     [trpcClient]
   )
 
-  useEffect(() => {
-    if (open) {
-      loadThreads()
-      setSelectedId(null)
-      setMessages([])
-      setComposingNew(false)
-      setContent('')
-    }
-  }, [open, loadThreads])
+  // Every open starts on the start screen with a fresh thread list — reset in the
+  // click that opens (the only way in), not in an effect on `open`.
+  const handleOpen = () => {
+    setSelectedId(null)
+    setMessages([])
+    setComposingNew(false)
+    setContent('')
+    loadThreads()
+    setOpen(true)
+  }
 
   // Selecting a thread leaves compose-new mode — adjusted during render on the
   // same trigger as the load effect below.
@@ -224,7 +225,7 @@ export function FeedbackDialog(): React.JSX.Element {
             aria-label="Feedback"
             variant="ghost"
             size="icon-lg"
-            onClick={() => setOpen(true)}
+            onClick={handleOpen}
             className="rounded-lg text-muted-foreground"
           >
             <MessageSquare className="size-5" />

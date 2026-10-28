@@ -9,9 +9,9 @@ import {
 
 const repoRoot = resolve(__dirname, '../../..')
 
-// Mirrors the '@' alias in electron.vite.config.ts — needed so renderer files
-// that import via '@/...' (the standard convention for this package) can be
-// unit tested at all.
+// Mirrors the '@' and 'convex/_generated' aliases in electron.vite.config.ts —
+// needed so renderer files that import via '@/...' (the standard convention for
+// this package) or the Convex api can be unit tested at all.
 export default defineConfig({
   // The React Compiler, set up exactly as the renderer build (electron.vite.config.ts)
   // runs it: the jsdom suites must test components compiled the way they ship.
@@ -19,7 +19,8 @@ export default defineConfig({
   plugins: [react(), reactCompilerPlugin(), fsModuleCacheResolutionKey(repoRoot)],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src/renderer/src')
+      '@': resolve(__dirname, 'src/renderer/src'),
+      'convex/_generated': resolve(repoRoot, 'convex/_generated')
     }
   },
   // Transforms persist between runs (the compiler pass was most of these suites' time).
