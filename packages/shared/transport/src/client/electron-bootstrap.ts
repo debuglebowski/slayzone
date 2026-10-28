@@ -1,4 +1,6 @@
-import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
+import type { ElectronAPI } from '@slayzone/types'
+import type { HubEntry } from '@slayzone/platform/hub-registry'
+import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
 declare global {
   interface Window {

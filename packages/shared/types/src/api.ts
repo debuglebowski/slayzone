@@ -273,22 +273,8 @@ export interface BrowserShortcutPayload {
   kind?: string
 }
 
-/**
- * Why the desktop app's own supervised computer is (not) connected — Settings →
- * Computers' "Not running" row. The hub only sees that it never enrolled; the
- * cause (it crashes at startup, its join token could not be minted) lives with
- * the supervisor in the main process.
- */
-export interface LocalComputerStatus {
-  /** A computer process is alive right now. */
-  running: boolean
-  /** Supervision gave up (only a manual start recovers); null while running or retrying. */
-  stalled: 'backoff-exhausted' | 'needs-re-enrollment' | null
-  /** Its most recent unrequested exit; `reason` is the dying output's error line. */
-  lastExit: { code: number | null; signal: string | null; at: number; reason: string } | null
-  /** Set when it was never spawned at all. */
-  unspawnedReason: string | null
-}
+import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
+export type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 export type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
@@ -390,32 +376,9 @@ export interface PtyCreateOptions {
   rows?: number
 }
 
-/**
- * Multi-hub federation (client-side hub registry).
- *
- * A "hub" is a full data server: it owns a SQLite DB + all routers/auth. The
- * client can connect to several at once and merges their projects into one flat
- * rail. A project belongs to exactly one hub (the DB it lives in) — there is no
- * user-facing "active hub".
- *
- * The registry lives in the pre-boot `client.boot.json` (a hub can't store the
- * list of hubs — it may be down), so this contract is shared between the main
- * process (boot-config) and the renderer (via the `app:get-hub-registry` IPC).
- */
-export type HubKind = 'local' | 'remote'
-
-export interface HubEntry {
-  /** Stable id — the `'local'` sentinel for the co-located sidecar; for a remote
-   * hub `hub:<url>`, or `remote-legacy` for a migrated pre-multi-hub remote. */
-  id: string
-  kind: HubKind
-  /** User-facing display name. */
-  label: string
-  /** Canonical ws(s)://host[:port]/trpc URL. Absent for local (resolved at
-   * runtime from the live sidecar port). A remote wss:// hub's certificate is
-   * verified the normal way (CA chain + hostname) — nothing is pinned. */
-  url?: string
-}
+// Multi-hub federation (client-side hub registry) — defined in @slayzone/platform.
+import type { HubEntry } from '@slayzone/platform/hub-registry'
+export type { HubKind, HubEntry } from '@slayzone/platform/hub-registry'
 
 // Bootstrap-only preload contract. Domain/backend calls use tRPC over WebSocket.
 export interface ElectronAPI {

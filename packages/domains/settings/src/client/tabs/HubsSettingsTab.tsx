@@ -5,7 +5,7 @@ import {
   useFederationOrNull,
   HubScope
 } from '@slayzone/transport/client'
-import type { HubEntry } from '@slayzone/types'
+import type { HubEntry } from '@slayzone/platform/hub-registry'
 import {
   Button,
   DropdownMenu,

@@ -59,6 +59,11 @@ export {
 // Multi-hub discovery. Also available as the lean `@slayzone/platform/hub-discovery`
 // subpath — prefer that from a bundle that must not pull this barrel.
 export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from './hub-discovery'
+// Client-side hub registry + local computer status contracts. Also the lean
+// `@slayzone/platform/hub-registry` and `/local-computer-status` subpaths —
+// prefer those from renderer bundles.
+export type { HubKind, HubEntry } from './hub-registry'
+export type { LocalComputerStatus } from './local-computer-status'
 export {
   ENV_MANIFEST,
   NON_PREFIXED_INFRA,

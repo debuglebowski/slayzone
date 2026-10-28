@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { HubEntry } from '@slayzone/types'
+import type { HubEntry } from '@slayzone/platform/hub-registry'
 
 /**
  * Live hub registry — the reactive counterpart to the one-shot boot read.

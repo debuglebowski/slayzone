@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
-import type { HubEntry } from '@slayzone/types'
+import type { HubEntry } from '@slayzone/platform/hub-registry'
 import { getOrCreateHubClient, type HubWsClient } from './trpc'
 import { makeQueryClient } from './provider'
 import { useHubRegistryStore } from './hubRegistryStore'
