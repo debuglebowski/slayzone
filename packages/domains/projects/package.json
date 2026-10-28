@@ -26,10 +26,12 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
-    "lucide-react": "^1.48.0"
+    "lucide-react": "^1.48.0",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "react": "^19.3.1"

@@ -20,6 +20,7 @@ export {
   reorderProjectsInGroup,
   type ProjectGroupsSnapshot
 } from './project-groups-store'
+export { projectGroupsRouter } from './project-groups-router'
 export { handleTerminalStateChange } from './task-automation'
 export {
   mayAccessProject,

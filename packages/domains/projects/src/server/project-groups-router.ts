@@ -8,7 +8,7 @@ import {
   moveProjectToGroup,
   reorderTopLevel,
   reorderProjectsInGroup
-} from '@slayzone/projects/server'
+} from './project-groups-store'
 import type { TopLevelEntryRef } from '@slayzone/projects-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
