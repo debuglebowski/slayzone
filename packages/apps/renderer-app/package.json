@@ -16,6 +16,7 @@
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/feedback": "workspace:*",
     "@slayzone/home": "workspace:*",
+    "@slayzone/integrations": "workspace:*",
     "@slayzone/layout": "workspace:*",
     "@slayzone/leaderboard": "workspace:*",
     "@slayzone/onboarding": "workspace:*",

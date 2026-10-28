@@ -1,7 +1,6 @@
 import { Inbox, CircleDashed, Circle, CircleDot, CircleCheck, CircleX } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { WorkflowCategory } from '@slayzone/projects-contracts'
-import type { IntegrationProvider } from '@slayzone/integrations/shared'
 
 export const CATEGORY_META: Record<WorkflowCategory, { label: string; icon: LucideIcon }> = {
   triage: { label: 'Triage', icon: Inbox },
@@ -21,42 +20,6 @@ export const STATUS_COLOR_BADGE: Record<string, string> = {
   green: 'bg-green-500/20 text-green-300',
   red: 'bg-red-500/20 text-red-300',
   orange: 'bg-orange-500/20 text-orange-300'
-}
-
-export function providerDisplayName(provider: IntegrationProvider): string {
-  return PROVIDER_CONFIG[provider]?.displayName ?? provider
-}
-
-export interface ProviderUiConfig {
-  displayName: string
-  groupLabel: string
-  scopeLabel: string
-  hasScopes: boolean
-  supportsTwoWay: boolean
-}
-
-export const PROVIDER_CONFIG: Record<IntegrationProvider, ProviderUiConfig> = {
-  linear: {
-    displayName: 'Linear',
-    groupLabel: 'Team',
-    scopeLabel: 'Project',
-    hasScopes: true,
-    supportsTwoWay: true
-  },
-  github: {
-    displayName: 'GitHub Projects',
-    groupLabel: 'Repository',
-    scopeLabel: 'Project',
-    hasScopes: true,
-    supportsTwoWay: false
-  },
-  jira: {
-    displayName: 'Jira',
-    groupLabel: 'Project',
-    scopeLabel: '',
-    hasScopes: false,
-    supportsTwoWay: true
-  }
 }
 
 export function SettingsTabIntro({ title, description }: { title: string; description: string }) {

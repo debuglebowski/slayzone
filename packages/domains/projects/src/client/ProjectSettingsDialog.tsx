@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
-import { type QueryClient, useQueryClient } from '@tanstack/react-query'
-import { electronBootstrap, useTRPC } from '@slayzone/transport/client'
+import { electronBootstrap } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, useDepsChanged } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects-contracts'
-import type { IntegrationProvider } from '@slayzone/integrations/shared'
 import { track } from '@slayzone/telemetry/client'
 import { GeneralTab } from './GeneralTab'
 import { EnvironmentTab } from './EnvironmentTab'
 import { ColumnsTab } from './ColumnsTab'
-import { IntegrationsTab } from './IntegrationsTab'
 import { TestsTab } from '@slayzone/test-panel/client'
 import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
-import { getProjectSettingsTabs } from './ProjectSettingsTabs'
+import {
+  getProjectSettingsTabs,
+  useStatusSyncLockLookup,
+  type IntegrationOnboardingProvider,
+  type IntegrationsSettingsTabProps
+} from './ProjectSettingsTabs'
 import { useDetectedRepos } from './useDetectedRepos'
 import { TasksGeneralTab } from './TasksGeneralTab'
 
@@ -35,35 +37,12 @@ interface ProjectSettingsDialogProps {
     | 'templates'
   groupBy?: 'none' | 'path' | 'label'
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
-  integrationOnboardingProvider?: IntegrationProvider | null
+  integrationOnboardingProvider?: IntegrationOnboardingProvider | null
   onIntegrationOnboardingHandled?: () => void
   onUpdated: (project: Project) => void
   /** In-place update without closing the dialog. Falls back to onUpdated if not provided. */
   onChanged?: (project: Project) => void
   renderTemplatesTab?: (projectId: string) => React.ReactNode
-}
-
-/** Which provider's status sync locks the project's statuses (null = none, or unknown). */
-async function fetchIntegrationLock(
-  queryClient: QueryClient,
-  trpc: ReturnType<typeof useTRPC>,
-  projectId: string
-): Promise<string | null> {
-  try {
-    const [linear, github] = await Promise.all([
-      queryClient.fetchQuery(
-        trpc.integrations.getProjectMapping.queryOptions({ projectId, provider: 'linear' })
-      ),
-      queryClient.fetchQuery(
-        trpc.integrations.getProjectMapping.queryOptions({ projectId, provider: 'github' })
-      )
-    ])
-    if (linear?.status_setup_complete) return 'Linear'
-    if (github?.status_setup_complete) return 'GitHub'
-    return null
-  } catch {
-    return null
-  }
 }
 
 export function ProjectSettingsDialog({
@@ -92,8 +71,7 @@ export function ProjectSettingsDialog({
     | 'integrations'
     | 'tests'
   >('general')
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
+  const lookupStatusSyncLock = useStatusSyncLockLookup()
   const detectedRepos = useDetectedRepos(open ? (project?.path ?? null) : null, project?.id)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
@@ -102,8 +80,8 @@ export function ProjectSettingsDialog({
       setLockedByProvider(null)
       return
     }
-    setLockedByProvider(await fetchIntegrationLock(queryClient, trpc, project.id))
-  }, [project, queryClient, trpc])
+    setLockedByProvider(await lookupStatusSyncLock(project.id))
+  }, [project, lookupStatusSyncLock])
 
   // Re-check whenever the dialog opens or its project changes. The no-project /
   // e2e branch needs no round-trip, so it is adjusted during render under the
@@ -111,23 +89,21 @@ export function ProjectSettingsDialog({
   const [lockCheckSeen, setLockCheckSeen] = useState<{
     open: boolean
     project: Project | null
-    queryClient: typeof queryClient
-    trpc: typeof trpc
+    lookupStatusSyncLock: typeof lookupStatusSyncLock
   } | null>(null)
   if (
     lockCheckSeen === null ||
     !Object.is(lockCheckSeen.open, open) ||
     !Object.is(lockCheckSeen.project, project) ||
-    !Object.is(lockCheckSeen.queryClient, queryClient) ||
-    !Object.is(lockCheckSeen.trpc, trpc)
+    !Object.is(lockCheckSeen.lookupStatusSyncLock, lookupStatusSyncLock)
   ) {
-    setLockCheckSeen({ open, project, queryClient, trpc })
+    setLockCheckSeen({ open, project, lookupStatusSyncLock })
     if (open && (!project || electronBootstrap.isPlaywright())) setLockedByProvider(null)
   }
   useEffect(() => {
     if (!open || !project || electronBootstrap.isPlaywright()) return
-    void fetchIntegrationLock(queryClient, trpc, project.id).then(setLockedByProvider)
-  }, [open, project, queryClient, trpc])
+    void lookupStatusSyncLock(project.id).then(setLockedByProvider)
+  }, [open, project, lookupStatusSyncLock])
 
   // Pick the tab while rendering (same triggers as an effect on these deps, incl.
   // mount), so opening never commits the previously active tab first — that
@@ -216,7 +192,7 @@ export function ProjectSettingsDialog({
           )}
 
           {activeTab === 'integrations' && project && (
-            <IntegrationsTab
+            <RegisteredIntegrationsTab
               project={project}
               open={open}
               onUpdated={(p) => {
@@ -256,4 +232,10 @@ export function ProjectSettingsDialog({
 function RegisteredTagsTab({ projectId }: { projectId: string }) {
   const { TagsSettingsTab } = getProjectSettingsTabs()
   return <TagsSettingsTab projectId={projectId} />
+}
+
+/** The app-registered Integrations tab (see ProjectSettingsTabs.ts). */
+function RegisteredIntegrationsTab(props: IntegrationsSettingsTabProps) {
+  const { IntegrationsTab } = getProjectSettingsTabs()
+  return <IntegrationsTab {...props} />
 }

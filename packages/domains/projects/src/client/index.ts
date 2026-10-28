@@ -5,7 +5,7 @@ export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'
 export { useDetectedRepos } from './useDetectedRepos'
-export { PROVIDER_CONFIG, type ProviderUiConfig } from './project-settings-shared'
+export { SettingsTabIntro } from './project-settings-shared'
 export {
   isRateLimited,
   recordTaskOpen,

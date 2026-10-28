@@ -1,1 +1,6 @@
-export {}
+export { IntegrationsTab } from './IntegrationsTab'
+export type { IntegrationsTabProps } from './IntegrationsTab.types'
+export { ProjectIntegrationConnectionModal } from './ProjectIntegrationConnectionModal'
+export { PROVIDER_CONFIG, providerDisplayName, type ProviderUiConfig } from './provider-config'
+export { fetchStatusSyncLock, useStatusSyncLockLookup } from './useStatusSyncLockLookup'
+export { integrationsProjectSettingsTabs } from './project-settings-tabs'

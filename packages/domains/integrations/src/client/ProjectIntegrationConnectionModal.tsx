@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
-import type { IntegrationProvider } from '@slayzone/integrations/shared'
+import { useTRPC } from './trpc'
+import type { IntegrationProvider } from '../shared'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Input } from '@slayzone/ui'
 
 interface ProjectIntegrationConnectionModalProps {

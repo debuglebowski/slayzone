@@ -918,6 +918,9 @@ importers:
       '@slayzone/home':
         specifier: workspace:*
         version: link:../../domains/home
+      '@slayzone/integrations':
+        specifier: workspace:*
+        version: link:../../domains/integrations
       '@slayzone/layout':
         specifier: workspace:*
         version: link:../../shared/layout
@@ -1650,9 +1653,15 @@ importers:
 
   packages/domains/integrations:
     dependencies:
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../projects
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
@@ -1665,15 +1674,30 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../terminal-contracts
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/trpc-server':
         specifier: workspace:*
         version: link:../../shared/trpc-server
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
       '@slayzone/workflow':
         specifier: workspace:*
         version: link:../../shared/workflow
+      '@tanstack/react-query':
+        specifier: ^5.104.0
+        version: 5.104.0(react@19.3.1)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
+      lucide-react:
+        specifier: ^1.48.0
+        version: 1.48.0(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
       zod:
         specifier: ^4.5.4
         version: 4.6.5
@@ -1681,6 +1705,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
 
   packages/domains/leaderboard:
     dependencies:
@@ -1789,9 +1816,6 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
-      '@slayzone/integrations':
-        specifier: workspace:*
-        version: link:../integrations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform

@@ -1,4 +1,4 @@
-import type { ImportGithubRepositoryIssuesResult } from '@slayzone/integrations/shared'
+import type { ImportGithubRepositoryIssuesResult } from '../shared'
 import type { ImportIssueSort, ProjectSyncSummary, TaskSyncRow } from './IntegrationsTab.types'
 
 export function summarizeSyncRows(rows: TaskSyncRow[]): ProjectSyncSummary {

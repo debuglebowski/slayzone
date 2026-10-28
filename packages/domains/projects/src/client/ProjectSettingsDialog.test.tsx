@@ -5,9 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import type { Project } from '@slayzone/projects-contracts'
 
-// Per-project, per-provider mapping the lock check reads.
-let mappings: Record<string, { status_setup_complete?: boolean } | null> = {}
-let fetchFails = false
+// Per-project provider whose status sync locks the project (the registered lookup's answer).
+let locks: Record<string, string> = {}
 let isPlaywright = false
 // Tabs that committed (ran their mount effects), in order.
 let mountedTabs: string[] = []
@@ -17,31 +16,13 @@ function useMountLog(name: string): void {
   }, [name])
 }
 
-const fetchQuery = vi.fn((opts: { input: { projectId: string; provider: string } }) =>
-  fetchFails
-    ? Promise.reject(new Error('offline'))
-    : Promise.resolve(mappings[`${opts.input.projectId}:${opts.input.provider}`] ?? null)
-)
+// The registered lookup (integrations' in the app). Stable, like the real hook's
+// result while its query client and hub client stay the same.
+const lookup = vi.fn((projectId: string) => Promise.resolve(locks[projectId] ?? null))
 
-// Like the real hooks (context values), both return the SAME object every render.
-vi.mock('@slayzone/transport/client', () => {
-  const trpc = {
-    integrations: {
-      getProjectMapping: { queryOptions: (input: unknown) => ({ input }) }
-    }
-  }
-  return {
-    electronBootstrap: { isPlaywright: () => isPlaywright },
-    useTRPC: () => trpc
-  }
-})
-
-vi.mock('@tanstack/react-query', () => {
-  const queryClient = {
-    fetchQuery: (opts: { input: { projectId: string; provider: string } }) => fetchQuery(opts)
-  }
-  return { useQueryClient: () => queryClient }
-})
+vi.mock('@slayzone/transport/client', () => ({
+  electronBootstrap: { isPlaywright: () => isPlaywright }
+}))
 
 type Kids = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', async () => ({
@@ -73,12 +54,6 @@ vi.mock('./EnvironmentTab', () => ({
     return null
   }
 }))
-vi.mock('./IntegrationsTab', () => ({
-  IntegrationsTab: () => {
-    useMountLog('integrations')
-    return null
-  }
-}))
 vi.mock('./WorktreesTab', () => ({ WorktreesTab: () => null }))
 vi.mock('./ReposTab', () => ({ ReposTab: () => null }))
 vi.mock('./TasksGeneralTab', () => ({ TasksGeneralTab: () => null }))
@@ -87,8 +62,15 @@ vi.mock('@slayzone/test-panel/client', () => ({ TestsTab: () => null }))
 import { ProjectSettingsDialog } from './ProjectSettingsDialog'
 import { registerProjectSettingsTabs } from './ProjectSettingsTabs'
 
-// The app registers settings' tag editor; stub the slot.
-registerProjectSettingsTabs({ TagsSettingsTab: () => null })
+// The app registers settings' tag editor and integrations' tab + lock lookup; stub the slots.
+registerProjectSettingsTabs({
+  TagsSettingsTab: () => null,
+  IntegrationsTab: () => {
+    useMountLog('integrations')
+    return null
+  },
+  useStatusSyncLockLookup: () => lookup
+})
 
 const project = (id: string) => ({ id, path: `/tmp/${id}` }) as unknown as Project
 const ui = (p: Project | null, open = true) => (
@@ -104,58 +86,44 @@ const lockText = () => screen.getByTestId('columns-lock').textContent
 
 beforeEach(() => {
   mountedTabs = []
-  mappings = {}
-  fetchFails = false
+  locks = {}
   isPlaywright = false
-  fetchQuery.mockClear()
+  lookup.mockClear()
 })
 
 afterEach(cleanup)
 
 describe('ProjectSettingsDialog status lock', () => {
-  it('reports the provider whose status sync is set up', async () => {
-    mappings = { 'p1:github': { status_setup_complete: true } }
+  // Which provider wins and how a failed lookup reads live with the lookup itself
+  // (@slayzone/integrations useStatusSyncLockLookup.test.ts).
+  it('reports the provider the lookup returns', async () => {
+    locks = { p1: 'GitHub' }
     render(ui(project('p1')))
     await waitFor(() => expect(lockText()).toBe('GitHub'))
-  })
-
-  it('prefers Linear when both are set up', async () => {
-    mappings = {
-      'p1:linear': { status_setup_complete: true },
-      'p1:github': { status_setup_complete: true }
-    }
-    render(ui(project('p1')))
-    await waitFor(() => expect(lockText()).toBe('Linear'))
+    expect(lookup).toHaveBeenCalledWith('p1')
   })
 
   it('re-checks when the project changes while open', async () => {
-    mappings = { 'p1:linear': { status_setup_complete: true } }
+    locks = { p1: 'Linear' }
     const { rerender } = render(ui(project('p1')))
     await waitFor(() => expect(lockText()).toBe('Linear'))
 
     rerender(ui(project('p2')))
     await waitFor(() => expect(lockText()).toBe('unlocked'))
-    expect(fetchQuery).toHaveBeenCalledWith({ input: { projectId: 'p2', provider: 'linear' } })
-  })
-
-  it('treats a failed lookup as unlocked', async () => {
-    fetchFails = true
-    render(ui(project('p1')))
-    await waitFor(() => expect(fetchQuery).toHaveBeenCalled())
-    expect(lockText()).toBe('unlocked')
+    expect(lookup).toHaveBeenCalledWith('p2')
   })
 
   it('does not look anything up while closed', () => {
     render(ui(project('p1'), false))
-    expect(fetchQuery).not.toHaveBeenCalled()
+    expect(lookup).not.toHaveBeenCalled()
   })
 
   it('skips the lookup under Playwright', async () => {
     isPlaywright = true
-    mappings = { 'p1:linear': { status_setup_complete: true } }
+    locks = { p1: 'Linear' }
     render(ui(project('p1')))
     await waitFor(() => expect(lockText()).toBe('unlocked'))
-    expect(fetchQuery).not.toHaveBeenCalled()
+    expect(lookup).not.toHaveBeenCalled()
   })
 })
 

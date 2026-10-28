@@ -18,6 +18,10 @@
   "packages/domains/ai-config/src/client/useSkillMarketplace.ts": ["useSkillMarketplace"],
   "packages/domains/automations/src/client/AutomationCard.tsx": ["AutomationCard"],
   "packages/domains/feedback/src/client/FeedbackDialog.tsx": ["FeedbackDialog"],
+  "packages/domains/integrations/src/client/ProjectIntegrationConnectionModal.tsx": [
+    "ProjectIntegrationConnectionModal"
+  ],
+  "packages/domains/integrations/src/client/useIntegrationsTab.ts": ["useIntegrationsTab"],
   "packages/domains/leaderboard/src/convexAuth.tsx": ["ConvexAuthBridge"],
   "packages/domains/leaderboard/src/useLeaderboardController.ts": ["useLeaderboardController"],
   "packages/domains/onboarding/src/client/CliInstallStep.tsx": ["CliInstallStep"],
@@ -26,11 +30,7 @@
   "packages/domains/projects/src/client/CreateProjectDialog.tsx": ["CreateProjectDialog"],
   "packages/domains/projects/src/client/EnvironmentTab.tsx": ["EnvironmentTab"],
   "packages/domains/projects/src/client/GeneralTab.tsx": ["GeneralTab"],
-  "packages/domains/projects/src/client/ProjectIntegrationConnectionModal.tsx": [
-    "ProjectIntegrationConnectionModal"
-  ],
   "packages/domains/projects/src/client/TasksGeneralTab.tsx": ["TasksGeneralTab"],
-  "packages/domains/projects/src/client/useIntegrationsTab.ts": ["useIntegrationsTab"],
   "packages/domains/projects/src/client/WorktreesTab.tsx": ["WorktreesTab"],
   "packages/domains/settings/src/client/CliInstallDialog.tsx": ["CliInstallDialog"],
   "packages/domains/settings/src/client/tabs/AboutSettingsTab.tsx": ["AboutSettingsTab"],

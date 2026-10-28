@@ -836,7 +836,9 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/editor/src/rich-text-editor.tab-switch.test.tsx \
   packages/domains/projects/src/client/ProjectSettingsDialog.test.tsx \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
-  packages/domains/projects/src/client/useIntegrationsTab.test.tsx \
+  packages/domains/integrations/src/client/useIntegrationsTab.test.tsx \
+  packages/domains/integrations/src/client/ProjectIntegrationConnectionModal.test.tsx \
+  packages/domains/integrations/src/client/useStatusSyncLockLookup.test.ts \
   packages/domains/task-artifacts/src/client/useArtifacts.test.tsx \
   packages/domains/task-browser/src/client/useBrowserPickElement.test.tsx \
   packages/domains/task-terminals/src/client/chat/autocomplete/useAutocomplete.test.tsx \

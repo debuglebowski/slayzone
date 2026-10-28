@@ -11,25 +11,34 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./project-settings-tabs": "./src/client/project-settings-tabs.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/host-capabilities": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/projects": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
+    "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",
-    "@slayzone/platform": "workspace:*",
+    "@tanstack/react-query": "^5.104.0",
+    "lucide-react": "^1.48.0",
     "zod": "^4.3.5"
   },
   "peerDependencies": {
-    "electron": "^45.0.0"
+    "electron": "^45.0.0",
+    "react": "^19.3.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0"
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/react": "^19.3.0"
   }
 }

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { Project } from '@slayzone/projects-contracts'
-import type { IntegrationProvider } from '@slayzone/integrations/shared'
+import type { IntegrationProvider } from '../shared'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void }
 function deferred<T>(): Deferred<T> {
@@ -46,7 +46,7 @@ const client = {
   }
 }
 
-vi.mock('@slayzone/transport/client', () => ({
+vi.mock('./trpc', () => ({
   useTRPCClient: () => client
 }))
 

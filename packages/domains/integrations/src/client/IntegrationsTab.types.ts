@@ -1,9 +1,5 @@
 import type { Project } from '@slayzone/projects-contracts'
-import type {
-  ExternalLink,
-  IntegrationProvider,
-  TaskSyncStatus
-} from '@slayzone/integrations/shared'
+import type { ExternalLink, IntegrationProvider, TaskSyncStatus } from '../shared'
 
 export type TaskSyncRow = {
   taskId: string

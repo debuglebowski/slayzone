@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { toast, depsChanged } from '@slayzone/ui'
 import type {
   GithubIssueSummary,
@@ -12,8 +12,8 @@ import type {
   LinearIssueSummary,
   LinearProject,
   LinearTeam
-} from '@slayzone/integrations/shared'
-import { providerDisplayName } from './project-settings-shared'
+} from '../shared'
+import { providerDisplayName } from './provider-config'
 import type {
   ImportIssueSort,
   IntegrationsTabProps,

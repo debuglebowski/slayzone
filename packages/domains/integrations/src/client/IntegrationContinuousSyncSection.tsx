@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Check, ExternalLink as ExternalLinkIcon, Info, Loader2, Pencil } from 'lucide-react'
 import {
   Button,
@@ -20,7 +20,7 @@ import {
   TooltipTrigger
 } from '@slayzone/ui'
 import { resolveColumns } from '@slayzone/projects-contracts'
-import type { IntegrationSyncMode } from '@slayzone/integrations/shared'
+import type { IntegrationSyncMode } from '../shared'
 import type { IntegrationsTabModel } from './useIntegrationsTab'
 
 export function IntegrationContinuousSyncSection({ vm }: { vm: IntegrationsTabModel }) {

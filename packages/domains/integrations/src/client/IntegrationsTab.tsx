@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import { Switch } from '@slayzone/ui'
 import { ProjectIntegrationConnectionModal } from './ProjectIntegrationConnectionModal'
-import { SettingsTabIntro } from './project-settings-shared'
+import { SettingsTabIntro } from '@slayzone/projects/client'
 import type { IntegrationsTabProps } from './IntegrationsTab.types'
 import { useIntegrationsTab } from './useIntegrationsTab'
 import { IntegrationCategoryGrid } from './IntegrationCategoryGrid'

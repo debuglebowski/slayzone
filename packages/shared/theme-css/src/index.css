@@ -41,6 +41,7 @@
 @source "../../../domains/app-shell/src";
 @source "../../../domains/feedback/src";
 @source "../../../domains/file-editor/src";
+@source "../../../domains/integrations/src";
 @source "../../../domains/leaderboard/src";
 @source "../../../domains/onboarding/src";
 @source "../../../domains/projects/src";

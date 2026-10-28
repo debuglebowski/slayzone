@@ -22,6 +22,7 @@ import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
 import { taskPanels } from './app-shell/taskPanels'
 import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSettingsTabs'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
+import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
 import App from './App'
 import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
@@ -38,8 +39,9 @@ import { MaybeProfiler } from './lib/perfProfiler'
 // Artifacts + git panels TaskDetailPage embeds (main + secondary task windows) —
 // registered before any render.
 registerTaskPanels(taskPanels)
-// Settings' tag editor ProjectSettingsDialog embeds — registered before any render.
-registerProjectSettingsTabs({ TagsSettingsTab })
+// Settings' tag editor + integrations' tab ProjectSettingsDialog embeds — registered
+// before any render.
+registerProjectSettingsTabs({ TagsSettingsTab, ...integrationsProjectSettingsTabs })
 
 const params = new URLSearchParams(window.location.search)
 const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'

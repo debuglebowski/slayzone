@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
  * Form state that re-seeds from props: the project-settings tabs, the folder
- * dialog, the integration credential modal and the lock popover all keep local
- * edits until a NEW prop object (or a re-open) arrives, then reset from it.
+ * dialog and the lock popover all keep local edits until a NEW prop object (or a
+ * re-open) arrives, then reset from it. (The integration credential modal's
+ * counterpart lives in @slayzone/integrations.)
  */
 import React, { createContext, useContext } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -100,7 +101,6 @@ import { ColumnsTab } from './ColumnsTab'
 import { EnvironmentTab } from './EnvironmentTab'
 import { WorktreesTab } from './WorktreesTab'
 import { GroupSettingsDialog } from './GroupSettingsDialog'
-import { ProjectIntegrationConnectionModal } from './ProjectIntegrationConnectionModal'
 import { ProjectLockPopover } from './ProjectLockPopover'
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -233,41 +233,6 @@ describe('GroupSettingsDialog', () => {
     type('#group-name', 'typing')
     rerender(ui(group('g2', 'Beta 2')))
     expect(valueOf('#group-name')).toBe('Beta 2')
-  })
-})
-
-describe('ProjectIntegrationConnectionModal', () => {
-  const ui = (open: boolean, provider: 'github' | 'linear' = 'github') => (
-    <ProjectIntegrationConnectionModal
-      open={open}
-      onOpenChange={vi.fn()}
-      projectId="proj-1"
-      provider={provider}
-      mode="connect"
-      onConnectionsChanged={vi.fn()}
-    />
-  )
-
-  it('keeps the credential while open, clears it on re-open and on provider switch', () => {
-    const { rerender } = render(ui(true))
-    type('#project-github-connect-credential', 'ghp_secret')
-    rerender(ui(true))
-    expect(valueOf('#project-github-connect-credential')).toBe('ghp_secret')
-
-    rerender(ui(false))
-    rerender(ui(true))
-    expect(valueOf('#project-github-connect-credential')).toBe('')
-
-    type('#project-github-connect-credential', 'ghp_secret')
-    rerender(ui(true, 'linear'))
-    expect(valueOf('#project-linear-connect-credential')).toBe('')
-  })
-
-  it('re-rendering with unchanged props keeps the credential (reset only on transitions)', () => {
-    const { rerender } = render(ui(true))
-    type('#project-github-connect-credential', 'kept')
-    rerender(ui(true, 'github'))
-    expect(valueOf('#project-github-connect-credential')).toBe('kept')
   })
 })
 
