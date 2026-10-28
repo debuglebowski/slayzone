@@ -15,7 +15,7 @@
   "e2e/browser/78-browser-view-scripting.spec.ts": 5639,
   "e2e/browser/79-browser-view-events.spec.ts": 6400,
   "e2e/browser/80-browser-view-google-login.spec.ts": 31326,
-  "e2e/browser/81-browser-extension-usage.spec.ts": 190277,
+  "e2e/browser/81-browser-extension-usage.spec.ts": 1,
   "e2e/browser/82-browser-loading-animation.spec.ts": 5421,
   "e2e/browser/83-browser-zoom-sync.spec.ts": 10780,
   "e2e/browser/84-browser-cli-multi-tab.spec.ts": 11224,

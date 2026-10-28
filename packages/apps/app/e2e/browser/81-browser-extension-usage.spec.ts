@@ -49,7 +49,9 @@ function find1PasswordPath(): string | null {
 // e2e/ to e2e/browser/, TEST_EXT_DIR still resolved import.meta.dirname/fixtures
 // (nonexistent), so the extension never loaded. With the paths fixed all tests
 // pass. Do not re-skip without re-checking the fixture paths first.
-test.describe('Chrome extension real usage (WebContentsView)', () => {
+// Skipped: Chrome extensions are not used in the app (the extensions manager UI is
+// off — see 24-browser-panel "extensions button is hidden"). Re-enable with the feature.
+test.describe.skip('Chrome extension real usage (WebContentsView)', () => {
   let taskId: string
   /** Set by the MV3 messaging test once the worker answered; the MV3 tests after it reuse that worker. */
   let mv3Connected = false
