@@ -71,7 +71,7 @@ function ensureBuilt(): void {
   const srcDirs = [
     join(HUB_DIR, 'src'),
     join(PACKAGES, 'shared', 'platform', 'src'),
-    join(PACKAGES, 'shared', 'transport', 'src', 'server'),
+    join(PACKAGES, 'apps', 'api', 'src'),
     join(PACKAGES, 'domains', 'hub-auth', 'src'),
     join(PACKAGES, 'domains', 'computer-transport', 'src')
   ]
