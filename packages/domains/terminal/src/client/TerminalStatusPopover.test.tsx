@@ -28,7 +28,7 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('@tanstack/react-query', () => ({ useMutation: () => ({ mutateAsync: vi.fn() }) }))
 
 let terminalsOpen = false
-vi.mock('@slayzone/settings', () => ({
+vi.mock('@slayzone/dialogs', () => ({
   useDialogStore: Object.assign(
     (sel: (s: { terminalsOpen: boolean; closeTerminals: () => void }) => unknown) =>
       sel({ terminalsOpen, closeTerminals: vi.fn() }),

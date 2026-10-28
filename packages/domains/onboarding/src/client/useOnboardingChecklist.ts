@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useDialogStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import { useTRPCClient } from '@slayzone/transport/client'
 
 const CHECKLIST_SETTINGS_KEY = 'onboarding_checklist_state'

@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.20",
-    "@slayzone/settings": "workspace:*",
+    "@slayzone/dialogs": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",

@@ -18,7 +18,7 @@ import { groupTasksBy, columnToCreateTaskDraft, type Column } from './kanban'
 import type { ViewConfig, CardProperties } from './FilterState'
 import type { Tag } from '@slayzone/tags/shared'
 import { useActiveTaskIds } from '@slayzone/terminal'
-import { useDialogStore } from '@slayzone/settings/client'
+import { useDialogStore } from '@slayzone/dialogs'
 import { GroupSection } from './KanbanGroupSection'
 import { computeSubTaskCounts, splitActiveInactiveColumns } from './KanbanListView.utils'
 

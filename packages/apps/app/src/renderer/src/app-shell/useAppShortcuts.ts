@@ -8,7 +8,8 @@ import {
   toast
 } from '@slayzone/ui'
 import { useUndo, focusOwnsUndoKey } from '@slayzone/ui'
-import { useTabStore, useDialogStore, type SearchFileContext, type Tab } from '@slayzone/settings'
+import { useTabStore, type Tab } from '@slayzone/settings'
+import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import type { Project } from '@slayzone/projects-contracts'
 import { useHomePanel } from '@slayzone/home/client'

@@ -1,7 +1,7 @@
 // Chromium-fork dialog orchestrator — the store-driven registry every leaf
 // dialog plugs into. Mirrors the canonical app-shell/AppDialogs.tsx
 // (packages/apps/app/src/renderer/src/app-shell/AppDialogs.tsx): it watches
-// useDialogStore (@slayzone/settings) and lazy-mounts whichever dialog has its
+// useDialogStore (@slayzone/dialogs) and lazy-mounts whichever dialog has its
 // open-flag set.
 //
 // Open-state is store-driven: each dialog reads its own slice straight from
@@ -40,7 +40,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@slayzone/ui'
-import { useDialogStore, useTabStore, type Tab } from '@slayzone/settings'
+import { useTabStore, type Tab } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import {
   useTRPCClient,
   getClientForHub,

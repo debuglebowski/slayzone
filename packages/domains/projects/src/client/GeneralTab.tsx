@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects-contracts'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
-import { useDialogStore } from '@slayzone/settings/client'
+import { useDialogStore } from '@slayzone/dialogs'
 import { SettingsTabIntro } from './project-settings-shared'
 
 /** Select sentinel for the project's Local (in-process) default computer (null). */

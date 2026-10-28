@@ -24,7 +24,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator
 } from '@slayzone/ui'
-import { useTabStore, useDialogStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import {
   type AgentStatusState,

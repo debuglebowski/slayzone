@@ -55,12 +55,8 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import {
-  useTabStore,
-  useDialogStore,
-  AppearanceProvider,
-  useSettingsReopenTab
-} from '@slayzone/settings'
+import { useTabStore, AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import { track } from '@slayzone/telemetry/client'
 import {
   markSessionUnspawned,

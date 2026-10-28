@@ -315,6 +315,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../../domains/dialogs
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
@@ -776,6 +779,9 @@ importers:
       '@slayzone/app-shell':
         specifier: workspace:*
         version: link:../../domains/app-shell
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../../domains/dialogs
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
@@ -1183,6 +1189,18 @@ importers:
         specifier: ^24.19.0
         version: 24.19.0
 
+  packages/domains/dialogs:
+    dependencies:
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
+      zustand:
+        specifier: ^5.0.15
+        version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
+
   packages/domains/feedback:
     dependencies:
       '@slayzone/platform':
@@ -1474,9 +1492,9 @@ importers:
       '@radix-ui/react-collapsible':
         specifier: ^1.1.20
         version: 1.1.20(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@slayzone/settings':
+      '@slayzone/dialogs':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../dialogs
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1524,6 +1542,9 @@ importers:
 
   packages/domains/projects:
     dependencies:
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
@@ -1585,6 +1606,9 @@ importers:
 
   packages/domains/search:
     dependencies:
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
@@ -1707,6 +1731,9 @@ importers:
       '@slayzone/ai-config':
         specifier: workspace:*
         version: link:../ai-config
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1827,6 +1854,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
@@ -2104,6 +2134,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
@@ -2184,15 +2217,15 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -2363,6 +2396,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
+      '@slayzone/dialogs':
+        specifier: workspace:*
+        version: link:../dialogs
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
@@ -2378,9 +2414,6 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task

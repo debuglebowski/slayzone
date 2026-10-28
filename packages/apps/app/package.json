@@ -56,6 +56,7 @@
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/dialogs": "workspace:*",
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",

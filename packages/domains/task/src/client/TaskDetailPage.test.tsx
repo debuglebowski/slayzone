@@ -48,7 +48,10 @@ vi.mock('@slayzone/settings/client', () => ({
       taskHeaderPanelMode: 'tabs',
       taskHeaderPanelAlign: 'right',
       taskHeaderTitleAlign: 'left'
-    }),
+    })
+}))
+
+vi.mock('@slayzone/dialogs', () => ({
   useDialogStore: Object.assign(() => ({}), {
     getState: () => ({ openSearch: vi.fn() })
   })

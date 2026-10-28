@@ -39,12 +39,8 @@ import {
   useReopenClosedTab,
   useCompleteAndCloseTask
 } from '@slayzone/tasks/client'
-import {
-  useDialogStore,
-  useTabStore,
-  loadTabStoreState,
-  type SearchFileContext
-} from '@slayzone/settings'
+import { useTabStore, loadTabStoreState } from '@slayzone/settings'
+import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
 import { TabBar } from '@slayzone/tabs'
 import { HomeContainer, type HomeContainerHandle } from '@slayzone/home/client'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'

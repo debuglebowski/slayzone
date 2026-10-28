@@ -14,7 +14,8 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { useTabStore, useDialogStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'

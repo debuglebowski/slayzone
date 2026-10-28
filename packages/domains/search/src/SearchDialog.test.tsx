@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
 import { usePaletteCommandStore, type PaletteCommand } from '@slayzone/ui'
-import { useDialogStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 

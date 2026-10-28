@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import { useDialogStore } from '@slayzone/settings/client'
+import { useDialogStore } from '@slayzone/dialogs'
 import {
   FolderGit2,
   GitBranch,

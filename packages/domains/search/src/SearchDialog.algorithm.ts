@@ -1,5 +1,5 @@
 import { Fzf } from 'fzf'
-import type { SearchFileContext } from '@slayzone/settings'
+import type { SearchFileContext } from '@slayzone/dialogs'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { flattenPaletteCommands, type PaletteCommand } from '@slayzone/ui'

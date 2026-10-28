@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator
 } from '@slayzone/ui'
 import { PRIORITY_LABELS } from '@slayzone/tasks'
-import { useDialogStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import { type Task } from '@slayzone/task-contracts'
 import type { TreeGroup } from '../treeGrouping'
 import type { ProjectGroup } from '@slayzone/projects-contracts'

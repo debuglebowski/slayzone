@@ -35,6 +35,7 @@
     "@hookform/resolvers": "^5.9.1",
     "@milkdown/core": "^7.22.2",
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/dialogs": "workspace:*",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",

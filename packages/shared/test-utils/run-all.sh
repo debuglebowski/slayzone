@@ -695,7 +695,7 @@ run_harness packages/domains/integrations/src/server/sync.test.ts
 run_harness packages/domains/projects/src/client/useProjectLockGuard.test.ts
 run_harness packages/domains/projects-contracts/src/columns.test.ts
 run_harness packages/domains/projects-contracts/src/resolve-repo.test.ts
-run_harness packages/domains/settings/src/client/useDialogStore.test.ts
+run_harness packages/domains/dialogs/src/useDialogStore.test.ts
 run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/autocomplete/autocomplete.test.ts

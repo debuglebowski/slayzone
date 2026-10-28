@@ -56,7 +56,7 @@ import {
   type PaletteScope,
   type StatusOption
 } from '@slayzone/ui'
-import { useDialogStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/dialogs'
 import { track } from '@slayzone/telemetry/client'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalModeInfo } from '@slayzone/terminal-contracts'

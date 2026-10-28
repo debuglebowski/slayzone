@@ -103,7 +103,7 @@ vi.mock('@slayzone/ui', () => {
 })
 
 vi.mock('@slayzone/platform/slz-file-url', () => ({ toSlzFileUrl: (p: string) => `slz://${p}` }))
-vi.mock('@slayzone/settings/client', () => ({
+vi.mock('@slayzone/dialogs', () => ({
   useDialogStore: { getState: () => ({ openDeleteProject: vi.fn() }) }
 }))
 vi.mock('./project-settings-shared', () => ({
