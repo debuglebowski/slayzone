@@ -26,6 +26,19 @@ function busyFreezeForTest(ms: number): void {
     // Spinning on the main thread, like a CPU-heavy synchronous handler.
   }
 }
+
+/**
+ * Run `fn` on this (the main) thread, measuring for ourselves — independently of
+ * the detector — the CPU this thread burned and the wall time it took.
+ */
+function measuredOnThisThread(fn: () => void): { cpuMs: number; wallMs: number } {
+  const cpuBefore = process.threadCpuUsage()
+  const wallBefore = performance.now()
+  fn()
+  const wallMs = performance.now() - wallBefore
+  const cpu = process.threadCpuUsage(cpuBefore)
+  return { cpuMs: (cpu.user + cpu.system) / 1000, wallMs }
+}
 function oneGitLikeCall(): void {
   spawnSync('sleep', ['0.3'])
 }
@@ -73,8 +86,11 @@ describe('nothing frozen → nothing reported', () => {
 describe('busy JavaScript', () => {
   let stalls: EventLoopStall[] = []
   let s: EventLoopStall | undefined
+  let spin = { cpuMs: 0, wallMs: 0 }
   beforeAll(async () => {
-    stalls = await observe(() => busyFreezeForTest(1500))
+    stalls = await observe(() => {
+      spin = measuredOnThisThread(() => busyFreezeForTest(1500))
+    })
     s = stalls[0]
   })
 
@@ -92,16 +108,29 @@ describe('busy JavaScript', () => {
     expect(s, 'no stall').toBeDefined()
     expect(stackText(s!)).toContain('busyFreezeForTest')
   })
-  // Not ~100%: on a saturated machine the OS deschedules even a spinning thread
-  // (that is what `machineCpuBusyPct` shows). The signal is the CONTRAST with a
-  // waiting thread below, which burns almost nothing.
-  test('the main thread burned CPU for a large share of it (busy, not waiting)', () => {
+  // What tells BUSY from WAITING in a report is `mainThreadCpuMs`: the CPU the
+  // main thread really burned over the freeze. How much a spinning thread gets is
+  // the scheduler's call, not the detector's — ~100% of the wall clock on an idle
+  // machine, a quarter of it with the unit suites oversubscribing every core — so
+  // the report is held to the spin's OWN CPU, measured on the spinning thread
+  // itself, not to a share of wall clock. The contrast is the waiting freeze
+  // below, which burns almost nothing.
+  test('mainThreadCpuMs is the CPU the spinning main thread burned (busy, not waiting)', () => {
     expect(s, 'no stall').toBeDefined()
     expect(s!.mainThreadCpuMs, 'mainThreadCpuMs').not.toBeNull()
-    expect(
-      s!.mainThreadCpuMs!,
-      `mainThreadCpuMs=${s?.mainThreadCpuMs} durationMs=${s?.durationMs}`
-    ).toBeGreaterThanOrEqual(0.3 * s!.durationMs)
+    const cpuMs = s!.mainThreadCpuMs!
+    const detail =
+      `mainThreadCpuMs=${cpuMs} durationMs=${s!.durationMs} ` +
+      `spin: cpu=${spin.cpuMs.toFixed(1)}ms wall=${spin.wallMs.toFixed(1)}ms`
+    expect(spin.cpuMs, `the spin burned CPU at all (${detail})`).toBeGreaterThan(0)
+    // The freeze window encloses the spin, so it holds all of the spin's CPU
+    // (−1: the report rounds to whole ms)...
+    expect(cpuMs, `covers the spin's CPU (${detail})`).toBeGreaterThanOrEqual(spin.cpuMs - 1)
+    // ...and on top at most the wall time the window adds around the spin: one
+    // thread cannot burn more CPU than wall time (+5: rounding, clock granularity).
+    expect(cpuMs, `only this thread's CPU, in ms (${detail})`).toBeLessThanOrEqual(
+      spin.cpuMs + (s!.durationMs - spin.wallMs) + 5
+    )
   })
 
   test('machine CPU and GC time are reported as numbers', () => {

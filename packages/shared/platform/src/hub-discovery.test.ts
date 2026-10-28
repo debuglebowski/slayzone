@@ -22,40 +22,88 @@ import { discoverHubs, findHub } from './hub-discovery'
 type Closer = () => Promise<void>
 const cleanups: Closer[] = []
 
-/**
- * Close every fake hub opened so far. A test that SWEEPS a port range between two
- * fresh ephemeral ports would otherwise also find the hubs earlier tests left
- * listening (they close at the very end), and count them: the OS picks ephemeral
- * ports in no promised order, so on Linux the range between two new ports can span
- * old ones.
- */
-async function closeLeftovers(): Promise<void> {
-  for (const c of cleanups.splice(0)) await c()
-}
+type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void
 
-/** A hub-shaped /health responder on an OS-assigned port. */
-async function fakeHub(body: Record<string, unknown>): Promise<number> {
-  const srv = http.createServer((req, res) => {
+/** A hub-shaped /health responder; `delayMs` holds each answer back that long. */
+function hubHandler(body: Record<string, unknown>, delayMs = 0): Handler {
+  return (req, res) => {
     if (req.url !== '/health') {
       res.writeHead(404)
       res.end()
       return
     }
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, ...body }))
-  })
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
-  cleanups.push(() => new Promise((r) => srv.close(() => r())))
-  return (srv.address() as AddressInfo).port
+    const answer = (): void => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, ...body }))
+    }
+    if (delayMs > 0) setTimeout(answer, delayMs)
+    else answer()
+  }
 }
 
-/** Serves something that is NOT a hub (wrong shape / wrong service). */
-async function fakeNonHub(handler: (res: http.ServerResponse) => void): Promise<number> {
-  const srv = http.createServer((_req, res) => handler(res))
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
-  cleanups.push(() => new Promise((r) => srv.close(() => r())))
-  return (srv.address() as AddressInfo).port
+/** Something that is NOT a hub (wrong shape / wrong service). */
+const nonHubHandler =
+  (respond: (res: http.ServerResponse) => void): Handler =>
+  (_req, res) =>
+    respond(res)
+
+const closeServer = (srv: net.Server): Promise<void> => new Promise((r) => srv.close(() => r()))
+
+/** Listen on loopback `port` (0 = OS-assigned): the bound port, or null when it is taken. */
+function listenOrTaken(srv: net.Server, port: number): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException): void => {
+      if (err.code === 'EADDRINUSE') resolve(null)
+      else reject(err)
+    }
+    srv.once('error', onError)
+    srv.listen(port, '127.0.0.1', () => {
+      srv.off('error', onError)
+      resolve((srv.address() as AddressInfo).port)
+    })
+  })
 }
+
+/** Serve `handler` on an OS-assigned port; a sweep of exactly that port probes only it. */
+async function serve(handler: Handler): Promise<number> {
+  const srv = http.createServer(handler)
+  const port = await listenOrTaken(srv, 0)
+  if (port === null) throw new Error('an OS-assigned port cannot be taken')
+  cleanups.push(() => closeServer(srv))
+  return port
+}
+
+/**
+ * Serve each handler on its own port, the ports ADJACENT and ascending in handler
+ * order, so a sweep of exactly the returned range probes nothing but these servers.
+ *
+ * Two separately OS-assigned ports give no such guarantee: test files run
+ * concurrently (one vitest run, many forks), and the gap between two ephemeral
+ * ports can hold ANOTHER file's hub — a real one or a fake like these — which the
+ * sweep would rightly count. A neighbour that is already taken just means starting
+ * over from a fresh OS-assigned base port.
+ */
+async function serveAdjacent(handlers: Handler[]): Promise<{ start: number; end: number }> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const servers = handlers.map((h) => http.createServer(h))
+    const base = await listenOrTaken(servers[0]!, 0)
+    if (base === null) throw new Error('an OS-assigned port cannot be taken')
+    let claimed = base + servers.length - 1 <= 65535
+    for (let i = 1; claimed && i < servers.length; i++) {
+      claimed = (await listenOrTaken(servers[i]!, base + i)) !== null
+    }
+    if (claimed) {
+      for (const srv of servers) cleanups.push(() => closeServer(srv))
+      return { start: base, end: base + servers.length - 1 }
+    }
+    await Promise.all(servers.filter((s) => s.listening).map(closeServer))
+  }
+  throw new Error(`no run of ${handlers.length} adjacent free loopback ports in 100 attempts`)
+}
+
+const fakeHub = (body: Record<string, unknown>): Promise<number> => serve(hubHandler(body))
+const fakeNonHub = (respond: (res: http.ServerResponse) => void): Promise<number> =>
+  serve(nonHubHandler(respond))
 
 /**
  * A TCP listener that accepts and then says nothing — the black-hole case. A
@@ -161,16 +209,23 @@ describe('hub discovery', () => {
   })
 
   test('finds several hubs at once and sorts them stably', async () => {
-    await closeLeftovers()
-    const p1 = await fakeHub({ ...HUB_A, name: 'zulu' })
-    const p2 = await fakeHub({ ...HUB_A, name: 'bravo' })
-    const lo = Math.min(p1, p2)
-    const hi = Math.max(p1, p2)
-    const hubs = await discoverHubs({ range: { start: lo, end: hi } })
-    expect(hubs.length, 'both found').toBe(2)
-    // Port order is deterministic; name order would depend on which fake bound
-    // which ephemeral port.
-    expect(hubs[0]!.port, 'ascending by port').toBeLessThan(hubs[1]!.port)
+    // The LOWER port answers last, so the worker pool collects them in reverse
+    // port order — only the sort puts them back. The generous probe budget keeps
+    // that held-back answer from ever reading as a timeout on a loaded machine.
+    const range = await serveAdjacent([
+      hubHandler({ ...HUB_A, name: 'zulu' }, 100),
+      hubHandler({ ...HUB_A, name: 'bravo' })
+    ])
+    const hubs = await discoverHubs({ range, timeoutMs: 5_000 })
+    expect(
+      hubs.map((h) => h.port),
+      'both found, ascending by port'
+    ).toEqual([range.start, range.end])
+    // Port order — not name order, not the order the answers arrived in.
+    expect(
+      hubs.map((h) => h.name),
+      'sorted by port'
+    ).toEqual(['zulu', 'bravo'])
   })
 
   test('a dead port yields nothing (no phantom hub)', async () => {
@@ -180,18 +235,17 @@ describe('hub discovery', () => {
   })
 
   test('ignores a non-SlayZone service on a hub port', async () => {
-    await closeLeftovers()
-    const html = await fakeNonHub((res) => {
-      res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end('<html>not a hub</html>')
-    })
-    const json404 = await fakeNonHub((res) => {
-      res.writeHead(404)
-      res.end('{}')
-    })
-    const lo = Math.min(html, json404)
-    const hi = Math.max(html, json404)
-    const hubs = await discoverHubs({ range: { start: lo, end: hi } })
+    const range = await serveAdjacent([
+      nonHubHandler((res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end('<html>not a hub</html>')
+      }),
+      nonHubHandler((res) => {
+        res.writeHead(404)
+        res.end('{}')
+      })
+    ])
+    const hubs = await discoverHubs({ range })
     expect(hubs.length, 'neither counted as a hub').toBe(0)
   })
 

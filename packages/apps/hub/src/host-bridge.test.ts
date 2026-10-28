@@ -100,6 +100,16 @@ const hubBrowser = bridge.appDeps.browser
 const cached = (viewId: string): Snap | undefined =>
   (hubBrowser.getAllStateSnapshots() as Snap[]).find((s) => s.viewId === viewId)
 
+/**
+ * One full hub→desktop round trip on the bridge socket. Requests ride that socket
+ * in order and the desktop answers them in order, so once this resolves, every
+ * request the hub had queued BEFORE it has reached the desktop and been answered —
+ * the exact sync point for "nothing the hub already asked for is still in flight".
+ */
+const bridgeRoundTrip = async (): Promise<void> => {
+  await hubBrowser.getStateSnapshot('bv-1')
+}
+
 describe('desktop bridge: browser replay cache', () => {
   test('primes from the desktop on connect', async () => {
     await until(() => cached('bv-1') !== undefined, 'the prime')
@@ -124,17 +134,24 @@ describe('desktop bridge: browser replay cache', () => {
   })
 
   test('relayed events carry their own state: no desktop round-trip per event', async () => {
+    // The connect-time prime can still be in flight here: `connect()` and the
+    // socket's first `onOpen` each ask for one, and the second is coalesced to run
+    // after the first — which is all the first test waits for. Drain it, or it lands
+    // inside the window below and reads as a per-event round trip.
+    await bridgeRoundTrip()
     const before = getAllCalls
     let seen = 0
-    const onEvent = (): void => {
-      seen++
+    const onEvent = (e: unknown): void => {
+      if ((e as { type: string }).type === 'page-title-updated') seen++
     }
     hubBrowser.events.on('event', onEvent)
     for (let i = 0; i < 5; i++) hostEmit('bv-1', 'page-title-updated', {})
     await until(() => seen === 5, 'five relayed events')
     hubBrowser.events.off('event', onEvent)
-    await new Promise((r) => setTimeout(r, 50))
-    expect(getAllCalls).toBe(before)
+    // A re-read an event triggered is queued before that event is re-emitted, so it
+    // is ahead of this round trip: once this resolves, the desktop has seen it.
+    await bridgeRoundTrip()
+    expect(getAllCalls, 'desktop getAllStateSnapshots calls during the relay').toBe(before)
   })
 
   test('a destroyed view drops out of the replay', async () => {
