@@ -10,6 +10,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 let behind = 3
 const aheadBehindReads: number[] = []
 
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => {
   // tRPC-shaped: queryOptions(input, opts) → a real query (key + fn + caller's opts).
   const q = (name: string, fn: (input: Record<string, string>) => Promise<unknown>) => ({

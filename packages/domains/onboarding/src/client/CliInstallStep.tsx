@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'motion/react'
 import { Button } from '@slayzone/ui'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Terminal } from 'lucide-react'
 import { CLI_FEATURES } from './onboardingConstants'

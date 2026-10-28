@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { api } from 'convex/_generated/api'
 import type { LeaderboardAuthState } from './auth'
 import type { Period } from './LeaderboardPage.constants'

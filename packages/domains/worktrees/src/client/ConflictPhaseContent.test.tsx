@@ -60,6 +60,9 @@ const trpc = {
     getCurrentBranch: query('getCurrentBranch')
   }
 }
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({ useTRPC: () => trpc }))
 
 const { ConflictPhaseContent } = await import('./ConflictPhaseContent')

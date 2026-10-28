@@ -14,7 +14,9 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
+    "@slayzone/settings": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",

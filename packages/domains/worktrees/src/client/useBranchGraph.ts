@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { toast, useDepsChanged, useStablePoll } from '@slayzone/ui'
 import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { DEFAULT_CONFIG, FETCH_LIMIT } from './branches-tab.constants'

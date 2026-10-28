@@ -1049,9 +1049,15 @@ importers:
 
   packages/domains/agent-panels:
     dependencies:
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
@@ -1193,6 +1199,9 @@ importers:
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../agent-panels
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state
@@ -1369,6 +1378,9 @@ importers:
 
   packages/domains/feedback:
     dependencies:
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1660,6 +1672,9 @@ importers:
       '@convex-dev/auth':
         specifier: ^0.0.95
         version: 0.0.95(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.41.3)(convex@1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6))(react@19.3.1)
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1669,6 +1684,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../usage-analytics
       convex:
         specifier: ^1.46.0
         version: 1.46.0(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@6.0.6)
@@ -1691,6 +1709,12 @@ importers:
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -2691,6 +2715,9 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
@@ -2700,6 +2727,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task

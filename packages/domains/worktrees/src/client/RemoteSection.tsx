@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { ChevronDown, Loader2, Download, Upload } from 'lucide-react'
 import {
   Button,

@@ -16,6 +16,9 @@ vi.mock('./git-diff-store', () => ({
     refresh: snapshotState.refresh
   })
 }))
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     worktrees: {

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 
 interface UseGitDiffCommitParams {
   targetPath: string | null

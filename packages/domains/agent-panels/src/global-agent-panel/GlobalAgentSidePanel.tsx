@@ -7,7 +7,7 @@ import {
   groupTerminalModes
 } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import {
   Button,
   Select,

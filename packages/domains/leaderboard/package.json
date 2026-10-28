@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.95",
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
     "convex": "^1.46.0",
     "lucide-react": "^1.48.0"
   },

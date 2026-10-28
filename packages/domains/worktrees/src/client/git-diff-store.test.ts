@@ -30,6 +30,9 @@ import type { GitDiffSnapshot } from '../shared/types'
 // only the injected transport (set below), so stub the transport hooks to inert
 // no-ops — the test drives the store directly via _setGitDiffStoreTransport +
 // notifyDiffChanged.
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     worktrees: {

@@ -1,4 +1,5 @@
 [
+  "@slayzone/agent-panels -> @slayzone/settings",
   "@slayzone/agent-panels -> @slayzone/telemetry",
   "@slayzone/agent-panels -> @slayzone/terminal",
   "@slayzone/agent-panels -> @slayzone/transport",
@@ -87,6 +88,7 @@
   "@slayzone/worktrees -> @slayzone/agent-turns",
   "@slayzone/worktrees -> @slayzone/editor",
   "@slayzone/worktrees -> @slayzone/file-editor",
+  "@slayzone/worktrees -> @slayzone/settings",
   "@slayzone/worktrees -> @slayzone/task",
   "@slayzone/worktrees -> @slayzone/tasks",
   "@slayzone/worktrees -> @slayzone/terminal",

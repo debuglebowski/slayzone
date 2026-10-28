@@ -23,6 +23,9 @@ function deferred<T>(): Deferred<T> {
 let branchCalls: Array<{ path: string; d: Deferred<string> }> = []
 const repoChecks: string[] = []
 
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => {
   const q = (fn: (input: { path?: string; repoPath?: string }) => Promise<unknown>) => ({
     queryOptions: (input: { path?: string; repoPath?: string }) => ({ queryFn: () => fn(input) })

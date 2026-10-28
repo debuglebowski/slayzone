@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAction } from 'convex/react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { MessageSquare, Plus, Send, ArrowLeft, Trash2 } from 'lucide-react'
 import {
   Button,

@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import type { LeaderboardAuthState } from './auth'
 import { PERIODS } from './LeaderboardPage.constants'
 import type { useLeaderboardController } from './useLeaderboardController'

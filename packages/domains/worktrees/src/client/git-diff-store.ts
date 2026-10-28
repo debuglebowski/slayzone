@@ -27,7 +27,8 @@
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from './trpc'
 import type { GitDiffSnapshot } from '../shared/types'
 
 export type GitDiffContextLines = '0' | '3' | '5' | 'all'

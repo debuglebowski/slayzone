@@ -1,6 +1,6 @@
 import { GitPullRequest, Link2, Plus, Unlink, AlertTriangle } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Button, PulseGrid } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { LinkedPrView } from './LinkedPrView'

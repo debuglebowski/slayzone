@@ -8,7 +8,7 @@ import {
   forwardRef
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { FolderGit2 } from 'lucide-react'
 import {
   AlertDialog,

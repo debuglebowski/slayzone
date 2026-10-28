@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { buildFileTree } from '@slayzone/ui'
 import { parseUnifiedDiff } from './parse-diff'
 import type { FileDiff as FileDiffType } from './parse-diff'

@@ -48,6 +48,9 @@ const trpc = { worktrees: procs, settings: procs }
 const trpcClient = {
   worktrees: { watchStart: { mutate: async () => {} }, watchStop: { mutate: async () => {} } }
 }
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
   useTRPCClient: () => trpcClient,

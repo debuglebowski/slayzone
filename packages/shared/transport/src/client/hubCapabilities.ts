@@ -1,5 +1,6 @@
 import { isPathAllowed, type Scope } from '../shared/scopes'
 import type { TrpcVanillaClient } from './trpc'
+import type { RuntimeClient } from './runtime'
 
 /**
  * The scopes each hub connection holds, asked once per client (`hub.describe`).
@@ -8,10 +9,12 @@ import type { TrpcVanillaClient } from './trpc'
  */
 const scopesByClient = new WeakMap<object, Promise<readonly Scope[] | null>>()
 
-function scopesOf(client: TrpcVanillaClient): Promise<readonly Scope[] | null> {
+function scopesOf(client: RuntimeClient): Promise<readonly Scope[] | null> {
   let scopes = scopesByClient.get(client)
   if (!scopes) {
-    scopes = client.hub.describe.query().then(
+    // Every view's client is the one path-based runtime client, and every hub serves
+    // `hub.describe`: reading it through the whole-app type is sound for any view.
+    scopes = (client as TrpcVanillaClient).hub.describe.query().then(
       // `?? null`: a hub older than the field sends none.
       (d) => d.scopes ?? null,
       (err: unknown) => {
@@ -34,8 +37,11 @@ function scopesOf(client: TrpcVanillaClient): Promise<readonly Scope[] | null> {
  * True when nothing restricts the caller (no login, a full principal, a hub older
  * than `describe.scopes`) and when the hub cannot be asked — the call itself then
  * fails the way it always did.
+ *
+ * Takes any view's client (`RuntimeClient`): the check is about the hub, not about the
+ * routers the caller's view types.
  */
-export async function hubAllows(client: TrpcVanillaClient, path: string): Promise<boolean> {
+export async function hubAllows(client: RuntimeClient, path: string): Promise<boolean> {
   const scopes = await scopesOf(client).catch(() => null)
   return scopes === null || isPathAllowed(scopes, path)
 }

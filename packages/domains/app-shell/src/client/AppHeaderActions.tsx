@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { FolderClosed, Focus, LayoutGrid, TerminalSquare } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import {
   Tooltip,
   TooltipTrigger,

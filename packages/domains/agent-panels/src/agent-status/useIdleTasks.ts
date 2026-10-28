@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 import { useStableCallback } from '@slayzone/ui'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal-contracts'
 import { isAliveTerminalState } from '@slayzone/terminal-contracts'

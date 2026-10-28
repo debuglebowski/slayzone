@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '../trpc'
 
 export interface AgentStatusState {
   isLocked: boolean

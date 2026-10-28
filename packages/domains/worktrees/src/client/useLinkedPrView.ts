@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { useStablePoll } from '@slayzone/ui'
 import type { GhPullRequest, GhPrComment, GhPrTimelineEvent, MergeStrategy } from '../shared/types'
 import { parseUnifiedDiff } from './parse-diff'

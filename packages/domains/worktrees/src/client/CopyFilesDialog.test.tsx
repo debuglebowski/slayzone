@@ -69,6 +69,9 @@ function setPresets(data: string | null): void {
 let treeState: 'success' | 'error' | 'loading' = 'success'
 let treeRenders = 0
 const RENDER_LOOP_LIMIT = 100
+// The domain's typed view (`./trpc`) re-types the transport client: serve
+// it the transport mock below.
+vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     settings: {

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'lucide-react'
 import { cn, PulseGrid } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'

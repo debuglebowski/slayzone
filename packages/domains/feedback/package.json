@@ -22,6 +22,7 @@
     "@types/react": "^19.3.0"
   },
   "dependencies": {
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",

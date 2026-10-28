@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '../trpc'
 import { CHANGELOG } from './changelog-data'
 
 const SETTINGS_KEY = 'last_seen_changelog_version'

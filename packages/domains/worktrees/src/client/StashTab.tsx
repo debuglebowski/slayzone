@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Archive, FileText } from 'lucide-react'
 import { cn, PulseGrid, useStablePoll } from '@slayzone/ui'
 import type { StashEntry } from '../shared/types'

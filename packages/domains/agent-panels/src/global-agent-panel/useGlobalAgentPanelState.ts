@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { getTrpcClient } from '@slayzone/transport/client'
+import { getTrpcClient } from '../trpc'
 
 export interface GlobalAgentPanelState {
   isOpen: boolean

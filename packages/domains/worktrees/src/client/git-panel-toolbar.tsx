@@ -1,6 +1,6 @@
 import { type RefObject, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import {
   AlignJustify,
   Columns2,

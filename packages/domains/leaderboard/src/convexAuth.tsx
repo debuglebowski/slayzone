@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { useVisibleInterval } from '@slayzone/ui'
-import { hubAllows, useTRPCClient } from '@slayzone/transport/client'
+import { hubAllows } from '@slayzone/transport/client'
+import { useTRPCClient } from './trpc'
 import { api } from 'convex/_generated/api'
 import { LEADERBOARD_AUTH_DISABLED, type LeaderboardAuthState } from './auth'
 
