@@ -39,17 +39,6 @@ export function useGitPanelTabs(
   // The tab chosen (a click, switchToTab, a merge starting) and saved through
   // onTabChange. It can be hidden right now: the panel then shows `activeTab` below.
   const [selectedTab, setSelectedTab] = useState<GitTabId>(defaultTab)
-  // The tab the parent last heard of through onTabChange — at first the one it gave
-  // us. Written only by the handler below and the merge-switch effect.
-  const notifiedTabRef = useRef(defaultTab)
-  const setActiveTab = useCallback(
-    (tab: GitTabId) => {
-      setSelectedTab(tab)
-      notifiedTabRef.current = tab
-      onTabChange?.(tab)
-    },
-    [onTabChange]
-  )
 
   const hasConflicts =
     !!task && (task.merge_state === 'conflicts' || task.merge_state === 'rebase-conflicts')
@@ -116,8 +105,12 @@ export function useGitPanelTabs(
   const mergeStateChanged = useDepsChanged([hasConflicts, isUncommitted], true)
   if (mergeStateChanged && mergeTab !== null && selectedTab !== mergeTab) setSelectedTab(mergeTab)
 
-  // Tell the parent (which saves it) about that switch, once: a re-run of this effect
-  // (a re-show, a new onTabChange) finds nothing it has not already heard.
+  // Tell the parent (which saves it) each change of the selection once, after it
+  // commits, whatever made it: a click, switchToTab or the merge switch above. The ref
+  // holds the tab the parent last heard of (at first the one it gave us), so a click
+  // on the selected tab or a re-run of this effect (a re-show under <Activity>, a new
+  // onTabChange) reports nothing. The fallback below is never selected, never saved.
+  const notifiedTabRef = useRef(defaultTab)
   useEffect(() => {
     if (notifiedTabRef.current === selectedTab) return
     notifiedTabRef.current = selectedTab
@@ -137,15 +130,15 @@ export function useGitPanelTabs(
   useImperativeHandle(
     ref,
     () => ({
-      switchToTab: setActiveTab,
+      switchToTab: setSelectedTab,
       getActiveTab: () => activeTab
     }),
-    [activeTab, setActiveTab]
+    [activeTab]
   )
 
   return {
     activeTab,
-    setActiveTab,
+    setActiveTab: setSelectedTab,
     isTabVisible,
     tabOrder,
     hasConflicts,

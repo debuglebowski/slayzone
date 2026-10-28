@@ -357,3 +357,40 @@ describe('hidden tab fallback', () => {
     expect(p.saves).toEqual(['general'])
   })
 })
+
+describe('saving', () => {
+  it('selecting the tab already selected saves nothing', async () => {
+    const p = mount({ task: makeTask(), defaultTab: 'stash' })
+    await p.settled()
+    select('stash')
+    act(() => p.panelRef.current?.switchToTab('stash'))
+    await p.settled()
+    expect(latest.activeTab).toBe('stash')
+    expect(p.saves).toEqual([])
+  })
+
+  it('selecting the Conflicts tab a merge switched to saves nothing more', async () => {
+    const p = mount({ task: makeTask({ merge_state: 'conflicts' }) })
+    await p.settled()
+    select('conflicts')
+    await p.settled()
+    expect(p.saves).toEqual(['conflicts'])
+  })
+
+  it('saves each real change once, in order, through a merge and task-tab re-shows', async () => {
+    const p = mount({ task: makeTask(), defaultTab: 'stash' })
+    await p.settled()
+    select('changes')
+    p.reshow()
+    p.update({ task: makeTask({ merge_state: 'conflicts' }) })
+    p.reshow()
+    select('general')
+    p.reshow()
+    act(() => p.panelRef.current?.switchToTab('conflicts'))
+    p.update({ task: makeTask() })
+    p.reshow()
+    await p.settled()
+    expect(latest.activeTab).toBe('general')
+    expect(p.saves).toEqual(['changes', 'conflicts', 'general', 'conflicts'])
+  })
+})
