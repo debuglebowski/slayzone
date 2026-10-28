@@ -555,8 +555,11 @@ run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test
 
 # Side-car supervisor crash-recovery (slice 2.5.1 HARD GATE). Also stop() as quit
 # awaits it, and parent death against the REAL hub bundle (rebuilt on demand): a
-# supervised hub never outlives its app; a standalone one is untouched.
+# supervised hub never outlives its app; a standalone one is untouched. Three files
+# (shared sidecar-server-supervisor-harness.ts) so the real deadlines run in parallel.
 run_harness packages/apps/app/src/main/sidecar-server-supervisor.test.ts
+run_harness packages/apps/app/src/main/sidecar-server-supervisor-parent-death.test.ts
+run_harness packages/apps/app/src/main/sidecar-server-supervisor-real-stop.test.ts
 
 # Local-computer supervisor exit reporting — the computer owns every agent pty, so
 # its exits must stay observable (they killed whole fleets silently before). Also

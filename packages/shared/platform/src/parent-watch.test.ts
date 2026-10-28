@@ -6,7 +6,7 @@ import { watchParent, type ParentDeathReason } from './parent-watch'
  * Unit tests for the parent-death detection of a supervised hub or computer. The
  * real process-level behaviour (a SIGKILLed app takes its hub and its computer with
  * it) is proven end to end against each built bundle in
- * packages/apps/app/src/main/sidecar-server-supervisor.test.ts and
+ * packages/apps/app/src/main/sidecar-server-supervisor-parent-death.test.ts and
  * local-computer-supervisor.test.ts; these pin each signal in isolation, including
  * the ones a single OS cannot show (Windows never reparents, so only the liveness
  * probe and the pipe see it there).
