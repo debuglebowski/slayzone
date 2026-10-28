@@ -1,6 +1,6 @@
 /**
  * Worktree source branch migration tests
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { runMigrations } from './index'

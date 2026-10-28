@@ -37,7 +37,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { LATEST_MIGRATION_VERSION } from '@slayzone/transport/db-bootstrap'
+import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
 import { openServerDatabase, openServerDiagnosticsDatabase } from './db.js'
 
 const ROOT_KEY = 'SLAYZONE_ROOT'

@@ -5,7 +5,7 @@
  * picks the exact same "current" conversation. See plans/agent-sessions.md.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v147-agent-sessions-migration.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/db-migrations/src/v147-agent-sessions-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'

@@ -1,7 +1,7 @@
 /**
  * Global Agent Panel rename migration tests (v132 + v133).
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/agent-panel-rename-migration.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/db-migrations/src/agent-panel-rename-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'

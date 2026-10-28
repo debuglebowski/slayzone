@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { runMigrations } from '@slayzone/db-migrations'
 
 export interface TestDb {
   /** Raw synchronous handle — fixture setup + schema introspection. */

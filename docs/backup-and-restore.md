@@ -26,7 +26,7 @@ on Windows the same folders under the user profile).
   live SQLite file without its `-wal` is not a backup.
 - **Forward only.** Migrations have no `down`. A build refuses to start on a DB
   migrated by a newer build (`SchemaTooNewError`,
-  `shared/transport/src/db-bootstrap/migrations.ts`). To go back a version, restore
+  `shared/db-migrations/src/migrations.ts`). To go back a version, restore
   the whole `<ROOT>` from before the upgrade; never run the old binary on the new DB.
 - Each upgrade that migrates writes `backups/*.migration.sqlite` (main DB only; the
   last 3 are kept). It covers the main DB only, not the rest of the table above.

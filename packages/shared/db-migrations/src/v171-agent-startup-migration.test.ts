@@ -4,7 +4,7 @@
  * (plans/agent-startup-mode.md).
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/db-migrations/src/v171-agent-startup-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'

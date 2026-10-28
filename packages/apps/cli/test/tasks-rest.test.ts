@@ -86,7 +86,7 @@ for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
   // Canonical schema moved out of apps/app/src/main/db in the Wave C2 split.
-  '../../../shared/transport/src/db-bootstrap/migrations.ts'
+  '../../../shared/db-migrations/src/migrations.ts'
 )
 const mod = await import(migrationsPath)
 mod.runMigrations(db)

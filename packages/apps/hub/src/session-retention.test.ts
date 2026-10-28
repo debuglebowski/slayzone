@@ -32,7 +32,7 @@ import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { getCurrentConversationId, getTaskOp, listTaskSessions } from '@slayzone/task/server'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
-import { runMigrations } from '../../../shared/transport/src/db-bootstrap/migrations.js'
+import { runMigrations } from '../../../shared/db-migrations/src/migrations.js'
 import {
   getNextSeqForTab,
   loadChatEvents,

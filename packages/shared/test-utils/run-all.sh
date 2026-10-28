@@ -88,6 +88,8 @@ run_harness packages/apps/hub/src/computer-placement.test.ts
 # the local computer. It must never overwrite a mapping the user re-pointed, and
 # must never record a path that is not on that machine.
 run_harness packages/apps/hub/src/seed-computer-project-paths.test.ts
+# The hub composes the schema boot (migrations + domain boot steps).
+run_harness packages/apps/hub/src/bootstrap-schema.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
 # has no opt-out and that a re-open neither re-migrates nor mints a 2nd backup.
 run_harness packages/apps/hub/src/supervised-bootstrap.test.ts
@@ -313,24 +315,24 @@ run_harness packages/apps/app/src/main/client-settings-migration.realstore.test.
 # current schema — an operation production never performs. All eleven now build
 # the DB at exactly version N-1 and apply migration N alone. Registered so they
 # cannot rot again.
-run_harness packages/shared/transport/src/db-bootstrap/history-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/v140-task-state-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/v147-agent-sessions-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
+run_harness packages/shared/db-migrations/src/history-migration.test.ts
+run_harness packages/shared/db-migrations/src/v140-task-state-migration.test.ts
+run_harness packages/shared/db-migrations/src/v147-agent-sessions-migration.test.ts
+run_harness packages/domains/task/src/server/v148-agent-sessions-runtime-migration.test.ts
 # A v145 (v0.35.0) database with orphan rows must still migrate; and the whole chain
 # v145 → latest must not lose a row in any table.
-run_harness packages/shared/transport/src/db-bootstrap/orphan-rows-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/v145-chain-conserves-rows.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/agent-panel-rename-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/ai-config-raw-skill-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/ai-config-slug-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/codex-flags-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/tag-color-dedup-migration.test.ts
+run_harness packages/shared/db-migrations/src/orphan-rows-migration.test.ts
+run_harness packages/shared/db-migrations/src/v145-chain-conserves-rows.test.ts
+run_harness packages/shared/db-migrations/src/agent-panel-rename-migration.test.ts
+run_harness packages/shared/db-migrations/src/ai-config-raw-skill-migration.test.ts
+run_harness packages/shared/db-migrations/src/ai-config-slug-migration.test.ts
+run_harness packages/shared/db-migrations/src/codex-flags-migration.test.ts
+run_harness packages/shared/db-migrations/src/schema-too-new.test.ts
+run_harness packages/domains/projects/src/server/status-normalization.test.ts
+run_harness packages/shared/db-migrations/src/tag-color-dedup-migration.test.ts
 # v169 project owner + per-user settings, on an empty and a populated v168 DB.
-run_harness packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
-run_harness packages/shared/transport/src/db-bootstrap/v171-agent-startup-migration.test.ts
+run_harness packages/shared/db-migrations/src/v169-ownership-migration.test.ts
+run_harness packages/shared/db-migrations/src/v171-agent-startup-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -739,7 +741,7 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 
 # Known-red suites, skipped visibly with the reason and owner instead of failing every run.
-skip_suite packages/shared/transport/src/db-bootstrap/worktree-source-branch-migration.test.ts \
+skip_suite packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts \
   "fails at HEAD (duplicate column name: execution_context). TODO(T-01): fix the test, then register it with the other migration suites"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the

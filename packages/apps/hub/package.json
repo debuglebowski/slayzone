@@ -19,6 +19,7 @@
   "dependencies": {
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
+    "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",

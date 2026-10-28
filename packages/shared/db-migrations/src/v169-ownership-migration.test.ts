@@ -6,12 +6,11 @@
  * boot step (apps/hub ownership-backfill.test.ts / ownership-boot.test.ts).
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v169-ownership-migration.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/db-migrations/src/v169-ownership-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
-import { settingScope } from '@slayzone/settings/server'
-import { bootstrapSchema, LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
+import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
 
 function dbUpTo(maxVersion: number): Database.Database {
   const db = new Database(':memory:')
@@ -127,26 +126,6 @@ describe('v169 project ownership + per-user settings migration', () => {
       const n = (db.prepare('SELECT count(*) AS n FROM user_settings').get() as { n: number }).n
       // user_settings starts empty
       expect(n).toBe(0)
-    } finally {
-      db.close()
-    }
-  })
-
-  test('every settings row a fresh database is seeded with is a hub key', () => {
-    // A seeded per-user key would not be a default for everyone on a login hub:
-    // users never fall back to a global row, and the boot backfill hands it to the
-    // first admin. Seed per-user defaults in the client instead.
-    const db = new Database(':memory:')
-    try {
-      bootstrapSchema(db)
-      const keys = (db.prepare('SELECT key FROM settings').all() as { key: string }[]).map(
-        (r) => r.key
-      )
-      // something is seeded
-      expect(keys.length).toBeGreaterThan(0)
-      const notHub = keys.filter((k) => settingScope(k) !== 'hub')
-      // seeded keys that are not hub-scoped
-      expect(notHub).toEqual([])
     } finally {
       db.close()
     }

@@ -16,11 +16,8 @@ import {
   type TxnResult
 } from '@slayzone/platform'
 import { domainTxnRegistry } from '@slayzone/transport/txns'
-import {
-  bootstrapSchema,
-  createPreMigrationBackup,
-  LATEST_MIGRATION_VERSION
-} from '@slayzone/transport/db-bootstrap'
+import { createPreMigrationBackup, LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
+import { bootstrapSchema } from './bootstrap-schema'
 import { createDiagnosticsSchema, applyDiagnosticsPragmas } from '@slayzone/diagnostics/server'
 
 /**

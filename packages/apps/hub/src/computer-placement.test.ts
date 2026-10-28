@@ -12,7 +12,7 @@ import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
 import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { runMigrations } from '@slayzone/db-migrations'
 import {
   BindComputerError,
   ComputerNotYoursError,

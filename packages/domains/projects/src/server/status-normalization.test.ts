@@ -1,12 +1,12 @@
 /**
  * Startup status normalization tests
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/status-normalization.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/domains/projects/src/server/status-normalization.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
 import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects-contracts'
-import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
+import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
 import { normalizeProjectStatusData } from './status-normalization.js'
 
 function createDb(): Database.Database {

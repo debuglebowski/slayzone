@@ -5,11 +5,7 @@
  * store takes, not against a hand-built schema.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  LATEST_MIGRATION_VERSION,
-  migrations,
-  runMigrations
-} from '@slayzone/transport/db-bootstrap'
+import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from '@slayzone/db-migrations'
 import type Database from 'better-sqlite3'
 import { createMigratedDb } from './test-db'
 

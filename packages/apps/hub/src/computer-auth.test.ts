@@ -32,7 +32,7 @@ import {
   revokeComputer
 } from '@slayzone/computers/server'
 import { createSlayzoneDbAdapter } from '@slayzone/test-utils'
-import { runMigrations } from '@slayzone/transport/db-bootstrap'
+import { runMigrations } from '@slayzone/db-migrations'
 import { createComputerAuthAdapters } from './computer-auth.js'
 
 /** Fresh in-memory SlayzoneDb with the FULL production migration chain applied. */

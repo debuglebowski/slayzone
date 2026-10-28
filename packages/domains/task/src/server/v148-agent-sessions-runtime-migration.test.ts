@@ -5,19 +5,19 @@
  * schema. See plans/agent-sessions.md.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/v148-agent-sessions-runtime-migration.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/domains/task/src/server/v148-agent-sessions-runtime-migration.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { migrations } from './index'
+import { migrations } from '@slayzone/db-migrations'
 import {
   recordSessionSpawn,
   confirmSessionConversation,
   bindSessionToTask,
   markSessionFirstTurn,
   getCurrentConversationId
-} from '@slayzone/task/server'
+} from './index'
 
 /** Build a DB migrated through v148 (all real migrations). */
 function dbUpTo(maxVersion: number): Database.Database {

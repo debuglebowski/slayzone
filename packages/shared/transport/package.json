@@ -10,8 +10,7 @@
     "./server": "./src/server/index.ts",
     "./client": "./src/client/index.ts",
     "./testing": "./src/testing/index.tsx",
-    "./txns": "./src/txns/index.ts",
-    "./db-bootstrap": "./src/db-bootstrap/index.ts"
+    "./txns": "./src/txns/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -21,6 +20,7 @@
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
+    "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",

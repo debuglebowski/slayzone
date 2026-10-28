@@ -18,8 +18,8 @@
     "@slayzone/platform": "workspace:*"
   },
   "devDependencies": {
+    "@slayzone/db-migrations": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
-    "@slayzone/transport": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "better-sqlite3": "^13.0.3",
     "vitest": "^5.0.2"

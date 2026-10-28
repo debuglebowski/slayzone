@@ -29,7 +29,7 @@ import Database from 'better-sqlite3'
 import { afterAll, assert, beforeAll, expect, test } from 'vitest'
 import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
-import { migrations } from '../../../shared/transport/src/db-bootstrap/index.js'
+import { migrations } from '../../../shared/db-migrations/src/index.js'
 
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))

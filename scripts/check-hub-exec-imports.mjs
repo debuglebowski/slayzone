@@ -70,7 +70,7 @@ const ALLOWLIST = {
     'git status, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
   'packages/domains/file-editor/src/server/repo-discovery.ts':
     'git repo discovery, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
-  'packages/shared/transport/src/db-bootstrap/migrations.ts':
+  'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',
   // Not reachable as exec on a hub.
   'packages/shared/platform/src/cli-install.ts':

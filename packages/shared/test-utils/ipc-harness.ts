@@ -149,12 +149,9 @@ export async function createTestHarness(): Promise<TestHarness> {
   }
 
   // Dynamic import to avoid Node 24 native TS static analysis issues.
-  // Canonical schema lives in transport's db-bootstrap (moved out of
+  // Canonical schema lives in @slayzone/db-migrations (moved out of
   // apps/app/src/main/db in the Wave C2 split).
-  const migrationsPath = path.resolve(
-    import.meta.dirname,
-    '../transport/src/db-bootstrap/migrations.ts'
-  )
+  const migrationsPath = path.resolve(import.meta.dirname, '../db-migrations/src/migrations.ts')
   const mod = await import(migrationsPath)
   mod.runMigrations(db)
 

@@ -1,7 +1,7 @@
 /**
  * Downgrade guard: an older build must refuse a DB migrated by a newer one.
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
- *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/transport/src/db-bootstrap/schema-too-new.test.ts
+ *   --config packages/shared/test-utils/vitest.harness.config.ts packages/shared/db-migrations/src/schema-too-new.test.ts
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'

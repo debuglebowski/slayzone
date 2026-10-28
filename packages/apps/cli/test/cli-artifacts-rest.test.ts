@@ -75,7 +75,7 @@ const db = new Database(dbPath)
 for (const pragma of DB_PRAGMAS) db.pragma(pragma)
 const migrationsPath = path.resolve(
   import.meta.dirname,
-  '../../../shared/transport/src/db-bootstrap/migrations.ts'
+  '../../../shared/db-migrations/src/migrations.ts'
 )
 const mod = await import(migrationsPath)
 mod.runMigrations(db)

@@ -3,11 +3,12 @@ import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'
+// v78 uses a frozen copy of ai-config's frontmatter helpers (see the file header).
 import {
   parseSkillFrontmatter,
   renderSkillFrontmatter,
   validateSkillFrontmatter
-} from '@slayzone/ai-config/shared'
+} from './frozen/v78-skill-frontmatter'
 
 interface Migration {
   version: number

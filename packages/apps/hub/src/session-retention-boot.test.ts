@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { afterAll, beforeAll, expect, test } from 'vitest'
-import { migrations } from '../../../shared/transport/src/db-bootstrap/index.js'
+import { migrations } from '../../../shared/db-migrations/src/index.js'
 import { BOOT_SWEEP_DELAY_MS } from './session-retention.js'
 
 const require = createRequire(import.meta.url)

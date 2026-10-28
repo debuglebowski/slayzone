@@ -2,8 +2,8 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import { ensureIntegrationSchemaSync } from '@slayzone/integrations/db'
 import { syncTerminalModes } from '@slayzone/terminal/db'
-import { runMigrations } from '../db-bootstrap'
-import { normalizeProjectStatusData } from '../db-bootstrap'
+import { runMigrations } from '@slayzone/db-migrations'
+import { normalizeProjectStatusData } from '@slayzone/projects/db'
 
 /**
  * Playwright-only full schema rebuild.

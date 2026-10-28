@@ -6,7 +6,7 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
-import { runMigrations } from '../../../../shared/transport/src/db-bootstrap/migrations.js'
+import { runMigrations } from '../../../../shared/db-migrations/src/migrations.js'
 import { describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
 import { isPromptCaptureMode } from '@slayzone/terminal-contracts'
