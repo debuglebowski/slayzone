@@ -42,3 +42,11 @@ export const feedbackRouter = router({
     .input(z.object({ threadId: z.string() }))
     .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).deleteThread(input.threadId))
 })
+
+export type FeedbackRouter = typeof feedbackRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `feedbackRouter` at
+ * `feedback` and asserts the slice in its `router.ts`.
+ */
+export type FeedbackMounts = { feedback: FeedbackRouter }

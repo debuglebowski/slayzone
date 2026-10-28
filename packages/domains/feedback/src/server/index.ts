@@ -1,2 +1,2 @@
 export { buildFeedbackOps } from './feedback-store'
-export { feedbackRouter } from './feedback-router'
+export { feedbackRouter, type FeedbackRouter, type FeedbackMounts } from './feedback-router'
