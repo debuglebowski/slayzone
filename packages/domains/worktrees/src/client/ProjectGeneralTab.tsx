@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useLayoutEffect, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { GitBranch, ChevronDown, Check, Loader2, Plus, Copy, FolderGit2 } from 'lucide-react'
@@ -94,9 +94,18 @@ export function ProjectGeneralTab({
   )
 
   const lastHashRef = useRef<string>('')
+  // The path on screen. A layout effect, so it is set inside the commit: a read that
+  // settles right after the commit already sees it. A read that started for another
+  // path drops its result — its data must not land under the new path, nor end its
+  // "Checking...".
+  const shownPathRef = useRef(projectPath)
+  useLayoutEffect(() => {
+    shownPathRef.current = projectPath
+  }, [projectPath])
 
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
+    const superseded = () => shownPathRef.current !== projectPath
     try {
       let isRepo: boolean
       try {
@@ -104,6 +113,7 @@ export function ProjectGeneralTab({
           trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
         )
       } catch (err) {
+        if (superseded()) return null
         // The check itself failed (git could not be started) — not the same as "not a
         // repo", which would offer `git init` on a healthy repo.
         const message = err instanceof Error ? err.message : String(err)
@@ -114,6 +124,7 @@ export function ProjectGeneralTab({
         }
         return hash
       }
+      if (superseded()) return null
       if (!isRepo) {
         const hash = JSON.stringify({ isRepo: false })
         if (hash !== lastHashRef.current) {
@@ -135,6 +146,7 @@ export function ProjectGeneralTab({
             trpc.worktrees.getAheadBehindUpstream.queryOptions({ path: projectPath, branch })
           )
         : null
+      if (superseded()) return null
       const hash = JSON.stringify({ isRepo: true, branch, status, remote, uab })
       if (hash !== lastHashRef.current) {
         lastHashRef.current = hash
@@ -151,7 +163,13 @@ export function ProjectGeneralTab({
     }
   }, [projectPath, queryClient, trpc])
 
-  useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: 5000 })
+  // Restarted per path: a new path is read at once (not on the old path's backed-off
+  // timer, nor after its read still in flight), and polls from the base delay.
+  useStablePoll(fetchGitData, {
+    enabled: visible && !!projectPath,
+    baseDelayMs: 5000,
+    restartKey: projectPath
+  })
 
   const handleBranchPopoverChange = (open: boolean) => {
     setBranchPopoverOpen(open)
