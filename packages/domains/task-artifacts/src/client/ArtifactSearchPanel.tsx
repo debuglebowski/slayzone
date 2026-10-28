@@ -182,6 +182,10 @@ export function ArtifactSearchPanel({
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!query.trim()) return
     const deps = [query, matchCase, useRegex, textArtifacts, readContent, getArtifactPath]
+    // A run superseded (newer search, tab hidden, unmount) lands nothing: finishing
+    // after a newer run, its older results would replace the newer ones and leave
+    // "Searching..." stuck (its deps no longer match).
+    let superseded = false
     debounceRef.current = setTimeout(() => {
       void runArtifactSearch({
         query,
@@ -191,11 +195,16 @@ export function ArtifactSearchPanel({
         contentCache,
         readContent,
         getArtifactPath,
-        onDone: (found) => setFinished({ deps, results: found }),
-        setCollapsed
+        onDone: (found) => {
+          if (!superseded) setFinished({ deps, results: found })
+        },
+        setCollapsed: (next) => {
+          if (!superseded) setCollapsed(next)
+        }
       })
     }, 300)
     return () => {
+      superseded = true
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [query, matchCase, useRegex, textArtifacts, readContent, getArtifactPath])

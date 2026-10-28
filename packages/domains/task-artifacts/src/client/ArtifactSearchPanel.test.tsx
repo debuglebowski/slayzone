@@ -15,7 +15,8 @@ const getArtifactPath = (a: TaskArtifact): string => a.title
 const onSelectResult = vi.fn()
 
 let contents: Record<string, string | null>
-const readContent = vi.fn(async (id: string) => contents[id] ?? null)
+const readFromContents = async (id: string) => contents[id] ?? null
+const readContent = vi.fn(readFromContents)
 
 function Tab({ mode }: { mode: 'visible' | 'hidden' }) {
   return (
@@ -45,6 +46,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   contents = { a1: 'hello world', a2: 'nothing here' }
   readContent.mockClear()
+  readContent.mockImplementation(readFromContents)
 })
 afterEach(() => {
   cleanup()
@@ -111,6 +113,38 @@ describe('ArtifactSearchPanel', () => {
     expect(readContent.mock.calls.length).toBe(reads + 1)
     expect(files()).toEqual(['a.md', 'b.md'])
     expect(summary()).toBe('2 results in 2 files')
+  })
+
+  it('a run overtaken by a newer one never replaces its results (nor sticks "Searching...")', async () => {
+    // Run 1 waits on b.md's read; b.md is deleted meanwhile, so run 2 (without it)
+    // finishes first. Run 1 landing later must not put back the deleted file.
+    contents.a2 = 'hello there'
+    let releaseB!: () => void
+    readContent.mockImplementation(async (id: string) => {
+      if (id === 'a2') await new Promise<void>((r) => (releaseB = r))
+      return contents[id] ?? null
+    })
+    const List = ({ artifacts }: { artifacts: TaskArtifact[] }) => (
+      <ArtifactSearchPanel
+        artifacts={artifacts}
+        readContent={readContent}
+        getArtifactPath={getArtifactPath}
+        onSelectResult={onSelectResult}
+      />
+    )
+    const view = render(<List artifacts={ARTIFACTS} />)
+    type('hello')
+    await settle() // run 1 starts: a.md read, b.md pending
+
+    view.rerender(<List artifacts={[ARTIFACTS[0]]} />)
+    await settle() // run 2: a.md only
+    expect(searching()).toBe(false)
+    expect(files()).toEqual(['a.md'])
+
+    await act(async () => releaseB()) // run 1 lands last
+    expect(searching()).toBe(false)
+    expect(summary()).toBe('1 result in 1 file')
+    expect(files()).toEqual(['a.md'])
   })
 
   it('keeps the results (not "Searching...") while the search re-runs on show', async () => {
