@@ -716,6 +716,22 @@ export const tabStoreReady: Promise<void> = Promise.resolve()
 
 // Debounced persistence — subscribe to tab/index/project changes and save
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null
+let _inflightWrite: Promise<unknown> = Promise.resolve()
+let _persistenceStopped = false
+
+/**
+ * Stop persisting `viewState` for the rest of this renderer's life: drop the pending
+ * debounced write and resolve once any write already on the wire has landed. For a
+ * caller about to wipe the DB and reload (the e2e `resetApp`): without it, a tab change
+ * made just before the wipe is written AFTER it, and the reload restores a deleted task
+ * as the active tab.
+ */
+export async function stopViewStatePersistence(): Promise<void> {
+  _persistenceStopped = true
+  if (_debounceTimer) clearTimeout(_debounceTimer)
+  _debounceTimer = null
+  await _inflightWrite.catch(() => {})
+}
 
 useTabStore.subscribe(
   (state) => ({
@@ -758,10 +774,14 @@ useTabStore.subscribe(
     closedTabs: state.closedTabs
   }),
   (slice) => {
-    if (!useTabStore.getState().isLoaded) return
+    if (!useTabStore.getState().isLoaded || _persistenceStopped) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
-      void getTrpcClient().settings.set.mutate({ key: 'viewState', value: JSON.stringify(slice) })
+      _debounceTimer = null
+      _inflightWrite = getTrpcClient().settings.set.mutate({
+        key: 'viewState',
+        value: JSON.stringify(slice)
+      })
     }, 500)
   },
   { equalityFn: shallow }

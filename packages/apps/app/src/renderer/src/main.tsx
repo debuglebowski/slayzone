@@ -1,7 +1,12 @@
 import './assets/main.css'
 
 import { createRoot } from 'react-dom/client'
-import { ThemeProvider, loadTabStoreState, useTabStore } from '@slayzone/settings'
+import {
+  ThemeProvider,
+  loadTabStoreState,
+  stopViewStatePersistence,
+  useTabStore
+} from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import {
@@ -196,6 +201,9 @@ if (isFloatingGlobalAgentPanel) {
           getTrpcVanillaClient?: () => ReturnType<typeof initTrpcClient>['client']
         }
       ).getTrpcVanillaClient = () => initTrpcClient(trpcUrl).client
+      ;(
+        window as typeof window & { __slayzone_stopViewStatePersistence?: () => Promise<void> }
+      ).__slayzone_stopViewStatePersistence = stopViewStatePersistence
     }
     // Multi-hub federation registry. The DEFAULT hub is pinned to `server.url` —
     // the exact url boot's initTrpcClient() used — so its HubScope reuses that

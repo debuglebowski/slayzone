@@ -33,6 +33,9 @@ declare global {
     /** Vanilla tRPC client exposed by main.tsx under PLAYWRIGHT. Typing it
      *  here is what makes the `page.evaluate` closures type-checked. */
     getTrpcVanillaClient: () => TrpcVanillaClient
+    /** Exposed by main.tsx under PLAYWRIGHT; `resetApp` calls it before the DB wipe
+     *  so no pending `viewState` write can land in the fresh DB. */
+    __slayzone_stopViewStatePersistence?: () => Promise<void>
   }
 }
 

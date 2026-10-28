@@ -231,6 +231,12 @@ function closeSessionLogCapture(): void {
  * test.beforeAll to ensure parallel worker isolation.
  */
 export async function resetApp(page: Page): Promise<void> {
+  // Quiesce the renderer's debounced `viewState` write first. Otherwise a tab change
+  // the previous spec made <500ms before this call is written AFTER the wipe below,
+  // and the reload restores that (now deleted) task as the active tab: "Task not
+  // found", with the next spec's board hidden behind it. Absent before boot has loaded
+  // the tab store (nothing persists yet) and in the web shell.
+  await page.evaluate(() => window.__slayzone_stopViewStatePersistence?.())
   // `app:reset-for-test` does bulk DB writes; under full-suite load the better-sqlite3
   // worker can briefly hold a write lock and the invoke rejects with "database is
   // locked". The reset is idempotent (it clears state), so retry until it lands — this

@@ -10,6 +10,7 @@ export {
   useTabStore,
   tabStoreReady,
   loadTabStoreState,
+  stopViewStatePersistence,
   type Tab,
   type ClosedTab,
   type ClosedTabRestorer,
