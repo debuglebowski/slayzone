@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from 'vitest'
 import { appRouter } from './router'
-import { SCOPE_POLICY, isPathAllowed, type Scope } from './scopes'
+import { SCOPE_POLICY, isPathAllowed, type Scope } from '../shared/scopes'
 
 const LIVE_PATHS = Object.keys(appRouter._def.procedures).sort()
 const POLICY_PATHS = Object.keys(SCOPE_POLICY).sort()

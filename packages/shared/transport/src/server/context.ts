@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { AutomationRun } from '@slayzone/automations/shared'
 import type { IncomingMessage } from 'node:http'
-import type { Scope } from './scopes'
+import type { Scope } from '../shared/scopes'
 
 /** Structural slice of AutomationEngine the automations router needs. Keeps
  *  transport decoupled from the engine's electron-laden value module — only the

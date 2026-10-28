@@ -1,4 +1,4 @@
-import { isPathAllowed, type Scope } from '../server/scopes'
+import { isPathAllowed, type Scope } from '../shared/scopes'
 import type { TrpcVanillaClient } from './trpc'
 
 /**

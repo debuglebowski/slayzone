@@ -30,10 +30,13 @@
  *     forces a future PR to make a security decision before merging.
  *
  * NO ROUTER IMPORTS HERE, deliberately. This file must stay pure data + the
- * vocabulary comments — `scopes.test.ts` is where the coupling to the live
- * `appRouter` happens, in a test, not in production code.
+ * vocabulary comments — `server/scopes.test.ts` is where the coupling to the live
+ * `appRouter` happens, in a test, not in production code. Being pure is also
+ * why it lives in `shared/`: the server gate (`server/trpc.ts`) and the client
+ * capability check (`client/hubCapabilities.ts`) both import it, and the client
+ * must not import server code.
  *
- * @module transport/server/scopes
+ * @module transport/shared/scopes
  */
 
 /**

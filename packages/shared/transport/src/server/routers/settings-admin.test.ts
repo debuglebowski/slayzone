@@ -17,7 +17,7 @@ import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { router } from '../trpc'
 import { setAuthGate } from '../app-deps'
 import type { TrpcContext } from '../context'
-import type { Scope } from '../scopes'
+import type { Scope } from '../../shared/scopes'
 import { settingsWriteProcedure } from './settings-admin'
 
 const testRouter = router({

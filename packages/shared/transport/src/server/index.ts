@@ -8,7 +8,7 @@ export {
   type Scope,
   type PrincipalScope,
   type ProcedureScope
-} from './scopes'
+} from '../shared/scopes'
 export {
   ADMIN_ONLY,
   CONDITIONAL_ADMIN,

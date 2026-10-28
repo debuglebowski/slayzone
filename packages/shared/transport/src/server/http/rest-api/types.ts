@@ -6,7 +6,7 @@ import type { TasksChange } from '@slayzone/task/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '../../context'
 import type { FindJoinTokenAccount } from '../../join-token-policy'
-import type { Scope } from '../../scopes'
+import type { Scope } from '../../../shared/scopes'
 
 /**
  * A resolved REST-side principal — the twin of `ConnectionPrincipal`
