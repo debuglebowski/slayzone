@@ -14,7 +14,7 @@ Goal: real Cmd+K command palette in the chromium fork. Extract canonical `Search
     used only by `SearchResults`. Clean to move all 8.
 - Component deps (all barrel): `@slayzone/ui`, `@slayzone/icons` (FileIcon),
   `@slayzone/settings` (`useDialogStore`, `Tab`, `SearchFileContext`),
-  `@slayzone/task/shared` (`Task`, `priorityOptions`), `@slayzone/projects-contracts` (`Project`),
+  `@slayzone/task-contracts` (`Task`, `priorityOptions`), `@slayzone/projects-contracts` (`Project`),
   `@slayzone/telemetry/client`, `@slayzone/transport/client`, `fzf`, `lucide-react`.
 - Fork `AppDialogs` (`packages/apps/renderer-app/src/AppDialogs.tsx`) = store-driven,
   currently EMPTY (only Toaster). Has `useLazyMounted()` gate ready. Mounted at HomeView root.
