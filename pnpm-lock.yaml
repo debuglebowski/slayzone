@@ -514,9 +514,6 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
-      '@slayzone/task-browser':
-        specifier: workspace:*
-        version: link:../../domains/task-browser
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
@@ -1656,9 +1653,6 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../terminal-contracts
-      '@slayzone/types':
-        specifier: workspace:*
-        version: link:../../shared/types
     devDependencies:
       '@types/node':
         specifier: ^24.19.0

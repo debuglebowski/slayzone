@@ -85,7 +85,6 @@
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
-    "@slayzone/task-browser": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
