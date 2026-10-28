@@ -5,6 +5,10 @@ export {
 } from './TerminalStatusPopover'
 export { PtyProvider, usePty } from './PtyContext'
 export {
+  registerHibernatedSessionIdsSource,
+  type HibernatedSessionIdsSource
+} from './hibernated-sessions-source'
+export {
   useSessionState,
   useSessionStateRaw,
   useSessionBackgroundJobs,

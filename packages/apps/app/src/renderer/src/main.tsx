@@ -3,7 +3,8 @@ import './assets/main.css'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@slayzone/settings'
 import { loadTabStoreState, stopViewStatePersistence, useTabStore } from '@slayzone/tabs-state'
-import { PtyProvider } from '@slayzone/terminal'
+import { PtyProvider, registerHibernatedSessionIdsSource } from '@slayzone/terminal'
+import { hibernatedSessionIdsSource } from '@slayzone/task-terminals/hibernated-sessions'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import {
   TrpcProvider,
@@ -54,6 +55,9 @@ registerProjectSettingsTabs({
   ...integrationsProjectSettingsTabs,
   useDetectedRepos
 })
+// Terminal-state store's persisted hibernated set (task-terminals owns it) —
+// registered before any render (PtyProvider seeds from it on mount).
+registerHibernatedSessionIdsSource(hibernatedSessionIdsSource)
 
 const params = new URLSearchParams(window.location.search)
 const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'

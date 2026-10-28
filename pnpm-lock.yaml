@@ -526,6 +526,9 @@ importers:
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../../domains/task-terminals
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks
@@ -960,6 +963,9 @@ importers:
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../../domains/task-terminals
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks

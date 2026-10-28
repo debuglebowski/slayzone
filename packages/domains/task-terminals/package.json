@@ -11,7 +11,8 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
-    "./client/TaskSessionsSource": "./src/client/agent-sessions/TaskSessionsSource.ts"
+    "./client/TaskSessionsSource": "./src/client/agent-sessions/TaskSessionsSource.ts",
+    "./hibernated-sessions": "./src/client/hibernated-sessions.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

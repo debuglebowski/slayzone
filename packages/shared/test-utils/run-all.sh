@@ -484,6 +484,7 @@ run_harness packages/domains/terminal/src/client/webgl-budget.test.ts
 run_harness packages/domains/terminal/src/client/terminal-init-scheduler.test.ts
 run_harness packages/domains/terminal/src/client/open-trace.test.ts
 run_harness packages/domains/terminal/src/client/input-gate.test.ts
+run_harness packages/domains/terminal/src/client/hibernated-sessions-source.test.ts
 run_harness packages/domains/terminal/src/client/early-input.test.ts
 # Stuck-'starting' watchdog: waits on a session the backend still holds as starting
 # (queued for an agent-start slot) instead of showing it dead.

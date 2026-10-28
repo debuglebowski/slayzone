@@ -24,6 +24,7 @@ import {
   useTRPCClient
 } from '@slayzone/transport/client'
 import type { TerminalState } from '@slayzone/terminal-contracts'
+import { listHibernatedSessionIds } from './hibernated-sessions-source'
 
 // `background` (main agent done, its background subagents still working) is as
 // alive as `running` — it must count for useActiveTaskIds AND be eligible for the
@@ -439,8 +440,9 @@ export function useWireTerminalStateStore(): void {
         // Seed only: the store already defaults every session to "unknown", and
         // the focus/interval self-heal below re-runs the same reconcile.
       })
-    trpcClient.taskTerminals.listHibernatedSessions
-      .query()
+    // The hibernated set is task-terminals' (above terminal) — read through the
+    // app-registered source, re-run whenever the provider's client changes.
+    listHibernatedSessionIds()
       .then((ids) => ids.forEach((id) => st().applyHibernated(id)))
       .catch(() => {
         // Same as above — a missed hibernated set heals on the next reconcile.

@@ -1,7 +1,8 @@
 import { createRoot } from 'react-dom/client'
 import { TrpcProvider, electronBootstrap, initTrpcClient } from '@slayzone/transport/client'
 import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
-import { PtyProvider } from '@slayzone/terminal'
+import { PtyProvider, registerHibernatedSessionIdsSource } from '@slayzone/terminal'
+import { hibernatedSessionIdsSource } from '@slayzone/task-terminals/hibernated-sessions'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
@@ -31,6 +32,9 @@ registerProjectSettingsTabs({
   ...integrationsProjectSettingsTabs,
   useDetectedRepos
 })
+// Terminal-state store's persisted hibernated set (task-terminals owns it) —
+// registered before any render (PtyProvider seeds from it on mount).
+registerHibernatedSessionIdsSource(hibernatedSessionIdsSource)
 import { OverlayDialogApp } from './OverlayDialogApp'
 
 // window.api shim is installed by the shell before this module evaluates
