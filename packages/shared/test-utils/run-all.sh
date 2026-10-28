@@ -853,6 +853,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
+  packages/domains/worktrees/src/client/useConsolidatedGeneralData.poll.test.tsx \
   packages/domains/worktrees/src/client/ProjectGeneralTab.test.tsx \
   packages/domains/worktrees/src/client/useGitMergeActions.test.tsx \
   packages/domains/worktrees/src/client/CreatePrDialog.test.tsx \

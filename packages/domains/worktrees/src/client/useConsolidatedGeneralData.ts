@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
@@ -169,17 +169,29 @@ export function useConsolidatedGeneralData(
   const [taskBranch, setTaskBranch] = useState<string | null>(null)
   const [diffStats, setDiffStats] = useState<DiffStatsSummary | null>(null)
   const [metadata, setMetadata] = useState<WorktreeMetadata | null>(null)
+  // True until the first branch comparison for a shown target lands (or fails).
   const [branchLoading, setBranchLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-
-  const initialLoad = useRef(false)
 
   const lastGitHashRef = useRef<string>('')
   const lastBranchHashRef = useRef<string>('')
 
+  // What each poll reads. A key change restarts that poll (the new target is read at
+  // once, with fresh backoff), and a read that started for another key drops its
+  // result: its data must not land under the new target, nor end its loading state.
+  const gitKey = JSON.stringify([projectPath, targetPath])
+  const branchKey = JSON.stringify([targetPath, projectPath, parentBranch])
+  // The keys on screen. A layout effect, so they are set inside the commit: a read that
+  // settles right after the commit already sees them.
+  const shownKeysRef = useRef({ git: gitKey, branch: branchKey })
+  useLayoutEffect(() => {
+    shownKeysRef.current = { git: gitKey, branch: branchKey }
+  }, [gitKey, branchKey])
+
   // Fetch general git data — dedups setStates via hash; backoff via useStablePoll.
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
+    const superseded = () => shownKeysRef.current.git !== gitKey
     try {
       // Everything that doesn't depend on another answer goes out at once (one round
       // trip, not three): the repo check, both branches, the remote and the status.
@@ -222,6 +234,7 @@ export function useConsolidatedGeneralData(
         repoCheck,
         knownNotRepo ? null : readAll().catch(() => null)
       ])
+      if (superseded()) return null
       if (check.error !== null) {
         // The check itself failed (git could not be started) — not the same as "not a
         // repo", which would offer `git init` on a healthy repo.
@@ -243,7 +256,7 @@ export function useConsolidatedGeneralData(
       }
       // Became a repo since the last poll (`git init`): read the rest now.
       const settledReads = knownNotRepo ? await readAll().catch(() => null) : parallelReads
-      if (!settledReads) return null
+      if (!settledReads || superseded()) return null
       const [branch, remote, ownBranch, status] = settledReads
 
       let uab: AheadBehind | null = null
@@ -256,6 +269,7 @@ export function useConsolidatedGeneralData(
           )
         )
       }
+      if (superseded()) return null
 
       const hash = JSON.stringify({ isRepo: true, branch, remote, status, uab })
       if (hash !== lastGitHashRef.current) {
@@ -273,15 +287,20 @@ export function useConsolidatedGeneralData(
     } catch {
       return null
     }
-  }, [projectPath, targetPath, ownCheckout, queryClient, trpc])
+  }, [projectPath, targetPath, ownCheckout, gitKey, queryClient, trpc])
 
   // Fetch branch comparison data
   const fetchBranchData = useCallback(async () => {
     if (!targetPath || !parentBranch) return null
+    const superseded = () => shownKeysRef.current.branch !== branchKey
+    const markLoaded = () => {
+      if (branchLoading) setBranchLoading(false)
+    }
     try {
       const branch = await queryClient.fetchQuery(
         trpc.worktrees.getCurrentBranch.queryOptions({ path: targetPath }, FRESH)
       )
+      if (superseded()) return null
       if (!branch) {
         const hash = JSON.stringify({ branch: null })
         if (hash !== lastBranchHashRef.current) {
@@ -310,6 +329,7 @@ export function useConsolidatedGeneralData(
             trpc.worktrees.getDiffStats.queryOptions({ path: targetPath, ref: parentBranch }, FRESH)
           )
         : null
+      if (superseded()) return null
 
       // Hash only the values that drive setState — exclude `result.graph`
       // which contains time-sensitive `relativeDate` strings on every commit.
@@ -328,19 +348,14 @@ export function useConsolidatedGeneralData(
         setBaseCount(result?.baseCount ?? 0)
         setDiffStats(stats)
       }
-      if (!initialLoad.current) {
-        setBranchLoading(false)
-        initialLoad.current = true
-      }
+      markLoaded()
       return hash
     } catch {
-      if (!initialLoad.current) {
-        setBranchLoading(false)
-        initialLoad.current = true
-      }
+      if (superseded()) return null
+      markLoaded()
       return null
     }
-  }, [targetPath, projectPath, parentBranch, queryClient, trpc])
+  }, [targetPath, projectPath, parentBranch, branchKey, branchLoading, queryClient, trpc])
 
   // Own-checkout branch (worktree or custom working directory). Each reactive fetch
   // below drops its response once its inputs have changed, so a late answer for
@@ -368,11 +383,13 @@ export function useConsolidatedGeneralData(
 
   const gitPoll = useStablePoll(fetchGitData, {
     enabled: visible && !!projectPath,
-    baseDelayMs: pollIntervalMs
+    baseDelayMs: pollIntervalMs,
+    restartKey: gitKey
   })
   const branchPoll = useStablePoll(fetchBranchData, {
     enabled: visible && !!targetPath && !!parentBranch,
-    baseDelayMs: pollIntervalMs
+    baseDelayMs: pollIntervalMs,
+    restartKey: branchKey
   })
   // A git change (fs watcher) refreshes now, instead of after a poll that backs off to
   // 60s while nothing changes. The project checkout is watched too when it isn't the
@@ -419,11 +436,6 @@ export function useConsolidatedGeneralData(
       cancelled = true
     }
   }, [task.worktree_path, queryClient, trpc])
-
-  // Reset on path change
-  useEffect(() => {
-    initialLoad.current = false
-  }, [targetPath])
 
   // Actions
   const handleInitGit = useCallback(async () => {
