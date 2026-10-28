@@ -9,6 +9,7 @@ import type {
   SlayExportData
 } from './txns/export-import-txns'
 import { getAppDeps, getNotifyEvents } from './app-deps'
+import type { ExportImportOps, ExportResult, ImportResult } from '@slayzone/settings/server'
 
 /**
  * Export / import, running where the data is.
@@ -44,22 +45,6 @@ interface SlayExportMeta {
 interface SlayExportBundle {
   meta: SlayExportMeta
   data: SlayExportData
-}
-
-interface ExportResult {
-  success: boolean
-  canceled?: boolean
-  path?: string
-  error?: string
-}
-
-interface ImportResult {
-  success: boolean
-  canceled?: boolean
-  projectCount?: number
-  taskCount?: number
-  importedProjects?: Array<{ id: string; name: string }>
-  error?: string
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -328,23 +313,6 @@ async function handleImport(db: SlayzoneDb, caller: ExportImportCaller): Promise
   } catch (e) {
     return { success: false, error: String(e) }
   }
-}
-
-// Pure op surface shared by the IPC handlers (below) and the tRPC
-// `app.exportImport` router (via setAppDeps). Test-only ops bypass native
-// dialogs and are present only when `isTest` (e2e); the router guards on their
-// presence. Both transports delegate here (coexistence until slice 5).
-export type ExportImportOps = {
-  exportAll: () => Promise<ExportResult>
-  exportProject: (projectId: string) => Promise<ExportResult>
-  importBundle: () => Promise<ImportResult>
-  testExportAllToPath?: (filePath: string) => Promise<ExportResult>
-  testExportProjectToPath?: (projectId: string, filePath: string) => Promise<ExportResult>
-  testImportFromPath?: (filePath: string) => Promise<ImportResult>
-  testSetTaskParent?: (
-    taskId: string,
-    parentId: string | null
-  ) => Promise<{ success: boolean; error?: string }>
 }
 
 /**

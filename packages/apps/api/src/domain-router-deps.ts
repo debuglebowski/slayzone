@@ -18,8 +18,10 @@ import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
 import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
 import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'
 import { setComputersRouterDeps } from '@slayzone/computers/server'
+import { setExportImportOpsFactory } from '@slayzone/settings/server'
 import { createAccessScope } from './access'
 import { filterManagedComputers, mayManageComputer } from './computer-access'
+import { buildExportImportOps } from './export-import'
 import { getAppDeps, getComputersDepsOrNull } from './app-deps'
 import { accessRequestOf, ownedProjectIds } from './owner-gate'
 
@@ -85,3 +87,18 @@ setComputersRouterDeps({
     }
   }
 })
+
+// `app.exportImport`: export/import for one request. Imported projects belong to its
+// user — null on a hub without login, where requests carry none — and `exportAll`
+// holds only what its access scope allows (O-22: the caller's own content on a hub
+// with login).
+setExportImportOpsFactory((ctx, isTest) =>
+  buildExportImportOps(
+    ctx.db,
+    {
+      userId: ctx.principal?.userId ?? null,
+      scope: createAccessScope(ctx.db, accessRequestOf(ctx))
+    },
+    isTest
+  )
+)

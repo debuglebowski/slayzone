@@ -34,7 +34,7 @@ import {
   type AppTaskWindowsMounts,
   type AppWindowMounts
 } from '@slayzone/host-capabilities/server'
-import type { AppBackupMounts } from '@slayzone/settings/server'
+import type { AppBackupMounts, AppExportImportMounts } from '@slayzone/settings/server'
 import {
   usageAnalyticsRouter,
   type AppLeaderboardMounts,
@@ -143,6 +143,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AppBrowserMounts>>,
   AssertAppSlice<IsAppSlice<AppClipboardMounts>>,
   AssertAppSlice<IsAppSlice<AppDialogMounts>>,
+  AssertAppSlice<IsAppSlice<AppExportImportMounts>>,
   AssertAppSlice<IsAppSlice<AppFeedbackMounts>>,
   AssertAppSlice<IsAppSlice<AppFilesMounts>>,
   AssertAppSlice<IsAppSlice<AppFloatingAgentMounts>>,
