@@ -20,6 +20,10 @@ import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
 import { taskPanels } from './app-shell/taskPanels'
+import {
+  registerTaskSessionsSource,
+  taskSessionsSource
+} from '@slayzone/task/client/taskSessionsSource'
 import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSettingsTabs'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
@@ -40,6 +44,9 @@ import { MaybeProfiler } from './lib/perfProfiler'
 // Artifacts + git panels TaskDetailPage embeds (main + secondary task windows) —
 // registered before any render.
 registerTaskPanels(taskPanels)
+// Agent-session history TerminalContainer shows (task owns agentSessions) —
+// registered before any render.
+registerTaskSessionsSource(taskSessionsSource)
 // Settings' tag editor, integrations' tab and worktrees' repo detection
 // ProjectSettingsDialog embeds — registered before any render.
 registerProjectSettingsTabs({

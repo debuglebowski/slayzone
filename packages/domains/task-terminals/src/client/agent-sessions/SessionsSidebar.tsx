@@ -12,7 +12,7 @@ import {
   IconButton,
   cn
 } from '@slayzone/ui'
-import { useTaskSessions } from './useTaskSessions'
+import { useTaskSessions } from './TaskSessionsSource'
 
 const storageKey = (taskId: string): string => `slayzone:sessions-sidebar:${taskId}`
 

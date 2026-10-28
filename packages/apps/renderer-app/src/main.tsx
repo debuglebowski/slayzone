@@ -10,6 +10,10 @@ import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
 import { taskPanels } from './taskPanels'
+import {
+  registerTaskSessionsSource,
+  taskSessionsSource
+} from '@slayzone/task/client/taskSessionsSource'
 import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSettingsTabs'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
@@ -17,6 +21,9 @@ import { useDetectedRepos } from '@slayzone/worktrees/hooks'
 
 // Artifacts + git panels TaskDetailPage embeds — registered before any render.
 registerTaskPanels(taskPanels)
+// Agent-session history TerminalContainer shows (task owns agentSessions) —
+// registered before any render.
+registerTaskSessionsSource(taskSessionsSource)
 // Settings' tag editor, integrations' tab and worktrees' repo detection
 // ProjectSettingsDialog embeds — registered before any render.
 registerProjectSettingsTabs({

@@ -32,7 +32,7 @@ import {
   SessionHistoryToggleButton,
   useSessionsSidebarOpen
 } from './agent-sessions/SessionsSidebar'
-import { useTaskSessions } from './agent-sessions/useTaskSessions'
+import { useTaskSessions } from './agent-sessions/TaskSessionsSource'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
