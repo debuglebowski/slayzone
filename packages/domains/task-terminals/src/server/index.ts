@@ -19,4 +19,8 @@ export {
   deleteTab
 } from './tabs-store'
 export type { TabRow } from './tabs-store'
-export { taskTerminalsRouter } from './task-terminals-router'
+export {
+  taskTerminalsRouter,
+  type TaskTerminalsRouter,
+  type TaskTerminalsMounts
+} from './task-terminals-router'

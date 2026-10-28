@@ -78,3 +78,11 @@ export const taskTerminalsRouter = router({
     })
   )
 })
+
+export type TaskTerminalsRouter = typeof taskTerminalsRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `taskTerminalsRouter` at
+ * `taskTerminals` and asserts the slice in its `router.ts`.
+ */
+export type TaskTerminalsMounts = { taskTerminals: TaskTerminalsRouter }
