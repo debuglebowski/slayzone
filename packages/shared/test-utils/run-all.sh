@@ -378,6 +378,9 @@ run_harness scripts/release/check-glibc-floor.test.mjs
 # `pnpm lint:trpc-deps`: flags a useMutation() result object bare in a hook dep array
 # (by `*Mutation` name and by binding, multi-line arrays included); quiet on stable forms.
 run_harness scripts/check-trpc-stable-deps.test.mjs
+# `pnpm lint:workspace-cycles`: a dependency edge inside a package cycle must be in the
+# baseline, and a baseline edge no longer in a cycle must be removed (shrink-only).
+run_harness scripts/check-workspace-cycles.test.mjs
 # `/cap` bearer gate (web-access plan open question #5) — loopback alone must
 # NOT get into the desktop's capabilityBridgeRouter; the WS upgrade itself must
 # reject a missing/wrong/mismatched-length per-boot token.
