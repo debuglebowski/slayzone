@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
-import { useShortcutAction } from '@slayzone/ui'
+import { useShortcutAction, useStableCallback } from '@slayzone/ui'
 
 type FoundInPageEvent = {
   viewId: string
@@ -32,6 +32,16 @@ export function useBrowserFind({
   const [findResult, setFindResult] = useState<{ active: number; total: number } | null>(null)
   const findInputRef = useRef<HTMLInputElement>(null)
 
+  // Close find when switching tabs. Adjusted during render, not in an effect, so
+  // no frame is drawn for the new tab with the old tab's find bar still open.
+  const [findTabId, setFindTabId] = useState(activeTabId)
+  if (findTabId !== activeTabId) {
+    setFindTabId(activeTabId)
+    setFindMode(false)
+    setFindText('')
+    setFindResult(null)
+  }
+
   const focusFindInput = useCallback(
     (select = false) => {
       const focusLocalTarget = () => {
@@ -53,13 +63,22 @@ export function useBrowserFind({
     setFindMode(false)
     setFindText('')
     setFindResult(null)
-    if (activeViewId) {
-      void trpcClient.app.browser.stopFindInPage.mutate({
-        viewId: activeViewId,
-        action: 'clearSelection'
+  }, [])
+
+  // The highlights live in the page find ran in: clear them THERE whenever find
+  // ends on it — Esc, a tab switch, or the panel unmounting. The cleanup closes
+  // over that view, so a tab switch never clears the newly active tab instead.
+  const clearHighlights = useStableCallback((viewId: string) => {
+    void trpcClient.app.browser.stopFindInPage
+      .mutate({ viewId, action: 'clearSelection' })
+      .catch(() => {
+        /* view already gone */
       })
-    }
-  }, [activeViewId, trpcClient])
+  })
+  useEffect(() => {
+    if (!findMode || !activeViewId) return
+    return () => clearHighlights(activeViewId)
+  }, [findMode, activeViewId, clearHighlights])
 
   const openFindMode = useCallback(() => {
     if (multiDeviceMode || extensionsManagerOpen) return
@@ -122,12 +141,6 @@ export function useBrowserFind({
       }
     })
   )
-
-  // Close find when switching tabs
-  useEffect(() => {
-    if (findMode) closeFindMode()
-    // Keyed on activeTabId only — intentional
-  }, [activeTabId])
 
   // Find shortcuts via scope-aware registry. Routes from both DOM focus
   // ([data-browser-panel] focusin) and WCV focus (browser-view:shortcut IPC).
