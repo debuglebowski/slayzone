@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, waitFor, act } from '@testing-library/react'
-import { StrictMode } from 'react'
+import { StrictMode, useLayoutEffect } from 'react'
 
 const renderMock = vi.fn()
 const initializeMock = vi.fn()
@@ -16,7 +16,8 @@ function setHtmlTheme(theme: 'dark' | 'light') {
   document.documentElement.classList.toggle('dark', theme === 'dark')
 }
 
-vi.mock('@slayzone/ui', () => ({
+vi.mock('@slayzone/ui', async () => ({
+  ...(await vi.importActual<object>('../../../ui/src/use-deps-changed')),
   IconButton: (props: {
     onClick?: () => void
     'aria-label': string
@@ -95,6 +96,61 @@ describe('MermaidBlock', () => {
     await waitFor(() => expect(container.querySelector('pre code')).not.toBeNull())
     expect(container.querySelector('pre code')?.textContent).toBe('invalid mermaid # case-4')
     expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // What each commit puts on screen, read before passive effects run (= what is painted).
+  function CommitProbe({ log, code }: { log: string[]; code: string }) {
+    useLayoutEffect(() => {
+      log.push(document.querySelector('[data-probe-root]')?.innerHTML ?? '<no root>')
+    }, [code])
+    return null
+  }
+
+  it('editing the code never paints the previous diagram', async () => {
+    renderMock.mockResolvedValueOnce({ svg: '<svg data-testid="diagram-5a"/>' })
+    const log: string[] = []
+    const ui = (code: string) => (
+      <div data-probe-root>
+        <MermaidBlock code={code} />
+        <CommitProbe log={log} code={code} />
+      </div>
+    )
+    const { container, rerender } = render(ui('flowchart TD\nA-->B # case-5a'))
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="diagram-5a"]')).not.toBeNull()
+    )
+
+    let finish!: (v: { svg: string }) => void
+    renderMock.mockReturnValueOnce(new Promise((r) => (finish = r)))
+    log.length = 0
+    rerender(ui('flowchart TD\nA-->C # case-5b'))
+    expect(log).toHaveLength(1)
+    expect(log.filter((html) => html.includes('diagram-5a'))).toEqual([])
+    await act(async () => finish({ svg: '<svg data-testid="diagram-5b"/>' }))
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="diagram-5b"]')).not.toBeNull()
+    )
+
+    // Back to the first code: drawn from the cache at once, without rendering again.
+    const calls = renderMock.mock.calls.length
+    rerender(ui('flowchart TD\nA-->B # case-5a'))
+    expect(container.querySelector('[data-testid="diagram-5a"]')).not.toBeNull()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(renderMock.mock.calls.length).toBe(calls)
+  })
+
+  it('a fixed diagram replaces the error fallback', async () => {
+    renderMock.mockRejectedValueOnce(new Error('parse error'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { container, rerender } = render(<MermaidBlock code="broken # case-6" />)
+    await waitFor(() => expect(container.querySelector('pre code')).not.toBeNull())
+    renderMock.mockResolvedValueOnce({ svg: '<svg data-testid="diagram-6"/>' })
+    rerender(<MermaidBlock code="flowchart TD\nA-->B # case-6" />)
+    await waitFor(() => expect(container.querySelector('[data-testid="diagram-6"]')).not.toBeNull())
+    expect(container.querySelector('pre code')).toBeNull()
     warn.mockRestore()
   })
 })

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useSyncExternalStore, useMemo } from 'react'
+import { useDepsChanged } from '@slayzone/ui'
 import { MediaView } from './MediaView'
 
 /**
@@ -67,16 +68,16 @@ export function MermaidBlock({ code, fill = false }: MermaidBlockProps) {
   const [hasError, setHasError] = useState(false)
   const svgHostRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const cached = svgCache.get(cacheKey)
-    if (cached !== undefined) {
-      setSvg(cached)
-      setHasError(false)
-      return
-    }
-    let cancelled = false
+  // New code or theme: show its cached diagram, else the loading box, from this very
+  // render — never the previous diagram (or error) for one frame.
+  if (useDepsChanged([cacheKey])) {
+    setSvg(svgCache.get(cacheKey) ?? null)
     setHasError(false)
-    setSvg(null)
+  }
+
+  useEffect(() => {
+    if (svgCache.has(cacheKey)) return
+    let cancelled = false
     getMermaid(theme)
       .then(async (m) => {
         const id = `mermaid-shared-${++mermaidIdCounter}`
