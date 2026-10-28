@@ -1,14 +1,15 @@
+// The `usageAnalytics` router. `@slayzone/api` mounts it at `usageAnalytics`.
 import { z } from 'zod'
-import { refreshUsageData, queryAnalytics, queryTaskCost } from '@slayzone/usage-analytics/server'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
-import { ownedProjectIds } from '../owner-gate'
+import { refreshUsageData, queryAnalytics, queryTaskCost } from './cache'
+import { getUsageAnalyticsRouterDeps } from './router-deps'
 
 // real validation, mirrors DateRange = '7d'|'30d'|'90d'|'all' (usage-analytics/shared/types.ts)
 const dateRangeInput = z.enum(['7d', '30d', '90d', 'all'])
 
 /** On a hub with login, only the caller's projects' records are summed (T-17). */
 const scopeOf = async (ctx: TrpcContext) => {
-  const projectIds = await ownedProjectIds(ctx)
+  const projectIds = await getUsageAnalyticsRouterDeps().ownedProjectIds(ctx)
   return projectIds ? { projectIds } : null
 }
 
@@ -30,3 +31,7 @@ export const usageAnalyticsRouter = router({
     .input(z.object({ taskId: z.string() }))
     .query(({ ctx, input }) => queryTaskCost(ctx.db, input.taskId))
 })
+
+export type UsageAnalyticsRouter = typeof usageAnalyticsRouter
+/** Where `@slayzone/api` mounts it: `usageAnalytics`. */
+export type UsageAnalyticsMounts = { usageAnalytics: UsageAnalyticsRouter }

@@ -23,7 +23,8 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "lucide-react": "^1.48.0",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "react": "^19.3.1"

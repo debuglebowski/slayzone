@@ -33,7 +33,11 @@ import type {
   AppWindowMounts
 } from '@slayzone/host-capabilities/server'
 import type { AppBackupMounts } from '@slayzone/settings/server'
-import type { AppLeaderboardMounts } from '@slayzone/usage-analytics/server'
+import {
+  usageAnalyticsRouter,
+  type AppLeaderboardMounts,
+  type UsageAnalyticsMounts
+} from '@slayzone/usage-analytics/server'
 import type { AppUsageMounts } from '@slayzone/terminal/server'
 import type { AppFeedbackMounts } from '@slayzone/feedback/server'
 import type { AppBrowserMounts, AppWebviewMounts } from '@slayzone/task-browser/server'
@@ -78,7 +82,6 @@ import {
 import { artifactsRouter, type ArtifactsMounts } from '@slayzone/task-artifacts/server'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
-import { usageAnalyticsRouter } from './routers/usage-analytics'
 import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/server'
 
 export const appRouter = router({
@@ -175,6 +178,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,
   AssertAppSlice<IsAppSlice<TestPanelMounts>>,
+  AssertAppSlice<IsAppSlice<UsageAnalyticsMounts>>,
   AssertAppSlice<IsAppSlice<WorkspaceMounts>>,
   AssertAppSlice<IsAppSlice<WorktreesMounts>>
 ]

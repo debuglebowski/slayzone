@@ -66,5 +66,6 @@ setUsageRouterDeps({ getHost: () => getAppDeps() })
 setTaskBrowserRouterDeps({ getHost: () => getAppDeps() })
 setAgentPanelsRouterDeps({ getHost: () => getAppDeps() })
 
-// `app.leaderboard` sums over the caller's projects only (T-17): api's owner gate.
+// `app.leaderboard` and `usageAnalytics` sum over the caller's projects only (T-17):
+// api's owner gate.
 setUsageAnalyticsRouterDeps({ ownedProjectIds })

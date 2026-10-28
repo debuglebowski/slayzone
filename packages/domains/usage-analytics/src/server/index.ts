@@ -14,6 +14,12 @@ export {
   type AppLeaderboardRouter,
   type AppLeaderboardMounts
 } from './leaderboard-router'
+// `usageAnalytics`, mounted by `@slayzone/api` at `usageAnalytics`.
+export {
+  usageAnalyticsRouter,
+  type UsageAnalyticsRouter,
+  type UsageAnalyticsMounts
+} from './usage-analytics-router'
 export {
   setUsageAnalyticsRouterDeps,
   getUsageAnalyticsRouterDeps,
