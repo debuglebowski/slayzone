@@ -1,6 +1,6 @@
 import { TRPCClientError, type TRPCLink, type TRPCWebSocketClient } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from './app-router'
+import type { AnyTRPCRouter } from '@trpc/server'
 
 /**
  * Fail an operation that is still waiting for its hub's socket to open.
@@ -63,7 +63,10 @@ export interface ConnectDeadlineLinkOpts {
   hubUrl?: string
 }
 
-export function connectDeadlineLink(opts: ConnectDeadlineLinkOpts): TRPCLink<AppRouter> {
+// Router-agnostic: it reads only the operation type, never a path's types.
+export function connectDeadlineLink<TRouter extends AnyTRPCRouter>(
+  opts: ConnectDeadlineLinkOpts
+): TRPCLink<TRouter> {
   const deadlineMs = opts.deadlineMs ?? HUB_CONNECT_DEADLINE_MS
   return () =>
     ({ op, next }) =>

@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { TRPCProvider } from './trpc'
+import { TRPCProvider } from './runtime'
 import { useFederation } from './FederationProvider'
 
 /**

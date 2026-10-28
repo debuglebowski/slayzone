@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { createTRPCClient, type TRPCLink } from '@trpc/client'
 import { observable } from '@trpc/server/observable'
-import { TRPCProvider, type TrpcVanillaClient, type AppRouter } from '../client/trpc'
+import { TRPCProvider } from '../client/runtime'
+import type { TrpcVanillaClient, AppRouter } from '../client/trpc'
 import { makeQueryClient } from '../client/provider'
 
 /** Resolves a query or mutation; a throw/rejection surfaces as the tRPC error. */

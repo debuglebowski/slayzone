@@ -8,6 +8,11 @@ formatter), the procedure builders and the gate chain every procedure runs throu
 - **Domains import builders from here**: `import { router, publicProcedure } from '@slayzone/trpc-server'`.
   A domain's router lives in its own `src/server/`.
 - **Only `@slayzone/api` composes routers** into `AppRouter` (`router.ts`).
+- **A domain's client is typed against its own mounts**, not `AppRouter`: the domain
+  exports `XMounts = { <key>: XRouter }` and its client uses
+  `typedTrpc<XMounts>()` (`@slayzone/transport`, README "Typed views"), which types
+  the shared client as `MountedRouter<XMounts>` from here. api asserts each slice in
+  `router.ts`.
 - This package depends on `@slayzone/platform`, `@trpc/server` and `superjson` only:
   never on a domain, never on `api`. It must stay out of every workspace cycle
   (`node scripts/check-workspace-cycles.mjs`).

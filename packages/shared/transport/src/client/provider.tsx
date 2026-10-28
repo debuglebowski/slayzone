@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TRPCProvider, initTrpcClient } from './trpc'
+import { TRPCProvider, initTrpcClient } from './runtime'
 
 export type TrpcProviderProps = {
   url: string

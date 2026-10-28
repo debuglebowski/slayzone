@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import { getHubClient, getTrpcClient, useTRPCClient, type TrpcVanillaClient } from './trpc'
+import { getHubClient, getTrpcClient, useRuntimeTRPCClient, type RuntimeClient } from './runtime'
 
 /**
  * Which hub OWNS a project / task — the map every write has to consult before it
@@ -99,16 +99,16 @@ export function getHubIdForTask(taskId: MaybeId): string | undefined {
  * reached for the default hub and for unowned ids, which is exactly where the
  * default client is the right answer.
  */
-export function getClientForHub(hubId: MaybeId, fallback?: TrpcVanillaClient): TrpcVanillaClient {
+export function getClientForHub(hubId: MaybeId, fallback?: RuntimeClient): RuntimeClient {
   const resolved = hubId ? getHubClient(hubId)?.client : null
   return resolved ?? fallback ?? getTrpcClient()
 }
 
-export function getClientForProject(projectId: MaybeId): TrpcVanillaClient {
+export function getClientForProject(projectId: MaybeId): RuntimeClient {
   return getClientForHub(getHubIdForProject(projectId))
 }
 
-export function getClientForTask(taskId: MaybeId): TrpcVanillaClient {
+export function getClientForTask(taskId: MaybeId): RuntimeClient {
   return getClientForHub(getHubIdForTask(taskId))
 }
 
@@ -128,15 +128,15 @@ export function useHubIdForTask(taskId: MaybeId): string | undefined {
  * ambient client is already the right hub, so an id we don't know yet must not
  * be yanked back to the default hub.
  */
-export function useClientForProject(projectId: MaybeId): TrpcVanillaClient {
-  const ambient = useTRPCClient()
+export function useClientForProject(projectId: MaybeId): RuntimeClient {
+  const ambient = useRuntimeTRPCClient()
   const hubId = useHubIdForProject(projectId)
   return useMemo(() => getClientForHub(hubId, ambient), [hubId, ambient])
 }
 
 /** The client that owns `taskId`. Same ambient fallback as `useClientForProject`. */
-export function useClientForTask(taskId: MaybeId): TrpcVanillaClient {
-  const ambient = useTRPCClient()
+export function useClientForTask(taskId: MaybeId): RuntimeClient {
+  const ambient = useRuntimeTRPCClient()
   const hubId = useHubIdForTask(taskId)
   return useMemo(() => getClientForHub(hubId, ambient), [hubId, ambient])
 }

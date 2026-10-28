@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // the test never opens a real WS (createWSClient has no WebSocket in node).
 const DEFAULT_CLIENT = { __hub: 'default' }
 const REMOTE_CLIENT = { __hub: 'remote-a' }
-vi.mock('./trpc', () => ({
+vi.mock('./runtime', () => ({
   getTrpcClient: () => DEFAULT_CLIENT,
   getHubClient: (id: string) => (id === 'remote-a' ? { id, client: REMOTE_CLIENT } : null),
-  useTRPCClient: () => DEFAULT_CLIENT
+  useRuntimeTRPCClient: () => DEFAULT_CLIENT
 }))
 
 const {

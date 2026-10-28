@@ -15,8 +15,16 @@ export {
   type CreateTrpcClientOpts,
   type TrpcVanillaClient,
   type HubWsClient,
-  type AppRouter
+  type AppRouter,
+  getClientForHub,
+  getClientForProject,
+  getClientForTask,
+  useClientForProject,
+  useClientForTask
 } from './trpc'
+// Typed views over the one client runtime — how new code gets a typed client.
+// A domain: `typedTrpc<ItsMounts>()`; an app: `trpcFor<AppRouter>()`. See README.md.
+export { typedTrpc, trpcFor, type TrpcView, type TypedHubWsClient } from './view'
 export { TrpcProvider, makeQueryClient, type TrpcProviderProps } from './provider'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
@@ -36,13 +44,8 @@ export {
   useHubOwnershipStore,
   getHubIdForProject,
   getHubIdForTask,
-  getClientForHub,
-  getClientForProject,
-  getClientForTask,
   useHubIdForProject,
-  useHubIdForTask,
-  useClientForProject,
-  useClientForTask
+  useHubIdForTask
 } from './hubOwnershipStore'
 // Subscription hook for the tanstack integration — single import point so
 // renderer code gets it from the transport barrel (not @trpc/* directly).
