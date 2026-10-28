@@ -112,7 +112,7 @@ import {
   getEffectiveRenderMode,
   RENDER_MODE_INFO
 } from '@slayzone/task-contracts'
-import { useTheme } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
 import {

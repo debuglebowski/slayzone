@@ -42,7 +42,6 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/settings": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",
     "@slayzone/suspense": "workspace:*",
     "@slayzone/tags": "workspace:*",

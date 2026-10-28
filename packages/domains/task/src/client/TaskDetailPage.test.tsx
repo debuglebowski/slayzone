@@ -34,10 +34,6 @@ vi.mock('@slayzone/terminal', () => ({
   useSlayNudge: () => ({ showBanner: false, dismiss: vi.fn(), recheck: vi.fn() })
 }))
 
-vi.mock('@slayzone/settings/client', () => ({
-  useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' })
-}))
-
 vi.mock('@slayzone/tabs-state', () => ({
   // Only the header-layout slice the page selects from is provided.
   useTabStore: (
@@ -68,6 +64,7 @@ vi.mock('@slayzone/ui', async (importOriginal) => {
     // Real module underneath, so exports the page gains later (hooks, helpers)
     // don't break this suite; only the UI primitives below are stubbed.
     ...(await importOriginal<typeof import('@slayzone/ui')>()),
+    useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' }),
     Button: Stub,
     IconButton: Stub,
     PanelToggle: () => null,

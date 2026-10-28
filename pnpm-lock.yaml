@@ -2014,9 +2014,6 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/suspense':
         specifier: workspace:*
         version: link:../../shared/suspense
@@ -2282,9 +2279,6 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state

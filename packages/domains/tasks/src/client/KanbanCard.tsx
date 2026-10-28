@@ -20,7 +20,7 @@ import {
   getTerminalStateStyle,
   PriorityIcon
 } from '@slayzone/ui'
-import { useAppearance } from '@slayzone/settings/client'
+import { useAppearance } from '@slayzone/ui'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task-contracts'
 import { AlarmClockOff, GitMerge } from 'lucide-react'
