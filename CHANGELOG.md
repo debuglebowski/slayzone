@@ -1,6 +1,183 @@
 # Changelog
 
 
+## v0.36.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.36.0...v0.36.1)
+
+### 🚀 Enhancements
+
+- **sidebar:** Temp-task button + overflow menu in tree project row ([baac0dc87](https://github.com/debuglebowski/slayzone/commit/baac0dc87))
+- **computer:** T-27 hardening — local folder limits, local request log, spawn cwd jail (protocol v3) ([#162](https://github.com/debuglebowski/slayzone/pull/162))
+- **tabs:** ⌘⌥←/→ switch to adjacent task tab ([59effaa99](https://github.com/debuglebowski/slayzone/commit/59effaa99))
+- **shortcuts:** Task-tab keys Ctrl+PgUp/PgDn off macOS ([fdea8ee3f](https://github.com/debuglebowski/slayzone/commit/fdea8ee3f))
+- **explode:** Layout control — repack, minimize to tray, drag to swap ([e9278f7ae](https://github.com/debuglebowski/slayzone/commit/e9278f7ae))
+- **worktrees:** Auto-detect task PR from branch via gh ([#94](https://github.com/debuglebowski/slayzone/pull/94))
+- **terminal:** Log cross-task terminal leaks ([db1a115db](https://github.com/debuglebowski/slayzone/commit/db1a115db))
+- **terminal:** Track claude background jobs, show ring on status dot ([ec62684bc](https://github.com/debuglebowski/slayzone/commit/ec62684bc))
+- **artifacts:** Clickable links in HTML previews ([011f76fc4](https://github.com/debuglebowski/slayzone/commit/011f76fc4))
+
+### 🔥 Performance
+
+- **app-shell:** Project-path guard skips no-op state writes ([a97d85cea](https://github.com/debuglebowski/slayzone/commit/a97d85cea))
+- **task:** Prime detail cache from board state on open ([5e9ab2739](https://github.com/debuglebowski/slayzone/commit/5e9ab2739))
+- **e2e:** Reset waits for usable computer, not fixed 600ms ([ddae2b253](https://github.com/debuglebowski/slayzone/commit/ddae2b253))
+- **e2e:** Split core into 2 duration-balanced shards ([459d302b0](https://github.com/debuglebowski/slayzone/commit/459d302b0))
+- **e2e:** Reset side-car in process, no restart per spec ([69c1d51f2](https://github.com/debuglebowski/slayzone/commit/69c1d51f2))
+- **test:** Vitest fs module cache for app + harness runs, resolution-safe key ([18e50b790](https://github.com/debuglebowski/slayzone/commit/18e50b790))
+- **e2e:** Balance full suite across 7 procs; perf opt-in ([c512272b0](https://github.com/debuglebowski/slayzone/commit/c512272b0))
+
+### 🩹 Fixes
+
+- **release:** Read changelog from onboarding pkg, fail loudly ([03e70e2eb](https://github.com/debuglebowski/slayzone/commit/03e70e2eb))
+- **hub:** Rate-limit the /device sign-in start (T-110) ([#163](https://github.com/debuglebowski/slayzone/pull/163))
+- **lint:** Clear react-hooks/immutability (9 → 0), lower eslint cap ([8ce73285b](https://github.com/debuglebowski/slayzone/commit/8ce73285b))
+- **lint:** Clear react-hooks/purity (5 → 0), lower eslint cap ([ee40996ff](https://github.com/debuglebowski/slayzone/commit/ee40996ff))
+- **lint:** Clear static-components + preserve-manual-memoization (4 → 0) ([ef9eeea48](https://github.com/debuglebowski/slayzone/commit/ef9eeea48))
+- **projects:** Lock screen clears on expiry / Unlock early, returns on Re-lock ([3c643aa82](https://github.com/debuglebowski/slayzone/commit/3c643aa82))
+- **lint:** App set-state-in-effect (3 → 0) via render-phase adjustment ([e23010ad7](https://github.com/debuglebowski/slayzone/commit/e23010ad7))
+- **lint:** Ai-config + settings set-state-in-effect (44 of 52) ([2e926feb2](https://github.com/debuglebowski/slayzone/commit/2e926feb2))
+- **lint:** Ui/editor/markdown/agent-panels/misc refs + set-state-in-effect (35 of 53) ([35d90198e](https://github.com/debuglebowski/slayzone/commit/35d90198e))
+- **lint:** Projects/task-terminals/task-artifacts/task-browser set-state-in-effect (35 of 57) ([b0cc4d28b](https://github.com/debuglebowski/slayzone/commit/b0cc4d28b))
+- **lint:** Task/tasks/terminal/worktrees refs + set-state-in-effect (33 of 51) ([d5e7a747c](https://github.com/debuglebowski/slayzone/commit/d5e7a747c))
+- CopyFilesDialog render loop + tRPC mutation objects in hook deps; guard catches any name ([8c5a6dad4](https://github.com/debuglebowski/slayzone/commit/8c5a6dad4))
+- Computer closes fs watches on shutdown; AlertDialog content nested in its overlay ([d468275b5](https://github.com/debuglebowski/slayzone/commit/d468275b5))
+- **shortcuts:** Cleared global shortcut no longer falls back to default ([49ddb9146](https://github.com/debuglebowski/slayzone/commit/49ddb9146))
+- **shortcuts:** Cleared shortcut stored as null, shows Unbound ([dd2199b90](https://github.com/debuglebowski/slayzone/commit/dd2199b90))
+- **terminal:** Option-as-Meta setting, auto default ([#103](https://github.com/debuglebowski/slayzone/pull/103))
+- **hubs:** Allow registered hub origins in renderer CSP ([#161](https://github.com/debuglebowski/slayzone/pull/161))
+- **hubs:** Refuse plaintext ws for non-loopback hubs at probe ([efc4fe328](https://github.com/debuglebowski/slayzone/commit/efc4fe328))
+- **shortcuts:** Ctrl as primary modifier off macOS ([065850ec8](https://github.com/debuglebowski/slayzone/commit/065850ec8))
+- **ui:** Dialog content nested in its overlay (same reopen race as AlertDialog) ([3cd70e358](https://github.com/debuglebowski/slayzone/commit/3cd70e358))
+- Stale-response guards (processes, worktree data, file search, skills, instructions) ([2a41a6511](https://github.com/debuglebowski/slayzone/commit/2a41a6511))
+- Stale UI (mention picker, chat card defaults, search scroll, settings tab, extensions modal) ([476b09ffe](https://github.com/debuglebowski/slayzone/commit/476b09ffe))
+- **computer:** A supervised computer never outlives its app ([1ab5f48e0](https://github.com/debuglebowski/slayzone/commit/1ab5f48e0))
+- **lint:** Pass 2 — ai-config/onboarding/settings set-state-in-effect (6 of 16) ([a195e0e16](https://github.com/debuglebowski/slayzone/commit/a195e0e16))
+- **lint:** Pass 2 — app-shell/task/worktrees set-state-in-effect (6 of 16) ([0d38c09a7](https://github.com/debuglebowski/slayzone/commit/0d38c09a7))
+- **lint:** Pass 2 — App settings-reopen, use-mobile, terminal modes, automation runs (4 of 15) ([e731630df](https://github.com/debuglebowski/slayzone/commit/e731630df))
+- **lint:** Pass 3 — dead ChatPanelHarness, project-path diagnostics bug, header slots via context (31 → 28) ([6f344e002](https://github.com/debuglebowski/slayzone/commit/6f344e002))
+- **terminal:** Active Terminals duration never negative ([de148e5e1](https://github.com/debuglebowski/slayzone/commit/de148e5e1))
+- **projects:** A new duration lock is enforced after Unlock early / expiry (FLAGGED) ([eb8ed9c86](https://github.com/debuglebowski/slayzone/commit/eb8ed9c86))
+- **projects:** ProjectLockScreen compiles again (lockedUntil in handleUnlockEarly deps) ([43533bdc6](https://github.com/debuglebowski/slayzone/commit/43533bdc6))
+- Review follow-ups — computer binding rollback, palette fade, watchdog reap order ([b3e6358a9](https://github.com/debuglebowski/slayzone/commit/b3e6358a9))
+- **ui:** Sheet content nested in its overlay (same reopen race as Dialog) ([5ff655092](https://github.com/debuglebowski/slayzone/commit/5ff655092))
+- **shortcuts:** Modal guard actually detects open dialogs ([#46](https://github.com/debuglebowski/slayzone/pull/46))
+- **task:** Web-panel shortcuts need the primary modifier (bare letter toggled them) ([79ca3377e](https://github.com/debuglebowski/slayzone/commit/79ca3377e))
+- **hub:** Supervised hub can no longer outlive the app; quit waits for both children ([ea1bbaaa0](https://github.com/debuglebowski/slayzone/commit/ea1bbaaa0))
+- **terminal:** Resume sessions for custom providers ([7d2ab051c](https://github.com/debuglebowski/slayzone/commit/7d2ab051c))
+- **ui:** Take the modal answer at key press in every window, not only the main app ([24c1bf5e3](https://github.com/debuglebowski/slayzone/commit/24c1bf5e3))
+- Give GUI-launched spawns the login-shell PATH ([a05eb903d](https://github.com/debuglebowski/slayzone/commit/a05eb903d))
+- **hub:** Web sessions read+save own settings, skip warm pool ([#164](https://github.com/debuglebowski/slayzone/pull/164))
+- **hub:** Web sessions get no scope refusals at boot ([eeb052bc4](https://github.com/debuglebowski/slayzone/commit/eeb052bc4))
+- **terminal:** Close transcript stream on early exit (hub fd leak) ([0a72c24f6](https://github.com/debuglebowski/slayzone/commit/0a72c24f6))
+- **lint:** Group A — tab switch keeps refreshing data, stops resetting UI (9 of 10) ([be85e393d](https://github.com/debuglebowski/slayzone/commit/be85e393d))
+- **hub:** Git panel says 'Git unavailable' when git can't start; fd watchdog ([be5999a85](https://github.com/debuglebowski/slayzone/commit/be5999a85))
+- **panels:** Fill free space + width-aware settings layout ([#87](https://github.com/debuglebowski/slayzone/pull/87))
+- **build:** Electron-vite 6 — main crashed at boot (ESM shim in js-yaml comment) ([f5fed0213](https://github.com/debuglebowski/slayzone/commit/f5fed0213))
+- **linux:** Build natives at glibc 2.35 floor + gate it; surface computer load errors ([#165](https://github.com/debuglebowski/slayzone/pull/165))
+- **release:** Container-safe temp path for linux asset upload ([1cb0e97a9](https://github.com/debuglebowski/slayzone/commit/1cb0e97a9))
+- **task:** Wider settings column breakpoints (2col 860, 3col 1440) ([7632a3c01](https://github.com/debuglebowski/slayzone/commit/7632a3c01))
+- **deps:** Restore node-pty patch hash in lockfile ([82f57a578](https://github.com/debuglebowski/slayzone/commit/82f57a578))
+- **worktrees:** Custom-dir task syncs its own branch; push uses HEAD ([18390b1e4](https://github.com/debuglebowski/slayzone/commit/18390b1e4))
+- **ci:** Allowlist process-tree hub import; host-independent lfs test ([9d8dc6a6c](https://github.com/debuglebowski/slayzone/commit/9d8dc6a6c))
+- **worktrees:** Linked PR via useQuery, not setState in effect ([b2b52d2fb](https://github.com/debuglebowski/slayzone/commit/b2b52d2fb))
+- E2e failures from full-suite run — prune runtime dirs, cmdk default, pty live check ([10721cab5](https://github.com/debuglebowski/slayzone/commit/10721cab5))
+- **hub:** Repair composition.ts mangled by in-process reset commit ([e7c7d9bcf](https://github.com/debuglebowski/slayzone/commit/e7c7d9bcf))
+- **terminal:** Leak-detector interval via useVisibleInterval ([2677f1e0b](https://github.com/debuglebowski/slayzone/commit/2677f1e0b))
+- **ci:** Format 30 files; restore split assertion; classify pty.testWarmStatus ([2429b011c](https://github.com/debuglebowski/slayzone/commit/2429b011c))
+- **ci:** Drop uncommitted getUntrackedFileDiffs policy entry; format 4 files ([1d78abf79](https://github.com/debuglebowski/slayzone/commit/1d78abf79))
+- **ci:** Mark pty.testWarmStatus in owner-policy ([28eb49568](https://github.com/debuglebowski/slayzone/commit/28eb49568))
+- **ci:** Age check reads both pnpm 11+ lockfile documents ([dab75fb3c](https://github.com/debuglebowski/slayzone/commit/dab75fb3c))
+- Run packaged app + hub with NODE_ENV=production ([56c1c56dd](https://github.com/debuglebowski/slayzone/commit/56c1c56dd))
+- **app:** Set NODE_ENV in a bootstrap entry before main loads ([97ad14150](https://github.com/debuglebowski/slayzone/commit/97ad14150))
+- **integrations:** Never let NODE_ENV=test unlock plaintext credentials ([9986abff5](https://github.com/debuglebowski/slayzone/commit/9986abff5))
+- **ui:** Label background state "Subagents working" ([0e23673e5](https://github.com/debuglebowski/slayzone/commit/0e23673e5))
+- **e2e:** Reaper spares concurrent runs' live apps; pty exists = live ([467fa8c8f](https://github.com/debuglebowski/slayzone/commit/467fa8c8f))
+- **worktrees:** Git panel slow/flaky — cut git fan-out, push refresh, keep diff fresh ([0a3471898](https://github.com/debuglebowski/slayzone/commit/0a3471898))
+- **e2e:** In-process reset re-publishes server_port; re-record core weights ([9d7065253](https://github.com/debuglebowski/slayzone/commit/9d7065253))
+- **worktrees:** Stop git-status refresh loop; useStablePoll no forked timers ([181d5a396](https://github.com/debuglebowski/slayzone/commit/181d5a396))
+- **ci:** Load-independent flush-on-exit test; window-api lint w/o rg ([b988426ff](https://github.com/debuglebowski/slayzone/commit/b988426ff))
+- **lint:** Search errors fail gates loudly, never read as clean ([ba6fce73a](https://github.com/debuglebowski/slayzone/commit/ba6fce73a))
+- **app:** App window never navigates to a website ([4a4a83abf](https://github.com/debuglebowski/slayzone/commit/4a4a83abf))
+- **terminal:** Don't auto-restore archived tasks' agents on boot ([7ab9fc9f6](https://github.com/debuglebowski/slayzone/commit/7ab9fc9f6))
+- **idle-close:** Run idle sweep in hub — auto-close never fired ([ca64197c4](https://github.com/debuglebowski/slayzone/commit/ca64197c4))
+- **worktrees:** Git panel switches to Conflicts/Changes when the merge state starts, not on every tab return ([41a97724c](https://github.com/debuglebowski/slayzone/commit/41a97724c))
+- **worktrees:** Git panel fallback tab is display-only, never saved ([a38b9d6e0](https://github.com/debuglebowski/slayzone/commit/a38b9d6e0))
+- **worktrees:** Git panel saves its tab once per real change ([97d2a4f23](https://github.com/debuglebowski/slayzone/commit/97d2a4f23))
+- **task:** Opening the closed git panel with ⌘G / ⇧⌘G / ⌘K saves its tab ([f7eb71434](https://github.com/debuglebowski/slayzone/commit/f7eb71434))
+- **task-artifacts:** An overtaken search run no longer sticks "Searching…" ([15b6c09ba](https://github.com/debuglebowski/slayzone/commit/15b6c09ba))
+- **cli:** Create fails fast when unsupervised hub/computer exits; refuse --bind :0 ([a595a53f0](https://github.com/debuglebowski/slayzone/commit/a595a53f0))
+- **task-artifacts:** Artifact selection no longer jumps back on a quick tab switch ([2e0d1f3cf](https://github.com/debuglebowski/slayzone/commit/2e0d1f3cf))
+- **task-artifacts:** Collapsed search groups stay collapsed on tab return ([7b78f9911](https://github.com/debuglebowski/slayzone/commit/7b78f9911))
+- **task:** History and processes panels show an error with Retry instead of loading forever ([fa6a9c3e2](https://github.com/debuglebowski/slayzone/commit/fa6a9c3e2))
+- **worktrees:** Branch graph drops answers for the previous project and loads the new one at once ([b23663967](https://github.com/debuglebowski/slayzone/commit/b23663967))
+- **terminal:** Reload no longer wakes sleeping agents in instant mode ([310b3ea48](https://github.com/debuglebowski/slayzone/commit/310b3ea48))
+
+### 💅 Refactors
+
+- **ui:** One depsChanged/useDepsChanged in @slayzone/ui ([09a978627](https://github.com/debuglebowski/slayzone/commit/09a978627))
+- **worktrees:** Fetch linked PR with useQuery ([e5c158599](https://github.com/debuglebowski/slayzone/commit/e5c158599))
+- **usage-analytics:** Own LocalLeaderboard types, drop @slayzone/types import ([659e23c67](https://github.com/debuglebowski/slayzone/commit/659e23c67))
+- **settings:** Backup types → settings/shared, DiagnosticsConfig → diagnostics/shared ([d2115b8e6](https://github.com/debuglebowski/slayzone/commit/d2115b8e6))
+- **platform:** Own HubEntry/HubKind/LocalComputerStatus types ([d453a8f79](https://github.com/debuglebowski/slayzone/commit/d453a8f79))
+- **ui:** Own useTheme + Theme types; file-editor drops settings dep ([d4df693f1](https://github.com/debuglebowski/slayzone/commit/d4df693f1))
+- **task:** Derive integration types from tRPC client; drop integrations dep ([89a5e9293](https://github.com/debuglebowski/slayzone/commit/89a5e9293))
+- **terminal:** Inject TaskSessionStore; terminal drops task dep ([fc847fc39](https://github.com/debuglebowski/slayzone/commit/fc847fc39))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.36.0 ([008f2c049](https://github.com/debuglebowski/slayzone/commit/008f2c049))
+- **lint:** React-compiler ratchet also scans renderer-app ([6e422ae73](https://github.com/debuglebowski/slayzone/commit/6e422ae73))
+- Remove verified dead code (integration wizard, useProviderData, dup use-mobile, pending-prompt plumbing) ([90f03c898](https://github.com/debuglebowski/slayzone/commit/90f03c898))
+- **lint:** React-hooks/refs cleared to 0 → error ([dc1ecf2ff](https://github.com/debuglebowski/slayzone/commit/dc1ecf2ff))
+- **lint:** Cap 46 → 47 for upstream App.tsx settings-reopen effect ([#161](https://github.com/debuglebowski/slayzone/pull/161))
+- Dead-code sweep 2 — unmounted AI-config tab subtree, ProjectContextTree, useWhatNext, unused PtyContext API ([cde723ae5](https://github.com/debuglebowski/slayzone/commit/cde723ae5))
+- Dead-code sweep 3 — ProjectSkills, ContextFilesPanel, never-sent AI-config section plumbing ([df323a222](https://github.com/debuglebowski/slayzone/commit/df323a222))
+- Make run-all.sh executable ([f73d5d814](https://github.com/debuglebowski/slayzone/commit/f73d5d814))
+- Format login-shell-path files (fixes main CI Lint) ([c13385a24](https://github.com/debuglebowski/slayzone/commit/c13385a24))
+- **lint:** Eslint cap 28 → 19 (missed from be85e393d) ([57943403a](https://github.com/debuglebowski/slayzone/commit/57943403a))
+- Format knip.json (fixes main CI Lint) ([77e040e50](https://github.com/debuglebowski/slayzone/commit/77e040e50))
+- **ci:** Bump GitHub Actions to node24 majors ([22812b0f2](https://github.com/debuglebowski/slayzone/commit/22812b0f2))
+- **ci:** Bump GitHub actions ([d8bcb3db2](https://github.com/debuglebowski/slayzone/commit/d8bcb3db2))
+- **lint:** Allowlist process-tree.ts in hub exec-imports check ([7497d3497](https://github.com/debuglebowski/slayzone/commit/7497d3497))
+- Format task-terminals.test.ts (fixes main CI Lint) ([1c5aae184](https://github.com/debuglebowski/slayzone/commit/1c5aae184))
+- Add workspace package cycle check w/ shrink-only baseline ([330a86f70](https://github.com/debuglebowski/slayzone/commit/330a86f70))
+
+### ✅ Tests
+
+- **hub:** Secrets-at-rest speaks computer protocol v3 (CI unit-tests red since #162) ([#162](https://github.com/debuglebowski/slayzone/issues/162))
+- **task:** CreateTaskDialog mock provides the shortcut helpers (CI unit-tests red since 065850ec8) ([768a5b246](https://github.com/debuglebowski/slayzone/commit/768a5b246))
+- Run jsdom suites through the React Compiler, exactly as the renderer ships ([6da471f8b](https://github.com/debuglebowski/slayzone/commit/6da471f8b))
+- **ai-config:** Inert getTrpcClient in state-sync-hooks mock ([fa8a351c8](https://github.com/debuglebowski/slayzone/commit/fa8a351c8))
+- **e2e:** Tab switch keeps history/processes fresh and user state (group A) ([917f66fd0](https://github.com/debuglebowski/slayzone/commit/917f66fd0))
+- Run node harness suites in one parallel vitest run ([72173ec50](https://github.com/debuglebowski/slayzone/commit/72173ec50))
+- **e2e:** Replace 24 fixed sleeps with condition waits ([667a3ed1c](https://github.com/debuglebowski/slayzone/commit/667a3ed1c))
+- **computer:** Isolate login-shell-path test from system gh/git-lfs ([6a0759466](https://github.com/debuglebowski/slayzone/commit/6a0759466))
+- Run unit suites in 2 concurrent lanes; strip vitest test env ([513901550](https://github.com/debuglebowski/slayzone/commit/513901550))
+- **artifacts:** Modifier-click link e2e for PDF + HTML ([1118bc12a](https://github.com/debuglebowski/slayzone/commit/1118bc12a))
+- **computer:** Fs watch tests wait until the watch is live ([dc2acf1bd](https://github.com/debuglebowski/slayzone/commit/dc2acf1bd))
+- **worktrees:** Cover listBranchesDetailed fallback for git < 2.41 ([a2adecc29](https://github.com/debuglebowski/slayzone/commit/a2adecc29))
+- Make 3 suites independent of parallel runs and CPU load ([6880662e0](https://github.com/debuglebowski/slayzone/commit/6880662e0))
+- **e2e:** ⌘G / ⇧⌘G open, switch and close on the git tab shown ([e83876c76](https://github.com/debuglebowski/slayzone/commit/e83876c76))
+- **hub:** End break-glass boot session via end command, not 1m TTL wait ([4ea843aa2](https://github.com/debuglebowski/slayzone/commit/4ea843aa2))
+- **app:** Split sidecar supervisor suite so real-hub deadlines run in parallel ([2c4e343ca](https://github.com/debuglebowski/slayzone/commit/2c4e343ca))
+- **e2e:** Artifact selection and collapsed search groups survive a tab switch ([c4a909062](https://github.com/debuglebowski/slayzone/commit/c4a909062))
+- **e2e:** Skip browser extension spec (feature unused) ([101ae0e39](https://github.com/debuglebowski/slayzone/commit/101ae0e39))
+
+### 🎨 Styles
+
+- Biome-format release scripts (unblocks CI lint:format) ([e8cdba78e](https://github.com/debuglebowski/slayzone/commit/e8cdba78e))
+
+### 🤖 CI
+
+- One unit-tests job per run-all lane; restore vitest module cache ([c8be53991](https://github.com/debuglebowski/slayzone/commit/c8be53991))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Wise-toddler ([@wise-toddler](https://github.com/wise-toddler))
+- Kalle
+
 ## v0.36.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.35.0...v0.36.0)

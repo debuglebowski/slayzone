@@ -1,5 +1,142 @@
 [
   {
+    "version": "0.36.1",
+    "date": "2026-10-28",
+    "tagline": "Tighter, steadier, faster",
+    "items": [
+      {
+        "category": "breaking",
+        "title": "Update cloud computers",
+        "description": "Hubs now refuse computers older than this release, so update every cloud computer; agents there can only start inside its allowed folders — add more with `slay computer roots <name> --add`."
+      },
+      {
+        "category": "feature",
+        "title": "Explode layout control",
+        "description": "Repack the exploded grid, minimize tasks to a tray and drag tiles to swap places."
+      },
+      {
+        "category": "feature",
+        "title": "Switch task tabs from the keyboard",
+        "description": "⌘⌥←/→ jumps to the adjacent task tab (Ctrl+PgUp/PgDn on Windows and Linux)."
+      },
+      {
+        "category": "feature",
+        "title": "Linked pull requests",
+        "description": "A task's PR is detected automatically from its branch via the GitHub CLI."
+      },
+      {
+        "category": "feature",
+        "title": "Background job ring",
+        "description": "A ring on the status dot shows when Claude has background jobs still running."
+      },
+      {
+        "category": "feature",
+        "title": "Temporary tasks from the sidebar",
+        "description": "The tree view's project row gets a temp-task button and an overflow menu."
+      },
+      {
+        "category": "feature",
+        "title": "Clickable links in HTML previews",
+        "description": "Links inside HTML artifact previews now open when clicked."
+      },
+      {
+        "category": "feature",
+        "title": "Computer request log",
+        "description": "Each computer keeps a local log of every hub request and refuses access to its own config and credentials."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster git panel",
+        "description": "The git panel does far less git work, refreshes on push and keeps the diff current, ending the refresh loop and flaky loads."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster task open",
+        "description": "Task details render instantly from the board instead of waiting for a fresh fetch."
+      },
+      {
+        "category": "improvement",
+        "title": "Shortcuts on Windows and Linux",
+        "description": "Ctrl is now the primary modifier off macOS, and a cleared shortcut stays unbound instead of reverting to the default."
+      },
+      {
+        "category": "improvement",
+        "title": "Option as Meta",
+        "description": "A new terminal setting controls whether Option acts as Meta, picked automatically by default."
+      },
+      {
+        "category": "improvement",
+        "title": "Wider settings layout",
+        "description": "Panels fill free space and the task settings columns adapt to the available width."
+      },
+      {
+        "category": "fix",
+        "title": "Idle auto-close works",
+        "description": "Idle tasks now actually close automatically — the sweep never fired before."
+      },
+      {
+        "category": "fix",
+        "title": "Sleeping agents stay asleep",
+        "description": "Reloading no longer wakes agents in instant mode, and archived tasks' agents aren't restored on boot."
+      },
+      {
+        "category": "fix",
+        "title": "No more endless loading",
+        "description": "History and processes panels show an error with Retry, and the git panel says when Git is unavailable."
+      },
+      {
+        "category": "fix",
+        "title": "Stale views after switching",
+        "description": "Tabs, searches, pickers and panels no longer show results from a previous project or a quick tab switch."
+      },
+      {
+        "category": "fix",
+        "title": "Git panel tabs",
+        "description": "The git panel opens on Conflicts/Changes only when a merge starts and remembers its tab correctly."
+      },
+      {
+        "category": "fix",
+        "title": "Custom-directory worktrees",
+        "description": "Tasks with a custom worktree directory sync and push their own branch."
+      },
+      {
+        "category": "fix",
+        "title": "Resume for custom providers",
+        "description": "Sessions from custom agent providers resume correctly."
+      },
+      {
+        "category": "fix",
+        "title": "Login-shell PATH",
+        "description": "Agents and tools started from a Finder-launched app get your full login-shell PATH."
+      },
+      {
+        "category": "fix",
+        "title": "Clean shutdown",
+        "description": "The hub and computer never outlive the app, and quitting waits for both to stop."
+      },
+      {
+        "category": "fix",
+        "title": "Duration locks",
+        "description": "A new project duration lock is enforced again after Unlock early or expiry, and the lock screen clears on time."
+      },
+      {
+        "category": "fix",
+        "title": "Dialogs and modals",
+        "description": "Dialogs no longer flicker on quick reopen, and modal shortcuts work in every window."
+      },
+      {
+        "category": "fix",
+        "title": "Linux compatibility",
+        "description": "Native modules are built for older glibc so the app runs on more Linux distributions."
+      },
+      {
+        "category": "fix",
+        "title": "Security hardening",
+        "description": "Remote hubs require encrypted connections, device sign-in is rate-limited and the app window can never navigate to a website."
+      }
+    ]
+  },
+  {
     "version": "0.36.0",
     "date": "2026-10-26",
     "tagline": "Hubs, computers, speed",
