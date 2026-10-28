@@ -129,6 +129,30 @@ describe('AppearanceProvider', () => {
     expect(seen.at(-1)?.terminalFontSize).toBe(21)
   })
 
+  it('passes children updates through and keeps listening across re-renders', async () => {
+    snapshot = { terminal_font_size: '15' }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const ui = (label: string) => (
+      <QueryClientProvider client={queryClient}>
+        <AppearanceProvider settingsRevision={0}>
+          <Consumer />
+          <span data-testid="label">{label}</span>
+        </AppearanceProvider>
+      </QueryClientProvider>
+    )
+    const r = render(ui('a'))
+    await flush()
+    r.rerender(ui('b'))
+    expect(r.getByTestId('label').textContent).toBe('b')
+
+    snapshot = { terminal_font_size: '23' }
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+    })
+    await flush()
+    expect(seen.at(-1)?.terminalFontSize).toBe(23)
+  })
+
   it('migrates notes_line_spacing to notes_readability once', async () => {
     snapshot = { notes_line_spacing: 'compact' }
     renderProvider()
