@@ -1,0 +1,18 @@
+/**
+ * Wires the host seams of domain-owned routers from api's own registries, at load
+ * (imported by `router.ts`, like `procedure-policy`). A domain router never imports
+ * `@slayzone/api`; the registries below stay api's (exactly one copy each, shared
+ * with routers still in api), and each seam reads them live on every call, so a
+ * registry set later by a composition root is seen.
+ *
+ * @module api/domain-router-deps
+ */
+import { setProjectsRouterDeps } from '@slayzone/projects/server'
+import { getComputersDepsOrNull } from './app-deps'
+
+setProjectsRouterDeps({
+  countUsableComputers: () => {
+    const gateway = getComputersDepsOrNull()?.getGateway()
+    return gateway ? gateway.listUsableComputers().length : null
+  }
+})

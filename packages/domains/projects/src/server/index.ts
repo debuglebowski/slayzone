@@ -25,6 +25,15 @@ export {
   type ProjectGroupsRouter,
   type ProjectGroupsMounts
 } from './project-groups-router'
+// `projects.*` tRPC router + the host seam it reads. Composed by `@slayzone/api`,
+// which also wires the seam from its computer gateway registry.
+export { projectsRouter, type ProjectsRouter } from './projects-router'
+export {
+  setProjectsRouterDeps,
+  getProjectsRouterDeps,
+  type ProjectsRouterDeps
+} from './projects-router-deps'
+export type { ProjectsMounts } from './router-mounts'
 export { handleTerminalStateChange } from './task-automation'
 export {
   mayAccessProject,

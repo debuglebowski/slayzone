@@ -7,10 +7,10 @@ import {
   deleteProject,
   uploadProjectIcon,
   reorderProjects
-} from '@slayzone/projects/server'
+} from './project-store'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
-import { getComputersDepsOrNull } from '../app-deps'
+import { getProjectsRouterDeps } from './projects-router-deps'
 
 const createProjectInput = z.object({
   name: z.string().min(1),
@@ -45,10 +45,10 @@ export const projectsRouter = router({
    * project whose first agent start hangs.
    */
   create: publicProcedure.input(createProjectInput).mutation(({ ctx, input }) => {
-    const gateway = getComputersDepsOrNull()?.getGateway()
-    // No gateway wired at all = the fork sidecar or a pre-init boot, where this
+    const usable = getProjectsRouterDeps().countUsableComputers()
+    // No gateway wired at all (null) = the fork sidecar or a pre-init boot, where this
     // process IS the only machine. Not the "no computer" case, so not refused.
-    if (gateway && gateway.listUsableComputers().length === 0) {
+    if (usable === 0) {
       throw new Error(
         'No computer is connected, so a project has no machine to live on. ' +
           'Start the local computer (Settings → Connections) or enroll one, then try again.'
@@ -78,3 +78,5 @@ export const projectsRouter = router({
     .input(z.object({ projectIds: z.array(z.string()) }))
     .mutation(({ ctx, input }) => reorderProjects(ctx.db, input.projectIds))
 })
+
+export type ProjectsRouter = typeof projectsRouter

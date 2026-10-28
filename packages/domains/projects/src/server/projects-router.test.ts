@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { projectsRouter } from './projects.js'
+import { projectsRouter } from './projects-router.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-projects-')) }

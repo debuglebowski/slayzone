@@ -4,6 +4,7 @@ import { router, type MountedRouter, type RouterMounts } from '@slayzone/trpc-se
 import './procedure-policy'
 import './automation-engine-context'
 import './settings-host-wiring'
+import './domain-router-deps'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
 import { agentLifecycleRouter, type AgentLifecycleMounts } from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
@@ -24,8 +25,12 @@ import { hubRouter } from './routers/hub'
 import { integrationsRouter } from './routers/integrations'
 import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
-import { projectsRouter } from './routers/projects'
-import { projectGroupsRouter, type ProjectGroupsMounts } from '@slayzone/projects/server'
+import {
+  projectsRouter,
+  projectGroupsRouter,
+  type ProjectGroupsMounts,
+  type ProjectsMounts
+} from '@slayzone/projects/server'
 import { ptyRouter } from './routers/pty'
 import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
@@ -115,6 +120,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<SettingsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TaskMounts>>,
+  AssertAppSlice<IsAppSlice<ProjectsMounts>>,
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,

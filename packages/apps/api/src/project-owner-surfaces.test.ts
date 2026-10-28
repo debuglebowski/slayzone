@@ -29,7 +29,7 @@ import { buildExportImportOps } from './export-import'
 import { bindRestPrincipal } from './http/rest-api/principal'
 import { registerProjectsCrudRoutes } from './http/rest-api/projects/crud'
 import { registerMcpTools } from './http/mcp-tools'
-import { projectsRouter } from './routers/projects'
+import { projectsRouter } from '@slayzone/projects/server'
 
 const h = await createTestHarness()
 const dataRoot = mkdtempSync(join(tmpdir(), 'project-owner-surfaces-'))
