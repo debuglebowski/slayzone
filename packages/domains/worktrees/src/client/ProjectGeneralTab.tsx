@@ -31,6 +31,11 @@ interface ProjectGeneralTabProps {
   onSwitchToDiff: () => void
 }
 
+/** Git reads must hit git: the poll and "sync done" decide WHEN to read, so a cached
+ *  answer (global staleTime 5s) would show the pre-change state — and with the poll
+ *  backed off on an unchanged hash, keep showing it. (Same as useConsolidatedGeneralData.) */
+const FRESH = { staleTime: 0 } as const
+
 export function ProjectGeneralTab({
   projectId,
   projectPath,
@@ -110,7 +115,7 @@ export function ProjectGeneralTab({
       let isRepo: boolean
       try {
         isRepo = await queryClient.fetchQuery(
-          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath }, FRESH)
         )
       } catch (err) {
         if (superseded()) return null
@@ -135,15 +140,19 @@ export function ProjectGeneralTab({
         return hash
       }
       const [branch, status, remote] = await Promise.all([
-        queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
         queryClient.fetchQuery(
-          trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath })
+          trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, FRESH)
         ),
-        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }))
+        queryClient.fetchQuery(
+          trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath }, FRESH)
+        ),
+        queryClient.fetchQuery(
+          trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }, FRESH)
+        )
       ])
       const uab = branch
         ? await queryClient.fetchQuery(
-            trpc.worktrees.getAheadBehindUpstream.queryOptions({ path: projectPath, branch })
+            trpc.worktrees.getAheadBehindUpstream.queryOptions({ path: projectPath, branch }, FRESH)
           )
         : null
       if (superseded()) return null
@@ -194,7 +203,7 @@ export function ProjectGeneralTab({
     setBranchError(null)
     try {
       const hasChanges = await queryClient.fetchQuery(
-        trpc.worktrees.hasUncommittedChanges.queryOptions({ path: projectPath })
+        trpc.worktrees.hasUncommittedChanges.queryOptions({ path: projectPath }, FRESH)
       )
       if (hasChanges) {
         setBranchError('Uncommitted changes — commit or stash first')
