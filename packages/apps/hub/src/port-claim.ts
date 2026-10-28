@@ -19,7 +19,14 @@ type MinimalDb = {
   prepare: (sql: string) => { run: (...params: unknown[]) => Promise<unknown> }
 }
 
-function isPortAlive(host: string, port: number, timeoutMs = 300): Promise<boolean> {
+/** Socket-inactivity budget. A dead port refuses at once, so only a listener that
+ *  accepted waits it out — and a live-but-busy sidecar (big txn, loaded box) can
+ *  stall /health for hundreds of ms. The old 300ms read that as dead and clobbered
+ *  the key, the exact redirect this guard exists to stop. Same rationale as
+ *  hub-discovery's DEFAULT_TIMEOUT_MS. */
+const LIVENESS_TIMEOUT_MS = 3_000
+
+function isPortAlive(host: string, port: number, timeoutMs = LIVENESS_TIMEOUT_MS): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/health', timeout: timeoutMs }, (res) => {
       res.resume()

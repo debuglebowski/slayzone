@@ -269,6 +269,21 @@ describe('hub discovery', () => {
     expect(elapsed, `gave up quickly (took ${elapsed}ms)`).toBeLessThan(3_000)
   })
 
+  test('a busy hub that answers late is still discovered (default budget)', async () => {
+    // A hub whose event loop is busy (password hashing, a big txn) accepts the
+    // connection at once — the kernel does that — but answers /health late. A
+    // tight budget dropped it from the sweep, so `--hub <name>` failed with "No hub
+    // named …" while the very next sweep (the error's own hint) listed it.
+    const handler = hubHandler(HUB_A)
+    const port = await serve((req, res) => {
+      setTimeout(() => handler(req, res), 800)
+    })
+    const hubs = await discoverHubs({ range: { start: port, end: port } })
+    expect(hubs.map((h) => h.name), 'slow-but-live hub is listed').toEqual([HUB_A.name])
+    const found = await findHub(HUB_A.name as string, { range: { start: port, end: port } })
+    expect(found?.port, 'and resolvable by name').toBe(port)
+  })
+
   test('a 503 (hub still starting) is not yet a discoverable hub', async () => {
     const port = await fakeNonHub((res) => {
       res.writeHead(503, { 'Content-Type': 'application/json' })
@@ -332,7 +347,7 @@ describe('hub discovery', () => {
   })
 
   test('a large range completes promptly (concurrency, not serial)', async () => {
-    // 200 mostly-dead ports at 300ms each would be a minute serially. The scan
+    // 200 mostly-dead ports probed serially would be far too slow. The scan
     // must overlap probes or `hub ls` is unusable.
     const port = await fakeHub(HUB_A)
     const started = Date.now()
@@ -343,7 +358,9 @@ describe('hub discovery', () => {
     // on which port the OS handed out — and it never surfaced because this
     // file sat downstream of a `set -e` abort in run-all.sh and had never run.
     const start = port + 199 <= 65535 ? port : port - 199
-    const hubs = await discoverHubs({ range: { start, end: start + 199 }, timeoutMs: 300 })
+    // Default budget, not a tight override: under a loaded box the real hub
+    // itself can answer later than 300ms. Dead ports refuse at once regardless.
+    const hubs = await discoverHubs({ range: { start, end: start + 199 } })
     const elapsed = Date.now() - started
     expect(hubs.length, 'still found the real hub').toBeGreaterThanOrEqual(1)
     expect(elapsed, `200-port sweep took ${elapsed}ms`).toBeLessThan(10_000)

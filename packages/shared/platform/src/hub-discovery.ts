@@ -30,9 +30,15 @@ import http from 'node:http'
 import { HUB_PORT_BLOCK } from './paths'
 import { HUB_SWITCH_DEFAULTS, HUB_SWITCH_ENV, type HubSwitches } from './hub-switches'
 
-/** Default per-port probe budget. Matches port-claim.ts's liveness check: a
- *  loopback hub answers in single-digit ms, so 300ms is generous. */
-const DEFAULT_TIMEOUT_MS = 300
+/** Default per-port probe budget (socket inactivity). Only a port that ACCEPTED
+ *  spends it — a closed port refuses at once — and in the hub block an accepting
+ *  port is almost always a hub. An idle hub answers in single-digit ms, but a busy
+ *  one (password hashing, a big txn, a loaded box) can stall its event loop for
+ *  hundreds; the old 300ms dropped such a hub from the sweep, so `--hub <name>`
+ *  failed with "No hub named …" while the error's own hint sweep listed it. The
+ *  cost of a generous budget is bounded: only a silent non-hub listener in the
+ *  block waits it out, and the worker pool overlaps those. */
+const DEFAULT_TIMEOUT_MS = 3_000
 
 /** Default in-flight probe count. Keeps a 100-port sweep sub-second without
  *  opening a socket per port at once. */

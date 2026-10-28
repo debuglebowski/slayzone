@@ -39,12 +39,15 @@ function fakeDb(initial?: string): {
   }
 }
 
-/** A minimal /health server that answers 200 — simulates a live sidecar. */
-function startFakeAlive(): Promise<{ port: number; close: () => Promise<void> }> {
+/** A minimal /health server that answers 200 — simulates a live sidecar.
+ *  `delayMs` simulates a BUSY one (event loop stalled by a big txn, hashing). */
+function startFakeAlive(delayMs = 0): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const srv = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end('{"ok":true}')
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end('{"ok":true}')
+      }, delayMs)
     })
     srv.listen(0, '127.0.0.1', () => {
       const addr = srv.address()
@@ -99,6 +102,19 @@ test('existing value points at a LIVE sidecar ⇒ refuses to clobber', async () 
       logs.some((l) => l.includes('refus') || l.includes('alive')),
       'logged a loud reason for refusing'
     ).toBe(true)
+  } finally {
+    await alive.close()
+  }
+})
+
+test('existing value points at a BUSY live sidecar (slow /health) ⇒ still refuses', async () => {
+  // A live sidecar under load answers late. A tight liveness budget read it as
+  // dead and clobbered the key — the exact redirect this guard exists to stop.
+  const alive = await startFakeAlive(800)
+  try {
+    const db = fakeDb(String(alive.port))
+    await claimServerPort(db, '127.0.0.1', 4004, () => {})
+    expect(db.written.length, 'did NOT write — slow is not dead').toBe(0)
   } finally {
     await alive.close()
   }
