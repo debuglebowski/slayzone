@@ -17,11 +17,14 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/workflow": "workspace:*",
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "electron": "^45.0.0"

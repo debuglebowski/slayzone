@@ -4,6 +4,14 @@
 // IPC handlers (../electron) and the tRPC integrations router.
 export { createIntegrationOps, ensureIntegrationSchema } from './handlers-store'
 export type { IntegrationOps } from './handlers-store'
+// `integrations.*` tRPC router + the ops registry it reads (host-wired via
+// `setIntegrationOps`). Composed by `@slayzone/api`.
+export {
+  integrationsRouter,
+  type IntegrationsRouter,
+  type IntegrationsMounts
+} from './integrations-router'
+export { setIntegrationOps, getIntegrationOps } from './integrations-router-deps'
 export {
   startSyncPoller,
   pushTaskAfterEdit,

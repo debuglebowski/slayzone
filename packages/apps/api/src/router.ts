@@ -27,7 +27,7 @@ import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
-import { integrationsRouter } from './routers/integrations'
+import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'
 import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
 import {
@@ -123,6 +123,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<ChatMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
+  AssertAppSlice<IsAppSlice<IntegrationsMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<ProjectsMounts>>,

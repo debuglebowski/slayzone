@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Project } from '@slayzone/projects-contracts'
-import { getIntegrationOps } from '../app-deps'
 import { router, publicProcedure } from '@slayzone/trpc-server'
+import { getIntegrationOps } from './integrations-router-deps'
 
 // Mirrors the 43 `integrations:*` IPC handlers (integrations/src/main/handlers.ts).
 // Both call the same ops instance (`createIntegrationOps`, injected via
@@ -167,3 +167,8 @@ export const integrationsRouter = router({
     .mutation(({ input }) => getIntegrationOps().testSetGithubRepositoryIssues(input as never)),
   testClearGithubMocks: publicProcedure.mutation(() => getIntegrationOps().testClearGithubMocks())
 })
+
+export type IntegrationsRouter = typeof integrationsRouter
+
+/** Where `@slayzone/api` mounts this router; it asserts the slice in its `router.ts`. */
+export type IntegrationsMounts = { integrations: IntegrationsRouter }

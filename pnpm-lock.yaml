@@ -1593,6 +1593,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
@@ -1602,12 +1605,18 @@ importers:
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../terminal-contracts
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/workflow':
         specifier: workspace:*
         version: link:../../shared/workflow
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^9.6.0

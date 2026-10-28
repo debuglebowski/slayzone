@@ -15,7 +15,6 @@ import {
   assertHubLocalExecEnabled
 } from '@slayzone/platform/hub-switch-refusal'
 import {
-  setIntegrationOps,
   setNotifyEvents,
   setMenuEvents,
   setTaskTriggerBus,
@@ -114,7 +113,8 @@ import {
   createIntegrationOps,
   ensureIntegrationSchema,
   resetSyncFlags,
-  setCredentialCipher
+  setCredentialCipher,
+  setIntegrationOps
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'

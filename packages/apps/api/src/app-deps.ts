@@ -10,7 +10,6 @@ import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
-import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 import type { SettingsChange } from '@slayzone/settings/server'
@@ -62,21 +61,6 @@ export type FloatingAgentState = {
   hasCustomSize: boolean
 }
 import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal-contracts'
-
-// Integration ops — the electron-coupled domain ops (`@slayzone/integrations/server`
-// pulls electron + node clients), injected by the host so the `integrationsRouter`
-// and the still-live IPC handlers share one instance (coexistence until slice 5).
-let integrationOps: IntegrationOps | null = null
-
-export function setIntegrationOps(ops: IntegrationOps): void {
-  integrationOps = ops
-}
-
-export function getIntegrationOps(): IntegrationOps {
-  if (!integrationOps)
-    throw new Error('integrationOps not initialized — call setIntegrationOps() in main host first')
-  return integrationOps
-}
 
 // Notify event bus — the cross-domain `tasks-changed` / `settings-changed`
 // signals that back the `notify.*` subscriptions. The emitter is owned by the

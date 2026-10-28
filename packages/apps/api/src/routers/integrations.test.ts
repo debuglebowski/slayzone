@@ -1,7 +1,12 @@
 /**
  * integrations router contract tests — exercise the procedures via tRPC
  * `createCaller` against the harness DB, with the integration ops injected on
- * the app-deps singleton (the router resolves ops via `getIntegrationOps`).
+ * the domain's registry (the router resolves ops via `getIntegrationOps`).
+ *
+ * The router lives in `@slayzone/integrations/server`; this suite stays in api
+ * because its worktree auto-create cases wire `@slayzone/worktrees` adapters, and
+ * integrations cannot depend on worktrees (worktrees → task → projects →
+ * integrations would close a new workspace cycle).
  *
  * Ports the coverage of the two now-dead integration IPC-handler tests:
  *   - domains/integrations/src/electron/handlers.db.test.ts  (DB-only channels)
@@ -28,12 +33,12 @@
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { _mock } from '../../../../shared/test-utils/mock-linear-client.js'
-import { integrationsRouter } from './integrations.js'
-import { setIntegrationOps } from '../app-deps.js'
 import {
   createIntegrationOps,
   ensureIntegrationSchema,
-  setCredentialCipher
+  integrationsRouter,
+  setCredentialCipher,
+  setIntegrationOps
 } from '@slayzone/integrations/server'
 import type { LinearIssueSummary } from '@slayzone/integrations/shared'
 import { configureTaskRuntimeAdapters } from '@slayzone/task/server'
