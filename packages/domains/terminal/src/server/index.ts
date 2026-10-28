@@ -250,3 +250,11 @@ export {
 // Quit-time gate: flip BEFORE any teardown that can fire pty/chat exit handlers,
 // or the kill cascade marks `stopped` the very agents the next boot needs to restore.
 export { beginTerminalShutdown } from './runtime/shutdown'
+// `agentLifecycle.*` tRPC router + the hook-driven lifecycle bus it streams.
+// Composed by `@slayzone/api`; the bus is injected by the composition root.
+export { agentLifecycleRouter } from './agent-lifecycle-router'
+export {
+  setAgentLifecycleEvents,
+  getAgentLifecycleEvents,
+  type AgentLifecycleEventMap
+} from './agent-lifecycle-events'

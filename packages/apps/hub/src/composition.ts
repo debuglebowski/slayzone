@@ -21,7 +21,6 @@ import {
   setNotifyEvents,
   setAutomationsEvents,
   setMenuEvents,
-  setAgentLifecycleEvents,
   setTaskTriggerBus,
   setAppDeps,
   getAppDeps,
@@ -39,7 +38,6 @@ import {
   type NotifyEventMap,
   type AutomationsEventMap,
   type MenuEventMap,
-  type AgentLifecycleEventMap,
   type AuthEventMap,
   type RestApiDeps,
   type FloatingAgentState
@@ -106,6 +104,8 @@ import {
   backfillChatModes,
   setPtyEnricher,
   resetTerminalRuntimeForTest,
+  setAgentLifecycleEvents,
+  type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
 import {

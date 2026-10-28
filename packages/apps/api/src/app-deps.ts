@@ -12,7 +12,6 @@ import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
-import type { AgentLifecycleEvent } from '@slayzone/terminal-contracts'
 import type {
   createChatOps,
   createChatQueueOps,
@@ -297,24 +296,6 @@ export function getMenuEvents(): TypedEmitter<MenuEventMap> {
   if (!menuEvents)
     throw new Error('menuEvents not initialized — call setMenuEvents() in main host first')
   return menuEvents
-}
-
-export type AgentLifecycleEventMap = {
-  event: [event: AgentLifecycleEvent]
-}
-
-let agentLifecycleEvents: TypedEmitter<AgentLifecycleEventMap> | null = null
-
-export function setAgentLifecycleEvents(ev: TypedEmitter<AgentLifecycleEventMap>): void {
-  agentLifecycleEvents = ev
-}
-
-export function getAgentLifecycleEvents(): TypedEmitter<AgentLifecycleEventMap> {
-  if (!agentLifecycleEvents)
-    throw new Error(
-      'agentLifecycleEvents not initialized — call setAgentLifecycleEvents() in main host first'
-    )
-  return agentLifecycleEvents
 }
 
 // Auth-callback bus — backs the `app.auth.onCallback` subscription. The

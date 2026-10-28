@@ -22,7 +22,6 @@ import { deriveBootstrapOwnerPassword } from '@slayzone/platform/hub-auth-secret
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import {
-  getAgentLifecycleEvents,
   getAppDeps,
   getAutomationsEvents,
   getChatDeps,
@@ -34,6 +33,7 @@ import {
 } from '@slayzone/api'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
+import { getAgentLifecycleEvents } from '@slayzone/terminal/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
 import { settingsEvents } from '@slayzone/settings/server'
 // Not a dependency of the hub app; reached by path so it is the SAME module instance

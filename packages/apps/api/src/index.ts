@@ -48,11 +48,6 @@ export {
   type AutomationsEventMap
 } from './app-deps'
 export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
-export {
-  setAgentLifecycleEvents,
-  getAgentLifecycleEvents,
-  type AgentLifecycleEventMap
-} from './app-deps'
 export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
 export {
   requestGithubSignInStart,

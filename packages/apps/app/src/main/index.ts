@@ -515,7 +515,7 @@ import {
   beginTerminalShutdown,
   ptyEvents
 } from '@slayzone/terminal/electron'
-import { setOnTaskReachedTerminalHandler } from '@slayzone/terminal/server'
+import { setOnTaskReachedTerminalHandler, setAgentLifecycleEvents } from '@slayzone/terminal/server'
 import {
   attachFloatingGlobalAgentPanel,
   setupFloatingGlobalAgentPanel,
@@ -2303,7 +2303,7 @@ app
             // here. Post-cutover the host capability bridge streams these to the
             // side-car, whose `menu.*` subscriptions deliver them to the renderer.
             mod.setMenuEvents(menuEvents)
-            mod.setAgentLifecycleEvents(agentLifecycleEvents)
+            setAgentLifecycleEvents(agentLifecycleEvents)
             // Power-resume bus — host `powerMonitor 'resume'` (see above) forwarded
             // over the capability bridge so the side-car engine runs cron catchup.
             mod.setPowerResumeEvents(powerResumeEvents)
