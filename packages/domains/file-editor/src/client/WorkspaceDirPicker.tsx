@@ -16,6 +16,9 @@ import {
   toast
 } from '@slayzone/ui'
 
+/** The roots while the query has no data: one identity, so `defaultCwd` is not recomputed every render. */
+const NO_ROOTS: string[] = []
+
 /**
  * Pick a directory on the machine that will run the agent.
  *
@@ -76,7 +79,7 @@ export function WorkspaceDirPicker({
   const [newName, setNewName] = useState('')
   const [manual, setManual] = useState<string | null>(null)
 
-  const roots = rootsQuery.data?.roots ?? []
+  const roots = rootsQuery.data?.roots ?? NO_ROOTS
   const sep = rootsQuery.data?.sep ?? '/'
   const home = rootsQuery.data?.home ?? null
 

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Settings, RefreshCw, ChevronRight } from 'lucide-react'
 import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@slayzone/ui'
-import type { TestLabel } from '../shared/types'
+import type { TestFileLabel, TestFileNote, TestLabel } from '../shared/types'
 import { TestFileRow } from './TestFileRow'
 
 interface TestPanelProps {
@@ -12,6 +12,10 @@ interface TestPanelProps {
   groupBy: 'none' | 'path' | 'label'
   onOpenSettings: () => void
 }
+
+/** The lists while their queries have no data: one identity, so the maps built from them are not rebuilt every render. */
+const NO_FILE_LABELS: TestFileLabel[] = []
+const NO_FILE_NOTES: TestFileNote[] = []
 
 interface DirNode {
   name: string
@@ -90,8 +94,8 @@ export function TestPanel({
   const categories = categoriesQuery.data ?? []
   const scanResult = scanQuery.data ?? null
   const labels = labelsQuery.data ?? []
-  const fileLabels = fileLabelsQuery.data ?? []
-  const fileNotes = fileNotesQuery.data ?? []
+  const fileLabels = fileLabelsQuery.data ?? NO_FILE_LABELS
+  const fileNotes = fileNotesQuery.data ?? NO_FILE_NOTES
   const loading = scanQuery.isFetching
 
   const fileLabelMap = useMemo(() => {

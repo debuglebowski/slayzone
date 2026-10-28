@@ -1085,9 +1085,12 @@ function App(): React.JSX.Element {
   const handleTaskClick = useStableCallback((task: Task): void => {
     openTask(task.id)
   })
-  const handleTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void => {
-    moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy)
-  }
+  // Stable: the test-seam effect below installs it, and every board card gets it.
+  const handleTaskMove = useStableCallback(
+    (taskId: string, newColumnId: string, targetIndex: number): void => {
+      moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy)
+    }
+  )
   const handleTaskBulkMove = (
     taskIds: string[],
     newColumnId: string,

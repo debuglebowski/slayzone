@@ -1504,11 +1504,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     handleWebPanelFaviconChange
   } = usePersistenceSaves(task)
 
-  const handleTaskUpdate = (updated: Task): void => {
+  // Stable: `applyTemplate` and the git panel's `onTaskUpdated` hold it.
+  const handleTaskUpdate = useStableCallback((updated: Task): void => {
     setTitleValue(updated.title)
     setDescriptionValue(updated.description ?? '')
     onTaskUpdated(updated)
-  }
+  })
 
   const applyTemplate = useCallback(
     async (template: TaskTemplate) => {

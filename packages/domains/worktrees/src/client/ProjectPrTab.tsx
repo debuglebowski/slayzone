@@ -20,6 +20,9 @@ interface PrFilterState {
   filterReview: '' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED'
 }
 
+/** The PRs while the query has no data: one identity, so the memos keyed on them are not recomputed every render. */
+const NO_PRS: GhPullRequest[] = []
+
 const DEFAULT_FILTER: PrFilterState = {
   sortBy: 'newest',
   filterAuthor: '',
@@ -97,7 +100,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
       { enabled: visible && !!projectPath }
     )
   )
-  const prs = prsQuery.data ?? []
+  const prs = prsQuery.data ?? NO_PRS
   const loading = prsQuery.isPending
   const error = prsQuery.error
     ? prsQuery.error instanceof Error
