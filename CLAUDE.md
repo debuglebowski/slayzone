@@ -40,7 +40,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm build`     | Build for production           |
 | `pnpm build:mac` | Build macOS .app               |
 | `pnpm typecheck` | Typecheck all packages         |
-| `pnpm test:e2e`  | Run E2E tests (requires build) — full suite runs one process per `e2e/` subdirectory (`core` split into 2 duration-balanced shards, weights in `e2e/spec-durations.json`); passing args (`pnpm test:e2e e2e/core/64-x.spec.ts`) forwards them straight to Playwright |
+| `pnpm test:e2e`  | Run E2E tests (requires build) — full suite = every group except `perf`, split into 7 duration-balanced deterministic processes (`e2e/shard-plan.mjs`, weights in `e2e/spec-durations.json`); passing args (`pnpm test:e2e e2e/core/64-x.spec.ts`) forwards them straight to Playwright |
+| `pnpm test:e2e:perf` | Run the `perf` group alone (wall-clock budgets — needs a quiet box; not part of `test:e2e`) |
 | `pnpm lint`      | Lint all packages              |
 
 ## Dev Env Flags

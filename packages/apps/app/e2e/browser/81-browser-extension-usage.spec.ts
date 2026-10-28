@@ -51,6 +51,8 @@ function find1PasswordPath(): string | null {
 // pass. Do not re-skip without re-checking the fixture paths first.
 test.describe('Chrome extension real usage (WebContentsView)', () => {
   let taskId: string
+  /** Set by the MV3 messaging test once the worker answered; the MV3 tests after it reuse that worker. */
+  let mv3Connected = false
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -208,41 +210,51 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     }
     expect(result.error, `MV3 extension load failed: ${result.error}`).toBeUndefined()
 
-    // Try to start the service worker explicitly and check status (fixed wait:
-    // give the freshly loaded extension's worker time to register; diagnostic only)
-    await mainWindow.waitForTimeout(2000)
-    const swInfo = await electronApp.evaluate(async ({ session }) => {
-      const ses = session.fromPartition('persist:browser-tabs')
-      const allExts = ses.getAllExtensions()
-      const swResults: string[] = []
-
-      // Try starting each MV3 extension's service worker
-      for (const ext of allExts) {
-        if (ext.manifest.manifest_version === 3 && ext.manifest.background?.service_worker) {
-          const scope = `chrome-extension://${ext.id}/`
-          try {
-            await ses.serviceWorkers.startWorkerForScope(scope)
-            swResults.push(`${ext.name}: started OK`)
-          } catch (err) {
-            swResults.push(
-              `${ext.name}: FAILED - ${err instanceof Error ? err.message : String(err)}`
-            )
+    // Wait until the freshly loaded extension's worker actually starts. Its
+    // registration is async after loadExtension resolves, and under full-suite
+    // load it outlasted the fixed 2s wait this replaced — startWorkerForScope then
+    // failed and the messaging below never connected.
+    const startMv3Workers = () =>
+      electronApp.evaluate(async ({ session }) => {
+        const ses = session.fromPartition('persist:browser-tabs')
+        const allExts = ses.getAllExtensions()
+        const swResults: string[] = []
+        for (const ext of allExts) {
+          if (ext.manifest.manifest_version === 3 && ext.manifest.background?.service_worker) {
+            try {
+              await ses.serviceWorkers.startWorkerForScope(`chrome-extension://${ext.id}/`)
+              swResults.push(`${ext.name}: started OK`)
+            } catch (err) {
+              swResults.push(
+                `${ext.name}: FAILED - ${err instanceof Error ? err.message : String(err)}`
+              )
+            }
           }
         }
-      }
-
-      // Check running workers
-      const running = ses.serviceWorkers.getAllRunning()
-      const runningList = Object.entries(running).map(
-        ([id, info]) => `${id}: ${JSON.stringify(info)}`
+        const running = ses.serviceWorkers.getAllRunning()
+        return {
+          extensions: allExts.map((e) => `${e.name} (MV${e.manifest.manifest_version})`),
+          swStartResults: swResults,
+          runningWorkers: Object.entries(running).map(
+            ([id, info]) => `${id}: ${JSON.stringify(info)}`
+          )
+        }
+      })
+    let swInfo = await startMv3Workers()
+    await expect
+      .poll(
+        async () => {
+          swInfo = await startMv3Workers()
+          return (
+            swInfo.swStartResults.length > 0 &&
+            swInfo.swStartResults.every((r) => r.endsWith('started OK'))
+          )
+        },
+        { timeout: 15_000, intervals: [250, 500, 1_000] }
       )
-
-      return {
-        extensions: allExts.map((e) => `${e.name} (MV${e.manifest.manifest_version})`),
-        swStartResults: swResults,
-        runningWorkers: runningList
-      }
-    })
+      .toBe(true)
+      // A timeout falls through to the diagnostic assert below.
+      .catch(() => {})
 
     // Navigate to trigger content script
     await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/title-ext-page'))
@@ -294,6 +306,7 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
         `Running workers: ${JSON.stringify(swInfo.runningWorkers)}`
       ].join('\n')
     ).toBe('connected')
+    mv3Connected = true
   })
 
   // Runs after the MV3 messaging test above, which loaded the MV3 fixture into this
@@ -303,6 +316,12 @@ test.describe('Chrome extension real usage (WebContentsView)', () => {
     viewId: string,
     message: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
+    // Fail at once rather than burn this test's whole budget polling a worker that
+    // was never reachable — the messaging test above already reported why.
+    expect(
+      mv3Connected,
+      'MV3 worker never connected in "MV3: service worker messaging works"'
+    ).toBe(true)
     await testInvoke(
       mainWindow,
       'browser:execute-js',

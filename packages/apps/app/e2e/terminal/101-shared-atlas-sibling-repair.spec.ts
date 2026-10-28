@@ -560,14 +560,15 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
    * stale while hidden.
    *
    * Setup is the real-world trigger, not a synthetic one. The heartbeat
-   * (`Terminal.tsx` → `setInterval(tryCorrect('heartbeat'), 30_000)`) is gated on
-   * `isActive`, so over a 70s idle window the ACTIVE pane repacks the shared atlas
-   * twice while the hidden panes are never told to correct themselves.
+   * (`Terminal.tsx` → `setInterval(tryCorrect('heartbeat'), 30s)`) is gated on
+   * `isActive`, so across two ticks the ACTIVE pane repacks the shared atlas twice
+   * while the hidden panes are never told to correct themselves. The spec shortens
+   * the period (`__slayzone_setAtlasHeartbeatMs`) so two ticks take seconds.
    *
    * A hidden pane then has no paint source at all: no output arrives, cursor blink
    * only runs on the focused terminal, and its own heartbeat is gated off. Since
    * the repair executes inside `beginFrame()`, no paint means no repair — measured
-   * here as a hidden pane sitting at 0.625 agreement across all 28 samples of the
+   * here as a hidden pane sitting at 0.625 agreement across every sample of a 70s
    * soak, never self-healing. That is EXPECTED and is not the bug: nothing is on
    * screen, so nothing is visibly wrong, and `WebglRenderer.renderRows` promotes
    * any subsequent paint to `_updateModel(0, rows - 1)` — a full-viewport rebuild
@@ -596,23 +597,59 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
     )
 
     // --- Idle soak: let the active pane's heartbeat repack the shared atlas. ---
-    const SOAK_MS = 70_000 // > 2 × 30s heartbeat, with margin for the rAF debounce
+    // The product heartbeat is 30s; re-arm every mounted pane's timer at a short
+    // period so two repacks land in seconds instead of a 70s soak. Same timer, same
+    // `isActive` gate — only the period differs. Restored below.
+    const HEARTBEAT_MS = 4_000
+    const HEARTBEATS = 2
+    const SOAK_CAP_MS = 30_000 // fails the heartbeat assertion below if it is ever hit
+    const setHeartbeat = (ms: number) =>
+      mainWindow.evaluate(
+        (m) =>
+          (
+            window as unknown as { __slayzone_setAtlasHeartbeatMs: (ms: number) => void }
+          ).__slayzone_setAtlasHeartbeatMs(m),
+        ms
+      )
+    const heartbeatsSoFar = () =>
+      mainWindow.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __slayzone_terminalDiag?: { dump: () => Array<{ event: string; site?: string }> }
+            }
+          ).__slayzone_terminalDiag
+            ?.dump()
+            .filter((e) => e.event === 'atlas-correct' && e.site === 'heartbeat').length ?? 0
+      )
     const activeSid = getMainSessionId(taskIds[TAB_COUNT - 1])
     const samples: Array<{ atMs: number; active: number; worstHidden: number }> = []
+    await setHeartbeat(HEARTBEAT_MS)
     const startedAt = Date.now()
-    while (Date.now() - startedAt < SOAK_MS) {
-      await mainWindow.waitForTimeout(2_500)
-      const rs = (await mainWindow.evaluate(
-        '(() => window.__atlasOracle.read())()'
-      )) as PaneReading[]
-      const active = rs.find((r) => r.sessionId === activeSid)
-      const hidden = rs.filter((r) => r.sessionId !== activeSid)
-      samples.push({
-        atMs: Date.now() - startedAt,
-        active: active ? active.agreement : 1,
-        worstHidden: hidden.length ? Math.min(...hidden.map((r) => r.agreement)) : 1
-      })
+    try {
+      // Sample until the heartbeat has repacked twice, then one more period so the
+      // active pane's post-repack paint is sampled too.
+      let doneAt: number | null = null
+      while (Date.now() - startedAt < SOAK_CAP_MS && (doneAt === null || Date.now() < doneAt)) {
+        await mainWindow.waitForTimeout(1_000)
+        const rs = (await mainWindow.evaluate(
+          '(() => window.__atlasOracle.read())()'
+        )) as PaneReading[]
+        const active = rs.find((r) => r.sessionId === activeSid)
+        const hidden = rs.filter((r) => r.sessionId !== activeSid)
+        samples.push({
+          atMs: Date.now() - startedAt,
+          active: active ? active.agreement : 1,
+          worstHidden: hidden.length ? Math.min(...hidden.map((r) => r.agreement)) : 1
+        })
+        if (doneAt === null && (await heartbeatsSoFar()) >= HEARTBEATS) {
+          doneAt = Date.now() + HEARTBEAT_MS
+        }
+      }
+    } finally {
+      await setHeartbeat(30_000)
     }
+    const SOAK_MS = Date.now() - startedAt
 
     // A soak that saw no heartbeat repack proves nothing — the timer must have
     // fired and actually repacked the shared atlas during the window.
@@ -637,7 +674,7 @@ test.describe('shared texture atlas — siblings repair after a repack', () => {
     expect(corrections, 'diag ring available').not.toBeNull()
     expect(
       corrections?.bySite.heartbeat ?? 0,
-      'the 30s heartbeat repacked the shared atlas at least twice during the soak — ' +
+      'the heartbeat repacked the shared atlas at least twice during the soak — ' +
         'without that, the soak asserts nothing'
     ).toBeGreaterThanOrEqual(2)
 

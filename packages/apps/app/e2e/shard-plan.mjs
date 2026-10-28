@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// Duration-balanced, DETERMINISTIC split of one e2e group into N processes.
+// Duration-balanced, DETERMINISTIC split of the e2e suite into N processes.
 //
-//   node e2e/shard-plan.mjs plan <groupDir> <n>     one line per shard: its spec paths
+//   node e2e/shard-plan.mjs plan <n> <groupDir>...   one line per shard: its spec paths
 //   node e2e/shard-plan.mjs record <report.json>...  merge measured per-file ms into
 //                                                    e2e/spec-durations.json
 //
+// The split spans every group dir it is given, not one group at a time: with one
+// process per directory the slowest DIRECTORY set the wall clock (browser 353s while
+// web-shell finished at 79s), however the rest balanced.
+//
 // Why not Playwright's own `--shard`: it balances by TEST COUNT, and here a file's
-// cost is dominated by its per-file `resetApp` (side-car restart), not its tests —
+// cost is dominated by its per-file `resetApp` and app/hub launches, not its tests —
 // measured on core it put 49 files in one shard and 24 in the other.
 //
 // Why not dynamic scheduling (`--workers=N`): which files share an Electron app then
-// changes run to run, so order-dependent failures rotate identity — exactly what
-// the group-per-subdirectory layout exists to prevent. Here the same spec set +
-// weights always yields the same shards.
+// changes run to run, so order-dependent failures rotate identity. Here the same
+// spec set + weights always yields the same shards.
 //
 // A spec absent from spec-durations.json (new file) gets the median weight, so it
 // is always scheduled — never silently dropped. Re-record after big spec changes.
@@ -32,12 +35,15 @@ function readDurations() {
   }
 }
 
-function plan(groupDir, n) {
-  const rel = groupDir.replace(/\/+$/, '')
-  const files = fs
-    .readdirSync(path.join(appDir, rel))
-    .filter((f) => f.endsWith('.spec.ts'))
-    .map((f) => `${rel}/${f}`)
+function plan(n, groupDirs) {
+  const files = groupDirs
+    .flatMap((dir) => {
+      const rel = dir.replace(/\/+$/, '')
+      return fs
+        .readdirSync(path.join(appDir, rel))
+        .filter((f) => f.endsWith('.spec.ts'))
+        .map((f) => `${rel}/${f}`)
+    })
     .sort()
   const durations = readDurations()
   const known = files.map((f) => durations[f]).filter((v) => typeof v === 'number')
@@ -87,8 +93,12 @@ function record(reports) {
       durations[file] = Math.max(1, Math.round(next - start))
     })
   }
+  // Drop weights of deleted/renamed specs so the file only describes the live suite
+  // (a stale entry would otherwise skew the median new files are scheduled with).
   const sorted = Object.fromEntries(
-    Object.entries(durations).sort(([a], [b]) => a.localeCompare(b))
+    Object.entries(durations)
+      .filter(([file]) => fs.existsSync(path.join(appDir, file)))
+      .sort(([a], [b]) => a.localeCompare(b))
   )
   fs.writeFileSync(durationsPath, JSON.stringify(sorted, null, 2) + '\n')
   console.log(
@@ -97,9 +107,9 @@ function record(reports) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2)
-if (cmd === 'plan' && rest.length === 2 && Number(rest[1]) >= 1) plan(rest[0], Number(rest[1]))
+if (cmd === 'plan' && rest.length >= 2 && Number(rest[0]) >= 1) plan(Number(rest[0]), rest.slice(1))
 else if (cmd === 'record' && rest.length > 0) record(rest)
 else {
-  console.error('usage: shard-plan.mjs plan <groupDir> <n> | record <report.json>...')
+  console.error('usage: shard-plan.mjs plan <n> <groupDir>... | record <report.json>...')
   process.exit(2)
 }

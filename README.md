@@ -142,6 +142,7 @@ pnpm dev
 | `pnpm build`        | Production build                                              |
 | `pnpm typecheck`    | Typecheck all packages                                        |
 | `pnpm test:e2e`     | Run E2E tests (build first)                                   |
+| `pnpm test:e2e:perf`| Run perf E2E budgets alone (quiet box; not in `test:e2e`)     |
 
 ***
 

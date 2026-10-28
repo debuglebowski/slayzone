@@ -94,9 +94,18 @@ test.describe('Browser view events (WebContentsView)', () => {
       'https://this-domain-does-not-exist-12345.invalid'
     )
 
-    // The URL should eventually reflect the attempted navigation
-    // (the view keeps the last successful URL or the failed URL)
-    await mainWindow.waitForTimeout(5000)
+    // did-fail-load lands on the view's state as `error` for the failed URL
+    await expect
+      .poll(
+        async () =>
+          (
+            (await testInvoke(mainWindow, 'browser:get-state', viewId)) as {
+              error?: { url?: string } | null
+            } | null
+          )?.error?.url ?? '',
+        { timeout: 10_000 }
+      )
+      .toContain('this-domain-does-not-exist-12345.invalid')
 
     // The view should still be queryable (not crashed)
     const url = (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string

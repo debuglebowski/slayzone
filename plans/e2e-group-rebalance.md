@@ -1,6 +1,8 @@
 # E2E: rebalance the parallel groups so no group sets the wall clock
 
-**Status: measured, designed, NOT yet applied — blocked on a live collision (§5).**
+**Status: SUPERSEDED (2026-10-28).** `e2e-parallel.sh` no longer runs one process per
+directory: `e2e/shard-plan.mjs` balances every spec across 7 fixed processes by measured
+duration, so no directory regrouping is needed. Kept for its measurements.
 
 ## 1. No new measurement run is needed
 

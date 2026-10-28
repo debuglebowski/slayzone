@@ -78,6 +78,25 @@ export type { TerminalProps, TerminalHandle } from './Terminal.types'
 /** Host style for a terminal nobody can see — see the host `<div>` below. */
 const HIDDEN_HOST_STYLE = { contentVisibility: 'hidden' } as const
 
+/** Period of the atlas-correction heartbeat (see the heartbeat effect below). */
+let atlasHeartbeatMs = 30_000
+/** Re-arms every mounted terminal's heartbeat timer at the current period. */
+const heartbeatRearms = new Set<() => void>()
+
+/**
+ * e2e seam: `window.__slayzone_setAtlasHeartbeatMs(ms)` changes the heartbeat
+ * period on every mounted terminal at once, so a spec can observe repeated
+ * heartbeat repacks without a 70s idle soak. The product never calls it.
+ */
+function installHeartbeatSeam(): void {
+  ;(
+    window as unknown as { __slayzone_setAtlasHeartbeatMs?: (ms: number) => void }
+  ).__slayzone_setAtlasHeartbeatMs = (ms) => {
+    atlasHeartbeatMs = ms
+    for (const rearm of heartbeatRearms) rearm()
+  }
+}
+
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
     sessionId,
@@ -1013,13 +1032,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Callback has its own `visibilityState !== 'visible'` early-return; the
     // timer also acts as a heartbeat that must coexist with focus +
     // visibilitychange listeners.
+    const onHeartbeat = tryCorrect('heartbeat')
     // eslint-disable-next-line no-restricted-syntax
-    const interval = window.setInterval(tryCorrect('heartbeat'), 30_000)
+    let interval = window.setInterval(onHeartbeat, atlasHeartbeatMs)
+    const rearm = (): void => {
+      window.clearInterval(interval)
+      // eslint-disable-next-line no-restricted-syntax
+      interval = window.setInterval(onHeartbeat, atlasHeartbeatMs)
+    }
+    heartbeatRearms.add(rearm)
+    installHeartbeatSeam()
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
 
     return () => {
       window.clearInterval(interval)
+      heartbeatRearms.delete(rearm)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onFocus)
     }

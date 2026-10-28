@@ -463,12 +463,12 @@ base.describe('Computer loopback (computer ON)', () => {
         const page = launched.page
         await page.waitForSelector('#root', { timeout: 20_000 })
 
-        // Supervisor opted out → no computer auto-spawns, so nothing is connected.
-        await page.waitForTimeout(3_000)
-        const rows = await listComputers(page)
-        expect(rows.filter((r) => r.connected).length).toBe(0)
+        // The "nothing connected" check needs a window in which an auto-spawned
+        // computer WOULD have connected. The mint poll below waits on the same async
+        // computer init anyway, so it runs first and the window is topped up to 3s.
+        const windowStartedAt = Date.now()
 
-        // But the computer listener IS bound (always-on) → mintJoinToken succeeds and
+        // The computer listener IS bound (always-on) → mintJoinToken succeeds and
         // returns a decodable szjt1 token embedding the wss computer URL. Poll: the
         // async computer init (createHubAuth migrations + listener bind) resolves
         // shortly after boot.
@@ -488,6 +488,12 @@ base.describe('Computer loopback (computer ON)', () => {
             { timeout: 60_000, intervals: [1_000, 2_000] }
           )
           .toBe(true)
+
+        // Supervisor opted out → no computer auto-spawns, so nothing is connected.
+        const remaining = 3_000 - (Date.now() - windowStartedAt)
+        if (remaining > 0) await page.waitForTimeout(remaining)
+        const rows = await listComputers(page)
+        expect(rows.filter((r) => r.connected).length).toBe(0)
       } finally {
         await launched.close()
       }

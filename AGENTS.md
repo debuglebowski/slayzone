@@ -39,6 +39,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm build:mac` | Build macOS .app |
 | `pnpm typecheck` | Typecheck all packages |
 | `pnpm test:e2e` | Run E2E tests (requires build) |
+| `pnpm test:e2e:perf` | Run perf E2E budgets alone (not in `test:e2e`) |
 | `pnpm lint` | Lint all packages |
 
 ## Commit Messages

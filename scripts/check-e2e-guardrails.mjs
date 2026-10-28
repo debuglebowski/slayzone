@@ -17,7 +17,8 @@
  *
  * 3. WALL-CLOCK BUDGET IN THE PARALLEL SUITE — `expect(<ms>).toBeLessThan(n)`
  *    measures the machine, not the product, when six Electron apps share the
- *    cores. Latency assertions belong in the serial perf phase.
+ *    cores. Latency assertions belong in e2e/perf, which runs alone
+ *    (`pnpm test:e2e:perf`).
  *
  * Usage: node scripts/check-e2e-guardrails.mjs
  */
@@ -94,7 +95,7 @@ for (const file of files) {
       }
     }
 
-    // (3) A wall-clock assertion outside the serial perf phase. Keyed on a
+    // (3) A wall-clock assertion outside the perf group (which runs alone). Keyed on a
     // duration-shaped identifier so DOM/geometry assertions are not flagged.
     if (!inPerf && /toBeLessThan\(/.test(line)) {
       if (/\b\w*(Ms|Duration|Latency|elapsed|duration)\w*\b/.test(line)) {
