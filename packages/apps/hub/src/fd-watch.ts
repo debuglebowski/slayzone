@@ -80,7 +80,13 @@ export function startFdWatch(opts: {
     return true
   }
   // The first count runs now: it also tells whether this platform can count at all.
-  if (!tick()) return { active: false, stop: () => {} }
+  if (!tick())
+    return {
+      active: false,
+      stop: () => {
+        // No interval was started: nothing to stop.
+      }
+    }
   const handle = timers.setInterval(() => void tick(), FD_CHECK_INTERVAL_MS)
   return { active: true, stop: () => timers.clearInterval(handle) }
 }

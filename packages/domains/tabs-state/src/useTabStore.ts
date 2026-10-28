@@ -730,7 +730,9 @@ export async function stopViewStatePersistence(): Promise<void> {
   _persistenceStopped = true
   if (_debounceTimer) clearTimeout(_debounceTimer)
   _debounceTimer = null
-  await _inflightWrite.catch(() => {})
+  await _inflightWrite.catch(() => {
+    // Only waiting for the write to settle here, not handling its failure.
+  })
 }
 
 useTabStore.subscribe(

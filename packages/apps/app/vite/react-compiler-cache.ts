@@ -323,7 +323,9 @@ export function reactCompilerCachePlugin(stats?: ReactCompilerCacheStats): Plugi
               }
               return undefined
             })
-            .catch(() => {})
+            .catch(() => {
+              // Best-effort LRU touch: an untouched entry only ages out sooner.
+            })
           return { code: cached, map: { mappings: '' } }
         }
         const t0 = performance.now()
@@ -337,7 +339,11 @@ export function reactCompilerCachePlugin(stats?: ReactCompilerCacheStats): Plugi
         void mkdir(join(cacheDir, key.slice(0, 2)), { recursive: true })
           .then(() => writeFile(tmp, out))
           .then(() => rename(tmp, file))
-          .catch(() => rm(tmp, { force: true }).catch(() => {}))
+          .catch(() =>
+            rm(tmp, { force: true }).catch(() => {
+              // Best-effort: a stray .tmp is harmless; the next miss recompiles.
+            })
+          )
         return { code: out, map: { mappings: '' } }
       }
     }

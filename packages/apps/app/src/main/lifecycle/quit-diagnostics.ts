@@ -15,8 +15,12 @@ export async function drainDiagnosticsForQuit(deps: {
 }): Promise<'drained' | 'timed-out'> {
   const drain = (async () => {
     // A failed flush must not skip the close; diagnostics never escalate.
-    await deps.stop().catch(() => {})
-    await deps.closeDb().catch(() => {})
+    await deps.stop().catch(() => {
+      // Diagnostics never escalate: the close below must still run.
+    })
+    await deps.closeDb().catch(() => {
+      // Diagnostics never escalate: a failed close must not block the quit.
+    })
     return 'drained' as const
   })()
   let timer: NodeJS.Timeout | undefined

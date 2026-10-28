@@ -82,7 +82,9 @@ function report(
         message: `terminal pane ${sessionId} holds a foreign/extra xterm (${anomalies.join(', ')}) @${site}`,
         payload: full
       })
-      .catch(() => {})
+      .catch(() => {
+        // Diagnostics must never break the terminal.
+      })
   } catch {
     // Diagnostics must never break the terminal.
   }

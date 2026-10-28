@@ -36,7 +36,12 @@ export function startIntegrationPollers(opts: {
   // `SLAYZONE_HUB_ENABLE_INTEGRATIONS=0`: this hub makes no provider call, so the pollers
   // never exist (the same stance as `wireIntegrationPush`). Starting them would hit the
   // credential refusal and write a `denied` audit line every tick.
-  if (!hubIntegrationsEnabled()) return { stop: () => {} }
+  if (!hubIntegrationsEnabled())
+    return {
+      stop: () => {
+        // No poller was started: nothing to stop.
+      }
+    }
   // One poller failing to start must not take the other (or the boot) down.
   const start = (label: string, run: () => NodeJS.Timeout): void => {
     try {

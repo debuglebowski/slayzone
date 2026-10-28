@@ -189,7 +189,9 @@ export async function initTerminalSession(
   setInitError(null)
   let didInit = false
   // Releases this init's turn in the hidden-terminal queue (idempotent).
-  let releaseSlot: () => void = () => {}
+  let releaseSlot: () => void = () => {
+    // No slot taken yet: nothing to release.
+  }
   const timeline = startMountTimeline(sessionId, mode)
 
   try {

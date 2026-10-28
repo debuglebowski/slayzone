@@ -121,7 +121,11 @@ class ParkedRenderer {
     this.update()
   }
 
-  readonly onRequestRedraw = (): Disposable => ({ dispose: () => {} })
+  readonly onRequestRedraw = (): Disposable => ({
+    dispose: () => {
+      // Never fires a redraw request: nothing to unsubscribe.
+    }
+  })
 
   private update(): void {
     const cs = this.core._charSizeService
@@ -150,13 +154,28 @@ class ParkedRenderer {
   handleCharSizeChanged(): void {
     this.update()
   }
-  handleBlur(): void {}
-  handleFocus(): void {}
-  handleSelectionChanged(): void {}
-  handleCursorMove(): void {}
-  clear(): void {}
-  renderRows(): void {}
-  clearTextureAtlas(): void {}
+  // Parked: draws nothing, so every paint-related hook below is a deliberate no-op.
+  handleBlur(): void {
+    // No-op: parked.
+  }
+  handleFocus(): void {
+    // No-op: parked.
+  }
+  handleSelectionChanged(): void {
+    // No-op: parked.
+  }
+  handleCursorMove(): void {
+    // No-op: parked.
+  }
+  clear(): void {
+    // No-op: parked.
+  }
+  renderRows(): void {
+    // No-op: parked.
+  }
+  clearTextureAtlas(): void {
+    // No-op: parked (no atlas).
+  }
 }
 
 /**

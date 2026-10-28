@@ -253,12 +253,24 @@ const unconfiguredWorktreePolicyAdapters: WorktreePolicyAdapters = {
   }
 }
 
+// Side-effect hooks default to no-ops so ops run unwired (tests, CLI); the app and the
+// hub wire every one of them via configureTaskRuntimeAdapters.
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
-  killPtysByTaskId: () => {},
-  killTaskProcesses: () => {},
-  recordDiagnosticEvent: () => {},
-  requestPtyRespawn: () => {},
-  onReachedTerminal: () => {},
+  killPtysByTaskId: () => {
+    // Unwired: no PTYs to kill.
+  },
+  killTaskProcesses: () => {
+    // Unwired: no processes to kill.
+  },
+  recordDiagnosticEvent: () => {
+    // Unwired: no diagnostics sink.
+  },
+  requestPtyRespawn: () => {
+    // Unwired: no PTYs to respawn.
+  },
+  onReachedTerminal: () => {
+    // Unwired: no teardown to run.
+  },
   getDataRoot: () => {
     throw new Error(
       'TaskRuntimeAdapters.getDataRoot not configured (call configureTaskRuntimeAdapters)'
