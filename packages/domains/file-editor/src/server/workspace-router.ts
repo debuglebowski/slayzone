@@ -16,13 +16,13 @@
  * back on every response so the UI can name the machine it is showing instead of
  * implying a remote one.
  *
- * Registered as `workspace` in router.ts.
+ * Registered as `workspace` in api's router.ts.
  */
 
 import { z } from 'zod'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getWorkspaceDeps } from '@slayzone/file-editor/server'
+import { getWorkspaceDeps } from './workspace-deps'
 
 /** Resolvable address of the machine a call targets. */
 const targetInput = z.object({
@@ -190,3 +190,7 @@ export const workspaceRouter = router({
       }
     })
 })
+
+export type WorkspaceRouter = typeof workspaceRouter
+/** Where api mounts this router (`router.ts`). */
+export type WorkspaceMounts = { workspace: WorkspaceRouter }

@@ -69,3 +69,4 @@ export {
   getFileEditorRouterDeps,
   type FileEditorRouterDeps
 } from './file-editor-router-deps'
+export { workspaceRouter, type WorkspaceRouter, type WorkspaceMounts } from './workspace-router'
