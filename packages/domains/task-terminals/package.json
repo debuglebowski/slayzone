@@ -18,7 +18,6 @@
   "dependencies": {
     "@lobehub/icons": "^5.21.0",
     "@slayzone/editor": "workspace:*",
-    "@slayzone/settings": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",

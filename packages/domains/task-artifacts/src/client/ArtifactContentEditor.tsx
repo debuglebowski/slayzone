@@ -25,8 +25,7 @@ import {
   isBinaryRenderMode
 } from '@slayzone/task-contracts'
 import { Markdown, MermaidBlock, MediaView } from '@slayzone/markdown/client'
-import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
-import { useTheme } from '@slayzone/settings/client'
+import { useAppearance, useTheme, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import {
   SearchableCodeView,
   type SearchableCodeViewHandle

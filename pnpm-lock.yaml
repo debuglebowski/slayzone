@@ -2105,9 +2105,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
@@ -2172,9 +2169,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
@@ -2221,9 +2215,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../settings
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal

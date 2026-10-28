@@ -18,7 +18,7 @@ import {
   useShortcutDisplay,
   useStableCallback
 } from '@slayzone/ui'
-import { useAppearance } from '@slayzone/settings/client'
+import { useAppearance } from '@slayzone/ui'
 import { type BrowserTabPlaceholderHandle, type BrowserTabView } from './BrowserTabPlaceholder'
 import type { BrowserViewState } from './useBrowserView'
 import type { BrowserTab, BrowserTabsState } from '../shared'

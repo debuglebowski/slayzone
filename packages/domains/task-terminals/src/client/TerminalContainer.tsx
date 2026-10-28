@@ -17,7 +17,7 @@ import {
   getThemeChrome,
   getChromeStyleOverrides
 } from '@slayzone/ui'
-import { useTheme } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/ui'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'

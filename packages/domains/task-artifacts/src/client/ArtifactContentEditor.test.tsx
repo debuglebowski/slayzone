@@ -32,10 +32,10 @@ const theme = { editorThemeId: 'default', contentVariant: 'dark' }
 vi.mock('@slayzone/ui', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@slayzone/ui')>()),
   useAppearance: () => appearance,
+  useTheme: () => theme,
   // The 1s mtime poll is its own path (external writes); not under test here.
   useVisibleInterval: () => undefined
 }))
-vi.mock('@slayzone/settings/client', () => ({ useTheme: () => theme }))
 vi.mock('@slayzone/editor', () => ({
   RichTextEditor: () => null,
   resolveReadOnlyLinkClickTarget: () => null,

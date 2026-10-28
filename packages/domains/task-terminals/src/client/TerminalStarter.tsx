@@ -16,7 +16,7 @@ import {
   type AgentStartupMode,
   type AgentState
 } from '@slayzone/terminal-contracts'
-import { useTheme } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/ui'
 import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
 import { getModeLabel } from './get-tab-label'

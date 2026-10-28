@@ -23,7 +23,6 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/markdown": "workspace:*",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/settings": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
