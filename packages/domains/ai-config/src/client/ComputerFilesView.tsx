@@ -27,7 +27,8 @@ import {
   TooltipTrigger,
   cn,
   fileTreeIndent,
-  useDepsChanged
+  useDepsChanged,
+  useStableCallback
 } from '@slayzone/ui'
 import type { ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
@@ -85,7 +86,7 @@ export function ComputerFilesView() {
     void fetchFiles()
   }, [fetchFiles])
 
-  const openFile = async (entry: ComputerFileEntry) => {
+  const openFile = useStableCallback(async (entry: ComputerFileEntry) => {
     if (!entry.exists) {
       await trpcClient.aiConfig.writeContextFile.mutate({
         filePath: entry.path,
@@ -104,7 +105,7 @@ export function ComputerFilesView() {
     } catch {
       // silent
     }
-  }
+  })
 
   const autoSave = useCallback(
     async (path: string, text: string) => {
@@ -138,7 +139,7 @@ export function ComputerFilesView() {
     []
   )
 
-  const deleteFile = async (entry: ComputerFileEntry) => {
+  const deleteFile = useStableCallback(async (entry: ComputerFileEntry) => {
     try {
       await trpcClient.aiConfig.deleteComputerFile.mutate({ filePath: entry.path })
       if (selectedPath === entry.path) {
@@ -149,7 +150,7 @@ export function ComputerFilesView() {
     } catch {
       // silent
     }
-  }
+  })
 
   const handleCreateFile = async () => {
     if (!creatingFile || !newFileName.trim()) return
@@ -307,7 +308,7 @@ export function ComputerFilesView() {
         </div>
       )
     },
-    [selectedPath, hashColorMap, hashMembers, showBlobs, showLineCount]
+    [selectedPath, hashColorMap, hashMembers, showBlobs, showLineCount, openFile, deleteFile]
   )
 
   // Resizable split

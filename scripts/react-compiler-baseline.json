@@ -4,7 +4,6 @@
   "packages/domains/agent-turns/src/client/useAgentTurns.ts": ["useAgentTurns"],
   "packages/domains/ai-config/src/client/AddItemPicker.tsx": ["AddItemPicker"],
   "packages/domains/ai-config/src/client/AddRegistryDialog.tsx": ["AddRegistryDialog"],
-  "packages/domains/ai-config/src/client/ComputerFilesView.tsx": ["ComputerFilesView"],
   "packages/domains/ai-config/src/client/InstructionVariantsView.tsx": ["InstructionVariantsView"],
   "packages/domains/ai-config/src/client/mcp-servers-panel/dialogs/AddComputerMcpDialog.tsx": [
     "AddComputerMcpDialog"

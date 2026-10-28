@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
-import { ThemeContext, type ThemeContextValue } from '@slayzone/ui'
+import { ThemeContext, useStableCallback, type ThemeContextValue } from '@slayzone/ui'
 import { applyTheme } from './apply-theme'
 import { readThemeCache, resolveThemeCache, systemTheme, writeThemeCache } from './theme-cache'
 
@@ -199,20 +199,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     editorOverrideThemeId
   ])
 
-  const setPreference = async (nextPreference: ThemePreference) => {
+  const setPreference = useStableCallback(async (nextPreference: ThemePreference) => {
     const serverEffective = await setThemeMutation.mutateAsync(nextPreference)
     setPreferenceState(nextPreference)
     setTheme(resolveEffective(nextPreference, serverEffective))
     track('theme_changed', { mode: nextPreference as 'light' | 'dark' | 'system' })
-  }
+  })
 
-  const setThemeId = (id: string) => {
+  const setThemeId = useStableCallback((id: string) => {
     setSingleThemeId(id)
     setSettingMutation.mutate({ key: 'app_theme_id', value: id })
     track('theme_changed', { themeId: id })
-  }
+  })
 
-  const setSplitThemes = (enabled: boolean) => {
+  const setSplitThemes = useStableCallback((enabled: boolean) => {
     if (enabled) {
       setThemeIdDarkState(singleThemeId)
       setThemeIdLightState(singleThemeId)
@@ -221,27 +221,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     setSplitThemesState(enabled)
     setSettingMutation.mutate({ key: 'app_theme_split', value: enabled ? '1' : '0' })
-  }
+  })
 
-  const setThemeIdDark = (id: string) => {
+  const setThemeIdDark = useStableCallback((id: string) => {
     setThemeIdDarkState(id)
     setSettingMutation.mutate({ key: 'app_theme_id_dark', value: id })
-  }
+  })
 
-  const setThemeIdLight = (id: string) => {
+  const setThemeIdLight = useStableCallback((id: string) => {
     setThemeIdLightState(id)
     setSettingMutation.mutate({ key: 'app_theme_id_light', value: id })
-  }
+  })
 
-  const setTerminalOverrideThemeId = (id: string) => {
+  const setTerminalOverrideThemeId = useStableCallback((id: string) => {
     setTerminalOverrideThemeIdState(id)
     setSettingMutation.mutate({ key: 'terminal_override_theme_id', value: id })
-  }
+  })
 
-  const setEditorOverrideThemeId = (id: string) => {
+  const setEditorOverrideThemeId = useStableCallback((id: string) => {
     setEditorOverrideThemeIdState(id)
     setSettingMutation.mutate({ key: 'editor_override_theme_id', value: id })
-  }
+  })
 
   const value = useMemo<ThemeContextValue>(
     () => ({
@@ -275,7 +275,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       editorOverrideThemeId,
       terminalThemeId,
       editorThemeId,
-      contentVariant
+      contentVariant,
+      // Stable (useStableCallback); listed so the deps are complete.
+      setPreference,
+      setThemeId,
+      setSplitThemes,
+      setThemeIdDark,
+      setThemeIdLight,
+      setTerminalOverrideThemeId,
+      setEditorOverrideThemeId
     ]
   )
 
