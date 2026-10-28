@@ -290,6 +290,10 @@ jobs:
 
           # Plain node, not `pnpm exec`: pnpm 12 verifies deps before exec and refuses the
           # Windows tree, whose package.json drops posix (step above) on purpose.
+          # electron-builder finds no lockfile or `packageManager` in the app dir, so it falls
+          # back to this env (which `pnpm exec` set) to pick pnpm and rebuild natives from the
+          # workspace root. Without it: npm, app-dir-only rebuild, node-pty can't spawn.
+          export npm_config_user_agent="pnpm"
           cd packages/apps/app
           node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
         env:
