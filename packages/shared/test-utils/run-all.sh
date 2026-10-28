@@ -691,8 +691,8 @@ run_harness packages/domains/diagnostics/src/server/self-heal.test.ts
 run_harness packages/domains/integrations/src/server/credentials.test.ts
 run_harness packages/domains/integrations/src/server/sync.test.ts
 run_harness packages/domains/projects/src/client/useProjectLockGuard.test.ts
-run_harness packages/domains/projects/src/shared/columns.test.ts
-run_harness packages/domains/projects/src/shared/resolve-repo.test.ts
+run_harness packages/domains/projects-contracts/src/columns.test.ts
+run_harness packages/domains/projects-contracts/src/resolve-repo.test.ts
 run_harness packages/domains/settings/src/client/useDialogStore.test.ts
 run_harness packages/domains/task-browser/src/client/dom-picker.test.ts
 run_harness packages/domains/task-browser/src/client/scale.test.ts

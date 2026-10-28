@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { ProjectLockScreen } from './ProjectLockScreen'
 import { clearLockOverrides, isProjectDurationLocked } from './useProjectLockGuard'
 

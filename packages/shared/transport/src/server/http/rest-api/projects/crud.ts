@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { createProject, updateProject } from '@slayzone/projects/server'
-import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
+import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { restPrincipalOf } from '../principal'
 import { isResolveFailure, resolveProjectRef } from '../resolve'

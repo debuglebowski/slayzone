@@ -2,7 +2,7 @@
  * resolveProjectDrop — the shared drag-drop decision matrix for both views.
  * Pure, no electron/react.
  */
-import type { TopLevelEntryRef } from '@slayzone/projects/shared'
+import type { TopLevelEntryRef } from '@slayzone/projects-contracts'
 import { describe, expect, test } from 'vitest'
 import {
   resolveProjectDrop,

@@ -13,7 +13,7 @@ import { recordConversation } from './task-conversations.js'
 import { OWNED_AT_SQL, resumableSessionSql } from './agent-sessions.js'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 import {
   getColumnById,
   getDefaultStatus,
@@ -22,12 +22,12 @@ import {
   isTerminalStatus,
   parseColumnsConfig,
   WORKFLOW_CATEGORIES
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
-import type { WorktreeCopyBehavior } from '@slayzone/projects/shared'
+import type { WorktreeCopyBehavior } from '@slayzone/projects-contracts'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 
 /**

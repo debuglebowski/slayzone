@@ -1,6 +1,6 @@
 import { Inbox, CircleDashed, Circle, CircleDot, CircleCheck, CircleX } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { WorkflowCategory } from '@slayzone/projects/shared'
+import type { WorkflowCategory } from '@slayzone/projects-contracts'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
 
 export const CATEGORY_META: Record<WorkflowCategory, { label: string; icon: LucideIcon }> = {

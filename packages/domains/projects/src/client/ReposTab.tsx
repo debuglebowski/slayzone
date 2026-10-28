@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { FolderGit2, Star } from 'lucide-react'
 import { cn } from '@slayzone/ui'
-import type { Project, DetectedRepo } from '@slayzone/projects/shared'
+import type { Project, DetectedRepo } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './project-settings-shared'
 
 interface ReposTabProps {

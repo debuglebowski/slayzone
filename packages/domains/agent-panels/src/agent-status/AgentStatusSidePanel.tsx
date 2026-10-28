@@ -1,4 +1,4 @@
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 import { AgentStatusPanel } from './AgentStatusPanel'
 import type { IdleTask } from './useIdleTasks'
 

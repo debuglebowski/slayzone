@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { getIntegrationOps } from '../app-deps'
 import { router, publicProcedure } from '../trpc'
 

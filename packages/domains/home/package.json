@@ -16,6 +16,7 @@
     "@slayzone/automations": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/tasks": "workspace:*",

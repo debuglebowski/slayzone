@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import type { DetectedRepo } from '@slayzone/projects/shared'
+import type { DetectedRepo } from '@slayzone/projects-contracts'
 
 /**
  * Child git repos of a project directory, discovered on the machine that owns it.

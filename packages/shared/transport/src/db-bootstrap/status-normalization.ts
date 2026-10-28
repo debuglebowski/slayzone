@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { getDefaultStatus, parseColumnsConfig, resolveColumns } from '@slayzone/projects/shared'
+import { getDefaultStatus, parseColumnsConfig, resolveColumns } from '@slayzone/projects-contracts'
 
 export function normalizeProjectStatusData(db: Database.Database): void {
   const projectColumns = db.prepare(`PRAGMA table_info(projects)`).all() as Array<{ name: string }>

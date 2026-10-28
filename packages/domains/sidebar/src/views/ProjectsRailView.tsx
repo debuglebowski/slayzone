@@ -23,7 +23,7 @@ import {
   ContextMenuItem
 } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/settings'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { ProjectItem } from '../ProjectItem'
 import { ProjectFolderTile, FolderMiniGrid } from '../ProjectFolderTile'
 import { ProjectAvatar } from '../ProjectAvatar'

@@ -15,7 +15,7 @@ import { ColorPicker } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 export type ProjectStartMode = 'scratch' | 'github' | 'linear'
 
 /** Sentinel for "no explicit binding" — Select has no null value. */

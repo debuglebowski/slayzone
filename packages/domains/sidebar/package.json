@@ -15,7 +15,7 @@
   "dependencies": {
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/projects": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",

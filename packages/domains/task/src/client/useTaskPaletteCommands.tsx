@@ -60,7 +60,7 @@ import { useDialogStore } from '@slayzone/settings'
 import { track } from '@slayzone/telemetry/client'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
-import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects/shared'
+import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
 import { priorityOptions, type Task, type TaskTemplate } from '@slayzone/task/shared'
 import { getSnoozePresets } from './SnoozePicker'
 

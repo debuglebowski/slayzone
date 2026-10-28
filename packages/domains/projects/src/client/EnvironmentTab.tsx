@@ -6,7 +6,7 @@ import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './project-settings-shared'
 
 interface EnvironmentTabProps {

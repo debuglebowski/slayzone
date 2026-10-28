@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import { getDoneStatus, type Project } from '@slayzone/projects/shared'
+import { getDoneStatus, type Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 
 const mutate = vi.fn()

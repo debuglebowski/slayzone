@@ -15,7 +15,7 @@ import {
   SelectValue,
   Button
 } from '@slayzone/ui'
-import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
+import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 interface CopyPreset {

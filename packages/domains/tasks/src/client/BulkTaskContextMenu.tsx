@@ -26,7 +26,7 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
-import { getSharedStatusColumns, type Project } from '@slayzone/projects/shared'
+import { getSharedStatusColumns, type Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import {
   AlarmClock,

@@ -2,7 +2,7 @@
  * Project lock guard utility tests
  */
 import { describe, expect, test } from 'vitest'
-import type { Project, ProjectLockConfig } from '../shared/types.js'
+import type { Project, ProjectLockConfig } from '@slayzone/projects-contracts'
 import {
   isProjectDurationLocked,
   isScheduleLocked,

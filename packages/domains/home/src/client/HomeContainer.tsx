@@ -2,7 +2,7 @@ import React, { useCallback, useImperativeHandle, useMemo, useRef, useState, typ
 import { useTRPCClient } from '@slayzone/transport/client'
 import { useUndo } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
-import { resolveRepoPath, type Project } from '@slayzone/projects/shared'
+import { resolveRepoPath, type Project } from '@slayzone/projects-contracts'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import {
   useTasksData,

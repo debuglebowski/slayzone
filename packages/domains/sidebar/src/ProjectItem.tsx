@@ -10,7 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { FolderPlus } from 'lucide-react'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { ProjectAvatar } from './ProjectAvatar'
 
 interface ProjectItemProps {

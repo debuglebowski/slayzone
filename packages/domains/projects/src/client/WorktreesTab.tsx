@@ -16,7 +16,7 @@ import type {
   Project,
   WorktreeCopyBehavior,
   WorktreeSubmoduleInit
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './project-settings-shared'
 
 type CopyOverride = 'inherit' | WorktreeCopyBehavior

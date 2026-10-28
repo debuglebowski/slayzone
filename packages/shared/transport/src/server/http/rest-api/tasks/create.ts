@@ -1,7 +1,7 @@
 import type { Express, Response } from 'express'
 import { CreateTaskInputSchema, type Task } from '@slayzone/task/shared'
 import { createTaskOp, getTaskOp } from '@slayzone/task/server'
-import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects/shared'
+import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import {

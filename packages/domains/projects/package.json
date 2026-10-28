@@ -7,7 +7,6 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
@@ -21,6 +20,7 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",

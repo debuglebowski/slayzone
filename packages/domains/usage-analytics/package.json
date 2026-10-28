@@ -16,13 +16,13 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "lucide-react": "^1.48.0",
     "recharts": "^3.10.1",
-    "@slayzone/platform": "workspace:*",
-    "@slayzone/projects": "workspace:*"
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.3.1"

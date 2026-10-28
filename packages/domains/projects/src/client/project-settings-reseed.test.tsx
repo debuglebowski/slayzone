@@ -7,7 +7,7 @@
 import React, { createContext, useContext } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { Project, ProjectGroup } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup } from '@slayzone/projects-contracts'
 
 vi.mock('@slayzone/transport/client', () => {
   const inert = { mutationOptions: () => ({}) }

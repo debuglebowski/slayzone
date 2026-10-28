@@ -8,7 +8,7 @@ import {
   type TrpcVanillaClient
 } from '@slayzone/transport/client'
 import type { TaskStatus } from '@slayzone/task/shared'
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 
 export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics' | 'context'
 

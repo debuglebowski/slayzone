@@ -10,7 +10,7 @@ import {
 import { useUndo, focusOwnsUndoKey } from '@slayzone/ui'
 import { useTabStore, useDialogStore, type SearchFileContext, type Tab } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { useHomePanel } from '@slayzone/home/client'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'

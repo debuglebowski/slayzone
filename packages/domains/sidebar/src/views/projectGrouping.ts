@@ -1,4 +1,4 @@
-import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 
 /**
  * One slot in the top-level sidebar list — either an ungrouped project or a

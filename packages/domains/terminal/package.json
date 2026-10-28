@@ -26,6 +26,7 @@
   "dependencies": {
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",

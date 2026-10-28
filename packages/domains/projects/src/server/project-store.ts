@@ -2,8 +2,17 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs
 import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { assertPathSafeId, containedPath, isPathSafeId } from '@slayzone/platform/safe-path'
-import type { ColumnConfig, CreateProjectInput, Project, UpdateProjectInput } from '../shared'
-import { parseColumnsConfig, prepareProjectCreate, validateColumns } from '../shared'
+import type {
+  ColumnConfig,
+  CreateProjectInput,
+  Project,
+  UpdateProjectInput
+} from '@slayzone/projects-contracts'
+import {
+  parseColumnsConfig,
+  prepareProjectCreate,
+  validateColumns
+} from '@slayzone/projects-contracts'
 
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 

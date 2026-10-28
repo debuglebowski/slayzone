@@ -1,5 +1,5 @@
 import type { ComponentType, RefAttributes } from 'react'
-import type { DetectedRepo } from '@slayzone/projects/shared'
+import type { DetectedRepo } from '@slayzone/projects-contracts'
 import type { GitTabId, Task, TaskArtifact, UpdateTaskInput } from '@slayzone/task/shared'
 
 /**

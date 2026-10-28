@@ -330,7 +330,7 @@ export function modeAgentId(mode: string, declaredType: string | null | undefine
   return declaredType || mode
 }
 
-// Duplicated from @slayzone/projects/shared — neither domain can depend on the
+// Duplicated from @slayzone/projects-contracts — neither domain can depend on the
 // other, so both define the same structural type. Keep in sync.
 export type ExecutionContext =
   | { type: 'host' }

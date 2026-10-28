@@ -28,7 +28,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction
 } from '@slayzone/ui'
-import type { Project, ProjectLockConfig } from '@slayzone/projects/shared'
+import type { Project, ProjectLockConfig } from '@slayzone/projects-contracts'
 
 interface ProjectLockPopoverProps {
   project: Project

@@ -13,7 +13,7 @@ import {
   TooltipTrigger,
   TooltipContent
 } from '@slayzone/ui'
-import type { Project, ProjectGroup } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup } from '@slayzone/projects-contracts'
 import { ProjectAvatar } from './ProjectAvatar'
 import { ProjectItem } from './ProjectItem'
 

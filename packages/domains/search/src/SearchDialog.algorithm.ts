@@ -1,7 +1,7 @@
 import { Fzf } from 'fzf'
 import type { SearchFileContext } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { flattenPaletteCommands, type PaletteCommand } from '@slayzone/ui'
 import type { FilterKind, SearchItem } from './SearchDialog.types'
 import { BASENAME_BOOST, KIND_WEIGHT, MAX_RESULTS, ACTION_DEFS } from './SearchDialog.constants'

@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { updateTaskInputSchema, type UpdateTaskInput } from '@slayzone/task/shared'
 import { updateTaskOp } from '@slayzone/task/server'
-import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects/shared'
+import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'

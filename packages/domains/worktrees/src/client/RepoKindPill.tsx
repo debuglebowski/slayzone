@@ -1,4 +1,4 @@
-import type { DetectedRepo } from '@slayzone/projects/shared'
+import type { DetectedRepo } from '@slayzone/projects-contracts'
 
 export function RepoKindPill({ kind }: { kind: NonNullable<DetectedRepo['kind']> }) {
   if (kind !== 'submodule') return null

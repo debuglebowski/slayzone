@@ -5,7 +5,7 @@
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
-import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects/shared'
+import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects-contracts'
 import { LATEST_MIGRATION_VERSION, migrations, runMigrations } from './index'
 import { normalizeProjectStatusData } from './status-normalization.js'
 

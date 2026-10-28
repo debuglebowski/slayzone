@@ -20,13 +20,13 @@ import {
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
-import type { Project, ColumnConfig } from '@slayzone/projects/shared'
+import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import {
   getDefaultStatus,
   getStatusByCategory,
   isCompletedStatus,
   resolveRepoPath
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 // Domains
 import {
   useTasksData,

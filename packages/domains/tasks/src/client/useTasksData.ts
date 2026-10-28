@@ -12,7 +12,7 @@ import {
 } from '@slayzone/transport/client'
 import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task/shared'
 import { refreshTaskScopedQueries } from '@slayzone/task/client'
-import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'

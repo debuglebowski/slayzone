@@ -8,7 +8,7 @@ import {
   uploadProjectIcon,
   reorderProjects
 } from '@slayzone/projects/server'
-import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
+import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '../trpc'
 import { getComputersDepsOrNull } from '../app-deps'
 

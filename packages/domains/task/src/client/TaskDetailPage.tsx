@@ -53,14 +53,14 @@ import {
 } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import {
   getDefaultStatus,
   getDoneStatus,
   isCompletedStatus,
   isTerminalStatus,
   resolveRepoPath
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import { useDetectedRepos } from '@slayzone/projects'
 import type { TerminalMode } from '@slayzone/terminal-contracts'
 import {

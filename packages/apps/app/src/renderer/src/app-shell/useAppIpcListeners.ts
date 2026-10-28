@@ -5,7 +5,7 @@ import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore, useDialogStore } from '@slayzone/settings'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
 import type { ProjectSettingsTab, ProjectIntegrationOnboardingProvider } from './constants'
 

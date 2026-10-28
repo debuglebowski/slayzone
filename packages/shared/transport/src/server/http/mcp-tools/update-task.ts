@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { updateTaskOp } from '@slayzone/task/server'
-import { isKnownStatus } from '@slayzone/projects/shared'
+import { isKnownStatus } from '@slayzone/projects-contracts'
 import { getProjectColumns, getAllowedStatusesText } from './shared'
 import { NOOP_TASK_BUS } from '../rest-api/types'
 import type { McpToolsDeps } from './types'

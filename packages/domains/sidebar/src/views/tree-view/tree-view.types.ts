@@ -32,7 +32,7 @@ export interface TaskBranchCtx {
   openTabTaskIds: Set<string>
   doneTaskIds?: Set<string>
   taskProgress?: Map<string, number>
-  columnsByProjectId?: Map<string, import('@slayzone/projects/shared').ColumnConfig[] | null>
+  columnsByProjectId?: Map<string, import('@slayzone/projects-contracts').ColumnConfig[] | null>
   pinnedSet: Set<string>
   selectedTaskIds: Set<string>
   selectedTaskIdArr: string[]

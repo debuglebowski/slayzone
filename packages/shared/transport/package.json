@@ -28,6 +28,7 @@
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/tags": "workspace:*",

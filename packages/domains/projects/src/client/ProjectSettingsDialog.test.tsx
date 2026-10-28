@@ -3,7 +3,7 @@ import type React from 'react'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 
 // Per-project, per-provider mapping the lock check reads.
 let mappings: Record<string, { status_setup_complete?: boolean } | null> = {}

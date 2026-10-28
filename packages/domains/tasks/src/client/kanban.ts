@@ -1,7 +1,7 @@
 import type { Task } from '@slayzone/task/shared'
 import type { CreateTaskDraft } from '@slayzone/task/shared'
-import type { ColumnConfig } from '@slayzone/projects/shared'
-import { isTerminalStatus, resolveColumns } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
+import { isTerminalStatus, resolveColumns } from '@slayzone/projects-contracts'
 import {
   type FilterState,
   type ViewConfig,

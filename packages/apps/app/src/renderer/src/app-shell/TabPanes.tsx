@@ -11,7 +11,7 @@ import {
 } from 'react'
 import { HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { useTabStore, type Tab } from '@slayzone/settings'
 import { TaskPaneFallback, useTerminalFirstHolding } from '@slayzone/task/client/TerminalFirstShell'
 import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'

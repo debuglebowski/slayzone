@@ -1,6 +1,6 @@
 import type { Task } from '@slayzone/task/shared'
-import type { ColumnConfig } from '@slayzone/projects/shared'
-import { isTerminalStatus } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
+import { isTerminalStatus } from '@slayzone/projects-contracts'
 import type { Column } from './kanban'
 
 export function formatSnoozeTimeLeft(until: string): string {

@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
-import type { ColumnConfig, WorkflowCategory } from '@slayzone/projects/shared'
-import { getDefaultStatus, resolveColumns } from '@slayzone/projects/shared'
+import type { ColumnConfig, WorkflowCategory } from '@slayzone/projects-contracts'
+import { getDefaultStatus, resolveColumns } from '@slayzone/projects-contracts'
 
 /**
  * Named-transaction adapters for the projects domain. These are the conditional
@@ -10,7 +10,7 @@ import { getDefaultStatus, resolveColumns } from '@slayzone/projects/shared'
  * via `@slayzone/projects/db`. Each function owns its own `db.transaction(...)`,
  * so the worker invokes it directly without re-wrapping.
  *
- * Pure: imports only better-sqlite3 + the worker-safe `@slayzone/projects/shared`
+ * Pure: imports only better-sqlite3 + the worker-safe `@slayzone/projects-contracts`
  * barrel (no electron / fs side-effects), so it is safe to pull into the worker
  * bundle (unlike the electron + fs-laden `/main` handlers module).
  *

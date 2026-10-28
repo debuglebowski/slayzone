@@ -7,7 +7,7 @@ import type {
   ProjectGroup,
   ColumnConfig,
   TopLevelEntryRef
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 
 export interface SidebarViewContext {
   projects: Project[]

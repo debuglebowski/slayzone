@@ -19,6 +19,7 @@
     "@slayzone/leaderboard": "workspace:*",
     "@slayzone/onboarding": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/search": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/sidebar": "workspace:*",

@@ -14,8 +14,8 @@ import {
   Circle
 } from 'lucide-react'
 import { cn, getColumnStatusStyle } from '@slayzone/ui'
-import { resolveColumns } from '@slayzone/projects/shared'
-import type { Project } from '@slayzone/projects/shared'
+import { resolveColumns } from '@slayzone/projects-contracts'
+import type { Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 
 export interface TaskCompletedScreenProps {

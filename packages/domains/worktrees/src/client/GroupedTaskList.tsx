@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { TerminalSquare, ChevronDown, ChevronRight } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
-import { resolveColumns } from '@slayzone/projects/shared'
+import { resolveColumns } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 import { useGitPanelContext } from './git-panel-context'
 

@@ -1,4 +1,4 @@
-import type { TopLevelEntryRef } from '@slayzone/projects/shared'
+import type { TopLevelEntryRef } from '@slayzone/projects-contracts'
 
 /**
  * Shared project drag-and-drop decision logic for BOTH sidebar views (Discord

@@ -100,7 +100,7 @@ vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('@slayzone/tags/client', () => ({ TagSelector: () => null }))
 vi.mock('@slayzone/projects', () => ({ ProjectSelect: () => null }))
 vi.mock('./SnoozePicker', () => ({ SnoozePicker: () => null }))
-vi.mock('@slayzone/projects/shared', () => ({
+vi.mock('@slayzone/projects-contracts', () => ({
   isTerminalStatus: (status: string, columns?: Array<{ id: string; category?: string }>) => {
     const column = columns?.find((item) => item.id === status)
     return column?.category === 'completed' || status === 'done'

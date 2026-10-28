@@ -17,7 +17,7 @@ import type {
   ProjectGroup,
   ColumnConfig,
   TopLevelEntryRef
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'

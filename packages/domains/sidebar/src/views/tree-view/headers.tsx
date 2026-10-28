@@ -16,7 +16,7 @@ import { PRIORITY_LABELS } from '@slayzone/tasks'
 import { useDialogStore } from '@slayzone/settings'
 import { type Task } from '@slayzone/task/shared'
 import type { TreeGroup } from '../treeGrouping'
-import type { ProjectGroup } from '@slayzone/projects/shared'
+import type { ProjectGroup } from '@slayzone/projects-contracts'
 import type { GroupDropData, ProjDropMode } from './tree-view.types'
 
 /**
@@ -122,7 +122,7 @@ interface HeaderRowProps {
   projectId: string
   group: TreeGroup
   padTopClass: string
-  cols: import('@slayzone/projects/shared').ColumnConfig[] | null
+  cols: import('@slayzone/projects-contracts').ColumnConfig[] | null
   treeGroupBy: 'none' | 'status' | 'priority'
   onCreateTemporaryTask?: (projectId: string) => void
 }

@@ -17,7 +17,7 @@ import type { Task } from '@slayzone/task/shared'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 import { TaskDetailDataLoader } from '@slayzone/task/client/TaskDetailDataLoader'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { getDefaultStatus, getStatusByCategory } from '@slayzone/projects/shared'
+import { getDefaultStatus, getStatusByCategory } from '@slayzone/projects-contracts'
 
 interface TaskDetailViewProps {
   /** The ONE shared board-data instance, lifted in HomeView. */

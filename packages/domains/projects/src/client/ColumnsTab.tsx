@@ -19,7 +19,7 @@ import {
   type WorkflowCategory,
   type ColumnConfig,
   type Project
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import { CATEGORY_META, STATUS_COLOR_BADGE, SettingsTabIntro } from './project-settings-shared'
 
 interface ColumnsTabProps {

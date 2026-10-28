@@ -51,7 +51,7 @@ import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
 import type { useTasksData } from '@slayzone/tasks/client'
 import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 
 // Lazy chunks so the heavy settings/project-settings tab code (CodeMirror, MCP/

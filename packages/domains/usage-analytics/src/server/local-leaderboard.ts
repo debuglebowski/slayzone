@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { LocalLeaderboardStats } from '../shared'
 import { refreshUsageData, queryDailyTotals, type UsageScope } from './cache'
-import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
+import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects-contracts'
 
 async function getDailyTokens(
   db: SlayzoneDb,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { useAuthFailedConnections } from '../useAuthFailedConnections'
 import type { ProjectSettingsTab } from './constants'
 

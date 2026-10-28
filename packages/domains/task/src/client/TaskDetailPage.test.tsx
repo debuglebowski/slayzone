@@ -135,7 +135,7 @@ vi.mock('@slayzone/projects', () => ({
   useDetectedRepos: () => []
 }))
 
-vi.mock('@slayzone/projects/shared', () => ({
+vi.mock('@slayzone/projects-contracts', () => ({
   getDefaultStatus: () => 'todo',
   getDoneStatus: () => 'done',
   isTerminalStatus: () => false,

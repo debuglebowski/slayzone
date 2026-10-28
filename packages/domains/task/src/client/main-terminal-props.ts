@@ -1,6 +1,6 @@
 import type { Task } from '@slayzone/task/shared'
 import { getProviderFlags } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type { ExecutionContext, TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 /**

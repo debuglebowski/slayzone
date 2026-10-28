@@ -16,7 +16,7 @@ import {
 } from '@slayzone/ui'
 import { useTabStore, useDialogStore } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { type GlobalAgentPanelState } from '@slayzone/agent-panels'
 import {

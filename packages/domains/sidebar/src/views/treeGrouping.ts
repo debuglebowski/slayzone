@@ -1,5 +1,5 @@
 import type { Task } from '@slayzone/task/shared'
-import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects/shared'
+import { DEFAULT_COLUMNS, type ColumnConfig } from '@slayzone/projects-contracts'
 import type { TreeGroupBy, TreeOrderBy, TreeOrderDir } from '@slayzone/settings'
 
 export const TEMP_GROUP_KEY = '__temporary__'

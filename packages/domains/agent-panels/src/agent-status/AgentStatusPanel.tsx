@@ -8,7 +8,7 @@ import {
   getColumnStatusStyle
 } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 import type { IdleTask } from './useIdleTasks'
 
 interface AgentStatusPanelProps {

@@ -23,7 +23,7 @@ import {
 } from '@slayzone/ui'
 import { Circle, ShieldAlert, AlarmClock, Check, ListChecks, MessageSquare } from 'lucide-react'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { track } from '@slayzone/telemetry/client'
 import { CustomSnoozeDialog } from './SnoozePicker'
 import { BlockerDialog } from './BlockerDialog'

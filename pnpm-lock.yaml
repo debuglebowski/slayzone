@@ -357,6 +357,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/react-compiler-config':
         specifier: workspace:*
         version: link:../../shared/react-compiler-config
@@ -584,6 +587,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
@@ -776,6 +782,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/search':
         specifier: workspace:*
         version: link:../../domains/search
@@ -892,9 +901,9 @@ importers:
 
   packages/domains/agent-panels:
     dependencies:
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
@@ -1314,6 +1323,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -1500,6 +1512,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -1535,14 +1550,23 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0
 
+  packages/domains/projects-contracts:
+    dependencies:
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      '@slayzone/workflow':
+        specifier: workspace:*
+        version: link:../../shared/workflow
+
   packages/domains/search:
     dependencies:
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -1595,9 +1619,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -1662,9 +1686,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -1794,6 +1818,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -2032,9 +2059,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -2112,6 +2139,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -2212,9 +2242,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
@@ -2297,9 +2327,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../projects
+        version: link:../projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -2660,6 +2690,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -2778,6 +2811,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../../domains/projects-contracts
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -2941,9 +2977,9 @@ importers:
       '@slayzone/mojo-bindings':
         specifier: workspace:*
         version: link:../mojo-bindings
-      '@slayzone/projects':
+      '@slayzone/projects-contracts':
         specifier: workspace:*
-        version: link:../../domains/projects
+        version: link:../../domains/projects-contracts
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags

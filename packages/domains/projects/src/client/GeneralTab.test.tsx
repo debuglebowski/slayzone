@@ -111,7 +111,7 @@ vi.mock('./project-settings-shared', () => ({
 }))
 
 import { GeneralTab } from './GeneralTab'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 
 // Only the columns GeneralTab reads are filled in; the rest of the `Project` row
 // is irrelevant here, so the literal is widened through `unknown` rather than

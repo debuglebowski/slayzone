@@ -5,7 +5,7 @@ import type {
   Project,
   ProjectGroup,
   TopLevelEntryRef
-} from '../shared'
+} from '@slayzone/projects-contracts'
 import { parseProject } from './project-store'
 
 // Discord-style folders (rail) + labeled collapsible sections (tree). The complex

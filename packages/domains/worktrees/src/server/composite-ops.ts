@@ -7,7 +7,7 @@
  */
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
+import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects-contracts'
 import {
   detectWorktrees,
   createWorktree,

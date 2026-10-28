@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/shared'
-import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
+import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { insertTaskRow, updateTask } from '@slayzone/task/server'
-import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
+import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import { getProjectColumns, getAllowedStatusesText, buildDefaultProviderConfig } from './shared'
 import type { McpToolsDeps } from './types'
 

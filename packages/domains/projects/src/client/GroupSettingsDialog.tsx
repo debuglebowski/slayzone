@@ -8,7 +8,7 @@ import {
   Input,
   Label
 } from '@slayzone/ui'
-import type { ProjectGroup } from '@slayzone/projects/shared'
+import type { ProjectGroup } from '@slayzone/projects-contracts'
 
 interface GroupSettingsDialogProps {
   group: ProjectGroup

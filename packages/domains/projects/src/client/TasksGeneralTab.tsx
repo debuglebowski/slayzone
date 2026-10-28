@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@slayzone/ui'
-import type { Project, TaskAutomationConfig } from '@slayzone/projects/shared'
+import type { Project, TaskAutomationConfig } from '@slayzone/projects-contracts'
 import { resolveColumns } from '@slayzone/workflow'
 import { SettingsTabIntro } from './project-settings-shared'
 

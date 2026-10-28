@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void }

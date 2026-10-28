@@ -4,7 +4,7 @@ import {
   parseColumnsConfig,
   resolveStatusId,
   type ColumnConfig
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
 import { ownedProjectsClause } from '../../owner-scope'

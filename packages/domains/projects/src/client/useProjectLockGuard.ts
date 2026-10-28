@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import type { Project } from '../shared/types'
+import type { Project } from '@slayzone/projects-contracts'
 
 // Module-scoped — no DB writes, no re-render cascade, resets on restart
 const taskOpenLog = new Map<string, number[]>()

@@ -1,5 +1,5 @@
 import type { Tag } from '@slayzone/tags/shared'
-import { resolveColumns, type ColumnConfig } from '@slayzone/projects/shared'
+import { resolveColumns, type ColumnConfig } from '@slayzone/projects-contracts'
 import type {
   FilterState,
   GroupKey,

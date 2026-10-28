@@ -26,7 +26,7 @@
 // plausible row for THIS call only; every list read is empty. Widening the
 // mojom surface (cap-shell-7) is the real fix, not this shim.
 
-import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
+import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import type { Task, CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { TerminalMode } from '@slayzone/terminal-contracts'

@@ -1,5 +1,5 @@
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { cn, getColumnStatusStyle } from '@slayzone/ui'
 
 export function BlockerStatusIcon({

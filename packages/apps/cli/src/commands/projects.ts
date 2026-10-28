@@ -2,7 +2,7 @@ import { Command } from 'commander'
 import fs from 'node:fs'
 import path from 'node:path'
 import { apiGet, apiPost, apiPatch } from '../api'
-import { prepareProjectCreate } from '@slayzone/projects/shared'
+import { prepareProjectCreate } from '@slayzone/projects-contracts'
 
 interface ProjectRow extends Record<string, unknown> {
   id: string

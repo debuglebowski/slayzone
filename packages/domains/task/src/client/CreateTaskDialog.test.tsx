@@ -61,7 +61,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@slayzone/projects', () => ({
   ProjectSelect: ({ value }: { value?: string }) => <div data-testid="project-select">{value}</div>
 }))
-vi.mock('@slayzone/projects/shared', () => ({ getDefaultStatus: () => 'inbox' }))
+vi.mock('@slayzone/projects-contracts', () => ({ getDefaultStatus: () => 'inbox' }))
 vi.mock('@slayzone/tags/client', () => ({ CreateTagDialog: () => null }))
 vi.mock('@slayzone/telemetry/client', () => ({ track: vi.fn() }))
 

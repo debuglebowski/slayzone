@@ -1,5 +1,5 @@
 import type { Tag } from '@slayzone/tags/shared'
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 import type { FilterState } from './FilterState'
 import { FilterBarB } from './FilterBarB'
 

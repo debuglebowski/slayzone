@@ -1,7 +1,7 @@
 /**
  * buildTopLevelEntries / entriesToRefs — pure, no electron / better-sqlite3.
  */
-import type { Project, ProjectGroup } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup } from '@slayzone/projects-contracts'
 import { describe, expect, test } from 'vitest'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping.js'
 

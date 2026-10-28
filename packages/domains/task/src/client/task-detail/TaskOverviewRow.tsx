@@ -23,8 +23,8 @@ import {
   getColumnStatusStyle
 } from '@slayzone/ui'
 import { PtyProgressDot } from '@slayzone/terminal'
-import { isTerminalStatus } from '@slayzone/projects/shared'
-import type { Project } from '@slayzone/projects/shared'
+import { isTerminalStatus } from '@slayzone/projects-contracts'
+import type { Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 
 export function TaskOverviewRow({

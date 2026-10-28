@@ -19,9 +19,9 @@ import {
 import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
-import { resolveRepoPath } from '@slayzone/projects/shared'
+import { resolveRepoPath } from '@slayzone/projects-contracts'
 import {
   ProjectLockPopover,
   ProjectLockScreen,

@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
-import type { ColumnConfig } from '@slayzone/projects/shared'
-import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
+import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects-contracts'
 import { TaskProgressPopover } from '@slayzone/task/client'
 import {
   Card,

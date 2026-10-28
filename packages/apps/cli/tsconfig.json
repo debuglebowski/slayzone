@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "paths": {
       "*": ["./*"],
-      "@slayzone/projects/shared": ["../../domains/projects/src/shared/index.ts"],
+      "@slayzone/projects-contracts": ["../../domains/projects-contracts/src/index.ts"],
       "@slayzone/terminal-contracts": ["../../domains/terminal-contracts/src/index.ts"],
       "@slayzone/task/shared/types": ["../../domains/task/src/shared/types.ts"],
       "@slayzone/task/shared/panel-config": ["../../domains/task/src/shared/panel-config.ts"],

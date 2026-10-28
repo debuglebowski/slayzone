@@ -1,5 +1,5 @@
 import { cn } from '@slayzone/ui'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 
 /**

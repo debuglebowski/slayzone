@@ -6,7 +6,7 @@ import {
   useHubOwnershipStore,
   useTRPCClient
 } from '@slayzone/transport/client'
-import { getDoneStatus, type Project } from '@slayzone/projects/shared'
+import { getDoneStatus, type Project } from '@slayzone/projects-contracts'
 import type { Task } from '@slayzone/task/shared'
 import { toast } from '@slayzone/ui'
 import type { CloseTaskTabOptions } from './useCloseTaskTab'

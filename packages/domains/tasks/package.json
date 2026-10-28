@@ -15,12 +15,12 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/task": "workspace:*",
-    "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@dnd-kit/core": "^6.3.1",

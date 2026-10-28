@@ -7,7 +7,7 @@ import type {
   UpdateProjectGroupInput,
   TopLevelEntryRef,
   ExecutionContext
-} from '@slayzone/projects/shared'
+} from '@slayzone/projects-contracts'
 
 /** Authoritative state returned by project-group mutations (renderer replaces). */
 export interface ProjectGroupsSnapshot {
@@ -248,7 +248,7 @@ import type {
   JiraTransition
 } from '@slayzone/integrations/shared'
 
-export type { ExecutionContext } from '@slayzone/projects/shared'
+export type { ExecutionContext } from '@slayzone/projects-contracts'
 
 import type {
   BrowserCreateTaskFromLinkIntent,

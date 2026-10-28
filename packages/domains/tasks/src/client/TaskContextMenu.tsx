@@ -28,8 +28,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, MountWhenOpened } from '@slayzone/ui'
 import { Button, Textarea, safeClipboardWriteText } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
-import type { ColumnConfig } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
+import type { ColumnConfig } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import {

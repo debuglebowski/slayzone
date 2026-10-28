@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { updateTaskOp } from '@slayzone/task/server'
-import { getDoneStatus, parseColumnsConfig } from '@slayzone/projects/shared'
+import { getDoneStatus, parseColumnsConfig } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'

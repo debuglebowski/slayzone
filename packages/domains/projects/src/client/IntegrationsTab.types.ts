@@ -1,4 +1,4 @@
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import type {
   ExternalLink,
   IntegrationProvider,

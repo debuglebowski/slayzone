@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@slayzone/icons": "workspace:*",
-    "@slayzone/projects": "workspace:*",
+    "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/telemetry": "workspace:*",

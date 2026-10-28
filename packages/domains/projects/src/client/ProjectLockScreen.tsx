@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Lock } from 'lucide-react'
 import { Button, useVisibleInterval } from '@slayzone/ui'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project } from '@slayzone/projects-contracts'
 import { isScheduleLocked, overrideScheduleLock, overrideDurationLock } from './useProjectLockGuard'
 
 interface ProjectLockScreenProps {

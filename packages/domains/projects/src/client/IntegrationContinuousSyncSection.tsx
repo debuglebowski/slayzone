@@ -19,7 +19,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@slayzone/ui'
-import { resolveColumns } from '@slayzone/projects/shared'
+import { resolveColumns } from '@slayzone/projects-contracts'
 import type { IntegrationSyncMode } from '@slayzone/integrations/shared'
 import type { IntegrationsTabModel } from './useIntegrationsTab'
 

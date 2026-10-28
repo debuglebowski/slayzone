@@ -27,7 +27,7 @@ import {
 } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import type { GitTabId } from '@slayzone/task/shared'
-import type { DetectedRepo } from '@slayzone/projects/shared'
+import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { RepoKindPill } from './RepoKindPill'
 import type { ConflictToolbarData } from './UnifiedGitPanel.types'
 import type { GitDiffPanelHandle } from './GitDiffPanel'
