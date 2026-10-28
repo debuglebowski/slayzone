@@ -249,10 +249,10 @@ function runCli(
  * Tries the dev port first (the channel every other test in this file uses) and
  * falls back to the prod port, since a developer box is usually running a real
  * dev sidecar on 51101. `dev` reports which one was claimed so the caller can set
- * SLAYZONE_DEV to match. Throws — loudly — when both are taken, rather than
- * letting the assertion silently exercise a live app.
+ * SLAYZONE_DEV to match. Null when both are taken (a running prod AND dev app) —
+ * the caller then asserts what still holds, never silently drives a live app.
  */
-async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<void> }> {
+async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<void> } | null> {
   for (const [port, dev] of [
     [SIDECAR_FIXED_PORT.dev, true],
     [SIDECAR_FIXED_PORT.prod, false]
@@ -280,10 +280,7 @@ async function occupyFixedPort(): Promise<{ dev: boolean; close: () => Promise<v
       close: () => new Promise<void>((resolve) => server.close(() => resolve()))
     }
   }
-  throw new Error(
-    `Both fixed sidecar ports (${SIDECAR_FIXED_PORT.dev}, ${SIDECAR_FIXED_PORT.prod}) are in use — ` +
-      `cannot prove the "no hub answers" path. Stop one of the running hubs and re-run.`
-  )
+  return null
 }
 
 describe.skipIf(!HAS_SLAY_BIN)('CLI tasks create → REST', () => {
@@ -946,19 +943,30 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI app-down path', () => {
     // listener that is emphatically NOT a hub on whichever channel port it can
     // claim, which makes the outcome deterministic AND puts the hub-shape
     // validation itself under test (a squatter must be rejected, not dialled).
+    //
+    // When BOTH channel ports are held (a prod and a dev app running), no decoy can
+    // be placed. The CLI then probes a real app — and since `runCli` points
+    // SLAYZONE_ROOT at this test's tmp dir, that app is FOREIGN and must be refused.
+    // The decision logic for every probe outcome is pinned on test-owned ports in
+    // local-hub.test.ts; this end-to-end case asserts the invariant that holds either
+    // way: exit 1, and nothing written anywhere.
     const decoy = await occupyFixedPort()
     let r: CliResult
     try {
       r = await runCli(['tasks', 'create', 'Lost2', '--project', 'CLIREST'], {
         SLAYZONE_HUB_ADDRESS: undefined,
-        SLAYZONE_DEV: decoy.dev ? '1' : '0'
+        SLAYZONE_DEV: decoy && !decoy.dev ? '0' : '1'
       })
     } finally {
-      await decoy.close()
+      await decoy?.close()
     }
     expect(r.exitCode).toBe(1)
-    expect(r.stderr.includes('server port not found')).toBe(true)
-    // Nothing reached a real hub, so no row was created anywhere.
+    if (decoy) {
+      expect(r.stderr, r.stderr).toContain('server port not found')
+    } else {
+      expect(r.stderr, r.stderr).toMatch(/Refusing to act on the SlayZone app|server port not found/)
+    }
+    // Nothing reached a hub this test owns, so no row was created here.
     expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('Lost2')).toBe(undefined)
   })
 })

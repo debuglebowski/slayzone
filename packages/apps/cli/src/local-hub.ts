@@ -90,9 +90,11 @@ export type FixedPortProbe =
  * `resolveTarget` refuses to downgrade a configured-but-unreachable hub to the
  * local app: quietly acting on a different target applies the command to the
  * wrong data.
+ *
+ * `port` defaults to this channel's; tests pass a port they own so the decision
+ * logic is pinned without depending on what the machine has bound on the real one.
  */
-export async function probeFixedPort(): Promise<FixedPortProbe> {
-  const port = fixedPortForChannel()
+export async function probeFixedPort(port = fixedPortForChannel()): Promise<FixedPortProbe> {
   const hub = await findHub(String(port))
   if (!hub) return { kind: 'absent' }
   const expected = expectedRoot()

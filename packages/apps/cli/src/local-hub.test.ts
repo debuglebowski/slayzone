@@ -10,9 +10,12 @@
  *
  * Pure Node.
  */
+import http from 'node:http'
+import net from 'node:net'
+import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { SIDECAR_FIXED_PORT } from '@slayzone/platform/paths'
-import { fixedPortForChannel, isCoLocatedHub } from './local-hub'
+import { fixedPortForChannel, isCoLocatedHub, probeFixedPort } from './local-hub'
 
 /** Run `fn` with the given SLAYZONE_* env, restoring whatever was there before. */
 async function withEnv(
@@ -92,6 +95,84 @@ describe('isCoLocatedHub', () => {
   test('wildcard address is NOT co-located', async () => {
     await withEnv({ SLAYZONE_HUB_ADDRESS: '0.0.0.0:51101' }, async () => {
       expect(await isCoLocatedHub()).toBe(false)
+    })
+  })
+})
+
+/** Serve `handler` on an OS-assigned loopback port for the duration of `fn`. */
+async function withServer(
+  handler: http.RequestListener,
+  fn: (port: number) => Promise<void>
+): Promise<void> {
+  // Close every socket on the way out so a keep-alive probe connection cannot hold
+  // `close()` open.
+  const srv = http.createServer(handler)
+  srv.keepAliveTimeout = 1
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+  const port = (srv.address() as net.AddressInfo).port
+  try {
+    await fn(port)
+  } finally {
+    srv.closeAllConnections()
+    await new Promise<void>((r) => srv.close(() => r()))
+  }
+}
+
+/** A /health responder shaped like a hub serving `root`. */
+const hubAt =
+  (root: string): http.RequestListener =>
+  (_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, name: 'h', root, pid: 1 }))
+  }
+
+// The decision logic behind "which app does a bare `slay` act on", on ports the
+// test owns — so it never depends on what the developer's machine has bound on the
+// real channel ports (a running prod + dev app hold both).
+describe('probeFixedPort', () => {
+  const ours = path.resolve('/tmp/slz-probe-ours')
+
+  test('nothing listening ⇒ absent', async () => {
+    const free = await new Promise<number>((resolve) => {
+      const s = net.createServer().listen(0, '127.0.0.1', () => {
+        const port = (s.address() as net.AddressInfo).port
+        s.close(() => resolve(port))
+      })
+    })
+    expect(await probeFixedPort(free)).toEqual({ kind: 'absent' })
+  })
+
+  test('a non-hub squatter is rejected, not dialled ⇒ absent', async () => {
+    await withServer(
+      (_req, res) => {
+        res.writeHead(404, { 'content-type': 'text/plain' })
+        res.end('not a hub')
+      },
+      async (port) => {
+        expect(await probeFixedPort(port)).toEqual({ kind: 'absent' })
+      }
+    )
+  })
+
+  test('our hub ⇒ found', async () => {
+    await withServer(hubAt(ours), async (port) => {
+      await withEnv({ SLAYZONE_ROOT: ours }, async () => {
+        expect(await probeFixedPort(port)).toMatchObject({ kind: 'found', port, root: ours })
+      })
+    })
+  })
+
+  test("another install's hub ⇒ foreign (never acted on)", async () => {
+    const theirs = path.resolve('/tmp/slz-probe-theirs')
+    await withServer(hubAt(theirs), async (port) => {
+      await withEnv({ SLAYZONE_ROOT: ours }, async () => {
+        expect(await probeFixedPort(port)).toEqual({
+          kind: 'foreign',
+          port,
+          root: theirs,
+          expected: ours
+        })
+      })
     })
   })
 })
