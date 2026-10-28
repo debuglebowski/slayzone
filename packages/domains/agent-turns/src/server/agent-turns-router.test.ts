@@ -5,17 +5,18 @@
  * (domains/agent-turns/src/electron/handlers.test.ts) onto `caller.list`.
  * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
- *   packages/apps/api/src/routers/agent-turns.test.ts
+ *   packages/domains/agent-turns/src/server/agent-turns-router.test.ts
  */
 import { describe, test, expect, afterAll } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { agentTurnsRouter } from './agent-turns.js'
-import { agentTurnsEvents, recordTurnBoundary } from '@slayzone/agent-turns/server'
+import { agentTurnsRouter } from './agent-turns-router.js'
+import { agentTurnsEvents } from './events.js'
+import { recordTurnBoundary } from './turn-tracker.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { AgentTurnRange } from '@slayzone/agent-turns/shared'
+import type { AgentTurnRange } from '../shared/types.js'
 
 // --- onChanged subscription (unchanged — nothing else touches it) ---
 

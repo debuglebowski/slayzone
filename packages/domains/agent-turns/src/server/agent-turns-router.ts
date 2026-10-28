@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { agentTurnsEvents, listAgentTurnsForWorktree } from '@slayzone/agent-turns/server'
+import { agentTurnsEvents } from './events'
+import { listAgentTurnsForWorktree } from './list-turns'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 export const agentTurnsRouter = router({

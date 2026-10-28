@@ -436,7 +436,7 @@ run_harness packages/apps/api/src/routers/worktrees.test.ts
 run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
-run_harness packages/apps/api/src/routers/agent-turns.test.ts
+run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
 run_harness packages/apps/api/src/routers/chat.test.ts
 # pty.onData's server-side sessionIds filter — the web-bandwidth fix (§2.6).
 run_harness packages/apps/api/src/routers/pty.test.ts

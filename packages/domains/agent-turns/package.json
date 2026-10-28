@@ -16,10 +16,13 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/transport": "workspace:*",
-    "@tanstack/react-query": "^5.104.0",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/terminal-contracts": "workspace:*"
+    "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@tanstack/react-query": "^5.104.0",
+    "@trpc/server": "^11.19.0",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "electron": "^45.0.0",
