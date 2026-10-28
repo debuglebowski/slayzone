@@ -30,3 +30,5 @@ export const agentPromptsRouter = router({
     })
   )
 })
+
+export type AgentPromptsRouter = typeof agentPromptsRouter

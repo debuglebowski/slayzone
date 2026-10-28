@@ -1,6 +1,10 @@
 export { initChatTurnSubscriber, initPtyTurnSubscriber, recordTurnBoundary } from './turn-tracker'
 export { listAgentTurnsForWorktree } from './list-turns'
-export { agentTurnsRouter } from './agent-turns-router'
+export {
+  agentTurnsRouter,
+  type AgentTurnsRouter,
+  type AgentTurnsMounts
+} from './agent-turns-router'
 export { agentTurnsEvents, type AgentTurnsEventMap } from './events'
 export {
   capturePrompt,
@@ -9,6 +13,6 @@ export {
   type CapturePromptInput
 } from './prompt-capture'
 export { listPromptsForTask, insertPrompt, prunePrompts } from './prompt-db'
-export { agentPromptsRouter } from './agent-prompts-router'
+export { agentPromptsRouter, type AgentPromptsRouter } from './agent-prompts-router'
 export { agentPromptsEvents, type AgentPromptsEventMap } from './events'
 export type { AgentPrompt } from '../shared/types'
