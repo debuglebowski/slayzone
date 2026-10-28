@@ -26,7 +26,13 @@ import {
 import { buildMinimap as buildMinimapExt, cmScrollbarTheme } from './cm-shared-themes'
 import { Decoration } from '@codemirror/view'
 import { SearchCursor, RegExpCursor } from '@codemirror/search'
-import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands'
+import {
+  history,
+  historyField,
+  defaultKeymap,
+  historyKeymap,
+  indentWithTab
+} from '@codemirror/commands'
 import { keymap } from '@codemirror/view'
 import {
   indentUnit,
@@ -253,6 +259,12 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
 
     const themeComp = useRef(new Compartment())
     const minimapComp = useRef(new Compartment())
+    // What the view held when it was last destroyed (tab hidden, or a
+    // language/size change), restored on rebuild so caret, selection, undo
+    // history and scroll survive. Scroll is recorded while visible: a hidden
+    // (display:none) scroller already reads 0 by the time the view is torn down.
+    const savedRef = useRef<{ json: unknown; doc: string } | null>(null)
+    const scrollRef = useRef<StateEffect<unknown> | null>(null)
 
     // Create editor on mount / language change
     useEffect(() => {
@@ -283,6 +295,11 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         sizeTheme,
         searchField,
         searchDecorations(searchField),
+        EditorView.domEventHandlers({
+          scroll: (_e, v) => {
+            scrollRef.current = v.scrollSnapshot()
+          }
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !suppressOnChange.current) {
             onChangeRef.current(update.state.doc.toString())
@@ -296,12 +313,24 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
       ]
       if (lang) extensions.splice(0, 0, lang)
 
-      const state = EditorState.create({ doc: value, extensions })
+      // Restore only onto the same text: if the parent's value moved on while
+      // the view was gone, start fresh from it, as a first mount does.
+      const saved = savedRef.current
+      const state =
+        saved && saved.doc === value
+          ? EditorState.fromJSON(saved.json, { extensions }, { history: historyField })
+          : EditorState.create({ doc: value, extensions })
       const view = new EditorView({ state, parent: containerRef.current })
       viewRef.current = view
       if (viewHandleRef) viewHandleRef.current = view
+      if (saved && saved.doc === value && scrollRef.current)
+        view.dispatch({ effects: scrollRef.current })
 
       return () => {
+        savedRef.current = {
+          json: view.state.toJSON({ history: historyField }),
+          doc: view.state.doc.toString()
+        }
         view.destroy()
         viewRef.current = null
         if (viewHandleRef) viewHandleRef.current = null
