@@ -6,7 +6,14 @@ import './automation-engine-context'
 import './settings-host-wiring'
 import './domain-router-deps'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
-import { agentLifecycleRouter, type AgentLifecycleMounts } from '@slayzone/terminal/server'
+import {
+  agentLifecycleRouter,
+  chatRouter,
+  ptyRouter,
+  type AgentLifecycleMounts,
+  type ChatMounts,
+  type PtyMounts
+} from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
 import { aiConfigRouter } from './routers/ai-config'
@@ -16,7 +23,6 @@ import {
   type AgentTurnsMounts
 } from '@slayzone/agent-turns/server'
 import { automationsRouter } from './routers/automations'
-import { chatRouter } from './routers/chat'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
 import { fileEditorRouter } from './routers/file-editor'
@@ -31,7 +37,6 @@ import {
   type ProjectGroupsMounts,
   type ProjectsMounts
 } from '@slayzone/projects/server'
-import { ptyRouter } from './routers/pty'
 import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
 import { settingsRouter, type SettingsMounts } from '@slayzone/settings/server'
@@ -113,14 +118,16 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
+  AssertAppSlice<IsAppSlice<ChatMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
+  AssertAppSlice<IsAppSlice<ProjectsMounts>>,
+  AssertAppSlice<IsAppSlice<PtyMounts>>,
   AssertAppSlice<IsAppSlice<SettingsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TaskMounts>>,
-  AssertAppSlice<IsAppSlice<ProjectsMounts>>,
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,

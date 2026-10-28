@@ -31,14 +31,12 @@ export {
   type AccessClass
 } from './admin-policy'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
-export { setChatDeps, getChatDeps, type ChatDeps } from './app-deps'
 export {
   setWorkspaceDeps,
   getWorkspaceDeps,
   type WorkspaceDeps,
   type WorkspaceComputerTarget
 } from './app-deps'
-export { setPtyDeps, getPtyDeps, type PtyDeps } from './app-deps'
 export { setIntegrationOps, getIntegrationOps } from './app-deps'
 export { setNotifyEvents, getNotifyEvents, type NotifyEventMap } from './app-deps'
 export {

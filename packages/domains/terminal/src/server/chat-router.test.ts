@@ -2,7 +2,7 @@
  * chat tRPC router — proc delegation + streaming subscription wiring.
  * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
- *   packages/apps/api/src/routers/chat.test.ts
+ *   packages/domains/terminal/src/server/chat-router.test.ts
  *
  * The chat ops logic is covered by the terminal domain's own tests; here we
  * cover what's unique to the router: procedures delegate to the injected ops
@@ -11,8 +11,8 @@
  */
 import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { chatRouter } from './chat.js'
-import { setChatDeps, type ChatDeps } from '../app-deps.js'
+import { chatRouter } from './chat-router.js'
+import { setChatDeps, type ChatDeps } from './chat-router-deps.js'
 
 const events = new TypedEmitter<{
   event: [tabId: string, agentEvent: unknown, seq: number]

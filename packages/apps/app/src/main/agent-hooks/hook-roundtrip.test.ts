@@ -34,6 +34,8 @@ vi.mock('@slayzone/terminal/server', async () => {
   )
   return {
     agentLifecycleRouter: agentTree.agentLifecycleRouter,
+    ptyRouter: agentTree.ptyRouter,
+    chatRouter: agentTree.chatRouter,
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,
     createAgentTree: agentTree.createAgentTree,

@@ -15,8 +15,12 @@ const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | 
 vi.mock('@slayzone/terminal/server', async () => {
   const agentTree = await import('../../../domains/terminal/src/server/agent-tree.js')
   const lifecycle = await import('../../../domains/terminal/src/server/agent-lifecycle-router.js')
+  const pty = await import('../../../domains/terminal/src/server/pty-router.js')
+  const chat = await import('../../../domains/terminal/src/server/chat-router.js')
   return {
     agentLifecycleRouter: lifecycle.agentLifecycleRouter,
+    ptyRouter: pty.ptyRouter,
+    chatRouter: chat.chatRouter,
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,
     createAgentTree: agentTree.createAgentTree,

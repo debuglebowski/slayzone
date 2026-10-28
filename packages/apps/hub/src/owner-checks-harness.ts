@@ -24,15 +24,13 @@ import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import {
   getAppDeps,
   getAutomationsEvents,
-  getChatDeps,
   getMenuEvents,
   getNotifyEvents,
-  getPtyDeps,
   type AppRouter
 } from '@slayzone/api'
 import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
-import { getAgentLifecycleEvents } from '@slayzone/terminal/server'
+import { getAgentLifecycleEvents, getChatDeps, getPtyDeps } from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
 import { settingsEvents } from '@slayzone/settings/server'

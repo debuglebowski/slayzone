@@ -257,6 +257,15 @@ export {
   type AgentLifecycleRouter,
   type AgentLifecycleMounts
 } from './agent-lifecycle-router'
+// `pty.*` / `chat.*` tRPC routers, composed by `@slayzone/api` at those keys. Their
+// host deps (ops built from the composition root's db + task store, plus the
+// streaming emitters) are injected by the composition root via the setters below.
+// One mounts type per key, so a client types against exactly the routers it calls
+// (`typedTrpc<PtyMounts>()`, `typedTrpc<PtyMounts & ChatMounts>()`).
+export { ptyRouter, type PtyRouter, type PtyMounts } from './pty-router'
+export { setPtyDeps, getPtyDeps, type PtyDeps } from './pty-router-deps'
+export { chatRouter, type ChatRouter, type ChatMounts } from './chat-router'
+export { setChatDeps, getChatDeps, type ChatDeps } from './chat-router-deps'
 export {
   setAgentLifecycleEvents,
   getAgentLifecycleEvents,

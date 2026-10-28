@@ -23,8 +23,6 @@ import {
   setAppDeps,
   getAppDeps,
   setBackupOps,
-  setPtyDeps,
-  setChatDeps,
   setAuthEvents,
   setComputersDeps,
   setWorkspaceDeps,
@@ -104,6 +102,8 @@ import {
   setPtyEnricher,
   resetTerminalRuntimeForTest,
   setAgentLifecycleEvents,
+  setPtyDeps,
+  setChatDeps,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/server'

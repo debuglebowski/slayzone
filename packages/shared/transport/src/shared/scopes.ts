@@ -86,7 +86,7 @@ export type ProcedureScope = Scope | 'never'
  * `test*` procedure.
  *
  * WRITTEN DOWN, NOT DISCOVERED LATER: `pty.onData` (and `chat.onEvent`) can now
- * take an optional `sessionIds`/`tabIds` filter (routers/pty.ts, routers/chat.ts)
+ * take an optional `sessionIds`/`tabIds` filter (terminal's pty-router.ts / chat-router.ts)
  * that drops non-matching events server-side — but the filter is OPT-IN. A
  * caller (any caller, any scope, `agent` included) that subscribes with no
  * filter still receives every byte of every live session on the hub, exactly

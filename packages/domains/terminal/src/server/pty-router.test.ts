@@ -3,7 +3,7 @@
  *
  * Run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
- *   packages/apps/api/src/routers/pty.test.ts
+ *   packages/domains/terminal/src/server/pty-router.test.ts
  *
  * SCOPE: this file exists for ONE thing — `onData`'s optional `sessionIds`
  * input, added because the subscription was otherwise a firehose: every byte
@@ -17,8 +17,8 @@
  */
 import { describe, test, expect } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { ptyRouter } from './pty.js'
-import { setPtyDeps, type PtyDeps } from '../app-deps.js'
+import { ptyRouter } from './pty-router.js'
+import { setPtyDeps, type PtyDeps } from './pty-router-deps.js'
 
 const events = new TypedEmitter<PtyDeps['events'] extends TypedEmitter<infer M> ? M : never>()
 

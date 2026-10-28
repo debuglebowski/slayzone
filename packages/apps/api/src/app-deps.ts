@@ -1,25 +1,13 @@
-// App-level dependencies that the router needs but cannot import directly.
-//
-// The chat ops live in `@slayzone/terminal/electron`, which lazily `require`s
-// `electron` and pulls in `node-pty` — both forbidden inside the transport
-// package (it must run under plain Node for the standalone `@slayzone/hub`
-// host). So we `import type` only (erased at build → zero electron at runtime)
-// and the Electron-main host injects the concrete instances at startup via
-// `setChatDeps()`. A standalone server without these wired would throw on the
-// first chat procedure call.
+// App-level dependencies that the routers need but cannot build themselves: the
+// composition root injects the concrete instances at startup via the setters below.
+// A server without one wired throws on the first call that reads it. (A domain that
+// owns its router keeps that router's registry itself, e.g. terminal's
+// `setPtyDeps`/`setChatDeps`.)
 
 import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
-import type {
-  createChatOps,
-  createChatQueueOps,
-  ChatEventMap,
-  ChatQueueEventMap,
-  createPtyOps,
-  PtyEventMap
-} from '@slayzone/terminal/electron'
 import { createLocalWorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { IntegrationOps } from '@slayzone/integrations/server'
@@ -74,47 +62,6 @@ export type FloatingAgentState = {
   hasCustomSize: boolean
 }
 import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal-contracts'
-
-// Chat deps — ops + queue ops + the two streaming emitters the subscriptions
-// subscribe to. Same instances back the IPC handlers (coexistence until slice 5).
-export type ChatDeps = {
-  ops: ReturnType<typeof createChatOps>
-  queueOps: ReturnType<typeof createChatQueueOps>
-  events: TypedEmitter<ChatEventMap>
-  queueEvents: TypedEmitter<ChatQueueEventMap>
-}
-
-let chatDeps: ChatDeps | null = null
-
-export function setChatDeps(deps: ChatDeps): void {
-  chatDeps = deps
-}
-
-export function getChatDeps(): ChatDeps {
-  if (!chatDeps) throw new Error('chatDeps not initialized — call setChatDeps() in main host first')
-  return chatDeps
-}
-
-// Pty deps — ops + the single streaming emitter the pty subscriptions subscribe
-// to. `createPtyOps`/`ptyEvents` live in `@slayzone/terminal/electron` (electron +
-// node-pty), so `import type` only here; the Electron-main host injects the
-// concrete instances via `setPtyDeps()`. Same instances back the IPC handlers
-// (coexistence until slice 5).
-export type PtyDeps = {
-  ops: ReturnType<typeof createPtyOps>
-  events: TypedEmitter<PtyEventMap>
-}
-
-let ptyDeps: PtyDeps | null = null
-
-export function setPtyDeps(deps: PtyDeps): void {
-  ptyDeps = deps
-}
-
-export function getPtyDeps(): PtyDeps {
-  if (!ptyDeps) throw new Error('ptyDeps not initialized — call setPtyDeps() in main host first')
-  return ptyDeps
-}
 
 // Integration ops — the electron-coupled domain ops (`@slayzone/integrations/server`
 // pulls electron + node clients), injected by the host so the `integrationsRouter`

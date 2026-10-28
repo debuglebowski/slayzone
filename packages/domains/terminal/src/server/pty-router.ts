@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getPtyDeps } from '../app-deps'
+import { getPtyDeps } from './pty-router-deps'
 
 // PTY router (IPC → tRPC migration, slice 3 / P17). Mirrors the `pty:*` /
 // `terminalModes:*` / `session:*` / `chat:list` IPC handlers 1:1 plus the
@@ -342,3 +342,7 @@ export const ptyRouter = router({
     })
   )
 })
+
+export type PtyRouter = typeof ptyRouter
+/** The key api mounts `ptyRouter` at; a client calling `pty.*` types against this. */
+export type PtyMounts = { pty: PtyRouter }

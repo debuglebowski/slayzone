@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getChatDeps } from '../app-deps'
+import { getChatDeps } from './chat-router-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
 const queueOps = (): ReturnType<typeof getChatDeps>['queueOps'] => getChatDeps().queueOps
@@ -149,7 +149,7 @@ export const chatRouter = router({
   // the renderer cuts over (slice 5).
   //
   // `tabIds` is an OPTIONAL server-side filter — same reasoning as `pty.onData`
-  // (routers/pty.ts): this is otherwise every chat event on the hub, filtered
+  // (pty-router.ts): this is otherwise every chat event on the hub, filtered
   // only client-side. Omitted (every existing caller) reproduces today's
   // unfiltered behavior exactly.
   onEvent: publicProcedure
@@ -212,3 +212,7 @@ export const chatRouter = router({
     })
   )
 })
+
+export type ChatRouter = typeof chatRouter
+/** The key api mounts `chatRouter` at; a client calling `chat.*` types against this. */
+export type ChatMounts = { chat: ChatRouter }
