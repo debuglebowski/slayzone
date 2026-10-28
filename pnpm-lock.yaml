@@ -293,6 +293,9 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../../domains/telemetry
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
@@ -818,6 +821,9 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../../domains/telemetry
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
@@ -2346,15 +2352,24 @@ importers:
 
   packages/domains/telemetry:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       posthog-js:
         specifier: ^1.434.15
         version: 1.434.15(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1)

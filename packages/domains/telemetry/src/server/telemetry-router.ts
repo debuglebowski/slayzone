@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getTelemetryEvents } from '../app-deps'
+import { getTelemetryEvents } from './telemetry-events'
 
 // Telemetry IPC-event stream — the main-side `setIpcSuccessHook` fans
 // instrumented IPC successes here. Mirrors the legacy `telemetry:ipc-event`

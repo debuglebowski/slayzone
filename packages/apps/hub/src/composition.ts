@@ -20,7 +20,6 @@ import {
   setProcessesDeps,
   setNotifyEvents,
   setAutomationsEvents,
-  setTelemetryEvents,
   setMenuEvents,
   setAgentLifecycleEvents,
   setTaskTriggerBus,
@@ -39,7 +38,6 @@ import {
   type AppDeps,
   type NotifyEventMap,
   type AutomationsEventMap,
-  type TelemetryEventMap,
   type MenuEventMap,
   type AgentLifecycleEventMap,
   type AuthEventMap,
@@ -121,6 +119,7 @@ import {
   resetSyncFlags,
   setCredentialCipher
 } from '@slayzone/integrations/server'
+import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { AutomationEngine } from '@slayzone/automations/server'
 import {

@@ -8,12 +8,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./server": "./src/server/index.ts"
   },
   "dependencies": {
+    "@slayzone/platform": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
+    "@trpc/server": "^11.19.0",
     "posthog-js": "^1.434.15"
   },
   "peerDependencies": {

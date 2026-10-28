@@ -559,6 +559,7 @@ import {
   type LockOutcome
 } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
+import { setTelemetryEvents } from '@slayzone/telemetry/server'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
 import { resetSyncFlags, setCredentialCipher } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
@@ -2296,7 +2297,7 @@ app
             // sends dual-emit on, so the `automations.onChanged` /
             // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
             mod.setAutomationsEvents(automationsEvents)
-            mod.setTelemetryEvents(telemetryEvents)
+            setTelemetryEvents(telemetryEvents)
             // Menu / app-shortcut bus — native menus, the before-input-event
             // accelerator handler, the auto-updater, and protocol deep-links emit
             // here. Post-cutover the host capability bridge streams these to the

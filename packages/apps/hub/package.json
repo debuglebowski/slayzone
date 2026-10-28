@@ -34,6 +34,7 @@
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
+    "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/types": "workspace:*",

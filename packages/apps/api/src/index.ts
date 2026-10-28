@@ -47,11 +47,6 @@ export {
   getAutomationsEvents,
   type AutomationsEventMap
 } from './app-deps'
-export {
-  setTelemetryEvents,
-  getTelemetryEvents,
-  type TelemetryEventMap
-} from './app-deps'
 export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
 export {
   setAgentLifecycleEvents,
