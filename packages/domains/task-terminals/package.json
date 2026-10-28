@@ -21,13 +21,16 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
+    "@trpc/server": "^11.19.0",
     "fzf": "^0.5.2",
     "lucide-react": "^1.48.0",
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "zod": "^4.3.5"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

@@ -7,16 +7,11 @@ import {
   moveTabToGroup,
   updateTabRow,
   deleteTab,
-  ensureMainTab,
-  listHibernatedSessionIds,
-  listAutoRestoreTaskIds,
-  tabsEvents,
-  type TabsChangedPayload
-} from '@slayzone/task-terminals/server'
-import type {
-  CreateTerminalTabInput,
-  UpdateTerminalTabInput
-} from '@slayzone/task-terminals/shared'
+  ensureMainTab
+} from './tabs-store'
+import { listHibernatedSessionIds, listAutoRestoreTaskIds } from './tab-flags'
+import { tabsEvents, type TabsChangedPayload } from './events'
+import type { CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 7 `tabs:*` IPC handlers (task-terminals/src/main/handlers.ts) plus

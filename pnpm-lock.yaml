@@ -2239,6 +2239,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -2251,6 +2254,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -2263,6 +2269,9 @@ importers:
       react:
         specifier: ^19.3.1
         version: 19.3.1
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@types/react':
         specifier: ^19.3.0

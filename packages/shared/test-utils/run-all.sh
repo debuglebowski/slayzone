@@ -60,7 +60,7 @@ run_harness packages/domains/task/src/server/ops/list-task-sessions.test.ts
 run_harness packages/domains/task/src/server/ops/session-switch-delete.test.ts
 # agent-prompts capture + the deleted-session filter on listPromptsForTask.
 run_harness packages/domains/agent-turns/src/server/prompt-capture.test.ts
-run_harness packages/apps/api/src/routers/task-terminals.test.ts
+run_harness packages/domains/task-terminals/src/server/task-terminals-router.test.ts
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
