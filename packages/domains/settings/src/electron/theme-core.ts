@@ -1,7 +1,6 @@
 import { nativeTheme } from 'electron'
-import { type ThemePreference } from '../server/service'
+import { settingsEvents, type ThemePreference } from '@slayzone/settings-core/server'
 import { updateClientSettings } from '@slayzone/platform/client-settings'
-import { settingsEvents } from '../server/events'
 
 /**
  * Pure theme API — `nativeTheme` only, no IPC/BrowserWindow. This is the narrow

@@ -7,7 +7,7 @@
  * property below breaks, that getter silently returns a stale config and
  * hibernation stops matching what the user set — with no error anywhere.
  *
- * Run with: npx vitest run packages/domains/settings/src/server/service.test.ts
+ * Run with: npx vitest run packages/shared/settings-core/src/server/service.test.ts
  */
 import { describe, expect, it } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'

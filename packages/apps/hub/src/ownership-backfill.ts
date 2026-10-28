@@ -30,7 +30,7 @@ import { findFirstAdmin, type HubAuth } from '@slayzone/hub-auth/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { assignUnownedProjects } from '@slayzone/projects/server'
-import { adoptLegacyUserSettings } from '@slayzone/settings/server'
+import { adoptLegacyUserSettings } from '@slayzone/settings-core/server'
 
 export interface OwnershipBackfillResult {
   /** Who received the data, or null when the hub has no admin yet. */

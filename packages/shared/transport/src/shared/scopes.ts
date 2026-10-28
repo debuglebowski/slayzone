@@ -138,7 +138,7 @@ export type ProcedureScope = Scope | 'never'
  * own state plus hub-wide config any full session of that user reads anyway.
  * `settings.set` → `tasks`, PER KEY: the hub-wide keys include what the hub RUNS
  * (`test_profiles`, `default_terminal_mode`, worktree copy paths), and this gate is
- * per procedure, so `settingsWriteProcedure` (`@slayzone/settings/server`) refuses a
+ * per procedure, so `settingsWriteProcedure` (`@slayzone/settings-core/server`) refuses a
  * scoped session every key but its own (`user`) ones, whatever its account's role.
  *
  * ── warm pool: `pty.warmSetProjectTabCounts` is `never` ──────────────────────

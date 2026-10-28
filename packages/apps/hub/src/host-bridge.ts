@@ -3,7 +3,7 @@ import { WebSocket } from 'ws'
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { settingsEvents } from '@slayzone/settings/server'
+import { settingsEvents } from '@slayzone/settings-core/server'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import type {
   AppDeps,

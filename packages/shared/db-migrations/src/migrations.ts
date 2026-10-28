@@ -3882,7 +3882,7 @@ export const migrations: Migration[] = [
       // layout, filters) rather than the hub's. Same loose `user_id`. Used only
       // for a request that carries a user; a hub without login keeps every key
       // in `settings`, exactly as before. Which key is which: `settingScope` in
-      // `@slayzone/settings/server`. The `key` index serves the boot purge, which
+      // `@slayzone/settings-core/server`. The `key` index serves the boot purge, which
       // reads every user's `viewState`.
       db.exec(`
         ALTER TABLE projects ADD COLUMN owner_user_id TEXT;

@@ -31,6 +31,7 @@
     "@slayzone/projects": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",

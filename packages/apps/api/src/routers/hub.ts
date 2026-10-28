@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
-import { SettingsService } from '@slayzone/settings/server'
+import { SettingsService } from '@slayzone/settings-core/server'
 import { router, publicProcedure, openProcedure, getAuthGate } from '@slayzone/trpc-server'
 import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
 

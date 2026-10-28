@@ -4,7 +4,7 @@
  * and everything else defaults to per user, so a new client key is private.
  *
  * Run with: npx vitest run --config packages/apps/app/vitest.config.ts \
- *   packages/domains/settings/src/server/scope.test.ts
+ *   packages/shared/settings-core/src/server/scope.test.ts
  */
 import { describe, expect, it } from 'vitest'
 import { settingScope } from './scope'

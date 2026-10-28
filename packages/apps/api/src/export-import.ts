@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { SettingsService, settingProjectId } from '@slayzone/settings/server'
+import { SettingsService, settingProjectId } from '@slayzone/settings-core/server'
 import type { AccessScope } from './access'
 import type {
   ImportTxnParams,

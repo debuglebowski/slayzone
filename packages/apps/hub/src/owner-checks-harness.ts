@@ -28,7 +28,7 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
 import { getAgentLifecycleEvents, getChatDeps, getPtyDeps } from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
-import { settingsEvents } from '@slayzone/settings/server'
+import { settingsEvents } from '@slayzone/settings-core/server'
 // Not a dependency of the hub app; reached by path so it is the SAME module instance
 // the transport routers subscribe to (workspace symlinks resolve to this file).
 import {

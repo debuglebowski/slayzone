@@ -30,7 +30,7 @@
     "@slayzone/projects": "workspace:*",
     "@slayzone/computer-transport": "workspace:*",
     "@slayzone/computers": "workspace:*",
-    "@slayzone/settings": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",

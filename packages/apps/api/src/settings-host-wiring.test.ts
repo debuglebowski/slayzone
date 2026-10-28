@@ -8,7 +8,7 @@
 import './settings-host-wiring'
 import { expect, test } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { settingsRouter } from '@slayzone/settings/server'
+import { settingsRouter } from '@slayzone/settings-core/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { setAppDeps, setNotifyEvents, type AppDeps, type NotifyEventMap } from './app-deps'
 

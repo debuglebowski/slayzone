@@ -30,7 +30,7 @@
  * @module api/owner-policy
  */
 import { currentSecurityContext } from '@slayzone/platform/security-log'
-import { settingProjectId } from '@slayzone/settings/server'
+import { settingProjectId } from '@slayzone/settings-core/server'
 import type { AccessScope, OwnedResource, ResourceKind } from './access'
 import type { AccessClass } from './admin-policy'
 

@@ -11,7 +11,7 @@
  * api calls `setSettingsHostDeps()` once at load (`app-deps.ts`), so every host
  * that composes the app router has it wired.
  *
- * @module settings/server/settings-host-deps
+ * @module settings-core/server/settings-host-deps
  */
 
 /** The setting keys a write changed (`notify.onSettingsChanged`'s payload). */

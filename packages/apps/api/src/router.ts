@@ -65,7 +65,7 @@ import {
   type ProjectsMounts
 } from '@slayzone/projects/server'
 import { computersRouter } from './routers/computers'
-import { settingsRouter, type SettingsMounts } from '@slayzone/settings/server'
+import { settingsRouter, type SettingsMounts } from '@slayzone/settings-core/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import {
   taskRouter,

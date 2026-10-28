@@ -7,7 +7,7 @@
  * procedure and admits `settings.set` for `tasks`, so the per-key half is here — a
  * scoped credential writes only its own (`user`) keys, whatever the account's role.
  *
- * @module settings/server/settings-admin
+ * @module settings-core/server/settings-admin
  */
 import { TRPCError } from '@trpc/server'
 import { securityEvent } from '@slayzone/platform/security-log'

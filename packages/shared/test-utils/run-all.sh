@@ -35,7 +35,7 @@ fi
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
 # in the Wave C2 split; repointed here.
-run_harness packages/domains/settings/src/server/router.test.ts
+run_harness packages/shared/settings-core/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/domains/projects/src/server/projects-router.test.ts
@@ -881,8 +881,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/useSettingsReopenTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
-  packages/domains/settings/src/server/service.test.ts \
-  packages/domains/settings/src/server/scope.test.ts \
+  packages/shared/settings-core/src/server/service.test.ts \
+  packages/shared/settings-core/src/server/scope.test.ts \
   packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
   packages/apps/api/src/http/rest-api/agent-hook.test.ts \

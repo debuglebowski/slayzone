@@ -1,7 +1,6 @@
 import { BrowserWindow } from 'electron'
 import type { IpcMain } from 'electron'
-import type { ThemePreference } from '../server/service'
-import { settingsEvents } from '../server/events'
+import { settingsEvents, type ThemePreference } from '@slayzone/settings-core/server'
 import { getEffectiveTheme, getThemeSource, setTheme, wireNativeThemeBridge } from './theme-core'
 
 /**

@@ -16,7 +16,7 @@
   "dependencies": {
     "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/settings": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",

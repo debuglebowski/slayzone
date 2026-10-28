@@ -287,6 +287,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
@@ -821,9 +824,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
-      '@slayzone/settings':
+      '@slayzone/settings-core':
         specifier: workspace:*
-        version: link:../../domains/settings
+        version: link:../../shared/settings-core
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -1055,9 +1058,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
+      '@slayzone/settings-core':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../../shared/settings-core
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
@@ -1712,9 +1715,9 @@ importers:
       '@slayzone/host-capabilities':
         specifier: workspace:*
         version: link:../../shared/host-capabilities
-      '@slayzone/settings':
+      '@slayzone/settings-core':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../../shared/settings-core
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1902,6 +1905,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state
@@ -2727,9 +2733,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
+      '@slayzone/settings-core':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../../shared/settings-core
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
@@ -3044,6 +3050,21 @@ importers:
       vite:
         specifier: ^8.3.1
         version: 8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
+
+  packages/shared/settings-core:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
 
   packages/shared/shortcuts:
     devDependencies:

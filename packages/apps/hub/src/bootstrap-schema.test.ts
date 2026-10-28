@@ -8,7 +8,7 @@
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
-import { settingScope } from '@slayzone/settings/server'
+import { settingScope } from '@slayzone/settings-core/server'
 import { bootstrapSchema } from './bootstrap-schema'
 
 describe('bootstrapSchema', () => {

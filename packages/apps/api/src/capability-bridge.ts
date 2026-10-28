@@ -3,7 +3,7 @@ import { initTRPC } from '@trpc/server'
 import superjson from 'superjson'
 import { observable } from '@trpc/server/observable'
 import { EventEmitter } from 'node:events'
-import { settingsEvents } from '@slayzone/settings/server'
+import { settingsEvents } from '@slayzone/settings-core/server'
 import {
   getAppDeps,
   getMenuEvents,

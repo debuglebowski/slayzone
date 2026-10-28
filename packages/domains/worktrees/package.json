@@ -40,7 +40,7 @@
     "@slayzone/markdown": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
-    "@slayzone/settings": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/tasks": "workspace:*",

@@ -1,6 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { SettingsService } from '@slayzone/settings/server'
+import { SettingsService } from '@slayzone/settings-core/server'
 import {
   setIdleCloseConfigGetter,
   startIdleChecker,
