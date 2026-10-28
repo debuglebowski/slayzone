@@ -135,19 +135,36 @@ interface HistoryList {
   events: ActivityEvent[]
   /** Where the next "Load more" page starts; null = no more pages. */
   nextCursor: ActivityEventCursor | null
+  /** The page at `nextCursor` failed to load. Belongs to this list: replacing it clears it. */
+  nextPageFailed: boolean
+}
+
+/** One automation run's action steps: in flight, failed, or loaded. */
+type RunDetails = 'loading' | 'failed' | AutomationActionRun[]
+
+interface RunDetailsState {
+  /** Bumped on every task (or hub client) change: a fetch lands only on its own. */
+  generation: number
+  byRunId: Record<string, RunDetails>
 }
 
 export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
   // One state: a "Load more" page appends only onto the list it continues.
-  const [list, setList] = useState<HistoryList>({ events: [], nextCursor: null })
-  const { events, nextCursor } = list
-  const [loading, setLoading] = useState(true)
+  const [list, setList] = useState<HistoryList>({
+    events: [],
+    nextCursor: null,
+    nextPageFailed: false
+  })
+  const { events, nextCursor, nextPageFailed } = list
+  // Page 1 of this task's history. 'failed' only while there is no list to show:
+  // a failed refresh of a loaded list (tab re-show) keeps that list on screen.
+  const [firstPage, setFirstPage] = useState<'loading' | 'failed' | 'loaded'>('loading')
+  // Bumped by Retry: re-runs the page-1 load.
+  const [firstPageAttempt, setFirstPageAttempt] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [expandedRunIds, setExpandedRunIds] = useState<Record<string, boolean>>({})
-  const [actionRunsByRunId, setActionRunsByRunId] = useState<Record<string, AutomationActionRun[]>>(
-    {}
-  )
+  const [runDetails, setRunDetails] = useState<RunDetailsState>({ generation: 0, byRunId: {} })
   const [, setTimestampTick] = useState(0)
 
   useVisibleInterval(() => setTimestampTick((current) => current + 1), 60_000, {
@@ -157,35 +174,60 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
   // Another task's history (or hub client): start over — spinner, no expanded runs.
   // Adjusted while rendering, so no commit shows the previous task's state.
   if (useDepsChanged([taskId, trpcClient])) {
-    setLoading(true)
+    setFirstPage('loading')
     setLoadingMore(false)
-    setList((prev) => ({ events: prev.events, nextCursor: null }))
+    setList((prev) => ({ events: prev.events, nextCursor: null, nextPageFailed: false }))
     setExpandedRunIds({})
-    setActionRunsByRunId({})
+    setRunDetails((prev) => ({ generation: prev.generation + 1, byRunId: {} }))
   }
 
-  // Page 1 on mount, task change, AND every tab re-show (<Activity> re-runs this):
-  // the panel has no live updates, so the re-show reload is its only refresh. It
-  // replaces the list in place: no spinner, expanded runs kept.
+  // Page 1 on mount, task change, Retry, AND every tab re-show (<Activity> re-runs
+  // this): the panel has no live updates, so the re-show reload is its only
+  // refresh. It replaces the list in place: no spinner, expanded runs kept.
   useEffect(() => {
     let active = true
     trpcClient.history.listForTask
       .query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } })
       .then((result) => {
         if (!active) return
-        setList({ events: result.events, nextCursor: result.nextCursor })
-        setLoading(false)
+        setList({ events: result.events, nextCursor: result.nextCursor, nextPageFailed: false })
+        setFirstPage('loaded')
+      })
+      .catch(() => {
+        if (!active) return
+        setFirstPage((prev) => (prev === 'loaded' ? prev : 'failed'))
       })
     return () => {
       active = false
     }
-  }, [taskId, trpcClient])
+  }, [taskId, trpcClient, firstPageAttempt])
 
-  async function toggleAutomationDetails(runId: string): Promise<void> {
-    setExpandedRunIds((prev) => ({ ...prev, [runId]: !prev[runId] }))
-    if (actionRunsByRunId[runId]) return
-    const runs = await trpcClient.history.getAutomationActionRuns.query({ runId })
-    setActionRunsByRunId((prev) => ({ ...prev, [runId]: runs }))
+  function retryFirstPage(): void {
+    setFirstPage('loading')
+    setFirstPageAttempt((n) => n + 1)
+  }
+
+  function loadRunDetails(runId: string): void {
+    const { generation } = runDetails
+    const land = (details: RunDetails): void =>
+      setRunDetails((prev) =>
+        prev.generation === generation
+          ? { generation, byRunId: { ...prev.byRunId, [runId]: details } }
+          : prev
+      )
+    land('loading')
+    trpcClient.history.getAutomationActionRuns
+      .query({ runId })
+      .then(land)
+      .catch(() => land('failed'))
+  }
+
+  function toggleAutomationDetails(runId: string): void {
+    const expanding = expandedRunIds[runId] !== true
+    setExpandedRunIds((prev) => ({ ...prev, [runId]: expanding }))
+    // Fetched once per task; expanding a run whose fetch failed tries again.
+    const details = runDetails.byRunId[runId]
+    if (expanding && (details === undefined || details === 'failed')) loadRunDetails(runId)
   }
 
   async function loadMore(): Promise<void> {
@@ -194,27 +236,47 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
 
     setLoadingMore(true)
     try {
-      const result = await trpcClient.history.listForTask.query({
-        taskId,
-        options: {
-          limit: TASK_HISTORY_PAGE_SIZE,
-          before
+      const result = await trpcClient.history.listForTask
+        .query({
+          taskId,
+          options: {
+            limit: TASK_HISTORY_PAGE_SIZE,
+            before
+          }
+        })
+        .catch(() => null)
+      // Append (or mark the page failed) only if the list still ends where this page
+      // starts. A page-1 reload (tab re-show) or a task change that landed meanwhile
+      // replaced it: appending would leave a gap, or another task's events.
+      setList((prev) => {
+        if (!sameCursor(prev.nextCursor, before)) return prev
+        if (!result) return { ...prev, nextPageFailed: true }
+        return {
+          events: [...prev.events, ...result.events],
+          nextCursor: result.nextCursor,
+          nextPageFailed: false
         }
       })
-      // Append only if the list still ends where this page starts. A page-1 reload
-      // (tab re-show) or a task change that landed meanwhile replaced it: appending
-      // would leave a gap, or another task's events.
-      setList((prev) =>
-        sameCursor(prev.nextCursor, before)
-          ? { events: [...prev.events, ...result.events], nextCursor: result.nextCursor }
-          : prev
-      )
     } finally {
       setLoadingMore(false)
     }
   }
 
-  if (loading) {
+  if (firstPage === 'failed') {
+    return (
+      <div
+        data-testid="task-history-load-error"
+        className="flex items-center gap-2 text-sm text-muted-foreground"
+      >
+        <span className="text-destructive">Couldn't load history.</span>
+        <button type="button" className="underline hover:text-foreground" onClick={retryFirstPage}>
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  if (firstPage === 'loading') {
     return <div className="text-sm text-muted-foreground">Loading history...</div>
   }
 
@@ -241,7 +303,8 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
       {events.map((event, index) => {
         const isAutomation = event.entityType === 'automation_run'
         const isExpanded = expandedRunIds[event.entityId] === true
-        const actionRuns = actionRunsByRunId[event.entityId] ?? []
+        const details = runDetails.byRunId[event.entityId] ?? 'loading'
+        const actionRuns = Array.isArray(details) ? details : null
         const marker = getEventMarkerMeta(event)
 
         return (
@@ -276,7 +339,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
                         isExpanded ? 'Hide automation run details' : 'Show automation run details'
                       }
                       className="h-auto px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
-                      onClick={() => void toggleAutomationDetails(event.entityId)}
+                      onClick={() => toggleAutomationDetails(event.entityId)}
                     >
                       {isExpanded ? 'Hide details' : 'Show details'}
                     </Button>
@@ -288,7 +351,24 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
               </div>
               {isAutomation && isExpanded && (
                 <div className="mt-3 rounded-lg border border-border bg-muted/20">
-                  {actionRuns.map((run, actionIndex) => (
+                  {details === 'loading' && (
+                    <div className="px-3 py-3 text-xs text-muted-foreground">
+                      Loading details...
+                    </div>
+                  )}
+                  {details === 'failed' && (
+                    <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+                      <span className="text-destructive">Couldn't load details.</span>
+                      <button
+                        type="button"
+                        className="underline hover:text-foreground"
+                        onClick={() => loadRunDetails(event.entityId)}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                  {actionRuns?.map((run, actionIndex) => (
                     <div key={run.id} className="border-b border-border px-3 py-3 last:border-b-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <div className="text-xs font-medium text-foreground">{run.command}</div>
@@ -319,7 +399,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
                         )}
                     </div>
                   ))}
-                  {actionRuns.length === 0 && (
+                  {actionRuns?.length === 0 && (
                     <div className="px-3 py-3 text-xs text-muted-foreground">
                       No action details.
                     </div>
@@ -331,16 +411,20 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
         )
       })}
       {nextCursor && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="ml-10"
-          onClick={() => void loadMore()}
-          disabled={loadingMore}
-        >
-          {loadingMore ? 'Loading more...' : 'Load more'}
-        </Button>
+        <div className="ml-10 flex items-center gap-2">
+          {nextPageFailed && !loadingMore && (
+            <span className="text-sm text-destructive">Couldn't load more history.</span>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading more...' : nextPageFailed ? 'Retry' : 'Load more'}
+          </Button>
+        </div>
       )}
     </div>
   )

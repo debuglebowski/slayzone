@@ -2,11 +2,12 @@
 // Pins ProcessesPanel's list load: it loads for the current task/project, and a
 // response for a previous task/project landing late never replaces the newer list.
 // Task tabs live in <Activity>: re-showing a tab reloads the list again, but
-// keeps the current one on screen while it does (no spinner).
+// keeps the current one on screen while it does (no spinner). A failed load
+// shows an error with Retry instead of spinning forever.
 import { Activity } from 'react'
 import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ProcessEntry } from './ProcessesPanel.types'
 
 type Children = { children?: React.ReactNode }
@@ -17,13 +18,15 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged
 }))
 
-type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }
+type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: Error) => void }
 function deferred<T>(): Deferred<T> {
   let resolve!: (v: T) => void
-  const promise = new Promise<T>((res) => {
+  let reject!: (e: Error) => void
+  const promise = new Promise<T>((res, rej) => {
     resolve = res
+    reject = rej
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 let listCalls: Array<{ input: unknown; d: Deferred<ProcessEntry[]> }> = []
@@ -181,5 +184,91 @@ describe('ProcessesPanel across a tab switch', () => {
     await act(async () => listCalls[1].d.resolve([proc('b', 't2', 'Two')]))
     expect(spinner()).toBeNull()
     expect(labels()).toEqual(['Two'])
+  })
+})
+
+// A failed load (hub briefly unreachable, server error) used to leave the spinner
+// on forever: the list load had no `.catch`.
+describe('ProcessesPanel when the list load fails', () => {
+  const fail = (i: number) => act(async () => listCalls[i].d.reject(new Error('hub unreachable')))
+  const errorShown = () => screen.queryByText("Couldn't load processes.") !== null
+  const retry = () => fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+  it('a failed first load shows the error, not an endless spinner; Retry loads the list', async () => {
+    const { container } = render(<TabPanel mode="visible" />)
+    const spinner = () => container.querySelector('.animate-spin')
+    await fail(0)
+    expect(spinner()).toBeNull()
+    expect(errorShown()).toBe(true)
+    expect(screen.queryByText('No processes')).toBeNull()
+
+    retry()
+    expect(spinner()).not.toBeNull()
+    expect(errorShown()).toBe(false)
+    expect(listCalls).toHaveLength(2)
+    expect(listCalls[1].input).toEqual({ taskId: 't1', projectId: 'proj' })
+    await act(async () => listCalls[1].d.resolve([proc('a', 't1', 'One')]))
+    expect(spinner()).toBeNull()
+    expect(labels()).toEqual(['One'])
+  })
+
+  it('a failed Retry shows the error again', async () => {
+    render(<TabPanel mode="visible" />)
+    await fail(0)
+    retry()
+    await fail(1)
+    expect(errorShown()).toBe(true)
+  })
+
+  it('the error clears when the tab is shown again and that reload succeeds', async () => {
+    const { rerender } = render(<TabPanel mode="visible" />)
+    await fail(0)
+    expect(errorShown()).toBe(true)
+
+    rerender(<TabPanel mode="hidden" />)
+    rerender(<TabPanel mode="visible" />)
+    await act(async () => listCalls[1].d.resolve([proc('a', 't1', 'One')]))
+    expect(errorShown()).toBe(false)
+    expect(labels()).toEqual(['One'])
+  })
+
+  it('a task change after a failed load shows the spinner, then its own list', async () => {
+    const { container, rerender } = render(<TabPanel mode="visible" />)
+    const spinner = () => container.querySelector('.animate-spin')
+    await fail(0)
+
+    rerender(<TabPanel mode="visible" taskId="t2" />)
+    expect(errorShown()).toBe(false)
+    expect(spinner()).not.toBeNull()
+    await act(async () => listCalls[1].d.resolve([proc('b', 't2', 'Two')]))
+    expect(labels()).toEqual(['Two'])
+  })
+
+  it("the previous task's failed load never lands on the new task", async () => {
+    const { container, rerender } = render(<TabPanel mode="visible" />)
+    const spinner = () => container.querySelector('.animate-spin')
+    rerender(<TabPanel mode="visible" taskId="t2" />)
+
+    // Before t2's list lands: the spinner stays.
+    await fail(0)
+    expect(errorShown()).toBe(false)
+    expect(spinner()).not.toBeNull()
+
+    await act(async () => listCalls[1].d.resolve([proc('b', 't2', 'Two')]))
+    expect(labels()).toEqual(['Two'])
+    expect(errorShown()).toBe(false)
+  })
+
+  it('a failed reload on tab show keeps the list on screen (no error, no spinner)', async () => {
+    const { container, rerender } = render(<TabPanel mode="visible" />)
+    const spinner = () => container.querySelector('.animate-spin')
+    await act(async () => listCalls[0].d.resolve([proc('a', 't1', 'One')]))
+
+    rerender(<TabPanel mode="hidden" />)
+    rerender(<TabPanel mode="visible" />)
+    await fail(1)
+    expect(errorShown()).toBe(false)
+    expect(spinner()).toBeNull()
+    expect(labels()).toEqual(['One'])
   })
 })

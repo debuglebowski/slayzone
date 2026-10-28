@@ -37,7 +37,11 @@ export function ProcessesPanel({
   const stopMutation = useMutation(trpc.processes.stop.mutationOptions())
   const restartMutation = useMutation(trpc.processes.restart.mutationOptions())
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
-  const [loading, setLoading] = useState(true)
+  // 'failed' only while there is no list to show: a failed reload of a loaded list
+  // (tab re-show) keeps that list on screen.
+  const [listLoad, setListLoad] = useState<'loading' | 'failed' | 'loaded'>('loading')
+  // Bumped by Retry: re-runs the list load.
+  const [listLoadAttempt, setListLoadAttempt] = useState(0)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProcess, setEditingProcess] = useState<ProcessEntry | null>(null)
@@ -47,28 +51,39 @@ export function ProcessesPanel({
   // The spinner is for a list we don't have yet: the first load and a task/project
   // change, adjusted while rendering. A tab re-show (<Activity>) re-runs the load
   // effect below too, but keeps the current list on screen while it reloads.
-  if (useDepsChanged([taskId, projectId, trpcClient])) setLoading(true)
+  if (useDepsChanged([taskId, projectId, trpcClient])) setListLoad('loading')
 
   useEffect(() => {
-    // A response for a previous task/project must not replace the newer list.
+    // A response (or failure) for a previous task/project must not land on the newer one.
     let cancelled = false
-    trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
-      if (cancelled) return
-      const entries = (list as ProcessEntry[]).map((p) => {
-        if (p.serverUrl || p.status !== 'running') return p
-        for (let i = p.logBuffer.length - 1; i >= 0; i--) {
-          const url = extractUrlFromLine(p.logBuffer[i])
-          if (url) return { ...p, serverUrl: url }
-        }
-        return p
+    trpcClient.processes.listForTask
+      .query({ taskId, projectId })
+      .then((list) => {
+        if (cancelled) return
+        const entries = (list as ProcessEntry[]).map((p) => {
+          if (p.serverUrl || p.status !== 'running') return p
+          for (let i = p.logBuffer.length - 1; i >= 0; i--) {
+            const url = extractUrlFromLine(p.logBuffer[i])
+            if (url) return { ...p, serverUrl: url }
+          }
+          return p
+        })
+        setProcesses(entries)
+        setListLoad('loaded')
       })
-      setProcesses(entries)
-      setLoading(false)
-    })
+      .catch(() => {
+        if (cancelled) return
+        setListLoad((prev) => (prev === 'loaded' ? prev : 'failed'))
+      })
     return () => {
       cancelled = true
     }
-  }, [taskId, projectId, trpcClient])
+  }, [taskId, projectId, trpcClient, listLoadAttempt])
+
+  const retryListLoad = useCallback(() => {
+    setListLoad('loading')
+    setListLoadAttempt((n) => n + 1)
+  }, [])
 
   useSubscription(
     trpc.processes.onLog.subscriptionOptions(undefined, {
@@ -231,9 +246,23 @@ export function ProcessesPanel({
 
       {/* List */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {loading ? (
+        {listLoad === 'loading' ? (
           <div className="h-full flex items-center justify-center">
             <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : listLoad === 'failed' ? (
+          <div
+            data-testid="processes-load-error"
+            className="h-full flex items-center justify-center gap-2 text-xs text-muted-foreground"
+          >
+            <span className="text-destructive">Couldn't load processes.</span>
+            <button
+              type="button"
+              className="underline hover:text-foreground"
+              onClick={retryListLoad}
+            >
+              Retry
+            </button>
           </div>
         ) : isEmpty ? (
           <div className="h-full flex flex-col items-center justify-center gap-5 p-8">
