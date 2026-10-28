@@ -29,6 +29,7 @@ SlayZone is an Electron desktop app organized as a **pnpm monorepo** following t
 ```
 packages/
 ├── apps/
+│   ├── api/               # @slayzone/api - tRPC routers, REST/MCP API, app-deps (server half)
 │   └── app/               # @slayzone/app - Electron shell
 │       └── APP.md
 ├── domains/
@@ -42,7 +43,7 @@ packages/
 │   └── worktrees/         # @slayzone/worktrees - Git worktrees
 │       └── DOMAIN.md      # Each domain has DOMAIN.md
 └── shared/
-    ├── transport/         # @slayzone/transport - tRPC client/server routers
+    ├── transport/         # @slayzone/transport - tRPC client (+ scopes)
     ├── types/             # @slayzone/types - shared app/domain contracts
     ├── ui/                # @slayzone/ui - Radix/shadcn components
     └── editor/            # @slayzone/editor - Milkdown rich text
@@ -88,7 +89,7 @@ getTrpcClient().task.create.mutate()
     ↓
 @slayzone/transport over ws://127.0.0.1:<port>/trpc
     ↓
-@slayzone/server task router → SQLite
+@slayzone/api task router (in the hub) → SQLite
     ↓
 Response → useTasksData → KanbanBoard re-render
 ```

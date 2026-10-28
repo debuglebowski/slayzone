@@ -72,7 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\slayzone-deeplink.ps1 `
 
 - The sidecar `/api/auth/deep-link` route + the full receiving chain are
   implemented and tested (route-level test:
-  `packages/shared/transport/src/server/http/rest-api/auth-deep-link.test.ts`;
+  `packages/apps/api/src/http/rest-api/auth-deep-link.test.ts`;
   socket integration test on mac). Both are platform-agnostic.
 - The registry registration + `Start-Process` round-trip need a **real Windows
   machine** to verify end-to-end (the dev/CI host is macOS — no `powershell.exe`,
