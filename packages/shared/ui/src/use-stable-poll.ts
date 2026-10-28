@@ -7,6 +7,14 @@ export interface UseStablePollOptions {
   baseDelayMs?: number
   /** Cap on backoff delay when content is stable. Default 60000 (1 min). */
   maxDelayMs?: number
+  /**
+   * What the poll reads (e.g. a repo path), compared with `Object.is`. A change
+   * restarts the loop: a tick runs at once and the backoff starts over. A tick still
+   * running for the previous key is abandoned — its result feeds no backoff and arms
+   * no timer, and neither the new tick nor `refetch()` waits for it. Dropping that
+   * tick's side effects (setStates inside `fetchFn`) is the caller's job.
+   */
+  restartKey?: unknown
 }
 
 export interface UseStablePollResult {
@@ -30,8 +38,8 @@ export interface UseStablePollResult {
  * its own state.
  *
  * `fetchFn` is read through a ref so a fresh closure is used each tick
- * without restarting the timer. `enabled`, `baseDelayMs`, and `maxDelayMs`
- * changes restart the loop.
+ * without restarting the timer. `enabled`, `baseDelayMs`, `maxDelayMs` and
+ * `restartKey` changes restart the loop.
  */
 export function useStablePoll<T = unknown>(
   fetchFn: () => Promise<T>,
@@ -40,6 +48,7 @@ export function useStablePoll<T = unknown>(
   const enabled = options.enabled !== false
   const baseDelay = options.baseDelayMs ?? 5000
   const maxDelay = options.maxDelayMs ?? 60_000
+  const restartKey = options.restartKey
 
   const fetchRef = useRef(fetchFn)
   useEffect(() => {
@@ -119,7 +128,8 @@ export function useStablePoll<T = unknown>(
       cancelled = true
       if (timeout) clearTimeout(timeout)
     }
-  }, [enabled, baseDelay, maxDelay])
+    // `restartKey` isn't read in the loop: a new key only restarts it.
+  }, [enabled, baseDelay, maxDelay, restartKey])
 
   const refetch = useCallback(() => refetchRef.current(), [])
   return { refetch }

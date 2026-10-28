@@ -87,3 +87,88 @@ describe('useStablePoll', () => {
     unmount()
   })
 })
+
+// `restartKey` names what the poll reads (e.g. a repo path). A new target must be read
+// at once — not on the old target's backed-off timer, and not after a tick still running
+// for the old target.
+describe('useStablePoll restartKey', () => {
+  it('a rerender with the same restartKey does not restart the loop', async () => {
+    const fetchFn = vi.fn(async () => 'same')
+    const { rerender, unmount } = renderHook(
+      ({ k }: { k: string }) =>
+        useStablePoll(fetchFn, { baseDelayMs: 1000, maxDelayMs: 60_000, restartKey: k }),
+      { initialProps: { k: 'a' } }
+    )
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    rerender({ k: 'a' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    unmount()
+  })
+
+  it('a restartKey change runs a tick at once, with a fresh backoff', async () => {
+    const fetchFn = vi.fn(async () => 'same')
+    const { rerender, unmount } = renderHook(
+      ({ k }: { k: string }) =>
+        useStablePoll(fetchFn, { baseDelayMs: 1000, maxDelayMs: 60_000, restartKey: k }),
+      { initialProps: { k: 'a' } }
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000) // backed off: next tick 16s away
+    })
+    fetchFn.mockClear()
+
+    rerender({ k: 'b' })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // Fresh backoff: the base delay, then doubling again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    unmount()
+  })
+
+  it('a restartKey change does not wait for a tick still running for the old key', async () => {
+    const pending: Array<ReturnType<typeof deferred<string>>> = []
+    // The first three reads hang until resolved; later ones answer at once.
+    const fetchFn = vi.fn(() => {
+      if (pending.length >= 3) return Promise.resolve('x')
+      const d = deferred<string>()
+      pending.push(d)
+      return d.promise
+    })
+    const { result, rerender, unmount } = renderHook(
+      ({ k }: { k: string }) =>
+        useStablePoll(fetchFn, { baseDelayMs: 1000, maxDelayMs: 1000, restartKey: k }),
+      { initialProps: { k: 'a' } }
+    )
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    rerender({ k: 'b' })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    await act(async () => pending[1].resolve('b'))
+    // The 'a' tick still hangs; a refetch for 'b' doesn't wait for it either.
+    act(() => result.current.refetch())
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    await act(async () => pending[2].resolve('b'))
+
+    // The abandoned 'a' tick settles late and re-arms nothing: one chain, a tick per 1s.
+    await act(async () => pending[0].resolve('a'))
+    fetchFn.mockClear()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(10)
+    unmount()
+  })
+})

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { toast, useDepsChanged, useStablePoll } from '@slayzone/ui'
@@ -19,10 +19,16 @@ export function useBranchGraph(
   const fetchMutation = useMutation(trpc.worktrees.fetch.mutationOptions())
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
-  // Loading from the first render (the old mount effect set it true one commit later).
-  const [loading, setLoading] = useState(true)
+  // The path whose read has landed (graph or failure) since it last became the shown
+  // path; null until then. `loading` derives from it, so loading holds from the first
+  // render, and only a read for the shown path can end the spinner.
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
+  // A new project path loads from scratch: spinner until its first read lands. Reset
+  // while rendering, on a path change only — the poll re-runs at once on a tab re-show
+  // (<Activity>), and the graph on screen stays while it does.
+  if (useDepsChanged([projectPath])) setLoadedPath(null)
+  const loading = projectPath === null || loadedPath !== projectPath
   const [fetching, setFetching] = useState(false)
-  const initialLoad = useRef(false)
 
   const [currentBranch, setCurrentBranch] = useState<string>('')
   const [config, setConfig] = useState<CommitGraphConfig>(DEFAULT_CONFIG)
@@ -86,9 +92,22 @@ export function useBranchGraph(
   )
 
   const lastHashRef = useRef<string>('')
+  // The path on screen. A layout effect, so it is set inside the commit: a read that
+  // settles right after the commit already sees it (a passive effect can run a task
+  // later). A read that started for another path drops its result.
+  const shownPathRef = useRef(projectPath)
+  useLayoutEffect(() => {
+    shownPathRef.current = projectPath
+  }, [projectPath])
 
   const fetchData = useCallback(async () => {
     if (!projectPath) return null
+    // The project changed while this read ran: it changes nothing — its graph must not
+    // land under the new path, nor its outcome end the new path's spinner.
+    const superseded = () => shownPathRef.current !== projectPath
+    const markLoaded = () => {
+      if (loadedPath !== projectPath) setLoadedPath(projectPath)
+    }
     try {
       // staleTime:0 — a poll / git change must read git, not a cached answer.
       const branch = await queryClient.fetchQuery(
@@ -120,6 +139,7 @@ export function useBranchGraph(
           { staleTime: 0 }
         )
       )
+      if (superseded()) return null
       // Hash excludes `relativeDate` — that string updates over time
       // ("3 minutes ago") even when the commit hash is unchanged, which would
       // defeat the dedup. Stale display dates are acceptable; they refresh on
@@ -136,32 +156,22 @@ export function useBranchGraph(
         if (branch) setCurrentBranch(branch)
         setDagGraph(graph)
       }
-      if (!initialLoad.current) {
-        setLoading(false)
-        initialLoad.current = true
-      }
+      markLoaded()
       return hash
     } catch {
-      if (!initialLoad.current) {
-        setLoading(false)
-        initialLoad.current = true
-      }
+      if (superseded()) return null
+      markLoaded()
       return null
     }
-  }, [projectPath, config, defaultBaseBranch, queryClient, trpc])
+  }, [projectPath, loadedPath, config, defaultBaseBranch, queryClient, trpc])
 
-  // A new project path loads from scratch: spinner until its first fetch lands.
-  // Adjusted while rendering, on a path change only — the poll re-runs at once on a
-  // tab re-show (<Activity>), and the graph on screen stays while it does.
-  if (useDepsChanged([projectPath])) setLoading(true)
-  // `fetchData` ends the spinner on the first fetch since this reset (a ref: read in
-  // the async fetch). Re-runs on a re-show too, where it is a no-op: `loading` is
-  // already false, and the next fetch's setLoading(false) changes nothing.
-  useEffect(() => {
-    initialLoad.current = false
-  }, [projectPath])
-
-  const poll = useStablePoll(fetchData, { enabled: visible && !!projectPath, baseDelayMs: 10_000 })
+  // Restarted per path: a new path is read at once (not on the old path's backed-off
+  // timer, nor after its read still in flight), and polls from the base delay.
+  const poll = useStablePoll(fetchData, {
+    enabled: visible && !!projectPath,
+    baseDelayMs: 10_000,
+    restartKey: projectPath
+  })
   // A commit / branch move (fs watcher) re-reads now; the poll is only the safety net.
   // Ref moves only — a file edit doesn't change the graph.
   useGitPathChanges(projectPath, visible, poll.refetch, { refsOnly: true })
