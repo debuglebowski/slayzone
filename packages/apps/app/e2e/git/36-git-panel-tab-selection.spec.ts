@@ -10,6 +10,8 @@ import {
   openTaskById,
   createIsolatedGitRepo
 } from '../fixtures/electron'
+import { focusForAppShortcut } from '../fixtures/browser-view'
+import { shortcutKey } from '../fixtures/shortcuts'
 
 // Which tab the task git panel shows, and which one it saves (git_active_tab).
 // Task tabs live in <Activity>: hiding one unmounts its effects, showing it again
@@ -110,6 +112,60 @@ test.describe('Conflicts auto-switch across a task-tab switch', () => {
     await expect(panel.getByTestId('git-diff-panel')).toBeVisible()
     await expect(panel.getByText('Complete Merge')).toBeHidden()
     expect(await savedGitTab(mainWindow, taskA)).toBe('changes')
+  })
+})
+
+// ⌘G / ⇧⌘G (TaskDetailPage toggleGitTab) ask the panel which tab it shows to decide
+// between "switch to it" and "close the panel": the answer must be the tab on screen.
+test.describe('Git panel shortcuts switch or close', () => {
+  let taskId = ''
+
+  const tabButton = (page: Page, name: RegExp): Locator =>
+    gitPanel(page).getByRole('button', { name })
+  const expectActive = async (page: Page, name: RegExp): Promise<void> => {
+    await expect(tabButton(page, name)).toHaveClass(/shadow-sm/, { timeout: 5_000 })
+  }
+  const press = async (page: Page, id: string): Promise<void> => {
+    await focusForAppShortcut(page)
+    await page.keyboard.press(shortcutKey(id))
+  }
+
+  test.beforeAll(async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    const repo = freshRepo('tab-selection-shortcuts')
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Tab Keys', color: '#14b8a6', path: repo })
+    taskId = (await s.createTask({ projectId: p.id, title: 'TS keys task', status: 'todo' })).id
+    await s.updateTask({ id: taskId, panelVisibility: panels(false) })
+    await s.refreshData()
+  })
+
+  test('⌘G and ⇧⌘G open, switch, and close on the tab shown', async ({ mainWindow }) => {
+    await openTaskById(mainWindow, taskId)
+    await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 10_000 })
+
+    // Closed → ⌘G opens on General; ⌘G again (already on General) closes.
+    await press(mainWindow, 'panel-git')
+    await expect(gitPanel(mainWindow)).toBeVisible({ timeout: 10_000 })
+    await expectActive(mainWindow, /^General/)
+    await press(mainWindow, 'panel-git')
+    await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 5_000 })
+
+    // Closed → ⇧⌘G opens on Changes ("Diff").
+    await press(mainWindow, 'panel-git-diff')
+    await expect(gitPanel(mainWindow)).toBeVisible({ timeout: 10_000 })
+    await expectActive(mainWindow, /^Diff/)
+
+    // Open on Changes → ⌘G switches to General (stays open), ⇧⌘G switches back.
+    await press(mainWindow, 'panel-git')
+    await expectActive(mainWindow, /^General/)
+    await expect(gitPanel(mainWindow)).toBeVisible()
+    await press(mainWindow, 'panel-git-diff')
+    await expectActive(mainWindow, /^Diff/)
+
+    // Open on Changes → ⇧⌘G (already there) closes.
+    await press(mainWindow, 'panel-git-diff')
+    await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 5_000 })
   })
 })
 
