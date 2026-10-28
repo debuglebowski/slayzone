@@ -205,4 +205,24 @@ describe('ArtifactContentEditor switching artifacts', () => {
     expect(code()?.value).toBe('second')
     expect(code()).not.toBe(first)
   })
+
+  it("a read that finishes after the switch never shows the old artifact's text", async () => {
+    disk.content.a2 = 'second'
+    const pending: Record<string, () => void> = {}
+    readContent.mockImplementation(
+      (id: string) =>
+        new Promise<string | null>((resolve) => {
+          pending[id] = () => resolve(disk.content[id] ?? null)
+        })
+    )
+    const view = render(<Tab mode="visible" />)
+    await flush()
+    view.rerender(<Tab mode="visible" art={OTHER} />)
+    await flush()
+
+    await act(async () => pending.a2())
+    expect(code()?.value).toBe('second')
+    await act(async () => pending.a1())
+    expect(code()?.value).toBe('second')
+  })
 })

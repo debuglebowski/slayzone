@@ -263,26 +263,39 @@ export function ArtifactContentEditor({
     [readFromDisk, applyDisk]
   )
 
-  // Load on mount / artifact change. Flush pending save on unmount (with mtime guard).
+  // Load on mount / artifact change / tab show. Flush pending save on unmount or
+  // hide (with mtime guard). A read that lands after the artifact changed or the
+  // tab hid is dropped: it would show (and the next autosave would write) the
+  // previous artifact's text under the new one.
   useEffect(() => {
     const id = artifact.id
+    let cancelled = false
     if (isBinary) {
       // Cache-bust the preview once the baseline is in (or failed), so it
       // re-reads the file on every show.
       getMtime(id)
         .then(
           (m) => {
-            baselineMtimeRef.current = m
+            if (!cancelled) baselineMtimeRef.current = m
           },
           () => undefined
         )
-        .then(() => setPreviewVersion((v) => v + 1))
-      return
+        .then(() => {
+          if (!cancelled) setPreviewVersion((v) => v + 1)
+        })
+      return () => {
+        cancelled = true
+      }
     }
     readFromDisk()
-      .then(applyDisk)
-      .finally(() => setLoadedId(id))
+      .then((disk) => {
+        if (!cancelled) applyDisk(disk)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedId(id)
+      })
     return () => {
+      cancelled = true
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
