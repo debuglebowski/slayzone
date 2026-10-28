@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } fro
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { TaskArtifact } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task/shared'
-import { depsChanged } from '@slayzone/ui'
+import { depsChanged, useDepsChanged } from '@slayzone/ui'
 
 interface ArtifactSearchPanelProps {
   artifacts: TaskArtifact[]
@@ -34,7 +34,8 @@ interface ArtifactResult {
 
 /** The last search run that finished: what it searched for, and what it found. */
 interface FinishedSearch {
-  deps: readonly unknown[]
+  /** Everything the run used, in the search effect's dependency order. */
+  deps: readonly [query: string, matchCase: boolean, useRegex: boolean, ...sources: unknown[]]
   results: ArtifactResult[]
 }
 
@@ -48,8 +49,7 @@ async function runArtifactSearch({
   contentCache,
   readContent,
   getArtifactPath,
-  onDone,
-  setCollapsed
+  onDone
 }: {
   query: string
   matchCase: boolean
@@ -59,7 +59,6 @@ async function runArtifactSearch({
   readContent: (id: string) => Promise<string | null>
   getArtifactPath: (artifact: TaskArtifact) => string
   onDone: (results: ArtifactResult[]) => void
-  setCollapsed: (collapsed: Set<string>) => void
 }): Promise<void> {
   try {
     const flags = matchCase ? 'g' : 'gi'
@@ -108,7 +107,6 @@ async function runArtifactSearch({
       }
     }
     onDone(res)
-    setCollapsed(new Set())
   } catch {
     onDone([])
   }
@@ -162,6 +160,12 @@ export function ArtifactSearchPanel({
   if (!hasQuery && finished !== null) setFinished(null)
   // The latest finished run's results stay on screen while a newer one runs.
   const results = finished?.results ?? []
+  // Groups collapsed by hand belong to one search's results: results for a different
+  // query or options land with every group expanded (adjusted while rendering, keyed on
+  // what the finished run searched for). The same search re-running — on every tab
+  // re-show (<Activity>), or over a refreshed artifact list — keeps them.
+  const [shownQuery, shownMatchCase, shownUseRegex] = finished?.deps ?? []
+  if (useDepsChanged([shownQuery, shownMatchCase, shownUseRegex])) setCollapsed(new Set())
   // "Searching..." until a run has finished for exactly what is searched now. A tab
   // re-show (<Activity>) re-runs the search below but changes none of it, so the
   // results on screen are not flagged as searching again.
@@ -181,7 +185,14 @@ export function ArtifactSearchPanel({
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!query.trim()) return
-    const deps = [query, matchCase, useRegex, textArtifacts, readContent, getArtifactPath]
+    const deps: FinishedSearch['deps'] = [
+      query,
+      matchCase,
+      useRegex,
+      textArtifacts,
+      readContent,
+      getArtifactPath
+    ]
     // A run superseded (newer search, tab hidden, unmount) lands nothing: finishing
     // after a newer run, its older results would replace the newer ones and leave
     // "Searching..." stuck (its deps no longer match).
@@ -197,9 +208,6 @@ export function ArtifactSearchPanel({
         getArtifactPath,
         onDone: (found) => {
           if (!superseded) setFinished({ deps, results: found })
-        },
-        setCollapsed: (next) => {
-          if (!superseded) setCollapsed(next)
         }
       })
     }, 300)

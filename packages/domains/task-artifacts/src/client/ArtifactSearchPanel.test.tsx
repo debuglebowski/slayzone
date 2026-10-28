@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 // Debounced artifact search. Task tabs live in <Activity>: re-showing the tab
 // re-runs the search (as before), but the results on screen are not flagged
-// "Searching..." again — nothing about the query changed.
+// "Searching..." again — nothing about the query changed — and the result groups
+// collapsed by hand stay collapsed (so do they when a refreshed artifact list re-runs
+// it). Results for a new query or changed options still land with every group open.
 import { Activity } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -36,6 +38,11 @@ const summary = () => screen.queryByText(/ results? in \d+ files?$/)?.textConten
 const files = () => screen.queryAllByText(/^[ab]\.md$/).map((el) => el.textContent)
 const type = (value: string) =>
   fireEvent.change(screen.getByPlaceholderText('Search artifacts...'), { target: { value } })
+/** A file's result group: its header button, then one button per match line. */
+const groupHeader = (path: string) => screen.getByText(path).closest('button') as HTMLElement
+const toggle = (path: string) => fireEvent.click(groupHeader(path))
+const expanded = (path: string) =>
+  (groupHeader(path).parentElement as HTMLElement).querySelectorAll('button').length > 1
 /** Past the 300 ms debounce, then let the reads and the search settle. */
 const settle = () =>
   act(async () => {
@@ -145,6 +152,96 @@ describe('ArtifactSearchPanel', () => {
     expect(searching()).toBe(false)
     expect(summary()).toBe('1 result in 1 file')
     expect(files()).toEqual(['a.md'])
+  })
+
+  it('a new query resets the collapsed groups when its results land', async () => {
+    render(<Tab mode="visible" />)
+    type('hello')
+    await settle()
+    toggle('a.md')
+    expect(expanded('a.md')).toBe(false)
+
+    type('hell')
+    // The previous results stay on screen, as they were, until the new ones land.
+    expect(searching()).toBe(true)
+    expect(expanded('a.md')).toBe(false)
+    await settle()
+    expect(searching()).toBe(false)
+    expect(expanded('a.md')).toBe(true)
+
+    // Back to the earlier query: a new search too, not a restore of its groups.
+    toggle('a.md')
+    type('hello')
+    await settle()
+    expect(expanded('a.md')).toBe(true)
+  })
+
+  it('a changed option resets the collapsed groups when its results land', async () => {
+    render(<Tab mode="visible" />)
+    type('hello')
+    await settle()
+    toggle('a.md')
+
+    fireEvent.click(screen.getByTitle('Match Case')) // 'hello' still matches a.md
+    expect(expanded('a.md')).toBe(false)
+    await settle()
+    expect(files()).toEqual(['a.md'])
+    expect(expanded('a.md')).toBe(true)
+  })
+
+  it('clearing and retyping the query resets the collapsed groups', async () => {
+    render(<Tab mode="visible" />)
+    type('hello')
+    await settle()
+    toggle('a.md')
+
+    type('')
+    type('hello')
+    await settle()
+    expect(expanded('a.md')).toBe(true)
+  })
+
+  it('a collapsed group stays collapsed when the search re-runs on show', async () => {
+    contents.a2 = null // not readable yet: read (and matched) by the re-run on show
+    const view = render(<Tab mode="visible" />)
+    type('hello')
+    await settle()
+    toggle('a.md')
+    expect(files()).toEqual(['a.md'])
+    expect(expanded('a.md')).toBe(false)
+
+    view.rerender(<Tab mode="hidden" />)
+    contents.a2 = 'hello there'
+    view.rerender(<Tab mode="visible" />)
+    await settle()
+    expect(files()).toEqual(['a.md', 'b.md']) // the re-run landed
+    expect(expanded('a.md')).toBe(false)
+    expect(expanded('b.md')).toBe(true)
+  })
+
+  it('a collapsed group stays collapsed when the artifact list is refreshed', async () => {
+    contents.a2 = 'hello there'
+    const List = ({ artifacts }: { artifacts: TaskArtifact[] }) => (
+      <ArtifactSearchPanel
+        artifacts={artifacts}
+        readContent={readContent}
+        getArtifactPath={getArtifactPath}
+        onSelectResult={onSelectResult}
+      />
+    )
+    const view = render(<List artifacts={ARTIFACTS} />)
+    type('hello')
+    await settle()
+    toggle('a.md')
+
+    // A refetch hands over the same rows as new objects: the search re-runs.
+    view.rerender(<List artifacts={ARTIFACTS.map((a) => ({ ...a }))} />)
+    expect(searching()).toBe(true)
+    await settle()
+    expect(searching()).toBe(false)
+    expect(files()).toEqual(['a.md', 'b.md'])
+    expect(expanded('a.md')).toBe(false)
+    expect(expanded('b.md')).toBe(true)
   })
 
   it('keeps the results (not "Searching...") while the search re-runs on show', async () => {
