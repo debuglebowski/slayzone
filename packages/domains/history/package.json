@@ -19,6 +19,8 @@
     "@types/better-sqlite3": "^9.6.0"
   },
   "dependencies": {
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "zod": "^4.3.5"
   }
 }
