@@ -18,3 +18,4 @@ export {
   setFileNote,
   toggleFileLabel
 } from './test-panel-store'
+export { testPanelRouter, type TestPanelRouter, type TestPanelMounts } from './router'

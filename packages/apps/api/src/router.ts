@@ -31,7 +31,7 @@ import { taskRouter } from './routers/task'
 import { templateRouter } from '@slayzone/task/server'
 import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter } from '@slayzone/task-terminals/server'
-import { testPanelRouter } from './routers/test-panel'
+import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
 import { worktreesRouter } from './routers/worktrees'
 
@@ -94,4 +94,7 @@ type IsAppSlice<TMounts extends RouterMounts> =
     : false
 type AssertAppSlice<T extends true> = T
 
-export type DomainRouterSlices = [AssertAppSlice<IsAppSlice<TagsMounts>>]
+export type DomainRouterSlices = [
+  AssertAppSlice<IsAppSlice<TagsMounts>>,
+  AssertAppSlice<IsAppSlice<TestPanelMounts>>
+]

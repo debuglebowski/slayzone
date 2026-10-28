@@ -1,6 +1,6 @@
 import { z } from 'zod'
+import { scanTestFiles } from './scanner'
 import {
-  scanTestFiles,
   listCategories,
   createCategory,
   updateCategory,
@@ -18,14 +18,14 @@ import {
   listFileNotes,
   setFileNote,
   toggleFileLabel
-} from '@slayzone/test-panel/server'
+} from './test-panel-store'
 import type {
   CreateTestCategoryInput,
   UpdateTestCategoryInput,
   TestProfile,
   CreateTestLabelInput,
   UpdateTestLabelInput
-} from '@slayzone/test-panel/shared'
+} from '../shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 18 `db:testPanel:*` IPC handlers (test-panel/src/main/handlers.ts).
@@ -124,3 +124,12 @@ export const testPanelRouter = router({
     .input(z.object({ projectId: z.string(), filePath: z.string(), note: z.string() }))
     .mutation(({ ctx, input }) => setFileNote(ctx.db, input.projectId, input.filePath, input.note))
 })
+
+export type TestPanelRouter = typeof testPanelRouter
+
+/**
+ * Where this domain's router sits in the app router. `@slayzone/api` mounts
+ * `testPanelRouter` at `testPanel` (and asserts the slice in its `router.ts`); the
+ * domain's client is typed against exactly this (`client/trpc.ts`).
+ */
+export type TestPanelMounts = { testPanel: TestPanelRouter }

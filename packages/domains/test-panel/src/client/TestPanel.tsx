@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './trpc'
 import { Settings, RefreshCw, ChevronRight } from 'lucide-react'
 import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@slayzone/ui'
 import type { TestLabel } from '../shared/types'

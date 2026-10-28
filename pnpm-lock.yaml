@@ -2485,6 +2485,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -2497,6 +2500,9 @@ importers:
       react:
         specifier: ^19.3.1
         version: 19.3.1
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@types/picomatch':
         specifier: ^4.0.2
