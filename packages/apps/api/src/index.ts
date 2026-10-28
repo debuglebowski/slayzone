@@ -40,7 +40,6 @@ export {
 } from './app-deps'
 export { setPtyDeps, getPtyDeps, type PtyDeps } from './app-deps'
 export { setIntegrationOps, getIntegrationOps } from './app-deps'
-export { setTaskDeps, getTaskOps } from './app-deps'
 export { setNotifyEvents, getNotifyEvents, type NotifyEventMap } from './app-deps'
 export {
   setAutomationsEvents,

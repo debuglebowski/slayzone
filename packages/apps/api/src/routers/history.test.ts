@@ -12,11 +12,14 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { taskRouter } from './task.js'
 import { tagsRouter } from '@slayzone/tags/server'
 import { historyRouter } from '@slayzone/history/server'
-import { setTaskDeps } from '../app-deps.js'
-import { taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  taskRouter,
+  setTaskDeps,
+  taskOps,
+  configureTaskRuntimeAdapters
+} from '@slayzone/task/server'
 import type { Task } from '@slayzone/task-contracts'
 
 const h = await createTestHarness()

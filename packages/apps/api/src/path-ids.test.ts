@@ -32,7 +32,8 @@ import {
   configureTaskRuntimeAdapters,
   downloadArtifactFolder,
   taskOps,
-  type ArtifactDownloadHost
+  type ArtifactDownloadHost,
+  setTaskDeps
 } from '@slayzone/task/server'
 import { BlobStore, createArtifactStore } from '@slayzone/task-artifacts/server'
 import { afterAll, describe, expect, test } from 'vitest'
@@ -40,7 +41,6 @@ import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { appRouter } from './router.js'
 import { setAuthGate } from '@slayzone/trpc-server'
-import { setTaskDeps } from './app-deps.js'
 import { registerArchiveManyTaskRoute } from './http/rest-api/tasks/archive-many.js'
 import { registerArchiveManyTaskTool } from './http/mcp-tools/archive-many-task.js'
 import type { RestApiDeps } from './http/rest-api/types.js'

@@ -48,6 +48,7 @@ vi.mock('@slayzone/task/server', async () => {
   // api's router composes task's own routers; empty stand-ins keep it importable.
   const { router } = await import('@slayzone/trpc-server')
   return {
+    taskRouter: router({}),
     agentSessionsRouter: router({}),
     templateRouter: router({}),
     recordConversation: vi.fn(),

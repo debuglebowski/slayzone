@@ -19,9 +19,13 @@ import type {
   PanelVisibility,
   TaskTemplate
 } from '@slayzone/task-contracts'
-import { taskRouter } from './task.js'
-import { setTaskDeps } from '../app-deps.js'
-import { templateRouter, taskOps, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  taskRouter,
+  setTaskDeps,
+  templateRouter,
+  taskOps,
+  configureTaskRuntimeAdapters
+} from '@slayzone/task/server'
 
 const h = await createTestHarness()
 setTaskDeps({ ops: taskOps })

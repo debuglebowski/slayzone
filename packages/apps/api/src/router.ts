@@ -14,7 +14,6 @@ import {
   agentTurnsRouter,
   type AgentTurnsMounts
 } from '@slayzone/agent-turns/server'
-import { agentSessionsRouter, type AgentSessionsMounts } from '@slayzone/task/server'
 import { automationsRouter } from './routers/automations'
 import { chatRouter } from './routers/chat'
 import { diagnosticsRouter } from './routers/diagnostics'
@@ -32,8 +31,14 @@ import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
 import { settingsRouter, type SettingsMounts } from '@slayzone/settings/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
-import { taskRouter } from './routers/task'
-import { templateRouter, type TemplateMounts } from '@slayzone/task/server'
+import {
+  taskRouter,
+  agentSessionsRouter,
+  templateRouter,
+  type AgentSessionsMounts,
+  type TemplateMounts,
+  type TaskMounts
+} from '@slayzone/task/server'
 import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
@@ -109,6 +114,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<SettingsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
+  AssertAppSlice<IsAppSlice<TaskMounts>>,
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
   AssertAppSlice<IsAppSlice<TemplateMounts>>,

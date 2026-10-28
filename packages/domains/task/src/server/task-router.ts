@@ -1,19 +1,17 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
-import {
-  taskEvents,
-  recordPendingSpawn,
-  recordConversation,
-  isHonoredConversation,
-  deleteSession,
-  InvalidTaskUpdateError,
-  type OpDeps,
-  type TaskEventMap
-} from '@slayzone/task/server'
+import { taskEvents, type TaskEventMap } from './events'
+import { recordPendingSpawn, recordConversation, isHonoredConversation, deleteSession } from './ops'
+import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getTaskBus, getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
+import {
+  getTaskBus,
+  getTaskOps,
+  getTaskOnMutation,
+  getTaskReserveWarmTaskId
+} from './task-router-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are

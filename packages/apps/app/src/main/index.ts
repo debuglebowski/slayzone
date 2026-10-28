@@ -449,7 +449,12 @@ import {
   renderToPdf,
   renderToPng
 } from '@slayzone/task/electron'
-import { configureTaskRuntimeAdapters, closeArtifactWatcher, taskOps } from '@slayzone/task/server'
+import {
+  configureTaskRuntimeAdapters,
+  closeArtifactWatcher,
+  taskOps,
+  setTaskDeps
+} from '@slayzone/task/server'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
@@ -2288,7 +2293,7 @@ app
             // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
             // artifacts/template stores are electron-free + imported directly). Same ops
             // the IPC handlers call — one implementation, both transports.
-            mod.setTaskDeps({ ops: taskOps, onMutation: notifyTasksChanged })
+            setTaskDeps({ ops: taskOps, onMutation: notifyTasksChanged })
             // Cross-domain notify bus — same instance `notifyRenderer()` + the
             // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
             // (renderer cutover is slice 5).

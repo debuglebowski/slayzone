@@ -11,6 +11,11 @@ export {
   type AgentSessionsRouter,
   type AgentSessionsMounts
 } from './agent-sessions-router'
+// `task.*` tRPC router + the host-injected deps it calls. Composed by `@slayzone/api`;
+// the deps are injected by the composition roots (hub, Electron main).
+export { taskRouter } from './task-router'
+export { setTaskDeps, getTaskOps } from './task-router-deps'
+export type { TaskRouter, TaskMounts } from './router-mounts'
 
 export {
   artifactWatcherEvents,

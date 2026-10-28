@@ -15,7 +15,6 @@ import {
   assertHubLocalExecEnabled
 } from '@slayzone/platform/hub-switch-refusal'
 import {
-  setTaskDeps,
   setIntegrationOps,
   setNotifyEvents,
   setAutomationsEvents,
@@ -52,7 +51,8 @@ import {
   handleAttentionTransition,
   registerConversationHealer,
   registerConversationResolver,
-  taskSessionStore
+  taskSessionStore,
+  setTaskDeps
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
 import { handleTerminalStateChange, relocateProjectIcons } from '@slayzone/projects/server'
