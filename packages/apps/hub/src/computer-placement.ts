@@ -33,13 +33,8 @@ import { DEFAULT_LOCAL_COMPUTER_NAME, resolveTaskComputerId } from '@slayzone/co
 import type { ComputerWork, ComputerWorkGate } from '@slayzone/computer-transport/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
-import {
-  computerServes,
-  mayUseComputer,
-  resource,
-  type OwnedResource,
-  type WorkspaceComputerTarget
-} from '@slayzone/api'
+import { computerServes, mayUseComputer, resource, type OwnedResource } from '@slayzone/api'
+import type { WorkspaceComputerTarget } from '@slayzone/file-editor/server'
 
 /** A connected computer, as the gateway lists it. */
 export interface UsableComputer {

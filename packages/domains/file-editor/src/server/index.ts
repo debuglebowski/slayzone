@@ -51,3 +51,21 @@ export {
   type WorkspaceFsAdapters,
   type WorkspaceRoots
 } from './workspace-fs'
+
+export {
+  setWorkspaceDeps,
+  getWorkspaceDeps,
+  type WorkspaceDeps,
+  type WorkspaceComputerTarget
+} from './workspace-deps'
+
+export {
+  fileEditorRouter,
+  type FileEditorRouter,
+  type FileEditorMounts
+} from './file-editor-router'
+export {
+  setFileEditorRouterDeps,
+  getFileEditorRouterDeps,
+  type FileEditorRouterDeps
+} from './file-editor-router-deps'

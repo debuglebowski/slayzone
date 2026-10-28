@@ -21,10 +21,11 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
-import type { FileWatchEvent } from '@slayzone/file-editor/server'
-import type { SearchFilesOptions } from '@slayzone/file-editor/shared'
+import type { FileWatchEvent } from './watcher'
+import type { SearchFilesOptions } from '../shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getAppDeps, getWorkspaceDeps } from '../app-deps'
+import { getWorkspaceDeps } from './workspace-deps'
+import { getFileEditorRouterDeps } from './file-editor-router-deps'
 
 const searchOptions = z.unknown() as unknown as z.ZodType<SearchFilesOptions>
 
@@ -149,7 +150,7 @@ export const fileEditorRouter = router({
       const abs = input.targetPath
         ? path.resolve(input.rootPath, input.targetPath)
         : path.resolve(input.rootPath)
-      getAppDeps().shellShowItemInFolder(abs)
+      getFileEditorRouterDeps().shellShowItemInFolder(abs)
     }),
 
   /**
@@ -189,3 +190,7 @@ export const fileEditorRouter = router({
       })
     )
 })
+
+export type FileEditorRouter = typeof fileEditorRouter
+/** Where api mounts this domain's router (`router.ts`). */
+export type FileEditorMounts = { fileEditor: FileEditorRouter }

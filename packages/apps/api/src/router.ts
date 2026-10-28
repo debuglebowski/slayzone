@@ -24,7 +24,7 @@ import {
 import { automationsRouter, type AutomationsMounts } from '@slayzone/automations/server'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
-import { fileEditorRouter } from './routers/file-editor'
+import { fileEditorRouter, type FileEditorMounts } from '@slayzone/file-editor/server'
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'
@@ -122,6 +122,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AutomationsMounts>>,
   AssertAppSlice<IsAppSlice<ChatMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
+  AssertAppSlice<IsAppSlice<FileEditorMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<IntegrationsMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,

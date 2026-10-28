@@ -9,7 +9,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { fileEditorRouter } from './file-editor.js'
+import { fileEditorRouter } from './file-editor-router.js'
 
 const h = await createTestHarness()
 const caller = fileEditorRouter.createCaller({ db: h.slayDb, dataRoot: '' })

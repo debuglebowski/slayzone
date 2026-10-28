@@ -1445,12 +1445,18 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       codemirror:
         specifier: ^6.0.1
         version: 6.0.2
@@ -1466,6 +1472,9 @@ importers:
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@testing-library/react':
         specifier: ^16.3.3

@@ -23,7 +23,6 @@ import {
   setBackupOps,
   setAuthEvents,
   setComputersDeps,
-  setWorkspaceDeps,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
@@ -145,7 +144,11 @@ import {
   killAllProcesses,
   setProcessesDeps
 } from '@slayzone/processes/server'
-import { createLocalWorkspaceFs, closeAllFileWatchers } from '@slayzone/file-editor/server'
+import {
+  createLocalWorkspaceFs,
+  closeAllFileWatchers,
+  setWorkspaceDeps
+} from '@slayzone/file-editor/server'
 import {
   runGhLocally,
   setGhExecutor,

@@ -22,7 +22,7 @@
 import { z } from 'zod'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getWorkspaceDeps } from '../app-deps'
+import { getWorkspaceDeps } from '@slayzone/file-editor/server'
 
 /** Resolvable address of the machine a call targets. */
 const targetInput = z.object({

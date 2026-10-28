@@ -7,10 +7,15 @@
  *
  * @module api/domain-router-deps
  */
+import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/server'
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
-import { getAppDeps, getComputersDepsOrNull, getWorkspaceDeps } from './app-deps'
+import { getAppDeps, getComputersDepsOrNull } from './app-deps'
+
+setFileEditorRouterDeps({
+  shellShowItemInFolder: (absPath) => getAppDeps().shellShowItemInFolder(absPath)
+})
 
 setProjectsRouterDeps({
   countUsableComputers: () => {
@@ -19,6 +24,8 @@ setProjectsRouterDeps({
   }
 })
 
+// The workspace registry is file-editor's, not api's; api only bridges it to the
+// `worktrees` seam, since worktrees does not otherwise reach into file-editor's state.
 setWorktreesRouterDeps({
   getWorkspace: () => getWorkspaceDeps(),
   shellOpenPath: (absPath) => getAppDeps().shellOpenPath(absPath)

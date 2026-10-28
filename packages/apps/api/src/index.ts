@@ -30,12 +30,6 @@ export {
   type AccessClass
 } from './admin-policy'
 export { startTrpcServer, stopTrpcServer, type StartTrpcServerOpts } from './ws-server'
-export {
-  setWorkspaceDeps,
-  getWorkspaceDeps,
-  type WorkspaceDeps,
-  type WorkspaceComputerTarget
-} from './app-deps'
 export { setNotifyEvents, getNotifyEvents, type NotifyEventMap } from './app-deps'
 // The automations domain's bus setter, re-exported for the Electron host, which
 // reaches it through its lazy `import('@slayzone/api')` (one registry, the domain's).
