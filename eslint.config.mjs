@@ -52,7 +52,11 @@ export default defineConfig(
       'react-hooks/immutability': 'error',
       'react-hooks/purity': 'error',
       'react-hooks/preserve-manual-memoization': 'error',
-      'react-hooks/static-components': 'error'
+      'react-hooks/static-components': 'error',
+      // Owned here, not by biome's useExhaustiveDependencies (off in biome.json): React's own
+      // rule, and the React Compiler honors its suppressions. 'warn' while the backlog is
+      // cleared; lint:eslint's --max-warnings caps it at the current count.
+      'react-hooks/exhaustive-deps': 'warn'
     }
   },
   // Ban raw setInterval in renderer/client code — these timers fire while the
