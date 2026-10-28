@@ -7,16 +7,19 @@ import {
   normalizeClientEvent,
   buildExportBundle,
   summarizeExportEvents
-} from '@slayzone/diagnostics/server'
+} from './diagnostics-store'
 import type {
   ClientErrorEventInput,
   ClientDiagnosticEventInput,
   DiagnosticsConfig,
   DiagnosticsExportBundle
-} from '@slayzone/diagnostics/shared'
+} from '../shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { createAccessScope, resource, type AccessScope, type OwnedResource } from '../access'
-import { accessRequestOf } from '../owner-gate'
+import {
+  getDiagnosticsRouterDeps,
+  type DiagnosticsAccessScope,
+  type DiagnosticsNamedResource
+} from './diagnostics-router-deps'
 
 const clientErrorInput = z.unknown() as unknown as z.ZodType<ClientErrorEventInput>
 const clientEventInput = z.unknown() as unknown as z.ZodType<ClientDiagnosticEventInput>
@@ -67,7 +70,7 @@ export const diagnosticsRouter = router({
       if (!ctx.principal) return bundle
       return withoutOthersEvents(
         withoutPtyOutput(bundle),
-        createAccessScope(ctx.db, accessRequestOf(ctx))
+        getDiagnosticsRouterDeps().accessScopeFor(ctx)
       )
     })
 })
@@ -96,16 +99,20 @@ export function withoutPtyOutput(
  */
 export async function withoutOthersEvents(
   bundle: DiagnosticsExportBundle | null,
-  scope: AccessScope
+  scope: DiagnosticsAccessScope
 ): Promise<DiagnosticsExportBundle | null> {
   if (!bundle || !scope.enforcing) return bundle
   const events: DiagnosticsExportBundle['events'] = []
   for (const e of bundle.events) {
-    const named: OwnedResource[] = []
-    if (e.taskId) named.push(resource('task', e.taskId))
-    if (e.sessionId) named.push(resource('session', e.sessionId))
-    if (e.projectId) named.push(resource('project', e.projectId))
+    const named: DiagnosticsNamedResource[] = []
+    if (e.taskId) named.push({ kind: 'task', id: e.taskId })
+    if (e.sessionId) named.push({ kind: 'session', id: e.sessionId })
+    if (e.projectId) named.push({ kind: 'project', id: e.projectId })
     if (await scope.allowsAll(named)) events.push(e)
   }
   return { ...bundle, events, summary: summarizeExportEvents(events) }
 }
+
+export type DiagnosticsRouter = typeof diagnosticsRouter
+/** Where api mounts this domain's router (`router.ts`). */
+export type DiagnosticsMounts = { diagnostics: DiagnosticsRouter }

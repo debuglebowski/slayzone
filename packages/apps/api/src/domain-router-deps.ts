@@ -7,11 +7,18 @@
  *
  * @module api/domain-router-deps
  */
+import { setDiagnosticsRouterDeps } from '@slayzone/diagnostics/server'
 import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/server'
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { createAccessScope } from './access'
 import { getAppDeps, getComputersDepsOrNull } from './app-deps'
+import { accessRequestOf } from './owner-gate'
+
+setDiagnosticsRouterDeps({
+  accessScopeFor: (ctx) => createAccessScope(ctx.db, accessRequestOf(ctx))
+})
 
 setFileEditorRouterDeps({
   shellShowItemInFolder: (absPath) => getAppDeps().shellShowItemInFolder(absPath)

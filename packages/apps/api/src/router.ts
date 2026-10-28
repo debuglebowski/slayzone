@@ -22,7 +22,7 @@ import {
   type AgentTurnsMounts
 } from '@slayzone/agent-turns/server'
 import { automationsRouter, type AutomationsMounts } from '@slayzone/automations/server'
-import { diagnosticsRouter } from './routers/diagnostics'
+import { diagnosticsRouter, type DiagnosticsMounts } from '@slayzone/diagnostics/server'
 import { feedbackRouter, type FeedbackMounts } from '@slayzone/feedback/server'
 import {
   fileEditorRouter,
@@ -125,6 +125,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<ArtifactsMounts>>,
   AssertAppSlice<IsAppSlice<AutomationsMounts>>,
   AssertAppSlice<IsAppSlice<ChatMounts>>,
+  AssertAppSlice<IsAppSlice<DiagnosticsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<FileEditorMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,

@@ -24,6 +24,8 @@
     "@types/node": "^24.19.0"
   },
   "dependencies": {
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "zod": "^4.3.5"
   }
 }

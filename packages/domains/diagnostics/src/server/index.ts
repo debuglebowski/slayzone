@@ -31,3 +31,17 @@ export {
   type DiagnosticsEventRow,
   type BuildExportBundleOpts
 } from './diagnostics-store'
+export {
+  diagnosticsRouter,
+  withoutPtyOutput,
+  withoutOthersEvents,
+  type DiagnosticsRouter,
+  type DiagnosticsMounts
+} from './diagnostics-router'
+export {
+  setDiagnosticsRouterDeps,
+  getDiagnosticsRouterDeps,
+  type DiagnosticsAccessScope,
+  type DiagnosticsNamedResource,
+  type DiagnosticsRouterDeps
+} from './diagnostics-router-deps'

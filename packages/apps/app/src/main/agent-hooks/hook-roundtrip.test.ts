@@ -45,7 +45,15 @@ vi.mock('@slayzone/terminal/server', async () => {
     unadoptedWarmAgent: () => null
   }
 })
-vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
+vi.mock('@slayzone/diagnostics/server', async () => {
+  // api's router composes diagnostics' own router and wires its seam; stand-ins keep it importable.
+  const { router } = await import('@slayzone/trpc-server')
+  return {
+    diagnosticsRouter: router({}),
+    setDiagnosticsRouterDeps: () => {},
+    recordDiagnosticEvent: () => {}
+  }
+})
 vi.mock('@slayzone/task/server', async () => {
   // api's router composes task's own routers; empty stand-ins keep it importable.
   const { router } = await import('@slayzone/trpc-server')

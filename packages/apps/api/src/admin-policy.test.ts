@@ -38,7 +38,7 @@ import type { RestApiDeps, RestPrincipal } from './http/rest-api/types'
 import { registerMcpTools } from './http/mcp-tools'
 import { mcpAuthInfo, withMcpAdminGate } from './http/mcp-tools/admin-gate'
 import { settingWriteNeedsAdmin } from '@slayzone/settings/server'
-import { withoutPtyOutput } from './routers/diagnostics'
+import { withoutPtyOutput } from '@slayzone/diagnostics/server'
 
 const NO_DB = new Proxy(
   {},
