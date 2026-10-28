@@ -1317,7 +1317,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // to it, or close when already showing it. Shared by the shortcuts and Cmd+K.
   const toggleGitTab = useStableCallback((tab: GitTabId) => {
     if (!panelVisibility.diff) {
-      setGitDefaultTab(tab)
+      // The panel mounts on `tab`, so it is also the tab to save (and reopen on).
+      handleGitTabChange(tab)
       handlePanelToggle('diff', true)
     } else if (gitPanelRef.current?.getActiveTab() === tab) {
       handlePanelToggle('diff', false)

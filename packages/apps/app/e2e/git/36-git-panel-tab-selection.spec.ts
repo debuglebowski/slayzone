@@ -167,6 +167,24 @@ test.describe('Git panel shortcuts switch or close', () => {
     await press(mainWindow, 'panel-git-diff')
     await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 5_000 })
   })
+
+  // Opening the closed panel with a shortcut picks its tab, so it is the tab to
+  // reopen on: it must be saved, not left at whatever was saved before.
+  test('opening the closed panel with ⌘G saves the tab it opens on', async ({ mainWindow }) => {
+    await seed(mainWindow).updateTask({ id: taskId, gitActiveTab: 'stash' })
+    await seed(mainWindow).refreshData()
+    await openTaskById(mainWindow, taskId)
+    await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 10_000 })
+    expect(await savedGitTab(mainWindow, taskId)).toBe('stash')
+
+    await press(mainWindow, 'panel-git')
+    await expect(gitPanel(mainWindow)).toBeVisible({ timeout: 10_000 })
+    await expectActive(mainWindow, /^General/)
+    await expect.poll(() => savedGitTab(mainWindow, taskId)).toBe('general')
+
+    await press(mainWindow, 'panel-git')
+    await expect(gitPanel(mainWindow)).toHaveCount(0, { timeout: 5_000 })
+  })
 })
 
 test.describe('Saved PR tab while the GitHub remote loads', () => {
