@@ -708,6 +708,9 @@ export type AppDeps = {
       on(event: 'event', listener: (e: unknown) => void): EventEmitter
       on(event: 'shortcut', listener: (payload: BrowserShortcutPayload) => void): EventEmitter
       on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
+      /** Genuine user input in a task's browser view (focus / key / click / wheel,
+       *  throttled) — feeds the idle-close "user engaged" clock in the hub. */
+      on(event: 'engaged', listener: (payload: { taskId: string }) => void): EventEmitter
       on(
         event: 'create-task-from-link',
         listener: (intent: BrowserCreateTaskFromLinkIntent) => void

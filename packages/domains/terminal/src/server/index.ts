@@ -184,12 +184,17 @@ export {
   // THIS as the seam handler so status→done actually tears down sessions in
   // this process (where the PTYs/chats live post-cutover).
   onTaskReachedTerminal as runtimeOnTaskReachedTerminal,
-  // Idle-close (hibernation) config seam. Only the ELECTRON barrel exported this,
-  // which is how the feature went dead: the sweep that reads it runs in the
-  // side-car (slice 9), and with the getter unset it fails safe to disabled — so
-  // hibernation silently never fired. The side-car composition wires it now, and
-  // it must be reachable from the server barrel to do that.
+  // Idle-close (hibernation) seams: the config getter, the sweep that reads it,
+  // and the bare-taskId engagement touch. All were exported only from the
+  // ELECTRON barrel, so only the host could wire them — against a registry that
+  // owns no sessions since slice 9. Wiring just the getter here (Aug) left the
+  // feature dead: the sweep was still started only in the host. The hub wires
+  // all of them (apps/hub/src/idle-close.ts); they are no longer exported from
+  // the electron barrel, so they cannot be wired in the wrong process again.
   setIdleCloseConfigGetter,
+  startIdleChecker,
+  stopIdleChecker,
+  touchTaskMainSession,
   // `agent_state` recorder seam — the state that decides whether a restart
   // restores your agents. Same orphaning as `setIdleCloseConfigGetter` above:
   // only the ELECTRON barrel exported it, so when the pty runtime moved to the

@@ -84,7 +84,7 @@ export type CapabilityEventFrame = {
 
 // Event names per channel — kept here next to the bridge (TypedEmitter has no
 // wildcard). Must match the events the `app.ts` / `menu.ts` subscriptions wrap.
-const BROWSER_EVENTS = ['event', 'shortcut', 'focused', 'create-task-from-link'] as const
+const BROWSER_EVENTS = ['event', 'shortcut', 'focused', 'engaged', 'create-task-from-link'] as const
 const FLOATING_EVENTS = ['state', 'session-changed', 'collapse-changed'] as const
 const WEBVIEW_EVENTS = ['shortcut'] as const
 const TASK_WINDOWS_EVENTS = [

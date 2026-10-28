@@ -23,6 +23,7 @@ export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'event', listener: (e: unknown) => void): EventEmitter
   on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
   on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
+  on(event: 'engaged', listener: (payload: { taskId: string }) => void): EventEmitter
   on(event: 'create-task-from-link', listener: (intent: unknown) => void): EventEmitter
   off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
@@ -34,7 +35,6 @@ import {
   type ForcedHtmlTheme
 } from '@slayzone/platform'
 import { DebuggerHolders, type DebuggerHolder } from './debugger-holders'
-import { touchTaskMainSession } from '@slayzone/terminal/electron'
 import { isEngagementInputType, shouldReportEngagement } from '@slayzone/terminal/server'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
@@ -1463,7 +1463,9 @@ export class BrowserViewManager {
       // Idle-close engagement: focusing this view (e.g. opening the browser
       // panel) is genuine interaction with the task — keep its main agent's
       // idle clock fresh so it isn't hibernated out from under an active user.
-      touchTaskMainSession(entry.taskId)
+      // The sessions live in the hub, which touches on this event (relayed over
+      // the desktop bridge — apps/hub/src/idle-close.ts).
+      browserViewEvents.emit('engaged', { taskId: entry.taskId })
       browserViewEvents.emit('focused', { viewId }) // tRPC app.browser.onFocused
     })
 
@@ -1484,7 +1486,7 @@ export class BrowserViewManager {
       const now = Date.now()
       if (!shouldReportEngagement(lastEngagementTouchAt, now)) return
       lastEngagementTouchAt = now
-      touchTaskMainSession(entry.taskId)
+      browserViewEvents.emit('engaged', { taskId: entry.taskId })
     })
 
     wc.on('did-navigate', (_e, url) => {

@@ -505,8 +505,6 @@ import {
   shutdownAllPtys,
   killPtysByTaskId,
   onTaskReachedTerminal,
-  startIdleChecker,
-  stopIdleChecker,
   getPtyPids,
   onSessionChange,
   buildUsageOps,
@@ -1595,9 +1593,8 @@ function createMainWindow(): void {
   // .once: Chromium re-emits 'ready-to-show' a second time ~400ms after first
   // paint (compositor surface re-allocates after React mount). The second fire
   // is benign — handler is idempotent — but using .once keeps the boot
-  // timeline clean and avoids redundant idle-checker init.
+  // timeline clean. (The idle sweep is the hub's — apps/hub/src/idle-close.ts.)
   mainWindow.once('ready-to-show', () => {
-    if (mainWindow) startIdleChecker(mainWindow)
     mainWindowReady = true
     logBoot('main window ready-to-show')
     tryShowMainWindow()
@@ -2224,11 +2221,11 @@ app
       ])
       await installNotifyScript({ source: NOTIFY_SCRIPT_SOURCE })
     })
-    // Idle-close config and the warm-process pool are wired in the SIDE-CAR
-    // (composition.ts:509 and :547), which owns the pty runtime and the routing
-    // PtyBackend. The host's copies were registered on its OWN module singletons —
-    // `checkInactiveSessions` sweeps this process's session registry, which holds
-    // nothing, and the pool was constructed with `resolveComputerId: async () => null`,
+    // Idle-close (config + sweep + browser engagement touch) and the warm-process
+    // pool are wired in the HUB (idle-close.ts, composition.ts), which owns the pty
+    // runtime and the routing PtyBackend. The host's copies were registered on its
+    // OWN module singletons — its `checkInactiveSessions` swept a session registry
+    // that holds nothing, and the pool was constructed with `resolveComputerId: async () => null`,
     // i.e. explicitly unable to warm anything. Two registrations of the same
     // module-global also meant whichever process wrote last silently won.
     //
@@ -4076,7 +4073,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // 1. Kill running processes
         killAllPtys()
         killAllChatTransports()
-        stopIdleChecker()
         killAllProcesses()
 
         // 2. Stop timers
@@ -4762,7 +4758,6 @@ app.on('will-quit', (event) => {
     event: 'app.will-quit.complete',
     payload: { version: app.getVersion() }
   })
-  stopIdleChecker()
   closeArtifactWatcher()
   closeGitWatcher()
   // Reap the hub and the computer, THEN flush, THEN close: the process must not

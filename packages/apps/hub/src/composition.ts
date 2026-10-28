@@ -25,6 +25,7 @@ import {
   setAgentLifecycleEvents,
   setTaskTriggerBus,
   setAppDeps,
+  getAppDeps,
   setBackupOps,
   setPtyDeps,
   setChatDeps,
@@ -104,12 +105,10 @@ import {
   configureTransport,
   createDbChatDataOps,
   backfillChatModes,
-  setIdleCloseConfigGetter,
   setPtyEnricher,
   resetTerminalRuntimeForTest,
   type PtySessionWindow
 } from '@slayzone/terminal/server'
-import { SettingsService } from '@slayzone/settings/server'
 import {
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
@@ -190,6 +189,7 @@ import { createComputerPlacement } from './computer-placement.js'
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireHostKillStamp } from './host-kill.js'
+import { wireIdleClose } from './idle-close.js'
 import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
@@ -685,8 +685,8 @@ export function composeServer(opts: {
   })
   setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
 
-  // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as the
-  // idle-close getter below: the pty/chat runtimes live in THIS process, so the
+  // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as
+  // `wireIdleClose` below: the pty/chat runtimes live in THIS process, so the
   // Electron host's copy of the recorder fires for sessions it does not own
   // (i.e. never). Without this, no live agent is ever flagged, so
   // `listAutoRestoreTasks` is always empty and a restart lands every task on the
@@ -701,43 +701,6 @@ export function composeServer(opts: {
   // longer owns — the enricher is consulted where the sessions are, i.e. here.
   setPtyEnricher(createPtyEnricher(db))
 
-  // Idle-close (hibernation) config. Wired HERE because the pty runtime lives in
-  // this process (slice 9) — `isHibernateEligible` reads this getter, and with it
-  // unset it fails safe to `{ enabled: false }`. It was only ever wired in the
-  // Electron host, so when pty moved to the sidecar the entire feature went
-  // silently dead: the sweep ran, found no config, and never hibernated anything
-  // no matter what the user had set. Same orphaning as the warm pool below.
-  //
-  // Reads through the SHARED `SettingsService` instance (one per db handle) rather
-  // than a private cache: the settings router mutates that same instance, and
-  // `set()` is write-through for warmed keys, so a UI toggle is visible to this
-  // SYNC getter with no event and no restart. That is exactly the reader the
-  // service's own comment was designed for.
-  const settingsService = SettingsService.forDatabase(db)
-  const IDLE_CLOSE_KEYS = [
-    'terminal_auto_close_idle',
-    'terminal_idle_close_value',
-    'terminal_idle_close_unit'
-  ]
-  void settingsService.warmCache(IDLE_CLOSE_KEYS).then(
-    () => {
-      setIdleCloseConfigGetter(() => {
-        const value = Number(settingsService.getCached('terminal_idle_close_value')) || 30
-        const unit = settingsService.getCached('terminal_idle_close_unit') || 'minutes'
-        const unitMs = unit === 'seconds' ? 1_000 : unit === 'hours' ? 3_600_000 : 60_000
-        return {
-          // Raw `=== '1'` (NOT isLabEnabled, which defaults ON in dev) keeps it
-          // strictly opt-in.
-          enabled: settingsService.getCached('terminal_auto_close_idle') === '1',
-          idleMs: value * unitMs
-        }
-      })
-    },
-    () => {
-      // Warm failed (transient DB error at boot) — leave the getter unset so the
-      // sweep keeps failing safe rather than reading half a config.
-    }
-  )
   // Warm-process pool (plans/agent-sessions.md): pre-warm one agent per active
   // project so opening a task adopts instantly. PTY runs in THIS process
   // (slice 9), so the manager MUST be initialized here — the renderer's warm
@@ -1191,6 +1154,11 @@ export function composeServer(opts: {
       }
     })
   }
+
+  // Idle-close: config getter + sweep + the browser panel's engagement touch, all
+  // in THIS process because the pty sessions are here (./idle-close.ts). After
+  // setAppDeps: the browser `engaged` events arrive on its (bridged) emitter.
+  const idleClose = wireIdleClose(db, getAppDeps().browser.events)
 
   // PTY state-machine bridge — shared by the agent-hook HTTP route (restDeps
   // below) AND the computer-relay `event` consumer (wired in the async gateway
@@ -1821,7 +1789,7 @@ export function composeServer(opts: {
     for (const [key, value] of baseline) {
       await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value])
     }
-    await settingsService.warmCache(IDLE_CLOSE_KEYS)
+    await idleClose.rewarm()
     await refreshPrewarm()
     await initProcessManager(db)
     await backupOps.startAuto()

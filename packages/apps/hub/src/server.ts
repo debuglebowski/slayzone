@@ -13,6 +13,7 @@ import {
 import {
   beginTerminalShutdown,
   clearWindowTabCounts,
+  stopIdleChecker,
   teardownAllWarm
 } from '@slayzone/terminal/server'
 import {
@@ -847,6 +848,8 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()
+      // The idle sweep must not arm countdowns on sessions being torn down.
+      stopIdleChecker()
       // Kill the pool's pre-booted agents (billable, and nothing can adopt them once
       // this hub is gone) and stop it re-arming, before the gateway below closes.
       teardownAllWarm()

@@ -183,6 +183,23 @@ describe('desktop bridge: browser replay cache', () => {
   })
 })
 
+describe('desktop bridge: browser engagement', () => {
+  // Browser-panel input only exists on the desktop; the agent it must keep warm
+  // lives in the hub (idle-close.ts listens for exactly this event).
+  test('a desktop `engaged` event reaches the hub with its taskId', async () => {
+    const seen: unknown[] = []
+    const onEngaged = (p: unknown): void => {
+      seen.push(p)
+    }
+    hubBrowser.events.on('engaged', onEngaged)
+    await until(() => browserEvents.listenerCount('engaged') > 0, 'the engaged relay')
+    browserEvents.emit('engaged', { taskId: 'task-1' })
+    await until(() => seen.length === 1, 'engaged on the hub')
+    hubBrowser.events.off('engaged', onEngaged)
+    expect(seen).toEqual([{ taskId: 'task-1' }])
+  })
+})
+
 afterAll(() => {
   bridge.dispose()
   wssHandler.broadcastReconnectNotification()

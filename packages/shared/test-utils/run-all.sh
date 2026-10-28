@@ -96,6 +96,9 @@ run_harness packages/apps/hub/src/diagnostics-retention.test.ts
 # Host-kill stamp: fires where the pty sessions are (the side-car), not on the
 # host, whose session registry has been empty since slice 9.
 run_harness packages/apps/hub/src/host-kill.test.ts
+# Hub — idle-close wiring: the hub runs the sweep + config + browser engagement
+# touch (all were host-only after slice 9, so idle-close never fired).
+run_harness packages/apps/hub/src/idle-close.test.ts
 # Push-on-edit listens on the bus the task ops actually emit on. The host held the
 # only listeners, on an ipcMain the ops stopped using at the slice-9 cutover.
 run_harness packages/apps/hub/src/integrations-push.test.ts
@@ -158,6 +161,8 @@ run_harness packages/shared/transport/src/server/routers/upload-sources.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
+# Idle sweep runs windowless: idle-close countdown/hibernate + silence-timer idle flip.
+run_harness packages/domains/terminal/src/server/runtime/idle-sweep.test.ts
 # Hub-local pty/chat spawn refused with processes switched off; routed spawns unaffected.
 run_harness packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
 # node-pty optional in the published hub (T-30): loaded on the first local spawn, never at

@@ -649,9 +649,6 @@ export interface PtyShutdownResult {
   errors: Array<{ id: string; phase: string; message: string }>
 }
 
-// Reference to main window for sending idle events
-let mainWindow: PtySessionWindow | null = null
-
 // Interval reference for idle checker
 let idleCheckerInterval: NodeJS.Timeout | null = null
 
@@ -866,8 +863,14 @@ function transitionState(sessionId: string, newState: TerminalState): void {
 }
 
 // Check for inactive sessions and transition state (fallback timeout)
+// Window-free on purpose: every effect below reaches the renderer through
+// `ptyEvents` (tRPC), and the sessions live in the hub, which has no window.
+// It used to bail out unless the Electron host's cached main window existed,
+// so once the sessions moved to the hub the sweep never did anything.
 function checkInactiveSessions(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return
+  // Quit / test-reset kill cascade in progress — don't arm countdowns or flip
+  // states on sessions that are being torn down.
+  if (isShuttingDown) return
 
   const now = Date.now()
   for (const [sessionId, session] of sessions) {
@@ -986,8 +989,9 @@ export function touchPty(sessionId: string): boolean {
 }
 
 /** Mark engagement on a task's MAIN agent session, given only the bare taskId.
- *  Used by callers that don't know the session-id convention (e.g. the browser
- *  WebContentsView in main, whose input never reaches the renderer DOM). The
+ *  Used by callers that don't know the session-id convention (e.g. the hub's
+ *  relay of browser `engaged` events — a WebContentsView's input never reaches
+ *  the renderer DOM, so the desktop reports it by bare taskId). The
  *  main session is registered under `${taskId}:${taskId}` but `session.taskId`
  *  holds the bare id, so we resolve by that field + `isMainTabSession` rather
  *  than reconstructing the key — drift-proof if the convention ever changes.
@@ -1064,13 +1068,16 @@ export function probeSessionBackgroundJobs(
   return getPtyBackend().probeBackgroundJobs?.(sessionId, jobs) ?? Promise.resolve(null)
 }
 
-// Start the inactivity checker interval
-export function startIdleChecker(win: PtySessionWindow): void {
-  mainWindow = win
+/** Start the inactivity sweep (silence-timer idle flips + idle-close countdowns).
+ *  Must be started by the process that OWNS the sessions — the hub — or it sweeps
+ *  an empty registry. Idempotent: a second call restarts the interval. Unref'd so
+ *  a sweep is never what keeps a process alive. */
+export function startIdleChecker(): void {
   if (idleCheckerInterval) {
     clearInterval(idleCheckerInterval)
   }
   idleCheckerInterval = setInterval(checkInactiveSessions, IDLE_CHECK_INTERVAL_MS)
+  idleCheckerInterval.unref?.()
 }
 
 // Stop the inactivity checker
@@ -1079,7 +1086,6 @@ export function stopIdleChecker(): void {
     clearInterval(idleCheckerInterval)
     idleCheckerInterval = null
   }
-  mainWindow = null
 }
 
 // ---------------------------------------------------------------------------
@@ -3393,12 +3399,7 @@ export function killAllPtys(): void {
  *  exists and AI mode is configured). Matches the pty:exit IPC dispatch pattern. */
 export function broadcastRespawnRequest(taskId: string): void {
   ptyEvents.emit('respawn-suggested', taskId)
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  try {
-    mainWindow.webContents.send('pty:respawn-suggested', taskId)
-  } catch {
-    // window destroyed — ignore
-  }
+  broadcastPtyEvent('pty:respawn-suggested', taskId)
   recordDiagnosticEvent({
     level: 'info',
     source: 'pty',
@@ -3447,16 +3448,12 @@ export function requestEnsureAlive(
   taskId: string,
   opts: { force: boolean; timeoutMs: number }
 ): Promise<EnsureAliveResult> {
-  // Prefer cached mainWindow (set on ready-to-show), but fall back to any live
-  // BrowserWindow. The cached singleton lags startup-order: CLI calls before
-  // `ready-to-show` fires would otherwise see 'no-window' even with a window
-  // present. Splash window uses a `data:` URL — exclude it.
+  // Any live window from the host bridge (the hub's is a stub — the request and
+  // its ack flow over tRPC). Splash window uses a `data:` URL — exclude it.
   const liveWindow =
-    mainWindow && !mainWindow.isDestroyed()
-      ? mainWindow
-      : (getPtyHostBridge()
-          .getAllWindows()
-          .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')) ?? null)
+    getPtyHostBridge()
+      .getAllWindows()
+      .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')) ?? null
   if (!liveWindow) return Promise.resolve('no-window')
   // Note: callers should pre-check liveness (the main sessionId convention
   // lives in the renderer, e.g. `${taskId}:${taskId}` — see TaskDetailPage's

@@ -11,9 +11,10 @@
  * of the task the user was actively browsing got hibernated out from under them.
  *
  * The browser view's `webContents` emits `input-event` in the MAIN process; we
- * translate qualifying events into a throttled `touchPty` on the task's main
- * agent session. These helpers are the pure, testable core of that translation
- * (no Electron imports) so the wiring side stays trivial.
+ * translate qualifying events into a throttled `engaged` browser event, which the
+ * desktop bridge relays to the hub (owner of the sessions) as a touch on the
+ * task's main agent session. These helpers are the pure, testable core of that
+ * translation (no Electron imports) so the wiring side stays trivial.
  */
 
 /** Electron `input-event` types that count as genuine user engagement. Mirrors
