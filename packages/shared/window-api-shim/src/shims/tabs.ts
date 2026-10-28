@@ -9,7 +9,7 @@
 // `getMainSessionId(taskId) === `${taskId}:${taskId}`` (the helper Terminal.tsx
 // and Electron tests both rely on).
 
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type {
   TerminalTab,
   CreateTerminalTabInput,

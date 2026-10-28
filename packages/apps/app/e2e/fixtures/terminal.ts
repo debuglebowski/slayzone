@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect } from './electron'
 import { openTaskByTitle } from './electron'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { execSync } from 'child_process'

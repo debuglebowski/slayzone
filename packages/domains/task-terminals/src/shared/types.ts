@@ -1,4 +1,4 @@
-import type { AgentState, TerminalMode } from '@slayzone/terminal/shared'
+import type { AgentState, TerminalMode } from '@slayzone/terminal-contracts'
 
 export interface TerminalTab {
   id: string // UUID or "main"

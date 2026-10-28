@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
-import type { ValidationResult } from '@slayzone/terminal/shared'
+import type { ValidationResult } from '@slayzone/terminal-contracts'
 
 export interface UseTaskDoctorResult {
   doctorDialogOpen: boolean

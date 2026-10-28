@@ -6,7 +6,7 @@ import type {
   ValidationResult
 } from './types'
 import { whichBinary, validateShellEnv } from '../shell-env'
-import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal/shared'
+import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal-contracts'
 
 /**
  * Adapter for Claude Code CLI.

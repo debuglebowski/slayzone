@@ -1,5 +1,5 @@
 import type { TerminalTab } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 
 /** Human label for a terminal mode (provider name). */
 export function getModeLabel(mode: TerminalMode): string {

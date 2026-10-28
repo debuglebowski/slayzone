@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { CreateTaskInput } from '../types'
 
 const terminalModeSchema = z.string().min(1) as unknown as z.ZodType<TerminalMode>

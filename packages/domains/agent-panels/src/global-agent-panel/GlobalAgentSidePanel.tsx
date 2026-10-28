@@ -6,7 +6,7 @@ import {
   getModeLabel,
   groupTerminalModes
 } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,

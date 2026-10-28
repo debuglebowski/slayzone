@@ -1,4 +1,4 @@
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import type { ActivityState } from './adapters/types'
 
 /** Callback invoked when state actually changes (after debounce) */

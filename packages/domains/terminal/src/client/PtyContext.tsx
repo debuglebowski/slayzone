@@ -14,7 +14,7 @@ import {
   useFederationOrNull,
   HubScope
 } from '@slayzone/transport/client'
-import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
+import type { TerminalState, PromptInfo } from '@slayzone/terminal-contracts'
 import { useStableCallback } from '@slayzone/ui'
 import { disposeTerminal } from './terminal-cache'
 import { useTerminalStateStore, useWireTerminalStateStore } from './useTerminalStateStore'

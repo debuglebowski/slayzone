@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { parseAgentState, type AgentState } from '@slayzone/terminal/shared'
+import { parseAgentState, type AgentState } from '@slayzone/terminal-contracts'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
 
 /**

@@ -1,7 +1,7 @@
 import type { RefObject } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { useTRPCClient } from '@slayzone/transport/client'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalState } from '@slayzone/terminal-contracts'
 import {
   ensureFocusDiagnostics,
   captureBlurSync,

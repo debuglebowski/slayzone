@@ -17,7 +17,7 @@ import {
   type AgentStartupMode,
   type TerminalMode,
   type TerminalModeInfo
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'

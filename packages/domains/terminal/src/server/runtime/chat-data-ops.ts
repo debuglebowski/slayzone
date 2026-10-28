@@ -10,15 +10,15 @@ import {
 import { clearChatQueue } from '../chat-queue-store'
 import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
 import { getRemoteMcpEnvProvider } from './pty-manager'
-import type { TerminalMode } from '../../shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import {
   bumpAutocompleteUsage,
   getAutocompleteUsage,
   type UsageMap
 } from '../autocomplete-usage-store'
-import type { AgentEvent } from '../../shared/agent-events'
-import type { ChatEffort } from '../../shared/chat-effort'
-import type { ChatCollaborationMode } from '../../shared/chat-collaboration'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { ChatEffort } from '@slayzone/terminal-contracts'
+import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
 
 export interface ProviderConfigEntry {
   conversationId?: string | null

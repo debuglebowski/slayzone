@@ -21,7 +21,7 @@ import type {
   UpdateTerminalModeInput,
   UsageProviderConfig,
   UsageWindow
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { DebouncedInput } from './DebouncedInput'
 
 function HelpTip({ children }: { children: React.ReactNode }) {

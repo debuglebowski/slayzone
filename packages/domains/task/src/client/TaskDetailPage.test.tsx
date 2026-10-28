@@ -155,7 +155,7 @@ vi.mock('@slayzone/task/shared', () => ({
   priorityOptions: [{ value: 3, label: 'Medium' }]
 }))
 
-vi.mock('@slayzone/terminal/shared', () => ({
+vi.mock('@slayzone/terminal-contracts', () => ({
   DEV_SERVER_URL_PATTERN: /localhost/,
   SESSION_ID_COMMANDS: {},
   SESSION_ID_UNAVAILABLE: 'unavailable'

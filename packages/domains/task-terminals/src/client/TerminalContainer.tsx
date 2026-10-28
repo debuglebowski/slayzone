@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
-import { isPromptCaptureMode, type TerminalMode } from '@slayzone/terminal/shared'
+import { isPromptCaptureMode, type TerminalMode } from '@slayzone/terminal-contracts'
 import {
   matchesShortcut,
   useShortcutStore,
@@ -51,7 +51,7 @@ interface TerminalContainerProps {
   conversationHydrated?: boolean
   supportsSessionId?: boolean
   providerFlags?: string
-  executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
+  executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
   /** Owning task is temporary — disables terminal auto-start (regular-task-only). */
   isTemporary?: boolean
   isActive?: boolean

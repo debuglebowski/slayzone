@@ -19,6 +19,7 @@
   "dependencies": {
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/platform": "workspace:*"
   },

@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import { DEFAULT_TERMINAL_MODES } from '../shared/types'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 
 /**
  * Synchronize terminal modes in the database with the default modes defined in code.

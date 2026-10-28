@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
-import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'
 
 export interface UseDevServerDetectionParams {
   task: Task | null

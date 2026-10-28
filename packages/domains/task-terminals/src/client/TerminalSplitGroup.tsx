@@ -40,7 +40,7 @@ interface PaneProps {
   conversationHydrated?: boolean
   supportsSessionId?: boolean
   providerFlags?: string
-  executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
+  executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
   permissionNotice?: string | null
   /** Owning task is temporary — gates auto-start off (regular-task-only). */
   isTemporary?: boolean

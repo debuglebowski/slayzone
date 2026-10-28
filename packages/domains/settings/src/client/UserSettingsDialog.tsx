@@ -4,7 +4,7 @@ import { useTRPC } from '@slayzone/transport/client'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout, useDepsChanged } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
 
 // Import autonomous tabs

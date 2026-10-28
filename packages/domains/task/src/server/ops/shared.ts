@@ -23,7 +23,7 @@ import {
   parseColumnsConfig,
   WORKFLOW_CATEGORIES
 } from '@slayzone/projects/shared'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'

@@ -1,5 +1,5 @@
 import { TerminalSquare } from 'lucide-react'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 
 interface Props {
   state: TerminalState

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
-import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
-import { isAliveTerminalState } from '@slayzone/terminal/shared'
+import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal-contracts'
+import { isAliveTerminalState } from '@slayzone/terminal-contracts'
 import type { Task } from '@slayzone/task/shared'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects/shared'
 

@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { createTabRow, tabsEvents } from '@slayzone/task-terminals/server'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { RestApiDeps } from '../types'
 
 export function registerTabsCreateRoute(app: Express, deps: RestApiDeps): void {

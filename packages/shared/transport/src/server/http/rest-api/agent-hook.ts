@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { z } from 'zod'
-import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal/shared'
-import { mapEventType } from '@slayzone/terminal/shared'
+import type { AgentLifecycleEvent, TerminalState, TerminalMode } from '@slayzone/terminal-contracts'
+import { mapEventType } from '@slayzone/terminal-contracts'
 import {
   isHookDrivenMode,
   applyAgentHook,

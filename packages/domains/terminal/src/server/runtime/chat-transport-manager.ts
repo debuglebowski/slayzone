@@ -1,7 +1,7 @@
 import { spawn as realSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent } from '../../shared/agent-events'
-import type { ChatSessionStateEntry } from '../../shared/types'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
 import type {
   AgentBackend,
   ChatDriverContext,
@@ -15,7 +15,7 @@ import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
-import type { ConversationOrigin } from '../../shared/conversation-origin'
+import type { ConversationOrigin } from '@slayzone/terminal-contracts'
 import type { BufferedEvent } from '../chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -23,8 +23,8 @@ import type { BufferedEvent } from '../chat-events-store'
 // `chatModel` is an opaque, provider-specific model id (`claude --model`
 // alias for claude-chat, Codex model id for codex-chat) — typed as `string`.
 // The provider-aware catalog (`shared/chat-model-catalog.ts`) owns validity.
-import type { ChatEffort } from '../../shared/chat-effort'
-import type { ChatCollaborationMode } from '../../shared/chat-collaboration'
+import type { ChatEffort } from '@slayzone/terminal-contracts'
+import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
 import { markSessionUserInput, clearSessionUserInputMark } from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
 import {

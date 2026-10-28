@@ -23,7 +23,7 @@ import { createTestHarness } from '../../../../../test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../test-utils/rest-harness.js'
 import { handleAttentionTransition, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import { registerAgentHookRoute, type TerminalStateBridge } from './agent-hook.js'
 
 const h = await createTestHarness()

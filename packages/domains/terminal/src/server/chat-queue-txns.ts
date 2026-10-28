@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import type { QueuedChatMessage } from '../shared/types'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 import { pushChatQueue, popChatQueueHead, requeueAtHead } from './chat-queue-store'
 
 /**

@@ -3,7 +3,7 @@
  */
 import { expect, test } from 'vitest'
 import { filterBufferData } from './filter-buffer-data'
-import { stripUnderlineCodes } from '../shared/strip-underline'
+import { stripUnderlineCodes } from '@slayzone/terminal-contracts'
 
 // Basic underline stripping
 test('strips standalone SGR 4 (underline)', () => {

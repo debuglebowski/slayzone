@@ -55,6 +55,7 @@
 @source "../../../domains/task-terminals/src";
 @source "../../../domains/tasks/src";
 @source "../../../domains/terminal/src";
+@source "../../../domains/terminal-contracts/src";
 @source "../../../domains/usage-analytics/src";
 @source "../../../domains/worktrees/src";
 @source "../../../shared/editor/src";

@@ -4,7 +4,7 @@ import {
   parseAgentStartupMode,
   restoresRunningAgentsOnBoot,
   type AgentState
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { isTerminalStatus, parseColumnsConfig } from '@slayzone/workflow'
 
 /**

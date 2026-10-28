@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { isPromptCaptureMode } from '@slayzone/terminal/shared'
+import { isPromptCaptureMode } from '@slayzone/terminal-contracts'
 import { insertPrompt, prunePrompts } from './prompt-db'
 import { agentPromptsEvents } from './events'
 

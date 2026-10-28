@@ -5,7 +5,7 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import type { ProviderUsage, UsageWindow, UsageProviderConfig } from '@slayzone/terminal/shared'
+import type { ProviderUsage, UsageWindow, UsageProviderConfig } from '@slayzone/terminal-contracts'
 
 const TIMEOUT_MS = 10_000
 const MIN_BACKOFF_MS = 30_000 // minimum backoff on 429 (even if retry-after says 0)

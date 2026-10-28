@@ -32,6 +32,7 @@
     "@slayzone/task": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/worktrees": "workspace:*",

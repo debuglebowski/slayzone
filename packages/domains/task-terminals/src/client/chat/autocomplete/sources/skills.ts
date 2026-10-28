@@ -1,4 +1,4 @@
-import type { SkillInfo } from '@slayzone/terminal/shared'
+import type { SkillInfo } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, ChatListApi } from '../types'
 import { filterSkills } from '../../skill-filter'
 import { spliceReplace } from '../useAutocomplete'

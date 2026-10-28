@@ -20,6 +20,7 @@
     "@slayzone/editor": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/workflow": "workspace:*",

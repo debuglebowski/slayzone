@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import { updateTask } from './ops/shared.js'
 
 /**

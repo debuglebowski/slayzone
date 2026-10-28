@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { PtyInfo } from '@slayzone/terminal/shared'
+import type { PtyInfo } from '@slayzone/terminal-contracts'
 
 // The IPC tabs:* handlers (registerTerminalTabsHandlers) were removed at the
 // IPC→tRPC cutover — the renderer uses the tRPC `taskTerminals` router over the

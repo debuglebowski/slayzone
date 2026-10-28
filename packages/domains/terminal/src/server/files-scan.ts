@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import * as path from 'node:path'
 import { promisify } from 'node:util'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import type { FileMatch } from '../shared/types'
+import type { FileMatch } from '@slayzone/terminal-contracts'
 
 const execFileAsync = promisify(execFile)
 

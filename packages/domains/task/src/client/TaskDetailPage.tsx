@@ -62,7 +62,7 @@ import {
   resolveRepoPath
 } from '@slayzone/projects/shared'
 import { useDetectedRepos } from '@slayzone/projects'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import {
   Button,
   IconButton,
@@ -135,7 +135,7 @@ import {
   useSlayNudge,
   PtyStateDot
 } from '@slayzone/terminal'
-import type { LoopConfig } from '@slayzone/terminal/shared'
+import type { LoopConfig } from '@slayzone/terminal-contracts'
 import {
   TerminalContainer,
   type TerminalContainerHandle,

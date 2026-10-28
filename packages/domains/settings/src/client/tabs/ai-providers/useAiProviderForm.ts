@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from '@slayzone/ui'
-import type { TerminalModeInfo, CreateTerminalModeInput } from '@slayzone/terminal/shared'
+import type { TerminalModeInfo, CreateTerminalModeInput } from '@slayzone/terminal-contracts'
 import { slugify } from './utils'
 
 type TestResult = { ok: boolean; error?: string; detail?: string }

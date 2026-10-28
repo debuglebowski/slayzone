@@ -56,7 +56,7 @@ import {
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import { TerminalStatusButton } from '@slayzone/terminal'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import {

@@ -27,7 +27,7 @@
 //   + auto-open paths fire identically to the Electron main-process version.
 
 import type { TerminalHostRemote, TerminalObserverCallbackRouter } from '@slayzone/mojo-bindings'
-import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal-contracts'
 import { terminalModesShim } from './terminalModes'
 
 type DataCb = (sessionId: string, data: string, seq: number) => void

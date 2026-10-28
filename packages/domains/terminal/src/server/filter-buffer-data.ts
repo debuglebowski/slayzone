@@ -1,5 +1,5 @@
 import { stripDeviceStatusQueries } from '@slayzone/platform'
-import { stripUnderlineCodes } from '@slayzone/terminal/shared'
+import { stripUnderlineCodes } from '@slayzone/terminal-contracts'
 
 /**
  * Filter out terminal escape sequences that must not enter the replayable

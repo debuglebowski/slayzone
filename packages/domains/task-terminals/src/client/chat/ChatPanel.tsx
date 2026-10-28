@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { toast, useAppearance, safeClipboardWriteText } from '@slayzone/ui'
 import { useChatSession } from '@slayzone/terminal/client'
-import type { AgentState } from '@slayzone/terminal/shared'
+import type { AgentState } from '@slayzone/terminal-contracts'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
 import { ChatViewContext } from './ChatViewContext'
 import { useChatMode } from './useChatMode'

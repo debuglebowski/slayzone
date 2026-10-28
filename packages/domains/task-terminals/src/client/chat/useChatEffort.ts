@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, useStableCallback, type AgentEffort } from '@slayzone/ui'
-import { DEFAULT_CHAT_EFFORT } from '@slayzone/terminal/shared'
+import { DEFAULT_CHAT_EFFORT } from '@slayzone/terminal-contracts'
 
 interface SessionInfoLite {
   chatEffort?: AgentEffort | null

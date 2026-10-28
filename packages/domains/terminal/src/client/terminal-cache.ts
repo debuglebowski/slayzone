@@ -3,7 +3,7 @@ import type { FitAddon } from '@xterm/addon-fit'
 import type { SerializeAddon } from '@xterm/addon-serialize'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { WebglAddon } from '@xterm/addon-webgl'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { WebLinkProvider } from './web-link-provider'
 
 export interface CachedTerminal {

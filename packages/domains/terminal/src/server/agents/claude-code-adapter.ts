@@ -1,4 +1,4 @@
-import type { AgentEvent, ResultEvent, ModelUsage, TokenUsage } from '../../shared/agent-events'
+import type { AgentEvent, ResultEvent, ModelUsage, TokenUsage } from '@slayzone/terminal-contracts'
 import type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
 
 /**

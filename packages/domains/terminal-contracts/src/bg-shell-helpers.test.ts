@@ -1,6 +1,6 @@
 /**
  * Pure parser tests for bg-shell-helpers.
- * Run: pnpm dlx tsx packages/domains/terminal/src/shared/bg-shell-helpers.test.ts
+ * Run: pnpm dlx tsx packages/domains/terminal-contracts/src/bg-shell-helpers.test.ts
  */
 import { expect, test } from 'vitest'
 import type { ToolCallEvent, ToolResultEvent } from './agent-events'

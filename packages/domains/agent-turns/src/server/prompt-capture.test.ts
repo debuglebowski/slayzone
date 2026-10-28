@@ -9,7 +9,7 @@ import { DB_PRAGMAS } from '@slayzone/platform'
 import { runMigrations } from '../../../../shared/transport/src/db-bootstrap/migrations.js'
 import { describe, expect, test } from 'vitest'
 import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness.js'
-import { isPromptCaptureMode } from '@slayzone/terminal/shared'
+import { isPromptCaptureMode } from '@slayzone/terminal-contracts'
 import { capturePrompt, extractUserPromptText, isUserPromptSubmitEvent } from './prompt-capture.js'
 import { listPromptsForTask } from './prompt-db.js'
 

@@ -14,7 +14,7 @@ import {
   WORKING_DETECTION_WINDOW_MS,
   WORKING_DETECTION_THRESHOLD
 } from './state-machine'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import type { ActivityState } from './adapters/types'
 
 // Fake timers

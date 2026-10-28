@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, useStableCallback } from '@slayzone/ui'
-import { DEFAULT_CHAT_COLLABORATION, type ChatCollaborationMode } from '@slayzone/terminal/shared'
+import {
+  DEFAULT_CHAT_COLLABORATION,
+  type ChatCollaborationMode
+} from '@slayzone/terminal-contracts'
 
 interface SessionInfoLite {
   chatCollaboration?: ChatCollaborationMode | null

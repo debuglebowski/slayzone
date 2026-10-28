@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest'
 import { rankByName, rankAcrossSources } from './ranking'
 import { transformCommandSubmit } from './sources/commands'
 import type { AutocompleteSource } from './types'
-import type { CommandInfo } from '@slayzone/terminal/shared'
+import type { CommandInfo } from '@slayzone/terminal-contracts'
 
 interface TestItem {
   name: string

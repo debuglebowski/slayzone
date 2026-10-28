@@ -19,7 +19,8 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
-    "@slayzone/platform": "workspace:*"
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

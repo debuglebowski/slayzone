@@ -1,4 +1,4 @@
-import type { TerminalState } from '../shared/types'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 
 /**
  * The claude agent TREE — the model behind `TerminalState` for hook-driven claude

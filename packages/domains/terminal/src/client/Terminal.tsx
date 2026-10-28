@@ -63,14 +63,14 @@ import { useSessionState } from './useTerminalStateStore'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import { startingWatchdogVerdict, STARTING_WATCHDOG_INTERVAL_MS } from './starting-watchdog'
 import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import {
   stripUnderlineCodes,
   KITTY_SHIFT_ENTER,
   DETECTION_ENGINES
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { track } from '@slayzone/telemetry/client'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
@@ -170,7 +170,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   /** Why the session ended, when the exit code can't say (see exit-description.ts). */
   const [deadExitReason, setDeadExitReason] = useState<string | null>(null)
   const [doctorResults, setDoctorResults] = useState<
-    import('@slayzone/terminal/shared').ValidationResult[] | null
+    import('@slayzone/terminal-contracts').ValidationResult[] | null
   >(null)
   const [doctorLoading, setDoctorLoading] = useState(false)
 

@@ -1,4 +1,4 @@
-import type { TerminalMode, LoopConfig } from '@slayzone/terminal/shared'
+import type { TerminalMode, LoopConfig } from '@slayzone/terminal-contracts'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
 

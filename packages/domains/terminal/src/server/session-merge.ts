@@ -1,4 +1,4 @@
-import type { SessionInfo, TerminalState } from '../shared/types'
+import type { SessionInfo, TerminalState } from '@slayzone/terminal-contracts'
 
 interface MergeInputs {
   ptys: ReadonlyArray<{ sessionId: string; state: TerminalState; backgroundJobs?: number }>

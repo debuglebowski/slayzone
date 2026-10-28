@@ -3,7 +3,7 @@ import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
   UpdateTerminalModeInput
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { ProviderListView } from './ai-providers/ProviderListView'
 import { ProviderDetailView } from './ai-providers/ProviderDetailView'

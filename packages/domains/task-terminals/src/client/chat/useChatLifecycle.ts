@@ -7,7 +7,7 @@ import {
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
   type AgentState
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { resetChat } from './autocomplete/chat-actions'
 import type { ChatActions } from './autocomplete/types'
 

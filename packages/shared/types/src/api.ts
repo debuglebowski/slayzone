@@ -65,7 +65,7 @@ import type {
   FileMatch,
   ChatSessionStateEntry,
   QueuedChatMessage
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 
 export interface ChatSessionInfo {
   sessionId: string
@@ -422,7 +422,7 @@ export interface _LegacyElectronAPI {
   agentLifecycle: {
     /**
      * Subscribe to hook-driven agent lifecycle events (Start/Stop/PermissionRequest/...).
-     * Event shape is `AgentLifecycleEvent` from `@slayzone/terminal/shared` —
+     * Event shape is `AgentLifecycleEvent` from `@slayzone/terminal-contracts` —
      * typed loosely here to avoid a cross-package type import in this barrel.
      */
     onEvent: (callback: (event: AgentLifecycleEventPayload) => void) => () => void

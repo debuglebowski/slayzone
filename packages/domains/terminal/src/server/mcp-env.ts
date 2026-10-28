@@ -11,7 +11,7 @@ import {
   modeAgentId,
   type AgentId,
   type TerminalMode
-} from '../shared'
+} from '@slayzone/terminal-contracts'
 
 /** Path the agent lifecycle hook (notify.sh) POSTs to — see agent-hook.ts. */
 export const AGENT_HOOK_PATH = '/api/agent-hook'

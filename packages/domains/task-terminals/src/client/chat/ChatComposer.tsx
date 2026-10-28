@@ -20,8 +20,8 @@ import {
   modelSupportsEffortForMode,
   modeSupportsCollaboration,
   modeSupportsFastMode
-} from '@slayzone/terminal/shared'
-import type { QueuedChatMessage } from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 import { type ArtifactRef, type UseImagePasteDropReturn } from '@slayzone/editor/hooks'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import type { useAutocomplete } from './autocomplete/useAutocomplete'

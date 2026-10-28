@@ -1,4 +1,4 @@
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 
 export interface TerminalProps {
   sessionId: string
@@ -8,7 +8,7 @@ export interface TerminalProps {
   existingConversationId?: string | null
   supportsSessionId?: boolean
   providerFlags?: string | null
-  executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
+  executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
   isActive?: boolean
   /** Owning panel is mid-resize. Skip the ResizeObserver fit while true, then
    *  fit once when it clears — avoids per-frame xterm reflow/atlas churn during

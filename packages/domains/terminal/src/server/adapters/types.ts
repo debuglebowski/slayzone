@@ -1,4 +1,4 @@
-import type { ExecutionContext } from '@slayzone/terminal/shared'
+import type { ExecutionContext } from '@slayzone/terminal-contracts'
 
 export type TerminalMode = string
 export type { ExecutionContext }

@@ -15,13 +15,13 @@ import {
   modeAgentId,
   SESSION_ID_UNAVAILABLE,
   supportsFreshPreMint
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import type {
   AgentState,
   TerminalState,
   PtyInfo,
   BufferSinceResult
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { createDbPtySessionLedger, type PtySessionLedger } from './pty-data-ops'
 import type { TaskSessionStore } from './task-session-store'

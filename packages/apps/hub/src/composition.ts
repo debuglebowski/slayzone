@@ -114,7 +114,7 @@ import {
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode,
   warmPoolEnabled
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import {
   createIntegrationOps,
   ensureIntegrationSchema,

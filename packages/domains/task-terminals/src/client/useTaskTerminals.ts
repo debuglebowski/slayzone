@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import { usePty } from '@slayzone/terminal'
 
 interface UseTaskTerminalsResult {

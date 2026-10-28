@@ -1,4 +1,4 @@
-import type { AgentInfo } from '@slayzone/terminal/shared'
+import type { AgentInfo } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, ChatListApi } from '../types'
 import { rankByName } from '../ranking'
 import { spliceReplace } from '../useAutocomplete'

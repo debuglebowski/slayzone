@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 import { nextAgentMode, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
-import { chatModesForMode } from '@slayzone/terminal/shared'
+import { chatModesForMode } from '@slayzone/terminal-contracts'
 import type { CallbackRef } from './useFollowBottom'
 
 export interface UseChatPanelKeyboardOpts {

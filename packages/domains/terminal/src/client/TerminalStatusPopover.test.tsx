@@ -4,7 +4,7 @@
 import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
-import type { PtyInfo } from '@slayzone/terminal/shared'
+import type { PtyInfo } from '@slayzone/terminal-contracts'
 
 const subs = new Map<string, Array<(payload: unknown) => unknown>>()
 const list = vi.fn<() => Promise<PtyInfo[]>>()

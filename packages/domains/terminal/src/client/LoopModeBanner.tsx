@@ -2,7 +2,7 @@ import { IconButton, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/u
 import { Pencil, Play, Pause, Square, RotateCcw } from 'lucide-react'
 import type { LoopStatus } from './useLoopMode'
 import { isLoopActive } from './useLoopMode'
-import type { LoopConfig } from '@slayzone/terminal/shared'
+import type { LoopConfig } from '@slayzone/terminal-contracts'
 
 interface LoopModeBannerProps {
   config: LoopConfig

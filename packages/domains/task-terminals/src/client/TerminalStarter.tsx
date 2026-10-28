@@ -15,7 +15,7 @@ import {
   parseAgentStartupMode,
   type AgentStartupMode,
   type AgentState
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'

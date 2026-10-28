@@ -42,7 +42,7 @@
  * session is restarted. Answering upstream is what keeps capability detection
  * working while denying the buffer a copy to replay.
  *
- * Lives in `@slayzone/platform` rather than `@slayzone/terminal/shared` because
+ * Lives in `@slayzone/platform` rather than `@slayzone/terminal-contracts` because
  * BOTH pty output paths need it and they cannot share a domain package: the
  * terminal domain's `pty-manager` (local spawns) and the computer's `handlers/pty`
  * (remote spawns, bundled standalone). A mirrored copy is exactly the drift that

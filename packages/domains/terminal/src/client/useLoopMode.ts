@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal/shared'
+import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal-contracts'
 import {
   makeLoopController,
   stripAnsi,
   checkCriteria,
   isLoopActive
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { usePty } from './PtyContext'
 
 // Re-exports preserve existing client-side import paths.

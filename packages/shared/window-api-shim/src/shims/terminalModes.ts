@@ -5,12 +5,12 @@
 // input unchanged so the renderer optimistic flow completes. cap-migrate-
 // all-tests (terminal-core batch) added this.
 
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
   UpdateTerminalModeInput
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 
 let modes: TerminalModeInfo[] = DEFAULT_TERMINAL_MODES.map((m) => ({ ...m }))
 

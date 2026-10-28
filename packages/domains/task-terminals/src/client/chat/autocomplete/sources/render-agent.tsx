@@ -1,4 +1,4 @@
-import type { AgentInfo } from '@slayzone/terminal/shared'
+import type { AgentInfo } from '@slayzone/terminal-contracts'
 
 export function renderAgentItem(agent: AgentInfo): React.JSX.Element {
   return (

@@ -13,7 +13,7 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { codexChatBackend } from './codex-chat-session'
-import type { AgentEvent } from '../../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatDriverContext } from '../types'
 
 const TIMEOUT_MS = 60_000

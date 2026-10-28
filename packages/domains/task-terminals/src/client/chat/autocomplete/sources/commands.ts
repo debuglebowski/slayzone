@@ -1,4 +1,4 @@
-import type { CommandInfo } from '@slayzone/terminal/shared'
+import type { CommandInfo } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, ChatListApi, SubmitTransform } from '../types'
 import { rankByName } from '../ranking'
 import { spliceReplace } from '../useAutocomplete'

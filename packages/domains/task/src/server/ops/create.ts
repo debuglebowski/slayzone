@@ -5,7 +5,7 @@ import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
   parseAgentStartupMode
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
 import { getTemplateForTask } from '../template-store.js'
 import {

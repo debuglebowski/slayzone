@@ -4,7 +4,7 @@ import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/cli
 import type { Task } from '@slayzone/task/shared'
 import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task/shared'
 
-import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
+import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal-contracts'
 import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'

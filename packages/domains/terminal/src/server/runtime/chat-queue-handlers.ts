@@ -11,7 +11,7 @@ import {
 } from './chat-transport-manager'
 import { createDbChatQueueData, type ChatQueueData } from './chat-queue-data'
 import { getPtyHostBridge } from '../pty-host'
-import type { QueuedChatMessage } from '../../shared/types'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 
 /**
  * Chat-queue event emitter — the source for the tRPC `chat.onQueueChanged` /

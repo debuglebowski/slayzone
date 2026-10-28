@@ -37,8 +37,8 @@ import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
   UpdateTerminalModeInput
-} from '@slayzone/terminal/shared'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import { parseShellArgs } from '../adapters/flag-parser'
 import { setShellOverride } from '../shell-env'
 

@@ -1,4 +1,4 @@
-import type { SessionInfo, TerminalState } from '../../shared/types'
+import type { SessionInfo, TerminalState } from '@slayzone/terminal-contracts'
 import { listPtys, getState as getPtyState } from './pty-manager'
 import { listChatSessions, getChatSessionState } from './chat-transport-manager'
 import { mergeSessions } from '../session-merge'

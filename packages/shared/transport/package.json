@@ -35,6 +35,7 @@
     "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",

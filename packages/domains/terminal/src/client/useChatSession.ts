@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
-import type { AgentEvent } from '../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import {
   initialState,
   reducer,

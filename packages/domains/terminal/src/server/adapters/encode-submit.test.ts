@@ -7,7 +7,7 @@ import { ClaudeAdapter } from './claude-adapter'
 import { CodexAdapter } from './codex-adapter'
 import { ShellAdapter } from './shell-adapter'
 import { defaultEncodeSubmit } from './types'
-import { KITTY_SHIFT_ENTER } from '@slayzone/terminal/shared'
+import { KITTY_SHIFT_ENTER } from '@slayzone/terminal-contracts'
 
 // --- defaultEncodeSubmit ---
 

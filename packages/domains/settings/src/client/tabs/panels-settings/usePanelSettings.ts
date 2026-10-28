@@ -7,7 +7,7 @@ import {
   DEFAULT_AGENT_STARTUP_MODE,
   parseAgentStartupMode,
   type AgentStartupMode
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import type {

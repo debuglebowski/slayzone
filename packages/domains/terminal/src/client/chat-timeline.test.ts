@@ -2,7 +2,7 @@
  * Tests for chat-timeline reducer (correlation + pairing + in-flight).
  */
 import { expect, test } from 'vitest'
-import type { AgentEvent } from '../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import {
   initialState,
   reducer,

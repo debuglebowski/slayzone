@@ -1,5 +1,5 @@
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import type { ValidationResult } from '@slayzone/terminal/shared'
+import type { ValidationResult } from '@slayzone/terminal-contracts'
 import { stripAnsi } from './Terminal.utils'
 import { describeExit } from './exit-description'
 

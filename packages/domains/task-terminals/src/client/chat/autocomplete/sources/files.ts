@@ -1,4 +1,4 @@
-import type { FileMatch } from '@slayzone/terminal/shared'
+import type { FileMatch } from '@slayzone/terminal-contracts'
 import type { AutocompleteSource, ChatListApi } from '../types'
 import { spliceReplace } from '../useAutocomplete'
 import { renderFileItem } from './render-file'

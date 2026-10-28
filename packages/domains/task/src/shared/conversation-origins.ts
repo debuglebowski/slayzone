@@ -1,8 +1,8 @@
-import type { ConversationOrigin } from '@slayzone/terminal/shared'
+import type { ConversationOrigin } from '@slayzone/terminal-contracts'
 
 /**
  * `ConversationOrigin` (the provenance tag for each `task_conversations` row)
- * is owned by `@slayzone/terminal/shared` — the terminal runtime produces it and
+ * is owned by `@slayzone/terminal-contracts` — the terminal runtime produces it and
  * must not import task. Re-exported here so task consumers keep one import site.
  */
 export type { ConversationOrigin }

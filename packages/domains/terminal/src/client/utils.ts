@@ -1,4 +1,4 @@
-import type { TerminalModeInfo } from '../shared/types'
+import type { TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 /**
  * Filter and sort terminal modes for display in selectors.

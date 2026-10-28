@@ -14,7 +14,7 @@
  * @module terminal/client/starting-watchdog
  */
 
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 
 /** How often the watchdog re-checks the backend while a session is starting. */
 export const STARTING_WATCHDOG_INTERVAL_MS = 20_000

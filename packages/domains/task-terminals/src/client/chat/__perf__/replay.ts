@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { claudeCodeAdapter } from '@slayzone/terminal/agents'
 import { reducer, initialState, type ChatTimelineState } from '@slayzone/terminal/reducer'
-import type { AgentEvent } from '@slayzone/terminal/shared'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

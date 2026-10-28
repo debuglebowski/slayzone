@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../chat-queue-store'
-import type { QueuedChatMessage } from '../../shared/types'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 
 /**
  * Data seam for the chat-queue runtime (hub/computer split, wave 1). The drain

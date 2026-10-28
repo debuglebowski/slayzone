@@ -8,7 +8,7 @@
  *
  * @module agents/claude-session-driver
  */
-import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { claudeCodeAdapter } from './claude-code-adapter'
 import type {
   AgentBackend,

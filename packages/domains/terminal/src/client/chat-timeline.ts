@@ -3,14 +3,14 @@ import type {
   AgentPlanStep,
   ToolCallEvent,
   ToolResultEvent
-} from '../shared/agent-events'
+} from '@slayzone/terminal-contracts'
 import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
   extractBashOutputCall,
   extractKillShellCall,
   extractBashOutputResult
-} from '../shared/bg-shell-helpers'
+} from '@slayzone/terminal-contracts'
 
 /**
  * Render-ready item produced by the reducer. Tool calls are pre-paired with results.

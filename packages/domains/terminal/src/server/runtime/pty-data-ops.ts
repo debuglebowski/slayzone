@@ -1,5 +1,9 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { TerminalMode, TerminalModeInfo, UsageProviderConfig } from '@slayzone/terminal/shared'
+import type {
+  TerminalMode,
+  TerminalModeInfo,
+  UsageProviderConfig
+} from '@slayzone/terminal-contracts'
 import { buildMcpEnv as buildMcpEnvDb, type RemoteMcpEnv } from '../mcp-env'
 import type { TaskSessionStore } from './task-session-store'
 

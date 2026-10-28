@@ -1,4 +1,4 @@
-import type { CommandInfo } from '@slayzone/terminal/shared'
+import type { CommandInfo } from '@slayzone/terminal-contracts'
 
 export function renderCommandItem(cmd: CommandInfo): React.JSX.Element {
   return (

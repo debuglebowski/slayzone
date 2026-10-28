@@ -1,4 +1,4 @@
-import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 export interface AgentSpawnOpts {
   /** Session ID — either a fresh UUID (new session) or existing conversationId for --resume. */

@@ -1,4 +1,4 @@
-import type { FileMatch } from '@slayzone/terminal/shared'
+import type { FileMatch } from '@slayzone/terminal-contracts'
 import { FileIcon, FolderIcon } from 'lucide-react'
 
 export function renderFileItem(file: FileMatch): React.JSX.Element {

@@ -364,6 +364,7 @@
     {
       "includes": [
         "packages/domains/terminal/**/*.{ts,tsx}",
+        "packages/domains/terminal-contracts/**/*.{ts,tsx}",
         "packages/apps/app/e2e/**/*.ts",
         "packages/apps/cli/src/commands/tasks/artifacts.ts",
         "packages/domains/agent-turns/**/*.{ts,tsx}",

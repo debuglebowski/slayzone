@@ -9,7 +9,7 @@ import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import * as mgr from './chat-transport-manager'
-import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

@@ -18,7 +18,7 @@ import {
   TooltipTrigger
 } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/settings'
-import type { PtyInfo } from '@slayzone/terminal/shared'
+import type { PtyInfo } from '@slayzone/terminal-contracts'
 
 interface TaskRef {
   id: string

@@ -3,7 +3,7 @@
  */
 import { expect, test } from 'vitest'
 import { buildIdleTasks, buildActiveSessionTaskIds } from './useIdleTasks'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import type { Task } from '@slayzone/task/shared'
 
 interface AgentSessionRow {

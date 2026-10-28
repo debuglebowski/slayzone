@@ -7,7 +7,7 @@ import { createDbProcessPersistence } from './process-persistence'
 import type { ProcessPersistence } from './process-persistence'
 import { getProcessBackend } from './process-backend'
 import type { ProcessBackend, ProcHandle } from './process-backend'
-import { extractOscTitle } from '@slayzone/terminal/shared'
+import { extractOscTitle } from '@slayzone/terminal-contracts'
 import { getEnrichedPath } from '@slayzone/terminal/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {

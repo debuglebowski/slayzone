@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { QueuedChatMessage } from '../shared/types'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 
 interface Row {
   id: string

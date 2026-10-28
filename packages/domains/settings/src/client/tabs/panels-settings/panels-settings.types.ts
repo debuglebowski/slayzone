@@ -1,5 +1,5 @@
 import { Globe } from 'lucide-react'
-import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal-contracts'
 
 export interface PanelsSettingsTabProps {
   activeTab: string

@@ -2,7 +2,11 @@ import { promises as fs } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
-import { DEFAULT_CHAT_MODEL, normalizeAccountModel, type ChatModel } from '../shared/chat-model'
+import {
+  DEFAULT_CHAT_MODEL,
+  normalizeAccountModel,
+  type ChatModel
+} from '@slayzone/terminal-contracts'
 
 /**
  * Resolve what model the chat subprocess should default to when nothing is

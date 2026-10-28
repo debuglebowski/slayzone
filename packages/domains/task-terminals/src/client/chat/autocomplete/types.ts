@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal/shared'
+import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
 
 export interface TriggerMatch {
   /** The query string the user has typed after the trigger char(s). */

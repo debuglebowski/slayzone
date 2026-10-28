@@ -17,12 +17,12 @@ import {
   Switch
 } from '@slayzone/ui'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
-import { DETECTION_ENGINES } from '@slayzone/terminal/shared'
+import { DETECTION_ENGINES } from '@slayzone/terminal-contracts'
 import type {
   TerminalMode,
   TerminalModeInfo,
   UpdateTerminalModeInput
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 import type { AiProviderForm } from './useAiProviderForm'
 
 interface ProviderListViewProps {

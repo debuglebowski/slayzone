@@ -12,7 +12,7 @@ import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
-import type { AgentLifecycleEvent } from '@slayzone/terminal/shared'
+import type { AgentLifecycleEvent } from '@slayzone/terminal-contracts'
 import type {
   createChatOps,
   createChatQueueOps,
@@ -75,7 +75,7 @@ export type FloatingAgentState = {
   mode: 'auto' | 'manual' | null
   hasCustomSize: boolean
 }
-import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal/shared'
+import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal-contracts'
 
 // Chat deps — ops + queue ops + the two streaming emitters the subscriptions
 // subscribe to. Same instances back the IPC handlers (coexistence until slice 5).

@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ConversationOrigin } from '../../shared/conversation-origin'
+import type { ConversationOrigin } from '@slayzone/terminal-contracts'
 
 /**
  * Task-side session/conversation ledger writes the terminal runtime makes

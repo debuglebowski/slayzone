@@ -1,4 +1,4 @@
-import type { SkillInfo } from '@slayzone/terminal/shared'
+import type { SkillInfo } from '@slayzone/terminal-contracts'
 
 const sourceLabel: Record<SkillInfo['source'], string> = {
   project: 'project',

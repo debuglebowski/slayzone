@@ -7,7 +7,7 @@ import {
   parseColumnsConfig,
   type ColumnConfig
 } from '@slayzone/workflow'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 
 export function toMs(value: string | null | undefined): number {
   if (!value) return 0

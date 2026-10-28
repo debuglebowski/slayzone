@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { codexChatBackend } from './codex-chat-session'
-import type { AgentEvent } from '../../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { ChatDriverContext, ChatSessionDriver, PermissionDecision } from '../types'
 
 const flush = (): Promise<void> => new Promise((r) => setImmediate(r))

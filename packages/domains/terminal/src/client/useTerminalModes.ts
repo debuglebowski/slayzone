@@ -6,7 +6,7 @@ import type {
   TerminalModeInfo,
   CreateTerminalModeInput,
   UpdateTerminalModeInput
-} from '@slayzone/terminal/shared'
+} from '@slayzone/terminal-contracts'
 
 export function useTerminalModes() {
   const trpc = useTRPC()

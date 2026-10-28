@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, useStableCallback } from '@slayzone/ui'
-import { DEFAULT_CHAT_FAST_MODE } from '@slayzone/terminal/shared'
+import { DEFAULT_CHAT_FAST_MODE } from '@slayzone/terminal-contracts'
 
 interface SessionInfoLite {
   chatFastMode?: boolean

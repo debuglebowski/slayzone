@@ -29,8 +29,8 @@
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import type { TerminalMode } from '@slayzone/terminal/shared'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import { projectsRemote, tasklistRemote, tagsRemote } from '../transport/mojo'
 import { terminalModesShim } from './terminalModes'
 

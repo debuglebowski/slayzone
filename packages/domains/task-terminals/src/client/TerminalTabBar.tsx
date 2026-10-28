@@ -23,7 +23,7 @@ import {
   ContextMenuContent
 } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 
 type IconComponent = React.ComponentType<{ className?: string }>
 

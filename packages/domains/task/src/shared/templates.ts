@@ -1,4 +1,4 @@
-import type { TerminalMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal-contracts'
 import type { ProviderConfig, PanelVisibility, WebPanelUrls } from './types'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 

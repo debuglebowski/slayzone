@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
 import { getDefaultStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects/shared'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal-contracts'
 import { insertTaskRow } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'

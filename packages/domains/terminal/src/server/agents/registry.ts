@@ -1,7 +1,7 @@
 import type { AgentBackend } from './types'
 import { claudeChatBackend } from './claude-session-driver'
 import { codexChatBackend } from './codex/codex-chat-session'
-import { CHAT_SUPPORTED_MODES, type ChatSupportedMode } from '../../shared/types'
+import { CHAT_SUPPORTED_MODES, type ChatSupportedMode } from '@slayzone/terminal-contracts'
 
 /**
  * TerminalMode → AgentBackend mapping. Keys must match `CHAT_SUPPORTED_MODES`

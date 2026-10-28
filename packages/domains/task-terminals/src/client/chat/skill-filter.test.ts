@@ -3,7 +3,7 @@
  */
 import { describe, expect, test } from 'vitest'
 import { filterSkills } from './skill-filter'
-import type { SkillInfo } from '@slayzone/terminal/shared'
+import type { SkillInfo } from '@slayzone/terminal-contracts'
 
 function skill(name: string, description = '', source: SkillInfo['source'] = 'user'): SkillInfo {
   return { name, description, source, path: `/tmp/${name}/SKILL.md` }

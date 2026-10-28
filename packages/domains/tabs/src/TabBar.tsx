@@ -12,7 +12,7 @@ import {
   withShortcut
 } from '@slayzone/ui'
 import { useSessionBackgroundJobs, useSessionStateRaw } from '@slayzone/terminal'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import {
   DndContext,
   DragOverlay,

@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
-import { findLinksInString } from '@slayzone/terminal/shared'
+import { findLinksInString } from '@slayzone/terminal-contracts'
 import { formatKeysForDisplay, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 
 const modKey = formatKeysForDisplay('mod')

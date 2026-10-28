@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { useStablePoll } from '@slayzone/ui'
-import { isAliveTerminalState } from '@slayzone/terminal/shared'
+import { isAliveTerminalState } from '@slayzone/terminal-contracts'
 
 /**
  * Returns Set of sessionIds with alive PTY sessions

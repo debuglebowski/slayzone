@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, useStableCallback, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
-import { rawPermissionModeToChatMode } from '@slayzone/terminal/shared'
+import { rawPermissionModeToChatMode } from '@slayzone/terminal-contracts'
 
 /**
  * Minimal ChatSessionInfo shape — kept inline (instead of importing the full

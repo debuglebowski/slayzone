@@ -10,8 +10,8 @@ import {
   SelectValue,
   Switch
 } from '@slayzone/ui'
-import type { TerminalModeInfo, UpdateTerminalModeInput } from '@slayzone/terminal/shared'
-import { DETECTION_ENGINES, isChatSupported } from '@slayzone/terminal/shared'
+import type { TerminalModeInfo, UpdateTerminalModeInput } from '@slayzone/terminal-contracts'
+import { DETECTION_ENGINES, isChatSupported } from '@slayzone/terminal-contracts'
 import { PanelBreadcrumb } from '../PanelBreadcrumb'
 import { DebouncedInput } from './DebouncedInput'
 import { UsageConfigSection } from './UsageConfigSection'

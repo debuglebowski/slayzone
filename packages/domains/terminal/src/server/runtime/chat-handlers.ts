@@ -41,24 +41,24 @@ import { listCommands } from '../commands'
 import { listAgents } from '../agents-registry'
 import { listProjectFiles } from '../files-scan'
 import type { UsageMap } from '../autocomplete-usage-store'
-import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '../../shared/types'
-import type { AgentEvent } from '../../shared/agent-events'
+import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '@slayzone/terminal-contracts'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 import {
   rawPermissionModeToChatMode,
   chatModeToFlags as chatModeToFlagsShared,
   chatModeToCliPermissionMode,
   type ChatMode as ChatModeShared
-} from '../../shared/chat-mode'
-import { chatModelToFlags } from '../../shared/chat-model'
-import { defaultModelForMode, isValidModelForMode } from '../../shared/chat-model-catalog'
-import { defaultChatModeForMode, isValidChatModeForMode } from '../../shared/chat-mode-catalog'
-import { chatEffortToFlags, isChatEffort, type ChatEffort } from '../../shared/chat-effort'
+} from '@slayzone/terminal-contracts'
+import { chatModelToFlags } from '@slayzone/terminal-contracts'
+import { defaultModelForMode, isValidModelForMode } from '@slayzone/terminal-contracts'
+import { defaultChatModeForMode, isValidChatModeForMode } from '@slayzone/terminal-contracts'
+import { chatEffortToFlags, isChatEffort, type ChatEffort } from '@slayzone/terminal-contracts'
 import {
   isChatCollaborationMode,
   modeSupportsCollaboration,
   type ChatCollaborationMode
-} from '../../shared/chat-collaboration'
-import { modeSupportsFastMode } from '../../shared/chat-fast-mode'
+} from '@slayzone/terminal-contracts'
+import { modeSupportsFastMode } from '@slayzone/terminal-contracts'
 
 export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { SkillInfo, SkillSource } from '../shared/types'
+import type { SkillInfo, SkillSource } from '@slayzone/terminal-contracts'
 import { parseFrontmatter } from './frontmatter'
 
 async function scanDir(root: string, source: SkillSource): Promise<SkillInfo[]> {

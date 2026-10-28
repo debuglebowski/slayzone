@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { AgentEvent } from '../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 export interface BufferedEvent {
   seq: number

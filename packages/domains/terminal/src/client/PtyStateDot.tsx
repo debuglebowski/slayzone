@@ -1,5 +1,5 @@
 import { TerminalProgressDot, type TerminalProgressDotProps } from '@slayzone/ui'
-import type { TerminalState } from '../shared/types'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 import {
   useSessionBackgroundJobs,
   useSessionState,

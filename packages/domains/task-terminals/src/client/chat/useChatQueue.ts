@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
-import type { QueuedChatMessage } from '@slayzone/terminal/shared'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 
 /**
  * Subscribe to the backend-persisted chat queue for one tab. The queue is

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type ConversationOrigin, HONORED_ORIGINS_SQL } from '@slayzone/task/shared'
-import { isBuiltinTerminalMode, modeAgentId } from '@slayzone/terminal/shared'
+import { isBuiltinTerminalMode, modeAgentId } from '@slayzone/terminal-contracts'
 import { agentSessionsEvents } from '../events'
 
 /**

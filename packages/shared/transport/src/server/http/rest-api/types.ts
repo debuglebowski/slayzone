@@ -1,7 +1,7 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task/shared'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '../../context'

@@ -18,6 +18,7 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/types": "workspace:*"
   }
 }

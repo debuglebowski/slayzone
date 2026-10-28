@@ -1,5 +1,5 @@
 import type { ILinkProvider, ILink, Terminal, IBufferLine } from '@xterm/xterm'
-import { URL_REGEX, FILE_REGEX } from '@slayzone/terminal/shared'
+import { URL_REGEX, FILE_REGEX } from '@slayzone/terminal-contracts'
 
 // Regexes re-exported for existing client consumers.
 export { URL_REGEX, FILE_REGEX }

@@ -15,7 +15,7 @@
  *
  * @module agents/codex/codex-chat-session
  */
-import type { AgentEvent, TokenUsage } from '../../../shared/agent-events'
+import type { AgentEvent, TokenUsage } from '@slayzone/terminal-contracts'
 import type {
   AgentBackend,
   ChatDriverContext,
@@ -23,8 +23,8 @@ import type {
   PermissionDecision
 } from '../types'
 import { CodexAppServerClient, type JsonRpcId } from './codex-app-server-client'
-import { defaultModelForMode } from '../../../shared/chat-model-catalog'
-import { CODEX_FAST_SERVICE_TIER } from '../../../shared/chat-fast-mode'
+import { defaultModelForMode } from '@slayzone/terminal-contracts'
+import { CODEX_FAST_SERVICE_TIER } from '@slayzone/terminal-contracts'
 import {
   CODEX_DEFAULT_INSTRUCTIONS,
   CODEX_PLAN_INSTRUCTIONS

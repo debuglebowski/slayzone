@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { claudeCodeAdapter } from './claude-code-adapter'
-import type { AgentEvent } from '../../shared/agent-events'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
 
 const FIXTURES_DIR = fileURLToPath(new URL('../../../test/fixtures/claude-stream', import.meta.url))
 

@@ -23,7 +23,7 @@ import {
   useTRPC,
   useTRPCClient
 } from '@slayzone/transport/client'
-import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal-contracts'
 
 // `background` (main agent done, its background subagents still working) is as
 // alive as `running` — it must count for useActiveTaskIds AND be eligible for the
