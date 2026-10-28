@@ -33,6 +33,7 @@ vi.mock('@slayzone/terminal/server', async () => {
     '@slayzone/terminal/server'
   )
   return {
+    agentLifecycleRouter: agentTree.agentLifecycleRouter,
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,
     createAgentTree: agentTree.createAgentTree,
@@ -43,15 +44,21 @@ vi.mock('@slayzone/terminal/server', async () => {
   }
 })
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
-vi.mock('@slayzone/task/server', () => ({
-  recordConversation: vi.fn(),
-  findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
-  findOwnedSpawnForConversation: vi.fn(async () => null),
-  getCurrentConversationId: vi.fn(async () => null),
-  confirmSessionConversation: vi.fn(),
-  markSessionFirstTurn: vi.fn(async () => {}),
-  artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
-}))
+vi.mock('@slayzone/task/server', async () => {
+  // api's router composes task's own routers; empty stand-ins keep it importable.
+  const { router } = await import('@slayzone/trpc-server')
+  return {
+    agentSessionsRouter: router({}),
+    templateRouter: router({}),
+    recordConversation: vi.fn(),
+    findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
+    findOwnedSpawnForConversation: vi.fn(async () => null),
+    getCurrentConversationId: vi.fn(async () => null),
+    confirmSessionConversation: vi.fn(),
+    markSessionFirstTurn: vi.fn(async () => {}),
+    artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
+  }
+})
 
 const tmpDirs: string[] = []
 afterEach(() => {

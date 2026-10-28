@@ -14,7 +14,9 @@ const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | 
 // pulls in the native pty manager) — a hand-rolled fake would drift from its states.
 vi.mock('@slayzone/terminal/server', async () => {
   const agentTree = await import('../../../domains/terminal/src/server/agent-tree.js')
+  const lifecycle = await import('../../../domains/terminal/src/server/agent-lifecycle-router.js')
   return {
+    agentLifecycleRouter: lifecycle.agentLifecycleRouter,
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),
     applyAgentHook: agentTree.applyAgentHook,
     createAgentTree: agentTree.createAgentTree,
@@ -26,13 +28,19 @@ vi.mock('@slayzone/terminal/server', async () => {
 })
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
 const confirmSessionConversationSpy = vi.fn()
-vi.mock('@slayzone/task/server', () => ({
-  recordConversation: vi.fn(),
-  findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
-  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
-  markSessionFirstTurn: vi.fn(async () => {}),
-  artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
-}))
+vi.mock('@slayzone/task/server', async () => {
+  // api's router composes task's own routers; empty stand-ins keep it importable.
+  const { router } = await import('@slayzone/trpc-server')
+  return {
+    agentSessionsRouter: router({}),
+    templateRouter: router({}),
+    recordConversation: vi.fn(),
+    findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
+    confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
+    markSessionFirstTurn: vi.fn(async () => {}),
+    artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
+  }
+})
 
 /** A fake gateway that lets the test emit `event` notifications synchronously. */
 function makeFakeGateway(): {

@@ -26,15 +26,17 @@ const getBlockersOptions = vi.fn((input: { taskId: string }, opts?: { enabled?: 
   ...opts
 }))
 
-vi.mock('@slayzone/transport/client', () => ({
-  useTRPC: () => ({
+vi.mock('@slayzone/transport/client', () => {
+  const useTRPC = () => ({
     task: {
       getAll: { queryOptions: getAllOptions },
       getBlockers: { queryOptions: getBlockersOptions },
       addBlocker: { mutationOptions: () => ({ mutationFn: async () => undefined }) }
     }
   })
-}))
+  // Reached via TagsCard -> @slayzone/tags/client (domain-typed view).
+  return { useTRPC, typedTrpc: () => ({ useTRPC }) }
+})
 
 import { BlockerDialog } from './BlockerDialog'
 
