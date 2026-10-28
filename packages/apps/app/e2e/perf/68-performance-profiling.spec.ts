@@ -11,6 +11,13 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
+/** Chromium-only `performance.memory` — not in the DOM lib. */
+type ChromiumPerformance = Performance & {
+  memory: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number }
+}
+/** The renderer's PLAYWRIGHT-only refresh hook. */
+type ProfilingWindow = Window & { __slayzone_refreshData?: () => Promise<void> | void }
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_DIR = path.resolve(
   __dirname,
@@ -101,7 +108,7 @@ test.describe('Performance Profiling', () => {
 
   test('01 — memory baseline', async ({ mainWindow }) => {
     const mem = await mainWindow.evaluate(() => {
-      const m = (performance as any).memory
+      const m = (performance as ChromiumPerformance).memory
       return {
         usedMB: Math.round(m.usedJSHeapSize / 1048576),
         totalMB: Math.round(m.totalJSHeapSize / 1048576),
@@ -261,7 +268,7 @@ test.describe('Performance Profiling', () => {
   test('08 — interaction: refreshData latency', async ({ mainWindow }) => {
     const refreshMs = await mainWindow.evaluate(async () => {
       const start = performance.now()
-      await (window as any).__slayzone_refreshData?.()
+      await (window as ProfilingWindow).__slayzone_refreshData?.()
       return Math.round(performance.now() - start)
     })
     if (metrics.interaction) metrics.interaction.refreshDataMs = refreshMs
@@ -282,7 +289,7 @@ test.describe('Performance Profiling', () => {
     await mainWindow.waitForTimeout(500)
 
     const scaleData = await mainWindow.evaluate(async () => {
-      const mem = (performance as any).memory
+      const mem = (performance as ChromiumPerformance).memory
       const loadStart = performance.now()
       await window.getTrpcVanillaClient().task.loadBoardData.query()
       const loadMs = Math.round(performance.now() - loadStart)
@@ -310,7 +317,7 @@ test.describe('Performance Profiling', () => {
 
     // Interact during profiling
     await mainWindow.evaluate(() => {
-      ;(window as any).__slayzone_refreshData?.()
+      ;(window as ProfilingWindow).__slayzone_refreshData?.()
     })
     await mainWindow.waitForTimeout(1_000)
 

@@ -11,6 +11,19 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
+/** The renderer's PLAYWRIGHT-only tab store handle. */
+type ProfilingWindow = Window & {
+  __slayzone_tabStore?: {
+    getState: () => {
+      // Only serialized back into `viewState` — the shape is the app's, not this spec's.
+      tabs: unknown
+      activeTabIndex: number
+      selectedProjectId: unknown
+      openTask: (taskId: string) => void
+    }
+  }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_DIR = path.resolve(
   __dirname,
@@ -101,7 +114,7 @@ test.describe('Startup & Suspense Profiling', () => {
 
     // Persist tab state so it survives reload
     await mainWindow.evaluate(() => {
-      const store = (window as any).__slayzone_tabStore
+      const store = (window as ProfilingWindow).__slayzone_tabStore
       if (store) {
         const state = store.getState()
         window.getTrpcVanillaClient().settings.set.mutate({
@@ -314,7 +327,7 @@ test.describe('Startup & Suspense Profiling', () => {
     const taskToOpen = tasks[0]
     await mainWindow.evaluate((taskId) => {
       performance.mark('sz:taskSwitch:start')
-      const store = (window as any).__slayzone_tabStore
+      const store = (window as ProfilingWindow).__slayzone_tabStore
       store?.getState().openTask(taskId)
     }, taskToOpen.id)
 

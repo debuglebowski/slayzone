@@ -211,7 +211,7 @@ test.describe('Kanban keyboard shortcuts', () => {
     const s = seed(mainWindow)
     await s.refreshData()
     const tasks = await s.getTasks()
-    const updated = tasks.find((t: any) => t.id === todo[0])
+    const updated = tasks.find((t) => t.id === todo[0])
     expect(updated?.status).toBe('in_progress')
 
     // Restore for subsequent tests
@@ -239,11 +239,11 @@ test.describe('Kanban keyboard shortcuts', () => {
     const s = seed(mainWindow)
     await s.refreshData()
     const tasks = await s.getTasks()
-    const updated = tasks.find((t: any) => t.id === todo[0])
+    const updated = tasks.find((t) => t.id === todo[0])
     expect(updated?.priority).toBe(1)
 
     // Restore
-    await s.updateTask({ id: todo[0], priority: 3 } as any)
+    await s.updateTask({ id: todo[0], priority: 3 })
     await s.refreshData()
   })
 
