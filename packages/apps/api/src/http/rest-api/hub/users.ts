@@ -4,7 +4,7 @@ import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
 import { ADMIN_ONLY } from '../../../admin-policy'
-import type { PrincipalRole } from '../../../context'
+import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { RestApiDeps } from '../types'
 import { respondSwitchRefusal } from '../switch-refusal'
 

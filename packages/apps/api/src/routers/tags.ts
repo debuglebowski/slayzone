@@ -9,7 +9,7 @@ import {
   getAllTaskTagIds,
   setTagsForTask
 } from '@slayzone/tags/server'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTaskTriggerBus } from '../app-deps'
 
 const createTagInput = z.object({

@@ -1,4 +1,8 @@
-import { router } from './trpc'
+import { router } from '@slayzone/trpc-server'
+// The composition root: register the per-procedure tables with the gate chain, and add
+// the composition's host deps to the context type, before any router is served.
+import './procedure-policy'
+import './automation-engine-context'
 import { appLevelRouter } from './routers/app'
 import { agentLifecycleRouter } from './routers/agent-lifecycle'
 import { aiConfigRouter } from './routers/ai-config'

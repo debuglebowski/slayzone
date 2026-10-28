@@ -14,7 +14,7 @@ import type {
   DiagnosticsConfig,
   DiagnosticsExportBundle
 } from '@slayzone/diagnostics/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { createAccessScope, resource, type AccessScope, type OwnedResource } from '../access'
 import { accessRequestOf } from '../owner-gate'
 

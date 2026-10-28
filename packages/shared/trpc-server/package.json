@@ -1,0 +1,19 @@
+{
+  "name": "@slayzone/trpc-server",
+  "version": "0.36.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "superjson": "^2.2.1"
+  }
+}

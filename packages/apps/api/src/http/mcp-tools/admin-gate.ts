@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import { ADMIN_ONLY, MCP_ADMIN_POLICY, roleAllows, type AccessClass } from '../../admin-policy'
-import { auditAdminDenied } from '../../admin-gate'
+import { auditAdminDenied } from '@slayzone/trpc-server'
 import type { RestPrincipal } from '../rest-api/types'
 
 /**

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getChatDeps } from '../app-deps'
 
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops

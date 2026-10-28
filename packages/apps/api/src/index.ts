@@ -1,6 +1,18 @@
 export { appRouter, type AppRouter } from './router'
-export { router, publicProcedure, openProcedure, middleware, mergeRouters } from './trpc'
-export type { PrincipalRole, TrpcContext, TrpcServerDeps, TrpcContextFactory } from './context'
+export {
+  router,
+  publicProcedure,
+  openProcedure,
+  middleware,
+  mergeRouters,
+  setAuthGate,
+  getAuthGate,
+  type PrincipalRole,
+  type TrpcContext,
+  type TrpcServerDeps,
+  type TrpcContextFactory
+} from '@slayzone/trpc-server'
+export type { AutomationEngineLike } from './automation-engine-context'
 export {
   SCOPE_POLICY,
   requiredScope,
@@ -75,7 +87,6 @@ export {
   getHubDescribeDepsOrNull,
   type HubDescribeDeps
 } from './app-deps'
-export { setAuthGate, getAuthGate } from './app-deps'
 export {
   setPowerResumeEvents,
   getPowerResumeEvents,

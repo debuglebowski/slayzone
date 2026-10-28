@@ -13,7 +13,7 @@ import {
   clearAutomationRuns
 } from '@slayzone/automations/server'
 import type { CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getAutomationsEvents } from '../app-deps'
 
 // The Create/Update shapes carry nested trigger/condition/action configs; mirror

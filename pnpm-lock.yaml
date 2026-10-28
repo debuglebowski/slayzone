@@ -305,6 +305,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
@@ -2875,6 +2878,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../trpc-server
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
@@ -2906,6 +2912,18 @@ importers:
       ws:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+
+  packages/shared/trpc-server:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      superjson:
+        specifier: ^2.2.1
+        version: 2.2.6
 
   packages/shared/tsgo:
     dependencies:

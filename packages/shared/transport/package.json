@@ -17,6 +17,7 @@
   "dependencies": {
     "@slayzone/api": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",

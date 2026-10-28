@@ -880,7 +880,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/routers/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \
-  packages/apps/api/src/trpc-transformer.test.ts \
+  packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

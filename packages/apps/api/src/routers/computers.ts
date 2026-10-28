@@ -6,11 +6,16 @@ import {
   type SecurityOutcome
 } from '@slayzone/platform/security-log'
 import { TRPCError } from '@trpc/server'
-import { router, publicProcedure } from '../trpc'
-import { getAuthGate, getComputersDeps, getComputersDepsOrNull } from '../app-deps'
-import { adminOnlyTrpcError, callerIsNotAdmin } from '../admin-gate'
+import {
+  router,
+  publicProcedure,
+  getAuthGate,
+  adminOnlyTrpcError,
+  callerIsNotAdmin,
+  type TrpcContext
+} from '@slayzone/trpc-server'
+import { getComputersDeps, getComputersDepsOrNull } from '../app-deps'
 import { decideJoinTokenMint } from '../join-token-policy'
-import type { TrpcContext } from '../context'
 import { accessRequestOf } from '../owner-gate'
 import {
   filterManagedComputers,

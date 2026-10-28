@@ -15,7 +15,8 @@ import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { computersRouter } from './computers.js'
-import { setAuthGate, setComputersDeps, type ComputersDeps } from '../app-deps.js'
+import { setAuthGate } from '@slayzone/trpc-server'
+import { setComputersDeps, type ComputersDeps } from '../app-deps.js'
 import { appRouter } from '../router.js'
 import {
   registerComputer,

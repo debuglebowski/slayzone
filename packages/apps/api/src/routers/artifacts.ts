@@ -24,7 +24,7 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task-contracts'
-import { router, publicProcedure, hubLocalProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The

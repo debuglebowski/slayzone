@@ -26,7 +26,7 @@ import type {
   CreateTestLabelInput,
   UpdateTestLabelInput
 } from '@slayzone/test-panel/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 18 `db:testPanel:*` IPC handlers (test-panel/src/main/handlers.ts).
 // Both call the same electron-free store (@slayzone/test-panel/server), so the

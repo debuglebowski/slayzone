@@ -16,7 +16,7 @@ import type {
   InstallSkillInput,
   ListEntriesInput
 } from '@slayzone/ai-config/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 54 `ai-config:*` + 12 `ai-config:marketplace:*` IPC handlers
 // (ai-config/src/main/handlers.ts + handlers-marketplace.ts). Both call the same

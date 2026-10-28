@@ -21,7 +21,7 @@
 
 import { z } from 'zod'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getWorkspaceDeps } from '../app-deps'
 
 /** Resolvable address of the machine a call targets. */

@@ -46,21 +46,11 @@
  *
  * @module api/admin-policy
  */
-import type { PrincipalRole } from './context'
+import type { AccessClass } from '@slayzone/trpc-server'
 
-export type AccessClass = 'admin' | 'user' | 'open'
-
-/** The stable refusal code, on every surface. */
-export const ADMIN_ONLY = 'ADMIN_ONLY'
-
-/**
- * Whether an account with `role` may call an item of class `cls`. An admin may call
- * anything. `undefined` (unclassified) needs an admin: fail closed.
- */
-export function roleAllows(cls: AccessClass | undefined, role: PrincipalRole): boolean {
-  if (role === 'admin') return true
-  return cls === 'user' || cls === 'open'
-}
+// The vocabulary (`AccessClass`, `ADMIN_ONLY`, `roleAllows`) is the gate's, so it lives
+// in `@slayzone/trpc-server` (`access-class.ts`); this module owns the TABLES.
+export { ADMIN_ONLY, roleAllows, type AccessClass } from '@slayzone/trpc-server'
 
 /**
  * `user` items that need the admin role for SOME inputs. The handler decides, with

@@ -12,7 +12,8 @@
  */
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { setAppDeps, setHubDescribeDeps, setAuthGate, type AppDeps } from '../app-deps.js'
+import { setAuthGate } from '@slayzone/trpc-server'
+import { setAppDeps, setHubDescribeDeps, type AppDeps } from '../app-deps.js'
 import { hubRouter } from './hub.js'
 import { appRouter } from '../router.js'
 

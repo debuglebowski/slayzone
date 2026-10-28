@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { describe, test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { setAuthGate } from '../app-deps.js'
+import { setAuthGate } from '@slayzone/trpc-server'
 import { appRouter } from '../router.js'
 
 const h = await createTestHarness()

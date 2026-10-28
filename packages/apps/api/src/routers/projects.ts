@@ -9,7 +9,7 @@ import {
   reorderProjects
 } from '@slayzone/projects/server'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
-import { router, publicProcedure, hubLocalProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { getComputersDepsOrNull } from '../app-deps'
 
 const createProjectInput = z.object({

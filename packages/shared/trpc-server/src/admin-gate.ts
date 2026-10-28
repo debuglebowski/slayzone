@@ -1,15 +1,15 @@
 /**
  * The runtime half of the account-role gate (T-15); the classification is
- * `admin-policy.ts`. One refusal shape for every surface: a stable code
+ * `access-class.ts` (tables: `@slayzone/api`'s `admin-policy.ts`). One refusal shape for every surface: a stable code
  * ({@link ADMIN_ONLY}) and one `authz.denied` audit line with
  * `detail.reason: 'not_admin'` (the reason `/api/hub/users` already writes).
  *
- * @module api/admin-gate
+ * @module trpc-server/admin-gate
  */
 import { TRPCError } from '@trpc/server'
 import { securityEvent } from '@slayzone/platform/security-log'
-import { ADMIN_ONLY } from './admin-policy'
-import { getAuthGate } from './app-deps'
+import { ADMIN_ONLY } from './access-class'
+import { getAuthGate } from './auth-gate'
 import type { TrpcContext } from './context'
 
 /** The cause of a role refusal; tRPC's error formatter turns it into `data.appCode`. */
@@ -33,7 +33,7 @@ export function isAdminOnlyError(err: unknown): err is AdminOnlyError {
 }
 
 /** The audit line for a role refusal. Actor, ip and route come from the context
- *  unless given (a REST route runs outside it, see `admin-routes.ts`). */
+ *  unless given (a REST route runs outside it, see `@slayzone/api`'s `admin-routes.ts`). */
 export function auditAdminDenied(opts: {
   targetKind?: 'procedure' | null
   targetId?: string | null
@@ -65,7 +65,7 @@ export function adminOnlyTrpcError(path: string): TRPCError {
 }
 
 /**
- * For a {@link CONDITIONAL_ADMIN} handler: does the role matter for this call, and
+ * For a `CONDITIONAL_ADMIN` handler (`@slayzone/api`'s `admin-policy.ts`): does the role matter for this call, and
  * is the caller not an admin? False on a hub without login (no principal, nothing
  * to check — the desktop app's hub), the same short-circuit as the gate.
  */

@@ -10,7 +10,7 @@ import {
   reorderProjectsInGroup
 } from '@slayzone/projects/server'
 import type { TopLevelEntryRef } from '@slayzone/projects-contracts'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the `db:project-groups:*` IPC handlers (projects/electron/handlers.ts).
 // Both call the same electron-free store (@slayzone/projects/server), so the

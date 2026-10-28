@@ -12,10 +12,13 @@
 import { TRPCError } from '@trpc/server'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { settingScope } from '@slayzone/settings/server'
-import { adminOnlyTrpcError, callerIsNotAdmin } from '../admin-gate'
-import { getAuthGate } from '../app-deps'
-import type { TrpcContext } from '../context'
-import { publicProcedure } from '../trpc'
+import {
+  adminOnlyTrpcError,
+  callerIsNotAdmin,
+  getAuthGate,
+  publicProcedure,
+  type TrpcContext
+} from '@slayzone/trpc-server'
 
 /**
  * Whether writing `key` needs a hub admin: every key that is not one user's own.

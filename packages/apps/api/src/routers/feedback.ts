@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the `db:feedback:*` IPC handlers (feedback/src/electron/handlers.ts).
 // Ops are electron-free (db-only), so build them straight off ctx.db — same

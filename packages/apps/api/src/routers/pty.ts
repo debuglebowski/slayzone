@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getPtyDeps } from '../app-deps'
 
 // PTY router (IPC → tRPC migration, slice 3 / P17). Mirrors the `pty:*` /

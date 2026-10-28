@@ -23,12 +23,18 @@
  *   - every refusal writes one `authz.denied` audit line (T-03), and a procedure
  *     runs with the caller as the acting user for the audit lines below it
  */
+// The gate chain's tables, as `router.ts` registers them for the real app router.
+import './procedure-policy'
 import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
-import { publicProcedure, openProcedure, router } from './trpc'
-import { setAuthGate } from './app-deps'
-import type { TrpcContext } from './context'
+import {
+  publicProcedure,
+  openProcedure,
+  router,
+  setAuthGate,
+  type TrpcContext
+} from '@slayzone/trpc-server'
 import { TRPC_OWNER_POLICY } from './owner-policy'
 
 // `pty.write` -> 'agent' and `pty.create` -> 'never' in the REAL SCOPE_POLICY

@@ -34,8 +34,7 @@ import {
   type OwnedResource
 } from './access'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
-import { getAuthGate } from './app-deps'
-import type { TrpcContext } from './context'
+import { getAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import {
   DROP,
   TRPC_OWNER_POLICY,

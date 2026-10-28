@@ -97,7 +97,7 @@ import type {
   EditPrCommentInput
 } from '@slayzone/worktrees/shared'
 import type { GitDiffChangedPayload } from '@slayzone/worktrees/server'
-import { router, publicProcedure, hubLocalProcedure } from '../trpc'
+import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { getAppDeps, getWorkspaceDeps } from '../app-deps'
 
 const u = z.unknown()

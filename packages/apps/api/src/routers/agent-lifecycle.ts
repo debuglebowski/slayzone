@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import type { AgentLifecycleEvent } from '@slayzone/terminal-contracts'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getAgentLifecycleEvents } from '../app-deps'
 
 export const agentLifecycleRouter = router({

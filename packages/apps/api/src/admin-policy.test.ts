@@ -21,8 +21,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { TRPCError } from '@trpc/server'
 import { appRouter } from './router'
-import { setAuthGate } from './app-deps'
-import type { TrpcContext } from './context'
+import { setAuthGate, isAdminOnlyError, type TrpcContext } from '@slayzone/trpc-server'
 import {
   ADMIN_ONLY,
   CONDITIONAL_ADMIN,
@@ -32,7 +31,6 @@ import {
   roleAllows,
   type AccessClass
 } from './admin-policy'
-import { isAdminOnlyError } from './admin-gate'
 import { registerRestApi } from './http/rest-api'
 import { adminRouteGuard, restRouteKey, withAdminGate } from './http/rest-api/admin-routes'
 import { bindRestPrincipal } from './http/rest-api/principal'

@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { getComputer, revokeComputer, unrevokeComputer } from '@slayzone/computers/server'
 import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
-import { getAuthGate } from '../../../app-deps'
+import { getAuthGate } from '@slayzone/trpc-server'
 import { mayManageComputer } from '../../../computer-access'
 import { httpAccessRequest } from '../../owner-scope'
 import { restPrincipalOf } from '../principal'

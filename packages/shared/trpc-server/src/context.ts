@@ -1,14 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { AutomationRun } from '@slayzone/automations/shared'
 import type { IncomingMessage } from 'node:http'
-import type { Scope } from '@slayzone/transport/scopes'
-
-/** Structural slice of AutomationEngine the automations router needs. Keeps
- *  transport decoupled from the engine's electron-laden value module — only the
- *  pure `AutomationRun` type (from /shared) is imported. */
-export interface AutomationEngineLike {
-  executeManual(id: string): Promise<AutomationRun>
-}
+import type { Scope } from './scope'
 
 /**
  * An account's role on the hub — the `role` column of the hub-auth `user` row
@@ -17,11 +9,20 @@ export interface AutomationEngineLike {
  */
 export type PrincipalRole = 'admin' | 'user'
 
-export type TrpcServerDeps = {
+/**
+ * What every procedure's context carries from the host. An INTERFACE, so a package
+ * that owns a host-wired dependency adds it by module augmentation instead of this
+ * package importing that domain:
+ *
+ *   declare module '@slayzone/trpc-server' {
+ *     interface TrpcServerDeps { automationEngine?: AutomationEngineLike }
+ *   }
+ *
+ * (`@slayzone/api`'s `automation-engine-context.ts` does exactly this today.)
+ */
+export interface TrpcServerDeps {
   db: SlayzoneDb
   dataRoot: string
-  /** Optional — only the Electron-main host wires an engine. */
-  automationEngine?: AutomationEngineLike
 }
 
 export type TrpcContext = TrpcServerDeps & {

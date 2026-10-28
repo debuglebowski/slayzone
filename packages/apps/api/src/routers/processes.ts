@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getProcessesDeps } from '../app-deps'
 
 /** Far past any real value (a label is a tab title, a command one shell line, a cwd a

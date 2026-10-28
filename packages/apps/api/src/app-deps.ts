@@ -985,22 +985,8 @@ export function getHubDescribeDepsOrNull(): HubDescribeDeps | null {
   return hubDescribeDeps
 }
 
-/**
- * Multi-hub auth gate. Returns whether THIS hub enforces bearer auth on tRPC
- * procedures. Default `false` (trusted loopback / non-authed remote) → the auth
- * middleware is inert, byte-identical to the pre-auth server. The hub sets a
- * real predicate (`() => hubAuthRequired`) at boot — true when
- * `SLAYZONE_HUB_REQUIRE_LOGIN=1`.
- */
-let authGate: () => boolean = () => false
-
-export function setAuthGate(fn: () => boolean): void {
-  authGate = fn
-}
-
-export function getAuthGate(): boolean {
-  return authGate()
-}
+// The multi-hub auth gate (`setAuthGate` / `getAuthGate`) lives in `@slayzone/trpc-server`
+// (`auth-gate.ts`): every gate in the procedure chain reads it.
 
 /**
  * The workspace filesystem seam.

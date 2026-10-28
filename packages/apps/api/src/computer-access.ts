@@ -26,7 +26,7 @@
  */
 import type { SlayzoneDb } from '@slayzone/platform'
 import { canAccess, resource, type AccessRequest, type OwnedResource } from './access'
-import type { PrincipalRole } from './context'
+import type { PrincipalRole } from '@slayzone/trpc-server'
 
 /** A request that may MANAGE computers: the facts `canAccess` needs, plus the role. */
 export interface ComputerManagerRequest extends AccessRequest {

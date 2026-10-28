@@ -17,7 +17,7 @@
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { setAuthGate } from './app-deps'
+import { setAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import { MCP_ADMIN_POLICY, REST_ADMIN_POLICY } from './admin-policy'
 import { MCP_OWNER_POLICY, REST_OWNER_POLICY, type HttpOwnerRule } from './http-owner-policy'
 import { isOwnerQuestion } from './owner-policy'
@@ -29,7 +29,6 @@ import { registerMcpTools } from './http/mcp-tools'
 import { withMcpOwnerGate } from './http/mcp-tools/owner-gate'
 import { mcpAuthInfo } from './http/mcp-tools/admin-gate'
 import { idValuesAt } from './http/owner-scope'
-import type { TrpcContext } from './context'
 
 const NO_DB = new Proxy(
   {},

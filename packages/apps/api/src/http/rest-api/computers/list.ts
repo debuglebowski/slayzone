@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { listComputers as storeListComputers } from '@slayzone/computers/server'
-import { getAuthGate } from '../../../app-deps'
+import { getAuthGate } from '@slayzone/trpc-server'
 import { filterManagedComputers } from '../../../computer-access'
 import { httpAccessRequest } from '../../owner-scope'
 import { restPrincipalOf } from '../principal'

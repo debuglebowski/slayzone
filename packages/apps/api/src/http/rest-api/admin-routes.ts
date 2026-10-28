@@ -1,7 +1,7 @@
 import type { Express, NextFunction, Request, Response } from 'express'
 import { peerAddress, routeOf } from '@slayzone/platform/security-log'
 import { ADMIN_ONLY, REST_ADMIN_POLICY, roleAllows, type AccessClass } from '../../admin-policy'
-import { auditAdminDenied } from '../../admin-gate'
+import { auditAdminDenied } from '@slayzone/trpc-server'
 import { restPrincipalOf } from './principal'
 
 /**

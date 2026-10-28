@@ -23,7 +23,7 @@ import { observable } from '@trpc/server/observable'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { FileWatchEvent } from '@slayzone/file-editor/server'
 import type { SearchFilesOptions } from '@slayzone/file-editor/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getAppDeps, getWorkspaceDeps } from '../app-deps'
 
 const searchOptions = z.unknown() as unknown as z.ZodType<SearchFilesOptions>

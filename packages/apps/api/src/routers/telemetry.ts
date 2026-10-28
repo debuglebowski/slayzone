@@ -1,5 +1,5 @@
 import { observable } from '@trpc/server/observable'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTelemetryEvents } from '../app-deps'
 
 // Telemetry IPC-event stream — the main-side `setIpcSuccessHook` fans

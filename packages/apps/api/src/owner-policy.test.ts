@@ -20,7 +20,7 @@ import { z } from 'zod'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { TRPCError } from '@trpc/server'
 import { appRouter } from './router'
-import { setAuthGate } from './app-deps'
+import { setAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
 import { checkOwnership, ownedResult } from './owner-gate'
 import {
@@ -30,7 +30,6 @@ import {
   valuesAt,
   type OwnerRule
 } from './owner-policy'
-import type { TrpcContext } from './context'
 
 type ProcDef = { type: 'query' | 'mutation' | 'subscription'; inputs: z.ZodType[] }
 const PROCS = appRouter._def.procedures as unknown as Record<string, { _def: ProcDef }>

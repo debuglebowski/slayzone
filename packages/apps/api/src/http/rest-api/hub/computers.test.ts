@@ -14,7 +14,7 @@ import { createTestHarness } from '../../../../../../shared/test-utils/ipc-harne
 import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
 import { getComputer, registerComputer } from '@slayzone/computers/server'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { setAuthGate } from '../../../app-deps.js'
+import { setAuthGate } from '@slayzone/trpc-server'
 import { bindRestPrincipal } from '../principal.js'
 import type { RestPrincipal } from '../types.js'
 import { registerHubComputersRoute } from './computers.js'

@@ -8,7 +8,7 @@ import {
   setDefaultTemplate
 } from '@slayzone/task/server'
 import type { CreateTaskTemplateInput, UpdateTaskTemplateInput } from '@slayzone/task-contracts'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 6 `db:taskTemplates:*` IPC handlers (task/src/main/template-handlers.ts).
 // The store is electron-free (../../../../domains/task/src/server/template-store) so it's

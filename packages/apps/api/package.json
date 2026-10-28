@@ -37,6 +37,7 @@
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@trpc/server": "^11.19.0",

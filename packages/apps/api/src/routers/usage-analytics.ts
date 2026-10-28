@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import { refreshUsageData, queryAnalytics, queryTaskCost } from '@slayzone/usage-analytics/server'
-import { router, publicProcedure } from '../trpc'
-import type { TrpcContext } from '../context'
+import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
 import { ownedProjectIds } from '../owner-gate'
 
 // real validation, mirrors DateRange = '7d'|'30d'|'90d'|'all' (usage-analytics/shared/types.ts)

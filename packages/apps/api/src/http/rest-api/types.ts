@@ -4,7 +4,7 @@ import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TerminalMode, TerminalState, PtyInfo } from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap, MenuEventMap } from '../../app-deps'
-import type { PrincipalRole } from '../../context'
+import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { FindJoinTokenAccount } from '../../join-token-policy'
 import type { Scope } from '@slayzone/transport/scopes'
 

@@ -10,13 +10,13 @@
  * A stand-in router at the real path `settings.set`, so the real `SCOPE_POLICY`
  * and the real `settingsWriteProcedure` decide; the handler is a stub.
  */
+// The gate chain's tables, as `router.ts` registers them for the real app router.
+import '../procedure-policy'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { router } from '../trpc'
-import { setAuthGate } from '../app-deps'
-import type { TrpcContext } from '../context'
+import { router, setAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import type { Scope } from '@slayzone/transport/scopes'
 import { settingsWriteProcedure } from './settings-admin'
 

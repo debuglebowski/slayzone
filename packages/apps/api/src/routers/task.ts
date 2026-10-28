@@ -12,7 +12,7 @@ import {
   type TaskEventMap
 } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTaskBus, getTaskOps, getTaskOnMutation, getTaskReserveWarmTaskId } from '../app-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC

@@ -31,6 +31,7 @@ import {
   MAX_JOIN_TOKEN_TTL_MS
 } from '@slayzone/computers/server'
 import { securityEvent } from '@slayzone/platform/security-log'
+import { registerAppCode } from '@slayzone/trpc-server'
 
 export { DEFAULT_JOIN_TOKEN_TTL_MS, JOIN_TOKEN_TTL_TOO_LONG, MAX_JOIN_TOKEN_TTL_MS }
 
@@ -82,6 +83,10 @@ export function isJoinTokenRefusedError(err: unknown): err is JoinTokenRefusedEr
     typeof (err as { code?: unknown }).code === 'string'
   )
 }
+
+// tRPC's error formatter (`@slayzone/trpc-server`) carries the code as `data.appCode`.
+// Registered here, where the error is defined: it is registered whenever one can be thrown.
+registerAppCode((cause) => (isJoinTokenRefusedError(cause) ? cause.code : undefined))
 
 export type JoinTokenMintDecision =
   | { ok: true; ownerUserId: string | null; ttlMs: number }

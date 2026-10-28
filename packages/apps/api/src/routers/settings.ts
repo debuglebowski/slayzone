@@ -2,9 +2,8 @@ import { settingsWriteProcedure } from './settings-admin'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { SettingsService, settingsEvents } from '@slayzone/settings/server'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
 import { emitSettingsChanged, getAppDeps } from '../app-deps'
-import type { TrpcContext } from '../context'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
 

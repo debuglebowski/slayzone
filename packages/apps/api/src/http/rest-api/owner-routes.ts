@@ -3,7 +3,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { peerAddress, routeOf, runWithSecurityContext } from '@slayzone/platform/security-log'
 import { createAccessScope, type AccessScope } from '../../access'
 import { REST_ADMIN_POLICY, type AccessClass } from '../../admin-policy'
-import { getAuthGate } from '../../app-deps'
+import { getAuthGate } from '@slayzone/trpc-server'
 import {
   DENY_RESPONSE,
   REST_OWNER_POLICY,

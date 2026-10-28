@@ -6,13 +6,12 @@ import {
 } from '@slayzone/platform/hub-switch-refusal'
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import type { TrpcContext } from './context'
-import { getAuthGate } from './app-deps'
+import { getAuthGate } from './auth-gate'
 import { trpcTransformer } from './trpc-transformer'
-import { isPathAllowed } from '@slayzone/transport/scopes'
-import { ADMIN_ONLY, roleAllows, TRPC_ADMIN_POLICY } from './admin-policy'
+import { ADMIN_ONLY, roleAllows } from './access-class'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
-import { checkOwnership, ownedResult } from './owner-gate'
-import { isJoinTokenRefusedError } from './join-token-policy'
+import { registeredAppCodes } from './app-codes'
+import { procedurePolicy } from './procedure-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
   // superjson on the wire; responses skip superjson's walk when they are plain
@@ -29,8 +28,10 @@ const t = initTRPC.context<TrpcContext>().create({
       ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
       // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
       ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
-      // A refused join-token mint (T-20): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
-      ...(isJoinTokenRefusedError(error.cause) ? { appCode: error.cause.code } : {})
+      // A domain's own refusal, registered by the module defining its error (see
+      // app-codes.ts) — e.g. a refused join-token mint (T-20, `@slayzone/api`'s
+      // join-token-policy.ts): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
+      ...registeredAppCodes(error.cause)
     }
   })
 })
@@ -83,7 +84,8 @@ const authGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
- * Capability scope gate — see `scopes.ts` for the full design. Chained AFTER
+ * Capability scope gate — see `@slayzone/transport/scopes` for the full design; the
+ * table is reached through the registered policy (`procedure-policy.ts`). Chained AFTER
  * `authGate`, so by the time this runs on an enforcing hub, `ctx.principal` is
  * already guaranteed non-null (a null principal already 401'd above).
  *
@@ -106,7 +108,7 @@ const authGate = t.middleware(({ ctx, next, path }) => {
 const scopeGate = t.middleware(({ ctx, next, path }) => {
   if (!getAuthGate()) return next()
   const scopes = ctx.principal?.scopes ?? []
-  if (!isPathAllowed(scopes, path)) {
+  if (!procedurePolicy().scopeAllows(scopes, path)) {
     auditDenied(path, { reason: 'scope', scopes })
     throw new TRPCError({ code: 'FORBIDDEN', message: `insufficient scope for ${path}` })
   }
@@ -114,7 +116,8 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
 })
 
 /**
- * Account-role gate (T-15) — see `admin-policy.ts`. A non-admin account calling an
+ * Account-role gate (T-15) — see `access-class.ts`; the table (`@slayzone/api`'s
+ * `admin-policy.ts`) is reached through the registered policy. A non-admin account calling an
  * `admin` procedure (or an unclassified one: fail closed) gets FORBIDDEN with
  * `data.appCode: 'ADMIN_ONLY'` and one `authz.denied` line.
  *
@@ -127,23 +130,26 @@ const scopeGate = t.middleware(({ ctx, next, path }) => {
  */
 const adminGate = t.middleware(({ ctx, next, path }) => {
   if (!getAuthGate()) return next()
-  if (!roleAllows(TRPC_ADMIN_POLICY[path], ctx.principal?.role ?? 'user')) {
+  if (!roleAllows(procedurePolicy().adminClassOf(path), ctx.principal?.role ?? 'user')) {
     throw adminOnlyTrpcError(path)
   }
   return next()
 })
 
 /**
- * Owner gate (T-17) — see `owner-gate.ts`. On a hub with login, every id a `user`
- * procedure's input names must belong to the caller (else NOT_FOUND + one
- * `authz.denied` line), and lists and subscriptions are cut to the caller's rows. Inert
- * when the auth gate is off, like the gates above.
+ * Owner gate (T-17) — the decision is `@slayzone/api`'s `owner-gate.ts`, reached
+ * through the registered policy. On a hub with login, every id a `user` procedure's
+ * input names must belong to the caller (else NOT_FOUND + one `authz.denied` line),
+ * and lists and subscriptions are cut to the caller's rows. Inert when the auth gate
+ * is off, like the gates above.
  */
 const ownerGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) => {
-  const check = await checkOwnership({ ctx, path, type, getRawInput })
+  const filter = getAuthGate()
+    ? await procedurePolicy().ownerCheck({ ctx, path, type, getRawInput })
+    : null
   const result = await next()
-  if (!check || !result.ok) return result
-  return { ...result, data: await ownedResult(check, result.data) }
+  if (!filter || !result.ok) return result
+  return { ...result, data: await filter(result.data) }
 })
 
 /**
@@ -185,7 +191,7 @@ const unsafePathRefusal = t.middleware(async ({ next }) => {
  * Default procedure — auth-gated on an authed hub, then role- and scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
- * adds it to `SCOPE_POLICY` — see that file's exhaustiveness test).
+ * adds it to `SCOPE_POLICY` — see `@slayzone/api`'s `scopes.test.ts`).
  */
 export const publicProcedure = t.procedure
   .use(securityContext)

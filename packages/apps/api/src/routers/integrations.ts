@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Project } from '@slayzone/projects-contracts'
 import { getIntegrationOps } from '../app-deps'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 43 `integrations:*` IPC handlers (integrations/src/main/handlers.ts).
 // Both call the same ops instance (`createIntegrationOps`, injected via

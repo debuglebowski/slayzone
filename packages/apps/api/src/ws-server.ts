@@ -4,7 +4,8 @@ import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { getServerHost, getTrpcPort } from '@slayzone/platform'
 import { appRouter } from './router'
-import type { AutomationEngineLike, TrpcContext } from './context'
+import type { TrpcContext } from '@slayzone/trpc-server'
+import type { AutomationEngineLike } from './automation-engine-context'
 
 let httpServer: HttpServer | null = null
 let wss: WebSocketServer | null = null

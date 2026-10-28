@@ -17,7 +17,7 @@ import type {
   CreateTerminalTabInput,
   UpdateTerminalTabInput
 } from '@slayzone/task-terminals/shared'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure } from '@slayzone/trpc-server'
 
 // Mirrors the 7 `tabs:*` IPC handlers (task-terminals/src/main/handlers.ts) plus
 // the `tabs:changed` broadcast. Both the still-registered IPC handlers and these

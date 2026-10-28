@@ -6,13 +6,12 @@ import type {
 } from '@slayzone/platform/browser-view-events'
 import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { hubGithubSignInConvexUrl } from '../auth-github'
-import { router, publicProcedure } from '../trpc'
+import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
 import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
 import { buildFeedbackOps } from '@slayzone/feedback/server'
 import { buildExportImportOps } from '../export-import'
 import { createAccessScope } from '../access'
 import { accessRequestOf, ownedProjectIds } from '../owner-gate'
-import type { TrpcContext } from '../context'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
 const isTestBuild = (): boolean => process.env.PLAYWRIGHT === '1'
