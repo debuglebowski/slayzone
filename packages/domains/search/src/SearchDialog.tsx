@@ -13,7 +13,7 @@ import {
 } from '@slayzone/ui'
 import { ChevronLeft } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC } from './client/trpc'
 import { useDialogStore } from '@slayzone/dialogs'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
 import { FILTERS, MAX_RECENT } from './SearchDialog.constants'

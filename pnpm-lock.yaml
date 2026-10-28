@@ -1796,6 +1796,9 @@ importers:
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
