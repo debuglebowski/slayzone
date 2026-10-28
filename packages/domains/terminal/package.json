@@ -43,7 +43,6 @@
     "lucide-react": "^1.48.0",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5",
-    "zod": "^4.3.5",
     "zustand": "^5.0.15"
   },
   "peerDependencies": {
