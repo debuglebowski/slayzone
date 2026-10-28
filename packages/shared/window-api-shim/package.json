@@ -17,7 +17,6 @@
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
-    "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/types": "workspace:*"
   }

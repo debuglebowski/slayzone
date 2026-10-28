@@ -1,5 +1,4 @@
 [
-  "@slayzone/agent-turns -> @slayzone/terminal",
   "@slayzone/agent-turns -> @slayzone/transport",
   "@slayzone/ai-config -> @slayzone/file-editor",
   "@slayzone/ai-config -> @slayzone/transport",

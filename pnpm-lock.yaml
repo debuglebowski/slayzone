@@ -935,9 +935,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../terminal
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../terminal-contracts
@@ -2956,9 +2953,6 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
-      '@slayzone/terminal':
-        specifier: workspace:*
-        version: link:../../domains/terminal
       '@slayzone/terminal-contracts':
         specifier: workspace:*
         version: link:../../domains/terminal-contracts
