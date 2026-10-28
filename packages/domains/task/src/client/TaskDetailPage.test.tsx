@@ -163,7 +163,6 @@ vi.mock('@slayzone/terminal/shared', () => ({
 
 vi.mock('@slayzone/editor', () => ({ RichTextEditor: () => null }))
 vi.mock('@slayzone/task-terminals', () => ({ TerminalContainer: React.forwardRef(() => null) }))
-vi.mock('@slayzone/worktrees', () => ({ UnifiedGitPanel: React.forwardRef(() => null) }))
 vi.mock('@slayzone/task-browser', () => ({ BrowserPanel: React.forwardRef(() => null) }))
 vi.mock('@slayzone/task-browser/shared', () => ({}))
 vi.mock('@slayzone/file-editor/client', () => ({ FileEditorView: React.forwardRef(() => null) }))
@@ -297,7 +296,19 @@ vi.mock('@tanstack/react-query', () => {
 
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
+import { registerTaskPanels } from './task-detail/TaskPanels'
 import { detectPlatform } from '@slayzone/ui'
+
+// The app injects the artifacts + git panels and their data hooks; stub them.
+// Stable singleton returns so their values don't churn dep arrays.
+const NO_ARTIFACTS = { artifacts: [] }
+const NO_REPOS = { repos: [] }
+registerTaskPanels({
+  ArtifactsPanel: React.forwardRef(() => null),
+  UnifiedGitPanel: React.forwardRef(() => null),
+  useArtifacts: () => NO_ARTIFACTS,
+  useProjectRepos: () => NO_REPOS
+})
 
 // --- Test helpers ---
 

@@ -16,6 +16,7 @@
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
     "./client/TaskDetailDataLoader": "./src/client/TaskDetailDataLoader.tsx",
     "./client/lazyPanels": "./src/client/task-detail/lazyPanels.tsx",
+    "./client/TaskPanels": "./src/client/task-detail/TaskPanels.ts",
     "./client/taskDetailCache": "./src/client/taskDetailCache.ts",
     "./client/TaskShell": "./src/client/TaskShell.tsx",
     "./client/TerminalFirstShell": "./src/client/TerminalFirstShell.tsx",

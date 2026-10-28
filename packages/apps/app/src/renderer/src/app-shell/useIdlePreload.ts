@@ -2,12 +2,12 @@ import { useEffect } from 'react'
 import { preloadOnIdle } from '@slayzone/ui'
 import { preloadTerminal } from '@slayzone/terminal/client/LazyTerminal'
 import {
-  ArtifactsPanel,
   BrowserPanel,
   DescriptionDialog,
-  FileEditorView as TaskFileEditorView,
-  UnifiedGitPanel as TaskGitPanel
+  FileEditorView as TaskFileEditorView
 } from '@slayzone/task/client/lazyPanels'
+import { ArtifactsPanel } from '@slayzone/task-artifacts/task-panels'
+import { UnifiedGitPanel as TaskGitPanel } from '@slayzone/worktrees/task-panels'
 import {
   ChangelogDialog,
   CliInstallDialog,

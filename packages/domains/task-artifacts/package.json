@@ -10,7 +10,8 @@
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
     "./db": "./src/server/worker-db.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./task-panels": "./src/client/task-panels.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

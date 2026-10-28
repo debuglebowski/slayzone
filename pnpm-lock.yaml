@@ -785,6 +785,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
+      '@slayzone/task-artifacts':
+        specifier: workspace:*
+        version: link:../../domains/task-artifacts
       '@slayzone/tasks':
         specifier: workspace:*
         version: link:../../domains/tasks
@@ -803,6 +806,9 @@ importers:
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
         version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)

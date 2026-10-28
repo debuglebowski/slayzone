@@ -11,7 +11,8 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
-    "./hooks": "./src/client/hooks.ts"
+    "./hooks": "./src/client/hooks.ts",
+    "./task-panels": "./src/client/task-panels.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

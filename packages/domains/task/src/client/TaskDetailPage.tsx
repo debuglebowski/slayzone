@@ -31,12 +31,16 @@ import {
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
-import type { ArtifactsPanelHandle } from '@slayzone/task-artifacts/client'
-import { useArtifacts } from '@slayzone/task-artifacts/client'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import type { Task, PanelVisibility, PanelSizes, UpdateTaskInput } from '@slayzone/task/shared'
+import type {
+  Task,
+  PanelVisibility,
+  PanelSizes,
+  UpdateTaskInput,
+  GitTabId
+} from '@slayzone/task/shared'
 import type { TaskTemplate } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
 import { mainTerminalProps } from './main-terminal-props'
@@ -137,8 +141,6 @@ import {
   type TerminalContainerHandle,
   MODE_ICONS
 } from '@slayzone/task-terminals'
-import { useProjectRepos } from '@slayzone/worktrees/hooks'
-import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import {
   buildStatusOptions,
   cn,
@@ -187,10 +189,8 @@ import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
 import { useSharedCardHeights } from './useSharedCardHeights'
 import {
   SortableSubTask,
-  ArtifactsPanel,
   DescriptionDialog,
   RichTextEditor,
-  UnifiedGitPanel,
   BrowserPanel,
   FileEditorView,
   useTaskTemplates,
@@ -199,7 +199,12 @@ import {
   usePersistenceSaves,
   useDevServerDetection,
   useTaskTerminalSession,
-  TaskCompletedScreen
+  TaskCompletedScreen,
+  getTaskPanels,
+  useTaskArtifacts,
+  useTaskProjectRepos,
+  type ArtifactsPanelHandle,
+  type UnifiedGitPanelHandle
 } from './task-detail'
 
 export interface TaskDetailPageProps {
@@ -278,6 +283,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  // Artifacts + git panels, injected by the composing app (registerTaskPanels).
+  const { ArtifactsPanel, UnifiedGitPanel } = getTaskPanels()
   // mutateAsync is stable; the mutation result object is not (new each render).
   const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 
@@ -388,7 +395,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   } = useSubTasks(task?.id, initialData?.subTasks)
 
   // Artifacts
-  const { artifacts } = useArtifacts(task?.id)
+  const { artifacts } = useTaskArtifacts(task?.id)
   const { uploadFiles: uploadImageFiles } = useArtifactUpload(task?.id)
   const handleUploadImages = useCallback(
     async (files: File[]) => {
@@ -436,7 +443,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Git-panel viewing axis: ephemeral, repo selection here does NOT change the task-bound path.
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
   const taskBoundRepoForView = task?.worktree_path ?? resolvedRepo.path // worktree if present, else resolved child / project root
-  const { repos: viewableRepos } = useProjectRepos(
+  const { repos: viewableRepos } = useTaskProjectRepos(
     project?.path ?? null,
     taskBoundRepoForView,
     project?.id

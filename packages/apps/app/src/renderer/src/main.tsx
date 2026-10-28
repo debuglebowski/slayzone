@@ -17,6 +17,8 @@ import {
 import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
+import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
+import { taskPanels } from './app-shell/taskPanels'
 import App from './App'
 import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
@@ -29,6 +31,10 @@ import {
 import { startBootTimingsReport } from './lib/bootTimings'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
+
+// Artifacts + git panels TaskDetailPage embeds (main + secondary task windows) —
+// registered before any render.
+registerTaskPanels(taskPanels)
 
 const params = new URLSearchParams(window.location.search)
 const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'

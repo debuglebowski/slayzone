@@ -8,6 +8,11 @@ import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
 import { browserMojoLink } from './browser-mojo-link'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
+import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
+import { taskPanels } from './taskPanels'
+
+// Artifacts + git panels TaskDetailPage embeds — registered before any render.
+registerTaskPanels(taskPanels)
 import { OverlayDialogApp } from './OverlayDialogApp'
 
 // window.api shim is installed by the shell before this module evaluates
