@@ -1,0 +1,20 @@
+{
+  "name": "@slayzone/host-capabilities",
+  "version": "0.36.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/server/index.ts",
+  "types": "./src/server/index.ts",
+  "exports": {
+    "./server": "./src/server/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "zod": "^4.3.5"
+  }
+}

@@ -4,61 +4,23 @@
 // owns its router keeps that router's registry itself, e.g. terminal's
 // `setPtyDeps`/`setChatDeps`.)
 
-import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { CliInstallResult, HubSwitches } from '@slayzone/platform'
+import type { HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import type { TasksChange } from '@slayzone/task-contracts'
-import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 import type { SettingsChange } from '@slayzone/settings/server'
 import type { UpdateStatus } from '@slayzone/platform/app-update-status'
-import type {
-  BrowserShortcutPayload,
-  BrowserCreateTaskFromLinkIntent
-} from '@slayzone/platform/browser-view-events'
 import type { FindJoinTokenAccount } from './join-token-policy'
+import type { HostCapabilities } from '@slayzone/host-capabilities/server'
+import type { UsageHost } from '@slayzone/terminal/server'
+import type { TaskBrowserHost } from '@slayzone/task-browser/server'
+import type { FloatingAgentHost } from '@slayzone/agent-panels/server'
 
-/**
- * Backup ops — injected by the composition root rather than built in the router.
- *
- * Unlike leaderboard/feedback/export-import, backup needs things only the host
- * process knows: whether this hub is supervised (restore is refused otherwise),
- * the live DB file path, and how to close its own connection before that file is
- * overwritten. So it stays a registry, but the IMPLEMENTATION now lives with the
- * database instead of on the far side of a capability bridge.
- */
-export type BackupOps = {
-  list: () => Promise<BackupInfo[]>
-  create: (name?: string) => Promise<BackupInfo>
-  rename: (filename: string, name: string) => Promise<void>
-  delete: (filename: string) => Promise<void>
-  restore: (filename: string) => Promise<void>
-  getSettings: () => Promise<BackupSettings>
-  setSettings: (partial: Partial<BackupSettings>) => Promise<BackupSettings>
-  revealInFinder: () => void
-}
+// Backup ops — the registry lives with the `app.backup` router that reads it.
+export { setBackupOps, getBackupOps, type BackupOps } from '@slayzone/settings/server'
 
-let backupOps: BackupOps | null = null
-
-export function setBackupOps(ops: BackupOps): void {
-  backupOps = ops
-}
-
-export function getBackupOps(): BackupOps {
-  if (!backupOps) throw new Error('backupOps not initialized — call setBackupOps() at boot')
-  return backupOps
-}
-
-// Floating global agent panel state — the payload `getState()` returns and the
-// `state` event emits (mirrors floating-global-agent-panel.ts currentStatePayload).
-// Lives transport-side (transport can't import from apps/app); the host conforms.
-export type FloatingAgentState = {
-  kind: string
-  sessionId: string | null
-  mode: 'auto' | 'manual' | null
-  hasCustomSize: boolean
-}
-import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal-contracts'
+// Floating global agent panel state — lives with the `app.floatingAgent` router.
+export type { FloatingAgentState } from '@slayzone/agent-panels/server'
 
 // Notify event bus — the cross-domain `tasks-changed` / `settings-changed`
 // signals that back the `notify.*` subscriptions. The emitter is owned by the
@@ -150,31 +112,12 @@ export function getMenuEvents(): TypedEmitter<MenuEventMap> {
   return menuEvents
 }
 
-// Auth-callback bus — backs the `app.auth.onCallback` subscription. The
-// chromium-fork sidecar's Unix-socket server (sidecar-socket.ts) receives the
-// `slayzone://auth/callback` deep-link from the C++ shell (auth:deep-link RPC)
-// and emits the OAuth code/error here; the subscription fans it out to the
-// renderer's ConvexAuthBridge, which completes the Convex sign-in. Unlike the
-// other buses this one is process-LOCAL (emitter and subscriber both live in
-// THIS sidecar process — no Electron-host injection); composeServer constructs
-// and sets it before connections are accepted. Electron's renderer uses the
-// inline-mutation path and never subscribes, so nothing emits here in Electron.
-export type AuthEventMap = {
-  /** OAuth deep-link callback relayed from the chromium shell → sidecar. */
-  callback: [payload: { code?: string; error?: string }]
-}
-
-let authEvents: TypedEmitter<AuthEventMap> | null = null
-
-export function setAuthEvents(ev: TypedEmitter<AuthEventMap>): void {
-  authEvents = ev
-}
-
-export function getAuthEvents(): TypedEmitter<AuthEventMap> {
-  if (!authEvents)
-    throw new Error('authEvents not initialized — call setAuthEvents() in composeServer first')
-  return authEvents
-}
+// Auth-callback bus (`app.auth.onCallback`) — lives with the `app.auth` router.
+export {
+  setAuthEvents,
+  getAuthEvents,
+  type AuthEventMap
+} from '@slayzone/host-capabilities/server'
 
 // Power-resume bus — Electron `powerMonitor.on('resume')` is host-only, but the
 // AutomationEngine (which runs catchup on wake) lives in the side-car after the
@@ -205,407 +148,129 @@ export function getPowerResumeEvents(): TypedEmitter<PowerResumeEventMap> {
 // IPC handlers (coexistence until slice 5). Signatures are Promise-typed because
 // main's `SlayzoneDb` is async (worker_thread). A standalone server without these
 // wired throws on the first app procedure call.
-export type AppDeps = {
-  /** Relaunch the desktop app. Used by backup restore, which overwrites the
-   *  database file and must then restart everything pointing at it. */
-  appRelaunch: () => void
+//
+// The members the `app.*` routers wrap are declared by the package that owns each
+// router (`HostCapabilities`, `UsageHost`, `TaskBrowserHost`, `FloatingAgentHost`),
+// so router and host share one contract; this type is their union plus the members
+// only api's own code reads. Member names are the capability bridge's wire contract
+// (`capability-bridge.ts` forwards by name): never rename one.
+export type AppDeps = HostCapabilities &
+  UsageHost &
+  TaskBrowserHost & {
+    floatingAgent: FloatingAgentHost
+  } & {
+    /** Relaunch the desktop app. Used by backup restore, which overwrites the
+     *  database file and must then restart everything pointing at it. */
+    appRelaunch: () => void
 
-  /**
-   * Hand a saved diagnostics config to the desktop, which persists it to the
-   * CLIENT store.
-   *
-   * Both processes record into the same machine-local diagnostics database but
-   * hold separate copies of the config that gates it — the hub's in the shared
-   * DB, the desktop's in the client store — and the Settings UI writes to the
-   * hub. Without this the desktop keeps recording after the user turns
-   * diagnostics off.
-   */
-  diagnosticsConfigChanged: (next: DiagnosticsConfig) => Promise<void>
+    /**
+     * Hand a saved diagnostics config to the desktop, which persists it to the
+     * CLIENT store.
+     *
+     * Both processes record into the same machine-local diagnostics database but
+     * hold separate copies of the config that gates it — the hub's in the shared
+     * DB, the desktop's in the client store — and the Settings UI writes to the
+     * hub. Without this the desktop keeps recording after the user turns
+     * diagnostics off.
+     */
+    diagnosticsConfigChanged: (next: DiagnosticsConfig) => Promise<void>
 
-  // clipboard
-  clipboardWriteFilePaths: (paths: string[]) => Promise<void>
-  clipboardReadFilePaths: () => Promise<string[]>
-  clipboardHasFiles: () => Promise<boolean>
+    // Reveal + select an item in the OS file manager (Electron shell only) —
+    // backs file-editor `showInFinder`. Forwarded over the capability bridge.
+    shellShowItemInFolder: (absPath: string) => void
 
-  // screenshot
-  screenshotCaptureView: (viewId: string) => Promise<{ success: boolean; path?: string }>
+    // app metadata
+    /**
+     * OS downloads folder — the default directory for artifact save dialogs.
+     * Async because the capability bridge forwards every call over the wire; a
+     * sync signature here would type-check (the bridge proxy is cast to AppDeps)
+     * and then hand callers a Promise at runtime.
+     */
+    appGetDownloadsDir: () => Promise<string>
+    // Raise/show+focus the main window — the CLI/agent `tasks/open` foreground
+    // path. Forwarded over the capability bridge so the side-car's REST route can
+    // bring the Electron host window forward. No-op off-window (standalone).
+    appRaiseMainWindow: () => void
 
-  // usage
-  /** Providers are resolved from ctx.db by the caller — usage is an Electron
-   *  `net.fetch` over rows that live in the database, so each half runs where it
-   *  belongs instead of dragging a DB handle onto the host. */
-  usageFetch: (
-    providers: {
-      customRows: { id: string; label: string; usage_config: string }[]
-      builtinEnabled: Record<string, boolean>
-    },
-    force?: boolean
-  ) => Promise<ProviderUsage[]>
-  usageTest: (
-    config: UsageProviderConfig
-  ) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
+    // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
+    // host-only. The `settings.*Theme` tRPC procedures resolve these (through
+    // `settings-host-wiring.ts`; forwarded
+    // over the capability bridge); the `theme:changed` event streams back on the
+    // bridge's `theme` channel → the side-car's settingsEvents → onThemeChanged.
+    themeGetEffective: () => 'dark' | 'light'
+    themeGetSource: () => 'system' | 'light' | 'dark'
+    themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
 
-  // files
-  filesPathExists: (filePath: string) => Promise<boolean>
-  filesSaveTempImage: (
-    base64: string,
-    mimeType: string
-  ) => Promise<{ success: boolean; path?: string; error?: string }>
-
-  // shell
-  shellOpenExternal: (
-    url: string,
-    options?: {
-      blockDesktopHandoff?: boolean
-      desktopHandoff?: { protocol?: string; hostScope?: string }
+    // Credential cipher — Electron `safeStorage`-backed, so host-only. The side-car
+    // runs as ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
+    // forwards encrypt/decrypt here over the bridge. Base64 strings on the wire
+    // (superjson does not round-trip Buffer). Async — Electron's async safeStorage
+    // API; `shouldReEncrypt` = OS key rotated, the side-car re-encrypts + persists.
+    credentialCipher: {
+      isEncryptionAvailable: () => Promise<boolean>
+      encryptStringToB64: (secret: string) => Promise<string>
+      decryptStringFromB64: (b64: string) => Promise<{ result: string; shouldReEncrypt: boolean }>
     }
-  ) => void
-  shellOpenPath: (absPath: string) => Promise<string>
-  // Reveal + select an item in the OS file manager (Electron shell only) —
-  // backs file-editor `showInFinder`. Forwarded over the capability bridge.
-  shellShowItemInFolder: (absPath: string) => void
 
-  // app metadata (read-only)
-  appGetVersion: () => string
-  /**
-   * OS downloads folder — the default directory for artifact save dialogs.
-   * Async because the capability bridge forwards every call over the wire; a
-   * sync signature here would type-check (the bridge proxy is cast to AppDeps)
-   * and then hand callers a Promise at runtime.
-   */
-  appGetDownloadsDir: () => Promise<string>
-  appGetTrpcPort: () => Promise<number>
-  appIsTestsPanelEnabled: () => boolean
-  /**
-   * Labs flags are CLIENT-scoped — they gate native menu items the host builds
-   * before any hub exists, so they live in the client store. The read already came
-   * through AppDeps; this is the matching write, without which the Labs tab would
-   * update a hub row nothing reads.
-   */
-  appSetLabFlag: (key: 'labs_tests_panel' | 'labs_loop_mode', on: boolean) => Promise<void>
-  appIsLoopModeEnabled: () => boolean
-  appGetZoomFactor: () => number
-  appGetProtocolClientStatus: () => {
-    scheme: string
-    attempted: boolean
-    registered: boolean
-    reason: 'registered' | 'dev-skipped' | 'registration-failed'
-  }
-  appGetRendererZoomFactor: () => number | null
-  appCheckCliInstalled: () => { installed: boolean; path?: string }
-  appInstallCli: () => Promise<CliInstallResult>
-  appAdjustZoom: (command: 'in' | 'out' | 'reset') => number
-  appRestartForUpdate: () => Promise<void>
-  appCheckForUpdates: () => Promise<void>
+    // Native save sheet, parented to the focused window host-side so the side-car
+    // never needs a window handle. Backs every artifact download.
+    dialogShowSaveDialog: (options: unknown) => Promise<{ canceled: boolean; filePath?: string }>
 
-  // shortcuts — rebuild the native app menu from the persisted custom-shortcut
-  // overrides after the renderer writes them (was the `shortcuts:changed` IPC).
-  // No-op on a headless host (no native menu).
-  appRebuildMenuForShortcuts: () => void
-
-  // side-car supervisor (dark-launch) — read-only status + log reveal for the
-  // Diagnostics settings tab. Shape mirrors the host's `SidecarStatus`
-  // (transport stays decoupled from the supervisor module).
-  appGetSidecarStatus: () => {
-    health: 'starting' | 'ready' | 'restarting' | 'failed'
-    port: number | null
-    pid: number | null
-    restarts: number
-    totalRespawns: number
-    dbPath: string | null
-    uptimeMs: number | null
-    runningBuildId: string | null
-    diskBuildId: string | null
-    stale: boolean
-  }
-  appRevealSidecarLog: () => void
-
-  // window
-  appWindowGetContentBounds: () => {
-    x: number
-    y: number
-    width: number
-    height: number
-  } | null
-  appWindowGetDisplayScaleFactor: () => number | null
-  // macOS traffic-light controls — windowId resolves the target window (tRPC:
-  // ctx.windowId; IPC: event.sender). No-op off darwin / when the window can't be
-  // resolved. Same impl backs `window:set-traffic-light-position` /
-  // `window:set-window-button-visibility` IPC (coexistence until the bridge drops).
-  appWindowSetTrafficLightPosition: (
-    windowId: number | null,
-    pos: { x: number; y: number } | null
-  ) => void
-  appWindowSetWindowButtonVisibility: (windowId: number | null, visible: boolean) => void
-  // Pull OS keyboard focus back to the connection's renderer webContents (e.g.
-  // so the browser find input receives keys instead of a focused WCV). Graceful
-  // no-op when the window can't be resolved / isn't focused. windowId is the
-  // caller's webContents id (ctx.windowId), matching `windowClose`.
-  appFocusRenderer: (windowId: number | null) => void
-  // Raise/show+focus the main window — the CLI/agent `tasks/open` foreground
-  // path. Forwarded over the capability bridge so the side-car's REST route can
-  // bring the Electron host window forward. No-op off-window (standalone).
-  appRaiseMainWindow: () => void
-
-  // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
-  // host-only. The `settings.*Theme` tRPC procedures resolve these (through
-  // `settings-host-wiring.ts`; forwarded
-  // over the capability bridge); the `theme:changed` event streams back on the
-  // bridge's `theme` channel → the side-car's settingsEvents → onThemeChanged.
-  themeGetEffective: () => 'dark' | 'light'
-  themeGetSource: () => 'system' | 'light' | 'dark'
-  themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
-
-  // Credential cipher — Electron `safeStorage`-backed, so host-only. The side-car
-  // runs as ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
-  // forwards encrypt/decrypt here over the bridge. Base64 strings on the wire
-  // (superjson does not round-trip Buffer). Async — Electron's async safeStorage
-  // API; `shouldReEncrypt` = OS key rotated, the side-car re-encrypts + persists.
-  credentialCipher: {
-    isEncryptionAvailable: () => Promise<boolean>
-    encryptStringToB64: (secret: string) => Promise<string>
-    decryptStringFromB64: (b64: string) => Promise<{ result: string; shouldReEncrypt: boolean }>
-  }
-
-  // auth
-  authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
-
-  // dialog (native file picker — same electron dialog API backs the
-  // `dialog:showOpenDialog` IPC handler; coexistence until slice 5)
-  dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
-  // Native save sheet, parented to the focused window host-side so the side-car
-  // never needs a window handle. Backs every artifact download.
-  dialogShowSaveDialog: (options: unknown) => Promise<{ canceled: boolean; filePath?: string }>
-
-  // Artifact export — offscreen BrowserWindow rendering, unavailable off the
-  // Electron host. HTML building lives here too (not side-car side) because
-  // buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
-  // back to plain-code rendering when it misses; from the side-car bundle it
-  // would miss every time and quietly downgrade mermaid exports. The renderers
-  // write straight to destPath so multi-MB buffers never cross the bridge.
-  artifactBuildExportHtml: (content: string, mode: string, title: string) => Promise<string>
-  artifactRenderPdfToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<void>
-  /** False when the mode has no PNG representation (buildPngHtml declined). */
-  artifactRenderPngToFile: (
-    content: string,
-    mode: string,
-    title: string,
-    destPath: string
-  ) => Promise<boolean>
-
-  // window.close — closes the window owning the connection (ctx.windowId).
-  // Same effect as the `window:close` IPC (which uses event.sender).
-  windowClose: (windowId: number) => void
-
-  /**
-   * The task/tab browser REGISTRY — distinct from `browser` below, which is the
-   * view-id-keyed WebContentsView manager.
-   *
-   * Exists so the REST browser routes can run on the hub, where the
-   * `tasks.browser_tabs` row they read and write lives. They used to be
-   * reverse-proxied to the desktop wholesale, purely because the old
-   * `BrowserAccess` handed back a live `WebContents` — which in turn forced the
-   * desktop to keep its own connection to the shared database. A handle can't
-   * cross the bridge; `(taskId, tabId)` can.
-   *
-   * `capturePageToFile` writes the PNG on the host so a full-page image never
-   * travels as a buffer, matching the `artifactRender*ToFile` slots.
-   */
-  browserTabs: {
-    getResolvedTabId: (taskId: string, tabId?: string) => Promise<string | null>
-    listTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
-    hasTab: (taskId: string, tabId?: string) => Promise<boolean>
-    /** Resolves once a tab registers; rejects on timeout. */
-    waitForRegistration: (
-      taskId: string,
-      opts: { tabId?: string; timeoutMs?: number }
+    // Artifact export — offscreen BrowserWindow rendering, unavailable off the
+    // Electron host. HTML building lives here too (not side-car side) because
+    // buildMermaidPdfHtml reads the mermaid bundle only the host's build ships and silently falls
+    // back to plain-code rendering when it misses; from the side-car bundle it
+    // would miss every time and quietly downgrade mermaid exports. The renderers
+    // write straight to destPath so multi-MB buffers never cross the bridge.
+    artifactBuildExportHtml: (content: string, mode: string, title: string) => Promise<string>
+    artifactRenderPdfToFile: (
+      content: string,
+      mode: string,
+      title: string,
+      destPath: string
     ) => Promise<void>
-    execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
-    loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
-    getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
-    /** False when the captured image was empty. */
-    capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
-  }
+    /** False when the mode has no PNG representation (buildPngHtml declined). */
+    artifactRenderPngToFile: (
+      content: string,
+      mode: string,
+      title: string,
+      destPath: string
+    ) => Promise<boolean>
 
-  // Browser view manager — heavy electron coupling, expose as opaque object
-  // and call methods directly from procedures. All return types are unknown
-  // since the manager's public surface evolves; callers cast on the renderer.
-  browser: {
-    createView: (opts: unknown) => unknown
-    destroyView: (viewId: string) => unknown
-    destroyAllForTask: (taskId: string) => unknown
-    setBounds: (viewId: string, bounds: unknown) => unknown
-    setVisible: (viewId: string, visible: boolean) => unknown
-    /** Agent lock: drop OS-origin input while keeping the view rendering. */
-    setLocked: (viewId: string, locked: boolean) => unknown
-    hideAll: () => unknown
-    showAll: () => unknown
-    setHandoffPolicy: (viewId: string, policy: unknown) => unknown
-    navigate: (viewId: string, url: string) => unknown
-    goBack: (viewId: string) => unknown
-    goForward: (viewId: string) => unknown
-    reload: (viewId: string, ignoreCache?: boolean) => unknown
-    stop: (viewId: string) => unknown
-    executeJs: (viewId: string, code: string) => unknown
-    insertCss: (viewId: string, css: string) => unknown
-    setForcedTheme: (viewId: string, theme: 'light' | 'dark' | null) => unknown
-    removeCss: (viewId: string, key: string) => unknown
-    setZoom: (viewId: string, factor: number) => unknown
-    focus: (viewId: string) => unknown
-    findInPage: (viewId: string, text: string, options?: unknown) => unknown
-    stopFindInPage: (
-      viewId: string,
-      action: 'clearSelection' | 'keepSelection' | 'activateSelection'
-    ) => unknown
-    setKeyboardPassthrough: (viewId: string, enabled: boolean) => unknown
-    sendInputEvent: (viewId: string, input: unknown) => unknown
-    openDevTools: (viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') => unknown
-    closeDevTools: (viewId: string) => unknown
-    isDevToolsOpen: (viewId: string) => unknown
-    getUrl: (viewId: string) => unknown
-    getBounds: (viewId: string) => unknown
-    getZoomFactor: (viewId: string) => unknown
-    getActualNativeBounds: (viewId: string) => unknown
-    getViewVisible: (viewId: string) => unknown
-    getViewsForTask: (taskId: string) => unknown
-    getAllViewIds: () => unknown
-    listViews: () => unknown
-    getNativeChildViewCount: () => unknown
-    isAllHidden: () => unknown
-    isFocused: (viewId: string) => unknown
-    isViewNativelyVisible: (viewId: string) => unknown
-    getPartition: (viewId: string) => unknown
-    getWebContentsId: (viewId: string) => unknown
-    activateExtension: (extensionId: string) => unknown
-    getExtensions: () => unknown
-    loadExtension: () => unknown
-    removeExtension: (extensionId: string) => unknown
-    discoverBrowserExtensions: () => unknown
-    importExtension: (extPath: string) => unknown
-    reparentToCurrentWindow: (viewId: string) => unknown
-    /** Event-shaped (`type: 'state-snapshot'`) nav state per live view — replayed
-     * to each new `onEvent` subscriber so late subscribes can't miss load events. */
-    getAllStateSnapshots: () => unknown[]
-    /** One view's `state-snapshot` (null once the view is gone). The desktop
-     * bridge stamps it onto every relayed browser event, so the side-car's
-     * replay cache moves in lockstep with the events it relays. */
-    getStateSnapshot: (viewId: string) => unknown
-    events: EventEmitter & {
-      on(event: 'event', listener: (e: unknown) => void): EventEmitter
-      on(event: 'shortcut', listener: (payload: BrowserShortcutPayload) => void): EventEmitter
-      on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
-      /** Genuine user input in a task's browser view (focus / key / click / wheel,
-       *  throttled) — feeds the idle-close "user engaged" clock in the hub. */
-      on(event: 'engaged', listener: (payload: { taskId: string }) => void): EventEmitter
-      on(
-        event: 'create-task-from-link',
-        listener: (intent: BrowserCreateTaskFromLinkIntent) => void
-      ): EventEmitter
-      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    /**
+     * The task/tab browser REGISTRY — distinct from `browser` below, which is the
+     * view-id-keyed WebContentsView manager.
+     *
+     * Exists so the REST browser routes can run on the hub, where the
+     * `tasks.browser_tabs` row they read and write lives. They used to be
+     * reverse-proxied to the desktop wholesale, purely because the old
+     * `BrowserAccess` handed back a live `WebContents` — which in turn forced the
+     * desktop to keep its own connection to the shared database. A handle can't
+     * cross the bridge; `(taskId, tabId)` can.
+     *
+     * `capturePageToFile` writes the PNG on the host so a full-page image never
+     * travels as a buffer, matching the `artifactRender*ToFile` slots.
+     */
+    browserTabs: {
+      getResolvedTabId: (taskId: string, tabId?: string) => Promise<string | null>
+      listTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
+      hasTab: (taskId: string, tabId?: string) => Promise<boolean>
+      /** Resolves once a tab registers; rejects on timeout. */
+      waitForRegistration: (
+        taskId: string,
+        opts: { tabId?: string; timeoutMs?: number }
+      ) => Promise<void>
+      execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
+      loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
+      getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
+      /** False when the captured image was empty. */
+      capturePageToFile: (
+        taskId: string,
+        tabId: string | null,
+        destPath: string
+      ) => Promise<boolean>
     }
   }
-
-  // Floating global agent panel — ops + the 3 streaming emitters the
-  // floatingAgent subscriptions consume. Same instances back the
-  // `floating-global-agent-panel:*` IPC handlers (coexistence until slice 5).
-  floatingAgent: {
-    setEnabled: (enabled: boolean) => unknown
-    setSessionId: (sessionId: string | null) => unknown
-    setPanelOpen: (isOpen: boolean) => unknown
-    toggleCollapse: () => unknown
-    resetSize: () => unknown
-    detach: () => unknown
-    reattach: () => unknown
-    getState: () => FloatingAgentState
-    getSession: () => unknown
-    getConfig: () => unknown
-    events: EventEmitter & {
-      on(event: 'state', listener: (payload: FloatingAgentState) => void): EventEmitter
-      on(event: 'session-changed', listener: () => void): EventEmitter
-      on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
-      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
-    }
-  }
-
-  // Webview — CLI tab registry (P19i) + devtools (P19k) + shortcuts/emulation
-  // (P19m). Same impls back the `webview:*` IPC handlers (coexistence/slice 5).
-  webview: {
-    registerBrowserTab: (taskId: string, tabId: string, webContentsId: number) => void
-    unregisterBrowserTab: (taskId: string, tabId: string) => void
-    setActiveBrowserTab: (taskId: string, tabId: string | null) => void
-    closeDevTools: (webviewId: number) => unknown
-    isDevToolsOpened: (webviewId: number) => unknown
-    disableDeviceEmulation: (webviewId: number) => unknown
-    registerShortcuts: (webviewId: number) => unknown
-    setKeyboardPassthrough: (webviewId: number, enabled: boolean) => unknown
-    setDesktopHandoffPolicy: (webviewId: number, policy: unknown) => unknown
-    openDevToolsBottom: (webviewId: number, options?: { probe?: boolean }) => unknown
-    openDevToolsDetached: (webviewId: number) => unknown
-    enableDeviceEmulation: (
-      webviewId: number,
-      params: {
-        screenSize: { width: number; height: number }
-        viewSize: { width: number; height: number }
-        deviceScaleFactor: number
-        screenPosition: 'mobile' | 'desktop'
-        userAgent?: string
-      }
-    ) => unknown
-    events: EventEmitter & {
-      on(
-        event: 'shortcut',
-        listener: (payload: { webviewId: number; key: string; shift: boolean }) => void
-      ): EventEmitter
-      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
-    }
-  }
-
-  // Task windows + panel ownership. Window-scoped ops take the caller's window
-  // id (tRPC: ctx.windowId; IPC: event.sender.id). Same impls back the
-  // `task-window:*` / `panels:*` IPC handlers (coexistence until slice 5).
-  taskWindows: {
-    open: (taskId: string) => unknown
-    close: (taskId: string) => unknown
-    list: () => string[]
-    setPrimaryActive: (taskId: string | null, callerWindowId: number | null) => unknown
-    getPrimaryActive: () => string | null
-    claimPanel: (taskId: string, panelId: string, ownerWindowId: number) => unknown
-    releasePanel: (taskId: string, panelId: string, callerWindowId: number) => unknown
-    releaseAllForTask: (taskId: string, callerWindowId: number) => unknown
-    getOwnership: (taskId: string) => Array<{ panelId: string; ownerWindowId: number }>
-    getWindowId: (callerWindowId: number) => number | null
-    claimAndCloseOther: (taskId: string, panelId: string, ownerWindowId: number) => unknown
-    claimSession: (sessionId: string, callerWindowId: number) => unknown
-    events: EventEmitter & {
-      on(event: 'list-changed', listener: (taskIds: string[]) => void): EventEmitter
-      on(event: 'primary-active-changed', listener: (taskId: string | null) => void): EventEmitter
-      on(
-        event: 'ownership-changed',
-        listener: (payload: {
-          taskId: string
-          ownership: Array<{ panelId: string; ownerWindowId: number }>
-        }) => void
-      ): EventEmitter
-      on(
-        event: 'panels-released-on-close',
-        listener: (payload: {
-          closedWindowId: number
-          released: Array<{ taskId: string; panelId: string }>
-        }) => void
-      ): EventEmitter
-      on(
-        event: 'panels-close-request',
-        listener: (targetWindowId: number, payload: { taskId: string; panelId: string }) => void
-      ): EventEmitter
-      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
-    }
-  }
-}
 
 let appDeps: AppDeps | null = null
 

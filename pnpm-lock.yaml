@@ -236,6 +236,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.30.1
         version: 1.30.1(supports-color@7.2.0)(zod@4.6.5)
+      '@slayzone/agent-panels':
+        specifier: workspace:*
+        version: link:../../domains/agent-panels
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
@@ -263,6 +266,9 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
+      '@slayzone/host-capabilities':
+        specifier: workspace:*
+        version: link:../../shared/host-capabilities
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
@@ -290,6 +296,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-browser':
+        specifier: workspace:*
+        version: link:../../domains/task-browser
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../../domains/task-contracts
@@ -1058,18 +1067,27 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
@@ -2274,18 +2292,27 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       lucide-react:
         specifier: ^1.48.0
         version: 1.48.0(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
     devDependencies:
       '@types/react':
         specifier: ^19.3.0
@@ -2585,6 +2612,9 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -2831,6 +2861,21 @@ importers:
         version: 8.0.6(@babel/core@8.0.6)(eslint@10.11.0(jiti@2.7.0)(supports-color@7.2.0))
 
   packages/shared/hooks: {}
+
+  packages/shared/host-capabilities:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.5
 
   packages/shared/icons:
     dependencies:

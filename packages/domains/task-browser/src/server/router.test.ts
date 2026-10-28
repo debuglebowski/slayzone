@@ -6,8 +6,8 @@
  */
 import { EventEmitter } from 'node:events'
 import { test, expect } from 'vitest'
-import { appLevelRouter } from './app.js'
-import { setAppDeps, type AppDeps } from '../app-deps.js'
+import { appBrowserRouter } from './router'
+import { setTaskBrowserRouterDeps, type TaskBrowserHost } from './router-deps'
 
 const browserEvents = new EventEmitter()
 const snapshots = [
@@ -15,18 +15,19 @@ const snapshots = [
   { viewId: 'bv-2', type: 'state-snapshot', url: 'about:blank', hasLoadedRealPage: false }
 ]
 
-setAppDeps({
+const host = {
   browser: {
     events: browserEvents,
     getAllStateSnapshots: () => snapshots
   }
-} as unknown as AppDeps)
+} as unknown as TaskBrowserHost
+setTaskBrowserRouterDeps({ getHost: () => host })
 
-const caller = appLevelRouter.createCaller({} as never)
+const caller = appBrowserRouter.createCaller({} as never)
 
 test('browser.onEvent replays state snapshots on subscribe, then live events', async () => {
   const received: unknown[] = []
-  const obs = await caller.browser.onEvent()
+  const obs = await caller.onEvent()
   const sub = obs.subscribe({ next: (e: unknown) => received.push(e) })
 
   // Snapshots replayed synchronously on attach, one per live view
@@ -48,7 +49,7 @@ test('browser.onEvent replays state snapshots on subscribe, then live events', a
 test('browser.onEvent with no live views replays nothing', async () => {
   snapshots.length = 0
   const received: unknown[] = []
-  const obs = await caller.browser.onEvent()
+  const obs = await caller.onEvent()
   const sub = obs.subscribe({ next: (e: unknown) => received.push(e) })
   expect(received.length).toBe(0)
   sub.unsubscribe()

@@ -448,7 +448,7 @@ run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 # Cross-domain: task+tags+history activity-event recording + cursor pagination.
 run_harness packages/apps/api/src/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB
-run_harness packages/apps/api/src/routers/app.browser-events.test.ts
+run_harness packages/domains/task-browser/src/server/router.test.ts
 # Desktop bridge replay cache: a browser tab subscribing right after a relayed
 # dom-ready/did-stop-loading is replayed THAT state (stale "loading" stranded the overlay).
 run_harness packages/apps/hub/src/host-bridge.test.ts

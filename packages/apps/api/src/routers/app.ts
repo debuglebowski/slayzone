@@ -1,28 +1,38 @@
 import { z } from 'zod'
-import { observable } from '@trpc/server/observable'
-import type {
-  BrowserShortcutPayload,
-  BrowserCreateTaskFromLinkIntent
-} from '@slayzone/platform/browser-view-events'
-import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { hubGithubSignInConvexUrl } from '../auth-github'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
-import { getLocalLeaderboardStats } from '@slayzone/usage-analytics/server'
-import { buildFeedbackOps } from '@slayzone/feedback/server'
+import {
+  appClipboardRouter,
+  appScreenshotRouter,
+  appFilesRouter,
+  appShellRouter,
+  appMetaRouter,
+  appWindowRouter,
+  appShortcutsRouter,
+  appAuthRouter,
+  appDialogRouter,
+  appTaskWindowsRouter
+} from '@slayzone/host-capabilities/server'
+import { appBackupRouter } from '@slayzone/settings/server'
+import { appLeaderboardRouter } from '@slayzone/usage-analytics/server'
+import { appUsageRouter } from '@slayzone/terminal/server'
+import { appFeedbackRouter } from '@slayzone/feedback/server'
+import { appBrowserRouter, appWebviewRouter } from '@slayzone/task-browser/server'
+import { appFloatingAgentRouter } from '@slayzone/agent-panels/server'
 import { buildExportImportOps } from '../export-import'
 import { createAccessScope } from '../access'
-import { accessRequestOf, ownedProjectIds } from '../owner-gate'
+import { accessRequestOf } from '../owner-gate'
 
 /** Same gate the host used when deciding to expose the path-taking variants. */
 const isTestBuild = (): boolean => process.env.PLAYWRIGHT === '1'
-import { getBackupOps, getAppDeps, getAuthEvents, type FloatingAgentState } from '../app-deps'
 
-const anyInput = z.unknown()
-
-// App-level router — a grab-bag of main-process capabilities grouped by domain.
-// Every procedure delegates to the injected `AppDeps` (setAppDeps in the
-// Electron-main host); the same impls back the still-live IPC handlers
-// (coexistence until the renderer drops IPC in slice 5).
+// App-level router — main-process capabilities grouped by concern, mounted at `app`.
+// Each sub-router lives with the package that owns it (host capabilities in
+// `@slayzone/host-capabilities`, the rest in their domain), so a domain's client can
+// type against just the `app.*` routers it calls (`{ app: { meta: AppMetaRouter } }`,
+// asserted in `../router.ts`). The keys below ARE the wire paths
+// (`app.meta.getVersion`) and the policy keys: never rename or move one, a client and
+// a hub of different versions must agree. Only export/import stays in api: it needs
+// api's access scope.
 
 /** Export/import for one request. Imported projects belong to its user — null on
  *  a hub without login, where requests carry none — and `exportAll` holds only what
@@ -37,681 +47,66 @@ const exportImportOps = (ctx: TrpcContext, isTest = false) =>
     isTest
   )
 
-export const appLevelRouter = router({
-  // Backup
-  backup: router({
-    list: publicProcedure.query(() => getBackupOps().list()),
-    create: publicProcedure
-      .input(z.object({ name: z.string().optional() }).optional())
-      .mutation(({ input }) => getBackupOps().create(input?.name)),
-    rename: publicProcedure
-      .input(z.object({ filename: z.string(), name: z.string() }))
-      .mutation(({ input }) => getBackupOps().rename(input.filename, input.name)),
-    delete: publicProcedure
-      .input(z.object({ filename: z.string() }))
-      .mutation(({ input }) => getBackupOps().delete(input.filename)),
-    restore: publicProcedure
-      .input(z.object({ filename: z.string() }))
-      .mutation(({ input }) => getBackupOps().restore(input.filename)),
-    getSettings: publicProcedure.query(() => getBackupOps().getSettings()),
-    setSettings: publicProcedure
-      .input(anyInput)
-      .mutation(({ input }) =>
-        getBackupOps().setSettings(
-          input as Partial<Parameters<ReturnType<typeof getBackupOps>['setSettings']>[0]>
-        )
-      ),
-    revealInFinder: publicProcedure.mutation(() => getBackupOps().revealInFinder())
-  }),
-
-  // Clipboard
-  clipboard: router({
-    writeFilePaths: publicProcedure
-      .input(z.object({ paths: z.array(z.string()) }))
-      .mutation(({ input }) => getAppDeps().clipboardWriteFilePaths(input.paths)),
-    readFilePaths: publicProcedure.query(() => getAppDeps().clipboardReadFilePaths()),
-    hasFiles: publicProcedure.query(() => getAppDeps().clipboardHasFiles())
-  }),
-
-  // Screenshot
-  screenshot: router({
-    captureView: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().screenshotCaptureView(input.viewId))
-  }),
-
-  // Leaderboard — reads ctx.db directly. It was an AppDeps slot, which meant this
-  // process asked the Electron host to run a query against the database THIS
-  // process owns; standalone hubs got a fail-loud stub instead of a leaderboard.
-  leaderboard: router({
-    // Summed over the caller's projects only, on a hub with login (T-17).
-    getLocalStats: publicProcedure.query(async ({ ctx }) => {
-      const projectIds = await ownedProjectIds(ctx)
-      return getLocalLeaderboardStats(ctx.db, projectIds ? { projectIds } : null)
+// Export/Import — reads and writes ctx.db. Was seven AppDeps slots, i.e. this
+// process asking the Electron host to read the database this process owns. Only
+// the file-picker step is genuinely host-side, and it goes back over AppDeps
+// from inside `export-import.ts`.
+//
+// The `test*` variants are no longer test-only in nature — they are just the
+// path-taking forms — but the gate stays so production can't be driven headless.
+export const appExportImportRouter = router({
+  exportAll: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).exportAll()),
+  exportProject: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(({ ctx, input }) => exportImportOps(ctx).exportProject(input.projectId)),
+  import: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).importBundle()),
+  testExportAllToPath: publicProcedure
+    .input(z.object({ filePath: z.string() }))
+    .mutation(({ ctx, input }) => {
+      const fn = exportImportOps(ctx, isTestBuild()).testExportAllToPath
+      if (!fn) throw new Error('test-only handler unavailable in production')
+      return fn(input.filePath)
+    }),
+  testExportProjectToPath: publicProcedure
+    .input(z.object({ projectId: z.string(), filePath: z.string() }))
+    .mutation(({ ctx, input }) => {
+      const fn = exportImportOps(ctx, isTestBuild()).testExportProjectToPath
+      if (!fn) throw new Error('test-only handler unavailable in production')
+      return fn(input.projectId, input.filePath)
+    }),
+  testImportFromPath: publicProcedure
+    .input(z.object({ filePath: z.string() }))
+    .mutation(({ ctx, input }) => {
+      const fn = exportImportOps(ctx, isTestBuild()).testImportFromPath
+      if (!fn) throw new Error('test-only handler unavailable in production')
+      return fn(input.filePath)
+    }),
+  testSetTaskParent: publicProcedure
+    .input(z.object({ taskId: z.string(), parentId: z.string().nullable() }))
+    .mutation(({ ctx, input }) => {
+      const fn = exportImportOps(ctx, isTestBuild()).testSetTaskParent
+      if (!fn) throw new Error('test-only handler unavailable in production')
+      return fn(input.taskId, input.parentId)
     })
-  }),
+})
 
-  // Export/Import — reads and writes ctx.db. Was seven AppDeps slots, i.e. this
-  // process asking the Electron host to read the database this process owns. Only
-  // the file-picker step is genuinely host-side, and it goes back over AppDeps
-  // from inside `export-import.ts`.
-  //
-  // The `test*` variants are no longer test-only in nature — they are just the
-  // path-taking forms — but the gate stays so production can't be driven headless.
-  exportImport: router({
-    exportAll: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).exportAll()),
-    exportProject: publicProcedure
-      .input(z.object({ projectId: z.string() }))
-      .mutation(({ ctx, input }) => exportImportOps(ctx).exportProject(input.projectId)),
-    import: publicProcedure.mutation(({ ctx }) => exportImportOps(ctx).importBundle()),
-    testExportAllToPath: publicProcedure
-      .input(z.object({ filePath: z.string() }))
-      .mutation(({ ctx, input }) => {
-        const fn = exportImportOps(ctx, isTestBuild()).testExportAllToPath
-        if (!fn) throw new Error('test-only handler unavailable in production')
-        return fn(input.filePath)
-      }),
-    testExportProjectToPath: publicProcedure
-      .input(z.object({ projectId: z.string(), filePath: z.string() }))
-      .mutation(({ ctx, input }) => {
-        const fn = exportImportOps(ctx, isTestBuild()).testExportProjectToPath
-        if (!fn) throw new Error('test-only handler unavailable in production')
-        return fn(input.projectId, input.filePath)
-      }),
-    testImportFromPath: publicProcedure
-      .input(z.object({ filePath: z.string() }))
-      .mutation(({ ctx, input }) => {
-        const fn = exportImportOps(ctx, isTestBuild()).testImportFromPath
-        if (!fn) throw new Error('test-only handler unavailable in production')
-        return fn(input.filePath)
-      }),
-    testSetTaskParent: publicProcedure
-      .input(z.object({ taskId: z.string(), parentId: z.string().nullable() }))
-      .mutation(({ ctx, input }) => {
-        const fn = exportImportOps(ctx, isTestBuild()).testSetTaskParent
-        if (!fn) throw new Error('test-only handler unavailable in production')
-        return fn(input.taskId, input.parentId)
-      })
-  }),
-
-  // Usage
-  usage: router({
-    fetch: publicProcedure
-      .input(z.object({ force: z.boolean().optional() }).optional())
-      .query(async ({ ctx, input }) => {
-        // The rows live here; only the HTTP call needs Electron.
-        const customRows = (await ctx.db.all(
-          'SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1'
-        )) as { id: string; label: string; usage_config: string }[]
-        const builtinRows = (await ctx.db.all(
-          "SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')"
-        )) as { id: string; enabled: number }[]
-        const builtinEnabled = Object.fromEntries(builtinRows.map((r) => [r.id, r.enabled === 1]))
-        return getAppDeps().usageFetch({ customRows, builtinEnabled }, input?.force)
-      }),
-    test: publicProcedure
-      .input(anyInput)
-      .mutation(({ input }) => getAppDeps().usageTest(input as never))
-  }),
-
-  // Files
-  files: router({
-    pathExists: publicProcedure
-      .input(z.object({ filePath: z.string() }))
-      .query(({ input }) => getAppDeps().filesPathExists(input.filePath)),
-    saveTempImage: publicProcedure
-      .input(z.object({ base64: z.string(), mimeType: z.string() }))
-      .mutation(({ input }) => getAppDeps().filesSaveTempImage(input.base64, input.mimeType))
-  }),
-
-  // Shell
-  shell: router({
-    openExternal: publicProcedure.input(anyInput).mutation(({ input }) => {
-      const i = input as {
-        url: string
-        options?: {
-          blockDesktopHandoff?: boolean
-          desktopHandoff?: { protocol?: string; hostScope?: string }
-        }
-      }
-      return getAppDeps().shellOpenExternal(i.url, i.options)
-    }),
-    openPath: publicProcedure
-      .input(z.object({ absPath: z.string() }))
-      .mutation(({ input }) => getAppDeps().shellOpenPath(input.absPath))
-  }),
-
-  // Feedback — plain CRUD over `feedback_threads`/`feedback_messages`, so it reads
-  // ctx.db. It was six AppDeps slots, i.e. this process asking the Electron host to
-  // query the database this process owns; the host and the standalone branch built
-  // the SAME `buildFeedbackOps(db)`, which is how you can tell the indirection was
-  // never load-bearing.
-  feedback: router({
-    listThreads: publicProcedure.query(({ ctx }) => buildFeedbackOps(ctx.db).listThreads()),
-    createThread: publicProcedure
-      .input(anyInput)
-      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).createThread(input as never)),
-    getMessages: publicProcedure
-      .input(z.object({ threadId: z.string() }))
-      .query(({ ctx, input }) => buildFeedbackOps(ctx.db).getMessages(input.threadId)),
-    addMessage: publicProcedure
-      .input(anyInput)
-      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).addMessage(input as never)),
-    updateThreadDiscordId: publicProcedure
-      .input(z.object({ threadId: z.string(), discordThreadId: z.string() }))
-      .mutation(({ ctx, input }) =>
-        buildFeedbackOps(ctx.db).updateThreadDiscordId(input.threadId, input.discordThreadId)
-      ),
-    deleteThread: publicProcedure
-      .input(z.object({ threadId: z.string() }))
-      .mutation(({ ctx, input }) => buildFeedbackOps(ctx.db).deleteThread(input.threadId))
-  }),
-
-  // App metadata
-  meta: router({
-    getVersion: publicProcedure.query(() => getAppDeps().appGetVersion()),
-    getTrpcPort: publicProcedure.query(() => getAppDeps().appGetTrpcPort()),
-    isTestsPanelEnabled: publicProcedure.query(() => getAppDeps().appIsTestsPanelEnabled()),
-    setLabFlag: publicProcedure
-      .input(z.object({ key: z.enum(['labs_tests_panel', 'labs_loop_mode']), on: z.boolean() }))
-      .mutation(({ input }) => getAppDeps().appSetLabFlag(input.key, input.on)),
-    isLoopModeEnabled: publicProcedure.query(() => getAppDeps().appIsLoopModeEnabled()),
-    getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
-    getProtocolClientStatus: publicProcedure.query(() => getAppDeps().appGetProtocolClientStatus()),
-    getRendererZoomFactor: publicProcedure.query(() => getAppDeps().appGetRendererZoomFactor()),
-    checkCliInstalled: publicProcedure.query(() => getAppDeps().appCheckCliInstalled()),
-    installCli: publicProcedure.mutation(() => getAppDeps().appInstallCli()),
-    adjustZoom: publicProcedure
-      .input(z.object({ command: z.enum(['in', 'out', 'reset']) }))
-      .mutation(({ input }) => getAppDeps().appAdjustZoom(input.command)),
-    restartForUpdate: publicProcedure.mutation(() => getAppDeps().appRestartForUpdate()),
-    checkForUpdates: publicProcedure.mutation(() => getAppDeps().appCheckForUpdates()),
-    // Dark-launch side-car supervisor status (Diagnostics settings tab).
-    getSidecarStatus: publicProcedure.query(() => getAppDeps().appGetSidecarStatus()),
-    revealSidecarLog: publicProcedure.mutation(() => getAppDeps().appRevealSidecarLog())
-  }),
-
-  // Window
-  window: router({
-    getContentBounds: publicProcedure.query(() => getAppDeps().appWindowGetContentBounds()),
-    getDisplayScaleFactor: publicProcedure.query(() =>
-      getAppDeps().appWindowGetDisplayScaleFactor()
-    ),
-    close: publicProcedure.mutation(({ ctx }) => {
-      if (ctx.windowId == null) throw new Error('windowId required')
-      return getAppDeps().windowClose(ctx.windowId)
-    }),
-    // Cosmetic, fire-and-forget — no windowId guard (graceful no-op if the
-    // window can't be resolved) so the renderer's useEffect calls never reject.
-    setTrafficLightPosition: publicProcedure
-      .input(z.object({ pos: z.object({ x: z.number(), y: z.number() }).nullable() }))
-      .mutation(({ ctx, input }) =>
-        getAppDeps().appWindowSetTrafficLightPosition(ctx.windowId ?? null, input.pos)
-      ),
-    setWindowButtonVisibility: publicProcedure
-      .input(z.object({ visible: z.boolean() }))
-      .mutation(({ ctx, input }) =>
-        getAppDeps().appWindowSetWindowButtonVisibility(ctx.windowId ?? null, input.visible)
-      ),
-    // Pull OS keyboard focus back to this connection's renderer (browser find).
-    // Fire-and-forget, no windowId guard (graceful no-op if unresolved) so the
-    // renderer's focus calls never reject. Was the `app:focus-renderer` IPC.
-    focusRenderer: publicProcedure.mutation(({ ctx }) =>
-      getAppDeps().appFocusRenderer(ctx.windowId ?? null)
-    )
-  }),
-
-  // Shortcuts — rebuild the native menu after the renderer persists custom
-  // shortcut overrides. Was the `shortcuts:changed` IPC (preload bootstrap-only).
-  shortcuts: router({
-    changed: publicProcedure.mutation(() => getAppDeps().appRebuildMenuForShortcuts())
-  }),
-
-  // Auth
-  auth: router({
-    // Refused with integrations switched off: the hub would POST to Convex and open
-    // GitHub's authorize page itself.
-    githubSystemSignIn: publicProcedure.input(anyInput).mutation(({ input }) => {
-      assertHubIntegrationsEnabled({ op: 'sign_in', detail: { provider: 'github' } })
-      // T-99: the host POSTs only to THIS hub's Convex deployment. A client `convexUrl`
-      // naming another host (or a hub with none configured) is refused here, before the
-      // host is asked; what the host gets is the hub's own value, never the client's.
-      const req = typeof input === 'object' && input !== null ? input : {}
-      const convexUrl = hubGithubSignInConvexUrl((req as { convexUrl?: unknown }).convexUrl)
-      return getAppDeps().authGithubSystemSignIn({ ...req, convexUrl } as never)
-    }),
-    // Chromium-fork OAuth callback relay. The C++ shell forwards the
-    // `slayzone://auth/callback` deep-link to the sidecar (auth:deep-link), the
-    // sidecar's socket server emits it on `authEvents`, and this subscription
-    // pushes the {code,error} to the renderer's ConvexAuthBridge — which then
-    // completes the Convex sign-in (the renderer owns the Convex session). The
-    // Electron renderer uses the inline-mutation path and never subscribes here.
-    onCallback: publicProcedure.subscription(() =>
-      observable<{ code?: string; error?: string }>((emit) => {
-        const handler = (payload: { code?: string; error?: string }): void => emit.next(payload)
-        const ev = getAuthEvents()
-        ev.on('callback', handler)
-        return () => ev.off('callback', handler)
-      })
-    )
-  }),
-
-  // Dialog (native file picker — same impl backs the dialog:showOpenDialog IPC)
-  dialog: router({
-    showOpenDialog: publicProcedure
-      .input(anyInput)
-      .mutation(({ input }) => getAppDeps().dialogShowOpenDialog(input))
-  }),
-
-  // Browser view ops — delegate to the BrowserViewManager singleton (same
-  // instance backing the still-live `browser:*` IPC handlers; coexistence
-  // until the renderer drops IPC in slice 5).
-  browser: router({
-    createView: publicProcedure
-      .input(anyInput)
-      .mutation(({ input }) => getAppDeps().browser.createView(input)),
-    destroyView: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.destroyView(input.viewId)),
-    destroyAllForTask: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.destroyAllForTask(input.taskId)),
-    setBounds: publicProcedure
-      .input(z.object({ viewId: z.string(), bounds: anyInput }))
-      .mutation(({ input }) => getAppDeps().browser.setBounds(input.viewId, input.bounds)),
-    setVisible: publicProcedure
-      .input(z.object({ viewId: z.string(), visible: z.boolean() }))
-      .mutation(({ input }) => getAppDeps().browser.setVisible(input.viewId, input.visible)),
-    setLocked: publicProcedure
-      .input(z.object({ viewId: z.string(), locked: z.boolean() }))
-      .mutation(({ input }) => getAppDeps().browser.setLocked(input.viewId, input.locked)),
-    hideAll: publicProcedure.mutation(() => getAppDeps().browser.hideAll()),
-    showAll: publicProcedure.mutation(() => getAppDeps().browser.showAll()),
-    setHandoffPolicy: publicProcedure
-      .input(z.object({ viewId: z.string(), policy: anyInput }))
-      .mutation(({ input }) => getAppDeps().browser.setHandoffPolicy(input.viewId, input.policy)),
-    navigate: publicProcedure
-      .input(z.object({ viewId: z.string(), url: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.navigate(input.viewId, input.url)),
-    goBack: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.goBack(input.viewId)),
-    goForward: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.goForward(input.viewId)),
-    reload: publicProcedure
-      .input(z.object({ viewId: z.string(), ignoreCache: z.boolean().optional() }))
-      .mutation(({ input }) => getAppDeps().browser.reload(input.viewId, input.ignoreCache)),
-    stop: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.stop(input.viewId)),
-    executeJs: publicProcedure
-      .input(z.object({ viewId: z.string(), code: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.executeJs(input.viewId, input.code)),
-    insertCss: publicProcedure
-      .input(z.object({ viewId: z.string(), css: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.insertCss(input.viewId, input.css)),
-    removeCss: publicProcedure
-      .input(z.object({ viewId: z.string(), key: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.removeCss(input.viewId, input.key)),
-    setForcedTheme: publicProcedure
-      .input(z.object({ viewId: z.string(), theme: z.enum(['light', 'dark']).nullable() }))
-      .mutation(({ input }) => getAppDeps().browser.setForcedTheme(input.viewId, input.theme)),
-    setZoom: publicProcedure
-      .input(z.object({ viewId: z.string(), factor: z.number() }))
-      .mutation(({ input }) => getAppDeps().browser.setZoom(input.viewId, input.factor)),
-    focus: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.focus(input.viewId)),
-    findInPage: publicProcedure
-      .input(z.object({ viewId: z.string(), text: z.string(), options: anyInput.optional() }))
-      .mutation(({ input }) =>
-        getAppDeps().browser.findInPage(input.viewId, input.text, input.options)
-      ),
-    stopFindInPage: publicProcedure
-      .input(
-        z.object({
-          viewId: z.string(),
-          action: z.enum(['clearSelection', 'keepSelection', 'activateSelection'])
-        })
-      )
-      .mutation(({ input }) => getAppDeps().browser.stopFindInPage(input.viewId, input.action)),
-    setKeyboardPassthrough: publicProcedure
-      .input(z.object({ viewId: z.string(), enabled: z.boolean() }))
-      .mutation(({ input }) =>
-        getAppDeps().browser.setKeyboardPassthrough(input.viewId, input.enabled)
-      ),
-    sendInputEvent: publicProcedure
-      .input(z.object({ viewId: z.string(), input: anyInput }))
-      .mutation(({ input }) => getAppDeps().browser.sendInputEvent(input.viewId, input.input)),
-    openDevTools: publicProcedure
-      .input(
-        z.object({ viewId: z.string(), mode: z.enum(['bottom', 'right', 'undocked', 'detach']) })
-      )
-      .mutation(({ input }) => getAppDeps().browser.openDevTools(input.viewId, input.mode)),
-    closeDevTools: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.closeDevTools(input.viewId)),
-    isDevToolsOpen: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.isDevToolsOpen(input.viewId)),
-    getUrl: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getUrl(input.viewId)),
-    getBounds: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getBounds(input.viewId)),
-    getZoomFactor: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getZoomFactor(input.viewId)),
-    getActualNativeBounds: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getActualNativeBounds(input.viewId)),
-    getViewVisible: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getViewVisible(input.viewId)),
-    getViewsForTask: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getViewsForTask(input.taskId)),
-    getAllViewIds: publicProcedure.query(() => getAppDeps().browser.getAllViewIds()),
-    listViews: publicProcedure.query(() => getAppDeps().browser.listViews()),
-    getNativeChildViewCount: publicProcedure.query(() =>
-      getAppDeps().browser.getNativeChildViewCount()
-    ),
-    isAllHidden: publicProcedure.query(() => getAppDeps().browser.isAllHidden()),
-    isFocused: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.isFocused(input.viewId)),
-    isViewNativelyVisible: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.isViewNativelyVisible(input.viewId)),
-    getPartition: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getPartition(input.viewId)),
-    getWebContentsId: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .query(({ input }) => getAppDeps().browser.getWebContentsId(input.viewId)),
-    activateExtension: publicProcedure
-      .input(z.object({ extensionId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.activateExtension(input.extensionId)),
-    getExtensions: publicProcedure.query(() => getAppDeps().browser.getExtensions()),
-    loadExtension: publicProcedure.mutation(() => getAppDeps().browser.loadExtension()),
-    removeExtension: publicProcedure
-      .input(z.object({ extensionId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.removeExtension(input.extensionId)),
-    discoverBrowserExtensions: publicProcedure.query(() =>
-      getAppDeps().browser.discoverBrowserExtensions()
-    ),
-    importExtension: publicProcedure
-      .input(z.object({ extPath: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.importExtension(input.extPath)),
-    reparentToCurrentWindow: publicProcedure
-      .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.reparentToCurrentWindow(input.viewId)),
-    onEvent: publicProcedure.subscription(() =>
-      observable<unknown>((emit) => {
-        const browser = getAppDeps().browser
-        const h = (e: unknown): void => emit.next(e)
-        browser.events.on('event', h)
-        // Replay per-view nav-state snapshots so a subscriber attaching after
-        // createView's loadURL (the WS round-trip race) doesn't miss
-        // did-navigate/dom-ready and strand the loading overlay. Listener is
-        // attached first; both run in one sync block, so nothing interleaves.
-        for (const s of browser.getAllStateSnapshots()) emit.next(s)
-        return () => browser.events.off('event', h)
-      })
-    ),
-    onShortcut: publicProcedure.subscription(() =>
-      observable<BrowserShortcutPayload>((emit) => {
-        const h = (p: BrowserShortcutPayload): void => emit.next(p)
-        const ev = getAppDeps().browser.events
-        ev.on('shortcut', h)
-        return () => ev.off('shortcut', h)
-      })
-    ),
-    onFocused: publicProcedure.subscription(() =>
-      observable<{ viewId: string }>((emit) => {
-        const h = (p: { viewId: string }): void => emit.next(p)
-        const ev = getAppDeps().browser.events
-        ev.on('focused', h)
-        return () => ev.off('focused', h)
-      })
-    ),
-    onCreateTaskFromLink: publicProcedure.subscription(() =>
-      observable<BrowserCreateTaskFromLinkIntent>((emit) => {
-        const h = (i: BrowserCreateTaskFromLinkIntent): void => emit.next(i)
-        const ev = getAppDeps().browser.events
-        ev.on('create-task-from-link', h)
-        return () => ev.off('create-task-from-link', h)
-      })
-    )
-  }),
-
-  // Floating global agent panel — 10 ops + 3 streaming subs. Same ops/emitter
-  // back the still-live `floating-global-agent-panel:*` IPC (slice 5 cutover).
-  floatingAgent: router({
-    setEnabled: publicProcedure
-      .input(z.object({ enabled: z.boolean() }))
-      .mutation(({ input }) => getAppDeps().floatingAgent.setEnabled(input.enabled)),
-    setSessionId: publicProcedure
-      .input(z.object({ sessionId: z.string().nullable() }))
-      .mutation(({ input }) => getAppDeps().floatingAgent.setSessionId(input.sessionId)),
-    setPanelOpen: publicProcedure
-      .input(z.object({ isOpen: z.boolean() }))
-      .mutation(({ input }) => getAppDeps().floatingAgent.setPanelOpen(input.isOpen)),
-    toggleCollapse: publicProcedure.mutation(() => getAppDeps().floatingAgent.toggleCollapse()),
-    resetSize: publicProcedure.mutation(() => getAppDeps().floatingAgent.resetSize()),
-    detach: publicProcedure.mutation(() => getAppDeps().floatingAgent.detach()),
-    reattach: publicProcedure.mutation(() => getAppDeps().floatingAgent.reattach()),
-    getState: publicProcedure.query(() => getAppDeps().floatingAgent.getState()),
-    getSession: publicProcedure.query(() => getAppDeps().floatingAgent.getSession()),
-    getConfig: publicProcedure.query(() => getAppDeps().floatingAgent.getConfig()),
-    onState: publicProcedure.subscription(() =>
-      observable<FloatingAgentState>((emit) => {
-        const handler = (payload: FloatingAgentState): void => emit.next(payload)
-        const ev = getAppDeps().floatingAgent.events
-        ev.on('state', handler)
-        return () => ev.off('state', handler)
-      })
-    ),
-    onSessionChanged: publicProcedure.subscription(() =>
-      observable<void>((emit) => {
-        const handler = (): void => emit.next()
-        const ev = getAppDeps().floatingAgent.events
-        ev.on('session-changed', handler)
-        return () => ev.off('session-changed', handler)
-      })
-    ),
-    onCollapseChanged: publicProcedure.subscription(() =>
-      observable<{ collapsed: boolean }>((emit) => {
-        const handler = (collapsed: boolean): void => emit.next({ collapsed })
-        const ev = getAppDeps().floatingAgent.events
-        ev.on('collapse-changed', handler)
-        return () => ev.off('collapse-changed', handler)
-      })
-    )
-  }),
-
-  // Webview — CLI browser-tab registry (P19i; grown with devtools/shortcuts in
-  // P19k/P19m). Same impls back the `webview:*` IPC handlers (slice 5 cutover).
-  webview: router({
-    registerBrowserTab: publicProcedure
-      .input(z.object({ taskId: z.string(), tabId: z.string(), webContentsId: z.number() }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.registerBrowserTab(input.taskId, input.tabId, input.webContentsId)
-      ),
-    unregisterBrowserTab: publicProcedure
-      .input(z.object({ taskId: z.string(), tabId: z.string() }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.unregisterBrowserTab(input.taskId, input.tabId)
-      ),
-    setActiveBrowserTab: publicProcedure
-      .input(z.object({ taskId: z.string(), tabId: z.string().nullable() }))
-      .mutation(({ input }) => getAppDeps().webview.setActiveBrowserTab(input.taskId, input.tabId)),
-    closeDevTools: publicProcedure
-      .input(z.object({ webviewId: z.number() }))
-      .mutation(({ input }) => getAppDeps().webview.closeDevTools(input.webviewId)),
-    isDevToolsOpened: publicProcedure
-      .input(z.object({ webviewId: z.number() }))
-      .query(({ input }) => getAppDeps().webview.isDevToolsOpened(input.webviewId)),
-    disableDeviceEmulation: publicProcedure
-      .input(z.object({ webviewId: z.number() }))
-      .mutation(({ input }) => getAppDeps().webview.disableDeviceEmulation(input.webviewId)),
-    registerShortcuts: publicProcedure
-      .input(z.object({ webviewId: z.number() }))
-      .mutation(({ input }) => getAppDeps().webview.registerShortcuts(input.webviewId)),
-    setKeyboardPassthrough: publicProcedure
-      .input(z.object({ webviewId: z.number(), enabled: z.boolean() }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.setKeyboardPassthrough(input.webviewId, input.enabled)
-      ),
-    setDesktopHandoffPolicy: publicProcedure
-      .input(z.object({ webviewId: z.number(), policy: anyInput }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.setDesktopHandoffPolicy(input.webviewId, input.policy)
-      ),
-    openDevToolsBottom: publicProcedure
-      .input(z.object({ webviewId: z.number(), options: anyInput.optional() }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.openDevToolsBottom(
-          input.webviewId,
-          input.options as { probe?: boolean } | undefined
-        )
-      ),
-    openDevToolsDetached: publicProcedure
-      .input(z.object({ webviewId: z.number() }))
-      .mutation(({ input }) => getAppDeps().webview.openDevToolsDetached(input.webviewId)),
-    enableDeviceEmulation: publicProcedure
-      .input(z.object({ webviewId: z.number(), params: anyInput }))
-      .mutation(({ input }) =>
-        getAppDeps().webview.enableDeviceEmulation(input.webviewId, input.params as never)
-      ),
-    onShortcut: publicProcedure.subscription(() =>
-      observable<{ webviewId: number; key: string; shift: boolean }>((emit) => {
-        const handler = (payload: { webviewId: number; key: string; shift: boolean }): void =>
-          emit.next(payload)
-        const ev = getAppDeps().webview.events
-        ev.on('shortcut', handler)
-        return () => ev.off('shortcut', handler)
-      })
-    )
-  }),
-
-  // Task windows + panel ownership — window-scoped via ctx.windowId (parsed from
-  // the WS ?windowId=N query). Same ops back the `task-window:*` / `panels:*`
-  // IPC handlers (coexistence until slice 5). Procedures that mutate per-window
-  // ownership require ctx.windowId; null connections (CLI) cannot call them.
-  taskWindows: router({
-    open: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .mutation(({ input }) => getAppDeps().taskWindows.open(input.taskId)),
-    close: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .mutation(({ input }) => getAppDeps().taskWindows.close(input.taskId)),
-    list: publicProcedure.query(() => getAppDeps().taskWindows.list()),
-    setPrimaryActive: publicProcedure
-      .input(z.object({ taskId: z.string().nullable() }))
-      .mutation(({ ctx, input }) =>
-        getAppDeps().taskWindows.setPrimaryActive(input.taskId, ctx.windowId ?? null)
-      ),
-    getPrimaryActive: publicProcedure.query(() => getAppDeps().taskWindows.getPrimaryActive()),
-    claimPanel: publicProcedure
-      .input(z.object({ taskId: z.string(), panelId: z.string() }))
-      .mutation(({ ctx, input }) => {
-        if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.claimPanel(input.taskId, input.panelId, ctx.windowId)
-      }),
-    releasePanel: publicProcedure
-      .input(z.object({ taskId: z.string(), panelId: z.string() }))
-      .mutation(({ ctx, input }) => {
-        if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.releasePanel(input.taskId, input.panelId, ctx.windowId)
-      }),
-    releaseAllForTask: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .mutation(({ ctx, input }) => {
-        if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.releaseAllForTask(input.taskId, ctx.windowId)
-      }),
-    getOwnership: publicProcedure
-      .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getAppDeps().taskWindows.getOwnership(input.taskId)),
-    getWindowId: publicProcedure.query(({ ctx }) =>
-      ctx.windowId == null ? null : getAppDeps().taskWindows.getWindowId(ctx.windowId)
-    ),
-    claimAndCloseOther: publicProcedure
-      .input(z.object({ taskId: z.string(), panelId: z.string() }))
-      .mutation(({ ctx, input }) => {
-        if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.claimAndCloseOther(
-          input.taskId,
-          input.panelId,
-          ctx.windowId
-        )
-      }),
-    claimSession: publicProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .mutation(({ ctx, input }) => {
-        if (ctx.windowId == null) throw new Error('windowId required')
-        return getAppDeps().taskWindows.claimSession(input.sessionId, ctx.windowId)
-      }),
-    onListChanged: publicProcedure.subscription(() =>
-      observable<string[]>((emit) => {
-        const handler = (taskIds: string[]): void => emit.next(taskIds)
-        const ev = getAppDeps().taskWindows.events
-        ev.on('list-changed', handler)
-        return () => ev.off('list-changed', handler)
-      })
-    ),
-    onPrimaryActiveChanged: publicProcedure.subscription(() =>
-      observable<string | null>((emit) => {
-        const handler = (taskId: string | null): void => emit.next(taskId)
-        const ev = getAppDeps().taskWindows.events
-        ev.on('primary-active-changed', handler)
-        return () => ev.off('primary-active-changed', handler)
-      })
-    ),
-    onOwnershipChanged: publicProcedure.subscription(() =>
-      observable<{ taskId: string; ownership: Array<{ panelId: string; ownerWindowId: number }> }>(
-        (emit) => {
-          const handler = (payload: {
-            taskId: string
-            ownership: Array<{ panelId: string; ownerWindowId: number }>
-          }): void => emit.next(payload)
-          const ev = getAppDeps().taskWindows.events
-          ev.on('ownership-changed', handler)
-          return () => ev.off('ownership-changed', handler)
-        }
-      )
-    ),
-    onPanelsReleasedOnClose: publicProcedure.subscription(() =>
-      observable<{ closedWindowId: number; released: Array<{ taskId: string; panelId: string }> }>(
-        (emit) => {
-          const handler = (payload: {
-            closedWindowId: number
-            released: Array<{ taskId: string; panelId: string }>
-          }): void => emit.next(payload)
-          const ev = getAppDeps().taskWindows.events
-          ev.on('panels-released-on-close', handler)
-          return () => ev.off('panels-released-on-close', handler)
-        }
-      )
-    ),
-    // Targeted: only fires for the connection whose ctx.windowId matches the
-    // close-request's target window.
-    onPanelCloseRequest: publicProcedure.subscription(({ ctx }) =>
-      observable<{ taskId: string; panelId: string }>((emit) => {
-        const handler = (
-          targetWindowId: number,
-          payload: { taskId: string; panelId: string }
-        ): void => {
-          if (ctx.windowId !== targetWindowId) return
-          emit.next(payload)
-        }
-        const ev = getAppDeps().taskWindows.events
-        ev.on('panels-close-request', handler)
-        return () => ev.off('panels-close-request', handler)
-      })
-    )
-  })
+export const appLevelRouter = router({
+  backup: appBackupRouter,
+  clipboard: appClipboardRouter,
+  screenshot: appScreenshotRouter,
+  leaderboard: appLeaderboardRouter,
+  exportImport: appExportImportRouter,
+  usage: appUsageRouter,
+  files: appFilesRouter,
+  shell: appShellRouter,
+  feedback: appFeedbackRouter,
+  meta: appMetaRouter,
+  window: appWindowRouter,
+  shortcuts: appShortcutsRouter,
+  auth: appAuthRouter,
+  dialog: appDialogRouter,
+  browser: appBrowserRouter,
+  floatingAgent: appFloatingAgentRouter,
+  webview: appWebviewRouter,
+  taskWindows: appTaskWindowsRouter
 })

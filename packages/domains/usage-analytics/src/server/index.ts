@@ -8,3 +8,14 @@ export {
 // Leaderboard stats — computed against ctx.db in the hub. Was an AppDeps slot
 // (the hub asking the desktop to query the hub's own database).
 export { getLocalLeaderboardStats } from './local-leaderboard'
+// `app.leaderboard`, mounted by `@slayzone/api` under `app`, and its host seam.
+export {
+  appLeaderboardRouter,
+  type AppLeaderboardRouter,
+  type AppLeaderboardMounts
+} from './leaderboard-router'
+export {
+  setUsageAnalyticsRouterDeps,
+  getUsageAnalyticsRouterDeps,
+  type UsageAnalyticsRouterDeps
+} from './router-deps'

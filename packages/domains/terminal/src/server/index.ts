@@ -266,6 +266,13 @@ export { ptyRouter, type PtyRouter, type PtyMounts } from './pty-router'
 export { setPtyDeps, getPtyDeps, type PtyDeps } from './pty-router-deps'
 export { chatRouter, type ChatRouter, type ChatMounts } from './chat-router'
 export { setChatDeps, getChatDeps, type ChatDeps } from './chat-router-deps'
+// `app.usage` (provider usage limits), mounted by `@slayzone/api` under `app`.
+export { appUsageRouter, type AppUsageRouter, type AppUsageMounts } from './usage-router'
+export {
+  setUsageRouterDeps,
+  type UsageRouterDeps,
+  type UsageHost
+} from './usage-router-deps'
 export {
   setAgentLifecycleEvents,
   getAgentLifecycleEvents,

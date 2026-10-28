@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.1",
+    "@slayzone/agent-panels": "workspace:*",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
@@ -23,6 +24,7 @@
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
+    "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
@@ -32,6 +34,7 @@
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-browser": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/telemetry": "workspace:*",

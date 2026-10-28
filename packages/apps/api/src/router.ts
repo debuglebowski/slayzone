@@ -20,6 +20,24 @@ import {
 } from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
+import type {
+  AppAuthMounts,
+  AppClipboardMounts,
+  AppDialogMounts,
+  AppFilesMounts,
+  AppMetaMounts,
+  AppScreenshotMounts,
+  AppShellMounts,
+  AppShortcutsMounts,
+  AppTaskWindowsMounts,
+  AppWindowMounts
+} from '@slayzone/host-capabilities/server'
+import type { AppBackupMounts } from '@slayzone/settings/server'
+import type { AppLeaderboardMounts } from '@slayzone/usage-analytics/server'
+import type { AppUsageMounts } from '@slayzone/terminal/server'
+import type { AppFeedbackMounts } from '@slayzone/feedback/server'
+import type { AppBrowserMounts, AppWebviewMounts } from '@slayzone/task-browser/server'
+import type { AppFloatingAgentMounts } from '@slayzone/agent-panels/server'
 import { aiConfigRouter, type AiConfigMounts } from '@slayzone/ai-config/server'
 import {
   agentPromptsRouter,
@@ -115,6 +133,25 @@ type IsAppSlice<TMounts extends RouterMounts> = IsMountedSlice<TMounts, AppRoute
 type AssertAppSlice<T extends true> = AssertSlice<T>
 
 export type DomainRouterSlices = [
+  // The `app.*` routers, each owned by its package (`./routers/app.ts`).
+  AssertAppSlice<IsAppSlice<AppAuthMounts>>,
+  AssertAppSlice<IsAppSlice<AppBackupMounts>>,
+  AssertAppSlice<IsAppSlice<AppBrowserMounts>>,
+  AssertAppSlice<IsAppSlice<AppClipboardMounts>>,
+  AssertAppSlice<IsAppSlice<AppDialogMounts>>,
+  AssertAppSlice<IsAppSlice<AppFeedbackMounts>>,
+  AssertAppSlice<IsAppSlice<AppFilesMounts>>,
+  AssertAppSlice<IsAppSlice<AppFloatingAgentMounts>>,
+  AssertAppSlice<IsAppSlice<AppLeaderboardMounts>>,
+  AssertAppSlice<IsAppSlice<AppMetaMounts>>,
+  AssertAppSlice<IsAppSlice<AppScreenshotMounts>>,
+  AssertAppSlice<IsAppSlice<AppShellMounts>>,
+  AssertAppSlice<IsAppSlice<AppShortcutsMounts>>,
+  AssertAppSlice<IsAppSlice<AppTaskWindowsMounts>>,
+  AssertAppSlice<IsAppSlice<AppUsageMounts>>,
+  AssertAppSlice<IsAppSlice<AppWebviewMounts>>,
+  AssertAppSlice<IsAppSlice<AppWindowMounts>>,
+  // The domains:
   AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,
   AssertAppSlice<IsAppSlice<AiConfigMounts>>,
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,

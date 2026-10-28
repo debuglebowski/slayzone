@@ -12,9 +12,14 @@ import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { setHostCapabilitiesDeps } from '@slayzone/host-capabilities/server'
+import { setUsageRouterDeps } from '@slayzone/terminal/server'
+import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
+import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
+import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'
 import { createAccessScope } from './access'
 import { getAppDeps, getComputersDepsOrNull } from './app-deps'
-import { accessRequestOf } from './owner-gate'
+import { accessRequestOf, ownedProjectIds } from './owner-gate'
 
 setDiagnosticsRouterDeps({
   accessScopeFor: (ctx) => createAccessScope(ctx.db, accessRequestOf(ctx))
@@ -52,3 +57,14 @@ setArtifactsRouterDeps({
     }
   }
 })
+
+// The `app.*` routers that moved out of api read `AppDeps` (built from their types)
+// through these seams. Each getter reads the registry on every call: unset, it throws
+// exactly as `getAppDeps()` did inside the router.
+setHostCapabilitiesDeps({ getHost: () => getAppDeps() })
+setUsageRouterDeps({ getHost: () => getAppDeps() })
+setTaskBrowserRouterDeps({ getHost: () => getAppDeps() })
+setAgentPanelsRouterDeps({ getHost: () => getAppDeps() })
+
+// `app.leaderboard` sums over the caller's projects only (T-17): api's owner gate.
+setUsageAnalyticsRouterDeps({ ownedProjectIds })

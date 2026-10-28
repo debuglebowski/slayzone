@@ -4,6 +4,9 @@ export { settingProjectId, settingScope, type SettingScope } from './scope'
 export { adoptLegacyUserSettings } from './adopt-legacy'
 export { settingsRouter, type SettingsRouter, type SettingsMounts } from './router'
 export { settingsWriteProcedure, settingWriteNeedsAdmin } from './settings-admin'
+// `app.backup`, mounted by `@slayzone/api` under `app`, and the ops it reads.
+export { appBackupRouter, type AppBackupRouter, type AppBackupMounts } from './backup-router'
+export { setBackupOps, getBackupOps, type BackupOps } from './backup-ops'
 export {
   setSettingsHostDeps,
   getSettingsHostDeps,
