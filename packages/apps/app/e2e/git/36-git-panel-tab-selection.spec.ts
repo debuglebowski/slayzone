@@ -1,0 +1,111 @@
+import type { Locator, Page } from '@playwright/test'
+import { execSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  openTaskById,
+  createIsolatedGitRepo
+} from '../fixtures/electron'
+
+// Which tab the task git panel shows, and which one it saves (git_active_tab).
+// Task tabs live in <Activity>: hiding one unmounts its effects, showing it again
+// re-runs them.
+//  - A merge with conflicts switches the panel to Conflicts once. Re-showing the task
+//    tab must not take the user's own tab back (it did: the switch was an effect).
+
+const panels = (git: boolean) => ({
+  terminal: true,
+  browser: false,
+  diff: git,
+  settings: false,
+  editor: false,
+  artifacts: false,
+  processes: false
+})
+
+/** The active task tab's git panel (hidden task tabs stay mounted, display:none). */
+const gitPanel = (page: Page): Locator => page.locator('[data-testid="task-git-panel"]:visible')
+
+/** A new repo per run: the per-worker runtime dir can outlive a run. */
+function freshRepo(name: string): string {
+  fs.rmSync(createIsolatedGitRepo(name), { recursive: true, force: true })
+  return createIsolatedGitRepo(name)
+}
+
+function git(cwd: string, args: string): string {
+  return execSync(`git -c commit.gpgsign=false ${args}`, { cwd, encoding: 'utf-8', stdio: 'pipe' })
+}
+
+const savedGitTab = (page: Page, taskId: string) =>
+  page.evaluate(
+    async (id) => (await window.getTrpcVanillaClient().task.get.query({ id }))?.git_active_tab,
+    taskId
+  )
+
+/** Two frames: the effects of the last commit, and what they set, have rendered. */
+const nextFrames = (page: Page) =>
+  page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+  )
+
+test.describe('Conflicts auto-switch across a task-tab switch', () => {
+  let taskA = ''
+  let taskB = ''
+
+  async function showA(page: Page): Promise<void> {
+    await openTaskById(page, taskA)
+    await expect(gitPanel(page)).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Show B's tab (no git panel): A's tab is hidden once this returns. */
+  async function showB(page: Page): Promise<void> {
+    await openTaskById(page, taskB)
+    await expect(gitPanel(page)).toHaveCount(0, { timeout: 10_000 })
+  }
+
+  test.beforeAll(async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    const repo = freshRepo('tab-selection-merge')
+    fs.writeFileSync(path.join(repo, 'conflict.txt'), 'base\n')
+    git(repo, 'add conflict.txt')
+    git(repo, 'commit -m base')
+    git(repo, 'checkout -b feature')
+    fs.writeFileSync(path.join(repo, 'conflict.txt'), 'feature\n')
+    git(repo, 'commit -am feature')
+    git(repo, 'checkout -')
+    fs.writeFileSync(path.join(repo, 'conflict.txt'), 'main\n')
+    git(repo, 'commit -am main')
+    expect(() => git(repo, 'merge feature')).toThrow()
+
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Tab Merge', color: '#0ea5e9', path: repo })
+    taskA = (await s.createTask({ projectId: p.id, title: 'TS conflict task', status: 'todo' })).id
+    taskB = (await s.createTask({ projectId: p.id, title: 'TS other task', status: 'todo' })).id
+    await s.updateTask({ id: taskA, mergeState: 'conflicts', panelVisibility: panels(true) })
+    await s.updateTask({ id: taskB, panelVisibility: panels(false) })
+    await s.refreshData()
+  })
+
+  test("re-showing the task tab keeps the user's tab over Conflicts", async ({ mainWindow }) => {
+    await showA(mainWindow)
+    const panel = gitPanel(mainWindow)
+    // The merge's conflicts open the Conflicts tab, and that switch is saved.
+    await expect(panel.getByText('Complete Merge')).toBeVisible({ timeout: 10_000 })
+    await expect.poll(() => savedGitTab(mainWindow, taskA)).toBe('conflicts')
+
+    await panel.getByRole('button', { name: /^Diff/ }).click()
+    await expect(panel.getByTestId('git-diff-panel')).toBeVisible()
+    await expect.poll(() => savedGitTab(mainWindow, taskA)).toBe('changes')
+
+    await showB(mainWindow)
+    await showA(mainWindow)
+    await nextFrames(mainWindow)
+    await expect(panel.getByTestId('git-diff-panel')).toBeVisible()
+    await expect(panel.getByText('Complete Merge')).toBeHidden()
+    expect(await savedGitTab(mainWindow, taskA)).toBe('changes')
+  })
+})

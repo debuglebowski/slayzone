@@ -1,6 +1,14 @@
-import { type ForwardedRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
+import {
+  type ForwardedRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState
+} from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
+import { useDepsChanged } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import {
   isGitTabEnabled,
@@ -29,9 +37,13 @@ export function useGitPanelTabs(
 ) {
   const trpc = useTRPC()
   const [activeTab, setActiveTabRaw] = useState<GitTabId>(defaultTab)
+  // The tab the parent last heard of through onTabChange — at first the one it gave
+  // us. Written only by the handler below and the merge-switch effect.
+  const notifiedTabRef = useRef(defaultTab)
   const setActiveTab = useCallback(
     (tab: GitTabId) => {
       setActiveTabRaw(tab)
+      notifiedTabRef.current = tab
       onTabChange?.(tab)
     },
     [onTabChange]
@@ -102,15 +114,21 @@ export function useGitPanelTabs(
     }
   }, [refetchTabOrder, refetchTabVisibility])
 
-  // Auto-switch to conflicts tab when conflicts detected
-  useEffect(() => {
-    if (hasConflicts) setActiveTab('conflicts')
-  }, [hasConflicts])
+  // A merge state that starts, or is on at mount, switches to its tab: Conflicts for
+  // merge/rebase conflicts, Changes for an uncommitted merge. Once per start, while
+  // rendering: the user may leave the tab while the state lasts, and re-showing the
+  // task tab (<Activity> re-runs effects, not this) does not switch back.
+  const mergeTab: GitTabId | null = hasConflicts ? 'conflicts' : isUncommitted ? 'changes' : null
+  const mergeStateChanged = useDepsChanged([hasConflicts, isUncommitted], true)
+  if (mergeStateChanged && mergeTab !== null && activeTab !== mergeTab) setActiveTabRaw(mergeTab)
 
-  // Auto-switch to changes tab when uncommitted
+  // Tell the parent (which saves it) about that switch, once: a re-run of this effect
+  // (a re-show, a new onTabChange) finds nothing it has not already heard.
   useEffect(() => {
-    if (isUncommitted) setActiveTab('changes')
-  }, [isUncommitted])
+    if (notifiedTabRef.current === activeTab) return
+    notifiedTabRef.current = activeTab
+    onTabChange?.(activeTab)
+  }, [activeTab, onTabChange])
 
   // Reset active tab if it becomes hidden (runtime gate, user toggle, or stale 'branches').
   useEffect(() => {
