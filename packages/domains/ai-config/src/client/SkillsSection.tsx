@@ -155,15 +155,21 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
       })
   }, [trpcClient, items])
 
-  // Consume one-shot library skill selection from the store (set by Go-to-library button).
+  // Consume the one-shot library skill selection (set by "Go to source"): already
+  // pending when the library level shows, or set while it shows. The editor opens
+  // once the skill is in `items`.
   useEffect(() => {
     if (level !== 'library') return
-    if (items.length === 0) return
-    const pending = useContextManagerStore.getState().consumePendingLibrarySkillId()
-    if (pending && items.some((i) => i.id === pending)) {
-      setSelectedSkillId(pending)
-    }
-  }, [level, items])
+    return useContextManagerStore.subscribe(
+      (s) => s.pendingLibrarySkillId,
+      (pending) => {
+        if (!pending) return
+        useContextManagerStore.getState().consumePendingLibrarySkillId()
+        setSelectedSkillId(pending)
+      },
+      { fireImmediately: true }
+    )
+  }, [level])
 
   const handleViewModeChange = useCallback(
     (mode: SkillViewMode) => {

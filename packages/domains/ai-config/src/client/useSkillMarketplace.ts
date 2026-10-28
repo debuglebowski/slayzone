@@ -29,6 +29,12 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [previewEntry, setPreviewEntry] = useState<SkillRegistryEntry | null>(null)
+  // External navigation to one entry (e.g. a skill's marketplace badge): taken from
+  // the store's one-shot value at mount like the registry above, and held only while
+  // this marketplace stays open — an entry that never shows up is dropped with it.
+  const [pendingEntryId, setPendingEntryId] = useState<string | null>(
+    () => useContextManagerStore.getState().marketplaceDrillEntryId
+  )
 
   const loadRegistries = useCallback(
     async () =>
@@ -95,25 +101,27 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
       })
   }, [trpcClient])
 
-  // Consume the one-shot drill-in seeded into `activeRegistryId` above (browseMode
-  // already starts on 'registries').
+  // Consume the one-shot drill-in seeded into `activeRegistryId` / `pendingEntryId`
+  // above (browseMode already starts on 'registries').
   useEffect(() => {
-    if (useContextManagerStore.getState().marketplaceDrillRegistryId) {
-      useContextManagerStore.setState({ marketplaceDrillRegistryId: null })
+    const { marketplaceDrillRegistryId, marketplaceDrillEntryId } =
+      useContextManagerStore.getState()
+    if (marketplaceDrillRegistryId || marketplaceDrillEntryId) {
+      useContextManagerStore.setState({
+        marketplaceDrillRegistryId: null,
+        marketplaceDrillEntryId: null
+      })
     }
   }, [])
 
-  // Open the preview dialog for a specific entry once entries finish loading.
-  useEffect(() => {
-    if (loading) return
-    const pendingEntryId = useContextManagerStore.getState().marketplaceDrillEntryId
-    if (!pendingEntryId) return
+  // Open the preview dialog for the requested entry once a load lists it.
+  if (pendingEntryId && !loading) {
     const entry = entries.find((e) => e.id === pendingEntryId)
     if (entry) {
+      setPendingEntryId(null)
       setPreviewEntry(entry)
-      useContextManagerStore.setState({ marketplaceDrillEntryId: null })
     }
-  }, [loading, entries])
+  }
 
   const handleAddToLibrary = useCallback(
     async (entryId: string) => {

@@ -202,6 +202,36 @@ describe('Context Manager page (ContextManagerShell)', () => {
     expect(editorPanel.className).toContain('empty:hidden')
   })
 
+  it('"Go to source" from a project skill opens that skill in the library', async () => {
+    const PROJECT_SKILL = { ...SKILL, id: 'p-own', scope: 'project', project_id: 'p1', slug: 'own' }
+    handlers['aiConfig.listItems'] = (input) =>
+      (input as { scope: string }).scope === 'library' ? [SKILL] : [PROJECT_SKILL]
+    handlers['aiConfig.getProjectSkillsStatus'] = () => [{ item: SKILL, providers: {} }]
+    const { container } = renderPage('project', 'skills')
+    await flush()
+    const editorPanel = slot(container, 'context-manager-editor-panel')
+    expect(editorPanel.childElementCount).toBe(0)
+
+    act(() => {
+      useContextManagerStore.getState().navigateToLibrarySkill('s1')
+    })
+    await flush()
+    expect(useContextManagerStore.getState().activeLevel).toBe('library')
+    expect(within(editorPanel).getByTestId('skill-editor-s1')).toBeTruthy()
+    expect(useContextManagerStore.getState().pendingLibrarySkillId).toBe(null)
+  })
+
+  it('a library skill requested before the page opens is selected once it loads', async () => {
+    act(() => {
+      useContextManagerStore.getState().navigateToLibrarySkill('s1')
+    })
+    const { container } = renderPage('library', 'skills')
+    await flush()
+    const editorPanel = slot(container, 'context-manager-editor-panel')
+    expect(within(editorPanel).getByTestId('skill-editor-s1')).toBeTruthy()
+    expect(useContextManagerStore.getState().pendingLibrarySkillId).toBe(null)
+  })
+
   it('switching section: the new section portals into the same header, never inline', async () => {
     const { container } = renderPage('library', 'instructions')
     await flush()

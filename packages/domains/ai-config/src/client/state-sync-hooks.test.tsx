@@ -318,6 +318,56 @@ describe('useSkillMarketplace external drill-in', () => {
     ])
   })
 
+  it('opens the requested entry once it is listed, also on a later reload', async () => {
+    handlers['aiConfig.marketplace.listRegistries'] = async () => [{ id: 'r1' }]
+    const fresh = deferred<unknown>()
+    handlers['aiConfig.marketplace.ensureFresh'] = () => fresh.promise
+    const entries = deferredHandler('aiConfig.marketplace.listEntries')
+    useContextManagerStore.getState().navigateToMarketplaceEntry('r1', 'e2')
+
+    const { result } = renderHook(() => useSkillMarketplace('p1', '/a'))
+    await flush()
+    // The first answer predates the freshness pass and lacks the entry.
+    await act(async () => entries[0].resolve([{ id: 'e1' }]))
+    await flush()
+    expect(result.current.previewEntry).toBe(null)
+    await act(async () => fresh.resolve(undefined))
+    await flush()
+    await act(async () => entries[1].resolve([{ id: 'e1' }, { id: 'e2' }]))
+    await flush()
+    expect(result.current.previewEntry).toEqual({ id: 'e2' })
+    expect(useContextManagerStore.getState().marketplaceDrillEntryId).toBe(null)
+
+    // Closing the preview keeps it closed through later reloads.
+    act(() => result.current.setPreviewEntry(null))
+    act(() => {
+      void result.current.handleUninstall('i1')
+    })
+    await flush()
+    await act(async () => entries[2].resolve([{ id: 'e1' }, { id: 'e2' }]))
+    await flush()
+    expect(result.current.previewEntry).toBe(null)
+  })
+
+  it('a requested entry that never shows up is dropped when the marketplace closes', async () => {
+    handlers['aiConfig.marketplace.listRegistries'] = async () => [{ id: 'r1' }]
+    handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})
+    handlers['aiConfig.marketplace.listEntries'] = async () => [{ id: 'e1' }]
+    useContextManagerStore.getState().navigateToMarketplaceEntry('r1', 'gone')
+
+    const first = renderHook(() => useSkillMarketplace('p1', '/a'))
+    await flush()
+    expect(first.result.current.previewEntry).toBe(null)
+    first.unmount()
+
+    // Later the marketplace opens from the sidebar (no link) and the entry is back.
+    handlers['aiConfig.marketplace.listEntries'] = async () => [{ id: 'e1' }, { id: 'gone' }]
+    const second = renderHook(() => useSkillMarketplace('p1', '/a'))
+    await flush()
+    expect(second.result.current.entries).toEqual([{ id: 'e1' }, { id: 'gone' }])
+    expect(second.result.current.previewEntry).toBe(null)
+  })
+
   it('without a pending drill-in, mounts on the registry list', async () => {
     handlers['aiConfig.marketplace.listRegistries'] = async () => []
     handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})
