@@ -6,7 +6,6 @@ import {
   assertHubLocalExecEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import {
   artifactWatcherEvents,
   downloadArtifactFile,
@@ -14,10 +13,8 @@ import {
   downloadArtifactAsPdf,
   downloadArtifactAsPng,
   downloadArtifactAsHtml,
-  downloadAllArtifactsAsZip,
-  type ArtifactDownloadHost
+  downloadAllArtifactsAsZip
 } from '@slayzone/task/server'
-import { getAppDeps } from '../app-deps'
 import type {
   CreateArtifactInput,
   UpdateArtifactInput,
@@ -25,6 +22,8 @@ import type {
   UpdateArtifactFolderInput
 } from '@slayzone/task-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
+import { createArtifactStore } from './artifact-store'
+import { getArtifactsRouterDeps } from './artifacts-router-deps'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
@@ -96,24 +95,14 @@ function assertPasteSourcesAreHubStorage(dataRoot: string, sources: unknown): vo
 }
 
 // Host-only steps of a download (save sheet, directory picker, downloads dir, reveal,
-// offscreen PDF/PNG render) come from the AppDeps capability bridge. Previously these
-// procedures reached the electron-side download module through a catch-guarded dynamic
-// import, which cannot work in the plain-node side-car the renderer now talks to: the
-// module bundles fine, so the "absent" branch never fired, and its electron binding
-// resolved to a string path. AppDeps is compile-enforced at all three wiring sites, so a
-// missing capability is a build error rather than a silent no-op.
-const downloadHost = (): ArtifactDownloadHost => {
-  const deps = getAppDeps()
-  return {
-    showSaveDialog: deps.dialogShowSaveDialog,
-    showOpenDialog: deps.dialogShowOpenDialog,
-    getDownloadsDir: deps.appGetDownloadsDir,
-    showItemInFolder: deps.shellShowItemInFolder,
-    buildExportHtml: deps.artifactBuildExportHtml,
-    renderPdfToFile: deps.artifactRenderPdfToFile,
-    renderPngToFile: deps.artifactRenderPngToFile
-  }
-}
+// offscreen PDF/PNG render) come from the host's capability bridge, injected through
+// `setArtifactsRouterDeps` (api wires it from AppDeps). Previously these procedures
+// reached the electron-side download module through a catch-guarded dynamic import,
+// which cannot work in the plain-node side-car the renderer now talks to: the module
+// bundles fine, so the "absent" branch never fired, and its electron binding resolved
+// to a string path. AppDeps is compile-enforced at all three wiring sites, so a missing
+// capability is a build error rather than a silent no-op.
+const downloadHost = () => getArtifactsRouterDeps().getDownloadHost()
 
 export const artifactsRouter = router({
   // --- Artifact CRUD / read ---
@@ -295,3 +284,8 @@ export const artifactsRouter = router({
     })
   )
 })
+
+export type ArtifactsRouter = typeof artifactsRouter
+
+/** Where `@slayzone/api` mounts this router; it asserts the slice in its `router.ts`. */
+export type ArtifactsMounts = { artifacts: ArtifactsRouter }

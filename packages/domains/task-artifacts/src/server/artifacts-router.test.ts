@@ -15,7 +15,7 @@ import type {
   CreateArtifactInput,
   CreateArtifactFolderInput
 } from '@slayzone/task-contracts'
-import { artifactsRouter } from './artifacts.js'
+import { artifactsRouter } from './artifacts-router.js'
 import { taskOps } from '@slayzone/task/server'
 
 const h = await createTestHarness()

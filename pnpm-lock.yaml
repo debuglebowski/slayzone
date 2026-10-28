@@ -2165,12 +2165,18 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.1.0-beta)
       diff:
         specifier: ^9.0.0
         version: 9.0.0

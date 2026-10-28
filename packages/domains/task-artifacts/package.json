@@ -27,8 +27,10 @@
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
+    "@trpc/server": "^11.19.0",
     "diff": "^9.0.0",
     "lucide-react": "^1.48.0",
     "zod": "^4.3.5"

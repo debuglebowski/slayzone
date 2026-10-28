@@ -49,7 +49,7 @@ import {
   type TemplateMounts,
   type TaskMounts
 } from '@slayzone/task/server'
-import { artifactsRouter } from './routers/artifacts'
+import { artifactsRouter, type ArtifactsMounts } from '@slayzone/task-artifacts/server'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
@@ -118,6 +118,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
+  AssertAppSlice<IsAppSlice<ArtifactsMounts>>,
   AssertAppSlice<IsAppSlice<ChatMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
   AssertAppSlice<IsAppSlice<HistoryMounts>>,

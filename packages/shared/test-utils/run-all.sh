@@ -444,7 +444,7 @@ run_harness packages/domains/terminal/src/server/pty-router.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
 run_harness packages/apps/api/src/routers/task.test.ts
 run_harness packages/apps/api/src/routers/template.test.ts
-run_harness packages/apps/api/src/routers/artifacts.test.ts
+run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 # Cross-domain: task+tags+history activity-event recording + cursor pagination.
 run_harness packages/apps/api/src/routers/history.test.ts
 # Browser onEvent snapshot replay (stuck-loading race fix) — no DB

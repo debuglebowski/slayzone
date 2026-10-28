@@ -8,6 +8,7 @@
  * @module api/domain-router-deps
  */
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
+import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setWorktreesRouterDeps } from '@slayzone/worktrees/server'
 import { getAppDeps, getComputersDepsOrNull, getWorkspaceDeps } from './app-deps'
 
@@ -21,4 +22,19 @@ setProjectsRouterDeps({
 setWorktreesRouterDeps({
   getWorkspace: () => getWorkspaceDeps(),
   shellOpenPath: (absPath) => getAppDeps().shellOpenPath(absPath)
+})
+
+setArtifactsRouterDeps({
+  getDownloadHost: () => {
+    const deps = getAppDeps()
+    return {
+      showSaveDialog: deps.dialogShowSaveDialog,
+      showOpenDialog: deps.dialogShowOpenDialog,
+      getDownloadsDir: deps.appGetDownloadsDir,
+      showItemInFolder: deps.shellShowItemInFolder,
+      buildExportHtml: deps.artifactBuildExportHtml,
+      renderPdfToFile: deps.artifactRenderPdfToFile,
+      renderPngToFile: deps.artifactRenderPngToFile
+    }
+  }
 })
