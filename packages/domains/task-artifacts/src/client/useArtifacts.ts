@@ -93,6 +93,30 @@ export interface UseArtifactsReturn {
   folderPathMap: Map<string, string>
 }
 
+/**
+ * The selected artifact, reconciled with the task's saved one (`active_artifact_id`,
+ * passed in as `initialSelectedId`). The panel saves each selection 500 ms after it
+ * is made (usePersistenceSaves), so the saved value trails a selection made here;
+ * other windows and clients of the same task save theirs to the same field.
+ */
+interface Selection {
+  /** The task this selection is for. */
+  taskId: string | null | undefined
+  /** The selected artifact. */
+  id: string | null
+  /** The task's saved selection, as last seen. */
+  saved: string | null
+  /** `saved` changed to another artifact after the last selection made here. */
+  savedIsNewer: boolean
+}
+
+const selectionFor = (taskId: string | null | undefined, saved: string | null): Selection => ({
+  taskId,
+  id: saved,
+  saved,
+  savedIsNewer: false
+})
+
 export function useArtifacts(
   taskId: string | null | undefined,
   initialSelectedId?: string | null
@@ -101,16 +125,35 @@ export function useArtifacts(
   const queryClient = useQueryClient()
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([])
   const [folders, setFolders] = useState<ArtifactFolder[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
 
-  // Re-sync selection when switching tasks. Only `taskId` triggers the reset;
-  // the stable callback reads the latest `initialSelectedId` at that moment.
-  const resyncSelection = useStableCallback(() => {
-    setSelectedId(initialSelectedId ?? null)
+  const saved = initialSelectedId ?? null
+  const [selection, setSelection] = useState<Selection>(() => selectionFor(taskId, saved))
+  const selectedId = selection.id
+  // A new saved value for the same task: this panel's own save landing (it matches the
+  // selection), or a selection saved from another window or client. Recorded while
+  // rendering; adopted by the sync below.
+  if (Object.is(selection.taskId, taskId) && !Object.is(selection.saved, saved)) {
+    setSelection((s) => ({ ...s, saved, savedIsNewer: saved !== s.id }))
+  }
+  // On mount, a task change, and every tab re-show (<Activity> re-runs this): a task
+  // change selects that task's saved artifact (the stable callback reads the latest
+  // `initialSelectedId`). Otherwise the saved artifact is adopted only when it was saved
+  // after the last selection made here: a re-show inside the save window must not put
+  // back the previous artifact (it also collapsed a multi-select).
+  const syncSelection = useStableCallback(() => {
+    setSelection((s) => {
+      if (!Object.is(s.taskId, taskId)) return selectionFor(taskId, saved)
+      return s.savedIsNewer ? { ...s, id: s.saved, savedIsNewer: false } : s
+    })
   })
   useEffect(() => {
-    resyncSelection()
-  }, [taskId, resyncSelection])
+    syncSelection()
+  }, [taskId, syncSelection])
+  // A selection made here (a click, the search panel, the panel's imperative handle,
+  // create / upload): newer than anything saved so far.
+  const setSelectedId = useCallback((id: string | null) => {
+    setSelection((s) => (s.id === id && !s.savedIsNewer ? s : { ...s, id, savedIsNewer: false }))
+  }, [])
 
   // Fetch artifacts + folders. The two queries are the source of truth; local
   // state mirrors them so optimistic mutation updates stay instant and consumers
@@ -251,7 +294,7 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId, createMutate]
+    [taskId, createMutate, setSelectedId]
   )
 
   const updateArtifact = useCallback(
@@ -268,7 +311,7 @@ export function useArtifacts(
     async (id: string): Promise<void> => {
       await deleteMutate({ id })
       setArtifacts((prev) => prev.filter((a) => a.id !== id))
-      setSelectedId((prev) => (prev === id ? null : prev))
+      setSelection((s) => (s.id === id ? { ...s, id: null, savedIsNewer: false } : s))
       track('asset_deleted')
     },
     [deleteMutate]
@@ -329,7 +372,7 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId, uploadMutate]
+    [taskId, uploadMutate, setSelectedId]
   )
 
   const getFilePath = useCallback(
