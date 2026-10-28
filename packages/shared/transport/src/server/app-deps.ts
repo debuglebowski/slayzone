@@ -26,15 +26,13 @@ import type { WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { OpDeps, TaskOps } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task/shared'
+import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
+import type { ProcessInfo, ProcessEventMap } from '@slayzone/platform/process-info'
+import type { UpdateStatus } from '@slayzone/platform/app-update-status'
 import type {
-  BackupInfo,
-  BackupSettings,
-  ProcessInfo,
-  ProcessEventMap,
-  UpdateStatus,
   BrowserShortcutPayload,
   BrowserCreateTaskFromLinkIntent
-} from '@slayzone/types'
+} from '@slayzone/platform/browser-view-events'
 import type { FindJoinTokenAccount } from './join-token-policy'
 
 /**

@@ -1,5 +1,5 @@
 import { observable } from '@trpc/server/observable'
-import type { UpdateStatus } from '@slayzone/types'
+import type { UpdateStatus } from '@slayzone/platform/app-update-status'
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc'
 import { getMenuEvents } from '../app-deps'

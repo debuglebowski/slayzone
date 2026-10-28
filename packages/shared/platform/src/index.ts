@@ -64,6 +64,15 @@ export { discoverHubs, findHub, type DiscoveredHub, type DiscoverOptions } from 
 // prefer those from renderer bundles.
 export type { HubKind, HubEntry } from './hub-registry'
 export type { LocalComputerStatus } from './local-computer-status'
+// Process manager, app updater and WebContentsView event contracts. Also the lean
+// `/process-info`, `/app-update-status` and `/browser-view-events` subpaths.
+export type { ProcessStatus, ProcessStats, ProcessInfo, ProcessEventMap } from './process-info'
+export type { UpdateStatus } from './app-update-status'
+export type {
+  BrowserCreateTaskFromLinkSource,
+  BrowserCreateTaskFromLinkIntent,
+  BrowserShortcutPayload
+} from './browser-view-events'
 export {
   ENV_MANIFEST,
   NON_PREFIXED_INFRA,

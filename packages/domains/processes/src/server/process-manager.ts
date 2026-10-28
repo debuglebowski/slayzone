@@ -14,7 +14,8 @@ import {
   assertHubProcessesEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
-import type { ProcessEventMap } from '@slayzone/types'
+import type { ProcessEventMap, ProcessInfo, ProcessStatus } from '@slayzone/platform/process-info'
+export type { ProcessInfo, ProcessStatus } from '@slayzone/platform/process-info'
 
 /** Structural slice of Electron's BrowserWindow — the legacy dual-emit target.
  *  Kept structural so this module stays electron-free (src/server guard); the
@@ -33,26 +34,6 @@ export type ProjectCwdResolver = (projectId: string) => Promise<string | null>
 let projectCwdResolver: ProjectCwdResolver | null = null
 export function setProjectCwdResolver(resolver: ProjectCwdResolver | null): void {
   projectCwdResolver = resolver
-}
-
-export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
-
-export interface ProcessInfo {
-  id: string
-  taskId: string | null
-  projectId: string | null
-  label: string
-  command: string
-  cwd: string
-  autoRestart: boolean
-  status: ProcessStatus
-  pid: number | null
-  exitCode: number | null
-  logBuffer: string[]
-  startedAt: string
-  restartCount: number
-  spawnedAt: string | null
-  processTitle: string | null
 }
 
 /** What a client may set on a process (create, update); the rest is the manager's. */

@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
+import type {
+  BrowserShortcutPayload,
+  BrowserCreateTaskFromLinkIntent
+} from '@slayzone/platform/browser-view-events'
 import { assertHubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { hubGithubSignInConvexUrl } from '../auth-github'
 import { router, publicProcedure } from '../trpc'
