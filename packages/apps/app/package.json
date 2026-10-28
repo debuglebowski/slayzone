@@ -80,6 +80,7 @@
     "@slayzone/sidebar": "workspace:*",
     "@slayzone/suspense": "workspace:*",
     "@slayzone/tabs": "workspace:*",
+    "@slayzone/tabs-state": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",

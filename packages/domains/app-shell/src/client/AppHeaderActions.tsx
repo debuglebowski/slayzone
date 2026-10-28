@@ -10,7 +10,7 @@ import {
   withShortcut,
   UpdateButton
 } from '@slayzone/ui'
-import { useTabStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/tabs-state'
 import {
   AgentStatusButton,
   type AgentStatusState,

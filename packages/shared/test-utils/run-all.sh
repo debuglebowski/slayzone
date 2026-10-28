@@ -203,7 +203,7 @@ run_harness packages/domains/task/src/client/card-water-fill.test.ts
 # Workflow columns — statuses shared by several projects (bulk status menu).
 run_harness packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
-run_harness packages/domains/settings/src/client/useTabStore.test.ts
+run_harness packages/domains/tabs-state/src/useTabStore.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
 run_harness packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts

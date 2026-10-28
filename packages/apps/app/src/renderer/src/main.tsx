@@ -1,12 +1,8 @@
 import './assets/main.css'
 
 import { createRoot } from 'react-dom/client'
-import {
-  ThemeProvider,
-  loadTabStoreState,
-  stopViewStatePersistence,
-  useTabStore
-} from '@slayzone/settings'
+import { ThemeProvider } from '@slayzone/settings'
+import { loadTabStoreState, stopViewStatePersistence, useTabStore } from '@slayzone/tabs-state'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
 import {

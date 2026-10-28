@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task-contracts'
-import { useTabStore, type ActiveView, type Tab } from '@slayzone/settings'
+import { useTabStore, type ActiveView, type Tab } from '@slayzone/tabs-state'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
 import { useTabPageViews } from '@/hooks/useTabLifecycle'
 

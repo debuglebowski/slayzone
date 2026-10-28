@@ -502,6 +502,9 @@ importers:
       '@slayzone/tabs':
         specifier: workspace:*
         version: link:../../domains/tabs
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../../domains/tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
@@ -933,6 +936,9 @@ importers:
       '@slayzone/tabs':
         specifier: workspace:*
         version: link:../../domains/tabs
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../../domains/tabs-state
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -1160,9 +1166,9 @@ importers:
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../agent-panels
-      '@slayzone/settings':
+      '@slayzone/tabs-state':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../tabs-state
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
@@ -1730,9 +1736,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
+      '@slayzone/tabs-state':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../tabs-state
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
@@ -1785,6 +1791,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -1855,9 +1864,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
-      '@slayzone/settings':
+      '@slayzone/tabs-state':
         specifier: workspace:*
-        version: link:../settings
+        version: link:../tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -1914,6 +1923,21 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+
+  packages/domains/tabs-state:
+    dependencies:
+      '@slayzone/projects-contracts':
+        specifier: workspace:*
+        version: link:../projects-contracts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      zustand:
+        specifier: ^5.0.15
+        version: 5.0.15(@types/react@19.3.0)(immer@11.1.8)(react@19.3.1)(use-sync-external-store@1.6.0(react@19.3.1))
 
   packages/domains/tags:
     dependencies:
@@ -1996,6 +2020,9 @@ importers:
       '@slayzone/suspense':
         specifier: workspace:*
         version: link:../../shared/suspense
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -2258,6 +2285,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags

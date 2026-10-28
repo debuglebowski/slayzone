@@ -25,6 +25,7 @@
     "@slayzone/settings": "workspace:*",
     "@slayzone/sidebar": "workspace:*",
     "@slayzone/tabs": "workspace:*",
+    "@slayzone/tabs-state": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import type { Tab } from '@slayzone/settings'
+import type { Tab } from '@slayzone/tabs-state'
 
 export function useTabColors(
   tabs: Tab[],

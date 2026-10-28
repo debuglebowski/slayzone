@@ -26,14 +26,14 @@ import {
   buildStatusOptions,
   cn
 } from '@slayzone/ui'
-import { useTabStore } from '../useTabStore'
+import { useTabStore } from '@slayzone/tabs-state'
 import type {
   TreeGroupBy,
   TreeOrderBy,
   TreeOrderDir,
   TaskHeaderPanelMode,
   TaskHeaderAlign
-} from '../useTabStore'
+} from '@slayzone/tabs-state'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 const SIDEBAR_VIEWS: ReadonlyArray<{ value: string; label: string }> = [

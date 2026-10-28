@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { Task } from '@slayzone/task-contracts'
-import type { Tab } from '@slayzone/settings'
-import { useTabStore } from '@slayzone/settings'
+import type { Tab } from '@slayzone/tabs-state'
+import { useTabStore } from '@slayzone/tabs-state'
 
 const identity = (i: number) => i
 

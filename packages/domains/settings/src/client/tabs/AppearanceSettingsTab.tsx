@@ -20,7 +20,7 @@ import {
   getThemeVariant
 } from '@slayzone/ui'
 import { useTheme } from '../ThemeContext'
-import { useTabStore } from '../useTabStore'
+import { useTabStore } from '@slayzone/tabs-state'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 function SettingLabel({ children, tip }: { children: React.ReactNode; tip: string }) {

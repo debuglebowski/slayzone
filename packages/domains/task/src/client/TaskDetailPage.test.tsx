@@ -35,7 +35,10 @@ vi.mock('@slayzone/terminal', () => ({
 }))
 
 vi.mock('@slayzone/settings/client', () => ({
-  useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' }),
+  useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' })
+}))
+
+vi.mock('@slayzone/tabs-state', () => ({
   // Only the header-layout slice the page selects from is provided.
   useTabStore: (
     selector: (s: {

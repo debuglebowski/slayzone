@@ -12,7 +12,7 @@ import {
 import { HubScope } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import { useTabStore, type Tab } from '@slayzone/settings'
+import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { TaskPaneFallback, useTerminalFirstHolding } from '@slayzone/task/client/TerminalFirstShell'
 import { TaskPaneEventCatcher } from '@slayzone/task/client/TaskPaneEventCatcher'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'

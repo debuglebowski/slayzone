@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@slayzone/agent-panels": "workspace:*",
-    "@slayzone/settings": "workspace:*",
+    "@slayzone/tabs-state": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",

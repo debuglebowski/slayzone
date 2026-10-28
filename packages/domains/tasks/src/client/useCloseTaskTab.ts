@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useTabStore } from '@slayzone/settings/client'
+import { useTabStore } from '@slayzone/tabs-state'
 import { getClientForHub, getHubIdForTask, useTRPCClient } from '@slayzone/transport/client'
 
 export interface CloseTaskTabOptions {

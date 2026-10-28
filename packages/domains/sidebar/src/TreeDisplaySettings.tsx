@@ -23,7 +23,7 @@ import {
   type TreeGroupBy,
   type TreeOrderBy,
   type TreeOrderDir
-} from '@slayzone/settings'
+} from '@slayzone/tabs-state'
 import { PRIORITY_LABELS } from '@slayzone/tasks'
 
 export function TreeDisplaySettings() {

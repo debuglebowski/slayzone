@@ -55,7 +55,8 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import { useTabStore, AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
+import { AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
 import { track } from '@slayzone/telemetry/client'
 import {

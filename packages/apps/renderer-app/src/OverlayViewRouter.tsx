@@ -22,7 +22,7 @@
 // gate), exactly the prior behavior. usage-analytics + context render fully
 // (sidecar-backed).
 import { lazy, Suspense } from 'react'
-import { useTabStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/tabs-state'
 import { useLeaderboardAuth } from '@slayzone/leaderboard'
 
 const LeaderboardPage = lazy(() =>

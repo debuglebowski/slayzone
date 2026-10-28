@@ -27,6 +27,7 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
+    "@slayzone/tabs-state": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",

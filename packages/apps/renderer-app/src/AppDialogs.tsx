@@ -40,7 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@slayzone/ui'
-import { useTabStore, type Tab } from '@slayzone/settings'
+import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
 import {
   useTRPCClient,

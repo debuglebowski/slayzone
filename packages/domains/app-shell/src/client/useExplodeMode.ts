@@ -8,7 +8,7 @@ import {
   type RefObject,
   type SetStateAction
 } from 'react'
-import { useTabStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/tabs-state'
 import { reconcileExplodeOrder, swapExplodeOrder } from './explodeLayout'
 
 export interface ExplodeModeApi {

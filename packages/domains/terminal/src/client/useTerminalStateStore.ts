@@ -8,7 +8,7 @@
 // Keyed by sessionId (matches the backend + preserves split-pane granularity);
 // the task-level view is a derived selector over the main session
 // `${taskId}:${taskId}`. ONE module-scope block applies the IPC + self-heals
-// via reconcile — mirrors the eager-wiring pattern in settings/useTabStore.ts.
+// via reconcile — mirrors the eager-wiring pattern in tabs-state/useTabStore.ts.
 //
 // NOTE (Phase 2, in progress): this store is not yet wired into PtyContext or
 // consumers — it is additive and inert until first imported.
@@ -450,7 +450,7 @@ export function useWireTerminalStateStore(): void {
 
 // Self-heal triggers + E2E handle. Module-scope (runs once per renderer on first
 // import), guarded so importing in a non-DOM context (unit tests) is a no-op.
-// Mirrors settings/useTabStore.ts window-attach. The triggers call pullReconcile,
+// Mirrors tabs-state/useTabStore.ts window-attach. The triggers call pullReconcile,
 // which no-ops until the tRPC client is mounted.
 if (typeof window !== 'undefined') {
   // Self-heal triggers: window focus + a low-freq backstop interval. A dropped

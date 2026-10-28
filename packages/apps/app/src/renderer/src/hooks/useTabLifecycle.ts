@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
-import { useTabStore, type Tab } from '@slayzone/settings'
+import { useTabStore, type Tab } from '@slayzone/tabs-state'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { track } from '@slayzone/telemetry/client'
 

@@ -18,6 +18,7 @@
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/tabs-state": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/terminal": "workspace:*",

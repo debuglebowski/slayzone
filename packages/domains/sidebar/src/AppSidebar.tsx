@@ -8,7 +8,7 @@ import {
   SidebarGroupContent,
   cn
 } from '@slayzone/ui'
-import { useTabStore } from '@slayzone/settings'
+import { useTabStore } from '@slayzone/tabs-state'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { recordDiagnosticsTimeline, updateDiagnosticsContext } from '@/lib/diagnosticsClient'
-import type { Tab, ActiveView } from '@slayzone/settings'
+import type { Tab, ActiveView } from '@slayzone/tabs-state'
 
 export function useDiagnosticsSync({
   tabs,

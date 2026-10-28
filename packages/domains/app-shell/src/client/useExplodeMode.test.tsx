@@ -28,7 +28,7 @@ const setExplodeArrangement: Store['setExplodeArrangement'] = ({ order, minimize
   }
   for (const l of listeners) l()
 }
-vi.mock('@slayzone/settings', () => ({
+vi.mock('@slayzone/tabs-state', () => ({
   useTabStore: Object.assign(
     <T,>(sel: (s: Store) => T): T =>
       useSyncExternalStore(

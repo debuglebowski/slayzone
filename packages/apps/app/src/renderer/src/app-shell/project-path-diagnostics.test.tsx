@@ -52,7 +52,7 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client,
   getTrpcClient: () => client
 }))
-vi.mock('@slayzone/settings', () => {
+vi.mock('@slayzone/tabs-state', () => {
   const state = { activeTabIndex: 0, setSelectedProjectId: () => {} }
   const useTabStore = (select: (s: typeof state) => unknown) => select(state)
   useTabStore.getState = () => state

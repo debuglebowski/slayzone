@@ -143,7 +143,7 @@ vi.mock('../ThemeContext', () => ({
     setEditorOverrideThemeId: vi.fn()
   })
 }))
-vi.mock('../useTabStore', () => ({
+vi.mock('@slayzone/tabs-state', () => ({
   useTabStore: (sel: (s: { projectScopedTabs: boolean }) => unknown) =>
     sel({ projectScopedTabs: false })
 }))
