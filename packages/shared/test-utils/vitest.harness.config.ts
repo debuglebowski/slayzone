@@ -1,6 +1,7 @@
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vitest/config'
+import { fsModuleCacheOptions, fsModuleCacheResolutionKey } from './fs-module-cache.ts'
 
 // Node-environment suites (`pnpm test:unit`, the "harness" group in run-all.sh).
 // Run under Electron's node (ELECTRON_RUN_AS_NODE=1): better-sqlite3 is rebuilt for
@@ -46,7 +47,7 @@ function harnessMocks(): Plugin {
 
 export default defineConfig({
   root: rootDir,
-  plugins: [harnessMocks()],
+  plugins: [harnessMocks(), fsModuleCacheResolutionKey(rootDir)],
   test: {
     environment: 'node',
     // run-all.sh passes an explicit file list, which filters within this glob.
@@ -65,6 +66,8 @@ export default defineConfig({
     // Many suites boot a real hub/computer bin, git, or a fresh migrated DB.
     testTimeout: 120_000,
     hookTimeout: 120_000,
-    passWithNoTests: false
+    passWithNoTests: false,
+    // Transforms persist between runs (see fs-module-cache.ts).
+    ...fsModuleCacheOptions(rootDir, 'harness')
   }
 })

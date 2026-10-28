@@ -24,6 +24,8 @@
  * hook are compiled), the client-only gate (SSR modules stay uncompiled) and the
  * react/compiler-runtime pre-bundle entry.
  */
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import babel from '@rolldown/plugin-babel'
 import { reactCompilerPreset } from '@vitejs/plugin-react'
 
@@ -35,13 +37,26 @@ export const REACT_COMPILER_EXCLUDE = /\/node_modules\//
  * The compiler pass, used next to `react()`. `include` narrows it further — the
  * Electron dev server passes a never-matching regex to hand the pass to its cached
  * worker transform while keeping this plugin's config role (the pre-bundle entry).
+ *
+ * Under vitest with `fsModuleCache` (run-all.sh's invocations), a cached transform is
+ * keyed by plugin NAMES, not options: this file's content and `include` go into the key,
+ * so changing the compiler setup here never serves a module compiled the old way. (A
+ * compiler upgrade changes the lockfile, which clears the cache outright.)
  */
-export function reactCompilerPlugin({ include = REACT_COMPILER_INCLUDE } = {}) {
-  return babel({
+export async function reactCompilerPlugin({ include = REACT_COMPILER_INCLUDE } = {}) {
+  const plugin = await babel({
     include,
     exclude: REACT_COMPILER_EXCLUDE,
     presets: [reactCompilerPreset()]
   })
+  const setupKey = createHash('sha1')
+    .update(readFileSync(new URL(import.meta.url), 'utf8'))
+    .update(String(include))
+    .digest('hex')
+  plugin.configureVitest = ({ defineCacheKeyGenerator }) => {
+    defineCacheKeyGenerator(() => `react-compiler:${setupKey}`)
+  }
+  return plugin
 }
 
 /** plugin-react's code filter: a module that cannot hold a component or hook is not compiled. */

@@ -238,6 +238,8 @@ run_harness packages/shared/platform/src/hub-discovery.test.ts
 # OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay computer
 # create` — generated file CONTENT only; never registers with the real supervisor (P5).
 run_harness packages/shared/platform/src/service-unit.test.ts
+# The vitest fs module cache key: an import whose resolution can move must change it.
+run_harness packages/shared/test-utils/fs-module-cache.test.ts
 # `slay hub` end-to-end: boots two REAL hubs in temp roots, then drives ls /
 # --hub targeting / stop through the built CLI bundle, and asserts the
 # supervised-hub refusal. Spawns hubs directly (never `hub start`), so no
