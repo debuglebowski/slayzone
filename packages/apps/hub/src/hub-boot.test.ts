@@ -22,9 +22,11 @@
  *     from before cannot sign in.
  *   - break-glass v2 (O-9, O-23): the operator command on the box opens a grant over
  *     the hub's local socket, the verifier redeems it once for an admin session that
- *     revokes a computer and reads no content, the session ends at its TTL; a crash
- *     mid-session is closed at the next boot, v1's file is removed, nothing secret lands
- *     on disk. The desktop app's (login-off) hub has none of it.
+ *     revokes a computer and reads no content, the operator's end command closes it; a
+ *     crash mid-session is closed at the next boot, v1's file is removed, nothing secret
+ *     lands on disk. The desktop app's (login-off) hub has none of it. The end AT THE TTL
+ *     is break-glass.test.ts's, on a fake clock: the shortest TTL is 1m, and waiting it
+ *     out here made this the slowest file of the unit run.
  *
  * Isolation: every hub runs in its own throwaway SLAYZONE_ROOT with every inherited
  * SLAYZONE_ and ELECTRON_ prefixed env var scrubbed (a task terminal leaks the dial-side
@@ -796,7 +798,7 @@ test('password off on a login-off hub: `slay hub users add` (POST /api/hub/users
   }
 })
 
-test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a computer, ends at its TTL; a crash closes at the next boot', async () => {
+test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a computer, ended on the box; a crash closes at the next boot', async () => {
   const root = newRoot()
   const { certPath, keyPath } = writeSsoCert(root)
   const sso = {
@@ -854,7 +856,7 @@ test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a co
       '--challenge',
       first.challenge,
       '--ttl',
-      '1m',
+      '30m',
       '--root',
       root
     ])
@@ -894,18 +896,15 @@ test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a co
     const tasks = await fetch(`${base}/api/tasks`, { headers: bearer })
     expect(tasks.status, `no content, got ${tasks.status}`).toBe(403)
 
-    // 4. The TTL ends it: token refused, account closed, audited.
-    await poll(
-      async () =>
-        (await fetch(`${base}/api/hub/users`, { headers: bearer })).status === 401 ? true : null,
-      90_000,
-      'the session to expire'
-    )
-    await poll(
-      async () => (accountRow()?.disabledAt ? true : null),
-      10_000,
-      'the account to be closed'
-    )
+    // 4. The operator's end command ends it: token refused, account closed, audited.
+    const end = runBin(['break-glass', 'end', '--root', root])
+    expect(end.code, `end: ${end.out}`).toBe(0)
+    expect(end.out, end.out).toContain('session ended')
+    expect(
+      (await fetch(`${base}/api/hub/users`, { headers: bearer })).status,
+      'the ended session is refused'
+    ).toBe(401)
+    expect(accountRow()?.disabledAt, 'the account is closed').toBeTruthy()
     expect(accountRow()?.role, 'back to user').toBe('user')
     const lines = securityLines(hub)
     const id = lines.find(
@@ -918,7 +917,7 @@ test('break-glass v2 (O-9/O-23): granted on the box, redeemed once, revokes a co
       ['computer.revoke', (l: { actor?: unknown }) => l.actor === id],
       [
         'auth.break_glass.end',
-        (l: { detail: Record<string, unknown> }) => l.detail.reason === 'expired'
+        (l: { detail: Record<string, unknown> }) => l.detail.reason === 'ended'
       ],
       [
         'auth.break_glass.end',
