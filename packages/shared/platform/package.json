@@ -49,6 +49,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
+    "@slayzone/hooks": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "better-sqlite3": "^13.0.3",
     "vitest": "^5.0.2"

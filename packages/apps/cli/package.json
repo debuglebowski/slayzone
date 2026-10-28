@@ -8,6 +8,8 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/ai-config": "workspace:*",
+    "@slayzone/automations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",

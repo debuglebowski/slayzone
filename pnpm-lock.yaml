@@ -690,6 +690,12 @@ importers:
 
   packages/apps/cli:
     dependencies:
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
+      '@slayzone/automations':
+        specifier: workspace:*
+        version: link:../../domains/automations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -2777,6 +2783,9 @@ importers:
 
   packages/shared/platform:
     devDependencies:
+      '@slayzone/hooks':
+        specifier: workspace:*
+        version: link:../hooks
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
