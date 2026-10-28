@@ -1,6 +1,7 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from 'react'
 
 /** A `React.lazy` component that can also be fetched ahead of its first render. */
+// biome-ignore lint/suspicious/noExplicitAny: React.lazy's own bound — no non-any bound fits every component (unknown rejects required props, never rejects class components)
 export type PreloadableLazy<T extends ComponentType<any>> = LazyExoticComponent<T> & {
   preload: () => Promise<void>
 }
@@ -10,6 +11,7 @@ export type PreloadableLazy<T extends ComponentType<any>> = LazyExoticComponent<
  * chunk can never target a different module than the one the component renders
  * (no second hand-copied import specifier to drift).
  */
+// biome-ignore lint/suspicious/noExplicitAny: same bound as PreloadableLazy above
 export function lazyWithPreload<T extends ComponentType<any>>(
   factory: () => Promise<{ default: T }>
 ): PreloadableLazy<T> {
