@@ -1,14 +1,17 @@
-import type { ElectronAPI } from '@slayzone/types'
+import type { ElectronBootstrapAPI } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
 
+// The app-wide `ElectronAPI` type extends `ElectronBootstrapAPI` with no
+// members of its own, so this and its own `Window.api` declaration are the
+// identical type and merge cleanly.
 declare global {
   interface Window {
-    api: ElectronAPI
+    api: ElectronBootstrapAPI
   }
 }
 
-function api(): ElectronAPI {
+function api(): ElectronBootstrapAPI {
   return window.api
 }
 

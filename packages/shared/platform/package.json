@@ -30,6 +30,7 @@
     "./process-info": "./src/process-info.ts",
     "./app-update-status": "./src/app-update-status.ts",
     "./browser-view-events": "./src/browser-view-events.ts",
+    "./electron-bootstrap-contract": "./src/electron-bootstrap-contract.ts",
     "./paths": "./src/paths.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
