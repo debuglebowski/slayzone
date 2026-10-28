@@ -16,7 +16,6 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/types": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
