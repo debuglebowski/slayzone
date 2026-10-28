@@ -386,23 +386,25 @@ test('repeated crash → exponential-backoff restart → permanent failure', asy
     // 1 initial spawn + 5 backoff retries = 6 spawns.
     expect(ctx.spawnTimes.length, 'total spawn count (initial + 5 retries)').toBe(6)
 
-    const gaps: number[] = []
-    for (let i = 1; i < ctx.spawnTimes.length; i++) {
-      gaps.push(ctx.spawnTimes[i] - ctx.spawnTimes[i - 1])
-    }
-    // Each gap is at least its backoff slot (minus tolerance) and the
-    // sequence is strictly increasing — the signature of exponential backoff.
-    for (let i = 0; i < gaps.length; i++) {
+    // Measure the backoff itself: from the crash (the "restart in Xms" line the
+    // supervisor logs when it schedules the retry) to the next spawn. Spawn→spawn
+    // gaps also include the child's boot-until-crash time, which under a loaded
+    // box (2s+) swamps a 300ms slot and made the old "strictly increasing gaps"
+    // check flake.
+    const restarts = ctx.logs
+      .map((e) => ({ t: e.t, m: /\[supervisor\] restart in (\d+)ms/.exec(e.line) }))
+      .filter((r): r is { t: number; m: RegExpExecArray } => r.m !== null)
+    expect(
+      restarts.map((r) => Number(r.m[1])),
+      'scheduled delays follow the backoff schedule exactly'
+    ).toEqual(backoffMs)
+    for (let i = 0; i < restarts.length; i++) {
+      const waited = ctx.spawnTimes[i + 1] - restarts[i].t
+      // setTimeout never fires early; the slack covers Date.now() granularity.
       expect(
-        gaps[i],
-        `gap ${i} (${gaps[i]}ms) >= backoff ${backoffMs[i]}ms * 0.7`
-      ).toBeGreaterThanOrEqual(backoffMs[i] * 0.7)
-      if (i > 0) {
-        expect(
-          gaps[i],
-          `gap ${i} (${gaps[i]}ms) > gap ${i - 1} (${gaps[i - 1]}ms)`
-        ).toBeGreaterThan(gaps[i - 1])
-      }
+        waited,
+        `retry ${i} waited ${waited}ms >= backoff ${backoffMs[i]}ms`
+      ).toBeGreaterThanOrEqual(backoffMs[i] - 5)
     }
 
     expect(ctx.permanentFailure, 'onPermanentFailure fired').not.toBe(null)

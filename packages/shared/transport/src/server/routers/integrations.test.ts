@@ -36,6 +36,11 @@ import {
   setCredentialCipher
 } from '@slayzone/integrations/server'
 import type { LinearIssueSummary } from '@slayzone/integrations/shared'
+import { configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters
+} from '@slayzone/worktrees/server'
 import { execSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -54,6 +59,12 @@ const h = await createTestHarness()
 // because no working cipher exists — cipher-availability is the gate now, no env
 // flag). Explicit for clarity / isolation from other suites in the computer.
 setCredentialCipher(null)
+// Import auto-creates worktrees (issue #84) via task's injected adapters — wire the
+// in-process impls a composition root injects; unconfigured they reject silently.
+configureTaskRuntimeAdapters({
+  worktrees: defaultWorktreeExecAdapters,
+  worktreePolicy: defaultWorktreePolicyAdapters
+})
 
 // Seed a readable credential via the plaintext fallback (the same row shape
 // `storeCredential` writes when no cipher is injected + plaintext is allowed).

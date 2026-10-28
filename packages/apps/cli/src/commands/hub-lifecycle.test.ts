@@ -285,6 +285,10 @@ function slay(
  * (CSP + cert pinning). So this helper exercises the real login path, not an
  * artefact of the test client.
  */
+// `agent: false` on both helpers: a fresh connection per request. Node's global
+// agent keeps sockets alive, and the synchronous `slay()` spawns between requests
+// block this event loop for seconds under load — the hub's keep-alive timeout
+// closes the idle socket unseen, the next request reuses it, and reads ECONNRESET.
 function postJson(
   port: number,
   path: string,
@@ -301,6 +305,7 @@ function postJson(
       {
         method: 'POST',
         timeout: 10_000,
+        agent: false,
         headers: {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(payload)
@@ -334,7 +339,7 @@ function getStatus(port: number, path: string, token: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
       `http://127.0.0.1:${port}${path}`,
-      { method: 'GET', timeout: 10_000, headers: { authorization: `Bearer ${token}` } },
+      { method: 'GET', timeout: 10_000, agent: false, headers: { authorization: `Bearer ${token}` } },
       (res) => {
         res.resume()
         res.on('end', () => resolve(res.statusCode ?? -1))
