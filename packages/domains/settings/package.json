@@ -34,10 +34,13 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
+    "@trpc/server": "^11.19.0",
     "lucide-react": "^1.48.0",
     "motion": "^12.43.0",
+    "zod": "^4.3.5",
     "zustand": "^5.0.15"
   },
   "peerDependencies": {

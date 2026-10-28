@@ -1,9 +1,10 @@
-import { settingsWriteProcedure } from './settings-admin'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
-import { SettingsService, settingsEvents } from '@slayzone/settings/server'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
-import { emitSettingsChanged, getAppDeps } from '../app-deps'
+import { settingsWriteProcedure } from './settings-admin'
+import { SettingsService } from './service'
+import { settingsEvents } from './events'
+import { getSettingsHostDeps, notifySettingsWritten } from './settings-host-deps'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
 
@@ -12,7 +13,7 @@ const themeInput = z.enum(['light', 'dark', 'system'])
  * the hub's shared keys plus its OWN copy of every per-user key (`viewState`,
  * layout, filters …); a request without one (a hub without login) sees the global
  * table as before. Integration credentials are never served. Which key is which:
- * `settingScope` in `@slayzone/settings/server`. The client sends nothing new —
+ * `settingScope` (`./scope`). The client sends nothing new —
  * the user comes from the verified connection.
  */
 const settingsFor = (ctx: TrpcContext) =>
@@ -20,7 +21,7 @@ const settingsFor = (ctx: TrpcContext) =>
 
 /**
  * Theme is Electron `nativeTheme`-backed (host-only), so the theme procedures
- * resolve the injected `AppDeps` — on the Electron host these run the real
+ * resolve the injected host deps (`settings-host-deps.ts`) — on the Electron host these run the real
  * nativeTheme API; when the renderer talks to the side-car they are forwarded
  * over the capability bridge to the host. The `theme:changed` event streams back
  * on the bridge's `theme` channel into this process's `settingsEvents`, which
@@ -48,19 +49,21 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string(), value: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const result = await settingsFor(ctx).set(input.key, input.value)
-      emitSettingsChanged({ keys: [input.key] })
+      notifySettingsWritten({ keys: [input.key] })
       return result
     }),
 
   getAll: publicProcedure.query(({ ctx }) => settingsFor(ctx).getAll()),
 
-  // --- Theme (Electron nativeTheme — host-only, via injected AppDeps) ---
+  // --- Theme (Electron nativeTheme — host-only, via injected host deps) ---
 
-  getEffectiveTheme: publicProcedure.query(() => getAppDeps().themeGetEffective()),
+  getEffectiveTheme: publicProcedure.query(() => getSettingsHostDeps().themeGetEffective()),
 
-  getThemeSource: publicProcedure.query(() => getAppDeps().themeGetSource()),
+  getThemeSource: publicProcedure.query(() => getSettingsHostDeps().themeGetSource()),
 
-  setTheme: publicProcedure.input(themeInput).mutation(({ input }) => getAppDeps().themeSet(input)),
+  setTheme: publicProcedure
+    .input(themeInput)
+    .mutation(({ input }) => getSettingsHostDeps().themeSet(input)),
 
   /**
    * Replaces the `theme:changed` broadcast. Fires when nativeTheme.on('updated')
@@ -77,3 +80,6 @@ export const settingsRouter = router({
     })
   )
 })
+
+export type SettingsRouter = typeof settingsRouter
+export type SettingsMounts = { settings: SettingsRouter }

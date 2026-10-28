@@ -26,6 +26,7 @@ import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { OpDeps, TaskOps } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
+import type { SettingsChange } from '@slayzone/settings/server'
 import type { UpdateStatus } from '@slayzone/platform/app-update-status'
 import type {
   BrowserShortcutPayload,
@@ -205,9 +206,7 @@ export type NotifyEventMap = {
 }
 
 /** The setting keys a write changed (see `NotifyEventMap['settings-changed']`). */
-export interface SettingsChange {
-  keys: readonly string[]
-}
+export type { SettingsChange }
 
 let notifyEvents: TypedEmitter<NotifyEventMap> | null = null
 
@@ -495,7 +494,8 @@ export type AppDeps = {
   appRaiseMainWindow: () => void
 
   // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
-  // host-only. The `settings.*Theme` tRPC procedures resolve these (forwarded
+  // host-only. The `settings.*Theme` tRPC procedures resolve these (through
+  // `settings-host-wiring.ts`; forwarded
   // over the capability bridge); the `theme:changed` event streams back on the
   // bridge's `theme` channel → the side-car's settingsEvents → onThemeChanged.
   themeGetEffective: () => 'dark' | 'light'

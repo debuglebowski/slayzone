@@ -115,7 +115,7 @@ describe('SCOPE_POLICY — specific classifications', () => {
     })
   }
   // #164: per key — `settingsWriteProcedure` keeps every non-`user` key from a
-  // scoped session (routers/settings-admin.test.ts).
+  // scoped session (settings-admin.test.ts).
   test('settings.set is tasks', () => {
     expect(SCOPE_POLICY['settings.set']).toBe('tasks')
   })

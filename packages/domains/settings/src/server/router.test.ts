@@ -3,16 +3,15 @@
  * tRPC `createCaller` against the in-memory harness DB. Ports the coverage from
  * the legacy settings IPC-handler test
  * (domains/settings/src/electron/handlers.test.ts), including the warmed-cache
- * coherency regression. Theme procs are Electron nativeTheme-backed (AppDeps)
+ * coherency regression. Theme procs are Electron nativeTheme-backed (host deps)
  * and were not covered by the handler test — out of scope here.
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { SettingsService } from '@slayzone/settings/server'
-import { TypedEmitter } from '@slayzone/platform/events'
-import { settingsRouter } from './settings.js'
-import { setNotifyEvents, type NotifyEventMap } from '../app-deps.js'
+import { SettingsService } from './service.js'
+import { settingsRouter } from './router.js'
+import { setSettingsHostDeps, type SettingsChange } from './settings-host-deps.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: '' }
@@ -49,10 +48,16 @@ test('settings router: set updates the value warmed getCached() readers see', as
 test('settings router: set tells every window which key changed (cross-window sync)', async () => {
   // A second window (secondary task window) learns of this window's settings writes
   // only through notify.onSettingsChanged — set must signal it, scoped to the key.
-  const ev = new TypedEmitter<NotifyEventMap>()
-  setNotifyEvents(ev)
-  const seen: unknown[] = []
-  ev.on('settings-changed', (change) => seen.push(change))
+  const seen: SettingsChange[] = []
+  const unwired = () => {
+    throw new Error('theme not wired in this test')
+  }
+  setSettingsHostDeps({
+    themeGetEffective: unwired,
+    themeGetSource: unwired,
+    themeSet: unwired,
+    onSettingsWritten: (change) => seen.push(change)
+  })
   await caller.set({ key: 'panel_config', value: '{"webPanels":[]}' })
   expect(seen).toEqual([{ keys: ['panel_config'] }])
 })

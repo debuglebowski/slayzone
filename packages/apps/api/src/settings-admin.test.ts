@@ -11,14 +11,14 @@
  * and the real `settingsWriteProcedure` decide; the handler is a stub.
  */
 // The gate chain's tables, as `router.ts` registers them for the real app router.
-import '../procedure-policy'
+import './procedure-policy'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { router, setAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import type { Scope } from '@slayzone/transport/scopes'
-import { settingsWriteProcedure } from './settings-admin'
+import { settingsWriteProcedure } from '@slayzone/settings/server'
 
 const testRouter = router({
   settings: router({

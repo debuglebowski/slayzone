@@ -35,7 +35,7 @@ fi
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
 # in the Wave C2 split; repointed here.
-run_harness packages/apps/api/src/routers/settings.test.ts
+run_harness packages/domains/settings/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/projects.test.ts
@@ -140,6 +140,7 @@ run_harness packages/apps/hub/src/ownership-backfill.test.ts
 run_harness packages/apps/hub/src/ownership-boot.test.ts
 # Every project-create surface (tRPC, REST, import; MCP has none) stores its owner.
 run_harness packages/apps/api/src/project-owner-surfaces.test.ts
+run_harness packages/apps/api/src/settings-host-wiring.test.ts
 # Session retention (T-23): the sweep and its schedule, then through the built hub.
 run_harness packages/apps/hub/src/session-retention.test.ts
 run_harness packages/apps/hub/src/session-retention-boot.test.ts
@@ -882,7 +883,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/apps/computer/src/ring-buffer.test.ts \
   packages/apps/api/src/scopes.test.ts \
-  packages/apps/api/src/routers/settings-admin.test.ts \
+  packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \

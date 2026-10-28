@@ -3,6 +3,7 @@ import { router, type MountedRouter, type RouterMounts } from '@slayzone/trpc-se
 // the composition's host deps to the context type, before any router is served.
 import './procedure-policy'
 import './automation-engine-context'
+import './settings-host-wiring'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
 import { agentLifecycleRouter, type AgentLifecycleMounts } from '@slayzone/terminal/server'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
@@ -29,7 +30,7 @@ import { projectGroupsRouter, type ProjectGroupsMounts } from '@slayzone/project
 import { ptyRouter } from './routers/pty'
 import { computersRouter } from './routers/computers'
 import { workspaceRouter } from './routers/workspace'
-import { settingsRouter } from './routers/settings'
+import { settingsRouter, type SettingsMounts } from '@slayzone/settings/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import { taskRouter } from './routers/task'
 import { templateRouter, type TemplateMounts } from '@slayzone/task/server'
@@ -106,6 +107,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<HistoryMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
+  AssertAppSlice<IsAppSlice<SettingsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TaskTerminalsMounts>>,
   AssertAppSlice<IsAppSlice<TelemetryMounts>>,
