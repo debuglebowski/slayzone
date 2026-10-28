@@ -406,7 +406,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           }
         }
       }),
-      [taskId, tabs, groups, closeTab, closeGroupAndFocusAdjacent, activeGroupId]
+      [taskId, groups, closeTab, closeGroupAndFocusAdjacent, activeGroupId]
     )
 
     const startTabRename = useCallback((tabId: string) => {

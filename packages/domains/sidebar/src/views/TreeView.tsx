@@ -1226,13 +1226,11 @@ export function TreeView({
       tasks,
       wouldCycle,
       inheritOrderByField,
-      sortedProjects,
       onReorderTopLevel,
       onCreateFolderWithProjects,
       onMoveProjectToGroup,
       onReorderProjectsInGroup,
       allTopLevelRefs,
-      fullEntries,
       fullGroupMembers,
       onSetTasksPinned,
       onPinnedReorder

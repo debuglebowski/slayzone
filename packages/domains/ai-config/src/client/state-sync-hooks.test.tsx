@@ -237,6 +237,32 @@ describe('useSkillMarketplace', () => {
     expect(result.current.entries).toEqual([{ id: 'e2' }])
   })
 
+  it('reloads registries + entries once the freshness pass finishes', async () => {
+    let registryLoads = 0
+    handlers['aiConfig.marketplace.listRegistries'] = async () => [{ id: `r${++registryLoads}` }]
+    const fresh = deferred<unknown>()
+    handlers['aiConfig.marketplace.ensureFresh'] = () => fresh.promise
+    const entries = deferredHandler('aiConfig.marketplace.listEntries')
+
+    const { result } = renderHook(() => useSkillMarketplace('p1', '/a'))
+    await flush()
+    await act(async () => entries[0].resolve([{ id: 'stale' }]))
+    await flush()
+    expect(result.current.loading).toBe(false)
+    expect(callsTo('aiConfig.marketplace.listRegistries')).toHaveLength(1)
+
+    await act(async () => fresh.resolve(undefined))
+    expect(result.current.loading).toBe(true)
+    await flush()
+    expect(callsTo('aiConfig.marketplace.listRegistries')).toHaveLength(2)
+    expect(result.current.registries).toEqual([{ id: 'r2' }])
+    expect(callsTo('aiConfig.marketplace.listEntries')).toHaveLength(2)
+    await act(async () => entries[1].resolve([{ id: 'fresh' }]))
+    await flush()
+    expect(result.current.loading).toBe(false)
+    expect(result.current.entries).toEqual([{ id: 'fresh' }])
+  })
+
   it('reloads entries for the new project, and later reloads use it too', async () => {
     handlers['aiConfig.marketplace.listRegistries'] = async () => []
     handlers['aiConfig.marketplace.ensureFresh'] = () => new Promise(() => {})

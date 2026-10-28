@@ -41,7 +41,7 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
       trpcClient.aiConfig.marketplace.listRegistries.query().then((regs) => {
         setRegistries(regs)
       }),
-    [trpcClient, refreshKey]
+    [trpcClient]
   )
 
   const effectiveRegistryId = browseMode === 'registries' ? activeRegistryId : selectedRegistry
@@ -65,7 +65,7 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
             throw err
           }
         ),
-    [trpcClient, effectiveRegistryId, search, projectId, refreshKey]
+    [trpcClient, effectiveRegistryId, search, projectId]
   )
 
   const loadEntries = useCallback(async () => {
@@ -84,10 +84,11 @@ export function useSkillMarketplace(projectId: string | null, projectPath?: stri
   ])
   if (entriesSourceChanged) setLoading(true)
 
+  // `refreshKey` is a pure trigger: bumped once the freshness pass lands.
   useEffect(() => {
     loadRegistries()
     fetchEntries()
-  }, [loadRegistries, fetchEntries])
+  }, [loadRegistries, fetchEntries, refreshKey])
 
   useEffect(() => {
     trpcClient.aiConfig.marketplace.ensureFresh

@@ -250,12 +250,6 @@ export function useChatComposer({
     sessionEnded,
     sendMessage,
     autocomplete,
-    chatApi,
-    tabId,
-    taskId,
-    mode,
-    cwd,
-    providerFlagsOverride,
     scrollToBottom,
     handleEffortChange
   ])
