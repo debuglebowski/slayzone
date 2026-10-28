@@ -288,7 +288,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          pnpm --filter @slayzone/app exec electron-builder ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
+          # Plain node, not `pnpm exec`: pnpm 12 verifies deps before exec and refuses the
+          # Windows tree, whose package.json drops posix (step above) on purpose.
+          cd packages/apps/app
+          node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
