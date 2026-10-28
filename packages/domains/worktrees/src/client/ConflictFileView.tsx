@@ -63,9 +63,12 @@ export function ConflictFileView({
   )
   const { editorThemeId, contentVariant } = useTheme()
   const { editorFontSize } = useAppearance()
-  const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
   const cmThemeExt = useMemo(
-    () => buildCodeMirrorTheme(resolvedEditorColors, contentVariant === 'dark'),
+    () =>
+      buildCodeMirrorTheme(
+        getThemeEditorColors(editorThemeId, contentVariant),
+        contentVariant === 'dark'
+      ),
     [editorThemeId, contentVariant]
   )
   const sizeTheme = useMemo(

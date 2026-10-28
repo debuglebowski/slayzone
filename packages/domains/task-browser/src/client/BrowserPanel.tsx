@@ -511,7 +511,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       getActiveViewId: () => activeViewId,
       newTab: (url?: string) => createNewTab(url)
     }),
-    [handlePickElement, activeActions, findMode, closeFindMode, createNewTab]
+    [handlePickElement, activeActions, findMode, closeFindMode, activeViewId, createNewTab]
   )
 
   return (

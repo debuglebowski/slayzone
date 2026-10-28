@@ -142,7 +142,7 @@ export function WorkspaceDirPicker({
     } catch (err) {
       toast.error(`Could not create folder: ${err instanceof Error ? err.message : String(err)}`)
     }
-  }, [newName, cwd, mkdir, scope, sep, queryClient, trpc])
+  }, [newName, cwd, mkdir, scope, sep, queryClient, trpc, setCwd])
 
   const entries = listQuery.data?.entries ?? []
   const parent = listQuery.data?.parent ?? null

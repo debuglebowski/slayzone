@@ -232,7 +232,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           el?.scrollIntoView({ block: 'nearest' })
         }
       }),
-      []
+      [treeContainerRef]
     )
 
     const ctx: FileTreeRenderCtx = {

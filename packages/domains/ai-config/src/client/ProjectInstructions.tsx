@@ -98,6 +98,9 @@ export function ProjectInstructions(props: ProjectInstructionsProps) {
   )
 }
 
+// Dot colors marking files with identical content (one per content hash).
+const HASH_COLORS = ['#f97316', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#eab308', '#14b8a6']
+
 function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructionsProps) {
   const trpcClient = useTRPCClient()
   const { headerActions: headerTarget } = useContextManagerSlots()
@@ -124,8 +127,6 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
   const files = dedupeProviderFiles(providerHealth).sort((a, b) => a.path.localeCompare(b.path))
   const selectedFile = files.find((f) => f.path === selectedPath)
   const selectedProvider = selectedFile?.providers[0] ?? null
-
-  const HASH_COLORS = ['#f97316', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#eab308', '#14b8a6']
 
   const { hashColorMap, hashMembers } = useMemo(() => {
     const groups = new Map<string, InstructionFile[]>()

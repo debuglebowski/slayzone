@@ -181,13 +181,10 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
 
   const fileListRef = useRef<HTMLDivElement>(null)
 
-  const isSelected = (entry: FileEntry) =>
-    selectedFile?.path === entry.path && selectedFile?.source === entry.source
-
   const renderFileItem = useCallback(
     (entry: FileEntry, { name, depth }: { name: string; depth: number }) => {
       const diff = getDiffForEntry(entry)
-      const selected = isSelected(entry)
+      const selected = selectedFile?.path === entry.path && selectedFile?.source === entry.source
       const canDiscard = entry.source === 'unstaged'
       return (
         <FileListItem
@@ -215,7 +212,14 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
         />
       )
     },
-    [getDiffForEntry, selectedFile, handleSelectFile, handleStageAction, handleDiscardFile]
+    [
+      getDiffForEntry,
+      selectedFile,
+      selectedItemRef,
+      handleSelectFile,
+      handleStageAction,
+      handleDiscardFile
+    ]
   )
 
   const stagedFolderActions = useCallback(

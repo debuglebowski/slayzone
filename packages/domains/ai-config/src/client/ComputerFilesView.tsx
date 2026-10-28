@@ -34,6 +34,9 @@ import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
 import { useContextManagerSlots } from './ContextManagerSlots'
 
+// Dot colors marking files with identical content (one per content hash).
+const HASH_COLORS = ['#f97316', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#eab308', '#14b8a6']
+
 export function ComputerFilesView() {
   const trpcClient = useTRPCClient()
   const { headerActions: headerTarget } = useContextManagerSlots()
@@ -192,8 +195,6 @@ export function ComputerFilesView() {
     }
     return groups
   }, [entries])
-
-  const HASH_COLORS = ['#f97316', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#eab308', '#14b8a6']
 
   const { hashColorMap, hashMembers } = useMemo(() => {
     const groups = new Map<string, ComputerFileEntry[]>()
