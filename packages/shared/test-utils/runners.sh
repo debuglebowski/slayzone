@@ -4,10 +4,11 @@
 #
 # Two phases. The run_* helpers called from run-all.sh only REGISTER a suite (and its
 # files, into RAN, for require_registered). run_suites at the bottom then runs them all
-# in two concurrent lanes (LANES). The node harness run is bounded by its few longest
-# files (real hubs booting for minutes); the app-config run and the package runs, back
-# to back, fit beside it. More lanes only fight over the same cores: measured on a
-# 10-core Mac, three lanes stretched the app-config run from 68s alone to 264s.
+# in two concurrent lanes (LANES; SLZ_UNIT_LANES picks some). The node harness run is
+# bounded by its few longest files (real hubs booting); the app-config run and the
+# package runs, back to back, fit beside it. More lanes only fight over the same cores:
+# measured on a 10-core Mac, three lanes stretched the app-config run from 68s alone to
+# 264s. CI runs each lane as its own job instead, on its own runner.
 # Every lane's output is captured and printed grouped, one lane after the other, so
 # CI logs stay readable.
 #
@@ -236,12 +237,33 @@ kill_tree() {
 
 LANES=(lane_harness lane_app_and_packages)
 
+# SLZ_UNIT_LANES=<lane>[,<lane>] runs only those lanes, named without the `lane_`
+# prefix (harness, app_and_packages): CI runs each lane as its own job, on its own
+# runner. Every suite is still registered, so require_registered checks them all.
+# Prints the selected lanes, one per line; an unknown name is an error.
+selected_lanes() {
+  local want
+  if [ -z "${SLZ_UNIT_LANES:-}" ]; then
+    printf '%s\n' "${LANES[@]}"
+    return 0
+  fi
+  for want in ${SLZ_UNIT_LANES//,/ }; do
+    if ! printf '%s\n' "${LANES[@]}" | grep -qxF -- "lane_$want"; then
+      echo "SLZ_UNIT_LANES: unknown lane '$want' (lanes: ${LANES[*]#lane_})" >&2
+      return 1
+    fi
+    echo "lane_$want"
+  done
+}
+
 # Runs everything registered above, then folds each lane's verdicts into PASS / FAIL /
 # FAILED. SLZ_UNIT_JSON=<path> keeps the Electron harness run's JSON report (per-file
 # test counts and durations). Usage: run_suites
 run_suites() {
-  local i j lane status verdict label file started=$SECONDS
-  local list_pids=() lane_pids=()
+  local i j lane status verdict label file selected started=$SECONDS
+  local list_pids=() lane_pids=() lanes=()
+  selected=$(selected_lanes) || exit 2
+  while IFS= read -r lane; do lanes+=("$lane"); done <<<"$selected"
   WORK=$(mktemp -d "${TMPDIR:-/tmp}/slz-unit.XXXXXX")
   HARNESS_JSON="${SLZ_UNIT_JSON:-$WORK/harness.json}"
 
@@ -262,9 +284,9 @@ run_suites() {
     # stop every lane's process tree explicitly, then exit.
     trap 'trap - INT TERM; for i in "${lane_pids[@]}" "${list_pids[@]}"; do kill_tree "$i"; done; exit 130' INT TERM
     echo ""
-    echo "=== running ${#LANES[@]} lanes concurrently: ${LANES[*]} ==="
-    for i in "${!LANES[@]}"; do
-      lane="${LANES[$i]}"
+    echo "=== running ${#lanes[@]} lanes concurrently: ${lanes[*]} ==="
+    for i in "${!lanes[@]}"; do
+      lane="${lanes[$i]}"
       : >"$WORK/$lane.results"
       (
         set +e
@@ -275,8 +297,8 @@ run_suites() {
     done
 
     # Print each lane's log as soon as it (and every lane before it) is done.
-    for i in "${!LANES[@]}"; do
-      lane="${LANES[$i]}"
+    for i in "${!lanes[@]}"; do
+      lane="${lanes[$i]}"
       status=0
       wait "${lane_pids[$i]}" || status=$?
       echo ""

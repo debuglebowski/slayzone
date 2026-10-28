@@ -2,6 +2,8 @@
 # The ONE list of unit suites: `pnpm test:unit` locally and the CI unit-tests job.
 # Usage: bash packages/shared/test-utils/run-all.sh
 #        SLZ_UNIT_DRY=1 bash packages/shared/test-utils/run-all.sh   (registration check only)
+#        SLZ_UNIT_LANES=harness bash packages/shared/test-utils/run-all.sh   (one lane: harness
+#        or app_and_packages; CI runs each lane as its own job)
 #
 # Strict: exits non-zero if any suite fails, or if any test file under packages/ is
 # neither run nor skipped with a reason (require_registered at the bottom). Add a suite:

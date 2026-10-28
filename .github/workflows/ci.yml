@@ -63,10 +63,16 @@ jobs:
   # exits non-zero if any suite fails or any test file is registered nowhere. Node 24
   # because the hub-auth suites use node:sqlite flag-free. No CI_SKIP_POSTINSTALL: the
   # root postinstall rebuilds better-sqlite3 + node-pty for Electron's ABI, which the
-  # Electron-run suites load. ~12 min on an M-series laptop.
+  # Electron-run suites load. One job per run-all.sh lane (SLZ_UNIT_LANES): on a single
+  # 4-vCPU runner the two lanes fought over the same cores.
   unit-tests:
+    name: unit-tests (${{ matrix.lane }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [harness, app_and_packages]
 
     steps:
       - uses: actions/checkout@v7.0.1
@@ -83,10 +89,37 @@ jobs:
 
       # web-assets-served.test.ts serves the built shell (hub dist/web).
       - name: Build web shell
+        if: matrix.lane == 'harness'
         run: pnpm --filter @slayzone/web-shell build
+
+      # Vitest's fs module cache (packages/shared/test-utils/fs-module-cache.ts): the
+      # transforms of an earlier green run on main, for this lane and lockfile. Saved at
+      # most once a day per lane and lockfile, and only from main, so it stays small next
+      # to the pnpm store caches in the repo's cache quota.
+      - name: Cache day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore vitest module cache
+        id: vitest-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-modules-${{ runner.os }}-${{ matrix.lane }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ steps.day.outputs.day }}
+          restore-keys: |
+            vitest-modules-${{ runner.os }}-${{ matrix.lane }}-${{ hashFiles('pnpm-lock.yaml') }}-
 
       - name: Unit tests
         run: pnpm test:unit
+        env:
+          SLZ_UNIT_LANES: ${{ matrix.lane }}
+
+      - name: Save vitest module cache
+        if: github.ref == 'refs/heads/main' && steps.vitest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: node_modules/.vitest-cache
+          key: ${{ steps.vitest-cache.outputs.cache-primary-key }}
 
   # Windows job: the cross-platform shell + agent-hook path code (issue #88) is
   # only meaningfully exercised on a real Windows runner — Git Bash is
