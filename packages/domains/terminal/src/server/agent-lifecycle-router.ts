@@ -13,3 +13,11 @@ export const agentLifecycleRouter = router({
     })
   )
 })
+
+export type AgentLifecycleRouter = typeof agentLifecycleRouter
+
+/**
+ * Where this router sits in the app router. `@slayzone/api` mounts `agentLifecycleRouter` at
+ * `agentLifecycle` and asserts the slice in its `router.ts`.
+ */
+export type AgentLifecycleMounts = { agentLifecycle: AgentLifecycleRouter }

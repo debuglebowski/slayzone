@@ -252,7 +252,11 @@ export {
 export { beginTerminalShutdown } from './runtime/shutdown'
 // `agentLifecycle.*` tRPC router + the hook-driven lifecycle bus it streams.
 // Composed by `@slayzone/api`; the bus is injected by the composition root.
-export { agentLifecycleRouter } from './agent-lifecycle-router'
+export {
+  agentLifecycleRouter,
+  type AgentLifecycleRouter,
+  type AgentLifecycleMounts
+} from './agent-lifecycle-router'
 export {
   setAgentLifecycleEvents,
   getAgentLifecycleEvents,

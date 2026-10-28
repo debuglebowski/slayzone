@@ -4,7 +4,7 @@ import { router, type MountedRouter, type RouterMounts } from '@slayzone/trpc-se
 import './procedure-policy'
 import './automation-engine-context'
 import { telemetryRouter, type TelemetryMounts } from '@slayzone/telemetry/server'
-import { agentLifecycleRouter } from '@slayzone/terminal/server'
+import { agentLifecycleRouter, type AgentLifecycleMounts } from '@slayzone/terminal/server'
 import { processesRouter } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
 import { aiConfigRouter } from './routers/ai-config'
@@ -99,6 +99,7 @@ type IsAppSlice<TMounts extends RouterMounts> =
 type AssertAppSlice<T extends true> = T
 
 export type DomainRouterSlices = [
+  AssertAppSlice<IsAppSlice<AgentLifecycleMounts>>,
   AssertAppSlice<IsAppSlice<AgentSessionsMounts>>,
   AssertAppSlice<IsAppSlice<AgentTurnsMounts>>,
   AssertAppSlice<IsAppSlice<FeedbackMounts>>,
