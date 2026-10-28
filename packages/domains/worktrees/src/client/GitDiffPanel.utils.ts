@@ -13,7 +13,6 @@ export function deriveStatus(path: string, diffs: FileDiffType[]): 'M' | 'A' | '
 // control chars or CSI-debris like `[I [O [A` — treat them as empty too so
 // users never see garbled text.
 export function cleanPromptForDisplay(raw: string): string {
-  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(raw)) return ''
   // CSI debris left after upstream stripped ESC:
   //   `[I`/`[O`, `[A-D`, `[H`/`[F` — focus/arrow/home/end

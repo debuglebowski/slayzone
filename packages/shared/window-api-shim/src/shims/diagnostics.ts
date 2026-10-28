@@ -3,12 +3,10 @@
 
 export const diagnosticsShim = {
   recordClientError: (payload: unknown): Promise<void> => {
-    // eslint-disable-next-line no-console
     console.error('[shell] client error:', payload)
     return Promise.resolve()
   },
   recordClientEvent: (payload: unknown): Promise<void> => {
-    // eslint-disable-next-line no-console
     console.debug('[shell] client event:', payload)
     return Promise.resolve()
   },

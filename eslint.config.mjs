@@ -34,14 +34,19 @@ export default defineConfig(
       'chromium/**'
     ]
   },
+  // A disable that no longer suppresses anything fails lint: it would otherwise sit
+  // unnoticed and later hide a new real error on the same line. (Hook-rule disables
+  // also make the React Compiler skip the whole function.)
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error'
+    }
+  },
   ...tsParserConfigs,
   {
     files: ['**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': eslintPluginReactHooks
-    },
-    linterOptions: {
-      reportUnusedDisableDirectives: 'off'
     },
     rules: {
       // All cleared to zero → error. The two accepted set-state-in-effect sites carry an

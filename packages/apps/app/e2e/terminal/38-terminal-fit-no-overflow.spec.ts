@@ -132,7 +132,6 @@ test.describe('Terminal fit — init measures the settled panel width', () => {
       await mainWindow.waitForTimeout(50)
     }
 
-    // eslint-disable-next-line no-console
     console.log('[fit-test] maxOverflow:', maxOverflow, 'samples:', JSON.stringify(samples))
     expect(samples.length, 'took overflow samples').toBeGreaterThan(0)
     expect(maxOverflow, 'screen must never render wider than its container').toBeLessThanOrEqual(1)

@@ -15,7 +15,6 @@ import { agentTurnsEvents } from './events'
  */
 function isCleanPrompt(text: string): boolean {
   // Reject control bytes and ESC, but allow tab (0x09), LF (0x0a), CR (0x0d).
-  // eslint-disable-next-line no-control-regex
   return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(text)
 }
 
