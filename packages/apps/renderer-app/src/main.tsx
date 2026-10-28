@@ -19,6 +19,8 @@ import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSe
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
 import { useDetectedRepos } from '@slayzone/worktrees/hooks'
+import { registerArtifactUploader } from '@slayzone/editor/hooks'
+import { useArtifactUploader } from '@slayzone/task-artifacts/artifact-uploader'
 
 // Artifacts + git panels TaskDetailPage embeds — registered before any render.
 registerTaskPanels(taskPanels)
@@ -35,6 +37,9 @@ registerProjectSettingsTabs({
 // Terminal-state store's persisted hibernated set (task-terminals owns it) —
 // registered before any render (PtyProvider seeds from it on mount).
 registerHibernatedSessionIdsSource(hibernatedSessionIdsSource)
+// Artifact storage behind editor image paste/drop (task description + chat) —
+// registered before any render.
+registerArtifactUploader(useArtifactUploader)
 import { OverlayDialogApp } from './OverlayDialogApp'
 
 // window.api shim is installed by the shell before this module evaluates

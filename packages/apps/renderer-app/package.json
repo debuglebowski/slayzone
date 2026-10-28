@@ -14,6 +14,7 @@
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/app-shell": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
+    "@slayzone/editor": "workspace:*",
     "@slayzone/feedback": "workspace:*",
     "@slayzone/home": "workspace:*",
     "@slayzone/integrations": "workspace:*",

@@ -1,5 +1,8 @@
 export {
   useArtifactUpload,
+  registerArtifactUploader,
+  type ArtifactUploader,
+  type UseArtifactUploader,
   type ArtifactRef,
   type UseArtifactUploadReturn,
   type UseArtifactUploadOptions

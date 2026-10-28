@@ -29,6 +29,8 @@ import { registerProjectSettingsTabs } from '@slayzone/projects/client/ProjectSe
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { integrationsProjectSettingsTabs } from '@slayzone/integrations/project-settings-tabs'
 import { useDetectedRepos } from '@slayzone/worktrees/hooks'
+import { registerArtifactUploader } from '@slayzone/editor/hooks'
+import { useArtifactUploader } from '@slayzone/task-artifacts/artifact-uploader'
 import App from './App'
 import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
@@ -58,6 +60,9 @@ registerProjectSettingsTabs({
 // Terminal-state store's persisted hibernated set (task-terminals owns it) —
 // registered before any render (PtyProvider seeds from it on mount).
 registerHibernatedSessionIdsSource(hibernatedSessionIdsSource)
+// Artifact storage behind editor image paste/drop (task description + chat) —
+// registered before any render.
+registerArtifactUploader(useArtifactUploader)
 
 const params = new URLSearchParams(window.location.search)
 const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'

@@ -57,6 +57,7 @@
     "@slayzone/computers": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
+    "@slayzone/editor": "workspace:*",
     "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/home": "workspace:*",

@@ -8,6 +8,9 @@ export {
 } from './use-image-paste-drop'
 export {
   useArtifactUpload,
+  registerArtifactUploader,
+  type ArtifactUploader,
+  type UseArtifactUploader,
   type ArtifactRef,
   type UseArtifactUploadReturn
 } from './use-artifact-upload'

@@ -1,29 +1,22 @@
 /**
  * @vitest-environment jsdom
  *
- * `useArtifactUpload` — routes through `trpcClient.artifacts.*` (imperative
- * vanilla client via `useTRPCClient`), not a `window`-global `api.artifacts` /
- * `api.artifactFolders` reach-through. Those namespaces never existed in the
- * `ElectronAPI` contract (@slayzone/types), so the unguarded cast threw on
- * every host but the Electron app — this hook is used inside `packages/apps/
- * web-shell` (renderer-app's tree), so it must work there too.
+ * `useArtifactUpload` — the editor's paste/drop upload hook. Storage goes
+ * through the app-registered `ArtifactUploader` (registerArtifactUploader); the
+ * editor itself never calls a tRPC route. The real tRPC-backed uploader is
+ * tested in @slayzone/task-artifacts (`artifact-uploader.test.tsx`).
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { registerArtifactUploader, useArtifactUpload } from './use-artifact-upload'
 
-const trpcClientMock = {
-  artifacts: {
-    foldersGetOrCreateByName: { mutate: vi.fn() },
-    uploadBlob: { mutate: vi.fn() },
-    getFilePath: { query: vi.fn() }
-  }
+const uploader = {
+  getOrCreateFolder: vi.fn(),
+  uploadBlob: vi.fn(),
+  getFilePath: vi.fn()
 }
-
-vi.mock('@slayzone/transport/client', () => ({
-  useTRPCClient: () => trpcClientMock
-}))
-
-const { useArtifactUpload } = await import('./use-artifact-upload')
+const useFakeUploader = () => uploader
+registerArtifactUploader(useFakeUploader)
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -38,15 +31,16 @@ function makeFile(name: string, content: string, type: string): File {
   return { name, type, arrayBuffer: async () => bytes.buffer } as unknown as File
 }
 
+describe('registerArtifactUploader', () => {
+  it('re-registering the same hook is a no-op; a different one throws', () => {
+    expect(() => registerArtifactUploader(useFakeUploader)).not.toThrow()
+    expect(() => registerArtifactUploader(() => uploader)).toThrow(/already registered/)
+  })
+})
+
 describe('useArtifactUpload', () => {
-  it('uploads files against a task with no folder, narrowing the result to {id, title}', async () => {
-    trpcClientMock.artifacts.uploadBlob.mutate.mockResolvedValueOnce({
-      id: 'a1',
-      title: 'photo.png',
-      task_id: 't1',
-      folder_id: null,
-      extra_field_the_hook_must_drop: 'should not appear on ArtifactRef'
-    })
+  it('uploads files against a task with no folder', async () => {
+    uploader.uploadBlob.mockResolvedValueOnce({ id: 'a1', title: 'photo.png' })
     const { result } = renderHook(() => useArtifactUpload('t1'))
 
     let refs: unknown
@@ -54,62 +48,62 @@ describe('useArtifactUpload', () => {
       refs = await result.current.uploadFiles([makeFile('photo.png', 'x', 'image/png')])
     })
 
-    expect(trpcClientMock.artifacts.foldersGetOrCreateByName.mutate).not.toHaveBeenCalled()
-    expect(trpcClientMock.artifacts.uploadBlob.mutate).toHaveBeenCalledWith(
+    expect(uploader.getOrCreateFolder).not.toHaveBeenCalled()
+    expect(uploader.uploadBlob).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 't1', title: 'photo.png', folderId: null })
     )
+    expect(uploader.uploadBlob.mock.calls[0][0].bytes).toBeInstanceOf(Uint8Array)
     expect(refs).toEqual([{ id: 'a1', title: 'photo.png' }])
   })
 
   it('resolves the folder first when folderName is set, then uploads into it', async () => {
-    trpcClientMock.artifacts.foldersGetOrCreateByName.mutate.mockResolvedValueOnce({
-      id: 'folder-1'
-    })
-    trpcClientMock.artifacts.uploadBlob.mutate.mockResolvedValueOnce({
-      id: 'a2',
-      title: 'note.txt'
-    })
+    uploader.getOrCreateFolder.mockResolvedValueOnce('folder-1')
+    uploader.uploadBlob.mockResolvedValueOnce({ id: 'a2', title: 'note.txt' })
     const { result } = renderHook(() => useArtifactUpload('t1', { folderName: 'Screenshots' }))
 
     await waitFor(async () => {
       await result.current.uploadFiles([makeFile('note.txt', 'x', 'text/plain')])
     })
 
-    expect(trpcClientMock.artifacts.foldersGetOrCreateByName.mutate).toHaveBeenCalledWith({
-      taskId: 't1',
-      name: 'Screenshots'
-    })
-    expect(trpcClientMock.artifacts.uploadBlob.mutate).toHaveBeenCalledWith(
+    expect(uploader.getOrCreateFolder).toHaveBeenCalledWith('t1', 'Screenshots')
+    expect(uploader.uploadBlob).toHaveBeenCalledWith(
       expect.objectContaining({ folderId: 'folder-1' })
     )
   })
 
   it('a pasted file with no name gets a generated title, not the empty string', async () => {
-    trpcClientMock.artifacts.uploadBlob.mutate.mockResolvedValueOnce({ id: 'a3', title: 'x' })
+    uploader.uploadBlob.mockResolvedValueOnce({ id: 'a3', title: 'x' })
     const { result } = renderHook(() => useArtifactUpload('t1'))
 
     await waitFor(async () => {
       await result.current.uploadFiles([makeFile('', 'x', 'image/png')])
     })
 
-    const call = trpcClientMock.artifacts.uploadBlob.mutate.mock.calls[0][0]
+    const call = uploader.uploadBlob.mock.calls[0][0]
     expect(call.title).toMatch(/^pasted-.*\.png$/)
+  })
+
+  it('drops uploads that resolve null', async () => {
+    uploader.uploadBlob.mockResolvedValueOnce(null)
+    const { result } = renderHook(() => useArtifactUpload('t1'))
+    const refs = await result.current.uploadFiles([makeFile('a.png', 'x', 'image/png')])
+    expect(refs).toEqual([])
   })
 
   it('with no taskId, uploadFiles is a no-op returning []', async () => {
     const { result } = renderHook(() => useArtifactUpload(null))
     const refs = await result.current.uploadFiles([makeFile('a.png', 'x', 'image/png')])
     expect(refs).toEqual([])
-    expect(trpcClientMock.artifacts.uploadBlob.mutate).not.toHaveBeenCalled()
+    expect(uploader.uploadBlob).not.toHaveBeenCalled()
   })
 
-  it('getFilePath calls artifacts.getFilePath.query with the artifact id', async () => {
-    trpcClientMock.artifacts.getFilePath.query.mockResolvedValueOnce('/data/artifacts/a1')
+  it('getFilePath delegates to the uploader with the artifact id', async () => {
+    uploader.getFilePath.mockResolvedValueOnce('/data/artifacts/a1')
     const { result } = renderHook(() => useArtifactUpload('t1'))
 
     const path = await result.current.getFilePath('a1')
 
-    expect(trpcClientMock.artifacts.getFilePath.query).toHaveBeenCalledWith({ id: 'a1' })
+    expect(uploader.getFilePath).toHaveBeenCalledWith('a1')
     expect(path).toBe('/data/artifacts/a1')
   })
 })

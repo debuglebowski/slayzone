@@ -298,6 +298,7 @@ vi.mock('@tanstack/react-query', () => {
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
 import { registerTaskPanels } from './task-detail/TaskPanels'
+import { registerArtifactUploader } from '@slayzone/editor/hooks'
 import { detectPlatform } from '@slayzone/ui'
 
 // The app injects the artifacts + git panels, their data hooks and the external
@@ -314,6 +315,13 @@ registerTaskPanels({
   useDetectedRepos: () => NO_DETECTED_REPOS,
   ExternalSyncCard: () => null
 })
+// The app injects the editor's artifact uploader (image paste/drop); stub it.
+const NO_UPLOADER = {
+  getOrCreateFolder: async () => null,
+  uploadBlob: async () => null,
+  getFilePath: async () => null
+}
+registerArtifactUploader(() => NO_UPLOADER)
 
 // --- Test helpers ---
 

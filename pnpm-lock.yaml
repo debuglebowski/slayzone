@@ -454,6 +454,9 @@ importers:
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../../domains/dialogs
+      '@slayzone/editor':
+        specifier: workspace:*
+        version: link:../../shared/editor
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
@@ -915,6 +918,9 @@ importers:
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../../domains/dialogs
+      '@slayzone/editor':
+        specifier: workspace:*
+        version: link:../../shared/editor
       '@slayzone/feedback':
         specifier: workspace:*
         version: link:../../domains/feedback
@@ -2922,9 +2928,6 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
-      '@slayzone/transport':
-        specifier: workspace:*
-        version: link:../transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../ui
