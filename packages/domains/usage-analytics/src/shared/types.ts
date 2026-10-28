@@ -77,3 +77,13 @@ export interface AnalyticsSummary {
   byDay: DailySummary[]
   byTask: TaskSummary[]
 }
+
+export interface LocalLeaderboardDay {
+  date: string
+  totalTokens: number
+  totalCompletedTasks: number
+}
+
+export interface LocalLeaderboardStats {
+  days: LocalLeaderboardDay[]
+}

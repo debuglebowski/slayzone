@@ -305,15 +305,8 @@ export interface BackupSettings {
   nextBackupNumber: number
 }
 
-export interface LocalLeaderboardDay {
-  date: string
-  totalTokens: number
-  totalCompletedTasks: number
-}
-
-export interface LocalLeaderboardStats {
-  days: LocalLeaderboardDay[]
-}
+import type { LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
+export type { LocalLeaderboardDay, LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error' | 'orphaned'
 

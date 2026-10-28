@@ -6,6 +6,8 @@ export type {
   DailySummary,
   TaskSummary,
   AnalyticsSummary,
-  ProviderOption
+  ProviderOption,
+  LocalLeaderboardDay,
+  LocalLeaderboardStats
 } from './types'
 export { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from './types'
