@@ -279,7 +279,10 @@ describe('hub discovery', () => {
       setTimeout(() => handler(req, res), 800)
     })
     const hubs = await discoverHubs({ range: { start: port, end: port } })
-    expect(hubs.map((h) => h.name), 'slow-but-live hub is listed').toEqual([HUB_A.name])
+    expect(
+      hubs.map((h) => h.name),
+      'slow-but-live hub is listed'
+    ).toEqual([HUB_A.name])
     const found = await findHub(HUB_A.name as string, { range: { start: port, end: port } })
     expect(found?.port, 'and resolvable by name').toBe(port)
   })

@@ -964,7 +964,9 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI app-down path', () => {
     if (decoy) {
       expect(r.stderr, r.stderr).toContain('server port not found')
     } else {
-      expect(r.stderr, r.stderr).toMatch(/Refusing to act on the SlayZone app|server port not found/)
+      expect(r.stderr, r.stderr).toMatch(
+        /Refusing to act on the SlayZone app|server port not found/
+      )
     }
     // Nothing reached a hub this test owns, so no row was created here.
     expect(db.prepare('SELECT id FROM tasks WHERE title = ?').get('Lost2')).toBe(undefined)

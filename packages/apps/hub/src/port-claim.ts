@@ -26,7 +26,11 @@ type MinimalDb = {
  *  hub-discovery's DEFAULT_TIMEOUT_MS. */
 const LIVENESS_TIMEOUT_MS = 3_000
 
-function isPortAlive(host: string, port: number, timeoutMs = LIVENESS_TIMEOUT_MS): Promise<boolean> {
+function isPortAlive(
+  host: string,
+  port: number,
+  timeoutMs = LIVENESS_TIMEOUT_MS
+): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get({ host, port, path: '/health', timeout: timeoutMs }, (res) => {
       res.resume()

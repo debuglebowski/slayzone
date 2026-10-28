@@ -339,7 +339,12 @@ function getStatus(port: number, path: string, token: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
       `http://127.0.0.1:${port}${path}`,
-      { method: 'GET', timeout: 10_000, agent: false, headers: { authorization: `Bearer ${token}` } },
+      {
+        method: 'GET',
+        timeout: 10_000,
+        agent: false,
+        headers: { authorization: `Bearer ${token}` }
+      },
       (res) => {
         res.resume()
         res.on('end', () => resolve(res.statusCode ?? -1))
