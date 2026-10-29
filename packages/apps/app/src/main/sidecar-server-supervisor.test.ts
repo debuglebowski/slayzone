@@ -311,7 +311,9 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     // A shared hub's period: inherited, it would delete the desktop user's sessions.
     SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90',
     // Inherited, the hub would start GitHub sign-in against someone else's host (T-99).
-    SLAYZONE_HUB_CONVEX_ADDRESS: 'metadata.internal'
+    SLAYZONE_HUB_CONVEX_ADDRESS: 'metadata.internal',
+    // Inherited, a shared hub's telemetry opt-out would silently switch off the desktop's.
+    SLAYZONE_HUB_ENABLE_TELEMETRY: '0'
   }
   // The list under test must be the WHOLE hub-side surface, not what this test
   // remembers: a hub variable added to the platform list without a case here is a

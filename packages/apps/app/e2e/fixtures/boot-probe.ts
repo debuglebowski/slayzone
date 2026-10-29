@@ -286,6 +286,7 @@ export async function measureBoot(page: Page, ids: string[]): Promise<BootMeasur
 export function expectBootBudget(m: BootMeasurement, activeTabMs: number): void {
   expect(m.bootBusyMs, m.summary).toBeGreaterThan(0)
   expect(m.activeReadyAt, m.summary).toBeGreaterThan(0)
+  // e2e-guardrail-allow: wall-clock — the caller's bar (2s in core 116) is ~2x a busy-suite boot; CI runs no e2e, so this is the only always-run boot check
   expect(m.activeReadyAt, m.summary).toBeLessThan(activeTabMs)
   expect(m.maxLongTask, m.summary).toBeLessThanOrEqual(200)
   expect(m.idleFraction, m.summary).toBeLessThan(0.15)

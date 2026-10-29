@@ -20,6 +20,11 @@
  *    cores. Latency assertions belong in e2e/perf, which runs alone
  *    (`pnpm test:e2e:perf`).
  *
+ *    One escape hatch: `// e2e-guardrail-allow: wall-clock — <reason>` on the line
+ *    or the line above. For a bar loose enough to survive the parallel suite that
+ *    must still run there, because CI runs no e2e and e2e/perf is opt-in (the
+ *    boot budget's active-tab bar). The reason is required.
+ *
  * Usage: node scripts/check-e2e-guardrails.mjs
  */
 import fs from 'node:fs'
@@ -98,7 +103,10 @@ for (const file of files) {
     // (3) A wall-clock assertion outside the perf group (which runs alone). Keyed on a
     // duration-shaped identifier so DOM/geometry assertions are not flagged.
     if (!inPerf && /toBeLessThan\(/.test(line)) {
-      if (/\b\w*(Ms|Duration|Latency|elapsed|duration)\w*\b/.test(line)) {
+      const allowed = [line, lines[i - 1] ?? ''].some((l) =>
+        /\/\/\s*e2e-guardrail-allow:\s*wall-clock\s*[—-]\s*\S/.test(l)
+      )
+      if (!allowed && /\b\w*(Ms|Duration|Latency|elapsed|duration)\w*\b/.test(line)) {
         violations.push(
           `${at}\n    wall-clock budget in the parallel suite — move it to e2e/perf (runs alone)\n    ${line.trim()}`
         )
