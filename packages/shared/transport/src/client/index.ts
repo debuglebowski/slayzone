@@ -1,27 +1,7 @@
-export {
-  useTRPC,
-  useTRPCClient,
-  createTrpcWsClient,
-  getTrpcClient,
-  initTrpcClient,
-  getOrCreateHubClient,
-  getHubClient,
-  listHubClients,
-  _resetHubClients,
-  // Test seam, exported for the same reason as `_resetHubClients`: unit tests of
-  // stores that persist through tRPC need a stub, or their debounced write fires
-  // after the assertions and crashes the run on "tRPC client not ready".
-  _setTrpcClientSingleton,
-  type CreateTrpcClientOpts,
-  type TrpcVanillaClient,
-  type HubWsClient,
-  type AppRouter,
-  getClientForHub,
-  getClientForProject,
-  getClientForTask,
-  useClientForProject,
-  useClientForTask
-} from './trpc'
+// Test seams of the router-agnostic runtime: unit tests of stores that persist
+// through tRPC need a stub, or their debounced write fires after the assertions
+// and crashes the run on "tRPC client not ready".
+export { _resetHubClients, _setTrpcClientSingleton } from './runtime'
 // Typed views over the one client runtime — how new code gets a typed client.
 // A domain: `typedTrpc<ItsMounts>()`; an app: `trpcFor<AppRouter>()`. See README.md.
 export {

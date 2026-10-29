@@ -3335,9 +3335,6 @@ importers:
 
   packages/shared/transport:
     dependencies:
-      '@slayzone/api':
-        specifier: workspace:*
-        version: link:../../apps/api
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform

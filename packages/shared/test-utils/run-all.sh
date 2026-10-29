@@ -763,7 +763,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
-  packages/shared/transport/src/client/trpc.test.ts \
+  packages/shared/transport/src/client/runtime.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \

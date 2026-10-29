@@ -14,15 +14,15 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { createTRPCClient, type TRPCLink } from '@trpc/client'
+import type { AnyTRPCRouter } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
-import type { AppRouter } from './app-router'
 
 // Fake per-hub clients keyed by hub id. Built with the REAL createTRPCClient so
 // the tanstack integration's untyped-client symbol is present (a plain object
 // hangs forever) — a custom terminating link resolves `hub.describe` locally to
 // a label naming its hub, so a bleed (wrong client / shared cache) is visible.
 const describeCalls: Record<string, number> = {}
-function localLink(id: string): TRPCLink<AppRouter> {
+function localLink(id: string): TRPCLink<AnyTRPCRouter> {
   return () =>
     ({ op }) =>
       observable((observer) => {
@@ -41,7 +41,7 @@ function localLink(id: string): TRPCLink<AppRouter> {
       })
 }
 function fakeClientFor(id: string): unknown {
-  return createTRPCClient<AppRouter>({ links: [localLink(id)] })
+  return createTRPCClient<AnyTRPCRouter>({ links: [localLink(id)] })
 }
 
 // Records the LAST opts getOrCreateHubClient was called with, per hub id — so a
@@ -49,8 +49,8 @@ function fakeClientFor(id: string): unknown {
 // branch: the default hub must get NO token, each remote must get ONLY its own).
 const clientOpts: Record<string, { url: string; isDefault?: boolean; token?: string }> = {}
 
-vi.mock('./trpc', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./trpc')>()
+vi.mock('./runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./runtime')>()
   const clients = new Map<string, { id: string; url: string; client: unknown; wsClient: unknown }>()
   return {
     ...actual,
@@ -73,7 +73,7 @@ vi.mock('./trpc', async (importOriginal) => {
 
 const { FederationProvider } = await import('./FederationProvider')
 const { HubScope } = await import('./HubScope')
-const { useTRPC } = await import('./trpc')
+const { useTRPC } = (await import('./view')).trpcFor<AnyTRPCRouter>()
 const { useQuery } = await import('@tanstack/react-query')
 
 function HubLabel(): React.ReactNode {

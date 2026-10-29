@@ -36,7 +36,7 @@ vi.mock('@trpc/tanstack-react-query', () => ({
 vi.mock('superjson', () => ({ default: {} }))
 vi.mock('./connectDeadlineLink', () => ({ connectDeadlineLink: vi.fn(() => ({})) }))
 
-const { getOrCreateHubClient, _resetHubClients } = await import('./trpc')
+const { getOrCreateHubClient, _resetHubClients } = await import('./runtime')
 
 const URL_A = 'ws://127.0.0.1:9001/trpc'
 

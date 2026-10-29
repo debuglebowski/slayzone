@@ -1,10 +1,7 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-// The value import stays on `./trpc`: it is the seam federation.test.tsx mocks. The
-// whole-app typing it carries is dropped here — `ws` is the router-agnostic runtime type.
-import { getOrCreateHubClient } from './trpc'
-import type { RuntimeHubWsClient } from './runtime'
+import { getOrCreateHubClient, type RuntimeHubWsClient } from './runtime'
 import { makeQueryClient } from './provider'
 import { useHubRegistryStore } from './hubRegistryStore'
 

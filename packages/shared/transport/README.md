@@ -48,9 +48,7 @@ A mount may be nested and partial: `app` holds routers of many owners (meta, she
 browser, …), each in its owning package (`app.ts` in api composes them at the same keys,
 so wire paths never change), and `{ app: { meta: AppMetaRouter } }` is just `app.meta`.
 `IsMountedSlice` (`@slayzone/trpc-server`) checks every router it names is the whole
-router at that path; a plain-object level names a subset of keys. Only `app.exportImport`
-stays in api (it needs api's access scope), so a domain calling it stays on the whole-app
-view.
+router at that path; a plain-object level names a subset of keys.
 
 ## Migrating a domain
 
@@ -75,21 +73,18 @@ view.
 5. **Verify.** `pnpm -r --no-sort typecheck`, the moved router test, the domain's
    client tests, `pnpm lint:react-compiler`.
 
-## End state (the cycle cut)
+## End state (the cycle cut) — done
 
-Not-yet-migrated callers use the TEMPORARY whole-app view in `src/client/trpc.ts`,
-typed via `src/client/app-router.ts` (`export type { AppRouter } from '@slayzone/api'`).
-Those two files are the only reason transport depends on `@slayzone/api`
-(transport → api → every domain → transport). When the last domain has migrated:
+Transport has no whole-app view and no dependency on `@slayzone/api`; nothing in it
+names `AppRouter`. Every caller types itself:
 
-- apps (`app`, `renderer-app`, `web-shell`) define their own `trpcFor<AppRouter>()`
-  view + `trpcBootFor<AppRouter>()` boot and depend on `@slayzone/api` (done;
-  `chromium-shell` calls no procedure, it mounts `renderer-app`);
-- transport-internal users of the whole-app types move to the runtime types:
-  `FederationProvider`'s `ResolvedHub.ws` (`RuntimeHubWsClient`; its one reader,
-  `tasks`' `useTasksData`, re-types it with its view), `hubCapabilities`
-  (`hub.describe` through a hub view or a structural type), `testing`'s
-  `createTrpcTest` (generic over the router);
-- delete `src/client/trpc.ts`, `src/client/app-router.ts`, the `AppRouter` re-exports
-  in `src/index.ts` / `src/client/index.ts`, and `@slayzone/api` from `package.json`;
-  run `node scripts/check-workspace-cycles.mjs --update`.
+- a domain: `typedTrpc<ItsMounts & …deps' mounts>()` in its own `trpc.ts`;
+- an app (`app`, `renderer-app`, `web-shell`): its own `trpcFor<AppRouter>()` view +
+  `trpcBootFor<AppRouter>()` boot, depending on `@slayzone/api` (`chromium-shell`
+  calls no procedure, it mounts `renderer-app`);
+- transport internals use the runtime types: `FederationProvider`'s `ResolvedHub.ws`
+  is `RuntimeHubWsClient` (its reader, `tasks`' `useTasksData`, re-types it with its
+  view), `hubCapabilities` calls `hub.describe` through a structural type, and
+  `testing`'s `createTrpcTest` is generic over the router.
+
+`pnpm lint:workspace-cycles` (in `pnpm lint`) keeps the workspace graph acyclic.
