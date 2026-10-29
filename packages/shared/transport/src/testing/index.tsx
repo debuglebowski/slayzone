@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { createTRPCClient, type TRPCLink } from '@trpc/client'
+import { createTRPCClient, type TRPCClient, type TRPCLink } from '@trpc/client'
+import type { AnyTRPCRouter } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
-import { TRPCProvider } from '../client/runtime'
-import type { TrpcVanillaClient, AppRouter } from '../client/trpc'
+import { TRPCProvider, type RuntimeClient } from '../client/runtime'
 import { makeQueryClient } from '../client/provider'
 
 /** Resolves a query or mutation; a throw/rejection surfaces as the tRPC error. */
@@ -23,8 +23,13 @@ export interface TrpcTestBackend {
   subscriptions?: Record<string, TestSubscription>
 }
 
-export interface TrpcTest {
-  trpcClient: TrpcVanillaClient
+/**
+ * `TRouter` types `trpcClient` only (the wire is path-based). Defaults to the
+ * router-agnostic runtime type; a test that calls `trpcClient` directly passes its
+ * view's router (`createTrpcTest<MountedRouter<XMounts>>(...)`).
+ */
+export interface TrpcTest<TRouter extends AnyTRPCRouter = AnyTRPCRouter> {
+  trpcClient: TRPCClient<TRouter>
   queryClient: QueryClient
   /** `renderHook(..., { wrapper })` / `render(..., { wrapper })`. */
   wrapper: (props: { children: ReactNode }) => ReactNode
@@ -37,8 +42,10 @@ export interface TrpcTest {
  * operation with no handler fails loudly (`unexpected op <path>`), so a hook
  * that grows a new call can't silently pass.
  */
-export function createTrpcTest(backend: TrpcTestBackend): TrpcTest {
-  const link: TRPCLink<AppRouter> =
+export function createTrpcTest<TRouter extends AnyTRPCRouter = AnyTRPCRouter>(
+  backend: TrpcTestBackend
+): TrpcTest<TRouter> {
+  const link: TRPCLink<AnyTRPCRouter> =
     () =>
     ({ op }) =>
       observable((observer) => {
@@ -71,14 +78,16 @@ export function createTrpcTest(backend: TrpcTestBackend): TrpcTest {
         return () => undefined
       })
 
-  const trpcClient = createTRPCClient<AppRouter>({ links: [link] })
+  const runtimeClient: RuntimeClient = createTRPCClient<AnyTRPCRouter>({ links: [link] })
+  // Same object, re-typed for the caller's router (path-based, see view.ts).
+  const trpcClient = runtimeClient as unknown as TRPCClient<TRouter>
   const queryClient = makeQueryClient()
   return {
     trpcClient,
     queryClient,
     wrapper: ({ children }) => (
       <QueryClientProvider client={queryClient}>
-        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+        <TRPCProvider trpcClient={runtimeClient} queryClient={queryClient}>
           {children}
         </TRPCProvider>
       </QueryClientProvider>
