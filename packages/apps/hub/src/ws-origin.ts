@@ -76,7 +76,10 @@ export interface WsOriginOptions {
  *     node tooling, e2e, the sidecar, `slay`. Those cannot be confused deputies —
  *     they carry no ambient credentials for an attacker to borrow — and they are
  *     still bearer-gated afterwards. Accepting them here is what keeps every
- *     native client working on an enforcing hub.
+ *     native client working on an enforcing hub — the desktop app included: its
+ *     main process removes `Origin` from the app document's own `/trpc` sockets
+ *     (app `hub-socket-origin.ts`), since its `file://` / dev-server origin is
+ *     (rightly) refused below on a hub other machines reach.
  *
  *  2. **Local-client origins → accept only when the hub is local.** `file:`,
  *     `chrome:`, `chrome-extension:`, `devtools:` and `null` are first-party
@@ -208,11 +211,17 @@ export function resolveAllowedWebOrigins(env: NodeJS.ProcessEnv = process.env): 
   return [...origins]
 }
 
-/** `scheme://host[:port]` for a parseable absolute URL, else null. */
+/**
+ * `scheme://host[:port]` for a parseable absolute http(s) URL, else null. Web origins
+ * only: any other scheme (`file:`, `chrome-extension:`) has the OPAQUE origin "null",
+ * which is also what every sandboxed iframe sends — allowing it would allow every
+ * website, here and in better-auth's `trustedOrigins`.
+ */
 function normalizeOrigin(value: string): string | null {
   if (!value) return null
   try {
-    return new URL(value).origin
+    const u = new URL(value)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null
   } catch {
     return null
   }

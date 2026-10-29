@@ -95,6 +95,44 @@ test('localhost is REJECTED once the hub binds off-box', () => {
   ).toBe('reject')
 })
 
+// ── the desktop app against a login hub other machines reach ──────────────────
+test('the desktop reaches a remote login hub ONLY Origin-less, never by its renderer origin', () => {
+  // Measured 2026-10-29 on slay.normain.com: every desktop /trpc upgrade was refused with
+  // `reason: origin`. These are the two origins those refusals logged — the packaged
+  // renderer and the dev server — and both STAY refused: `file://` is also every other
+  // Electron app's page, and a localhost origin is any local web page.
+  const allowedOrigins = ['https://slay.normain.com']
+  for (const origin of ['file://', 'http://localhost:5173']) {
+    expect(
+      wsOriginDecision({ origin, ...INTERNET_FACING, allowedOrigins }),
+      `${origin} refused`
+    ).toBe('reject')
+  }
+  // The desktop's path: Electron main removes Origin from the app document's own /trpc
+  // sockets (app `hub-socket-origin.ts`), so the hub admits them as a native client...
+  expect(
+    wsOriginDecision({ origin: undefined, ...INTERNET_FACING, allowedOrigins }),
+    'Origin-less desktop socket'
+  ).toBe('accept')
+  // ...that authenticates by its bearer alone: an absent Origin never earns the cookie.
+  expect(
+    cookieOriginDecision({
+      origin: undefined,
+      host: 'slay.normain.com',
+      loopbackBind: false,
+      allowedOrigins
+    }),
+    'no cookie principal for an Origin-less socket'
+  ).toBe('reject')
+  // Nothing else moved: the opaque origin and a website stay refused.
+  for (const origin of ['null', 'https://evil.example']) {
+    expect(
+      wsOriginDecision({ origin, ...INTERNET_FACING, allowedOrigins }),
+      `${origin} still refused`
+    ).toBe('reject')
+  }
+})
+
 // ── foreign origins ───────────────────────────────────────────────────────────
 test('a foreign website is rejected in every deployment shape', () => {
   for (const shape of [DESKTOP_APP, STANDALONE_LOOPBACK, INTERNET_FACING]) {
@@ -226,6 +264,25 @@ test('the env override adds origins and drops junk defensively', () => {
   expect(origins[0], 'first entry').toBe('https://a.example')
   // A trailing path is normalized away — a browser only ever sends the origin.
   expect(origins[1], 'path stripped to bare origin').toBe('https://b.example')
+})
+
+test('the env override never adds an OPAQUE origin: file:// is not a web origin', () => {
+  // `new URL('file://').origin` is "null" — the origin every sandboxed iframe sends. So
+  // `SLAYZONE_HUB_ALLOWED_WEB_ORIGINS=file://`, the obvious try when the desktop is
+  // refused, put "null" on the allowlist: every website could open /trpc, and
+  // better-auth trusted "null" too (`trustedOrigins` is this list).
+  const origins = resolveAllowedWebOrigins({
+    SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'file://,chrome-extension://abc,ftp://x.example,https://ok.example'
+  })
+  expect(origins.join(','), 'only the http(s) entry survives').toBe('https://ok.example')
+  expect(
+    wsOriginDecision({
+      origin: 'null',
+      ...INTERNET_FACING,
+      allowedOrigins: resolveAllowedWebOrigins({ SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'file://' })
+    }),
+    'a sandboxed iframe is still refused'
+  ).toBe('reject')
 })
 
 test('no configuration at all yields an EMPTY allowlist (never a wildcard)', () => {

@@ -20,6 +20,13 @@ function isSameApp(current: URL, target: URL): boolean {
   return target.origin === current.origin
 }
 
+/** Is `url` the app's own document? `appUrl` is the renderer entry (packaged file or dev server). */
+export function isAppDocument(appUrl: string, url: string): boolean {
+  const app = parse(appUrl)
+  const target = parse(url)
+  return !!app && !!target && isSameApp(app, target)
+}
+
 /**
  * What a main-frame navigation of an app window may do. The window shows the
  * app, never a website: anything that would replace it with one opens in the

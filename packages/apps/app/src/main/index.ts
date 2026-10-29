@@ -23,6 +23,7 @@ import {
   crashReporter
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
+import { pathToFileURL } from 'url'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
@@ -78,6 +79,7 @@ import {
   type ViewBounds
 } from './browser-view-manager'
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
+import { attachHubSocketOriginStrip } from './hub-socket-origin'
 import {
   probeRemoteHealth,
   hubLogin,
@@ -3077,6 +3079,16 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return hubConnectSources({ localHub: !isRemoteMode, remoteHubUrls })
       },
       !app.isPackaged
+    )
+
+    // The app document's hub sockets reach the hub with no `Origin`, as a native
+    // client: a hub other machines can reach refuses the renderer's own `file://` /
+    // dev-server origin (see hub-socket-origin.ts). Same document URL the windows load.
+    attachHubSocketOriginStrip(
+      session.defaultSession,
+      !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
+        ? process.env['ELECTRON_RENDERER_URL']
+        : pathToFileURL(join(__dirname, '../renderer/index.html')).href
     )
 
     // No certificate verify proc: a remote hub's wss:// front end is verified by

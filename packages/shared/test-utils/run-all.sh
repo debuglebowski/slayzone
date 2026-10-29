@@ -373,6 +373,8 @@ run_harness packages/domains/projects/src/server/project-icons-relocate.test.ts
 run_harness packages/apps/app/src/main/present-window.test.ts
 # App windows show the app, never a website: external main-frame loads open in the browser.
 run_harness packages/apps/app/src/main/app-window-navigation-guard.test.ts
+# Remote hubs: the app document's /trpc sockets reach the hub with no Origin (native client).
+run_harness packages/apps/app/src/main/hub-socket-origin.test.ts
 # File-tree copy/paste of files: Electron 44's async clipboard, text/uri-list ⇄ native file refs.
 run_harness packages/apps/app/src/main/clipboard-file-paths.test.ts
 # Remembered dialog folder: Electron 43 opens a dialog without defaultPath in Downloads.
