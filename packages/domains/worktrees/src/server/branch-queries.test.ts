@@ -8,7 +8,7 @@
  *   packages/domains/worktrees/src/server/branch-queries.test.ts
  */
 import { execSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -39,10 +39,11 @@ const BRANCHES = 12
 let root: string
 let repo: string
 
-function git(cmd: string, cwd = repo): string {
+function git(cmd: string, cwd = repo, input?: string): string {
   return execSync(`git ${cmd}`, {
     cwd,
     encoding: 'utf-8',
+    input,
     env: {
       ...process.env,
       GIT_AUTHOR_NAME: 'T',
@@ -53,31 +54,50 @@ function git(cmd: string, cwd = repo): string {
   }).trim()
 }
 
-function commit(file: string): void {
-  writeFileSync(join(repo, file), file)
-  git(`add ${file}`)
-  git(`-c commit.gpgsign=false commit -qm ${file}`)
+/**
+ * The fixture's history, as ONE `git fast-import` stream. Built commit by commit with
+ * porcelain it took 73 sequential git processes: 1.7s on a quiet box, past the 10s
+ * hook timeout on a saturated one, where every process start is slow. Its cost was
+ * process count × spawn latency, which says nothing about the code under test — so
+ * the whole history is now one process. Each commit adds a file named and filled
+ * after itself; committer times strictly increase, so `--sort=-committerdate` (newest
+ * first) has one answer, not a same-second tie.
+ */
+function historyStream(): string {
+  const out: string[] = []
+  const data = (s: string): string => `data ${Buffer.byteLength(s)}\n${s}\n`
+  let mark = 0
+  let time = 1_700_000_000
+  /** Commits `file` onto `branch` (from `from`, else the branch's own tip) → its mark. */
+  const commit = (branch: string, file: string, from?: number): number => {
+    out.push(
+      `commit refs/heads/${branch}\nmark :${++mark}\ncommitter T <t@t> ${time++} +0000\n` +
+        data(`${file}\n`) +
+        (from ? `from :${from}\n` : '') +
+        `M 100644 inline ${file}\n` +
+        data(file)
+    )
+    return mark
+  }
+  const base = commit('main', 'base')
+  // Unmerged feature branches, each 2 ahead / 1 behind main.
+  for (let i = 0; i < BRANCHES; i++) {
+    commit(`feat-${i}`, `f${i}a`, base)
+    commit(`feat-${i}`, `f${i}b`)
+  }
+  // Merged branch (points at main's current tip, then main moves on).
+  out.push(`reset refs/heads/merged-one\nfrom :${base}\n`)
+  commit('main', 'main2')
+  // Orphan branch: no history shared with main — never a child.
+  commit('pages', 'pages')
+  return out.join('\n')
 }
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'branch-queries-'))
   repo = join(root, 'repo')
   git(`init -q -b main ${repo}`, root)
-  commit('base')
-  // Unmerged feature branches, each 2 ahead / 1 behind main.
-  for (let i = 0; i < BRANCHES; i++) {
-    git(`checkout -q -b feat-${i} main`)
-    commit(`f${i}a`)
-    commit(`f${i}b`)
-  }
-  git('checkout -q main')
-  // Merged branch (points at main's current tip, then main moves on).
-  git('branch merged-one')
-  commit('main2')
-  // Orphan branch: no history shared with main — never a child.
-  git('checkout -q --orphan pages')
-  git('rm -rq --cached .')
-  commit('pages')
+  git('fast-import --quiet', repo, historyStream())
   git('checkout -q -f main')
   // Upstream tracking: feat-0 tracks feat-1 (feat-0 is 2 ahead, 2 behind feat-1).
   git('branch -q --set-upstream-to=feat-1 feat-0')

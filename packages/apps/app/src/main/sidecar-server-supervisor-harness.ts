@@ -85,7 +85,17 @@ export const REAL_EXIT_BUDGET_MS = 12_000
  * Written by the hub's bin.ts in the same synchronous run that installs its signal
  * handlers and its parent watch, so a hub that has printed it is fully up.
  */
-const HUB_LISTENING = /\[slayzone-server\] listening on http:\/\/127\.0\.0\.1:(\d+)/
+const HUB_LISTENING = /\[slayzone-server\] listening on http:\/\/127\.0\.0\.1:(\d+)/g
+/** Every port a hub in `log` has printed {@link HUB_LISTENING} for, in order. */
+const listeningPorts = (log: string): number[] =>
+  [...log.matchAll(HUB_LISTENING)].map((m) => Number(m[1]))
+/**
+ * The supervisor's word for which hub it runs. Not necessarily the first one it
+ * spawned: a hub that misses its `/health` boot deadline (10s, reachable when the
+ * box is saturated) is SIGKILLed and replaced on a freshly probed port, so the
+ * first `spawned`/`listening` lines can name a dead hub.
+ */
+const SUPERVISOR_READY = /\[supervisor\] sidecar ready pid=(\d+) port=(\d+)/
 
 function newestMtime(dir: string): number {
   let newest = 0
@@ -353,6 +363,7 @@ export async function startRealHub(opts: {
     }
   }
   let hubPid = 0
+  let hubPort = 0
   const held: net.Socket[] = []
   const cleanup = (): void => {
     for (const pid of [hubPid, parent.pid]) {
@@ -375,27 +386,39 @@ export async function startRealHub(opts: {
       `parent never spawned the hub — output: ${parentOut}`
     )
     hubPid = Number(/spawned pid=(\d+)/.exec(parentOut)![1])
-    await waitFor(
-      () => HUB_LISTENING.test(read(logFile)),
-      30_000,
-      `hub never booted — log: ${read(logFile)} ${read(path.join(dir, 'hub.out'))} parent: ${parentOut}`
-    )
-    // Under the supervisor, also wait until it has seen the hub ready, as an app
-    // quit would: until then its `/health` probe may be in flight, and the hub's
-    // stop (its HTTP server close) can wait on that connection past the
-    // supervisor's SIGTERM grace.
     if (opts.parent === 'supervisor') {
+      // The hub is the one the supervisor has seen ready, as an app quit would wait
+      // for: until then its `/health` probe may be in flight, and the hub's stop (its
+      // HTTP server close) can wait on that connection past the supervisor's SIGTERM
+      // grace. Its pid and port come from that ready line, never from the first
+      // spawn: after a boot-deadline restart those name a dead hub, and a client
+      // dialing its port is refused (seen on a loaded box as "no WS upgrade — got: ").
       await waitFor(
-        () => parentOut.includes('[supervisor] sidecar ready'),
-        20_000,
-        `the supervisor never saw the hub ready — parent: ${parentOut}`
+        () => SUPERVISOR_READY.test(parentOut),
+        50_000,
+        `the supervisor never saw a hub ready — log: ${read(logFile)} parent: ${parentOut}`
       )
+      const ready = SUPERVISOR_READY.exec(parentOut)!
+      hubPid = Number(ready[1])
+      hubPort = Number(ready[2])
+      await waitFor(
+        () => listeningPorts(read(logFile)).includes(hubPort),
+        20_000,
+        `the ready hub (pid ${hubPid}) never printed listening on :${hubPort} — log: ${read(logFile)} parent: ${parentOut}`
+      )
+    } else {
+      // A bare parent spawns its hub once: the first (only) listening line is its.
+      await waitFor(
+        () => listeningPorts(read(logFile)).length > 0,
+        30_000,
+        `hub never booted — log: ${read(logFile)} ${read(path.join(dir, 'hub.out'))} parent: ${parentOut}`
+      )
+      hubPort = listeningPorts(read(logFile))[0]!
     }
   } catch (err) {
     cleanup()
     throw err
   }
-  const hubPort = Number(HUB_LISTENING.exec(read(logFile))![1])
   return {
     parent,
     hubPid,
